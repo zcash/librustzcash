@@ -28,9 +28,10 @@ use zcash_primitives::{
 
 use crate::{
     wallet::{
+        chain_tip_height,
         commitment_tree::SqliteShardStore,
         init::{migrations::shardtree_support, WalletMigrationError},
-        scan_queue_extrema, scope_code,
+        scope_code,
     },
     PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
 };
@@ -154,7 +155,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             let zip212_height = tx_height.map_or_else(
                 || {
                     tx_expiry.filter(|h| *h != 0).map_or_else(
-                        || scan_queue_extrema(transaction).map(|extrema| extrema.map(|r| *r.end())),
+                        || chain_tip_height(transaction),
                         |h| Ok(Some(BlockHeight::from(h))),
                     )
                 },
@@ -286,13 +287,14 @@ mod tests {
         slice::ParallelSliceMut,
     };
     use rand_core::OsRng;
-    use rusqlite::{named_params, params, Connection};
+    use rusqlite::{named_params, params, Connection, OptionalExtension};
     use tempfile::NamedTempFile;
     use zcash_client_backend::{
         data_api::{BlockMetadata, WalletCommitmentTrees, SAPLING_SHARD_HEIGHT},
         decrypt_transaction,
         proto::compact_formats::{CompactBlock, CompactTx},
         scanning::{scan_block, Nullifiers, ScanningKeys},
+        wallet::WalletTx,
         TransferType,
     };
     use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
@@ -647,7 +649,7 @@ mod tests {
                     }
 
                     // Insert the block into the database.
-                    crate::wallet::put_block(
+                    put_block(
                         wdb.conn.0,
                         block.height(),
                         block.block_hash(),
@@ -661,7 +663,7 @@ mod tests {
                     )?;
 
                     for tx in block.transactions() {
-                        let tx_row = crate::wallet::put_tx_meta(wdb.conn.0, tx, block.height())?;
+                        let tx_row = put_tx_meta(wdb.conn.0, tx, block.height())?;
 
                         for output in tx.sapling_outputs() {
                             put_received_note_before_migration(wdb.conn.0, output, tx_row, None)?;
@@ -744,5 +746,119 @@ mod tests {
             }
         }
         assert_eq!(row_count, 2);
+    }
+
+    /// This is a copy of [`crate::wallet::put_block`] as of the expected database
+    /// state corresponding to this migration. It is duplicated here as later
+    /// updates to the database schema require incompatible changes to `put_block`.
+    #[allow(clippy::too_many_arguments)]
+    fn put_block(
+        conn: &rusqlite::Transaction<'_>,
+        block_height: BlockHeight,
+        block_hash: BlockHash,
+        block_time: u32,
+        sapling_commitment_tree_size: u32,
+        sapling_output_count: u32,
+        #[cfg(feature = "orchard")] orchard_commitment_tree_size: u32,
+        #[cfg(feature = "orchard")] orchard_action_count: u32,
+    ) -> Result<(), SqliteClientError> {
+        let block_hash_data = conn
+            .query_row(
+                "SELECT hash FROM blocks WHERE height = ?",
+                [u32::from(block_height)],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .optional()?;
+
+        // Ensure that in the case of an upsert, we don't overwrite block data
+        // with information for a block with a different hash.
+        if let Some(bytes) = block_hash_data {
+            let expected_hash = BlockHash::try_from_slice(&bytes).ok_or_else(|| {
+                SqliteClientError::CorruptedData(format!(
+                    "Invalid block hash at height {}",
+                    u32::from(block_height)
+                ))
+            })?;
+            if expected_hash != block_hash {
+                return Err(SqliteClientError::BlockConflict(block_height));
+            }
+        }
+
+        let mut stmt_upsert_block = conn.prepare_cached(
+            "INSERT INTO blocks (
+                height,
+                hash,
+                time,
+                sapling_commitment_tree_size,
+                sapling_output_count,
+                sapling_tree,
+                orchard_commitment_tree_size,
+                orchard_action_count
+            )
+            VALUES (
+                :height,
+                :hash,
+                :block_time,
+                :sapling_commitment_tree_size,
+                :sapling_output_count,
+                x'00',
+                :orchard_commitment_tree_size,
+                :orchard_action_count
+            )
+            ON CONFLICT (height) DO UPDATE
+            SET hash = :hash,
+                time = :block_time,
+                sapling_commitment_tree_size = :sapling_commitment_tree_size,
+                sapling_output_count = :sapling_output_count,
+                orchard_commitment_tree_size = :orchard_commitment_tree_size,
+                orchard_action_count = :orchard_action_count",
+        )?;
+
+        #[cfg(not(feature = "orchard"))]
+        let orchard_commitment_tree_size: Option<u32> = None;
+        #[cfg(not(feature = "orchard"))]
+        let orchard_action_count: Option<u32> = None;
+
+        stmt_upsert_block.execute(named_params![
+            ":height": u32::from(block_height),
+            ":hash": &block_hash.0[..],
+            ":block_time": block_time,
+            ":sapling_commitment_tree_size": sapling_commitment_tree_size,
+            ":sapling_output_count": sapling_output_count,
+            ":orchard_commitment_tree_size": orchard_commitment_tree_size,
+            ":orchard_action_count": orchard_action_count,
+        ])?;
+
+        Ok(())
+    }
+
+    /// This is a copy of [`crate::wallet::put_tx_meta`] as of the expected database
+    /// state corresponding to this migration. It is duplicated here as later
+    /// updates to the database schema require incompatible changes to `put_tx_meta`.
+    pub(crate) fn put_tx_meta(
+        conn: &rusqlite::Connection,
+        tx: &WalletTx<AccountId>,
+        height: BlockHeight,
+    ) -> Result<i64, SqliteClientError> {
+        // It isn't there, so insert our transaction into the database.
+        let mut stmt_upsert_tx_meta = conn.prepare_cached(
+            "INSERT INTO transactions (txid, block, tx_index)
+            VALUES (:txid, :block, :tx_index)
+            ON CONFLICT (txid) DO UPDATE
+            SET block = :block,
+                tx_index = :tx_index
+            RETURNING id_tx",
+        )?;
+
+        let txid_bytes = tx.txid();
+        let tx_params = named_params![
+            ":txid": &txid_bytes.as_ref()[..],
+            ":block": u32::from(height),
+            ":tx_index": i64::try_from(tx.block_index()).expect("transaction indices are representable as i64"),
+        ];
+
+        stmt_upsert_tx_meta
+            .query_row(tx_params, |row| row.get::<_, i64>(0))
+            .map_err(SqliteClientError::from)
     }
 }

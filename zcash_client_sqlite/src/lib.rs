@@ -276,18 +276,18 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
     }
 
     #[cfg(feature = "transparent-inputs")]
-    fn get_unspent_transparent_outputs(
+    fn get_spendable_transparent_outputs(
         &self,
         address: &TransparentAddress,
-        max_height: BlockHeight,
-        exclude: &[OutPoint],
+        target_height: BlockHeight,
+        min_confirmations: u32,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
-        wallet::transparent::get_unspent_transparent_outputs(
+        wallet::transparent::get_spendable_transparent_outputs(
             self.conn.borrow(),
             &self.params,
             address,
-            max_height,
-            exclude,
+            target_height,
+            min_confirmations,
         )
     }
 }
@@ -430,9 +430,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     }
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        wallet::scan_queue_extrema(self.conn.borrow())
-            .map(|h| h.map(|range| *range.end()))
-            .map_err(SqliteClientError::from)
+        wallet::chain_tip_height(self.conn.borrow()).map_err(SqliteClientError::from)
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {

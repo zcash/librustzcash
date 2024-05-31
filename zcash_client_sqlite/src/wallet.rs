@@ -490,7 +490,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
 
     // Rewrite the scan ranges from the birthday height up to the chain tip so that we'll ensure we
     // re-scan to find any notes that might belong to the newly added account.
-    if let Some(t) = scan_queue_extrema(conn)?.map(|range| *range.end()) {
+    if let Some(t) = chain_tip_height(conn)? {
         let rescan_range = birthday.height()..(t + 1);
 
         replace_queue_entries::<SqliteClientError>(
@@ -952,8 +952,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     min_confirmations: u32,
     progress: &impl ScanProgress,
 ) -> Result<Option<WalletSummary<AccountId>>, SqliteClientError> {
-    let chain_tip_height = match scan_queue_extrema(tx)? {
-        Some(range) => *range.end(),
+    let chain_tip_height = match chain_tip_height(tx)? {
+        Some(h) => h,
         None => {
             return Ok(None);
         }
@@ -1019,7 +1019,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         ) -> Result<(), SqliteClientError>,
     {
         // If the shard containing the summary height contains any unscanned ranges that start below or
-        // including that height, none of our balance is currently spendable.
+        // including that height, none of our shielded balance is currently spendable.
         #[tracing::instrument(skip_all)]
         fn is_any_spendable(
             conn: &rusqlite::Connection,
@@ -1167,12 +1167,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     drop(sapling_trace);
 
     #[cfg(feature = "transparent-inputs")]
-    transparent::add_transparent_account_balances(
-        tx,
-        chain_tip_height,
-        min_confirmations,
-        &mut account_balances,
-    )?;
+    transparent::add_transparent_account_balances(tx, chain_tip_height + 1, &mut account_balances)?;
 
     // The approach used here for Sapling and Orchard subtree indexing was a quick hack
     // that has not yet been replaced. TODO: Make less hacky.
@@ -1503,30 +1498,23 @@ pub(crate) fn get_account<P: Parameters>(
 }
 
 /// Returns the minimum and maximum heights of blocks in the chain which may be scanned.
-pub(crate) fn scan_queue_extrema(
+pub(crate) fn chain_tip_height(
     conn: &rusqlite::Connection,
-) -> Result<Option<RangeInclusive<BlockHeight>>, rusqlite::Error> {
-    conn.query_row(
-        "SELECT MIN(block_range_start), MAX(block_range_end) FROM scan_queue",
-        [],
-        |row| {
-            let min_height: Option<u32> = row.get(0)?;
-            let max_height: Option<u32> = row.get(1)?;
+) -> Result<Option<BlockHeight>, rusqlite::Error> {
+    conn.query_row("SELECT MAX(block_range_end) FROM scan_queue", [], |row| {
+        let max_height: Option<u32> = row.get(0)?;
 
-            // Scan ranges are end-exclusive, so we subtract 1 from `max_height` to obtain the
-            // height of the last known chain tip;
-            Ok(min_height
-                .zip(max_height.map(|h| h.saturating_sub(1)))
-                .map(|(min, max)| RangeInclusive::new(min.into(), max.into())))
-        },
-    )
+        // Scan ranges are end-exclusive, so we subtract 1 from `max_height` to obtain the
+        // height of the last known chain tip;
+        Ok(max_height.map(|h| BlockHeight::from(h.saturating_sub(1))))
+    })
 }
 
 pub(crate) fn get_target_and_anchor_heights(
     conn: &rusqlite::Connection,
     min_confirmations: NonZeroU32,
 ) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
-    match scan_queue_extrema(conn)?.map(|range| *range.end()) {
+    match chain_tip_height(conn)? {
         Some(chain_tip_height) => {
             let sapling_anchor_height = get_max_checkpointed_height(
                 conn,
@@ -1861,9 +1849,29 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         named_params![":new_end_height": u32::from(block_height + 1)],
     )?;
 
-    // If we're removing scanned blocks, we need to truncate the note commitment tree, un-mine
-    // transactions, and remove received transparent outputs and affected block records from the
-    // database.
+    // Mark transparent utxos as un-mined. Since the TXO is now not mined, it would ideally be
+    // considered to have been returned to the mempool; it _might_ be spendable in this state, but
+    // we must also set its max_observed_unspent_height field to NULL because the transaction may
+    // be rendered entirely invalid by a reorg that alters anchor(s) used in constructing shielded
+    // spends in the transaction.
+    conn.execute(
+        "UPDATE transparent_received_outputs
+         SET max_observed_unspent_height = NULL
+         WHERE max_observed_unspent_height > :height",
+        named_params![":height": u32::from(block_height)],
+    )?;
+
+    // Un-mine transactions. This must be done outside of the last_scanned_height check because
+    // transaction entries may be created as a consequence of receiving transparent TXOs.
+    conn.execute(
+        "UPDATE transactions
+         SET block = NULL, mined_height = NULL, tx_index = NULL
+         WHERE block > ?",
+        [u32::from(block_height)],
+    )?;
+
+    // If we're removing scanned blocks, we need to truncate the note commitment tree and remove
+    // affected block records from the database.
     if block_height < last_scanned_height {
         // Truncate the note commitment trees
         let mut wdb = WalletDb {
@@ -1884,20 +1892,6 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         // Also, do not delete received notes; they may contain memo data that is
         // not recoverable; balance APIs must ensure that un-mined received notes
         // do not count towards spendability or transaction balalnce.
-
-        // Rewind utxos. It is currently necessary to delete these because we do
-        // not have the full transaction data for the received output.
-        conn.execute(
-            "DELETE FROM utxos WHERE height > ?",
-            [u32::from(block_height)],
-        )?;
-
-        // Un-mine transactions.
-        conn.execute(
-            "UPDATE transactions SET block = NULL, tx_index = NULL
-            WHERE block IS NOT NULL AND block > ?",
-            [u32::from(block_height)],
-        )?;
 
         // Now that they aren't depended on, delete un-mined blocks.
         conn.execute(
@@ -2010,6 +2004,25 @@ pub(crate) fn put_block(
         ":orchard_action_count": orchard_action_count,
     ])?;
 
+    // If we now have a block corresponding to a received transparent output that had not been
+    // scanned at the time the UTXO was discovered, update the associated transaction record to
+    // refer to that block.
+    //
+    // NOTE: There's a small data corruption hazard here, in that we're relying exclusively upon
+    // the block height to associate the transaction to the block. This is because CompactBlock
+    // values only contain CompactTx entries for transactions that contain shielded inputs or
+    // outputs, and the GetAddressUtxosReply data does not contain the block hash. As such, it's
+    // necessary to ensure that any chain rollback to below the received height causes that height
+    // to be set to NULL.
+    let mut stmt_update_transaction_block_reference = conn.prepare_cached(
+        "UPDATE transactions
+         SET block = :height
+         WHERE mined_height = :height",
+    )?;
+
+    stmt_update_transaction_block_reference
+        .execute(named_params![":height": u32::from(block_height),])?;
+
     Ok(())
 }
 
@@ -2022,10 +2035,11 @@ pub(crate) fn put_tx_meta(
 ) -> Result<i64, SqliteClientError> {
     // It isn't there, so insert our transaction into the database.
     let mut stmt_upsert_tx_meta = conn.prepare_cached(
-        "INSERT INTO transactions (txid, block, tx_index)
-        VALUES (:txid, :block, :tx_index)
+        "INSERT INTO transactions (txid, block, mined_height, tx_index)
+        VALUES (:txid, :block, :block, :tx_index)
         ON CONFLICT (txid) DO UPDATE
         SET block = :block,
+            mined_height = :block,
             tx_index = :tx_index
         RETURNING id_tx",
     )?;

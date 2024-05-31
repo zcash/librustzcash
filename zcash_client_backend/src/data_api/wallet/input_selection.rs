@@ -580,11 +580,7 @@ where
         let mut transparent_inputs: Vec<WalletTransparentOutput> = source_addrs
             .iter()
             .map(|taddr| {
-                wallet_db.get_unspent_transparent_outputs(
-                    taddr,
-                    target_height - min_confirmations,
-                    &[],
-                )
+                wallet_db.get_spendable_transparent_outputs(taddr, target_height, min_confirmations)
             })
             .collect::<Result<Vec<Vec<_>>, _>>()
             .map_err(InputSelectorError::DataSource)?

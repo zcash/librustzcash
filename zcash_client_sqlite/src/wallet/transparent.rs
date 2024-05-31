@@ -1,7 +1,6 @@
 //! Functions for transparent input support in the wallet.
 use rusqlite::OptionalExtension;
 use rusqlite::{named_params, Connection, Row};
-use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use zcash_client_backend::data_api::AccountBalance;
@@ -20,20 +19,20 @@ use zcash_primitives::{
 };
 use zcash_protocol::consensus::{self, BlockHeight};
 
-use crate::{error::SqliteClientError, AccountId, UtxoId, PRUNING_DEPTH};
+use crate::{error::SqliteClientError, AccountId, UtxoId};
 
-use super::get_account_ids;
-use super::scan_queue_extrema;
+use super::{chain_tip_height, get_account_ids};
 
 pub(crate) fn detect_spending_accounts<'a>(
     conn: &Connection,
     spent: impl Iterator<Item = &'a OutPoint>,
 ) -> Result<HashSet<AccountId>, rusqlite::Error> {
     let mut account_q = conn.prepare_cached(
-        "SELECT received_by_account_id
-        FROM utxos
-        WHERE prevout_txid = :prevout_txid
-        AND prevout_idx = :prevout_idx",
+        "SELECT account_id
+        FROM transparent_received_outputs o
+        JOIN transactions t ON t.id_tx = o.transaction_id
+        WHERE t.txid = :prevout_txid
+        AND o.output_index = :prevout_idx",
     )?;
 
     let mut acc = HashSet::new();
@@ -161,17 +160,17 @@ pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
 }
 
 fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, SqliteClientError> {
-    let txid: Vec<u8> = row.get("prevout_txid")?;
+    let txid: Vec<u8> = row.get("txid")?;
     let mut txid_bytes = [0u8; 32];
     txid_bytes.copy_from_slice(&txid);
 
-    let index: u32 = row.get("prevout_idx")?;
+    let index: u32 = row.get("output_index")?;
     let script_pubkey = Script(row.get("script")?);
     let raw_value: i64 = row.get("value_zat")?;
     let value = NonNegativeAmount::from_nonnegative_i64(raw_value).map_err(|_| {
         SqliteClientError::CorruptedData(format!("Invalid UTXO value: {}", raw_value))
     })?;
-    let height: u32 = row.get("height")?;
+    let height: u32 = row.get("received_height")?;
 
     let outpoint = OutPoint::new(txid_bytes, index);
     WalletTransparentOutput::from_parts(
@@ -189,21 +188,39 @@ fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, S
     })
 }
 
+/// Select an output to fund a new transaction that is targeting at least `chain_tip_height + 1`.
 pub(crate) fn get_unspent_transparent_output(
     conn: &rusqlite::Connection,
     outpoint: &OutPoint,
 ) -> Result<Option<WalletTransparentOutput>, SqliteClientError> {
+    let chain_tip_height = chain_tip_height(conn)?;
+
+    // This could, in very rare circumstances, return as unspent outputs that are actually not
+    // spendable, if they are the outputs of deshielding transactions where the spend anchors have
+    // been invalidated by a rewind. There isn't a way to detect this circumstance at present, but
+    // it should be vanishingly rare as the vast majority of rewinds are of a single block.
     let mut stmt_select_utxo = conn.prepare_cached(
-        "SELECT u.prevout_txid, u.prevout_idx, u.script, u.value_zat, u.height
-         FROM utxos u
-         WHERE u.prevout_txid = :txid
-         AND u.prevout_idx = :output_index
+        "SELECT t.txid, u.output_index, u.script,
+                u.value_zat, t.mined_height AS received_height
+         FROM transparent_received_outputs u
+         JOIN transactions t ON t.id_tx = u.transaction_id
+         WHERE t.txid = :txid
+         AND u.output_index = :output_index
+         -- the transaction that created the output is mined or is definitely unexpired
+         AND (
+            t.mined_height IS NOT NULL -- tx is mined
+            -- TODO: uncomment the following two lines in order to enable zero-conf spends
+            -- OR t.expiry_height = 0 -- tx will not expire
+            -- OR t.expiry_height >= :mempool_height -- tx has not yet expired
+         )
+         -- and the output is unspent
          AND u.id NOT IN (
             SELECT txo_spends.transparent_received_output_id
             FROM transparent_received_output_spends txo_spends
             JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
-            WHERE tx.block IS NOT NULL  -- the spending tx is mined
-            OR tx.expiry_height IS NULL -- the spending tx will not expire
+            WHERE tx.mined_height IS NOT NULL  -- the spending tx is mined
+            OR tx.expiry_height = 0 -- the spending tx will not expire
+            OR tx.expiry_height >= :mempool_height -- the spending tx has not yet expired
          )",
     )?;
 
@@ -211,7 +228,8 @@ pub(crate) fn get_unspent_transparent_output(
         .query_and_then(
             named_params![
                 ":txid": outpoint.hash(),
-                ":output_index": outpoint.n()
+                ":output_index": outpoint.n(),
+                ":mempool_height": chain_tip_height.map(|h| u32::from(h) + 1),
             ],
             to_unspent_transparent_output,
         )?
@@ -221,53 +239,62 @@ pub(crate) fn get_unspent_transparent_output(
     result
 }
 
-/// Returns unspent transparent outputs that have been received by this wallet at the given
-/// transparent address, such that the block that included the transaction was mined at a
-/// height less than or equal to the provided `max_height`.
-pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
+pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     address: &TransparentAddress,
-    max_height: BlockHeight,
-    exclude: &[OutPoint],
+    target_height: BlockHeight,
+    min_confirmations: u32,
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
-    let chain_tip_height = scan_queue_extrema(conn)?.map(|range| *range.end());
-    let stable_height = chain_tip_height
-        .unwrap_or(max_height)
-        .saturating_sub(PRUNING_DEPTH);
+    let confirmed_height = target_height - min_confirmations;
 
+    // This could, in very rare circumstances, return as unspent outputs that are actually not
+    // spendable, if they are the outputs of deshielding transactions where the spend anchors have
+    // been invalidated by a rewind. There isn't a way to detect this circumstance at present, but
+    // it should be vanishingly rare as the vast majority of rewinds are of a single block.
     let mut stmt_utxos = conn.prepare(
-        "SELECT u.prevout_txid, u.prevout_idx, u.script,
-                u.value_zat, u.height
-         FROM utxos u
+        "SELECT t.txid, u.output_index, u.script,
+                u.value_zat, t.mined_height AS received_height
+         FROM transparent_received_outputs u
+         JOIN transactions t ON t.id_tx = u.transaction_id
          WHERE u.address = :address
-         AND u.height <= :max_height
+         -- the transaction that created the output is mined or unexpired as of `confirmed_height`
+         AND (
+            t.mined_height <= :confirmed_height -- tx is mined
+            -- TODO: uncomment the following lines in order to enable zero-conf spends
+            -- OR (
+            --     :min_confirmations = 0
+            --     AND (
+            --         t.expiry_height = 0 -- tx will not expire
+            --         OR t.expiry_height >= :target_height
+            --     )
+            -- )
+         )
+         -- and the output is unspent
          AND u.id NOT IN (
             SELECT txo_spends.transparent_received_output_id
             FROM transparent_received_output_spends txo_spends
             JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
-            WHERE
-              tx.block IS NOT NULL -- the spending tx is mined
-              OR tx.expiry_height IS NULL -- the spending tx will not expire
-              OR tx.expiry_height > :stable_height -- the spending tx is unexpired
+            WHERE tx.mined_height IS NOT NULL -- the spending transaction is mined
+            OR tx.expiry_height = 0 -- the spending tx will not expire
+            OR tx.expiry_height >= :target_height -- the spending tx has not yet expired
+            -- we are intentionally conservative and exclude outputs that are potentially spent
+            -- as of the target height, even if they might actually be spendable due to expiry
+            -- of the spending transaction as of the chain tip
          )",
     )?;
 
     let addr_str = address.encode(params);
-
-    let mut utxos = Vec::<WalletTransparentOutput>::new();
     let mut rows = stmt_utxos.query(named_params![
         ":address": addr_str,
-        ":max_height": u32::from(max_height),
-        ":stable_height": u32::from(stable_height),
+        ":confirmed_height": u32::from(confirmed_height),
+        ":target_height": u32::from(target_height),
+        //":min_confirmations": min_confirmations
     ])?;
-    let excluded: BTreeSet<OutPoint> = exclude.iter().cloned().collect();
+
+    let mut utxos = Vec::<WalletTransparentOutput>::new();
     while let Some(row) = rows.next()? {
         let output = to_unspent_transparent_output(row)?;
-        if excluded.contains(output.outpoint()) {
-            continue;
-        }
-
         utxos.push(output);
     }
 
@@ -276,31 +303,40 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
 
 /// Returns the unspent balance for each transparent address associated with the specified account,
 /// such that the block that included the transaction was mined at a height less than or equal to
-/// the provided `max_height`.
+/// the provided `summary_height`.
 pub(crate) fn get_transparent_address_balances<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account: AccountId,
-    max_height: BlockHeight,
+    summary_height: BlockHeight,
 ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, SqliteClientError> {
-    let chain_tip_height = scan_queue_extrema(conn)?.map(|range| *range.end());
-    let stable_height = chain_tip_height
-        .unwrap_or(max_height)
-        .saturating_sub(PRUNING_DEPTH);
+    let chain_tip_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
 
     let mut stmt_address_balances = conn.prepare(
         "SELECT u.address, SUM(u.value_zat)
-         FROM utxos u
-         WHERE u.received_by_account_id = :account_id
-         AND u.height <= :max_height
+         FROM transparent_received_outputs u
+         JOIN transactions t
+         ON t.id_tx = u.transaction_id
+         WHERE u.account_id = :account_id
+         -- the transaction that created the output is mined or is definitely unexpired
+         AND (
+            t.mined_height <= :summary_height -- tx is mined
+            OR ( -- or the caller has requested to include zero-conf funds that are not expired
+                :summary_height > :chain_tip_height
+                AND (
+                    t.expiry_height = 0 -- tx will not expire
+                    OR t.expiry_height >= :summary_height
+                )
+            )
+         )
+         -- and the output is unspent
          AND u.id NOT IN (
             SELECT txo_spends.transparent_received_output_id
             FROM transparent_received_output_spends txo_spends
             JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
-            WHERE
-              tx.block IS NOT NULL -- the spending tx is mined
-              OR tx.expiry_height IS NULL -- the spending tx will not expire
-              OR tx.expiry_height > :stable_height -- the spending tx is unexpired
+            WHERE tx.mined_height IS NOT NULL -- the spending tx is mined
+            OR tx.expiry_height = 0 -- the spending tx will not expire
+            OR tx.expiry_height >= :spend_expiry_height -- the spending tx is unexpired
          )
          GROUP BY u.address",
     )?;
@@ -308,8 +344,9 @@ pub(crate) fn get_transparent_address_balances<P: consensus::Parameters>(
     let mut res = HashMap::new();
     let mut rows = stmt_address_balances.query(named_params![
         ":account_id": account.0,
-        ":max_height": u32::from(max_height),
-        ":stable_height": u32::from(stable_height),
+        ":summary_height": u32::from(summary_height),
+        ":chain_tip_height": u32::from(chain_tip_height),
+        ":spend_expiry_height": u32::from(std::cmp::min(summary_height, chain_tip_height + 1)),
     ])?;
     while let Some(row) = rows.next()? {
         let taddr_str: String = row.get(0)?;
@@ -322,36 +359,38 @@ pub(crate) fn get_transparent_address_balances<P: consensus::Parameters>(
     Ok(res)
 }
 
+#[tracing::instrument(skip(conn, account_balances))]
 pub(crate) fn add_transparent_account_balances(
     conn: &rusqlite::Connection,
-    chain_tip_height: BlockHeight,
-    min_confirmations: u32,
+    mempool_height: BlockHeight,
     account_balances: &mut HashMap<AccountId, AccountBalance>,
 ) -> Result<(), SqliteClientError> {
     let transparent_trace = tracing::info_span!("stmt_transparent_balances").entered();
-    let zero_conf_height = (chain_tip_height + 1).saturating_sub(min_confirmations);
-    let stable_height = chain_tip_height.saturating_sub(PRUNING_DEPTH);
-
-    let mut stmt_transparent_balances = conn.prepare(
-        "SELECT u.received_by_account_id, SUM(u.value_zat)
-         FROM utxos u
-         WHERE u.height <= :max_height
+    let mut stmt_account_balances = conn.prepare(
+        "SELECT u.account_id, SUM(u.value_zat)
+         FROM transparent_received_outputs u
+         JOIN transactions t
+         ON t.id_tx = u.transaction_id
+         -- the transaction that created the output is mined or is definitely unexpired
+         WHERE (
+            t.mined_height < :mempool_height -- tx is mined
+            OR t.expiry_height = 0 -- tx will not expire
+            OR t.expiry_height >= :mempool_height
+         )
          -- and the received txo is unspent
          AND u.id NOT IN (
            SELECT transparent_received_output_id
            FROM transparent_received_output_spends txo_spends
            JOIN transactions tx
              ON tx.id_tx = txo_spends.transaction_id
-           WHERE tx.block IS NOT NULL -- the spending tx is mined
-           OR tx.expiry_height IS NULL -- the spending tx will not expire
-           OR tx.expiry_height > :stable_height -- the spending tx is unexpired
+           WHERE tx.mined_height IS NOT NULL -- the spending tx is mined
+           OR tx.expiry_height = 0 -- the spending tx will not expire
+           OR tx.expiry_height >= :mempool_height -- the spending tx is unexpired
          )
-         GROUP BY u.received_by_account_id",
+         GROUP BY u.account_id",
     )?;
-    let mut rows = stmt_transparent_balances.query(named_params![
-        ":max_height": u32::from(zero_conf_height),
-        ":stable_height": u32::from(stable_height)
-    ])?;
+    let mut rows = stmt_account_balances
+        .query(named_params![":mempool_height": u32::from(mempool_height),])?;
 
     while let Some(row) = rows.next()? {
         let account = AccountId(row.get(0)?);
@@ -360,9 +399,10 @@ pub(crate) fn add_transparent_account_balances(
             SqliteClientError::CorruptedData(format!("Negative UTXO value {:?}", raw_value))
         })?;
 
-        if let Some(balances) = account_balances.get_mut(&account) {
-            balances.add_unshielded_value(value)?;
-        }
+        account_balances
+            .entry(account)
+            .or_insert(AccountBalance::ZERO)
+            .add_unshielded_value(value)?;
     }
     drop(transparent_trace);
     Ok(())
@@ -377,9 +417,10 @@ pub(crate) fn mark_transparent_utxo_spent(
     let mut stmt_mark_transparent_utxo_spent = conn.prepare_cached(
         "INSERT INTO transparent_received_output_spends (transparent_received_output_id, transaction_id)
          SELECT txo.id, :spent_in_tx
-         FROM utxos txo
-         WHERE txo.prevout_txid = :prevout_txid
-         AND txo.prevout_idx = :prevout_idx
+         FROM transparent_received_outputs txo
+         JOIN transactions t ON t.id_tx = txo.transaction_id
+         WHERE t.txid = :prevout_txid
+         AND txo.output_index = :prevout_idx
          ON CONFLICT (transparent_received_output_id, transaction_id) DO NOTHING",
     )?;
 
@@ -409,7 +450,7 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
         .optional()?;
 
     if let Some(account) = account_id {
-        Ok(put_legacy_transparent_utxo(conn, params, output, account)?)
+        Ok(put_transparent_output(conn, params, output, account)?)
     } else {
         // If the UTXO is received at the legacy transparent address (at BIP 44 address
         // index 0 within its particular account, which we specifically ensure is returned
@@ -423,7 +464,7 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
                 |account| match get_legacy_transparent_address(params, conn, account) {
                     Ok(Some((legacy_taddr, _))) if &legacy_taddr == output.recipient_address() => {
                         Some(
-                            put_legacy_transparent_utxo(conn, params, output, account)
+                            put_transparent_output(conn, params, output, account)
                                 .map_err(SqliteClientError::from),
                         )
                     }
@@ -440,50 +481,74 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     }
 }
 
-pub(crate) fn put_legacy_transparent_utxo<P: consensus::Parameters>(
+pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     output: &WalletTransparentOutput,
     received_by_account: AccountId,
 ) -> Result<UtxoId, rusqlite::Error> {
-    #[cfg(feature = "transparent-inputs")]
-    let mut stmt_upsert_legacy_transparent_utxo = conn.prepare_cached(
-        "INSERT INTO utxos (
-            prevout_txid, prevout_idx,
-            received_by_account_id, address, script,
-            value_zat, height)
-        VALUES
-            (:prevout_txid, :prevout_idx,
-            :received_by_account_id, :address, :script,
-            :value_zat, :height)
-        ON CONFLICT (prevout_txid, prevout_idx) DO UPDATE
-        SET received_by_account_id = :received_by_account_id,
-            height = :height,
+    // Check whether we have an entry in the blocks table for the output height;
+    // if not, the transaction will be updated with its mined height when the
+    // associated block is scanned.
+    let block = conn
+        .query_row(
+            "SELECT height FROM blocks WHERE height = :height",
+            named_params![":height": &u32::from(output.height())],
+            |row| row.get::<_, u32>(0),
+        )
+        .optional()?;
+
+    let id_tx = conn.query_row(
+        "INSERT INTO transactions (txid, block, mined_height)
+         VALUES (:txid, :block, :mined_height)
+         ON CONFLICT (txid) DO UPDATE
+         SET block = IFNULL(block, :block),
+             mined_height = :mined_height
+         RETURNING id_tx",
+        named_params![
+           ":txid": &output.outpoint().hash().to_vec(),
+           ":block": block,
+           ":mined_height": u32::from(output.height())
+        ],
+        |row| row.get::<_, i64>(0),
+    )?;
+
+    let mut stmt_upsert_transparent_output = conn.prepare_cached(
+        "INSERT INTO transparent_received_outputs (
+            transaction_id, output_index,
+            account_id, address, script,
+            value_zat, max_observed_unspent_height
+        )
+        VALUES (
+            :transaction_id, :output_index,
+            :account_id, :address, :script,
+            :value_zat, :height
+        )
+        ON CONFLICT (transaction_id, output_index) DO UPDATE
+        SET account_id = :account_id,
             address = :address,
             script = :script,
-            value_zat = :value_zat
+            value_zat = :value_zat,
+            max_observed_unspent_height = :height
         RETURNING id",
     )?;
 
     let sql_args = named_params![
-        ":prevout_txid": &output.outpoint().hash().to_vec(),
-        ":prevout_idx": &output.outpoint().n(),
-        ":received_by_account_id": received_by_account.0,
+        ":transaction_id": id_tx,
+        ":output_index": &output.outpoint().n(),
+        ":account_id": received_by_account.0,
         ":address": &output.recipient_address().encode(params),
         ":script": &output.txout().script_pubkey.0,
         ":value_zat": &i64::from(Amount::from(output.txout().value)),
         ":height": &u32::from(output.height()),
     ];
 
-    stmt_upsert_legacy_transparent_utxo.query_row(sql_args, |row| row.get::<_, i64>(0).map(UtxoId))
+    stmt_upsert_transparent_output.query_row(sql_args, |row| row.get::<_, i64>(0).map(UtxoId))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        testing::{AddressType, TestBuilder, TestState},
-        PRUNING_DEPTH,
-    };
+    use crate::testing::{AddressType, TestBuilder, TestState};
     use sapling::zip32::ExtendedSpendingKey;
     use zcash_client_backend::{
         data_api::{
@@ -495,7 +560,6 @@ mod tests {
     };
     use zcash_primitives::{
         block::BlockHash,
-        consensus::BlockHeight,
         transaction::{
             components::{amount::NonNegativeAmount, OutPoint, TxOut},
             fees::fixed::FeeRule as FixedFeeRule,
@@ -510,6 +574,7 @@ mod tests {
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
+        let birthday = st.test_account().unwrap().birthday().height();
         let account_id = st.test_account().unwrap().account_id();
         let uaddr = st
             .wallet()
@@ -518,7 +583,9 @@ mod tests {
             .unwrap();
         let taddr = uaddr.transparent().unwrap();
 
-        let height_1 = BlockHeight::from_u32(12345);
+        let height_1 = birthday + 12345;
+        st.wallet_mut().update_chain_tip(height_1).unwrap();
+
         let bal_absent = st
             .wallet()
             .get_transparent_balances(account_id, height_1)
@@ -541,10 +608,10 @@ mod tests {
 
         // Confirm that we see the output unspent as of `height_1`.
         assert_matches!(
-            st.wallet().get_unspent_transparent_outputs(
+            st.wallet().get_spendable_transparent_outputs(
                 taddr,
                 height_1,
-                &[]
+                0
             ).as_deref(),
             Ok([ret]) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_1)
         );
@@ -555,7 +622,8 @@ mod tests {
 
         // Change the mined height of the UTXO and upsert; we should get back
         // the same `UtxoId`.
-        let height_2 = BlockHeight::from_u32(34567);
+        let height_2 = birthday + 34567;
+        st.wallet_mut().update_chain_tip(height_2).unwrap();
         let utxo2 = WalletTransparentOutput::from_parts(outpoint, txout, height_2).unwrap();
         let res1 = st.wallet_mut().put_received_transparent_utxo(&utxo2);
         assert_matches!(res1, Ok(id) if id == res0.unwrap());
@@ -563,7 +631,7 @@ mod tests {
         // Confirm that we no longer see any unspent outputs as of `height_1`.
         assert_matches!(
             st.wallet()
-                .get_unspent_transparent_outputs(taddr, height_1, &[])
+                .get_spendable_transparent_outputs(taddr, height_1, 0)
                 .as_deref(),
             Ok(&[])
         );
@@ -577,7 +645,7 @@ mod tests {
         // If we include `height_2` then the output is returned.
         assert_matches!(
             st.wallet()
-                .get_unspent_transparent_outputs(taddr, height_2, &[])
+                .get_spendable_transparent_outputs(taddr, height_2, 0)
                 .as_deref(),
             Ok([ret]) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_2)
         );
@@ -639,13 +707,15 @@ mod tests {
                 .account_balances()
                 .get(&account.account_id())
                 .unwrap();
+            // TODO: in the future, we will distinguish between available and total
+            // balance according to `min_confirmations`
             assert_eq!(balance.unshielded(), expected);
 
             // Check the older APIs for consistency.
-            let max_height = st.wallet().chain_height().unwrap().unwrap() + 1 - min_confirmations;
+            let mempool_height = st.wallet().chain_height().unwrap().unwrap() + 1;
             assert_eq!(
                 st.wallet()
-                    .get_transparent_balances(account.account_id(), max_height)
+                    .get_transparent_balances(account.account_id(), mempool_height)
                     .unwrap()
                     .get(taddr)
                     .cloned()
@@ -654,7 +724,7 @@ mod tests {
             );
             assert_eq!(
                 st.wallet()
-                    .get_unspent_transparent_outputs(taddr, max_height, &[])
+                    .get_spendable_transparent_outputs(taddr, mempool_height, 0)
                     .unwrap()
                     .into_iter()
                     .map(|utxo| utxo.value())
@@ -664,8 +734,11 @@ mod tests {
         };
 
         // The wallet starts out with zero balance.
+        // TODO: Once we have refactored `get_wallet_summary` to distinguish between available
+        // and total balance, we should perform additional checks against available balance;
+        // we use minconf 0 here because all transparent funds are considered shieldable,
+        // irrespective of confirmation depth.
         check_balance(&st, 0, NonNegativeAmount::ZERO);
-        check_balance(&st, 1, NonNegativeAmount::ZERO);
 
         // Create a fake transparent output.
         let value = NonNegativeAmount::from_u64(100000).unwrap();
@@ -681,10 +754,8 @@ mod tests {
             .put_received_transparent_utxo(&utxo)
             .unwrap();
 
-        // The wallet should detect the balance as having 1 confirmation.
+        // The wallet should detect the balance as available
         check_balance(&st, 0, value);
-        check_balance(&st, 1, value);
-        check_balance(&st, 2, NonNegativeAmount::ZERO);
 
         // Shield the output.
         let input_selector = GreedyInputSelector::new(
@@ -702,8 +773,6 @@ mod tests {
         // The wallet should have zero transparent balance, because the shielding
         // transaction can be mined.
         check_balance(&st, 0, NonNegativeAmount::ZERO);
-        check_balance(&st, 1, NonNegativeAmount::ZERO);
-        check_balance(&st, 2, NonNegativeAmount::ZERO);
 
         // Mine the shielding transaction.
         let (mined_height, _) = st.generate_next_block_including(txid);
@@ -711,8 +780,6 @@ mod tests {
 
         // The wallet should still have zero transparent balance.
         check_balance(&st, 0, NonNegativeAmount::ZERO);
-        check_balance(&st, 1, NonNegativeAmount::ZERO);
-        check_balance(&st, 2, NonNegativeAmount::ZERO);
 
         // Unmine the shielding transaction via a reorg.
         st.wallet_mut()
@@ -722,8 +789,6 @@ mod tests {
 
         // The wallet should still have zero transparent balance.
         check_balance(&st, 0, NonNegativeAmount::ZERO);
-        check_balance(&st, 1, NonNegativeAmount::ZERO);
-        check_balance(&st, 2, NonNegativeAmount::ZERO);
 
         // Expire the shielding transaction.
         let expiry_height = st
@@ -734,22 +799,6 @@ mod tests {
             .expiry_height();
         st.wallet_mut().update_chain_tip(expiry_height).unwrap();
 
-        // TODO: Making the transparent output spendable in this situation requires
-        // changes to the transparent data model, so for now the wallet should still have
-        // zero transparent balance. https://github.com/zcash/librustzcash/issues/986
-        check_balance(&st, 0, NonNegativeAmount::ZERO);
-        check_balance(&st, 1, NonNegativeAmount::ZERO);
-        check_balance(&st, 2, NonNegativeAmount::ZERO);
-
-        // Roll forward the chain tip until the transaction's expiry height is in the
-        // stable block range (so a reorg won't make it spendable again).
-        st.wallet_mut()
-            .update_chain_tip(expiry_height + PRUNING_DEPTH)
-            .unwrap();
-
-        // The transparent output should be spendable again, with more confirmations.
         check_balance(&st, 0, value);
-        check_balance(&st, 1, value);
-        check_balance(&st, 2, value);
     }
 }
