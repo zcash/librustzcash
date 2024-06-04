@@ -278,6 +278,11 @@ notes = "The new uses of unsafe to access getsockopt/setsockopt look reasonable.
 [[audits.syn]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
+delta = "2.0.53 -> 2.0.60"
+
+[[audits.syn]]
+who = "Daira-Emma Hopwood <daira@jacaranda.org>"
+criteria = "safe-to-deploy"
 delta = "2.0.60 -> 2.0.63"
 
 [[audits.thiserror]]
