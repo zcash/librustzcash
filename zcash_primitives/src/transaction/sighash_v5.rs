@@ -18,7 +18,6 @@ use crate::transaction::{
 
 #[cfg(zcash_unstable = "zfuture")]
 use byteorder::WriteBytesExt;
-use orchard::issuance::IssueAuth;
 
 #[cfg(zcash_unstable = "zfuture")]
 use zcash_encoding::{CompactSize, Vector};
@@ -174,9 +173,8 @@ pub fn tze_input_sigdigests<A: tze::Authorization>(
 pub fn v5_signature_hash<
     TA: TransparentAuthorizingContext,
     A: Authorization<TransparentAuth = TA>,
-    IA: IssueAuth,
 >(
-    tx: &TransactionData<A, IA>,
+    tx: &TransactionData<A>,
     signable_input: &SignableInput<'_>,
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> Blake2bHash {
@@ -199,6 +197,7 @@ pub fn v5_signature_hash<
         ),
         txid_parts.sapling_digest,
         txid_parts.orchard_digest,
+        #[cfg(zcash_unstable = "nu7")]
         txid_parts.issue_digest,
         #[cfg(zcash_unstable = "zfuture")]
         tx.tze_bundle

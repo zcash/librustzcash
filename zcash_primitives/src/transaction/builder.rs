@@ -51,12 +51,20 @@ use crate::{
 use crate::transaction::components::amount::NonNegativeAmount;
 use crate::transaction::components::sapling::zip212_enforcement;
 
-use crate::transaction::builder::Error::{IssuanceBuilder, IssuanceBundle};
-use orchard::issuance::{IssueBundle, IssueInfo};
-use orchard::keys::{IssuanceAuthorizingKey, IssuanceValidatingKey};
+
 use orchard::note::AssetBase;
-use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
+use orchard::orchard_flavors::{ OrchardVanilla, OrchardZSA };
+
+#[cfg(zcash_unstable = "nu7")]
 use rand_core::OsRng;
+#[cfg(zcash_unstable = "nu7")]
+use orchard::{
+    issuance::{IssueInfo, IssueBundle},
+    keys::{IssuanceAuthorizingKey, IssuanceValidatingKey}
+};
+use zcash_protocol::value::ZatBalance;
+#[cfg(zcash_unstable = "nu7")]
+use crate::transaction::builder::Error::{IssuanceBuilder, IssuanceBundle};
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
@@ -297,7 +305,9 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     transparent_builder: TransparentBuilder,
     sapling_builder: Option<sapling::builder::Builder>,
     orchard_builder: Option<orchard::builder::Builder>,
+    #[cfg(zcash_unstable = "nu7")]
     issuance_builder: Option<IssueBundle<issuance::Unauthorized>>,
+    #[cfg(zcash_unstable = "nu7")]
     issuance_key: Option<orchard::keys::IssuanceAuthorizingKey>,
     // TODO: In the future, instead of taking the spending keys as arguments when calling
     // `add_sapling_spend` or `add_orchard_spend`, we will build an unauthorized, unproven
@@ -367,10 +377,9 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
         build_config: BuildConfig,
     ) -> Self {
 
-        let is_orchard_zsa_enabled = params.is_nu_active(NetworkUpgrade::Nu6, target_height);
         let is_orchard_enabled = params.is_nu_active(NetworkUpgrade::Nu5, target_height);
 
-        let orchard_builder = if is_orchard_enabled || is_orchard_zsa_enabled {
+        let orchard_builder = if is_orchard_enabled {
             build_config
                 .orchard_builder_config()
                 .map(|(bundle_type, anchor)| orchard::builder::Builder::new(bundle_type, anchor))
@@ -396,7 +405,9 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder,
             orchard_builder,
+            #[cfg(zcash_unstable = "nu7")]
             issuance_builder: None,
+            #[cfg(zcash_unstable = "nu7")]
             issuance_key: None,
             sapling_asks: vec![],
             orchard_saks: Vec::new(),
@@ -426,7 +437,9 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             transparent_builder: self.transparent_builder,
             sapling_builder: self.sapling_builder,
             orchard_builder: self.orchard_builder,
+            #[cfg(zcash_unstable = "nu7")]
             issuance_builder: self.issuance_builder,
+            #[cfg(zcash_unstable = "nu7")]
             issuance_key: self.issuance_key,
             sapling_asks: self.sapling_asks,
             orchard_saks: self.orchard_saks,
@@ -437,6 +450,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
 
 
     /// Adds an Issuance action to the transaction.
+    #[cfg(zcash_unstable = "nu7")]
     pub fn init_issue_bundle<FeeError>(
         &mut self,
         ik: IssuanceAuthorizingKey,
@@ -464,6 +478,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     }
 
     /// Adds an Issuance action to the transaction.
+    #[cfg(zcash_unstable = "nu7")]
     pub fn add_issuance<FeeError>(
         &mut self,
         asset_desc: String,
@@ -482,6 +497,8 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
         Ok(())
     }
 
+    /// Adds a Burn action to the transaction.
+    #[cfg(zcash_unstable = "nu7")]
     pub fn add_burn<FE>(
         &mut self,
         value: u64,
@@ -500,6 +517,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     ///
     /// Returns an error if the given Merkle path does not have the required anchor for
     /// the given note.
+    #[cfg(zcash_unstable = "nu7")]
     pub fn add_orchard_zsa_spend<FE>(
         &mut self,
         sk: &orchard::keys::SpendingKey,
@@ -510,6 +528,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     }
 
     /// Adds an Orchard ZSA output to the transaction.
+    #[cfg(zcash_unstable = "nu7")]
     pub fn add_orchard_zsa_output<FE>(
         &mut self,
         ovk: Option<orchard::keys::OutgoingViewingKey>,
@@ -861,7 +880,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         };
 
         let mut unproven_orchard_bundle = None;
-        let mut unproven_orchard_zsa_bundle = None;
+        let mut unproven_orchard_zsa_bundle: Option<orchard::Bundle<orchard::builder::InProgress<orchard::builder::Unproven<OrchardZSA>, orchard::builder::Unauthorized>, ZatBalance, OrchardZSA>> = None;
         let mut orchard_meta = orchard::builder::BundleMetadata::empty();
 
         if let Some(builder) = self.orchard_builder {
@@ -876,12 +895,10 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             }
         };
 
-        let unauthorized_issue_bundle = self.issuance_builder;
-
         #[cfg(zcash_unstable = "zfuture")]
         let (tze_bundle, tze_signers) = self.tze_builder.build();
 
-        let unauthed_tx: TransactionData<Unauthorized, issuance::Unauthorized> = TransactionData {
+        let unauthed_tx: TransactionData<Unauthorized> = TransactionData {
             version,
             consensus_branch_id: BranchId::for_height(&self.params, self.target_height),
             lock_time: 0,
@@ -890,8 +907,10 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             sprout_bundle: None,
             sapling_bundle,
             orchard_bundle: unproven_orchard_bundle,
+            #[cfg(zcash_unstable = "nu7")]
             orchard_zsa_bundle: unproven_orchard_zsa_bundle,
-            issue_bundle: unauthorized_issue_bundle,
+            #[cfg(zcash_unstable = "nu7")]
+            issue_bundle: self.issuance_builder,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
         };
@@ -954,6 +973,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             .transpose()
             .map_err(Error::OrchardBuild)?;
 
+        #[cfg(zcash_unstable = "nu7")]
         let orchard_zsa_bundle = unauthed_tx
             .orchard_zsa_bundle
             .map(|b| {
@@ -972,6 +992,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             .transpose()
             .map_err(Error::OrchardBuild)?;
 
+        #[cfg(zcash_unstable = "nu7")]
         let issue_bundle = unauthed_tx
             .issue_bundle
             .map(|b| b.prepare(*shielded_sig_commitment.as_ref()))
@@ -987,7 +1008,9 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             sprout_bundle: unauthed_tx.sprout_bundle,
             sapling_bundle,
             orchard_bundle,
+            #[cfg(zcash_unstable = "nu7")]
             orchard_zsa_bundle,
+            #[cfg(zcash_unstable = "nu7")]
             issue_bundle,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
@@ -1150,7 +1173,9 @@ mod tests {
             tze_builder: std::marker::PhantomData,
             progress_notifier: (),
             orchard_builder: None,
+            #[cfg(zcash_unstable = "nu7")]
             issuance_builder: None,
+            #[cfg(zcash_unstable = "nu7")]
             issuance_key: None,
             sapling_asks: vec![],
             orchard_saks: Vec::new(),

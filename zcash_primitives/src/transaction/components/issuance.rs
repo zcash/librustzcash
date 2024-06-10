@@ -1,6 +1,6 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use nonempty::NonEmpty;
-use orchard::issuance::{IssueAction, IssueBundle, Signed};
+use orchard::issuance::{IssueAction, IssueAuth, IssueBundle, Signed};
 use orchard::keys::IssuanceValidatingKey;
 use orchard::note::{AssetBase, RandomSeed, Rho};
 use orchard::value::NoteValue;
@@ -10,8 +10,25 @@ use std::io;
 use std::io::{Read, Write};
 use zcash_encoding::{CompactSize, Vector};
 
+
+pub trait MapIssueAuth<A: IssueAuth, B: IssueAuth> {
+    fn map_issue_authorization(&self, a: A) -> B;
+}
+
+/// The identity map.
+///
+/// This can be used with [`TransactionData::map_authorization`] when you want to map the
+/// authorization of a subset of the transaction's bundles.
+///
+/// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
+impl MapIssueAuth<Signed, Signed> for () {
+    fn map_issue_authorization(&self, a: Signed) -> Signed {
+        a
+    }
+}
+
 /// Reads an [`orchard::Bundle`] from a v5 transaction format.
-pub fn read_v6_bundle<R: Read>(mut reader: R) -> io::Result<Option<IssueBundle<Signed>>> {
+pub fn read_v7_bundle<R: Read>(mut reader: R) -> io::Result<Option<IssueBundle<Signed>>> {
     let actions = Vector::read(&mut reader, |r| read_action(r))?;
 
     if actions.is_empty() {
@@ -97,7 +114,7 @@ fn read_rseed<R: Read>(mut reader: R, nullifier: &Rho) -> io::Result<RandomSeed>
 }
 
 /// Writes an [`IssueBundle`] in the v5 transaction format.
-pub fn write_v6_bundle<W: Write>(
+pub fn write_v7_bundle<W: Write>(
     bundle: Option<&IssueBundle<Signed>>,
     mut writer: W,
 ) -> io::Result<()> {

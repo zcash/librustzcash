@@ -1,5 +1,4 @@
 use blake2b_simd::Hash as Blake2bHash;
-use orchard::issuance::Signed;
 use std::ops::Deref;
 
 use proptest::prelude::*;
@@ -57,10 +56,12 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
         tx.orchard_bundle.as_ref().map(|v| *v.value_balance()),
         txo.orchard_bundle.as_ref().map(|v| *v.value_balance())
     );
+    #[cfg(zcash_unstable = "nu7")]
     prop_assert_eq!(
         tx.orchard_zsa_bundle.as_ref().map(|v| *v.value_balance()),
         txo.orchard_zsa_bundle.as_ref().map(|v| *v.value_balance())
     );
+    #[cfg(zcash_unstable = "zfuture")]
     if tx.issue_bundle.is_some() {
         prop_assert_eq!(tx.issue_bundle.as_ref(), txo.issue_bundle.as_ref());
     }
@@ -129,10 +130,11 @@ proptest! {
     }
 }
 
+#[cfg(zcash_unstable = "nu7")]
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]
-    fn tx_serialization_roundtrip_v6(tx in arb_tx(BranchId::Nu6)) {
+    fn tx_serialization_roundtrip_v7(tx in arb_tx(BranchId::Nu7)) {
         check_roundtrip(tx)?;
     }
 }
@@ -218,7 +220,12 @@ impl Authorization for TestUnauthorized {
     type TransparentAuth = TestTransparentAuth;
     type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
+
+    #[cfg(zcash_unstable = "nu7")]
     type OrchardZsaAuth = orchard::bundle::Authorized;
+
+    #[cfg(zcash_unstable = "nu7")]
+    type IssueAuth = orchard::issuance::Signed;
 
     #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth = tze::Authorized;
@@ -229,7 +236,7 @@ fn zip_0244() {
     fn to_test_txdata(
         tv: &self::data::zip_0244::TestVector,
     ) -> (
-        TransactionData<TestUnauthorized, Signed>,
+        TransactionData<TestUnauthorized>,
         TxDigests<Blake2bHash>,
     ) {
         let tx = Transaction::read(&tv.tx[..], BranchId::Nu5).unwrap();
@@ -283,7 +290,9 @@ fn zip_0244() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
+            #[cfg(zcash_unstable = "nu7")]
             txdata.orchard_zsa_bundle().cloned(),
+            #[cfg(zcash_unstable = "nu7")]
             txdata.issue_bundle().cloned(),
         );
         #[cfg(zcash_unstable = "zfuture")]

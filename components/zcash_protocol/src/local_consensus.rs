@@ -37,8 +37,10 @@ pub struct LocalNetwork {
     pub heartwood: Option<BlockHeight>,
     pub canopy: Option<BlockHeight>,
     pub nu5: Option<BlockHeight>,
-    // #[cfg(zcash_unstable = "nu6")]
+    #[cfg(zcash_unstable = "nu6")]
     pub nu6: Option<BlockHeight>,
+    #[cfg(zcash_unstable = "nu7")]
+    pub nu7: Option<BlockHeight>,
     #[cfg(zcash_unstable = "zfuture")]
     pub z_future: Option<BlockHeight>,
 }
@@ -57,8 +59,10 @@ impl Parameters for LocalNetwork {
             NetworkUpgrade::Heartwood => self.heartwood,
             NetworkUpgrade::Canopy => self.canopy,
             NetworkUpgrade::Nu5 => self.nu5,
-            // #[cfg(zcash_unstable = "nu6")]
+            #[cfg(zcash_unstable = "nu6")]
             NetworkUpgrade::Nu6 => self.nu6,
+            #[cfg(zcash_unstable = "nu7")]
+            NetworkUpgrade::Nu7 => self.nu7,
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => self.z_future,
         }
@@ -81,8 +85,10 @@ mod tests {
         let expected_heartwood = BlockHeight::from_u32(4);
         let expected_canopy = BlockHeight::from_u32(5);
         let expected_nu5 = BlockHeight::from_u32(6);
-        // #[cfg(zcash_unstable = "nu6")]
+        #[cfg(zcash_unstable = "nu6")]
         let expected_nu6 = BlockHeight::from_u32(7);
+        #[cfg(zcash_unstable = "nu7")]
+        let expected_nu7 = BlockHeight::from_u32(8);
         #[cfg(zcash_unstable = "zfuture")]
         let expected_z_future = BlockHeight::from_u32(7);
 
@@ -93,8 +99,10 @@ mod tests {
             heartwood: Some(expected_heartwood),
             canopy: Some(expected_canopy),
             nu5: Some(expected_nu5),
-            // #[cfg(zcash_unstable = "nu6")]
+            #[cfg(zcash_unstable = "nu6")]
             nu6: Some(expected_nu6),
+            #[cfg(zcash_unstable = "nu7")]
+            nu7: Some(expected_nu7),
             #[cfg(zcash_unstable = "zfuture")]
             z_future: Some(expected_z_future),
         };
@@ -105,8 +113,10 @@ mod tests {
         assert!(regtest.is_nu_active(NetworkUpgrade::Heartwood, expected_heartwood));
         assert!(regtest.is_nu_active(NetworkUpgrade::Canopy, expected_canopy));
         assert!(regtest.is_nu_active(NetworkUpgrade::Nu5, expected_nu5));
-        // #[cfg(zcash_unstable = "nu6")]
+        #[cfg(zcash_unstable = "nu6")]
         assert!(regtest.is_nu_active(NetworkUpgrade::Nu6, expected_nu6));
+        #[cfg(zcash_unstable = "nu7")]
+        assert!(regtest.is_nu_active(NetworkUpgrade::Nu7, expected_nu7));
         #[cfg(zcash_unstable = "zfuture")]
         assert!(!regtest.is_nu_active(NetworkUpgrade::ZFuture, expected_nu5));
     }
@@ -119,8 +129,10 @@ mod tests {
         let expected_heartwood = BlockHeight::from_u32(4);
         let expected_canopy = BlockHeight::from_u32(5);
         let expected_nu5 = BlockHeight::from_u32(6);
-        // #[cfg(zcash_unstable = "nu6")]
+        #[cfg(zcash_unstable = "nu6")]
         let expected_nu6 = BlockHeight::from_u32(7);
+        #[cfg(zcash_unstable = "nu7")]
+        let expected_nu7 = BlockHeight::from_u32(8);
         #[cfg(zcash_unstable = "zfuture")]
         let expected_z_future = BlockHeight::from_u32(7);
 
@@ -131,8 +143,10 @@ mod tests {
             heartwood: Some(expected_heartwood),
             canopy: Some(expected_canopy),
             nu5: Some(expected_nu5),
-            // #[cfg(zcash_unstable = "nu6")]
+            #[cfg(zcash_unstable = "nu6")]
             nu6: Some(expected_nu6),
+            #[cfg(zcash_unstable = "nu7")]
+            nu7: Some(expected_nu7),
             #[cfg(zcash_unstable = "zfuture")]
             z_future: Some(expected_z_future),
         };
@@ -161,6 +175,16 @@ mod tests {
             regtest.activation_height(NetworkUpgrade::Nu5),
             Some(expected_nu5)
         );
+        #[cfg(zcash_unstable = "nu6")]
+        assert_eq!(
+            regtest.activation_height(NetworkUpgrade::Nu6),
+            Some(expected_nu6)
+        );
+        #[cfg(zcash_unstable = "nu7")]
+        assert_eq!(
+            regtest.activation_height(NetworkUpgrade::Nu7),
+            Some(expected_nu7)
+        );
         #[cfg(zcash_unstable = "zfuture")]
         assert_eq!(
             regtest.activation_height(NetworkUpgrade::ZFuture),
@@ -176,8 +200,10 @@ mod tests {
         let expected_heartwood = BlockHeight::from_u32(4);
         let expected_canopy = BlockHeight::from_u32(5);
         let expected_nu5 = BlockHeight::from_u32(6);
-        // #[cfg(zcash_unstable = "nu6")]
+        #[cfg(zcash_unstable = "nu6")]
         let expected_nu6 = BlockHeight::from_u32(7);
+        #[cfg(zcash_unstable = "nu7")]
+        let expected_nu7 = BlockHeight::from_u32(8);
         #[cfg(zcash_unstable = "zfuture")]
         let expected_z_future = BlockHeight::from_u32(7);
 
@@ -188,8 +214,10 @@ mod tests {
             heartwood: Some(expected_heartwood),
             canopy: Some(expected_canopy),
             nu5: Some(expected_nu5),
-            // #[cfg(zcash_unstable = "nu6")]
+            #[cfg(zcash_unstable = "nu6")]
             nu6: Some(expected_nu6),
+            #[cfg(zcash_unstable = "nu7")]
+            nu7: Some(expected_nu7),
             #[cfg(zcash_unstable = "zfuture")]
             z_future: Some(expected_z_future),
         };

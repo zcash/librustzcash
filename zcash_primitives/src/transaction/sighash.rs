@@ -1,5 +1,4 @@
 use blake2b_simd::Hash as Blake2bHash;
-use orchard::issuance::IssueAuth;
 
 use super::{
     components::{amount::NonNegativeAmount, transparent},
@@ -14,7 +13,8 @@ use crate::{
 
 #[cfg(zcash_unstable = "zfuture")]
 use {super::components::Amount, crate::extensions::transparent::Precondition};
-use crate::transaction::sighash_v6::v6_signature_hash;
+#[cfg(zcash_unstable = "nu7")]
+use crate::transaction::sighash_v7::v7_signature_hash;
 
 pub const SIGHASH_ALL: u8 = 0x01;
 pub const SIGHASH_NONE: u8 = 0x02;
@@ -82,9 +82,8 @@ pub fn signature_hash<
     TA: TransparentAuthorizingContext,
     SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
     A: Authorization<SaplingAuth = SA, TransparentAuth = TA>,
-    IA: IssueAuth,
 >(
-    tx: &TransactionData<A, IA>,
+    tx: &TransactionData<A>,
     signable_input: &SignableInput<'a>,
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> SignatureHash {
@@ -95,7 +94,8 @@ pub fn signature_hash<
 
         TxVersion::Zip225 => v5_signature_hash(tx, signable_input, txid_parts),
 
-        TxVersion::Zsa => v6_signature_hash(tx, signable_input, txid_parts),
+        #[cfg(zcash_unstable = "nu7")]
+        TxVersion::Zsa => v7_signature_hash(tx, signable_input, txid_parts),
 
         #[cfg(zcash_unstable = "zfuture")]
         TxVersion::ZFuture => v5_signature_hash(tx, signable_input, txid_parts),

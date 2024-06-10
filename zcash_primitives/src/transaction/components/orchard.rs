@@ -7,7 +7,7 @@ use byteorder::{ReadBytesExt, WriteBytesExt};
 use nonempty::NonEmpty;
 use orchard::note::AssetBase;
 use orchard::note_encryption::OrchardDomain;
-use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
+use orchard::orchard_flavors::{OrchardVanilla, OrchardZSA};
 use orchard::{
     bundle::{Authorization, Authorized, Flags},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
@@ -403,7 +403,7 @@ pub mod testing {
     use crate::transaction::components::Amount;
     use crate::transaction::components::amount::testing::arb_amount;
     use crate::transaction::TxVersion;
-    use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
+    use orchard::orchard_flavors::{OrchardVanilla, OrchardZSA};
 
     prop_compose! {
         pub fn arb_bundle(n_actions: usize)(
