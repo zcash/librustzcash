@@ -241,10 +241,7 @@ impl TransparentAuthorizingContext for Unauthorized {
 impl Bundle<Unauthorized> {
     pub fn apply_signatures(
         self,
-        #[cfg(feature = "transparent-inputs")] mtx: &TransactionData<
-            tx::Unauthorized,
-            orchard::issuance::Unauthorized,
-        >,
+        #[cfg(feature = "transparent-inputs")] mtx: &TransactionData<tx::Unauthorized>,
         #[cfg(feature = "transparent-inputs")] txid_parts_cache: &TxDigests<Blake2bHash>,
     ) -> Bundle<Authorized> {
         #[cfg(feature = "transparent-inputs")]
