@@ -2759,7 +2759,7 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
 
 /// Returns the row of the `transactions` table corresponding to the transaction in which
 /// this nullifier is revealed, if any.
-pub(crate) fn query_nullifier_map<N: AsRef<[u8]>, S>(
+pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
     conn: &rusqlite::Transaction<'_>,
     spend_pool: ShieldedProtocol,
     nf: &N,

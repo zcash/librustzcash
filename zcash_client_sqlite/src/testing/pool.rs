@@ -1210,7 +1210,7 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
     .unwrap();
 
     let res0 = st.wallet_mut().put_received_transparent_utxo(&utxo);
-    assert!(matches!(res0, Ok(_)));
+    assert_matches!(res0, Ok(_));
 
     // TODO: This test was originally written to use the pre-zip-313 fee rule
     // and has not yet been updated.

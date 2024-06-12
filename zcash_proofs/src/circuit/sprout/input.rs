@@ -66,7 +66,7 @@ impl InputNote {
             let lhs = cur;
             let rhs = witness_u256(
                 cs.namespace(|| "sibling"),
-                layer.as_ref().map(|&(ref sibling, _)| &sibling[..]),
+                layer.as_ref().map(|(sibling, _)| &sibling[..]),
             )?;
 
             // Conditionally swap if cur is right
