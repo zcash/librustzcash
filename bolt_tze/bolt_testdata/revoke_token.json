@@ -1,0 +1,7 @@
+{
+    "message": {
+        "msgtype": "revoked",
+        "wpk": "02b4395f62fc0b786902b37924c2773195ad707ef07dd5ec7e31f2b3cda4804d8c"
+    },
+    "signature": "3045022100d4421207f4698bd93b0fd7de19a52f2cf90022c80261c4ff7423c6a5ae2c22e0022043eac6981cf37d873036cd5544dcf9a95cfe8271abc0d66f6c3db031307c2e52"
+}
