@@ -152,10 +152,6 @@ criteria = "safe-to-deploy"
 version = "1.5.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.cast]]
-version = "0.3.0"
-criteria = "safe-to-run"
-
 [[exemptions.cbc]]
 version = "0.1.2"
 criteria = "safe-to-deploy"
