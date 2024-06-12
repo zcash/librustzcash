@@ -272,7 +272,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         &self,
         outpoint: &OutPoint,
     ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
-        wallet::get_unspent_transparent_output(self.conn.borrow(), outpoint)
+        wallet::transparent::get_unspent_transparent_output(self.conn.borrow(), outpoint)
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -282,7 +282,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         max_height: BlockHeight,
         exclude: &[OutPoint],
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
-        wallet::get_unspent_transparent_outputs(
+        wallet::transparent::get_unspent_transparent_outputs(
             self.conn.borrow(),
             &self.params,
             address,
@@ -516,7 +516,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         &self,
         account: AccountId,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
-        wallet::get_transparent_receivers(self.conn.borrow(), &self.params, account)
+        wallet::transparent::get_transparent_receivers(self.conn.borrow(), &self.params, account)
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -525,7 +525,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         account: AccountId,
         max_height: BlockHeight,
     ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
-        wallet::get_transparent_balances(self.conn.borrow(), &self.params, account, max_height)
+        wallet::transparent::get_transparent_address_balances(
+            self.conn.borrow(),
+            &self.params,
+            account,
+            max_height,
+        )
     }
 }
 
@@ -1034,7 +1039,11 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         _output: &WalletTransparentOutput,
     ) -> Result<Self::UtxoRef, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
-        return wallet::put_received_transparent_utxo(&self.conn, &self.params, _output);
+        return wallet::transparent::put_received_transparent_utxo(
+            &self.conn,
+            &self.params,
+            _output,
+        );
 
         #[cfg(not(feature = "transparent-inputs"))]
         panic!(
@@ -1228,7 +1237,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 .iter()
                 .flat_map(|b| b.vin.iter())
             {
-                wallet::mark_transparent_utxo_spent(wdb.conn.0, tx_ref, &txin.prevout)?;
+                wallet::transparent::mark_transparent_utxo_spent(wdb.conn.0, tx_ref, &txin.prevout)?;
             }
 
             // If we have some transparent outputs:
@@ -1337,7 +1346,11 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
             #[cfg(feature = "transparent-inputs")]
             for utxo_outpoint in sent_tx.utxos_spent() {
-                wallet::mark_transparent_utxo_spent(wdb.conn.0, tx_ref, utxo_outpoint)?;
+                wallet::transparent::mark_transparent_utxo_spent(
+                    wdb.conn.0,
+                    tx_ref,
+                    utxo_outpoint,
+                )?;
             }
 
             for output in sent_tx.outputs() {
