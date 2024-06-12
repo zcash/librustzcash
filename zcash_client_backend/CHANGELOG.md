@@ -15,6 +15,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::sync` module, behind the `sync` feature flag.
 
 ### Changed
+- MSRV is now 1.70.0.
 - `zcash_client_backend::zip321` has been extracted to, and is now a reexport 
   of the root module of the `zip321` crate. Several of the APIs of this module
   have changed as a consequence of this extraction; please see the `zip321`
@@ -29,8 +30,6 @@ and this library adheres to Rust's notion of
   wrapping protocol-address types, the `Recipient` type now wraps a
   `zcash_address::ZcashAddress`. This simplifies the process of tracking the
   original address to which value was sent.
-- MSRV is now 1.66.0 (except for the `lightwalletd-tonic` feature flag which
-  requires 1.70.0).
 
 ## [0.12.1] - 2024-03-27
 

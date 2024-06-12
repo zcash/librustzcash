@@ -10,7 +10,7 @@ and this library adheres to Rust's notion of
 - `zcash_protocol::PoolType::{TRANSPARENT, SAPLING, ORCHARD}`
 
 ### Changed
-- MSRV is now 1.66.0.
+- MSRV is now 1.70.0.
 
 ## [0.1.1] - 2024-03-25
 ### Added
