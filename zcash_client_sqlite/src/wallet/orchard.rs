@@ -658,6 +658,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[cfg(feature = "transparent-inputs")]
     fn fully_funded_send_to_t() {
         testing::pool::fully_funded_send_to_t::<OrchardPoolTester, SaplingPoolTester>()
     }

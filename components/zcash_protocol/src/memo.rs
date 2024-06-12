@@ -144,9 +144,10 @@ impl Deref for TextMemo {
 }
 
 /// An unencrypted memo received alongside a shielded note in a Zcash transaction.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub enum Memo {
     /// An empty memo field.
+    #[default]
     Empty,
     /// A memo field containing a UTF-8 string.
     Text(TextMemo),
@@ -168,12 +169,6 @@ impl fmt::Debug for Memo {
                 write!(f, ")")
             }
         }
-    }
-}
-
-impl Default for Memo {
-    fn default() -> Self {
-        Memo::Empty
     }
 }
 

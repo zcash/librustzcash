@@ -17,7 +17,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.66"
+rust-version = "1.70"
 repository = "https://github.com/zcash/librustzcash"
 license = "MIT OR Apache-2.0"
 categories = ["cryptography::cryptocurrencies"]
@@ -108,7 +108,7 @@ lazy_static = "1"
 
 # Tests and benchmarks
 assert_matches = "1.5"
-criterion = "0.4"
+criterion = "0.5"
 proptest = "1"
 rand_chacha = "0.3"
 rand_xorshift = "0.3"

@@ -7,7 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Changed
-- MSRV is now 1.66.0.
+- MSRV is now 1.70.0.
 
 ### Removed
 - The `zcash_primitives::zip339` module, which reexported parts of the API of

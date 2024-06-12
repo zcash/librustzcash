@@ -1210,7 +1210,7 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
     .unwrap();
 
     let res0 = st.wallet_mut().put_received_transparent_utxo(&utxo);
-    assert!(matches!(res0, Ok(_)));
+    assert_matches!(res0, Ok(_));
 
     // TODO: This test was originally written to use the pre-zip-313 fee rule
     // and has not yet been updated.
@@ -1592,7 +1592,7 @@ pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoo
     );
 }
 
-#[cfg(feature = "orchard")]
+#[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
 pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()

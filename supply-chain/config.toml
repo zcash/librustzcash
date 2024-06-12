@@ -88,6 +88,10 @@ criteria = "safe-to-deploy"
 version = "0.2.16"
 criteria = "safe-to-deploy"
 
+[[exemptions.anstyle-wincon]]
+version = "3.0.3"
+criteria = "safe-to-run"
+
 [[exemptions.arrayvec]]
 version = "0.7.4"
 criteria = "safe-to-deploy"
@@ -152,10 +156,6 @@ criteria = "safe-to-deploy"
 version = "1.5.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.cast]]
-version = "0.3.0"
-criteria = "safe-to-run"
-
 [[exemptions.cbc]]
 version = "0.1.2"
 criteria = "safe-to-deploy"
@@ -183,10 +183,6 @@ criteria = "safe-to-run"
 [[exemptions.cipher]]
 version = "0.4.4"
 criteria = "safe-to-deploy"
-
-[[exemptions.clap]]
-version = "3.2.25"
-criteria = "safe-to-run"
 
 [[exemptions.cpp_demangle]]
 version = "0.4.3"
@@ -317,10 +313,6 @@ version = "0.4.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.hermit-abi]]
-version = "0.1.19"
-criteria = "safe-to-run"
-
-[[exemptions.hermit-abi]]
 version = "0.3.3"
 criteria = "safe-to-deploy"
 
@@ -400,10 +392,6 @@ criteria = "safe-to-deploy"
 version = "2.6.4"
 criteria = "safe-to-deploy"
 
-[[exemptions.memmap2]]
-version = "0.5.10"
-criteria = "safe-to-run"
-
 [[exemptions.memuse]]
 version = "0.2.1"
 criteria = "safe-to-deploy"
@@ -448,10 +436,6 @@ criteria = "safe-to-deploy"
 version = "1.18.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.os_str_bytes]]
-version = "6.6.1"
-criteria = "safe-to-run"
-
 [[exemptions.pairing]]
 version = "0.23.0"
 criteria = "safe-to-deploy"
@@ -493,7 +477,7 @@ version = "0.8.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.pprof]]
-version = "0.11.1"
+version = "0.13.0"
 criteria = "safe-to-run"
 
 [[exemptions.ppv-lite86]]
@@ -657,11 +641,11 @@ version = "0.1.0"
 criteria = "safe-to-run"
 
 [[exemptions.symbolic-common]]
-version = "10.2.1"
+version = "12.9.2"
 criteria = "safe-to-run"
 
 [[exemptions.symbolic-demangle]]
-version = "10.2.1"
+version = "12.9.2"
 criteria = "safe-to-run"
 
 [[exemptions.syn]]

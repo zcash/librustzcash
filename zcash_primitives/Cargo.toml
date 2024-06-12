@@ -96,8 +96,11 @@ rand_xorshift.workspace = true
 sapling = { workspace = true, features = ["test-dependencies"] }
 orchard = { workspace = true, features = ["test-dependencies"] }
 
+# MSRV pins for transitive dev-dependencies:
+clap = ">=4, <4.5" # clap 4.5 has MSRV 1.74
+
 [target.'cfg(unix)'.dev-dependencies]
-pprof = { version = "0.11", features = ["criterion", "flamegraph"] } # MSRV 1.56
+pprof = { version = "0.13", features = ["criterion", "flamegraph"] }
 
 [features]
 default = ["multicore"]

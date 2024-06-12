@@ -670,7 +670,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[cfg(feature = "orchard")]
+    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
     fn fully_funded_send_to_t() {
         use crate::wallet::orchard::tests::OrchardPoolTester;
 
