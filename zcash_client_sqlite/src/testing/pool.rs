@@ -1592,7 +1592,7 @@ pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoo
     );
 }
 
-#[cfg(feature = "orchard")]
+#[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
 pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
