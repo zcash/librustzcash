@@ -6,6 +6,8 @@ use arti_client::{config::TorClientConfigBuilder, TorClient};
 use tor_rtcompat::PreferredRuntime;
 use tracing::debug;
 
+mod http;
+
 /// A Tor client that exposes capabilities designed for Zcash wallets.
 pub struct Client {
     inner: TorClient<PreferredRuntime>,
@@ -48,6 +50,8 @@ impl Client {
 pub enum Error {
     /// The directory passed to [`Client::create`] does not exist.
     MissingTorDirectory,
+    /// An error occurred while using HTTP-over-Tor.
+    Http(self::http::HttpError),
     /// An IO error occurred while interacting with the filesystem.
     Io(io::Error),
     /// A Tor-specific error.
@@ -58,6 +62,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::MissingTorDirectory => write!(f, "Tor directory is missing"),
+            Error::Http(e) => write!(f, "HTTP-over-Tor error: {}", e),
             Error::Io(e) => write!(f, "IO error: {}", e),
             Error::Tor(e) => write!(f, "Tor error: {}", e),
         }
@@ -68,9 +73,16 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::MissingTorDirectory => None,
+            Error::Http(e) => Some(e),
             Error::Io(e) => Some(e),
             Error::Tor(e) => Some(e),
         }
+    }
+}
+
+impl From<self::http::HttpError> for Error {
+    fn from(e: self::http::HttpError) -> Self {
+        Error::Http(e)
     }
 }
 
