@@ -104,6 +104,16 @@ tonic-build = { version = "0.12", default-features = false }
 secrecy = "0.8"
 subtle = "2.2.3"
 
+# SQLite databases
+# - Warning: One of the downstream consumers requires that SQLite be available through
+#   CocoaPods, due to being bound to React Native. We need to ensure that the SQLite
+#   version required for `rusqlite` is a version that is available through CocoaPods.
+rusqlite = { version = "0.29.0", features = ["bundled"] }
+schemer = "0.2"
+schemer-rusqlite = "0.2.2"
+time = "0.3.22"
+uuid = "1.1"
+
 # Static constants and assertions
 lazy_static = "1"
 static_assertions = "1"
