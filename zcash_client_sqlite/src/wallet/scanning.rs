@@ -790,6 +790,16 @@ pub(crate) mod tests {
         );
     }
 
+    /// Creates wallet and chain state such that:
+    /// * Shielded chain history begins at NU5 activation
+    /// * Both the Sapling and the Orchard note commitment trees have the following structure:
+    /// * The initial 2^16 shard of the note commitment tree covers `initial_shard_blocks` blocks.
+    ///   If `insert_prior_roots` is set, the root of the initial shard is inserted into each note
+    ///   commitment tree. This can be used to simulate the circumstance where note commitment tree
+    ///   roots have been inserted prior to scanning.
+    /// * The wallet birthday is located `birthday_offset` blocks into the second shard.
+    /// * The note commitment tree contains 2^16+1235 notes at the end of the block prior to the
+    ///   wallet birthday.
     pub(crate) fn test_with_nu5_birthday_offset<T: ShieldedPoolTester>(
         initial_shard_blocks: u32,
         birthday_offset: u32,

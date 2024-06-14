@@ -521,8 +521,8 @@ where
         (new_height, res)
     }
 
-    /// Creates a fake block with the given height and hash containing a single output of
-    /// the given value, and inserts it into the cache.
+    /// Creates a fake block with the given height and hash containing the requested outputs, and
+    /// inserts it into the cache.
     ///
     /// This generated block will be treated as the latest block, and subsequent calls to
     /// [`Self::generate_next_block`] will build on it.
