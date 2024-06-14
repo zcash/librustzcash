@@ -38,6 +38,7 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
 - `zcash_client_backend::scanning`:
   - `testing` module
 - `zcash_client_backend::sync` module, behind the `sync` feature flag.
+- `zcash_client_backend::tor` module, behind the `tor` feature flag.
 - `zcash_client_backend::wallet::Recipient::map_ephemeral_transparent_outpoint`
 
 ### Changed

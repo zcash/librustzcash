@@ -80,6 +80,9 @@ pub mod sync;
 #[cfg(feature = "unstable-serialization")]
 pub mod serialization;
 
+#[cfg(feature = "tor")]
+pub mod tor;
+
 pub use decrypt::{decrypt_transaction, DecryptedOutput, TransferType};
 pub use zcash_protocol::{PoolType, ShieldedProtocol};
 

@@ -125,6 +125,13 @@ proptest = "1"
 rand_chacha = "0.3"
 rand_xorshift = "0.3"
 
+# Tor
+# - `arti-client` depends on `rusqlite`, and a version mismatch there causes a compilation
+#   failure due to incompatible `libsqlite3-sys` versions.
+arti-client = { version = "0.11", default-features = false, features = ["compression", "rustls", "tokio"] }
+tokio = "1"
+tor-rtcompat = "0.9"
+
 # ZIP 32
 aes = "0.8"
 fpe = "0.6"

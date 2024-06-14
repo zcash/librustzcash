@@ -27,6 +27,7 @@ features = [
     "lightwalletd-tonic",
     "transparent-inputs",
     "test-dependencies",
+    "tor",
     "unstable",
     "unstable-serialization",
     "unstable-spanning-tree",
@@ -94,6 +95,12 @@ jubjub = { workspace = true, optional = true }
 # - ZIP 321
 nom = "7"
 
+# - Tor
+# -- Exposed error types: `arti_client::Error`, `arti_client::config::ConfigBuildError`,
+#    `hyper::Error`, `hyper::http::Error`, `serde_json::Error`. We could avoid this with
+#    changes to error handling.
+arti-client = { workspace = true, optional = true }
+
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 # - Documentation
@@ -106,6 +113,10 @@ percent-encoding.workspace = true
 # - Scanning
 crossbeam-channel.workspace = true
 rayon.workspace = true
+
+# - Tor
+tokio = { workspace = true, optional = true, features = ["fs"] }
+tor-rtcompat = { workspace = true, optional = true }
 
 [build-dependencies]
 tonic-build = { workspace = true, features = ["prost"] }
@@ -146,6 +157,14 @@ sync = [
     "lightwalletd-tonic",
     "dep:async-trait",
     "dep:futures-util",
+]
+
+## Exposes a Tor client for hiding a wallet's IP address while performing certain wallet
+## operations.
+tor = [
+    "dep:arti-client",
+    "dep:tokio",
+    "dep:tor-rtcompat",
 ]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
