@@ -2919,7 +2919,7 @@ mod tests {
 
         // Create a fake transparent output.
         let value = NonNegativeAmount::const_from_u64(100000);
-        let outpoint = OutPoint::new([1u8; 32], 1);
+        let outpoint = OutPoint::fake();
         let txout = TxOut {
             value,
             script_pubkey: taddr.script(),
@@ -3098,7 +3098,6 @@ mod tests {
 
         // Create a fake transparent output.
         let value = NonNegativeAmount::from_u64(100000).unwrap();
-        let outpoint = OutPoint::new([1u8; 32], 1);
         let txout = TxOut {
             value,
             script_pubkey: taddr.script(),
@@ -3106,7 +3105,7 @@ mod tests {
 
         // Pretend the output was received in the chain tip.
         let height = st.wallet().chain_height().unwrap().unwrap();
-        let utxo = WalletTransparentOutput::from_parts(outpoint, txout, height).unwrap();
+        let utxo = WalletTransparentOutput::from_parts(OutPoint::fake(), txout, height).unwrap();
         st.wallet_mut()
             .put_received_transparent_utxo(&utxo)
             .unwrap();

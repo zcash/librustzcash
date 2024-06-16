@@ -1206,7 +1206,7 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
     st.scan_cached_blocks(h, 1);
 
     let utxo = WalletTransparentOutput::from_parts(
-        OutPoint::new([1u8; 32], 1),
+        OutPoint::fake(),
         TxOut {
             value: NonNegativeAmount::const_from_u64(10000),
             script_pubkey: taddr.script(),

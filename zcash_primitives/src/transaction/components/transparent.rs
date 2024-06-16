@@ -100,6 +100,15 @@ impl OutPoint {
         OutPoint { hash, n }
     }
 
+    /// Constructs a fake `OutPoint` for use in tests.
+    #[cfg(any(test, feature = "test-dependencies"))]
+    pub const fn fake() -> Self {
+        OutPoint {
+            hash: [1u8; 32],
+            n: 1,
+        }
+    }
+
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut hash = [0u8; 32];
         reader.read_exact(&mut hash)?;
