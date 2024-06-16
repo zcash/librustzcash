@@ -597,17 +597,9 @@ where
             target_height,
             &transparent_inputs,
             &Vec::<TxOut>::new(),
-            &(
-                ::sapling::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &sapling::EmptyBundleView,
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &orchard_fees::EmptyBundleView,
             &self.dust_output_policy,
         );
 
@@ -622,17 +614,9 @@ where
                     target_height,
                     &transparent_inputs,
                     &Vec::<TxOut>::new(),
-                    &(
-                        ::sapling::builder::BundleType::DEFAULT,
-                        &Vec::<Infallible>::new()[..],
-                        &Vec::<Infallible>::new()[..],
-                    ),
+                    &sapling::EmptyBundleView,
                     #[cfg(feature = "orchard")]
-                    &(
-                        orchard::builder::BundleType::DEFAULT,
-                        &Vec::<Infallible>::new()[..],
-                        &Vec::<Infallible>::new()[..],
-                    ),
+                    &orchard_fees::EmptyBundleView,
                     &self.dust_output_policy,
                 )?
             }

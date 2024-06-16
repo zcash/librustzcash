@@ -238,7 +238,10 @@ mod tests {
     };
 
     #[cfg(feature = "orchard")]
-    use crate::data_api::wallet::input_selection::OrchardPayment;
+    use {
+        crate::data_api::wallet::input_selection::OrchardPayment,
+        crate::fees::orchard as orchard_fees,
+    };
 
     #[test]
     fn change_without_dust() {
@@ -267,11 +270,7 @@ mod tests {
                 ))][..],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
         );
 
@@ -354,11 +353,7 @@ mod tests {
                 &Vec::<Infallible>::new()[..],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
         );
 
@@ -402,11 +397,7 @@ mod tests {
                 ))][..],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
         );
 
@@ -454,11 +445,7 @@ mod tests {
                 ))][..],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
         );
 

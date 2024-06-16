@@ -83,9 +83,6 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "orchard")]
-    use std::convert::Infallible;
-
     use zcash_primitives::{
         consensus::{Network, NetworkUpgrade, Parameters},
         transaction::{
@@ -103,6 +100,9 @@ mod tests {
         },
         ShieldedProtocol,
     };
+
+    #[cfg(feature = "orchard")]
+    use crate::fees::orchard as orchard_fees;
 
     #[test]
     fn change_without_dust() {
@@ -130,11 +130,7 @@ mod tests {
                 ))][..],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &[] as &[Infallible],
-                &[] as &[Infallible],
-            ),
+            &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
         );
 
@@ -179,11 +175,7 @@ mod tests {
                 ))][..],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &[] as &[Infallible],
-                &[] as &[Infallible],
-            ),
+            &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
         );
 
