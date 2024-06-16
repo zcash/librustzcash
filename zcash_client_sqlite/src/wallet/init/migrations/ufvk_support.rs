@@ -129,7 +129,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             });
                         }
                     }
-                    Address::Transparent(_) => {
+                    Address::Transparent(_) | Address::Tex(_) => {
                         return Err(WalletMigrationError::CorruptedData(
                             "Address field value decoded to a transparent address; should have been Sapling or unified.".to_string()));
                     }
@@ -261,7 +261,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 })?;
                 let output_pool = match decoded_address {
                     Address::Sapling(_) => Ok(pool_code(PoolType::SAPLING)),
-                    Address::Transparent(_) => Ok(pool_code(PoolType::TRANSPARENT)),
+                    Address::Transparent(_) | Address::Tex(_) => {
+                        Ok(pool_code(PoolType::TRANSPARENT))
+                    }
                     Address::Unified(_) => Err(WalletMigrationError::CorruptedData(
                         "Unified addresses should not yet appear in the sent_notes table."
                             .to_string(),

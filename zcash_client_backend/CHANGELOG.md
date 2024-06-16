@@ -35,6 +35,8 @@ and this library adheres to Rust's notion of
     if a memo is given for the transparent pool. Use `ChangeValue::shielded`
     to avoid this error case when creating a `ChangeValue` known to be for a
     shielded pool.
+- `zcash_client_backend::input_selection::GreedyInputSelectorError` has a
+  new variant `UnsupportedTexAddress`.
 - `zcash_client_backend::wallet::Recipient` variants have changed. Instead of
   wrapping protocol-address types, the `Recipient` type now wraps a
   `zcash_address::ZcashAddress`. This simplifies the process of tracking the

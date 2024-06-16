@@ -1038,6 +1038,9 @@ where
                     payment.amount(),
                 ));
             }
+            Address::Tex(_) => {
+                return Err(Error::ProposalNotSupported);
+            }
         }
     }
 
