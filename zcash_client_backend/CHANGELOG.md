@@ -10,7 +10,7 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_client_backend::data_api`:
   - `chain::BlockCache` trait, behind the `sync` feature flag.
-- `zcash_client_backend::fees::ChangeValue::transparent`
+- `zcash_client_backend::fees::ChangeValue::{transparent, shielded}`
 - `zcash_client_backend::scanning`:
   - `testing` module
 - `zcash_client_backend::sync` module, behind the `sync` feature flag.
@@ -31,6 +31,10 @@ and this library adheres to Rust's notion of
   - The return type of `ChangeValue::output_pool`, and the type of the
     `output_pool` argument to `ChangeValue::new`, have changed from
     `ShieldedProtocol` to `zcash_protocol::PoolType`.
+  - The return type of `ChangeValue::new` is now optional; it returns `None`
+    if a memo is given for the transparent pool. Use `ChangeValue::shielded`
+    to avoid this error case when creating a `ChangeValue` known to be for a
+    shielded pool.
 - `zcash_client_backend::wallet::Recipient` variants have changed. Instead of
   wrapping protocol-address types, the `Recipient` type now wraps a
   `zcash_address::ZcashAddress`. This simplifies the process of tracking the

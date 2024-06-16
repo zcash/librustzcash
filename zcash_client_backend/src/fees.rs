@@ -31,12 +31,16 @@ pub struct ChangeValue {
 
 impl ChangeValue {
     /// Constructs a new change value from its constituent parts.
-    pub fn new(output_pool: PoolType, value: NonNegativeAmount, memo: Option<MemoBytes>) -> Self {
-        Self {
+    pub fn new(
+        output_pool: PoolType,
+        value: NonNegativeAmount,
+        memo: Option<MemoBytes>,
+    ) -> Option<Self> {
+        (matches!(output_pool, PoolType::Shielded(_)) || memo.is_none()).then_some(Self {
             output_pool,
             value,
             memo,
-        }
+        })
     }
 
     /// Constructs a new change value that will be created as a transparent output.
@@ -48,23 +52,28 @@ impl ChangeValue {
         }
     }
 
-    /// Constructs a new change value that will be created as a Sapling output.
-    pub fn sapling(value: NonNegativeAmount, memo: Option<MemoBytes>) -> Self {
+    /// Constructs a new change value that will be created as a shielded output.
+    pub fn shielded(
+        protocol: ShieldedProtocol,
+        value: NonNegativeAmount,
+        memo: Option<MemoBytes>,
+    ) -> Self {
         Self {
-            output_pool: PoolType::Shielded(ShieldedProtocol::Sapling),
+            output_pool: PoolType::Shielded(protocol),
             value,
             memo,
         }
     }
 
+    /// Constructs a new change value that will be created as a Sapling output.
+    pub fn sapling(value: NonNegativeAmount, memo: Option<MemoBytes>) -> Self {
+        Self::shielded(ShieldedProtocol::Sapling, value, memo)
+    }
+
     /// Constructs a new change value that will be created as an Orchard output.
     #[cfg(feature = "orchard")]
     pub fn orchard(value: NonNegativeAmount, memo: Option<MemoBytes>) -> Self {
-        Self {
-            output_pool: PoolType::Shielded(ShieldedProtocol::Orchard),
-            value,
-            memo,
-        }
+        Self::shielded(ShieldedProtocol::Orchard, value, memo)
     }
 
     /// Returns the pool to which the change output should be sent.
