@@ -143,7 +143,7 @@ pub use encoding::ParseError;
 pub use kind::unified;
 use kind::unified::Receiver;
 pub use zcash_protocol::consensus::NetworkType as Network;
-use zcash_protocol::{PoolType, ShieldedProtocol};
+use zcash_protocol::PoolType;
 
 /// A Zcash address.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -274,9 +274,9 @@ impl ZcashAddress {
         use AddressKind::*;
         match &self.kind {
             Sprout(_) => false,
-            Sapling(_) => pool_type == PoolType::Shielded(ShieldedProtocol::Sapling),
+            Sapling(_) => pool_type == PoolType::SAPLING,
             Unified(addr) => addr.has_receiver_of_type(pool_type),
-            P2pkh(_) | P2sh(_) | Tex(_) => pool_type == PoolType::Transparent,
+            P2pkh(_) | P2sh(_) | Tex(_) => pool_type == PoolType::TRANSPARENT,
         }
     }
 

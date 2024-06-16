@@ -980,10 +980,7 @@ where
                             memo.clone(),
                         )?;
                         orchard_output_meta.push((
-                            Recipient::External(
-                                payment.recipient_address().clone(),
-                                PoolType::Shielded(ShieldedProtocol::Orchard),
-                            ),
+                            Recipient::External(payment.recipient_address().clone(), *output_pool),
                             payment.amount(),
                             Some(memo),
                         ));
@@ -997,10 +994,7 @@ where
                             memo.clone(),
                         )?;
                         sapling_output_meta.push((
-                            Recipient::External(
-                                payment.recipient_address().clone(),
-                                PoolType::Shielded(ShieldedProtocol::Sapling),
-                            ),
+                            Recipient::External(payment.recipient_address().clone(), *output_pool),
                             payment.amount(),
                             Some(memo),
                         ));
@@ -1117,7 +1111,7 @@ where
 
                 let recipient = recipient
                     .map_internal_account_note(|pool| {
-                        assert!(pool == PoolType::Shielded(ShieldedProtocol::Orchard));
+                        assert!(pool == PoolType::ORCHARD);
                         build_result
                             .transaction()
                             .orchard_bundle()
@@ -1147,7 +1141,7 @@ where
 
                 let recipient = recipient
                     .map_internal_account_note(|pool| {
-                        assert!(pool == PoolType::Shielded(ShieldedProtocol::Sapling));
+                        assert!(pool == PoolType::SAPLING);
                         build_result
                             .transaction()
                             .sapling_bundle()

@@ -389,7 +389,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     let step1 = Step::from_parts(
         &[step0.clone()],
         request1,
-        [(0, PoolType::Transparent)].into_iter().collect(),
+        [(0, PoolType::TRANSPARENT)].into_iter().collect(),
         vec![],
         None,
         vec![StepOutput::new(0, StepOutputIndex::Payment(0))],
@@ -1670,10 +1670,7 @@ pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTes
     // Since there are sufficient funds in either pool, change is kept in the same pool as
     // the source note (the target pool), and does not necessarily follow preference order.
     // The source note will always be sapling, as we spend Sapling funds preferentially.
-    assert_eq!(
-        change_output.output_pool(),
-        PoolType::Shielded(ShieldedProtocol::Sapling)
-    );
+    assert_eq!(change_output.output_pool(), PoolType::SAPLING);
     assert_eq!(change_output.value(), expected_change);
 
     let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(

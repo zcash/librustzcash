@@ -1418,9 +1418,7 @@ pub(crate) fn get_received_memo(
         ShieldedProtocol::Orchard => fetch_memo(ORCHARD_TABLES_PREFIX, "action_index")?.flatten(),
         #[cfg(not(feature = "orchard"))]
         ShieldedProtocol::Orchard => {
-            return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
-                ShieldedProtocol::Orchard,
-            )))
+            return Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD))
         }
     };
 

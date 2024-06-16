@@ -367,32 +367,32 @@ where
 
             match recipient_address {
                 Address::Transparent(addr) => {
-                    payment_pools.insert(*idx, PoolType::Transparent);
+                    payment_pools.insert(*idx, PoolType::TRANSPARENT);
                     transparent_outputs.push(TxOut {
                         value: payment.amount(),
                         script_pubkey: addr.script(),
                     });
                 }
                 Address::Sapling(_) => {
-                    payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
+                    payment_pools.insert(*idx, PoolType::SAPLING);
                     sapling_outputs.push(SaplingPayment(payment.amount()));
                 }
                 Address::Unified(addr) => {
                     #[cfg(feature = "orchard")]
                     if addr.orchard().is_some() {
-                        payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Orchard));
+                        payment_pools.insert(*idx, PoolType::ORCHARD);
                         orchard_outputs.push(OrchardPayment(payment.amount()));
                         continue;
                     }
 
                     if addr.sapling().is_some() {
-                        payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
+                        payment_pools.insert(*idx, PoolType::SAPLING);
                         sapling_outputs.push(SaplingPayment(payment.amount()));
                         continue;
                     }
 
                     if let Some(addr) = addr.transparent() {
-                        payment_pools.insert(*idx, PoolType::Transparent);
+                        payment_pools.insert(*idx, PoolType::TRANSPARENT);
                         transparent_outputs.push(TxOut {
                             value: payment.amount(),
                             script_pubkey: addr.script(),

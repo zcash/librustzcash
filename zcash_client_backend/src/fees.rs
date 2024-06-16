@@ -46,7 +46,7 @@ impl ChangeValue {
     /// Constructs a new change value that will be created as a transparent output.
     pub fn transparent(value: NonNegativeAmount) -> Self {
         Self {
-            output_pool: PoolType::Transparent,
+            output_pool: PoolType::TRANSPARENT,
             value,
             memo: None,
         }

@@ -233,9 +233,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
                 .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
 
                 #[cfg(not(feature = "orchard"))]
-                return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
-                    ShieldedProtocol::Orchard,
-                )));
+                return Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD));
             }
         }
     }
@@ -1074,7 +1072,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                                 receiver.to_zcash_address(wdb.params.network_type())
                             );
 
-                            Recipient::External(wallet_address, PoolType::Shielded(ShieldedProtocol::Sapling))
+                            Recipient::External(wallet_address, PoolType::SAPLING)
                         };
 
                         wallet::put_sent_output(
@@ -1155,7 +1153,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                                 receiver.to_zcash_address(wdb.params.network_type())
                             );
 
-                            Recipient::External(wallet_address, PoolType::Shielded(ShieldedProtocol::Orchard))
+                            Recipient::External(wallet_address, PoolType::ORCHARD)
                         };
 
                         wallet::put_sent_output(
@@ -1277,7 +1275,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             #[cfg(not(feature = "transparent-inputs"))]
                             let recipient_addr = receiver.to_zcash_address(wdb.params.network_type());
 
-                            let recipient = Recipient::External(recipient_addr, PoolType::Transparent);
+                            let recipient = Recipient::External(recipient_addr, PoolType::TRANSPARENT);
 
                             wallet::put_sent_output(
                                 wdb.conn.0,

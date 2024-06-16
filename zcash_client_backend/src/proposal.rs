@@ -186,7 +186,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
 
             for t_out in step.transparent_inputs() {
                 let key = (
-                    PoolType::Transparent,
+                    PoolType::TRANSPARENT,
                     TxId::from_bytes(*t_out.outpoint().hash()),
                     t_out.outpoint().n(),
                 );
@@ -198,9 +198,9 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
             for s_out in step.shielded_inputs().iter().flat_map(|i| i.notes().iter()) {
                 let key = (
                     match &s_out.note() {
-                        Note::Sapling(_) => PoolType::Shielded(ShieldedProtocol::Sapling),
+                        Note::Sapling(_) => PoolType::SAPLING,
                         #[cfg(feature = "orchard")]
-                        Note::Orchard(_) => PoolType::Shielded(ShieldedProtocol::Orchard),
+                        Note::Orchard(_) => PoolType::ORCHARD,
                     },
                     *s_out.txid(),
                     s_out.output_index().into(),
