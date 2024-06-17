@@ -587,6 +587,16 @@ impl UnifiedAddressRequest {
         Self::new(_has_orchard, _has_sapling, _has_p2pkh)
     }
 
+    /// Constructs a new unified address request that includes only the receivers
+    /// that appear both in itself and a given other request.
+    pub fn intersect(&self, other: &UnifiedAddressRequest) -> Option<UnifiedAddressRequest> {
+        Self::new(
+            self.has_orchard && other.has_orchard,
+            self.has_sapling && other.has_sapling,
+            self.has_p2pkh && other.has_p2pkh,
+        )
+    }
+
     /// Construct a new unified address request from its constituent parts.
     ///
     /// Panics: at least one of `has_orchard` or `has_sapling` must be `true`.

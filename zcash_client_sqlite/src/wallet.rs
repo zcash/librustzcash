@@ -218,6 +218,27 @@ impl Account {
             ViewingKey::Incoming(uivk) => uivk.default_address(request),
         }
     }
+
+    fn intersect_ua_request(
+        &self,
+        request: UnifiedAddressRequest,
+    ) -> Option<UnifiedAddressRequest> {
+        let uivk = self.viewing_key.uivk();
+
+        #[cfg(feature = "orchard")]
+        let has_orchard = uivk.orchard().is_some();
+        #[cfg(not(feature = "orchard"))]
+        let has_orchard = false;
+
+        let has_sapling = uivk.sapling().is_some();
+        let has_p2pkh = uivk.transparent().is_some();
+
+        let capability = UnifiedAddressRequest::new(has_orchard, has_sapling, has_p2pkh);
+        match capability {
+            None => None,
+            Some(capability) => request.intersect(&capability),
+        }
+    }
 }
 
 impl zcash_client_backend::data_api::Account<AccountId> for Account {
@@ -521,7 +542,12 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     }
 
     // Always derive the default Unified Address for the account.
-    let (address, d_idx) = account.default_address(DEFAULT_UA_REQUEST)?;
+    let ua_request = account
+        .intersect_ua_request(DEFAULT_UA_REQUEST)
+        .ok_or_else(|| {
+            SqliteClientError::AddressGeneration(AddressGenerationError::ShieldedReceiverRequired)
+        })?;
+    let (address, d_idx) = account.default_address(ua_request)?;
     insert_address(conn, params, account_id, d_idx, &address)?;
 
     Ok(account)
