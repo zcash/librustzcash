@@ -8,7 +8,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Added
 - `zcash_encoding::CompactSize::serialized_size`
-- `zcash_encoding::Vector::serialized_size`
+- `zcash_encoding::Vector::serialized_size_of_u8_vec`
 
 ## [0.2.0] - 2022-10-19
 ### Changed

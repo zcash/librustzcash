@@ -183,7 +183,7 @@ impl Vector {
     }
 
     /// Returns the serialized size of a vector of `u8` as written by `[Vector::write]`.
-    pub fn serialized_size(vec: &[u8]) -> usize {
+    pub fn serialized_size_of_u8_vec(vec: &[u8]) -> usize {
         let length = vec.len();
         CompactSize::serialized_size(length) + length
     }
@@ -341,7 +341,7 @@ mod tests {
                 let mut data = vec![];
                 Vector::write(&mut data, &$value, |w, e| w.write_u8(*e)).unwrap();
                 assert_eq!(&data[..], &$expected[..]);
-                let serialized_size = Vector::serialized_size(&$value);
+                let serialized_size = Vector::serialized_size_of_u8_vec(&$value);
                 assert_eq!(serialized_size, $expected.len());
                 match Vector::read(&data[..], |r| r.read_u8()) {
                     Ok(v) => assert_eq!(v, $value),

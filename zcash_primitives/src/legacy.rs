@@ -324,7 +324,7 @@ impl Script {
 
     /// Returns the length of this script as encoded (including the initial CompactSize).
     pub fn serialized_size(&self) -> usize {
-        Vector::serialized_size(&self.0)
+        Vector::serialized_size_of_u8_vec(&self.0)
     }
 
     /// Returns the address that this Script contains, if any.
