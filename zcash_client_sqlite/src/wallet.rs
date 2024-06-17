@@ -555,7 +555,7 @@ pub(crate) fn get_current_address<P: consensus::Parameters>(
                 SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
             })
             .and_then(|addr| match addr {
-                Address::Unified(ua) => Ok(ua),
+                Address::Unified(ua) => Ok(*ua),
                 _ => Err(SqliteClientError::CorruptedData(format!(
                     "Addresses table contains {} which is not a unified address",
                     addr_str,
@@ -683,7 +683,7 @@ pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     account_id: AccountId,
 ) -> Result<Option<(TransparentAddress, NonHardenedChildIndex)>, SqliteClientError> {
-    use zcash_address::unified::Container;
+    use zcash_address::unified::{Container, Item};
     use zcash_primitives::legacy::keys::ExternalIvk;
 
     // Get the UIVK for the account.
@@ -705,9 +705,9 @@ pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
         }
 
         // Derive the default transparent address (if it wasn't already part of a derived UA).
-        for item in uivk.items() {
-            if let Ivk::P2pkh(tivk_bytes) = item {
-                let tivk = ExternalIvk::deserialize(&tivk_bytes)?;
+        for item in uivk.items_as_parsed() {
+            if let Item::Data(Ivk::P2pkh(tivk_bytes)) = item {
+                let tivk = ExternalIvk::deserialize(tivk_bytes)?;
                 return Ok(Some(tivk.default_address()));
             }
         }
@@ -2386,7 +2386,7 @@ pub(crate) fn select_receiving_address<P: consensus::Parameters>(
                  FROM addresses
                  WHERE cached_transparent_receiver_address = :taddr",
                 named_params! {
-                    ":taddr": Address::Transparent(*taddr).encode(_params)
+                    ":taddr": Address::Transparent(Box::new(*taddr)).encode(_params)
                 },
                 |row| row.get::<_, String>(0),
             )
