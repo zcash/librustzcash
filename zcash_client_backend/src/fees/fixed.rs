@@ -117,8 +117,8 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
@@ -155,8 +155,8 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[

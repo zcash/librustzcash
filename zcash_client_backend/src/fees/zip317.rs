@@ -257,8 +257,8 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
@@ -297,19 +297,19 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
                     note_id: 0,
                     value: NonNegativeAmount::const_from_u64(55000),
                 }][..],
-                &Vec::<Infallible>::new()[..],
+                &[] as &[Infallible],
             ),
             &(
                 orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
+                &[] as &[Infallible],
                 &[OrchardPayment::new(NonNegativeAmount::const_from_u64(
                     30000,
                 ))][..],
@@ -339,7 +339,7 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
+            &[] as &[TestTransparentInput],
             &[TxOut {
                 value: NonNegativeAmount::const_from_u64(40000),
                 script_pubkey: Script(vec![]),
@@ -350,7 +350,7 @@ mod tests {
                     note_id: 0,
                     value: NonNegativeAmount::const_from_u64(55000),
                 }][..],
-                &Vec::<Infallible>::new()[..],
+                &[] as &[Infallible],
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
@@ -378,8 +378,8 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[
@@ -422,8 +422,8 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[
