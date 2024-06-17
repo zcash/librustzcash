@@ -289,6 +289,13 @@ where
     )
 }
 
+type ErrorT<DbT, InputsErrT, FeeRuleT> = Error<
+    <DbT as WalletRead>::Error,
+    <DbT as WalletCommitmentTrees>::Error,
+    InputsErrT,
+    <FeeRuleT as FeeRule>::Error,
+>;
+
 /// Constructs a transaction or series of transactions that send funds as specified
 /// by the `request` argument, stores them to the wallet's "sent transactions" data
 /// store, and returns the [`TxId`] for each transaction constructed.
@@ -353,15 +360,7 @@ pub fn spend<DbT, ParamsT, InputsT>(
     request: zip321::TransactionRequest,
     ovk_policy: OvkPolicy,
     min_confirmations: NonZeroU32,
-) -> Result<
-    NonEmpty<TxId>,
-    Error<
-        <DbT as WalletRead>::Error,
-        <DbT as WalletCommitmentTrees>::Error,
-        InputsT::Error,
-        <InputsT::FeeRule as FeeRule>::Error,
-    >,
->
+) -> Result<NonEmpty<TxId>, ErrorT<DbT, InputsT::Error, InputsT::FeeRule>>
 where
     DbT: InputSource,
     DbT: WalletWrite<
@@ -592,15 +591,7 @@ pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     usk: &UnifiedSpendingKey,
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, N>,
-) -> Result<
-    NonEmpty<TxId>,
-    Error<
-        <DbT as WalletRead>::Error,
-        <DbT as WalletCommitmentTrees>::Error,
-        InputsErrT,
-        FeeRuleT::Error,
-    >,
->
+) -> Result<NonEmpty<TxId>, ErrorT<DbT, InputsErrT, FeeRuleT>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,
@@ -645,15 +636,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     min_target_height: BlockHeight,
     prior_step_results: &[(&proposal::Step<N>, BuildResult)],
     proposal_step: &proposal::Step<N>,
-) -> Result<
-    BuildResult,
-    Error<
-        <DbT as WalletRead>::Error,
-        <DbT as WalletCommitmentTrees>::Error,
-        InputsErrT,
-        FeeRuleT::Error,
-    >,
->
+) -> Result<BuildResult, ErrorT<DbT, InputsErrT, FeeRuleT>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,
