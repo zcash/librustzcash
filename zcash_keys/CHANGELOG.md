@@ -8,6 +8,9 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_keys::address::Address::try_from_zcash_address`
 - `zcash_keys::address::Receiver`
+- `zcash_keys::keys::UnifiedAddressRequest`
+  - `intersect`
+  - `to_address_request`
 
 ### Changed
 - MSRV is now 1.70.0.

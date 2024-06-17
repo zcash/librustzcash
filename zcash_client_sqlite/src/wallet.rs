@@ -213,9 +213,13 @@ impl Account {
         &self,
         request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
+        self.uivk().default_address(request)
+    }
+
+    pub(crate) fn uivk(&self) -> UnifiedIncomingViewingKey {
         match &self.viewing_key {
-            ViewingKey::Full(ufvk) => ufvk.default_address(request),
-            ViewingKey::Incoming(uivk) => uivk.default_address(request),
+            ViewingKey::Full(ufvk) => ufvk.to_unified_incoming_viewing_key(),
+            ViewingKey::Incoming(uivk) => *uivk.clone(),
         }
     }
 }
@@ -521,7 +525,14 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     }
 
     // Always derive the default Unified Address for the account.
-    let (address, d_idx) = account.default_address(DEFAULT_UA_REQUEST)?;
+    let ua_request = account
+        .uivk()
+        .to_address_request()
+        .and_then(|ua_request| ua_request.intersect(&DEFAULT_UA_REQUEST))
+        .ok_or_else(|| {
+            SqliteClientError::AddressGeneration(AddressGenerationError::ShieldedReceiverRequired)
+        })?;
+    let (address, d_idx) = account.default_address(ua_request)?;
     insert_address(conn, params, account_id, d_idx, &address)?;
 
     Ok(account)
