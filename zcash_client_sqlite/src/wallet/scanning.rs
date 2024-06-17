@@ -1509,12 +1509,12 @@ pub(crate) mod tests {
         assert_eq!(actual, expected);
     }
 
-    /// This tests the case wherein:
+    /// This sets up the case wherein:
     /// * The wallet birthday is in the shard prior to the chain tip
     /// * The user receives funds in the last complete block in the birthday shard,
     ///   in the last note in that block.
     /// * The next block crosses the shard boundary, with two notes in the prior
-    ///   shard and two blocks in the subsequent shard
+    ///   shard and two notes in the subsequent shard.
     /// * An additional 110 blocks are scanned, to ensure that the checkpoint
     ///   is pruned.
     ///
@@ -1523,7 +1523,7 @@ pub(crate) mod tests {
     /// ```
     /// blocks:      |<---- 5000 ---->|<----- 10 ---->|<--- 11 --->|<- 1  ->|<- 1 ->|<----- 110 ----->|
     ///       nu5_activation                       birthday                                       chain_tip
-    /// commitments: |<---- 2^16 ---->|<--(2^16-50)-->|<--- 44 --->|<-___X->|<- 4 ->|<----- 114 ------|
+    /// commitments: |<---- 2^16 ---->|<--(2^16-50)-->|<--- 44 --->|<-___X->|<- 4 ->|<----- 110 ------|
     /// shards:      |<--- shard0 --->|<---------------- shard1 --------------->|<-------- shard2 -------->...
     /// ```
     ///
@@ -1638,7 +1638,7 @@ pub(crate) mod tests {
             assert_eq!(spanning_block_height, birthday.height() + 12);
 
             // Insert the root of the completed subtree if `with_birthday_subtree_root` is set.
-            // This simulates the situation where the subtree roots have all bee inserted prior
+            // This simulates the situation where the subtree roots have all been inserted prior
             // to scanning.
             if with_birthday_subtree_root {
                 st.wallet_mut()
