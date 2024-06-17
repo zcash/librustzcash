@@ -8,6 +8,9 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Changed
 - MSRV is now 1.70.0.
+- `zcash_client_sqlite::error::SqliteClientError` has changed variants:
+  - Removed `HdwalletError`.
+  - Added `TransparentDerivation`.
 
 ## [0.10.3] - 2024-04-08
 

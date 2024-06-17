@@ -6,13 +6,39 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_primitives::legacy::keys`:
+  - `impl From<TransparentKeyScope> for bip32::ChildNumber`
+  - `impl From<NonHardenedChildIndex> for bip32::ChildNumber`
+  - `impl TryFrom<bip32::ChildNumber> for NonHardenedChildIndex`
+
 ### Changed
 - MSRV is now 1.70.0.
+- Bumped dependencies to `secp256k1 0.27`.
+- `zcash_primitives::legacy::keys`:
+  - `AccountPrivKey::{from_bytes, to_bytes}` now use the byte encoding from the
+    inside of a `xprv` Base58 string encoding from BIP 32, excluding the prefix
+    bytes (i.e. starting with `depth`).
+  - `AccountPrivKey::from_extended_privkey` now takes
+    `bip32::ExtendedPrivateKey<secp256k1::SecretKey>`.
+  - The following methods now return `Result<_, bip32::Error>`:
+    - `AccountPrivKey::from_seed`
+    - `AccountPrivKey::derive_secret_key`
+    - `AccountPrivKey::derive_external_secret_key`
+    - `AccountPrivKey::derive_internal_secret_key`
+    - `AccountPubKey::derive_external_ivk`
+    - `AccountPubKey::derive_internal_ivk`
+    - `AccountPubKey::deserialize`
+    - `IncomingViewingKey::derive_address`
 
 ### Removed
 - The `zcash_primitives::zip339` module, which reexported parts of the API of
   the `bip0039` crate, has been removed. Use the `bip0039` crate directly
   instead.
+- The `hdwallet` dependency and its effect on `zcash_primitives::legacy::keys`:
+  - `impl From<TransparentKeyScope> for hdwallet::KeyIndex`
+  - `impl From<NonHardenedChildIndex> for hdwallet::KeyIndex`
+  - `impl TryFrom<hdwallet::KeyIndex> for NonHardenedChildIndex`
 
 ## [0.15.1] - 2024-05-23
 

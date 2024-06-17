@@ -11,6 +11,9 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.70.0.
+- `zcash_keys::keys`:
+  - The (unstable) encoding of `UnifiedSpendingKey` has changed.
+  - `DerivationError::Transparent` now contains `bip32::Error`.
 
 ## [0.2.0] - 2024-03-25
 

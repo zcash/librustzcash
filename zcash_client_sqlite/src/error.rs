@@ -39,7 +39,7 @@ pub enum SqliteClientError {
 
     /// An error produced in legacy transparent address derivation
     #[cfg(feature = "transparent-inputs")]
-    HdwalletError(hdwallet::error::Error),
+    TransparentDerivation(bip32::Error),
 
     /// An error encountered in decoding a transparent address from its
     /// serialized form.
@@ -139,7 +139,7 @@ impl fmt::Display for SqliteClientError {
                 write!(f, "A rewind must be either of less than {} blocks, or at least back to block {} for your wallet; the requested height was {}.", PRUNING_DEPTH, h, r),
             SqliteClientError::DecodingError(e) => write!(f, "{}", e),
             #[cfg(feature = "transparent-inputs")]
-            SqliteClientError::HdwalletError(e) => write!(f, "{:?}", e),
+            SqliteClientError::TransparentDerivation(e) => write!(f, "{:?}", e),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::TransparentAddress(e) => write!(f, "{}", e),
             SqliteClientError::TableNotEmpty => write!(f, "Table is not empty"),
@@ -190,9 +190,9 @@ impl From<prost::DecodeError> for SqliteClientError {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl From<hdwallet::error::Error> for SqliteClientError {
-    fn from(e: hdwallet::error::Error) -> Self {
-        SqliteClientError::HdwalletError(e)
+impl From<bip32::Error> for SqliteClientError {
+    fn from(e: bip32::Error) -> Self {
+        SqliteClientError::TransparentDerivation(e)
     }
 }
 

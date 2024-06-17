@@ -37,8 +37,8 @@ zip32.workspace = true
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - Errors
+bip32 = { workspace = true, optional = true }
 bs58.workspace = true
-hdwallet = { workspace = true, optional = true }
 
 # - Logging and metrics
 tracing.workspace = true
@@ -118,7 +118,7 @@ test-dependencies = [
 
 ## Enables receiving transparent funds and sending to transparent recipients
 transparent-inputs = [
-  "dep:hdwallet", 
+  "dep:bip32",
   "zcash_keys/transparent-inputs",
   "zcash_client_backend/transparent-inputs"
 ]

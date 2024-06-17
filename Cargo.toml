@@ -62,9 +62,9 @@ orchard = { version = "0.8.0", default-features = false }
 pasta_curves = "0.5"
 
 # - Transparent
-hdwallet = "0.4"
+bip32 = { version = "0.5", default-features = false, features = ["secp256k1-ffi"] }
 ripemd = "0.1"
-secp256k1 = "0.26"
+secp256k1 = "0.27"
 
 # CSPRNG
 rand = "0.8"
