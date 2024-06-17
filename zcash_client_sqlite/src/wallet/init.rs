@@ -158,6 +158,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         | SqliteClientError::KeyDerivationError(_)
         | SqliteClientError::AccountIdDiscontinuity
         | SqliteClientError::AccountIdOutOfRange
+        | SqliteClientError::AccountCollision(_)
         | SqliteClientError::CacheMiss(_) => {
             unreachable!("we only call WalletRead methods; mutations can't occur")
         }

@@ -556,7 +556,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
-            let account_id = wallet::add_account(
+            let account = wallet::add_account(
                 wdb.conn.0,
                 &wdb.params,
                 AccountSource::Derived {
@@ -567,7 +567,58 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 birthday,
             )?;
 
-            Ok((account_id, usk))
+            Ok((account.id(), usk))
+        })
+    }
+
+    fn import_account_hd(
+        &mut self,
+        seed: &SecretVec<u8>,
+        account_index: zip32::AccountId,
+        birthday: &AccountBirthday,
+    ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error> {
+        self.transactionally(|wdb| {
+            let seed_fingerprint =
+                SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
+                    SqliteClientError::BadAccountData(
+                        "Seed must be between 32 and 252 bytes in length.".to_owned(),
+                    )
+                })?;
+
+            let usk =
+                UnifiedSpendingKey::from_seed(&wdb.params, seed.expose_secret(), account_index)
+                    .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
+            let ufvk = usk.to_unified_full_viewing_key();
+
+            let account = wallet::add_account(
+                wdb.conn.0,
+                &wdb.params,
+                AccountSource::Derived {
+                    seed_fingerprint,
+                    account_index,
+                },
+                wallet::ViewingKey::Full(Box::new(ufvk)),
+                birthday,
+            )?;
+
+            Ok((account, usk))
+        })
+    }
+
+    fn import_account_ufvk(
+        &mut self,
+        ufvk: &UnifiedFullViewingKey,
+        birthday: &AccountBirthday,
+        _spending_key_available: bool,
+    ) -> Result<Self::Account, Self::Error> {
+        self.transactionally(|wdb| {
+            Ok(wallet::add_account(
+                wdb.conn.0,
+                &wdb.params,
+                AccountSource::Imported,
+                wallet::ViewingKey::Full(Box::new(ufvk.to_owned())),
+                birthday,
+            )?)
         })
     }
 

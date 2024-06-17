@@ -1440,6 +1440,9 @@ pub trait WalletWrite: WalletRead {
     /// assumed equivalent to the ZIP 32 account index. It is an opaque identifier for a pool of
     /// funds or set of outputs controlled by a single spending authority.
     ///
+    /// The ZIP-32 account index may be obtained by calling [`WalletRead::get_account`]
+    /// with the returned account identifier.
+    ///
     /// If `birthday.height()` is below the current chain tip, this operation will
     /// trigger a re-scan of the blocks at and above the provided height. The birthday height is
     /// defined as the minimum block height that will be scanned for funds belonging to the wallet.
@@ -1467,6 +1470,72 @@ pub trait WalletWrite: WalletRead {
         seed: &SecretVec<u8>,
         birthday: &AccountBirthday,
     ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error>;
+
+    /// Tells the wallet to track a specific account index for a given seed.
+    ///
+    /// Returns the account for the newly-created wallet database entry, along with the
+    /// associated [`UnifiedSpendingKey`]. Note that the unique account identifier should *not* be
+    /// assumed equivalent to the ZIP 32 account index. It is an opaque identifier for a pool of
+    /// funds or set of outputs controlled by a single spending authority.
+    ///
+    /// The ZIP-32 account index may be obtained by calling [`WalletRead::get_account`]
+    /// with the returned account identifier.
+    ///
+    /// If `birthday.height()` is below the current chain tip, this operation will
+    /// trigger a re-scan of the blocks at and above the provided height. The birthday height is
+    /// defined as the minimum block height that will be scanned for funds belonging to the wallet.
+    ///
+    /// For new wallets, callers should construct the [`AccountBirthday`] using
+    /// [`AccountBirthday::from_treestate`] for the block at height `chain_tip_height - 100`.
+    /// Setting the birthday height to a tree state below the pruning depth ensures that reorgs
+    /// cannot cause funds intended for the wallet to be missed; otherwise, if the chain tip height
+    /// were used for the wallet birthday, a transaction targeted at a height greater than the
+    /// chain tip could be mined at a height below that tip as part of a reorg.
+    ///
+    /// If `seed` was imported from a backup and this method is being used to restore a previous
+    /// wallet state, you should use this method to add all of the desired accounts before scanning
+    /// the chain from the seed's birthday height.
+    ///
+    /// By convention, wallets should only allow a new account to be generated after confirmed
+    /// funds have been received by the currently-available account (in order to enable automated
+    /// account recovery).
+    ///
+    /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    fn import_account_hd(
+        &mut self,
+        seed: &SecretVec<u8>,
+        account_index: zip32::AccountId,
+        birthday: &AccountBirthday,
+    ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error>;
+
+    /// Tells the wallet to track an account using a unified full viewing key.
+    ///
+    /// Returns the account for the newly-created wallet database entry.
+    ///
+    /// If `birthday.height()` is below the current chain tip, this operation will
+    /// trigger a re-scan of the blocks at and above the provided height. The birthday height is
+    /// defined as the minimum block height that will be scanned for funds belonging to the wallet.
+    ///
+    /// Certain optimizations are possible for accounts which will never be used to spend funds.
+    /// If `spending_key_available` is `false`, the wallet may choose to optimize for this case,
+    /// in which case any attempt to spend funds from the account will result in an error.
+    ///
+    /// For new wallets, callers should construct the [`AccountBirthday`] using
+    /// [`AccountBirthday::from_treestate`] for the block at height `chain_tip_height - 100`.
+    /// Setting the birthday height to a tree state below the pruning depth ensures that reorgs
+    /// cannot cause funds intended for the wallet to be missed; otherwise, if the chain tip height
+    /// were used for the wallet birthday, a transaction targeted at a height greater than the
+    /// chain tip could be mined at a height below that tip as part of a reorg.
+    ///
+    /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
+    fn import_account_ufvk(
+        &mut self,
+        unified_key: &UnifiedFullViewingKey,
+        birthday: &AccountBirthday,
+        spending_key_available: bool,
+    ) -> Result<Self::Account, Self::Error>;
 
     /// Generates and persists the next available diversified address, given the current
     /// addresses known to the wallet.
@@ -1876,6 +1945,24 @@ pub mod testing {
             UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account)
                 .map(|k| (u32::from(account), k))
                 .map_err(|_| ())
+        }
+
+        fn import_account_hd(
+            &mut self,
+            _seed: &SecretVec<u8>,
+            _account_index: zip32::AccountId,
+            _birthday: &AccountBirthday,
+        ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error> {
+            todo!()
+        }
+
+        fn import_account_ufvk(
+            &mut self,
+            _unified_key: &UnifiedFullViewingKey,
+            _birthday: &AccountBirthday,
+            _spending_key_available: bool,
+        ) -> Result<Self::Account, Self::Error> {
+            todo!()
         }
 
         fn get_next_available_address(

@@ -358,7 +358,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     kind: AccountSource,
     viewing_key: ViewingKey,
     birthday: &AccountBirthday,
-) -> Result<AccountId, SqliteClientError> {
+) -> Result<Account, SqliteClientError> {
     let (hd_seed_fingerprint, hd_account_index) = match kind {
         AccountSource::Derived {
             seed_fingerprint,
@@ -524,7 +524,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     let (address, d_idx) = account.default_address(DEFAULT_UA_REQUEST)?;
     insert_address(conn, params, account_id, d_idx, &address)?;
 
-    Ok(account_id)
+    Ok(account)
 }
 
 pub(crate) fn get_current_address<P: consensus::Parameters>(

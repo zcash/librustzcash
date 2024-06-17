@@ -8,6 +8,8 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Changed
 - MSRV is now 1.70.0.
+- `SqliteClientError` enum
+  - Added `AccountCollision` variant.
 
 ## [0.10.3] - 2024-04-08
 

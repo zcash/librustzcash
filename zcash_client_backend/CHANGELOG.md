@@ -10,6 +10,7 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_client_backend::data_api`:
   - `chain::BlockCache` trait, behind the `sync` feature flag.
+  - `WalletWrite` trait methods `import_account_hd` and `import_account_ufvk`.
 - `zcash_client_backend::scanning`:
   - `testing` module
 - `zcash_client_backend::sync` module, behind the `sync` feature flag.
