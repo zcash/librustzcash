@@ -623,9 +623,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
         let ua_str: String = row.get(0)?;
         let di_vec: Vec<u8> = row.get(1)?;
         let mut di: [u8; 11] = di_vec.try_into().map_err(|_| {
-            SqliteClientError::CorruptedData(
-                "Diverisifier index is not an 11-byte value".to_owned(),
-            )
+            SqliteClientError::CorruptedData("Diversifier index is not an 11-byte value".to_owned())
         })?;
         di.reverse(); // BE -> LE conversion
 
