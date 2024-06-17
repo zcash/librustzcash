@@ -620,6 +620,7 @@ where
             &step_results,
             step,
             None,
+            None,
         )?;
         step_results.push((step, step_result));
     }
@@ -650,6 +651,7 @@ pub fn calculate_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     usk_to_tkey: Option<
         fn(&UnifiedSpendingKey, &TransparentAddressMetadata) -> hdwallet::secp256k1::SecretKey,
     >,
+    override_sapling_change_address: Option<sapling::PaymentAddress>,
 ) -> Result<
     BuildResult,
     Error<
@@ -1034,7 +1036,7 @@ where
             ShieldedProtocol::Sapling => {
                 builder.add_sapling_output(
                     sapling_internal_ovk(),
-                    sapling_dfvk.change_address().1,
+                    override_sapling_change_address.unwrap_or(sapling_dfvk.change_address().1),
                     change_value.value(),
                     memo.clone(),
                 )?;
