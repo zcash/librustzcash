@@ -5,7 +5,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Zingo]
+- replace create_proposed_transaction with `calculate_proposed_transaction`
+  - dont try to write the calculated transaction to wallet, that will be handled later
+  - ignore collecting any transaction metadata
+  - handle usk differently
+- modify change algorithm
+- added display for NoteId
 
 ## [0.12.1] - 2024-03-27
 
