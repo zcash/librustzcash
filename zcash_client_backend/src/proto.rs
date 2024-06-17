@@ -1,4 +1,4 @@
-//! Generated code for handling light client protobuf structs.
+//! This module contains generated code for handling light client protobuf structs.
 
 use incrementalmerkletree::frontier::CommitmentTree;
 use nonempty::NonEmpty;

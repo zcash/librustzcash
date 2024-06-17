@@ -85,6 +85,8 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     /// An error occurred parsing the address from a payment request.
     Address(ConversionError<&'static str>),
 
+    /// The address associated with a record being inserted was not recognized as
+    /// belonging to the wallet.
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
 }

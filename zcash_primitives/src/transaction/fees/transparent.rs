@@ -25,6 +25,7 @@ pub enum InputSize {
 }
 
 impl InputSize {
+    /// An `InputSize` corresponding to the upper bound on the size of a P2PKH input used by ZIP 317.
     pub const STANDARD_P2PKH: InputSize = InputSize::Known(P2PKH_STANDARD_INPUT_SIZE);
 }
 

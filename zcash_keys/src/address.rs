@@ -297,7 +297,7 @@ pub enum Address {
     #[cfg(feature = "sapling")]
     Sapling(PaymentAddress),
 
-    /// A transparent address corresponding to either a public key or a `Script`.
+    /// A transparent address corresponding to either a public key hash or a script hash.
     Transparent(TransparentAddress),
 
     /// A [ZIP 316] Unified Address.

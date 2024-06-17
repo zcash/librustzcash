@@ -250,20 +250,20 @@ impl<NoteRefT> From<BalanceError> for ChangeError<BalanceError, NoteRefT> {
     }
 }
 
-/// An enumeration of actions to tak when a transaction would potentially create dust
-/// outputs (outputs that are likely to be without economic value due to fee rules.)
+/// An enumeration of actions to take when a transaction would potentially create dust
+/// outputs (outputs that are likely to be without economic value due to fee rules).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DustAction {
     /// Do not allow creation of dust outputs; instead, require that additional inputs be provided.
     Reject,
     /// Explicitly allow the creation of dust change amounts greater than the specified value.
     AllowDustChange,
-    /// Allow dust amounts to be added to the transaction fee
+    /// Allow dust amounts to be added to the transaction fee.
     AddDustToFee,
 }
 
 /// A policy describing how a [`ChangeStrategy`] should treat potentially dust-valued change
-/// outputs (outputs that are likely to be without economic value due to fee rules.)
+/// outputs (outputs that are likely to be without economic value due to fee rules).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DustOutputPolicy {
     action: DustAction,
@@ -275,7 +275,7 @@ impl DustOutputPolicy {
     ///
     /// A dust policy created with `None` as the dust threshold will delegate determination
     /// of the dust threshold to the change strategy that is evaluating the strategy; this
-    /// recommended, but an explicit value (including zero) may be provided to explicitly
+    /// is recommended, but an explicit value (including zero) may be provided to explicitly
     /// override the determination of the change strategy.
     pub fn new(action: DustAction, dust_threshold: Option<NonNegativeAmount>) -> Self {
         Self {
@@ -284,7 +284,7 @@ impl DustOutputPolicy {
         }
     }
 
-    /// Returns the action to take in the event that a dust change amount would be produced
+    /// Returns the action to take in the event that a dust change amount would be produced.
     pub fn action(&self) -> DustAction {
         self.action
     }
