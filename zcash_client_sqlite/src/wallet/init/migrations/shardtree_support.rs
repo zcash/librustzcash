@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use incrementalmerkletree::Retention;
+use incrementalmerkletree::{Marking, Retention};
 use rusqlite::{self, named_params, params};
 use schemer;
 use schemer_rusqlite::RusqliteMigration;
@@ -173,7 +173,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                                 nonempty_frontier.clone(),
                                 Retention::Checkpoint {
                                     id: block_height,
-                                    is_marked: false,
+                                    marking: Marking::Reference,
                                 },
                             )
                             .map_err(|e| match e {

@@ -96,6 +96,7 @@ zcash_primitives = { workspace = true, features = ["test-dependencies"] }
 zcash_protocol = { workspace = true, features = ["local-consensus"] }
 zcash_client_backend = { workspace = true, features = ["test-dependencies", "unstable-serialization", "unstable-spanning-tree"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
+zip321 = { workspace = true }
 
 [features]
 default = ["multicore"]

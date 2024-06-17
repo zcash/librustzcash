@@ -64,7 +64,7 @@
 //!   wallet.
 //! - `memo` the shielded memo associated with the output, if any.
 
-use incrementalmerkletree::Retention;
+use incrementalmerkletree::{Marking, Retention};
 use rusqlite::{self, named_params, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
@@ -450,7 +450,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 // there exists a prior block for which frontier is the tree state at the end of
                 // the block.
                 id: birthday.height() - 1,
-                is_marked: false,
+                marking: Marking::Reference,
             },
         )?;
     }
@@ -477,7 +477,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 // there exists a prior block for which frontier is the tree state at the end of
                 // the block.
                 id: birthday.height() - 1,
-                is_marked: false,
+                marking: Marking::Reference,
             },
         )?;
     }
@@ -2838,7 +2838,7 @@ mod tests {
     use zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
 
     use crate::{
-        testing::{AddressType, BlockCache, TestBuilder, TestState},
+        testing::{AddressType, BlockCache, FakeCompactOutput, TestBuilder, TestState},
         AccountId,
     };
 
@@ -3208,9 +3208,11 @@ mod tests {
         let _ = st.generate_block_at(
             start_height,
             BlockHash([0; 32]),
-            &not_our_key,
-            AddressType::DefaultExternal,
-            not_our_value,
+            &[FakeCompactOutput::new(
+                &not_our_key,
+                AddressType::DefaultExternal,
+                not_our_value,
+            )],
             0,
             0,
             false,

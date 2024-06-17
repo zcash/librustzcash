@@ -32,7 +32,7 @@
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 
-use incrementalmerkletree::{Position, Retention};
+use incrementalmerkletree::{Marking, Position, Retention};
 use maybe_rayon::{
     prelude::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
@@ -929,7 +929,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             from_state.final_sapling_tree().clone(),
                             Retention::Checkpoint {
                                 id: from_state.block_height(),
-                                is_marked: false,
+                                marking: Marking::Reference,
                             },
                         )?;
 
@@ -978,7 +978,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             from_state.final_orchard_tree().clone(),
                             Retention::Checkpoint {
                                 id: from_state.block_height(),
-                                is_marked: false,
+                                marking: Marking::Reference,
                             },
                         )?;
 
