@@ -30,6 +30,11 @@ and this library adheres to Rust's notion of
     - `AccountPubKey::derive_internal_ivk`
     - `AccountPubKey::deserialize`
     - `IncomingViewingKey::derive_address`
+- `zcash_primitives::transaction::fees::FeeRule::fee_required`: the types
+  of parameters relating to transparent inputs and outputs have changed.
+  This method now requires their `tx_in` and `tx_out` serialized sizes
+  (expressed as iterators of `InputSize` for inputs and `usize` for outputs)
+  rather than a slice of `InputView` or `OutputView`.
 
 ### Removed
 - The `zcash_primitives::zip339` module, which reexported parts of the API of

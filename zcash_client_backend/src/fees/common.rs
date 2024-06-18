@@ -183,8 +183,8 @@ where
         .fee_required(
             params,
             target_height,
-            transparent_inputs,
-            transparent_outputs,
+            transparent_inputs.iter().map(|i| i.serialized_size()),
+            transparent_outputs.iter().map(|i| i.serialized_size()),
             sapling_input_count,
             sapling_output_count,
             orchard_action_count,

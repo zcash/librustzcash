@@ -6,7 +6,6 @@ use core::cmp::max;
 
 use crate::{
     consensus::{self, BlockHeight},
-    legacy::TransparentAddress,
     transaction::{
         components::{
             amount::{BalanceError, NonNegativeAmount},
@@ -147,27 +146,30 @@ impl super::FeeRule for FeeRule {
         &self,
         _params: &P,
         _target_height: BlockHeight,
-        transparent_inputs: &[impl transparent::InputView],
-        transparent_outputs: &[impl transparent::OutputView],
+        transparent_input_sizes: impl IntoIterator<Item = transparent::InputSize>,
+        transparent_output_sizes: impl IntoIterator<Item = usize>,
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
     ) -> Result<NonNegativeAmount, Self::Error> {
-        let non_p2pkh_inputs: Vec<_> = transparent_inputs
-            .iter()
-            .filter_map(|t_in| match t_in.coin().script_pubkey.address() {
-                Some(TransparentAddress::PublicKeyHash(_)) => None,
-                _ => Some(t_in.outpoint()),
-            })
-            .cloned()
-            .collect();
-
-        if !non_p2pkh_inputs.is_empty() {
-            return Err(FeeError::NonP2pkhInputs(non_p2pkh_inputs));
+        let mut t_in_total_size: usize = 0;
+        let mut non_p2pkh_outpoints = vec![];
+        for sz in transparent_input_sizes.into_iter() {
+            match sz {
+                transparent::InputSize::Known(s) => {
+                    t_in_total_size += s;
+                }
+                transparent::InputSize::Unknown(outpoint) => {
+                    non_p2pkh_outpoints.push(outpoint.clone());
+                }
+            }
         }
 
-        let t_in_total_size = transparent_inputs.len() * 150;
-        let t_out_total_size = transparent_outputs.len() * 34;
+        if !non_p2pkh_outpoints.is_empty() {
+            return Err(FeeError::NonP2pkhInputs(non_p2pkh_outpoints));
+        }
+
+        let t_out_total_size = transparent_output_sizes.into_iter().sum();
 
         let ceildiv = |num: usize, den: usize| (num + den - 1) / den;
 
