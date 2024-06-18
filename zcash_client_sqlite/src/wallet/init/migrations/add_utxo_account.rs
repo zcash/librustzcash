@@ -223,7 +223,7 @@ fn get_legacy_transparent_address<P: consensus::Parameters>(
             .map(|tfvk| {
                 tfvk.derive_external_ivk()
                     .map(|tivk| tivk.default_address())
-                    .map_err(SqliteClientError::HdwalletError)
+                    .map_err(SqliteClientError::TransparentDerivation)
             })
             .transpose()
     } else {

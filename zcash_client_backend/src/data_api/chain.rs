@@ -188,6 +188,10 @@ pub struct CommitmentTreeRoot<H> {
 
 impl<H> CommitmentTreeRoot<H> {
     /// Construct a new `CommitmentTreeRoot` from its constituent parts.
+    ///
+    /// - `subtree_end_height`: The height of the block containing the note commitment that
+    ///   completed the subtree.
+    /// - `root_hash`: The Merkle root of the completed subtree.
     pub fn from_parts(subtree_end_height: BlockHeight, root_hash: H) -> Self {
         Self {
             subtree_end_height,

@@ -136,7 +136,9 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         }
         SqliteClientError::DecodingError(e) => WalletMigrationError::CorruptedData(e.to_string()),
         #[cfg(feature = "transparent-inputs")]
-        SqliteClientError::HdwalletError(e) => WalletMigrationError::CorruptedData(e.to_string()),
+        SqliteClientError::TransparentDerivation(e) => {
+            WalletMigrationError::CorruptedData(e.to_string())
+        }
         #[cfg(feature = "transparent-inputs")]
         SqliteClientError::TransparentAddress(e) => {
             WalletMigrationError::CorruptedData(e.to_string())

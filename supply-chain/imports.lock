@@ -1127,6 +1127,17 @@ criteria = "safe-to-deploy"
 version = "0.9.4"
 aggregated-from = "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
 
+[[audits.google.audits.winapi]]
+who = "danakj@chromium.org"
+criteria = "safe-to-run"
+version = "0.3.9"
+notes = """
+Reviewed in https://crrev.com/c/5171063
+
+Previously reviewed during security review and the audit is grandparented in.
+"""
+aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+
 [[audits.google.audits.winapi-util]]
 who = "danakj@chromium.org"
 criteria = "safe-to-run"
@@ -1197,6 +1208,11 @@ delta = "0.2.12 -> 0.2.14"
 who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
 delta = "0.2.14 -> 0.2.15"
+
+[[audits.isrg.audits.hmac]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+version = "0.12.1"
 
 [[audits.isrg.audits.num-bigint]]
 who = "David Cook <dcook@divviup.org>"
@@ -1297,11 +1313,6 @@ version = "0.4.1"
 who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
 delta = "0.5.0 -> 0.5.1"
-
-[[audits.isrg.audits.untrusted]]
-who = "David Cook <dcook@divviup.org>"
-criteria = "safe-to-deploy"
-version = "0.7.1"
 
 [[audits.isrg.audits.wasm-bindgen-shared]]
 who = "David Cook <dcook@divviup.org>"

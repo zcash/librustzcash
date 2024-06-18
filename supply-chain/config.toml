@@ -308,10 +308,6 @@ criteria = "safe-to-deploy"
 version = "0.8.4"
 criteria = "safe-to-deploy"
 
-[[exemptions.hdwallet]]
-version = "0.4.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.hermit-abi]]
 version = "0.3.3"
 criteria = "safe-to-deploy"
@@ -358,7 +354,7 @@ criteria = "safe-to-deploy"
 
 [[exemptions.js-sys]]
 version = "0.3.65"
-criteria = "safe-to-deploy"
+criteria = "safe-to-run"
 
 [[exemptions.jubjub]]
 version = "0.10.0"
@@ -553,10 +549,6 @@ version = "0.8.37"
 criteria = "safe-to-run"
 
 [[exemptions.ring]]
-version = "0.16.20"
-criteria = "safe-to-deploy"
-
-[[exemptions.ring]]
 version = "0.17.8"
 criteria = "safe-to-deploy"
 
@@ -742,35 +734,31 @@ criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen]]
 version = "0.2.92"
-criteria = "safe-to-deploy"
+criteria = "safe-to-run"
 
 [[exemptions.wasm-bindgen-backend]]
 version = "0.2.88"
-criteria = "safe-to-deploy"
+criteria = "safe-to-run"
 
 [[exemptions.wasm-bindgen-macro]]
 version = "0.2.88"
-criteria = "safe-to-deploy"
+criteria = "safe-to-run"
 
 [[exemptions.web-sys]]
 version = "0.3.65"
-criteria = "safe-to-deploy"
+criteria = "safe-to-run"
 
 [[exemptions.which]]
 version = "4.4.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.winapi]]
-version = "0.3.9"
-criteria = "safe-to-deploy"
-
 [[exemptions.winapi-i686-pc-windows-gnu]]
 version = "0.4.0"
-criteria = "safe-to-deploy"
+criteria = "safe-to-run"
 
 [[exemptions.winapi-x86_64-pc-windows-gnu]]
 version = "0.4.0"
-criteria = "safe-to-deploy"
+criteria = "safe-to-run"
 
 [[exemptions.wyz]]
 version = "0.5.1"

@@ -1,8 +1,7 @@
 //! Transparent key components.
 
-use hdwallet::{
-    traits::{Deserialize, Serialize},
-    ExtendedPrivKey, ExtendedPubKey, KeyIndex,
+use bip32::{
+    ChildNumber, ExtendedKey, ExtendedKeyAttrs, ExtendedPrivateKey, ExtendedPublicKey, Prefix,
 };
 use secp256k1::PublicKey;
 use sha2::{Digest, Sha256};
@@ -40,9 +39,9 @@ impl From<zip32::Scope> for TransparentKeyScope {
     }
 }
 
-impl From<TransparentKeyScope> for KeyIndex {
+impl From<TransparentKeyScope> for ChildNumber {
     fn from(value: TransparentKeyScope) -> Self {
-        KeyIndex::Normal(value.0)
+        ChildNumber::new(value.0, false).expect("TransparentKeyScope is correct by construction")
     }
 }
 
@@ -84,20 +83,21 @@ impl NonHardenedChildIndex {
     }
 }
 
-impl TryFrom<KeyIndex> for NonHardenedChildIndex {
+impl TryFrom<ChildNumber> for NonHardenedChildIndex {
     type Error = ();
 
-    fn try_from(value: KeyIndex) -> Result<Self, Self::Error> {
-        match value {
-            KeyIndex::Normal(i) => NonHardenedChildIndex::from_index(i).ok_or(()),
-            KeyIndex::Hardened(_) => Err(()),
+    fn try_from(value: ChildNumber) -> Result<Self, Self::Error> {
+        if value.is_hardened() {
+            Err(())
+        } else {
+            NonHardenedChildIndex::from_index(value.index()).ok_or(())
         }
     }
 }
 
-impl From<NonHardenedChildIndex> for KeyIndex {
+impl From<NonHardenedChildIndex> for ChildNumber {
     fn from(value: NonHardenedChildIndex) -> Self {
-        Self::Normal(value.index())
+        Self::new(value.index(), false).expect("NonHardenedChildIndex is correct by construction")
     }
 }
 
@@ -105,7 +105,7 @@ impl From<NonHardenedChildIndex> for KeyIndex {
 ///
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 #[derive(Clone, Debug)]
-pub struct AccountPrivKey(ExtendedPrivKey);
+pub struct AccountPrivKey(ExtendedPrivateKey<secp256k1::SecretKey>);
 
 impl AccountPrivKey {
     /// Performs derivation of the extended private key for the BIP44 path:
@@ -117,20 +117,20 @@ impl AccountPrivKey {
         params: &P,
         seed: &[u8],
         account: AccountId,
-    ) -> Result<AccountPrivKey, hdwallet::error::Error> {
-        ExtendedPrivKey::with_seed(seed)?
-            .derive_private_key(KeyIndex::hardened_from_normalize_index(44)?)?
-            .derive_private_key(KeyIndex::hardened_from_normalize_index(params.coin_type())?)?
-            .derive_private_key(KeyIndex::hardened_from_normalize_index(account.into())?)
+    ) -> Result<AccountPrivKey, bip32::Error> {
+        ExtendedPrivateKey::new(seed)?
+            .derive_child(ChildNumber::new(44, true)?)?
+            .derive_child(ChildNumber::new(params.coin_type(), true)?)?
+            .derive_child(ChildNumber::new(account.into(), true)?)
             .map(AccountPrivKey)
     }
 
-    pub fn from_extended_privkey(extprivkey: ExtendedPrivKey) -> Self {
+    pub fn from_extended_privkey(extprivkey: ExtendedPrivateKey<secp256k1::SecretKey>) -> Self {
         AccountPrivKey(extprivkey)
     }
 
     pub fn to_account_pubkey(&self) -> AccountPubKey {
-        AccountPubKey(ExtendedPubKey::from_private_key(&self.0))
+        AccountPubKey(ExtendedPublicKey::from(&self.0))
     }
 
     /// Derives the BIP44 private spending key for the child path
@@ -139,11 +139,11 @@ impl AccountPrivKey {
         &self,
         scope: TransparentKeyScope,
         child_index: NonHardenedChildIndex,
-    ) -> Result<secp256k1::SecretKey, hdwallet::error::Error> {
+    ) -> Result<secp256k1::SecretKey, bip32::Error> {
         self.0
-            .derive_private_key(scope.into())?
-            .derive_private_key(child_index.into())
-            .map(|k| k.private_key)
+            .derive_child(scope.into())?
+            .derive_child(child_index.into())
+            .map(|k| *k.private_key())
     }
 
     /// Derives the BIP44 private spending key for the external (incoming payment) child path
@@ -151,7 +151,7 @@ impl AccountPrivKey {
     pub fn derive_external_secret_key(
         &self,
         child_index: NonHardenedChildIndex,
-    ) -> Result<secp256k1::SecretKey, hdwallet::error::Error> {
+    ) -> Result<secp256k1::SecretKey, bip32::Error> {
         self.derive_secret_key(zip32::Scope::External.into(), child_index)
     }
 
@@ -160,22 +160,40 @@ impl AccountPrivKey {
     pub fn derive_internal_secret_key(
         &self,
         child_index: NonHardenedChildIndex,
-    ) -> Result<secp256k1::SecretKey, hdwallet::error::Error> {
+    ) -> Result<secp256k1::SecretKey, bip32::Error> {
         self.derive_secret_key(zip32::Scope::Internal.into(), child_index)
     }
 
     /// Returns the `AccountPrivKey` serialized using the encoding for a
-    /// [BIP 32](https://en.bitcoin.it/wiki/BIP_0032) ExtendedPrivKey
+    /// [BIP 32](https://en.bitcoin.it/wiki/BIP_0032) ExtendedPrivateKey, excluding the
+    /// 4 prefix bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
-        self.0.serialize()
+        // Convert to `xprv` encoding.
+        let xprv_encoded = self.0.to_extended_key(Prefix::XPRV).to_string();
+
+        // Now decode it and return the bytes we want.
+        bs58::decode(xprv_encoded)
+            .with_check(None)
+            .into_vec()
+            .expect("correct")
+            .split_off(Prefix::LENGTH)
     }
 
     /// Decodes the `AccountPrivKey` from the encoding specified for a
-    /// [BIP 32](https://en.bitcoin.it/wiki/BIP_0032) ExtendedPrivKey
+    /// [BIP 32](https://en.bitcoin.it/wiki/BIP_0032) ExtendedPrivateKey, excluding the
+    /// 4 prefix bytes.
     pub fn from_bytes(b: &[u8]) -> Option<Self> {
-        ExtendedPrivKey::deserialize(b)
-            .map(AccountPrivKey::from_extended_privkey)
+        // Convert to `xprv` encoding.
+        let mut bytes = Prefix::XPRV.to_bytes().to_vec();
+        bytes.extend_from_slice(b);
+        let xprv_encoded = bs58::encode(bytes).with_check().into_string();
+
+        // Now we can parse it.
+        xprv_encoded
+            .parse::<ExtendedKey>()
             .ok()
+            .and_then(|k| ExtendedPrivateKey::try_from(k).ok())
+            .map(AccountPrivKey::from_extended_privkey)
     }
 }
 
@@ -186,22 +204,22 @@ impl AccountPrivKey {
 ///
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 #[derive(Clone, Debug)]
-pub struct AccountPubKey(ExtendedPubKey);
+pub struct AccountPubKey(ExtendedPublicKey<PublicKey>);
 
 impl AccountPubKey {
     /// Derives the BIP44 public key at the external "change level" path
     /// `m/44'/<coin_type>'/<account>'/0`.
-    pub fn derive_external_ivk(&self) -> Result<ExternalIvk, hdwallet::error::Error> {
+    pub fn derive_external_ivk(&self) -> Result<ExternalIvk, bip32::Error> {
         self.0
-            .derive_public_key(KeyIndex::Normal(0))
+            .derive_child(ChildNumber::new(0, false)?)
             .map(ExternalIvk)
     }
 
     /// Derives the BIP44 public key at the internal "change level" path
     /// `m/44'/<coin_type>'/<account>'/1`.
-    pub fn derive_internal_ivk(&self) -> Result<InternalIvk, hdwallet::error::Error> {
+    pub fn derive_internal_ivk(&self) -> Result<InternalIvk, bip32::Error> {
         self.0
-            .derive_public_key(KeyIndex::Normal(1))
+            .derive_child(ChildNumber::new(1, false)?)
             .map(InternalIvk)
     }
 
@@ -211,7 +229,7 @@ impl AccountPubKey {
     /// [transparent-ovk]: https://zips.z.cash/zip-0316#deriving-internal-keys
     pub fn ovks_for_shielding(&self) -> (InternalOvk, ExternalOvk) {
         let i_ovk = PrfExpand::TRANSPARENT_ZIP316_OVK
-            .with(&self.0.chain_code, &self.0.public_key.serialize());
+            .with(&self.0.attrs().chain_code, &self.0.public_key().serialize());
         let ovk_external = ExternalOvk(i_ovk[..32].try_into().unwrap());
         let ovk_internal = InternalOvk(i_ovk[32..].try_into().unwrap());
 
@@ -229,18 +247,25 @@ impl AccountPubKey {
     }
 
     pub fn serialize(&self) -> Vec<u8> {
-        let mut buf = self.0.chain_code.clone();
-        buf.extend(self.0.public_key.serialize().to_vec());
+        let mut buf = self.0.attrs().chain_code.to_vec();
+        buf.extend_from_slice(&self.0.public_key().serialize());
         buf
     }
 
-    pub fn deserialize(data: &[u8; 65]) -> Result<Self, hdwallet::error::Error> {
-        let chain_code = data[..32].to_vec();
+    pub fn deserialize(data: &[u8; 65]) -> Result<Self, bip32::Error> {
+        let chain_code = data[..32].try_into().expect("correct length");
         let public_key = PublicKey::from_slice(&data[32..])?;
-        Ok(AccountPubKey(ExtendedPubKey {
+        Ok(AccountPubKey(ExtendedPublicKey::new(
             public_key,
-            chain_code,
-        }))
+            ExtendedKeyAttrs {
+                depth: 3,
+                // We do not expose the inner `ExtendedPublicKey`, so we can use dummy
+                // values for the fields that are not encoded in an `AccountPubKey`.
+                parent_fingerprint: [0xff, 0xff, 0xff, 0xff],
+                child_number: ChildNumber::new(0, true).expect("correct"),
+                chain_code,
+            },
+        )))
     }
 }
 
@@ -253,10 +278,13 @@ pub fn pubkey_to_address(pubkey: &secp256k1::PublicKey) -> TransparentAddress {
 }
 
 pub(crate) mod private {
-    use hdwallet::ExtendedPubKey;
+    use super::TransparentKeyScope;
+    use bip32::ExtendedPublicKey;
+    use secp256k1::PublicKey;
     pub trait SealedChangeLevelKey {
-        fn extended_pubkey(&self) -> &ExtendedPubKey;
-        fn from_extended_pubkey(key: ExtendedPubKey) -> Self;
+        const SCOPE: TransparentKeyScope;
+        fn extended_pubkey(&self) -> &ExtendedPublicKey<PublicKey>;
+        fn from_extended_pubkey(key: ExtendedPublicKey<PublicKey>) -> Self;
     }
 }
 
@@ -281,11 +309,9 @@ pub trait IncomingViewingKey: private::SealedChangeLevelKey + std::marker::Sized
     fn derive_address(
         &self,
         child_index: NonHardenedChildIndex,
-    ) -> Result<TransparentAddress, hdwallet::error::Error> {
-        let child_key = self
-            .extended_pubkey()
-            .derive_public_key(child_index.into())?;
-        Ok(pubkey_to_address(&child_key.public_key))
+    ) -> Result<TransparentAddress, bip32::Error> {
+        let child_key = self.extended_pubkey().derive_child(child_index.into())?;
+        Ok(pubkey_to_address(child_key.public_key()))
     }
 
     /// Searches the space of child indexes for an index that will
@@ -309,18 +335,26 @@ pub trait IncomingViewingKey: private::SealedChangeLevelKey + std::marker::Sized
 
     fn serialize(&self) -> Vec<u8> {
         let extpubkey = self.extended_pubkey();
-        let mut buf = extpubkey.chain_code.clone();
-        buf.extend(extpubkey.public_key.serialize().to_vec());
+        let mut buf = extpubkey.attrs().chain_code.to_vec();
+        buf.extend_from_slice(&extpubkey.public_key().serialize());
         buf
     }
 
-    fn deserialize(data: &[u8; 65]) -> Result<Self, hdwallet::error::Error> {
-        let chain_code = data[..32].to_vec();
+    fn deserialize(data: &[u8; 65]) -> Result<Self, bip32::Error> {
+        let chain_code = data[..32].try_into().expect("correct length");
         let public_key = PublicKey::from_slice(&data[32..])?;
-        Ok(Self::from_extended_pubkey(ExtendedPubKey {
+        Ok(Self::from_extended_pubkey(ExtendedPublicKey::new(
             public_key,
-            chain_code,
-        }))
+            ExtendedKeyAttrs {
+                depth: 4,
+                // We do not expose the inner `ExtendedPublicKey`, so we can use a dummy
+                // value for the `parent_fingerprint` that is not encoded in an
+                // `IncomingViewingKey`.
+                parent_fingerprint: [0xff, 0xff, 0xff, 0xff],
+                child_number: Self::SCOPE.into(),
+                chain_code,
+            },
+        )))
     }
 }
 
@@ -331,14 +365,16 @@ pub trait IncomingViewingKey: private::SealedChangeLevelKey + std::marker::Sized
 ///
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 #[derive(Clone, Debug)]
-pub struct ExternalIvk(ExtendedPubKey);
+pub struct ExternalIvk(ExtendedPublicKey<PublicKey>);
 
 impl private::SealedChangeLevelKey for ExternalIvk {
-    fn extended_pubkey(&self) -> &ExtendedPubKey {
+    const SCOPE: TransparentKeyScope = TransparentKeyScope(0);
+
+    fn extended_pubkey(&self) -> &ExtendedPublicKey<PublicKey> {
         &self.0
     }
 
-    fn from_extended_pubkey(key: ExtendedPubKey) -> Self {
+    fn from_extended_pubkey(key: ExtendedPublicKey<PublicKey>) -> Self {
         ExternalIvk(key)
     }
 }
@@ -353,14 +389,16 @@ impl IncomingViewingKey for ExternalIvk {}
 ///
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 #[derive(Clone, Debug)]
-pub struct InternalIvk(ExtendedPubKey);
+pub struct InternalIvk(ExtendedPublicKey<PublicKey>);
 
 impl private::SealedChangeLevelKey for InternalIvk {
-    fn extended_pubkey(&self) -> &ExtendedPubKey {
+    const SCOPE: TransparentKeyScope = TransparentKeyScope(1);
+
+    fn extended_pubkey(&self) -> &ExtendedPublicKey<PublicKey> {
         &self.0
     }
 
-    fn from_extended_pubkey(key: ExtendedPubKey) -> Self {
+    fn from_extended_pubkey(key: ExtendedPublicKey<PublicKey>) -> Self {
         InternalIvk(key)
     }
 }
@@ -388,7 +426,7 @@ impl ExternalOvk {
 
 #[cfg(test)]
 mod tests {
-    use hdwallet::KeyIndex;
+    use bip32::ChildNumber;
     use subtle::ConstantTimeEq;
 
     use super::AccountPubKey;
@@ -684,9 +722,9 @@ mod tests {
 
     #[test]
     fn nonhardened_index_tryfrom_keyindex() {
-        let nh: NonHardenedChildIndex = KeyIndex::Normal(0).try_into().unwrap();
+        let nh: NonHardenedChildIndex = ChildNumber::new(0, false).unwrap().try_into().unwrap();
         assert_eq!(nh.index(), 0);
 
-        assert!(NonHardenedChildIndex::try_from(KeyIndex::Hardened(0)).is_err());
+        assert!(NonHardenedChildIndex::try_from(ChildNumber::new(0, true).unwrap()).is_err());
     }
 }
