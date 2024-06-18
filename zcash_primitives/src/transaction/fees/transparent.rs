@@ -77,12 +77,9 @@ pub trait OutputView: std::fmt::Debug {
 
     /// Returns the serialized size of the txout.
     fn serialized_size(&self) -> usize {
-        let mut buf: Vec<u8> = vec![];
-        self.script_pubkey()
-            .write(&mut buf)
-            .expect("script does not exceed available memory");
-        // The length of a transparent TxOut is the length of an amount plus the length of the serialized script pubkey.
-        8 + buf.len()
+        // The serialized size of a transparent `TxOut` is the serialized size of an amount
+        // plus the serialized size of the script pubkey.
+        8 + self.script_pubkey().serialized_size()
     }
 }
 
