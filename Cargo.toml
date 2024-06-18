@@ -6,8 +6,8 @@ members = [
     "components/zcash_encoding",
     "components/zcash_protocol",
     "components/zip321",
-    "zcash_client_backend",
-    "zcash_client_sqlite",
+#    "zcash_client_backend",
+#    "zcash_client_sqlite",
     "zcash_extensions",
     "zcash_history",
     "zcash_keys",
@@ -31,7 +31,7 @@ categories = ["cryptography::cryptocurrencies"]
 # Intra-workspace dependencies
 equihash = { version = "0.2", path = "components/equihash" }
 zcash_address = { version = "0.3", path = "components/zcash_address" }
-zcash_client_backend = { version = "0.12", path = "zcash_client_backend" }
+#zcash_client_backend = { version = "0.12", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.2", path = "components/zcash_encoding" }
 zcash_keys = { version = "0.2", path = "zcash_keys" }
 zcash_protocol = { version = "0.1", path = "components/zcash_protocol", features = ["test-dependencies"] }
