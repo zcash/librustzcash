@@ -126,10 +126,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 orchard,
             )?;
             let (_, sapling_change, orchard_change) =
-                single_change_output_policy::<NoteRefT, Self::FeeRule, Self::Error>(
-                    &net_flows,
-                    self.fallback_change_pool,
-                )?;
+                single_change_output_policy(&net_flows, self.fallback_change_pool);
 
             let s_non_dust = sapling.inputs().len() - sapling_dust.len();
             let s_allowed_dust =

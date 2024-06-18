@@ -90,35 +90,34 @@ where
     })
 }
 
-pub(crate) fn single_change_output_policy<NoteRefT: Clone, F: FeeRule, E>(
+/// Decide which shielded pool change should go to if there is any.
+pub(crate) fn single_change_output_policy(
     _net_flows: &NetFlows,
     _fallback_change_pool: ShieldedProtocol,
-) -> Result<(ShieldedProtocol, usize, usize), ChangeError<E, NoteRefT>>
-where
-    E: From<F::Error> + From<BalanceError>,
-{
+) -> (ShieldedProtocol, usize, usize) {
     // TODO: implement a less naive strategy for selecting the pool to which change will be sent.
-    #[cfg(feature = "orchard")]
-    let (change_pool, sapling_change, orchard_change) =
+    let change_pool = {
+        #[cfg(feature = "orchard")]
         if _net_flows.orchard_in.is_positive() || _net_flows.orchard_out.is_positive() {
-            // Send change to Orchard if we're spending any Orchard inputs or creating any Orchard outputs
-            (ShieldedProtocol::Orchard, 0, 1)
+            // Send change to Orchard if we're spending any Orchard inputs or creating any Orchard outputs.
+            ShieldedProtocol::Orchard
         } else if _net_flows.sapling_in.is_positive() || _net_flows.sapling_out.is_positive() {
             // Otherwise, send change to Sapling if we're spending any Sapling inputs or creating any
             // Sapling outputs, so that we avoid pool-crossing.
-            (ShieldedProtocol::Sapling, 1, 0)
+            ShieldedProtocol::Sapling
         } else {
-            // This is a fully-transparent transaction, so the caller gets to decide
-            // where to shield change.
-            match _fallback_change_pool {
-                ShieldedProtocol::Orchard => (_fallback_change_pool, 0, 1),
-                ShieldedProtocol::Sapling => (_fallback_change_pool, 1, 0),
-            }
-        };
-    #[cfg(not(feature = "orchard"))]
-    let (change_pool, sapling_change, orchard_change) = (ShieldedProtocol::Sapling, 1, 0);
-
-    Ok((change_pool, sapling_change, orchard_change))
+            // The flows are transparent, so there may not be change. If there is, the caller
+            // gets to decide where to shield it.
+            _fallback_change_pool
+        }
+        #[cfg(not(feature = "orchard"))]
+        ShieldedProtocol::Sapling
+    };
+    (
+        change_pool,
+        (change_pool == ShieldedProtocol::Sapling).into(),
+        (change_pool == ShieldedProtocol::Orchard).into(),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -154,7 +153,7 @@ where
         orchard,
     )?;
     let (change_pool, sapling_change, _orchard_change) =
-        single_change_output_policy::<NoteRefT, F, E>(&net_flows, _fallback_change_pool)?;
+        single_change_output_policy(&net_flows, _fallback_change_pool);
 
     let sapling_input_count = sapling
         .bundle_type()
