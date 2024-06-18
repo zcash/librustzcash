@@ -1251,8 +1251,8 @@ pub mod testing {
             transparent_bundle in transparent::arb_bundle(),
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard_testing::arb_bundle_for_version(version),
-            orchard_zsa_bundle in orchard_testing::arb_zsa_bundle_for_version(version),
-            issue_bundle in issuance::testing::arb_bundle_for_version(version),
+            _orchard_zsa_bundle in orchard_testing::arb_zsa_bundle_for_version(version),
+            _issue_bundle in issuance::testing::arb_bundle_for_version(version),
             version in Just(version)
         ) -> TransactionData<Authorized> {
             TransactionData::<Authorized> {
@@ -1265,9 +1265,9 @@ pub mod testing {
                 sapling_bundle,
                 orchard_bundle,
                 #[cfg(zcash_unstable = "nu7")]
-                orchard_zsa_bundle,
+                _orchard_zsa_bundle,
                 #[cfg(zcash_unstable = "nu7")]
-                issue_bundle,
+                _issue_bundle,
             }
         }
     }
