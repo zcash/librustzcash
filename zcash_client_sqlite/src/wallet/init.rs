@@ -346,7 +346,11 @@ mod tests {
         zip32::AccountId,
     };
 
-    use crate::{testing::TestBuilder, wallet::scanning::priority_code, WalletDb, UA_TRANSPARENT};
+    use crate::{
+        testing::TestBuilder,
+        wallet::{db, scanning::priority_code},
+        WalletDb, UA_TRANSPARENT,
+    };
 
     use super::init_wallet_db;
 
@@ -367,244 +371,30 @@ mod tests {
         let re = Regex::new(r"\s+").unwrap();
 
         let expected_tables = vec![
-            r#"CREATE TABLE "accounts" (
-                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                account_kind INTEGER NOT NULL DEFAULT 0,
-                hd_seed_fingerprint BLOB,
-                hd_account_index INTEGER,
-                ufvk TEXT,
-                uivk TEXT NOT NULL,
-                orchard_fvk_item_cache BLOB,
-                sapling_fvk_item_cache BLOB,
-                p2pkh_fvk_item_cache BLOB,
-                birthday_height INTEGER NOT NULL,
-                birthday_sapling_tree_size INTEGER,
-                birthday_orchard_tree_size INTEGER,
-                recover_until_height INTEGER,
-                CHECK (
-                  (
-                    account_kind = 0
-                    AND hd_seed_fingerprint IS NOT NULL
-                    AND hd_account_index IS NOT NULL
-                    AND ufvk IS NOT NULL
-                  )
-                  OR
-                  (
-                    account_kind = 1
-                    AND hd_seed_fingerprint IS NULL
-                    AND hd_account_index IS NULL
-                  )
-                )
-            )"#,
-            r#"CREATE TABLE "addresses" (
-                account_id INTEGER NOT NULL,
-                diversifier_index_be BLOB NOT NULL,
-                address TEXT NOT NULL,
-                cached_transparent_receiver_address TEXT,
-                FOREIGN KEY (account_id) REFERENCES accounts(id),
-                CONSTRAINT diversification UNIQUE (account_id, diversifier_index_be)
-            )"#,
-            "CREATE TABLE blocks (
-                height INTEGER PRIMARY KEY,
-                hash BLOB NOT NULL,
-                time INTEGER NOT NULL,
-                sapling_tree BLOB NOT NULL ,
-                sapling_commitment_tree_size INTEGER,
-                orchard_commitment_tree_size INTEGER,
-                sapling_output_count INTEGER,
-                orchard_action_count INTEGER)",
-            "CREATE TABLE nullifier_map (
-                spend_pool INTEGER NOT NULL,
-                nf BLOB NOT NULL,
-                block_height INTEGER NOT NULL,
-                tx_index INTEGER NOT NULL,
-                CONSTRAINT tx_locator
-                    FOREIGN KEY (block_height, tx_index)
-                    REFERENCES tx_locator_map(block_height, tx_index)
-                    ON DELETE CASCADE
-                    ON UPDATE RESTRICT,
-                CONSTRAINT nf_uniq UNIQUE (spend_pool, nf)
-            )",
-            "CREATE TABLE orchard_received_note_spends (
-                orchard_received_note_id INTEGER NOT NULL,
-                transaction_id INTEGER NOT NULL,
-                FOREIGN KEY (orchard_received_note_id)
-                    REFERENCES orchard_received_notes(id)
-                    ON DELETE CASCADE,
-                FOREIGN KEY (transaction_id)
-                    -- We do not delete transactions, so this does not cascade
-                    REFERENCES transactions(id_tx),
-                UNIQUE (orchard_received_note_id, transaction_id)
-            )",
-            "CREATE TABLE orchard_received_notes (
-                id INTEGER PRIMARY KEY,
-                tx INTEGER NOT NULL,
-                action_index INTEGER NOT NULL,
-                account_id INTEGER NOT NULL,
-                diversifier BLOB NOT NULL,
-                value INTEGER NOT NULL,
-                rho BLOB NOT NULL,
-                rseed BLOB NOT NULL,
-                nf BLOB UNIQUE,
-                is_change INTEGER NOT NULL,
-                memo BLOB,
-                commitment_tree_position INTEGER,
-                recipient_key_scope INTEGER,
-                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (account_id) REFERENCES accounts(id),
-                CONSTRAINT tx_output UNIQUE (tx, action_index)
-            )",
-            "CREATE TABLE orchard_tree_cap (
-                -- cap_id exists only to be able to take advantage of `ON CONFLICT`
-                -- upsert functionality; the table will only ever contain one row
-                cap_id INTEGER PRIMARY KEY,
-                cap_data BLOB NOT NULL
-            )",
-            "CREATE TABLE orchard_tree_checkpoint_marks_removed (
-                checkpoint_id INTEGER NOT NULL,
-                mark_removed_position INTEGER NOT NULL,
-                FOREIGN KEY (checkpoint_id) REFERENCES orchard_tree_checkpoints(checkpoint_id)
-                ON DELETE CASCADE,
-                CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
-            )",
-            "CREATE TABLE orchard_tree_checkpoints (
-                checkpoint_id INTEGER PRIMARY KEY,
-                position INTEGER
-            )",
-            "CREATE TABLE orchard_tree_shards (
-                shard_index INTEGER PRIMARY KEY,
-                subtree_end_height INTEGER,
-                root_hash BLOB,
-                shard_data BLOB,
-                contains_marked INTEGER,
-                CONSTRAINT root_unique UNIQUE (root_hash)
-            )",
-            "CREATE TABLE sapling_received_note_spends (
-                sapling_received_note_id INTEGER NOT NULL,
-                transaction_id INTEGER NOT NULL,
-                FOREIGN KEY (sapling_received_note_id)
-                    REFERENCES sapling_received_notes(id)
-                    ON DELETE CASCADE,
-                FOREIGN KEY (transaction_id)
-                    -- We do not delete transactions, so this does not cascade
-                    REFERENCES transactions(id_tx),
-                UNIQUE (sapling_received_note_id, transaction_id)
-            )",
-            r#"CREATE TABLE "sapling_received_notes" (
-                id INTEGER PRIMARY KEY,
-                tx INTEGER NOT NULL,
-                output_index INTEGER NOT NULL,
-                account_id INTEGER NOT NULL,
-                diversifier BLOB NOT NULL,
-                value INTEGER NOT NULL,
-                rcm BLOB NOT NULL,
-                nf BLOB UNIQUE,
-                is_change INTEGER NOT NULL,
-                memo BLOB,
-                commitment_tree_position INTEGER,
-                recipient_key_scope INTEGER,
-                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (account_id) REFERENCES accounts(id),
-                CONSTRAINT tx_output UNIQUE (tx, output_index)
-            )"#,
-            "CREATE TABLE sapling_tree_cap (
-                -- cap_id exists only to be able to take advantage of `ON CONFLICT`
-                -- upsert functionality; the table will only ever contain one row
-                cap_id INTEGER PRIMARY KEY,
-                cap_data BLOB NOT NULL
-            )",
-            "CREATE TABLE sapling_tree_checkpoint_marks_removed (
-                checkpoint_id INTEGER NOT NULL,
-                mark_removed_position INTEGER NOT NULL,
-                FOREIGN KEY (checkpoint_id) REFERENCES sapling_tree_checkpoints(checkpoint_id)
-                ON DELETE CASCADE,
-                CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
-            )",
-            "CREATE TABLE sapling_tree_checkpoints (
-                checkpoint_id INTEGER PRIMARY KEY,
-                position INTEGER
-            )",
-            "CREATE TABLE sapling_tree_shards (
-                shard_index INTEGER PRIMARY KEY,
-                subtree_end_height INTEGER,
-                root_hash BLOB,
-                shard_data BLOB,
-                contains_marked INTEGER,
-                CONSTRAINT root_unique UNIQUE (root_hash)
-            )",
-            "CREATE TABLE scan_queue (
-                block_range_start INTEGER NOT NULL,
-                block_range_end INTEGER NOT NULL,
-                priority INTEGER NOT NULL,
-                CONSTRAINT range_start_uniq UNIQUE (block_range_start),
-                CONSTRAINT range_end_uniq UNIQUE (block_range_end),
-                CONSTRAINT range_bounds_order CHECK (
-                    block_range_start < block_range_end
-                )
-            )",
-            "CREATE TABLE schemer_migrations (
-                id blob PRIMARY KEY
-            )",
-            r#"CREATE TABLE "sent_notes" (
-                id INTEGER PRIMARY KEY,
-                tx INTEGER NOT NULL,
-                output_pool INTEGER NOT NULL,
-                output_index INTEGER NOT NULL,
-                from_account_id INTEGER NOT NULL,
-                to_address TEXT,
-                to_account_id INTEGER,
-                value INTEGER NOT NULL,
-                memo BLOB,
-                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (from_account_id) REFERENCES accounts(id),
-                FOREIGN KEY (to_account_id) REFERENCES accounts(id),
-                CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index),
-                CONSTRAINT note_recipient CHECK (
-                    (to_address IS NOT NULL) OR (to_account_id IS NOT NULL)
-                )
-            )"#,
-            // Internal table created by SQLite when we started using `AUTOINCREMENT`.
-            "CREATE TABLE sqlite_sequence(name,seq)",
-            "CREATE TABLE transactions (
-                id_tx INTEGER PRIMARY KEY,
-                txid BLOB NOT NULL UNIQUE,
-                created TEXT,
-                block INTEGER,
-                tx_index INTEGER,
-                expiry_height INTEGER,
-                raw BLOB,
-                fee INTEGER,
-                FOREIGN KEY (block) REFERENCES blocks(height)
-            )",
-            "CREATE TABLE transparent_received_output_spends (
-                transparent_received_output_id INTEGER NOT NULL,
-                transaction_id INTEGER NOT NULL,
-                FOREIGN KEY (transparent_received_output_id)
-                    REFERENCES utxos(id)
-                    ON DELETE CASCADE,
-                FOREIGN KEY (transaction_id)
-                    -- We do not delete transactions, so this does not cascade
-                    REFERENCES transactions(id_tx),
-                UNIQUE (transparent_received_output_id, transaction_id)
-            )",
-            "CREATE TABLE tx_locator_map (
-                block_height INTEGER NOT NULL,
-                tx_index INTEGER NOT NULL,
-                txid BLOB NOT NULL UNIQUE,
-                PRIMARY KEY (block_height, tx_index)
-            )",
-            r#"CREATE TABLE "utxos" (
-                id INTEGER PRIMARY KEY,
-                received_by_account_id INTEGER NOT NULL,
-                address TEXT NOT NULL,
-                prevout_txid BLOB NOT NULL,
-                prevout_idx INTEGER NOT NULL,
-                script BLOB NOT NULL,
-                value_zat INTEGER NOT NULL,
-                height INTEGER NOT NULL,
-                FOREIGN KEY (received_by_account_id) REFERENCES accounts(id),
-                CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
-            )"#,
+            db::TABLE_ACCOUNTS,
+            db::TABLE_ADDRESSES,
+            db::TABLE_BLOCKS,
+            db::TABLE_NULLIFIER_MAP,
+            db::TABLE_ORCHARD_RECEIVED_NOTE_SPENDS,
+            db::TABLE_ORCHARD_RECEIVED_NOTES,
+            db::TABLE_ORCHARD_TREE_CAP,
+            db::TABLE_ORCHARD_TREE_CHECKPOINT_MARKS_REMOVED,
+            db::TABLE_ORCHARD_TREE_CHECKPOINTS,
+            db::TABLE_ORCHARD_TREE_SHARDS,
+            db::TABLE_SAPLING_RECEIVED_NOTE_SPENDS,
+            db::TABLE_SAPLING_RECEIVED_NOTES,
+            db::TABLE_SAPLING_TREE_CAP,
+            db::TABLE_SAPLING_TREE_CHECKPOINT_MARKS_REMOVED,
+            db::TABLE_SAPLING_TREE_CHECKPOINTS,
+            db::TABLE_SAPLING_TREE_SHARDS,
+            db::TABLE_SCAN_QUEUE,
+            db::TABLE_SCHEMER_MIGRATIONS,
+            db::TABLE_SENT_NOTES,
+            db::TABLE_SQLITE_SEQUENCE,
+            db::TABLE_TRANSACTIONS,
+            db::TABLE_TRANSPARENT_RECEIVED_OUTPUT_SPENDS,
+            db::TABLE_TX_LOCATOR_MAP,
+            db::TABLE_UTXOS,
         ];
 
         let mut tables_query = st
@@ -618,7 +408,7 @@ mod tests {
             let sql: String = row.get(0).unwrap();
             assert_eq!(
                 re.replace_all(&sql, " "),
-                re.replace_all(expected_tables[expected_idx], " ")
+                re.replace_all(expected_tables[expected_idx], " ").trim(),
             );
             expected_idx += 1;
         }
