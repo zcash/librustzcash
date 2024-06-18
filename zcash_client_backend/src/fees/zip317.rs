@@ -212,7 +212,6 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
 
 #[cfg(test)]
 mod tests {
-
     use std::convert::Infallible;
 
     use zcash_primitives::{
@@ -229,7 +228,7 @@ mod tests {
         data_api::wallet::input_selection::SaplingPayment,
         fees::{
             tests::{TestSaplingInput, TestTransparentInput},
-            ChangeError, ChangeStrategy, ChangeValue, DustOutputPolicy,
+            ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy,
         },
         ShieldedProtocol,
     };
@@ -323,7 +322,19 @@ mod tests {
     }
 
     #[test]
-    fn change_with_transparent_payments() {
+    fn change_with_transparent_payments_implicitly_allowing_zero_change() {
+        change_with_transparent_payments(&DustOutputPolicy::default())
+    }
+
+    #[test]
+    fn change_with_transparent_payments_explicitly_allowing_zero_change() {
+        change_with_transparent_payments(&DustOutputPolicy::new(
+            DustAction::AllowDustChange,
+            Some(NonNegativeAmount::ZERO),
+        ))
+    }
+
+    fn change_with_transparent_payments(dust_output_policy: &DustOutputPolicy) {
         let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
@@ -351,25 +362,176 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
-            &DustOutputPolicy::default(),
+            dust_output_policy,
         );
 
         assert_matches!(
             result,
-            Ok(balance) if balance.proposed_change().is_empty()
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::ZERO, None)]
                 && balance.fee_required() == NonNegativeAmount::const_from_u64(15000)
         );
     }
 
     #[test]
-    fn change_with_allowable_dust() {
+    #[cfg(feature = "transparent-inputs")]
+    fn change_fully_transparent_no_change() {
+        use crate::fees::sapling as sapling_fees;
+        use zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint};
+
         let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedProtocol::Sapling,
         );
 
-        // spend a single Sapling note that is sufficient to pay the fee
+        // Spend a single transparent UTXO that is exactly sufficient to pay the fee.
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap(),
+            &[TestTransparentInput {
+                outpoint: OutPoint::fake(),
+                coin: TxOut {
+                    value: NonNegativeAmount::const_from_u64(50000),
+                    script_pubkey: TransparentAddress::PublicKeyHash([0u8; 20]).script(),
+                },
+            }],
+            &[TxOut {
+                value: NonNegativeAmount::const_from_u64(40000),
+                script_pubkey: Script(vec![]),
+            }],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            &DustOutputPolicy::default(),
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if
+                balance.proposed_change().is_empty() &&
+                balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn change_transparent_flows_with_shielded_change() {
+        use crate::fees::sapling as sapling_fees;
+        use zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint};
+
+        let change_strategy = SingleOutputChangeStrategy::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedProtocol::Sapling,
+        );
+
+        // Spend a single transparent UTXO that is sufficient to pay the fee.
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap(),
+            &[TestTransparentInput {
+                outpoint: OutPoint::fake(),
+                coin: TxOut {
+                    value: NonNegativeAmount::const_from_u64(63000),
+                    script_pubkey: TransparentAddress::PublicKeyHash([0u8; 20]).script(),
+                },
+            }],
+            &[TxOut {
+                value: NonNegativeAmount::const_from_u64(40000),
+                script_pubkey: Script(vec![]),
+            }],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            &DustOutputPolicy::default(),
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(8000), None)] &&
+                balance.fee_required() == NonNegativeAmount::const_from_u64(15000)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn change_transparent_flows_with_shielded_dust_change() {
+        use crate::fees::sapling as sapling_fees;
+        use zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint};
+
+        let change_strategy = SingleOutputChangeStrategy::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedProtocol::Sapling,
+        );
+
+        // Spend a single transparent UTXO that is sufficient to pay the fee.
+        // The change will go to the fallback shielded change pool even though all inputs
+        // and payments are transparent, and even though the change amount (1000) would
+        // normally be considered dust, because we set the dust policy to allow that.
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap(),
+            &[TestTransparentInput {
+                outpoint: OutPoint::fake(),
+                coin: TxOut {
+                    value: NonNegativeAmount::const_from_u64(56000),
+                    script_pubkey: TransparentAddress::PublicKeyHash([0u8; 20]).script(),
+                },
+            }],
+            &[TxOut {
+                value: NonNegativeAmount::const_from_u64(40000),
+                script_pubkey: Script(vec![]),
+            }],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            &DustOutputPolicy::new(
+                DustAction::AllowDustChange,
+                Some(NonNegativeAmount::const_from_u64(1000)),
+            ),
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(1000), None)] &&
+                balance.fee_required() == NonNegativeAmount::const_from_u64(15000)
+        );
+    }
+
+    #[test]
+    fn change_with_allowable_dust_implicitly_allowing_zero_change() {
+        change_with_allowable_dust(&DustOutputPolicy::default())
+    }
+
+    #[test]
+    fn change_with_allowable_dust_explicitly_allowing_zero_change() {
+        change_with_allowable_dust(&DustOutputPolicy::new(
+            DustAction::AllowDustChange,
+            Some(NonNegativeAmount::ZERO),
+        ))
+    }
+
+    fn change_with_allowable_dust(dust_output_policy: &DustOutputPolicy) {
+        let change_strategy = SingleOutputChangeStrategy::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedProtocol::Sapling,
+        );
+
+        // Spend two Sapling notes, one of them dust. There is sufficient to
+        // pay the fee: if only one note is spent then we are 1000 short, but
+        // if both notes are spent then the fee stays at 10000 (even with a
+        // zero-valued change output), so we have just enough.
         let result = change_strategy.compute_balance(
             &Network::TestNetwork,
             Network::TestNetwork
@@ -395,13 +557,14 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
-            &DustOutputPolicy::default(),
+            dust_output_policy,
         );
 
         assert_matches!(
             result,
-            Ok(balance) if balance.proposed_change().is_empty()
-                && balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::ZERO, None)] &&
+                balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
         );
     }
 
@@ -413,7 +576,10 @@ mod tests {
             ShieldedProtocol::Sapling,
         );
 
-        // spend a single Sapling note that is sufficient to pay the fee
+        // Attempt to spend three Sapling notes, one of them dust. Taking into account
+        // Sapling output padding, the dust note would be free to add to the transaction
+        // if there were only two notes (as in the `change_with_allowable_dust` test), but
+        // it is not free when there are three notes.
         let result = change_strategy.compute_balance(
             &Network::TestNetwork,
             Network::TestNetwork

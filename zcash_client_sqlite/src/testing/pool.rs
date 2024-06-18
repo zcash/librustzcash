@@ -304,9 +304,14 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
 
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
+    use std::collections::BTreeSet;
+
     use nonempty::NonEmpty;
-    use zcash_client_backend::proposal::{Proposal, StepOutput, StepOutputIndex};
-    use zcash_primitives::legacy::keys::IncomingViewingKey;
+    use zcash_client_backend::{
+        fees::ChangeValue,
+        proposal::{Proposal, StepOutput, StepOutputIndex},
+    };
+    use zcash_primitives::{legacy::keys::IncomingViewingKey, transaction::TxId};
 
     let mut st = TestBuilder::new()
         .with_block_cache()
@@ -317,7 +322,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note
-    let value = NonNegativeAmount::const_from_u64(65000);
+    let value = NonNegativeAmount::const_from_u64(100000);
     let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h, 1);
 
@@ -362,7 +367,14 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     let min_target_height = proposal0.min_target_height();
     let step0 = &proposal0.steps().head;
 
-    assert!(step0.balance().proposed_change().is_empty());
+    assert_eq!(
+        step0.balance().proposed_change(),
+        [ChangeValue::shielded(
+            T::SHIELDED_PROTOCOL,
+            NonNegativeAmount::const_from_u64(35000),
+            None
+        )]
+    );
     assert_eq!(
         step0.balance().fee_required(),
         NonNegativeAmount::const_from_u64(15000)
@@ -425,10 +437,10 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         )
         .unwrap();
 
-    let confirmed_sent = txids
+    // Check that there are sent outputs with the correct values for each transaction.
+    let confirmed_sent: Vec<BTreeSet<(&TxId, u32)>> = txids
         .iter()
         .map(|sent_txid| {
-            // check that there's a sent output with the correct value corresponding to
             stmt_sent
                 .query(rusqlite::params![sent_txid.as_ref()])
                 .unwrap()
@@ -436,18 +448,23 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
                     let value: u32 = row.get(0)?;
                     Ok((sent_txid, value))
                 })
-                .collect::<Result<Vec<_>, _>>()
+                .collect::<Result<BTreeSet<_>, _>>()
                 .unwrap()
         })
-        .collect::<Vec<_>>();
+        .collect();
 
     assert_eq!(
-        confirmed_sent.get(0).and_then(|v| v.get(0)),
-        Some(&(&txids[0], 50000))
+        confirmed_sent.get(0),
+        Some(
+            &[(&txids[0], 35000), (&txids[0], 50000)]
+                .iter()
+                .cloned()
+                .collect()
+        ),
     );
     assert_eq!(
-        confirmed_sent.get(1).and_then(|v| v.get(0)),
-        Some(&(&txids[1], 40000))
+        confirmed_sent.get(1),
+        Some(&[(&txids[1], 40000)].iter().cloned().collect()),
     );
 }
 
