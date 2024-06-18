@@ -37,6 +37,8 @@ use orchard::note::AssetBase;
 #[cfg(not(feature = "transparent-inputs"))]
 use std::convert::Infallible;
 
+use crate::transaction::components::amount::NonNegativeAmount;
+use crate::transaction::components::sapling::zip212_enforcement;
 #[cfg(zcash_unstable = "zfuture")]
 use crate::{
     extensions::transparent::{ExtensionTxBuilder, ToPayload},
@@ -48,23 +50,20 @@ use crate::{
         fees::FutureFeeRule,
     },
 };
-use crate::transaction::components::amount::NonNegativeAmount;
-use crate::transaction::components::sapling::zip212_enforcement;
-
 
 use orchard::note::AssetBase;
-use orchard::orchard_flavors::{ OrchardVanilla, OrchardZSA };
+use orchard::orchard_flavors::{OrchardVanilla, OrchardZSA};
 
 #[cfg(zcash_unstable = "nu7")]
-use rand_core::OsRng;
+use crate::transaction::builder::Error::{IssuanceBuilder, IssuanceBundle};
 #[cfg(zcash_unstable = "nu7")]
 use orchard::{
-    issuance::{IssueInfo, IssueBundle},
-    keys::{IssuanceAuthorizingKey, IssuanceValidatingKey}
+    issuance::{IssueBundle, IssueInfo},
+    keys::{IssuanceAuthorizingKey, IssuanceValidatingKey},
 };
-use zcash_protocol::value::ZatBalance;
 #[cfg(zcash_unstable = "nu7")]
-use crate::transaction::builder::Error::{IssuanceBuilder, IssuanceBundle};
+use rand_core::OsRng;
+use zcash_protocol::value::ZatBalance;
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
@@ -371,12 +370,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     ///
     /// The expiry height will be set to the given height plus the default transaction
     /// expiry delta (20 blocks).
-    pub fn new(
-        params: P,
-        target_height: BlockHeight,
-        build_config: BuildConfig,
-    ) -> Self {
-
+    pub fn new(params: P, target_height: BlockHeight, build_config: BuildConfig) -> Self {
         let is_orchard_enabled = params.is_nu_active(NetworkUpgrade::Nu5, target_height);
 
         let orchard_builder = if is_orchard_enabled {
@@ -448,7 +442,6 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
         }
     }
 
-
     /// Adds an Issuance action to the transaction.
     #[cfg(zcash_unstable = "nu7")]
     pub fn init_issue_bundle<FeeError>(
@@ -469,8 +462,8 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
                 Some(IssueInfo { recipient, value }),
                 OsRng,
             )
-                .map_err(IssuanceBundle)?
-                .0,
+            .map_err(IssuanceBundle)?
+            .0,
         );
         self.issuance_key = Some(ik);
 
@@ -499,11 +492,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
 
     /// Adds a Burn action to the transaction.
     #[cfg(zcash_unstable = "nu7")]
-    pub fn add_burn<FE>(
-        &mut self,
-        value: u64,
-        asset: AssetBase,
-    ) -> Result<(), Error<FE>> {
+    pub fn add_burn<FE>(&mut self, value: u64, asset: AssetBase) -> Result<(), Error<FE>> {
         self.orchard_builder
             .as_mut()
             .ok_or(Error::OrchardBuilderNotAvailable)?
@@ -578,10 +567,10 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             .add_spend(orchard::keys::FullViewingKey::from(sk), note, merkle_path)
             .map_err(Error::OrchardSpend)?;
 
-            self.orchard_saks
-                .push(orchard::keys::SpendAuthorizingKey::from(sk));
+        self.orchard_saks
+            .push(orchard::keys::SpendAuthorizingKey::from(sk));
 
-            Ok(())
+        Ok(())
     }
 
     /// Adds an Orchard recipient to the transaction.
@@ -880,16 +869,31 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         };
 
         let mut unproven_orchard_bundle = None;
-        let mut unproven_orchard_zsa_bundle: Option<orchard::Bundle<orchard::builder::InProgress<orchard::builder::Unproven<OrchardZSA>, orchard::builder::Unauthorized>, ZatBalance, OrchardZSA>> = None;
+        let mut unproven_orchard_zsa_bundle: Option<
+            orchard::Bundle<
+                orchard::builder::InProgress<
+                    orchard::builder::Unproven<OrchardZSA>,
+                    orchard::builder::Unauthorized,
+                >,
+                ZatBalance,
+                OrchardZSA,
+            >,
+        > = None;
         let mut orchard_meta = orchard::builder::BundleMetadata::empty();
 
         if let Some(builder) = self.orchard_builder {
             if version.has_zsa() {
-                let (bundle, meta) = builder.build(&mut rng).map_err(Error::OrchardBuild)?.unwrap();
+                let (bundle, meta) = builder
+                    .build(&mut rng)
+                    .map_err(Error::OrchardBuild)?
+                    .unwrap();
                 unproven_orchard_zsa_bundle = Some(bundle);
                 orchard_meta = meta;
             } else {
-                let (bundle, meta) = builder.build(&mut rng).map_err(Error::OrchardBuild)?.unwrap();
+                let (bundle, meta) = builder
+                    .build(&mut rng)
+                    .map_err(Error::OrchardBuild)?
+                    .unwrap();
                 unproven_orchard_bundle = Some(bundle);
                 orchard_meta = meta;
             }

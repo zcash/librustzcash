@@ -396,13 +396,13 @@ pub fn write_action_without_auth<W: Write, D: OrchardDomain>(
 pub mod testing {
     use proptest::prelude::*;
 
+    use crate::transaction::components::amount::testing::arb_amount;
+    use crate::transaction::components::Amount;
+    use crate::transaction::TxVersion;
     use orchard::bundle::{
         testing::{self as t_orch},
         Authorized, Bundle,
     };
-    use crate::transaction::components::Amount;
-    use crate::transaction::components::amount::testing::arb_amount;
-    use crate::transaction::TxVersion;
     use orchard::orchard_flavors::{OrchardVanilla, OrchardZSA};
 
     prop_compose! {

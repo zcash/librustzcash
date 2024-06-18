@@ -235,10 +235,7 @@ impl Authorization for TestUnauthorized {
 fn zip_0244() {
     fn to_test_txdata(
         tv: &self::data::zip_0244::TestVector,
-    ) -> (
-        TransactionData<TestUnauthorized>,
-        TxDigests<Blake2bHash>,
-    ) {
+    ) -> (TransactionData<TestUnauthorized>, TxDigests<Blake2bHash>) {
         let tx = Transaction::read(&tv.tx[..], BranchId::Nu5).unwrap();
 
         assert_eq!(tx.txid.as_ref(), &tv.txid);

@@ -30,12 +30,9 @@ use crate::{
 };
 
 #[cfg(zcash_unstable = "nu7")]
-use orchard::{
-    orchard_flavors::OrchardZSA,
-    issuance::IssueBundle
-};
-#[cfg(zcash_unstable = "nu7")]
 use crate::transaction::components::issuance;
+#[cfg(zcash_unstable = "nu7")]
+use orchard::{issuance::IssueBundle, orchard_flavors::OrchardZSA};
 
 use self::{
     components::{
@@ -257,9 +254,7 @@ impl TxVersion {
     /// Returns `true` if this transaction version supports the Orchard protocol.
     pub fn has_orchard(&self) -> bool {
         match self {
-            TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => {
-                false
-            }
+            TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => false,
             TxVersion::Zip225 => true,
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::Zsa => false,
@@ -270,9 +265,10 @@ impl TxVersion {
 
     pub fn has_zsa(&self) -> bool {
         match self {
-            TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling | TxVersion::Zip225 => {
-                false
-            }
+            TxVersion::Sprout(_)
+            | TxVersion::Overwinter
+            | TxVersion::Sapling
+            | TxVersion::Zip225 => false,
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::Zsa => true,
             #[cfg(feature = "zfuture")]
@@ -415,10 +411,10 @@ impl<A: Authorization> TransactionData<A> {
         sprout_bundle: Option<sprout::Bundle>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount, OrchardVanilla>>,
-        #[cfg(zcash_unstable = "nu7")]
-        orchard_zsa_bundle: Option<orchard::Bundle<A::OrchardZsaAuth, Amount, OrchardZSA>>,
-        #[cfg(zcash_unstable = "nu7")]
-        issue_bundle: Option<IssueBundle<A::IssueAuth>>,
+        #[cfg(zcash_unstable = "nu7")] orchard_zsa_bundle: Option<
+            orchard::Bundle<A::OrchardZsaAuth, Amount, OrchardZSA>,
+        >,
+        #[cfg(zcash_unstable = "nu7")] issue_bundle: Option<IssueBundle<A::IssueAuth>>,
     ) -> Self {
         TransactionData {
             version,
@@ -602,19 +598,20 @@ impl<A: Authorization> TransactionData<A> {
         ) -> Option<
             orchard::bundle::Bundle<B::OrchardAuth, Amount, OrchardVanilla>,
         >,
-        #[cfg(zcash_unstable = "nu7")]
-        f_zsa_orchard: impl FnOnce(
+        #[cfg(zcash_unstable = "nu7")] f_zsa_orchard: impl FnOnce(
             Option<orchard::bundle::Bundle<A::OrchardZsaAuth, Amount, OrchardZSA>>,
         ) -> Option<
             orchard::bundle::Bundle<B::OrchardZsaAuth, Amount, OrchardZSA>,
         >,
-        #[cfg(zcash_unstable = "nu7")]
-        f_issue: impl FnOnce(
+        #[cfg(zcash_unstable = "nu7")] f_issue: impl FnOnce(
             Option<orchard::issuance::IssueBundle<A::IssueAuth>>,
-        ) -> Option<orchard::issuance::IssueBundle<B::IssueAuth>>,
+        ) -> Option<
+            orchard::issuance::IssueBundle<B::IssueAuth>,
+        >,
         #[cfg(zcash_unstable = "zfuture")] f_tze: impl FnOnce(
             Option<tze::Bundle<A::TzeAuth>>,
-        ) -> Option<tze::Bundle<B::TzeAuth>>,
+        )
+            -> Option<tze::Bundle<B::TzeAuth>>,
     ) -> TransactionData<B> {
         TransactionData {
             version: self.version,
@@ -639,7 +636,10 @@ impl<A: Authorization> TransactionData<A> {
         f_transparent: impl transparent::MapAuth<A::TransparentAuth, B::TransparentAuth>,
         mut f_sapling: impl sapling_serialization::MapAuth<A::SaplingAuth, B::SaplingAuth>,
         mut f_orchard: impl orchard_serialization::MapAuth<A::OrchardAuth, B::OrchardAuth>,
-        #[cfg(zcash_unstable = "nu7")] mut f_orchard_zsa: impl orchard_serialization::MapAuth<A::OrchardZsaAuth, B::OrchardZsaAuth>,
+        #[cfg(zcash_unstable = "nu7")] mut f_orchard_zsa: impl orchard_serialization::MapAuth<
+            A::OrchardZsaAuth,
+            B::OrchardZsaAuth,
+        >,
         #[cfg(zcash_unstable = "nu7")] f_issue: impl issuance::MapIssueAuth<A::IssueAuth, B::IssueAuth>,
         #[cfg(zcash_unstable = "zfuture")] f_tze: impl tze::MapAuth<A::TzeAuth, B::TzeAuth>,
     ) -> TransactionData<B> {
@@ -677,11 +677,9 @@ impl<A: Authorization> TransactionData<A> {
                 )
             }),
             #[cfg(zcash_unstable = "nu7")]
-            issue_bundle: self.issue_bundle.map(|b| {
-                b.map_authorization(
-                    |a| f_issue.map_issue_authorization(a),
-                )
-            }),
+            issue_bundle: self
+                .issue_bundle
+                .map(|b| b.map_authorization(|a| f_issue.map_issue_authorization(a))),
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle: self.tze_bundle.map(|b| b.map_authorization(f_tze)),
         }
@@ -1076,7 +1074,6 @@ impl Transaction {
         sapling_serialization::write_v5_bundle(writer, self.sapling_bundle.as_ref())
     }
 
-
     #[cfg(zcash_unstable = "nu7")]
     pub fn write_v7<W: Write>(&self, mut writer: W) -> io::Result<()> {
         if self.sprout_bundle.is_some() {
@@ -1195,8 +1192,7 @@ pub trait TransactionDigest<A: Authorization> {
         transparent_digest: Self::TransparentDigest,
         sapling_digest: Self::SaplingDigest,
         orchard_digest: Self::OrchardDigest,
-        #[cfg(zcash_unstable = "nu7")]
-        issue_digest: Self::IssueDigest,
+        #[cfg(zcash_unstable = "nu7")] issue_digest: Self::IssueDigest,
         #[cfg(zcash_unstable = "zfuture")] tze_digest: Self::TzeDigest,
     ) -> Self::Digest;
 }
@@ -1207,8 +1203,8 @@ pub enum DigestError {
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
-    use proptest::prelude::*;
     use crate::consensus::BranchId;
+    use proptest::prelude::*;
 
     use super::{
         components::{

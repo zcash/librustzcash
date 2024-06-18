@@ -11,10 +11,10 @@ use crate::{
     sapling::{self, bundle::GrothProofBytes},
 };
 
-#[cfg(zcash_unstable = "zfuture")]
-use {super::components::Amount, crate::extensions::transparent::Precondition};
 #[cfg(zcash_unstable = "nu7")]
 use crate::transaction::sighash_v7::v7_signature_hash;
+#[cfg(zcash_unstable = "zfuture")]
+use {super::components::Amount, crate::extensions::transparent::Precondition};
 
 pub const SIGHASH_ALL: u8 = 0x01;
 pub const SIGHASH_NONE: u8 = 0x02;

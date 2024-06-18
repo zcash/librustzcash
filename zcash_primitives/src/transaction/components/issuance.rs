@@ -10,7 +10,6 @@ use std::io;
 use std::io::{Read, Write};
 use zcash_encoding::{CompactSize, Vector};
 
-
 pub trait MapIssueAuth<A: IssueAuth, B: IssueAuth> {
     fn map_issue_authorization(&self, a: A) -> B;
 }
@@ -131,7 +130,7 @@ pub fn write_v7_bundle<W: Write>(
 }
 
 fn write_action<W: Write>(action: &IssueAction, mut writer: W) -> io::Result<()> {
-    let is_finalized_u8 :u8 = if action.is_finalized() { 1 } else { 0 };
+    let is_finalized_u8: u8 = if action.is_finalized() { 1 } else { 0 };
     writer.write_u8(is_finalized_u8)?;
     Vector::write(&mut writer, action.notes(), |w, note| write_note(note, w))?;
     Vector::write(&mut writer, action.asset_desc().as_bytes(), |w, b| {
