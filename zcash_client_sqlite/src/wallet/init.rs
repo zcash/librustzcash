@@ -332,21 +332,18 @@ mod tests {
 
     use zcash_client_backend::{
         address::Address,
-        data_api::scanning::ScanPriority,
         encoding::{encode_extended_full_viewing_key, encode_payment_address},
         keys::{sapling, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     };
 
     use ::sapling::zip32::ExtendedFullViewingKey;
     use zcash_primitives::{
-        consensus::{
-            self, BlockHeight, BranchId, Network, NetworkConstants, NetworkUpgrade, Parameters,
-        },
+        consensus::{self, BlockHeight, BranchId, Network, NetworkConstants},
         transaction::{TransactionData, TxVersion},
         zip32::AccountId,
     };
 
-    use crate::{testing::TestBuilder, wallet::scanning::priority_code, WalletDb, UA_TRANSPARENT};
+    use crate::{testing::TestBuilder, wallet::db, WalletDb, UA_TRANSPARENT};
 
     use super::init_wallet_db;
 
@@ -367,244 +364,30 @@ mod tests {
         let re = Regex::new(r"\s+").unwrap();
 
         let expected_tables = vec![
-            r#"CREATE TABLE "accounts" (
-                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                account_kind INTEGER NOT NULL DEFAULT 0,
-                hd_seed_fingerprint BLOB,
-                hd_account_index INTEGER,
-                ufvk TEXT,
-                uivk TEXT NOT NULL,
-                orchard_fvk_item_cache BLOB,
-                sapling_fvk_item_cache BLOB,
-                p2pkh_fvk_item_cache BLOB,
-                birthday_height INTEGER NOT NULL,
-                birthday_sapling_tree_size INTEGER,
-                birthday_orchard_tree_size INTEGER,
-                recover_until_height INTEGER,
-                CHECK (
-                  (
-                    account_kind = 0
-                    AND hd_seed_fingerprint IS NOT NULL
-                    AND hd_account_index IS NOT NULL
-                    AND ufvk IS NOT NULL
-                  )
-                  OR
-                  (
-                    account_kind = 1
-                    AND hd_seed_fingerprint IS NULL
-                    AND hd_account_index IS NULL
-                  )
-                )
-            )"#,
-            r#"CREATE TABLE "addresses" (
-                account_id INTEGER NOT NULL,
-                diversifier_index_be BLOB NOT NULL,
-                address TEXT NOT NULL,
-                cached_transparent_receiver_address TEXT,
-                FOREIGN KEY (account_id) REFERENCES accounts(id),
-                CONSTRAINT diversification UNIQUE (account_id, diversifier_index_be)
-            )"#,
-            "CREATE TABLE blocks (
-                height INTEGER PRIMARY KEY,
-                hash BLOB NOT NULL,
-                time INTEGER NOT NULL,
-                sapling_tree BLOB NOT NULL ,
-                sapling_commitment_tree_size INTEGER,
-                orchard_commitment_tree_size INTEGER,
-                sapling_output_count INTEGER,
-                orchard_action_count INTEGER)",
-            "CREATE TABLE nullifier_map (
-                spend_pool INTEGER NOT NULL,
-                nf BLOB NOT NULL,
-                block_height INTEGER NOT NULL,
-                tx_index INTEGER NOT NULL,
-                CONSTRAINT tx_locator
-                    FOREIGN KEY (block_height, tx_index)
-                    REFERENCES tx_locator_map(block_height, tx_index)
-                    ON DELETE CASCADE
-                    ON UPDATE RESTRICT,
-                CONSTRAINT nf_uniq UNIQUE (spend_pool, nf)
-            )",
-            "CREATE TABLE orchard_received_note_spends (
-                orchard_received_note_id INTEGER NOT NULL,
-                transaction_id INTEGER NOT NULL,
-                FOREIGN KEY (orchard_received_note_id)
-                    REFERENCES orchard_received_notes(id)
-                    ON DELETE CASCADE,
-                FOREIGN KEY (transaction_id)
-                    -- We do not delete transactions, so this does not cascade
-                    REFERENCES transactions(id_tx),
-                UNIQUE (orchard_received_note_id, transaction_id)
-            )",
-            "CREATE TABLE orchard_received_notes (
-                id INTEGER PRIMARY KEY,
-                tx INTEGER NOT NULL,
-                action_index INTEGER NOT NULL,
-                account_id INTEGER NOT NULL,
-                diversifier BLOB NOT NULL,
-                value INTEGER NOT NULL,
-                rho BLOB NOT NULL,
-                rseed BLOB NOT NULL,
-                nf BLOB UNIQUE,
-                is_change INTEGER NOT NULL,
-                memo BLOB,
-                commitment_tree_position INTEGER,
-                recipient_key_scope INTEGER,
-                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (account_id) REFERENCES accounts(id),
-                CONSTRAINT tx_output UNIQUE (tx, action_index)
-            )",
-            "CREATE TABLE orchard_tree_cap (
-                -- cap_id exists only to be able to take advantage of `ON CONFLICT`
-                -- upsert functionality; the table will only ever contain one row
-                cap_id INTEGER PRIMARY KEY,
-                cap_data BLOB NOT NULL
-            )",
-            "CREATE TABLE orchard_tree_checkpoint_marks_removed (
-                checkpoint_id INTEGER NOT NULL,
-                mark_removed_position INTEGER NOT NULL,
-                FOREIGN KEY (checkpoint_id) REFERENCES orchard_tree_checkpoints(checkpoint_id)
-                ON DELETE CASCADE,
-                CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
-            )",
-            "CREATE TABLE orchard_tree_checkpoints (
-                checkpoint_id INTEGER PRIMARY KEY,
-                position INTEGER
-            )",
-            "CREATE TABLE orchard_tree_shards (
-                shard_index INTEGER PRIMARY KEY,
-                subtree_end_height INTEGER,
-                root_hash BLOB,
-                shard_data BLOB,
-                contains_marked INTEGER,
-                CONSTRAINT root_unique UNIQUE (root_hash)
-            )",
-            "CREATE TABLE sapling_received_note_spends (
-                sapling_received_note_id INTEGER NOT NULL,
-                transaction_id INTEGER NOT NULL,
-                FOREIGN KEY (sapling_received_note_id)
-                    REFERENCES sapling_received_notes(id)
-                    ON DELETE CASCADE,
-                FOREIGN KEY (transaction_id)
-                    -- We do not delete transactions, so this does not cascade
-                    REFERENCES transactions(id_tx),
-                UNIQUE (sapling_received_note_id, transaction_id)
-            )",
-            r#"CREATE TABLE "sapling_received_notes" (
-                id INTEGER PRIMARY KEY,
-                tx INTEGER NOT NULL,
-                output_index INTEGER NOT NULL,
-                account_id INTEGER NOT NULL,
-                diversifier BLOB NOT NULL,
-                value INTEGER NOT NULL,
-                rcm BLOB NOT NULL,
-                nf BLOB UNIQUE,
-                is_change INTEGER NOT NULL,
-                memo BLOB,
-                commitment_tree_position INTEGER,
-                recipient_key_scope INTEGER,
-                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (account_id) REFERENCES accounts(id),
-                CONSTRAINT tx_output UNIQUE (tx, output_index)
-            )"#,
-            "CREATE TABLE sapling_tree_cap (
-                -- cap_id exists only to be able to take advantage of `ON CONFLICT`
-                -- upsert functionality; the table will only ever contain one row
-                cap_id INTEGER PRIMARY KEY,
-                cap_data BLOB NOT NULL
-            )",
-            "CREATE TABLE sapling_tree_checkpoint_marks_removed (
-                checkpoint_id INTEGER NOT NULL,
-                mark_removed_position INTEGER NOT NULL,
-                FOREIGN KEY (checkpoint_id) REFERENCES sapling_tree_checkpoints(checkpoint_id)
-                ON DELETE CASCADE,
-                CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
-            )",
-            "CREATE TABLE sapling_tree_checkpoints (
-                checkpoint_id INTEGER PRIMARY KEY,
-                position INTEGER
-            )",
-            "CREATE TABLE sapling_tree_shards (
-                shard_index INTEGER PRIMARY KEY,
-                subtree_end_height INTEGER,
-                root_hash BLOB,
-                shard_data BLOB,
-                contains_marked INTEGER,
-                CONSTRAINT root_unique UNIQUE (root_hash)
-            )",
-            "CREATE TABLE scan_queue (
-                block_range_start INTEGER NOT NULL,
-                block_range_end INTEGER NOT NULL,
-                priority INTEGER NOT NULL,
-                CONSTRAINT range_start_uniq UNIQUE (block_range_start),
-                CONSTRAINT range_end_uniq UNIQUE (block_range_end),
-                CONSTRAINT range_bounds_order CHECK (
-                    block_range_start < block_range_end
-                )
-            )",
-            "CREATE TABLE schemer_migrations (
-                id blob PRIMARY KEY
-            )",
-            r#"CREATE TABLE "sent_notes" (
-                id INTEGER PRIMARY KEY,
-                tx INTEGER NOT NULL,
-                output_pool INTEGER NOT NULL,
-                output_index INTEGER NOT NULL,
-                from_account_id INTEGER NOT NULL,
-                to_address TEXT,
-                to_account_id INTEGER,
-                value INTEGER NOT NULL,
-                memo BLOB,
-                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (from_account_id) REFERENCES accounts(id),
-                FOREIGN KEY (to_account_id) REFERENCES accounts(id),
-                CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index),
-                CONSTRAINT note_recipient CHECK (
-                    (to_address IS NOT NULL) OR (to_account_id IS NOT NULL)
-                )
-            )"#,
-            // Internal table created by SQLite when we started using `AUTOINCREMENT`.
-            "CREATE TABLE sqlite_sequence(name,seq)",
-            "CREATE TABLE transactions (
-                id_tx INTEGER PRIMARY KEY,
-                txid BLOB NOT NULL UNIQUE,
-                created TEXT,
-                block INTEGER,
-                tx_index INTEGER,
-                expiry_height INTEGER,
-                raw BLOB,
-                fee INTEGER,
-                FOREIGN KEY (block) REFERENCES blocks(height)
-            )",
-            "CREATE TABLE transparent_received_output_spends (
-                transparent_received_output_id INTEGER NOT NULL,
-                transaction_id INTEGER NOT NULL,
-                FOREIGN KEY (transparent_received_output_id)
-                    REFERENCES utxos(id)
-                    ON DELETE CASCADE,
-                FOREIGN KEY (transaction_id)
-                    -- We do not delete transactions, so this does not cascade
-                    REFERENCES transactions(id_tx),
-                UNIQUE (transparent_received_output_id, transaction_id)
-            )",
-            "CREATE TABLE tx_locator_map (
-                block_height INTEGER NOT NULL,
-                tx_index INTEGER NOT NULL,
-                txid BLOB NOT NULL UNIQUE,
-                PRIMARY KEY (block_height, tx_index)
-            )",
-            r#"CREATE TABLE "utxos" (
-                id INTEGER PRIMARY KEY,
-                received_by_account_id INTEGER NOT NULL,
-                address TEXT NOT NULL,
-                prevout_txid BLOB NOT NULL,
-                prevout_idx INTEGER NOT NULL,
-                script BLOB NOT NULL,
-                value_zat INTEGER NOT NULL,
-                height INTEGER NOT NULL,
-                FOREIGN KEY (received_by_account_id) REFERENCES accounts(id),
-                CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
-            )"#,
+            db::TABLE_ACCOUNTS,
+            db::TABLE_ADDRESSES,
+            db::TABLE_BLOCKS,
+            db::TABLE_NULLIFIER_MAP,
+            db::TABLE_ORCHARD_RECEIVED_NOTE_SPENDS,
+            db::TABLE_ORCHARD_RECEIVED_NOTES,
+            db::TABLE_ORCHARD_TREE_CAP,
+            db::TABLE_ORCHARD_TREE_CHECKPOINT_MARKS_REMOVED,
+            db::TABLE_ORCHARD_TREE_CHECKPOINTS,
+            db::TABLE_ORCHARD_TREE_SHARDS,
+            db::TABLE_SAPLING_RECEIVED_NOTE_SPENDS,
+            db::TABLE_SAPLING_RECEIVED_NOTES,
+            db::TABLE_SAPLING_TREE_CAP,
+            db::TABLE_SAPLING_TREE_CHECKPOINT_MARKS_REMOVED,
+            db::TABLE_SAPLING_TREE_CHECKPOINTS,
+            db::TABLE_SAPLING_TREE_SHARDS,
+            db::TABLE_SCAN_QUEUE,
+            db::TABLE_SCHEMER_MIGRATIONS,
+            db::TABLE_SENT_NOTES,
+            db::TABLE_SQLITE_SEQUENCE,
+            db::TABLE_TRANSACTIONS,
+            db::TABLE_TRANSPARENT_RECEIVED_OUTPUT_SPENDS,
+            db::TABLE_TX_LOCATOR_MAP,
+            db::TABLE_UTXOS,
         ];
 
         let mut tables_query = st
@@ -618,35 +401,25 @@ mod tests {
             let sql: String = row.get(0).unwrap();
             assert_eq!(
                 re.replace_all(&sql, " "),
-                re.replace_all(expected_tables[expected_idx], " ")
+                re.replace_all(expected_tables[expected_idx], " ").trim(),
             );
             expected_idx += 1;
         }
 
         let expected_indices = vec![
-            r#"CREATE UNIQUE INDEX accounts_ufvk ON "accounts" (ufvk)"#,
-            r#"CREATE UNIQUE INDEX accounts_uivk ON "accounts" (uivk)"#,
-            r#"CREATE UNIQUE INDEX hd_account ON "accounts" (hd_seed_fingerprint, hd_account_index)"#,
-            r#"CREATE INDEX "addresses_accounts" ON "addresses" (
-                "account_id" ASC
-            )"#,
-            r#"CREATE INDEX nf_map_locator_idx ON nullifier_map(block_height, tx_index)"#,
-            r#"CREATE INDEX orchard_received_notes_account ON orchard_received_notes (
-                account_id ASC
-            )"#,
-            r#"CREATE INDEX orchard_received_notes_tx ON orchard_received_notes (
-                tx ASC
-            )"#,
-            r#"CREATE INDEX "sapling_received_notes_account" ON "sapling_received_notes" (
-                "account_id" ASC
-            )"#,
-            r#"CREATE INDEX "sapling_received_notes_tx" ON "sapling_received_notes" (
-                "tx" ASC
-            )"#,
-            r#"CREATE INDEX sent_notes_from_account ON "sent_notes" (from_account_id)"#,
-            r#"CREATE INDEX sent_notes_to_account ON "sent_notes" (to_account_id)"#,
-            r#"CREATE INDEX sent_notes_tx ON "sent_notes" (tx)"#,
-            r#"CREATE INDEX utxos_received_by_account ON "utxos" (received_by_account_id)"#,
+            db::INDEX_ACCOUNTS_UFVK,
+            db::INDEX_ACCOUNTS_UIVK,
+            db::INDEX_HD_ACCOUNT,
+            db::INDEX_ADDRESSES_ACCOUNTS,
+            db::INDEX_NF_MAP_LOCATOR_IDX,
+            db::INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT,
+            db::INDEX_ORCHARD_RECEIVED_NOTES_TX,
+            db::INDEX_SAPLING_RECEIVED_NOTES_ACCOUNT,
+            db::INDEX_SAPLING_RECEIVED_NOTES_TX,
+            db::INDEX_SENT_NOTES_FROM_ACCOUNT,
+            db::INDEX_SENT_NOTES_TO_ACCOUNT,
+            db::INDEX_SENT_NOTES_TX,
+            db::INDEX_UTXOS_RECEIVED_BY_ACCOUNT,
         ];
         let mut indices_query = st
             .wallet()
@@ -659,350 +432,22 @@ mod tests {
             let sql: String = row.get(0).unwrap();
             assert_eq!(
                 re.replace_all(&sql, " "),
-                re.replace_all(expected_indices[expected_idx], " ")
+                re.replace_all(expected_indices[expected_idx], " ").trim(),
             );
             expected_idx += 1;
         }
 
         let expected_views = vec![
-            // v_orchard_shard_scan_ranges
-            format!(
-                "CREATE VIEW v_orchard_shard_scan_ranges AS
-                SELECT
-                    shard.shard_index,
-                    shard.shard_index << 16 AS start_position,
-                    (shard.shard_index + 1) << 16 AS end_position_exclusive,
-                    IFNULL(prev_shard.subtree_end_height, {}) AS subtree_start_height,
-                    shard.subtree_end_height,
-                    shard.contains_marked,
-                    scan_queue.block_range_start,
-                    scan_queue.block_range_end,
-                    scan_queue.priority
-                FROM orchard_tree_shards shard
-                LEFT OUTER JOIN orchard_tree_shards prev_shard
-                    ON shard.shard_index = prev_shard.shard_index + 1
-                -- Join with scan ranges that overlap with the subtree's involved blocks.
-                INNER JOIN scan_queue ON (
-                    subtree_start_height < scan_queue.block_range_end AND
-                    (
-                        scan_queue.block_range_start <= shard.subtree_end_height OR
-                        shard.subtree_end_height IS NULL
-                    )
-                )",
-                u32::from(st.network().activation_height(NetworkUpgrade::Nu5).unwrap()),
-            ),
-            //v_orchard_shard_unscanned_ranges
-            format!(
-                "CREATE VIEW v_orchard_shard_unscanned_ranges AS
-                WITH wallet_birthday AS (SELECT MIN(birthday_height) AS height FROM accounts)
-                SELECT
-                    shard_index,
-                    start_position,
-                    end_position_exclusive,
-                    subtree_start_height,
-                    subtree_end_height,
-                    contains_marked,
-                    block_range_start,
-                    block_range_end,
-                    priority
-                FROM v_orchard_shard_scan_ranges
-                INNER JOIN wallet_birthday
-                WHERE priority > {}
-                AND block_range_end > wallet_birthday.height",
-                priority_code(&ScanPriority::Scanned),
-            ),
-            // v_orchard_shards_scan_state
-            "CREATE VIEW v_orchard_shards_scan_state AS
-            SELECT
-                shard_index,
-                start_position,
-                end_position_exclusive,
-                subtree_start_height,
-                subtree_end_height,
-                contains_marked,
-                MAX(priority) AS max_priority
-            FROM v_orchard_shard_scan_ranges
-            GROUP BY
-                shard_index,
-                start_position,
-                end_position_exclusive,
-                subtree_start_height,
-                subtree_end_height,
-                contains_marked".to_owned(),
-            // v_received_note_spends
-            "CREATE VIEW v_received_note_spends AS
-            SELECT
-                2 AS pool,
-                sapling_received_note_id AS received_note_id,
-                transaction_id
-            FROM sapling_received_note_spends
-            UNION
-            SELECT
-                3 AS pool,
-                orchard_received_note_id AS received_note_id,
-                transaction_id
-            FROM orchard_received_note_spends".to_owned(),
-            // v_received_notes
-            "CREATE VIEW v_received_notes AS
-                SELECT
-                    sapling_received_notes.id AS id_within_pool_table,
-                    sapling_received_notes.tx,
-                    2 AS pool,
-                    sapling_received_notes.output_index AS output_index,
-                    account_id,
-                    sapling_received_notes.value,
-                    is_change,
-                    sapling_received_notes.memo,
-                    sent_notes.id AS sent_note_id
-                FROM sapling_received_notes
-                LEFT JOIN sent_notes
-                ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
-                   (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
-            UNION
-                SELECT
-                    orchard_received_notes.id AS id_within_pool_table,
-                    orchard_received_notes.tx,
-                    3 AS pool,
-                    orchard_received_notes.action_index AS output_index,
-                    account_id,
-                    orchard_received_notes.value,
-                    is_change,
-                    orchard_received_notes.memo,
-                    sent_notes.id AS sent_note_id
-                FROM orchard_received_notes
-                LEFT JOIN sent_notes
-                ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
-                   (orchard_received_notes.tx, 3, orchard_received_notes.action_index)".to_owned(),
-            // v_sapling_shard_scan_ranges
-            format!(
-                "CREATE VIEW v_sapling_shard_scan_ranges AS
-                SELECT
-                    shard.shard_index,
-                    shard.shard_index << 16 AS start_position,
-                    (shard.shard_index + 1) << 16 AS end_position_exclusive,
-                    IFNULL(prev_shard.subtree_end_height, {}) AS subtree_start_height,
-                    shard.subtree_end_height,
-                    shard.contains_marked,
-                    scan_queue.block_range_start,
-                    scan_queue.block_range_end,
-                    scan_queue.priority
-                FROM sapling_tree_shards shard
-                LEFT OUTER JOIN sapling_tree_shards prev_shard
-                    ON shard.shard_index = prev_shard.shard_index + 1
-                -- Join with scan ranges that overlap with the subtree's involved blocks.
-                INNER JOIN scan_queue ON (
-                    subtree_start_height < scan_queue.block_range_end AND
-                    (
-                        scan_queue.block_range_start <= shard.subtree_end_height OR
-                        shard.subtree_end_height IS NULL
-                    )
-                )",
-                u32::from(st.network().activation_height(NetworkUpgrade::Sapling).unwrap()),
-            ),
-            // v_sapling_shard_unscanned_ranges
-            format!(
-                "CREATE VIEW v_sapling_shard_unscanned_ranges AS
-                WITH wallet_birthday AS (SELECT MIN(birthday_height) AS height FROM accounts)
-                SELECT
-                    shard_index,
-                    start_position,
-                    end_position_exclusive,
-                    subtree_start_height,
-                    subtree_end_height,
-                    contains_marked,
-                    block_range_start,
-                    block_range_end,
-                    priority
-                FROM v_sapling_shard_scan_ranges
-                INNER JOIN wallet_birthday
-                WHERE priority > {}
-                AND block_range_end > wallet_birthday.height",
-                priority_code(&ScanPriority::Scanned)
-            ),
-            // v_sapling_shards_scan_state
-            "CREATE VIEW v_sapling_shards_scan_state AS
-            SELECT
-                shard_index,
-                start_position,
-                end_position_exclusive,
-                subtree_start_height,
-                subtree_end_height,
-                contains_marked,
-                MAX(priority) AS max_priority
-            FROM v_sapling_shard_scan_ranges
-            GROUP BY
-                shard_index,
-                start_position,
-                end_position_exclusive,
-                subtree_start_height,
-                subtree_end_height,
-                contains_marked".to_owned(),
-            // v_transactions
-            "CREATE VIEW v_transactions AS
-                WITH
-                notes AS (
-                    -- Shielded notes received in this transaction
-                    SELECT v_received_notes.account_id     AS account_id,
-                           transactions.block              AS block,
-                           transactions.txid               AS txid,
-                           v_received_notes.pool           AS pool,
-                           id_within_pool_table,
-                           v_received_notes.value          AS value,
-                           CASE
-                                WHEN v_received_notes.is_change THEN 1
-                                ELSE 0
-                           END AS is_change,
-                           CASE
-                                WHEN v_received_notes.is_change THEN 0
-                                ELSE 1
-                           END AS received_count,
-                           CASE
-                             WHEN (v_received_notes.memo IS NULL OR v_received_notes.memo = X'F6')
-                               THEN 0
-                             ELSE 1
-                           END AS memo_present
-                    FROM v_received_notes
-                    JOIN transactions
-                         ON transactions.id_tx = v_received_notes.tx
-                    UNION
-                    -- Transparent TXOs received in this transaction
-                    SELECT utxos.received_by_account_id AS account_id,
-                           utxos.height                 AS block,
-                           utxos.prevout_txid           AS txid,
-                           0                            AS pool,
-                           utxos.id                     AS id_within_pool_table,
-                           utxos.value_zat              AS value,
-                           0                            AS is_change,
-                           1                            AS received_count,
-                           0                            AS memo_present
-                    FROM utxos
-                    UNION
-                    -- Shielded notes spent in this transaction
-                    SELECT v_received_notes.account_id  AS account_id,
-                           transactions.block           AS block,
-                           transactions.txid            AS txid,
-                           v_received_notes.pool        AS pool,
-                           id_within_pool_table,
-                           -v_received_notes.value      AS value,
-                           0                            AS is_change,
-                           0                            AS received_count,
-                           0                            AS memo_present
-                    FROM v_received_notes
-                    JOIN v_received_note_spends rns
-                         ON rns.pool = v_received_notes.pool
-                         AND rns.received_note_id = v_received_notes.id_within_pool_table
-                    JOIN transactions
-                         ON transactions.id_tx = rns.transaction_id
-                    UNION
-                    -- Transparent TXOs spent in this transaction
-                    SELECT utxos.received_by_account_id AS account_id,
-                           transactions.block           AS block,
-                           transactions.txid            AS txid,
-                           0                            AS pool,
-                           utxos.id                     AS id_within_pool_table,
-                           -utxos.value_zat             AS value,
-                           0                            AS is_change,
-                           0                            AS received_count,
-                           0                            AS memo_present
-                    FROM utxos
-                    JOIN transparent_received_output_spends tros
-                         ON tros.transparent_received_output_id = utxos.id
-                    JOIN transactions
-                         ON transactions.id_tx = tros.transaction_id
-                ),
-                -- Obtain a count of the notes that the wallet created in each transaction,
-                -- not counting change notes.
-                sent_note_counts AS (
-                    SELECT sent_notes.from_account_id AS account_id,
-                           transactions.txid       AS txid,
-                           COUNT(DISTINCT sent_notes.id) as sent_notes,
-                           SUM(
-                             CASE
-                               WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6' OR v_received_notes.tx IS NOT NULL)
-                                 THEN 0
-                               ELSE 1
-                             END
-                           ) AS memo_count
-                    FROM sent_notes
-                    JOIN transactions
-                         ON transactions.id_tx = sent_notes.tx
-                    LEFT JOIN v_received_notes
-                         ON sent_notes.id = v_received_notes.sent_note_id
-                    WHERE COALESCE(v_received_notes.is_change, 0) = 0
-                    GROUP BY account_id, txid
-                ),
-                blocks_max_height AS (
-                    SELECT MAX(blocks.height) as max_height FROM blocks
-                )
-                SELECT notes.account_id                  AS account_id,
-                       notes.block                       AS mined_height,
-                       notes.txid                        AS txid,
-                       transactions.tx_index             AS tx_index,
-                       transactions.expiry_height        AS expiry_height,
-                       transactions.raw                  AS raw,
-                       SUM(notes.value)                  AS account_balance_delta,
-                       transactions.fee                  AS fee_paid,
-                       SUM(notes.is_change) > 0          AS has_change,
-                       MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,
-                       SUM(notes.received_count)         AS received_note_count,
-                       SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
-                       blocks.time                       AS block_time,
-                       (
-                            blocks.height IS NULL
-                            AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height
-                       ) AS expired_unmined
-                FROM notes
-                LEFT JOIN transactions
-                     ON notes.txid = transactions.txid
-                JOIN blocks_max_height
-                LEFT JOIN blocks ON blocks.height = notes.block
-                LEFT JOIN sent_note_counts
-                     ON sent_note_counts.account_id = notes.account_id
-                     AND sent_note_counts.txid = notes.txid
-                GROUP BY notes.account_id, notes.txid".to_owned(),
-            // v_tx_outputs
-            "CREATE VIEW v_tx_outputs AS
-                SELECT transactions.txid              AS txid,
-                       v_received_notes.pool          AS output_pool,
-                       v_received_notes.output_index  AS output_index,
-                       sent_notes.from_account_id     AS from_account_id,
-                       v_received_notes.account_id    AS to_account_id,
-                       NULL                           AS to_address,
-                       v_received_notes.value         AS value,
-                       v_received_notes.is_change     AS is_change,
-                       v_received_notes.memo          AS memo
-                FROM v_received_notes
-                JOIN transactions
-                    ON transactions.id_tx = v_received_notes.tx
-                LEFT JOIN sent_notes
-                    ON sent_notes.id = v_received_notes.sent_note_id
-                UNION
-                SELECT utxos.prevout_txid           AS txid,
-                       0                            AS output_pool,
-                       utxos.prevout_idx            AS output_index,
-                       NULL                         AS from_account_id,
-                       utxos.received_by_account_id AS to_account_id,
-                       utxos.address                AS to_address,
-                       utxos.value_zat              AS value,
-                       0                            AS is_change,
-                       NULL                         AS memo
-                FROM utxos
-                UNION
-                SELECT transactions.txid            AS txid,
-                       sent_notes.output_pool       AS output_pool,
-                       sent_notes.output_index      AS output_index,
-                       sent_notes.from_account_id   AS from_account_id,
-                       v_received_notes.account_id  AS to_account_id,
-                       sent_notes.to_address        AS to_address,
-                       sent_notes.value             AS value,
-                       0                            AS is_change,
-                       sent_notes.memo              AS memo
-                FROM sent_notes
-                JOIN transactions
-                    ON transactions.id_tx = sent_notes.tx
-                LEFT JOIN v_received_notes
-                    ON sent_notes.id = v_received_notes.sent_note_id
-                WHERE COALESCE(v_received_notes.is_change, 0) = 0".to_owned(),
+            db::view_orchard_shard_scan_ranges(&st.network()),
+            db::view_orchard_shard_unscanned_ranges(),
+            db::VIEW_ORCHARD_SHARDS_SCAN_STATE.to_owned(),
+            db::VIEW_RECEIVED_NOTE_SPENDS.to_owned(),
+            db::VIEW_RECEIVED_NOTES.to_owned(),
+            db::view_sapling_shard_scan_ranges(&st.network()),
+            db::view_sapling_shard_unscanned_ranges(),
+            db::VIEW_SAPLING_SHARDS_SCAN_STATE.to_owned(),
+            db::VIEW_TRANSACTIONS.to_owned(),
+            db::VIEW_TX_OUTPUTS.to_owned(),
         ];
 
         let mut views_query = st
@@ -1016,7 +461,7 @@ mod tests {
             let sql: String = row.get(0).unwrap();
             assert_eq!(
                 re.replace_all(&sql, " "),
-                re.replace_all(&expected_views[expected_idx], " ")
+                re.replace_all(&expected_views[expected_idx], " ").trim(),
             );
             expected_idx += 1;
         }
