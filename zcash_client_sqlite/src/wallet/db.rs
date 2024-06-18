@@ -13,6 +13,11 @@
 // from showing up in `cargo doc --document-private-items`.
 #![allow(dead_code)]
 
+use zcash_client_backend::data_api::scanning::ScanPriority;
+use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
+
+use crate::wallet::scanning::priority_code;
+
 /// Stores information about the accounts that the wallet is tracking.
 pub(super) const TABLE_ACCOUNTS: &str = r#"
 CREATE TABLE "accounts" (
@@ -487,3 +492,359 @@ CREATE TABLE schemer_migrations (
 
 /// Internal table created by SQLite when we started using `AUTOINCREMENT`.
 pub(super) const TABLE_SQLITE_SEQUENCE: &str = "CREATE TABLE sqlite_sequence(name,seq)";
+
+//
+// Views
+//
+
+pub(super) const VIEW_RECEIVED_NOTES: &str = "
+CREATE VIEW v_received_notes AS
+SELECT
+    sapling_received_notes.id AS id_within_pool_table,
+    sapling_received_notes.tx,
+    2 AS pool,
+    sapling_received_notes.output_index AS output_index,
+    account_id,
+    sapling_received_notes.value,
+    is_change,
+    sapling_received_notes.memo,
+    sent_notes.id AS sent_note_id
+FROM sapling_received_notes
+LEFT JOIN sent_notes
+ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+    (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
+UNION
+SELECT
+    orchard_received_notes.id AS id_within_pool_table,
+    orchard_received_notes.tx,
+    3 AS pool,
+    orchard_received_notes.action_index AS output_index,
+    account_id,
+    orchard_received_notes.value,
+    is_change,
+    orchard_received_notes.memo,
+    sent_notes.id AS sent_note_id
+FROM orchard_received_notes
+LEFT JOIN sent_notes
+ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+    (orchard_received_notes.tx, 3, orchard_received_notes.action_index)";
+
+pub(super) const VIEW_RECEIVED_NOTE_SPENDS: &str = "
+CREATE VIEW v_received_note_spends AS
+SELECT
+    2 AS pool,
+    sapling_received_note_id AS received_note_id,
+    transaction_id
+FROM sapling_received_note_spends
+UNION
+SELECT
+    3 AS pool,
+    orchard_received_note_id AS received_note_id,
+    transaction_id
+FROM orchard_received_note_spends";
+
+pub(super) const VIEW_TRANSACTIONS: &str = "
+CREATE VIEW v_transactions AS
+WITH
+notes AS (
+    -- Shielded notes received in this transaction
+    SELECT v_received_notes.account_id     AS account_id,
+            transactions.block              AS block,
+            transactions.txid               AS txid,
+            v_received_notes.pool           AS pool,
+            id_within_pool_table,
+            v_received_notes.value          AS value,
+            CASE
+                WHEN v_received_notes.is_change THEN 1
+                ELSE 0
+            END AS is_change,
+            CASE
+                WHEN v_received_notes.is_change THEN 0
+                ELSE 1
+            END AS received_count,
+            CASE
+                WHEN (v_received_notes.memo IS NULL OR v_received_notes.memo = X'F6')
+                THEN 0
+                ELSE 1
+            END AS memo_present
+    FROM v_received_notes
+    JOIN transactions
+            ON transactions.id_tx = v_received_notes.tx
+    UNION
+    -- Transparent TXOs received in this transaction
+    SELECT utxos.received_by_account_id AS account_id,
+            utxos.height                 AS block,
+            utxos.prevout_txid           AS txid,
+            0                            AS pool,
+            utxos.id                     AS id_within_pool_table,
+            utxos.value_zat              AS value,
+            0                            AS is_change,
+            1                            AS received_count,
+            0                            AS memo_present
+    FROM utxos
+    UNION
+    -- Shielded notes spent in this transaction
+    SELECT v_received_notes.account_id  AS account_id,
+            transactions.block           AS block,
+            transactions.txid            AS txid,
+            v_received_notes.pool        AS pool,
+            id_within_pool_table,
+            -v_received_notes.value      AS value,
+            0                            AS is_change,
+            0                            AS received_count,
+            0                            AS memo_present
+    FROM v_received_notes
+    JOIN v_received_note_spends rns
+            ON rns.pool = v_received_notes.pool
+            AND rns.received_note_id = v_received_notes.id_within_pool_table
+    JOIN transactions
+            ON transactions.id_tx = rns.transaction_id
+    UNION
+    -- Transparent TXOs spent in this transaction
+    SELECT utxos.received_by_account_id AS account_id,
+            transactions.block           AS block,
+            transactions.txid            AS txid,
+            0                            AS pool,
+            utxos.id                     AS id_within_pool_table,
+            -utxos.value_zat             AS value,
+            0                            AS is_change,
+            0                            AS received_count,
+            0                            AS memo_present
+    FROM utxos
+    JOIN transparent_received_output_spends tros
+            ON tros.transparent_received_output_id = utxos.id
+    JOIN transactions
+            ON transactions.id_tx = tros.transaction_id
+),
+-- Obtain a count of the notes that the wallet created in each transaction,
+-- not counting change notes.
+sent_note_counts AS (
+    SELECT sent_notes.from_account_id AS account_id,
+            transactions.txid       AS txid,
+            COUNT(DISTINCT sent_notes.id) as sent_notes,
+            SUM(
+                CASE
+                WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6' OR v_received_notes.tx IS NOT NULL)
+                    THEN 0
+                ELSE 1
+                END
+            ) AS memo_count
+    FROM sent_notes
+    JOIN transactions
+            ON transactions.id_tx = sent_notes.tx
+    LEFT JOIN v_received_notes
+            ON sent_notes.id = v_received_notes.sent_note_id
+    WHERE COALESCE(v_received_notes.is_change, 0) = 0
+    GROUP BY account_id, txid
+),
+blocks_max_height AS (
+    SELECT MAX(blocks.height) as max_height FROM blocks
+)
+SELECT notes.account_id                  AS account_id,
+        notes.block                       AS mined_height,
+        notes.txid                        AS txid,
+        transactions.tx_index             AS tx_index,
+        transactions.expiry_height        AS expiry_height,
+        transactions.raw                  AS raw,
+        SUM(notes.value)                  AS account_balance_delta,
+        transactions.fee                  AS fee_paid,
+        SUM(notes.is_change) > 0          AS has_change,
+        MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,
+        SUM(notes.received_count)         AS received_note_count,
+        SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
+        blocks.time                       AS block_time,
+        (
+            blocks.height IS NULL
+            AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height
+        ) AS expired_unmined
+FROM notes
+LEFT JOIN transactions
+        ON notes.txid = transactions.txid
+JOIN blocks_max_height
+LEFT JOIN blocks ON blocks.height = notes.block
+LEFT JOIN sent_note_counts
+        ON sent_note_counts.account_id = notes.account_id
+        AND sent_note_counts.txid = notes.txid
+GROUP BY notes.account_id, notes.txid";
+
+pub(super) const VIEW_TX_OUTPUTS: &str = "
+CREATE VIEW v_tx_outputs AS
+SELECT transactions.txid              AS txid,
+        v_received_notes.pool          AS output_pool,
+        v_received_notes.output_index  AS output_index,
+        sent_notes.from_account_id     AS from_account_id,
+        v_received_notes.account_id    AS to_account_id,
+        NULL                           AS to_address,
+        v_received_notes.value         AS value,
+        v_received_notes.is_change     AS is_change,
+        v_received_notes.memo          AS memo
+FROM v_received_notes
+JOIN transactions
+    ON transactions.id_tx = v_received_notes.tx
+LEFT JOIN sent_notes
+    ON sent_notes.id = v_received_notes.sent_note_id
+UNION
+SELECT utxos.prevout_txid           AS txid,
+        0                            AS output_pool,
+        utxos.prevout_idx            AS output_index,
+        NULL                         AS from_account_id,
+        utxos.received_by_account_id AS to_account_id,
+        utxos.address                AS to_address,
+        utxos.value_zat              AS value,
+        0                            AS is_change,
+        NULL                         AS memo
+FROM utxos
+UNION
+SELECT transactions.txid            AS txid,
+        sent_notes.output_pool       AS output_pool,
+        sent_notes.output_index      AS output_index,
+        sent_notes.from_account_id   AS from_account_id,
+        v_received_notes.account_id  AS to_account_id,
+        sent_notes.to_address        AS to_address,
+        sent_notes.value             AS value,
+        0                            AS is_change,
+        sent_notes.memo              AS memo
+FROM sent_notes
+JOIN transactions
+    ON transactions.id_tx = sent_notes.tx
+LEFT JOIN v_received_notes
+    ON sent_notes.id = v_received_notes.sent_note_id
+WHERE COALESCE(v_received_notes.is_change, 0) = 0";
+
+pub(super) fn view_sapling_shard_scan_ranges<P: Parameters>(params: &P) -> String {
+    format!(
+        "CREATE VIEW v_sapling_shard_scan_ranges AS
+        SELECT
+            shard.shard_index,
+            shard.shard_index << 16 AS start_position,
+            (shard.shard_index + 1) << 16 AS end_position_exclusive,
+            IFNULL(prev_shard.subtree_end_height, {}) AS subtree_start_height,
+            shard.subtree_end_height,
+            shard.contains_marked,
+            scan_queue.block_range_start,
+            scan_queue.block_range_end,
+            scan_queue.priority
+        FROM sapling_tree_shards shard
+        LEFT OUTER JOIN sapling_tree_shards prev_shard
+            ON shard.shard_index = prev_shard.shard_index + 1
+        -- Join with scan ranges that overlap with the subtree's involved blocks.
+        INNER JOIN scan_queue ON (
+            subtree_start_height < scan_queue.block_range_end AND
+            (
+                scan_queue.block_range_start <= shard.subtree_end_height OR
+                shard.subtree_end_height IS NULL
+            )
+        )",
+        u32::from(params.activation_height(NetworkUpgrade::Sapling).unwrap()),
+    )
+}
+
+pub(super) fn view_sapling_shard_unscanned_ranges() -> String {
+    format!(
+        "CREATE VIEW v_sapling_shard_unscanned_ranges AS
+        WITH wallet_birthday AS (SELECT MIN(birthday_height) AS height FROM accounts)
+        SELECT
+            shard_index,
+            start_position,
+            end_position_exclusive,
+            subtree_start_height,
+            subtree_end_height,
+            contains_marked,
+            block_range_start,
+            block_range_end,
+            priority
+        FROM v_sapling_shard_scan_ranges
+        INNER JOIN wallet_birthday
+        WHERE priority > {}
+        AND block_range_end > wallet_birthday.height",
+        priority_code(&ScanPriority::Scanned)
+    )
+}
+
+pub(super) const VIEW_SAPLING_SHARDS_SCAN_STATE: &str = "
+CREATE VIEW v_sapling_shards_scan_state AS
+SELECT
+    shard_index,
+    start_position,
+    end_position_exclusive,
+    subtree_start_height,
+    subtree_end_height,
+    contains_marked,
+    MAX(priority) AS max_priority
+FROM v_sapling_shard_scan_ranges
+GROUP BY
+    shard_index,
+    start_position,
+    end_position_exclusive,
+    subtree_start_height,
+    subtree_end_height,
+    contains_marked";
+
+pub(super) fn view_orchard_shard_scan_ranges<P: Parameters>(params: &P) -> String {
+    format!(
+        "CREATE VIEW v_orchard_shard_scan_ranges AS
+        SELECT
+            shard.shard_index,
+            shard.shard_index << 16 AS start_position,
+            (shard.shard_index + 1) << 16 AS end_position_exclusive,
+            IFNULL(prev_shard.subtree_end_height, {}) AS subtree_start_height,
+            shard.subtree_end_height,
+            shard.contains_marked,
+            scan_queue.block_range_start,
+            scan_queue.block_range_end,
+            scan_queue.priority
+        FROM orchard_tree_shards shard
+        LEFT OUTER JOIN orchard_tree_shards prev_shard
+            ON shard.shard_index = prev_shard.shard_index + 1
+        -- Join with scan ranges that overlap with the subtree's involved blocks.
+        INNER JOIN scan_queue ON (
+            subtree_start_height < scan_queue.block_range_end AND
+            (
+                scan_queue.block_range_start <= shard.subtree_end_height OR
+                shard.subtree_end_height IS NULL
+            )
+        )",
+        u32::from(params.activation_height(NetworkUpgrade::Nu5).unwrap()),
+    )
+}
+
+pub(super) fn view_orchard_shard_unscanned_ranges() -> String {
+    format!(
+        "CREATE VIEW v_orchard_shard_unscanned_ranges AS
+        WITH wallet_birthday AS (SELECT MIN(birthday_height) AS height FROM accounts)
+        SELECT
+            shard_index,
+            start_position,
+            end_position_exclusive,
+            subtree_start_height,
+            subtree_end_height,
+            contains_marked,
+            block_range_start,
+            block_range_end,
+            priority
+        FROM v_orchard_shard_scan_ranges
+        INNER JOIN wallet_birthday
+        WHERE priority > {}
+        AND block_range_end > wallet_birthday.height",
+        priority_code(&ScanPriority::Scanned),
+    )
+}
+
+pub(super) const VIEW_ORCHARD_SHARDS_SCAN_STATE: &str = "
+CREATE VIEW v_orchard_shards_scan_state AS
+SELECT
+    shard_index,
+    start_position,
+    end_position_exclusive,
+    subtree_start_height,
+    subtree_end_height,
+    contains_marked,
+    MAX(priority) AS max_priority
+FROM v_orchard_shard_scan_ranges
+GROUP BY
+    shard_index,
+    start_position,
+    end_position_exclusive,
+    subtree_start_height,
+    subtree_end_height,
+    contains_marked";
