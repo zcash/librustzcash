@@ -1211,6 +1211,26 @@ impl UnifiedIncomingViewingKey {
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.find_address(DiversifierIndex::new(), request)
     }
+
+    /// Constructs a [`UnifiedAddressRequest`] that includes the components of this UIVK.
+    pub fn to_address_request(&self) -> Option<UnifiedAddressRequest> {
+        #[cfg(feature = "orchard")]
+        let has_orchard = self.orchard.is_some();
+        #[cfg(not(feature = "orchard"))]
+        let has_orchard = false;
+
+        #[cfg(feature = "sapling")]
+        let has_sapling = self.sapling.is_some();
+        #[cfg(not(feature = "sapling"))]
+        let has_sapling = false;
+
+        #[cfg(feature = "transparent-inputs")]
+        let has_p2pkh = self.transparent.is_some();
+        #[cfg(not(feature = "transparent-inputs"))]
+        let has_p2pkh = false;
+
+        UnifiedAddressRequest::new(has_orchard, has_sapling, has_p2pkh)
+    }
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]

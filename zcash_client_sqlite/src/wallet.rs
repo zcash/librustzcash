@@ -213,30 +213,13 @@ impl Account {
         &self,
         request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
-        match &self.viewing_key {
-            ViewingKey::Full(ufvk) => ufvk.default_address(request),
-            ViewingKey::Incoming(uivk) => uivk.default_address(request),
-        }
+        self.uivk().default_address(request)
     }
 
-    fn intersect_ua_request(
-        &self,
-        request: UnifiedAddressRequest,
-    ) -> Option<UnifiedAddressRequest> {
-        let uivk = self.viewing_key.uivk();
-
-        #[cfg(feature = "orchard")]
-        let has_orchard = uivk.orchard().is_some();
-        #[cfg(not(feature = "orchard"))]
-        let has_orchard = false;
-
-        let has_sapling = uivk.sapling().is_some();
-        let has_p2pkh = uivk.transparent().is_some();
-
-        let capability = UnifiedAddressRequest::new(has_orchard, has_sapling, has_p2pkh);
-        match capability {
-            None => None,
-            Some(capability) => request.intersect(&capability),
+    pub(crate) fn uivk(&self) -> UnifiedIncomingViewingKey {
+        match &self.viewing_key {
+            ViewingKey::Full(ufvk) => ufvk.to_unified_incoming_viewing_key(),
+            ViewingKey::Incoming(uivk) => *uivk.clone(),
         }
     }
 }
@@ -543,7 +526,9 @@ pub(crate) fn add_account<P: consensus::Parameters>(
 
     // Always derive the default Unified Address for the account.
     let ua_request = account
-        .intersect_ua_request(DEFAULT_UA_REQUEST)
+        .uivk()
+        .to_address_request()
+        .and_then(|ua_request| ua_request.intersect(&DEFAULT_UA_REQUEST))
         .ok_or_else(|| {
             SqliteClientError::AddressGeneration(AddressGenerationError::ShieldedReceiverRequired)
         })?;
