@@ -34,6 +34,12 @@ CREATE TABLE "accounts" (
         )
     )
 )"#;
+pub(super) const INDEX_ACCOUNTS_UFVK: &str =
+    r#"CREATE UNIQUE INDEX accounts_ufvk ON "accounts" (ufvk)"#;
+pub(super) const INDEX_ACCOUNTS_UIVK: &str =
+    r#"CREATE UNIQUE INDEX accounts_uivk ON "accounts" (uivk)"#;
+pub(super) const INDEX_HD_ACCOUNT: &str =
+    r#"CREATE UNIQUE INDEX hd_account ON "accounts" (hd_seed_fingerprint, hd_account_index)"#;
 
 pub(super) const TABLE_ADDRESSES: &str = r#"
 CREATE TABLE "addresses" (
@@ -43,6 +49,10 @@ CREATE TABLE "addresses" (
     cached_transparent_receiver_address TEXT,
     FOREIGN KEY (account_id) REFERENCES accounts(id),
     CONSTRAINT diversification UNIQUE (account_id, diversifier_index_be)
+)"#;
+pub(super) const INDEX_ADDRESSES_ACCOUNTS: &str = r#"
+CREATE INDEX "addresses_accounts" ON "addresses" (
+    "account_id" ASC
 )"#;
 
 pub(super) const TABLE_BLOCKS: &str = "
@@ -87,6 +97,14 @@ CREATE TABLE "sapling_received_notes" (
     FOREIGN KEY (account_id) REFERENCES accounts(id),
     CONSTRAINT tx_output UNIQUE (tx, output_index)
 )"#;
+pub(super) const INDEX_SAPLING_RECEIVED_NOTES_ACCOUNT: &str = r#"
+CREATE INDEX "sapling_received_notes_account" ON "sapling_received_notes" (
+    "account_id" ASC
+)"#;
+pub(super) const INDEX_SAPLING_RECEIVED_NOTES_TX: &str = r#"
+CREATE INDEX "sapling_received_notes_tx" ON "sapling_received_notes" (
+    "tx" ASC
+)"#;
 
 pub(super) const TABLE_SAPLING_RECEIVED_NOTE_SPENDS: &str = "
 CREATE TABLE sapling_received_note_spends (
@@ -120,6 +138,14 @@ CREATE TABLE orchard_received_notes (
     FOREIGN KEY (account_id) REFERENCES accounts(id),
     CONSTRAINT tx_output UNIQUE (tx, action_index)
 )";
+pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT: &str = r#"
+CREATE INDEX orchard_received_notes_account ON orchard_received_notes (
+    account_id ASC
+)"#;
+pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_TX: &str = r#"
+CREATE INDEX orchard_received_notes_tx ON orchard_received_notes (
+    tx ASC
+)"#;
 
 pub(super) const TABLE_ORCHARD_RECEIVED_NOTE_SPENDS: &str = "
 CREATE TABLE orchard_received_note_spends (
@@ -147,6 +173,8 @@ CREATE TABLE "utxos" (
     FOREIGN KEY (received_by_account_id) REFERENCES accounts(id),
     CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
 )"#;
+pub(super) const INDEX_UTXOS_RECEIVED_BY_ACCOUNT: &str =
+    r#"CREATE INDEX utxos_received_by_account ON "utxos" (received_by_account_id)"#;
 
 pub(super) const TABLE_TRANSPARENT_RECEIVED_OUTPUT_SPENDS: &str = "
 CREATE TABLE transparent_received_output_spends (
@@ -180,6 +208,11 @@ CREATE TABLE "sent_notes" (
         (to_address IS NOT NULL) OR (to_account_id IS NOT NULL)
     )
 )"#;
+pub(super) const INDEX_SENT_NOTES_FROM_ACCOUNT: &str =
+    r#"CREATE INDEX sent_notes_from_account ON "sent_notes" (from_account_id)"#;
+pub(super) const INDEX_SENT_NOTES_TO_ACCOUNT: &str =
+    r#"CREATE INDEX sent_notes_to_account ON "sent_notes" (to_account_id)"#;
+pub(super) const INDEX_SENT_NOTES_TX: &str = r#"CREATE INDEX sent_notes_tx ON "sent_notes" (tx)"#;
 
 //
 // State for shard trees
@@ -288,6 +321,8 @@ CREATE TABLE nullifier_map (
         ON UPDATE RESTRICT,
     CONSTRAINT nf_uniq UNIQUE (spend_pool, nf)
 )";
+pub(super) const INDEX_NF_MAP_LOCATOR_IDX: &str =
+    r#"CREATE INDEX nf_map_locator_idx ON nullifier_map(block_height, tx_index)"#;
 
 //
 // Internal tables

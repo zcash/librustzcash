@@ -414,29 +414,19 @@ mod tests {
         }
 
         let expected_indices = vec![
-            r#"CREATE UNIQUE INDEX accounts_ufvk ON "accounts" (ufvk)"#,
-            r#"CREATE UNIQUE INDEX accounts_uivk ON "accounts" (uivk)"#,
-            r#"CREATE UNIQUE INDEX hd_account ON "accounts" (hd_seed_fingerprint, hd_account_index)"#,
-            r#"CREATE INDEX "addresses_accounts" ON "addresses" (
-                "account_id" ASC
-            )"#,
-            r#"CREATE INDEX nf_map_locator_idx ON nullifier_map(block_height, tx_index)"#,
-            r#"CREATE INDEX orchard_received_notes_account ON orchard_received_notes (
-                account_id ASC
-            )"#,
-            r#"CREATE INDEX orchard_received_notes_tx ON orchard_received_notes (
-                tx ASC
-            )"#,
-            r#"CREATE INDEX "sapling_received_notes_account" ON "sapling_received_notes" (
-                "account_id" ASC
-            )"#,
-            r#"CREATE INDEX "sapling_received_notes_tx" ON "sapling_received_notes" (
-                "tx" ASC
-            )"#,
-            r#"CREATE INDEX sent_notes_from_account ON "sent_notes" (from_account_id)"#,
-            r#"CREATE INDEX sent_notes_to_account ON "sent_notes" (to_account_id)"#,
-            r#"CREATE INDEX sent_notes_tx ON "sent_notes" (tx)"#,
-            r#"CREATE INDEX utxos_received_by_account ON "utxos" (received_by_account_id)"#,
+            db::INDEX_ACCOUNTS_UFVK,
+            db::INDEX_ACCOUNTS_UIVK,
+            db::INDEX_HD_ACCOUNT,
+            db::INDEX_ADDRESSES_ACCOUNTS,
+            db::INDEX_NF_MAP_LOCATOR_IDX,
+            db::INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT,
+            db::INDEX_ORCHARD_RECEIVED_NOTES_TX,
+            db::INDEX_SAPLING_RECEIVED_NOTES_ACCOUNT,
+            db::INDEX_SAPLING_RECEIVED_NOTES_TX,
+            db::INDEX_SENT_NOTES_FROM_ACCOUNT,
+            db::INDEX_SENT_NOTES_TO_ACCOUNT,
+            db::INDEX_SENT_NOTES_TX,
+            db::INDEX_UTXOS_RECEIVED_BY_ACCOUNT,
         ];
         let mut indices_query = st
             .wallet()
@@ -449,7 +439,7 @@ mod tests {
             let sql: String = row.get(0).unwrap();
             assert_eq!(
                 re.replace_all(&sql, " "),
-                re.replace_all(expected_indices[expected_idx], " ")
+                re.replace_all(expected_indices[expected_idx], " ").trim(),
             );
             expected_idx += 1;
         }
