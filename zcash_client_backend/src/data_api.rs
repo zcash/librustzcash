@@ -1514,8 +1514,11 @@ pub trait WalletWrite: WalletRead {
         received_tx: DecryptedTransaction<Self::AccountId>,
     ) -> Result<(), Self::Error>;
 
-    /// Saves information about a transaction that was constructed and sent by the wallet to the
-    /// persistent wallet store.
+    /// Saves information about a transaction constructed by the wallet to the persistent
+    /// wallet store.
+    ///
+    /// The name `store_sent_tx` is somewhat misleading; this must be called *before* the
+    /// transaction is sent to the network.
     fn store_sent_tx(
         &mut self,
         sent_tx: &SentTransaction<Self::AccountId>,

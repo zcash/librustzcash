@@ -1807,7 +1807,9 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
             )
             .0,
         ),
-        Address::Transparent(_) => panic!("transparent addresses not supported in compact blocks"),
+        Address::Transparent(_) | Address::Tex(_) => {
+            panic!("transparent addresses not supported in compact blocks")
+        }
         Address::Unified(ua) => {
             // This is annoying to implement, because the protocol-aware UA type has no
             // concept of ZIP 316 preference order.

@@ -89,7 +89,7 @@ pub enum SqliteClientError {
     AccountIdOutOfRange,
 
     /// The address associated with a record being inserted was not recognized as
-    /// belonging to the wallet
+    /// belonging to the wallet.
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
 

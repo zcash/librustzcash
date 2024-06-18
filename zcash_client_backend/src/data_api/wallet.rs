@@ -289,6 +289,13 @@ where
     )
 }
 
+type ErrorT<DbT, InputsErrT, FeeRuleT> = Error<
+    <DbT as WalletRead>::Error,
+    <DbT as WalletCommitmentTrees>::Error,
+    InputsErrT,
+    <FeeRuleT as FeeRule>::Error,
+>;
+
 /// Constructs a transaction or series of transactions that send funds as specified
 /// by the `request` argument, stores them to the wallet's "sent transactions" data
 /// store, and returns the [`TxId`] for each transaction constructed.
@@ -353,15 +360,7 @@ pub fn spend<DbT, ParamsT, InputsT>(
     request: zip321::TransactionRequest,
     ovk_policy: OvkPolicy,
     min_confirmations: NonZeroU32,
-) -> Result<
-    NonEmpty<TxId>,
-    Error<
-        <DbT as WalletRead>::Error,
-        <DbT as WalletCommitmentTrees>::Error,
-        InputsT::Error,
-        <InputsT::FeeRule as FeeRule>::Error,
-    >,
->
+) -> Result<NonEmpty<TxId>, ErrorT<DbT, InputsT::Error, InputsT::FeeRule>>
 where
     DbT: InputSource,
     DbT: WalletWrite<
@@ -592,15 +591,7 @@ pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     usk: &UnifiedSpendingKey,
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, N>,
-) -> Result<
-    NonEmpty<TxId>,
-    Error<
-        <DbT as WalletRead>::Error,
-        <DbT as WalletCommitmentTrees>::Error,
-        InputsErrT,
-        FeeRuleT::Error,
-    >,
->
+) -> Result<NonEmpty<TxId>, ErrorT<DbT, InputsErrT, FeeRuleT>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,
@@ -645,15 +636,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     min_target_height: BlockHeight,
     prior_step_results: &[(&proposal::Step<N>, BuildResult)],
     proposal_step: &proposal::Step<N>,
-) -> Result<
-    BuildResult,
-    Error<
-        <DbT as WalletRead>::Error,
-        <DbT as WalletCommitmentTrees>::Error,
-        InputsErrT,
-        FeeRuleT::Error,
-    >,
->
+) -> Result<BuildResult, ErrorT<DbT, InputsErrT, FeeRuleT>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,
@@ -980,10 +963,7 @@ where
                             memo.clone(),
                         )?;
                         orchard_output_meta.push((
-                            Recipient::External(
-                                payment.recipient_address().clone(),
-                                PoolType::Shielded(ShieldedProtocol::Orchard),
-                            ),
+                            Recipient::External(payment.recipient_address().clone(), *output_pool),
                             payment.amount(),
                             Some(memo),
                         ));
@@ -997,10 +977,7 @@ where
                             memo.clone(),
                         )?;
                         sapling_output_meta.push((
-                            Recipient::External(
-                                payment.recipient_address().clone(),
-                                PoolType::Shielded(ShieldedProtocol::Sapling),
-                            ),
+                            Recipient::External(payment.recipient_address().clone(), *output_pool),
                             payment.amount(),
                             Some(memo),
                         ));
@@ -1044,6 +1021,9 @@ where
                     payment.amount(),
                 ));
             }
+            Address::Tex(_) => {
+                return Err(Error::ProposalNotSupported);
+            }
         }
     }
 
@@ -1051,8 +1031,9 @@ where
         let memo = change_value
             .memo()
             .map_or_else(MemoBytes::empty, |m| m.clone());
-        match change_value.output_pool() {
-            ShieldedProtocol::Sapling => {
+        let output_pool = change_value.output_pool();
+        match output_pool {
+            PoolType::Shielded(ShieldedProtocol::Sapling) => {
                 builder.add_sapling_output(
                     sapling_internal_ovk(),
                     sapling_dfvk.change_address().1,
@@ -1063,17 +1044,15 @@ where
                     Recipient::InternalAccount {
                         receiving_account: account,
                         external_address: None,
-                        note: PoolType::Shielded(ShieldedProtocol::Sapling),
+                        note: output_pool,
                     },
                     change_value.value(),
                     Some(memo),
                 ))
             }
-            ShieldedProtocol::Orchard => {
+            PoolType::Shielded(ShieldedProtocol::Orchard) => {
                 #[cfg(not(feature = "orchard"))]
-                return Err(Error::UnsupportedChangeType(PoolType::Shielded(
-                    ShieldedProtocol::Orchard,
-                )));
+                return Err(Error::UnsupportedChangeType(output_pool));
 
                 #[cfg(feature = "orchard")]
                 {
@@ -1087,12 +1066,15 @@ where
                         Recipient::InternalAccount {
                             receiving_account: account,
                             external_address: None,
-                            note: PoolType::Shielded(ShieldedProtocol::Orchard),
+                            note: output_pool,
                         },
                         change_value.value(),
                         Some(memo),
                     ))
                 }
+            }
+            PoolType::Transparent => {
+                return Err(Error::UnsupportedChangeType(output_pool));
             }
         }
     }
@@ -1115,7 +1097,7 @@ where
 
                 let recipient = recipient
                     .map_internal_account_note(|pool| {
-                        assert!(pool == PoolType::Shielded(ShieldedProtocol::Orchard));
+                        assert!(pool == PoolType::ORCHARD);
                         build_result
                             .transaction()
                             .orchard_bundle()
@@ -1145,7 +1127,7 @@ where
 
                 let recipient = recipient
                     .map_internal_account_note(|pool| {
-                        assert!(pool == PoolType::Shielded(ShieldedProtocol::Sapling));
+                        assert!(pool == PoolType::SAPLING);
                         build_result
                             .transaction()
                             .sapling_bundle()

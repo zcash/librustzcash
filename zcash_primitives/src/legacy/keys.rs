@@ -134,34 +134,34 @@ impl AccountPrivKey {
     }
 
     /// Derives the BIP44 private spending key for the child path
-    /// `m/44'/<coin_type>'/<account>'/<scope>/<child_index>`.
+    /// `m/44'/<coin_type>'/<account>'/<scope>/<address_index>`.
     pub fn derive_secret_key(
         &self,
         scope: TransparentKeyScope,
-        child_index: NonHardenedChildIndex,
+        address_index: NonHardenedChildIndex,
     ) -> Result<secp256k1::SecretKey, bip32::Error> {
         self.0
             .derive_child(scope.into())?
-            .derive_child(child_index.into())
+            .derive_child(address_index.into())
             .map(|k| *k.private_key())
     }
 
     /// Derives the BIP44 private spending key for the external (incoming payment) child path
-    /// `m/44'/<coin_type>'/<account>'/0/<child_index>`.
+    /// `m/44'/<coin_type>'/<account>'/0/<address_index>`.
     pub fn derive_external_secret_key(
         &self,
-        child_index: NonHardenedChildIndex,
+        address_index: NonHardenedChildIndex,
     ) -> Result<secp256k1::SecretKey, bip32::Error> {
-        self.derive_secret_key(zip32::Scope::External.into(), child_index)
+        self.derive_secret_key(zip32::Scope::External.into(), address_index)
     }
 
     /// Derives the BIP44 private spending key for the internal (change) child path
-    /// `m/44'/<coin_type>'/<account>'/1/<child_index>`.
+    /// `m/44'/<coin_type>'/<account>'/1/<address_index>`.
     pub fn derive_internal_secret_key(
         &self,
-        child_index: NonHardenedChildIndex,
+        address_index: NonHardenedChildIndex,
     ) -> Result<secp256k1::SecretKey, bip32::Error> {
-        self.derive_secret_key(zip32::Scope::Internal.into(), child_index)
+        self.derive_secret_key(zip32::Scope::Internal.into(), address_index)
     }
 
     /// Returns the `AccountPrivKey` serialized using the encoding for a
@@ -308,9 +308,9 @@ pub trait IncomingViewingKey: private::SealedChangeLevelKey + std::marker::Sized
     #[allow(deprecated)]
     fn derive_address(
         &self,
-        child_index: NonHardenedChildIndex,
+        address_index: NonHardenedChildIndex,
     ) -> Result<TransparentAddress, bip32::Error> {
-        let child_key = self.extended_pubkey().derive_child(child_index.into())?;
+        let child_key = self.extended_pubkey().derive_child(address_index.into())?;
         Ok(pubkey_to_address(child_key.public_key()))
     }
 
@@ -318,14 +318,14 @@ pub trait IncomingViewingKey: private::SealedChangeLevelKey + std::marker::Sized
     /// generate a valid transparent address, and returns the resulting
     /// address and the index at which it was generated.
     fn default_address(&self) -> (TransparentAddress, NonHardenedChildIndex) {
-        let mut child_index = NonHardenedChildIndex::ZERO;
+        let mut address_index = NonHardenedChildIndex::ZERO;
         loop {
-            match self.derive_address(child_index) {
+            match self.derive_address(address_index) {
                 Ok(addr) => {
-                    return (addr, child_index);
+                    return (addr, address_index);
                 }
                 Err(_) => {
-                    child_index = child_index.next().unwrap_or_else(|| {
+                    address_index = address_index.next().unwrap_or_else(|| {
                         panic!("Exhausted child index space attempting to find a default address.");
                     });
                 }

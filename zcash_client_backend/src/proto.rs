@@ -1,4 +1,4 @@
-//! Generated code for handling light client protobuf structs.
+//! This module contains generated code for handling light client protobuf structs.
 
 use incrementalmerkletree::frontier::CommitmentTree;
 use nonempty::NonEmpty;
@@ -441,9 +441,9 @@ impl<E: std::error::Error + 'static> std::error::Error for ProposalDecodingError
 
 fn pool_type<T>(pool_id: i32) -> Result<PoolType, ProposalDecodingError<T>> {
     match proposal::ValuePool::try_from(pool_id) {
-        Ok(proposal::ValuePool::Transparent) => Ok(PoolType::Transparent),
-        Ok(proposal::ValuePool::Sapling) => Ok(PoolType::Shielded(ShieldedProtocol::Sapling)),
-        Ok(proposal::ValuePool::Orchard) => Ok(PoolType::Shielded(ShieldedProtocol::Orchard)),
+        Ok(proposal::ValuePool::Transparent) => Ok(PoolType::TRANSPARENT),
+        Ok(proposal::ValuePool::Sapling) => Ok(PoolType::SAPLING),
+        Ok(proposal::ValuePool::Orchard) => Ok(PoolType::ORCHARD),
         _ => Err(ProposalDecodingError::ValuePoolNotSupported(pool_id)),
     }
 }
@@ -675,7 +675,7 @@ impl proposal::Proposal {
                                                     .ok_or({
                                                         ProposalDecodingError::InputNotFound(
                                                             txid,
-                                                            PoolType::Transparent,
+                                                            PoolType::TRANSPARENT,
                                                             out.index,
                                                         )
                                                     })?,

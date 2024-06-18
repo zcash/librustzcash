@@ -1,4 +1,4 @@
-use zcash_protocol::{PoolType, ShieldedProtocol};
+use zcash_protocol::PoolType;
 
 use super::{private::SealedItem, ParseError, Typecode};
 
@@ -107,9 +107,9 @@ impl Address {
     /// Returns whether this address has the ability to receive transfers of the given pool type.
     pub fn has_receiver_of_type(&self, pool_type: PoolType) -> bool {
         self.0.iter().any(|r| match r {
-            Receiver::Orchard(_) => pool_type == PoolType::Shielded(ShieldedProtocol::Orchard),
-            Receiver::Sapling(_) => pool_type == PoolType::Shielded(ShieldedProtocol::Sapling),
-            Receiver::P2pkh(_) | Receiver::P2sh(_) => pool_type == PoolType::Transparent,
+            Receiver::Orchard(_) => pool_type == PoolType::ORCHARD,
+            Receiver::Sapling(_) => pool_type == PoolType::SAPLING,
+            Receiver::P2pkh(_) | Receiver::P2sh(_) => pool_type == PoolType::TRANSPARENT,
             Receiver::Unknown { .. } => false,
         })
     }

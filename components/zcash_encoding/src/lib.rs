@@ -93,6 +93,16 @@ impl CompactSize {
             }
         }
     }
+
+    /// Returns the number of bytes needed to encode the given size in compact form.
+    pub fn serialized_size(size: usize) -> usize {
+        match size {
+            s if s < 253 => 1,
+            s if s <= 0xFFFF => 3,
+            s if s <= 0xFFFFFFFF => 5,
+            _ => 9,
+        }
+    }
 }
 
 /// Namespace for functions that perform encoding of vectors.
@@ -170,6 +180,12 @@ impl Vector {
     {
         CompactSize::write(&mut writer, items.len())?;
         items.try_for_each(|e| func(&mut writer, e))
+    }
+
+    /// Returns the serialized size of a vector of `u8` as written by `[Vector::write]`.
+    pub fn serialized_size_of_u8_vec(vec: &[u8]) -> usize {
+        let length = vec.len();
+        CompactSize::serialized_size(length) + length
     }
 }
 
@@ -279,8 +295,11 @@ mod tests {
             <T as TryInto<usize>>::Error: Debug,
         {
             let mut data = vec![];
-            CompactSize::write(&mut data, value.try_into().unwrap()).unwrap();
+            let value_usize: usize = value.try_into().unwrap();
+            CompactSize::write(&mut data, value_usize).unwrap();
             assert_eq!(&data[..], expected);
+            let serialized_size = CompactSize::serialized_size(value_usize);
+            assert_eq!(serialized_size, expected.len());
             let result: io::Result<T> = CompactSize::read_t(&data[..]);
             match result {
                 Ok(n) => assert_eq!(n, value),
@@ -308,6 +327,8 @@ mod tests {
             let mut data = vec![];
             CompactSize::write(&mut data, value).unwrap();
             assert_eq!(&data[..], encoded);
+            let serialized_size = CompactSize::serialized_size(value);
+            assert_eq!(serialized_size, encoded.len());
             assert!(CompactSize::read(encoded).is_err());
         }
     }
@@ -320,6 +341,8 @@ mod tests {
                 let mut data = vec![];
                 Vector::write(&mut data, &$value, |w, e| w.write_u8(*e)).unwrap();
                 assert_eq!(&data[..], &$expected[..]);
+                let serialized_size = Vector::serialized_size_of_u8_vec(&$value);
+                assert_eq!(serialized_size, $expected.len());
                 match Vector::read(&data[..], |r| r.read_u8()) {
                     Ok(v) => assert_eq!(v, $value),
                     Err(e) => panic!("Unexpected error: {:?}", e),

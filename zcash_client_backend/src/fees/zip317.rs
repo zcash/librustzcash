@@ -126,10 +126,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 orchard,
             )?;
             let (_, sapling_change, orchard_change) =
-                single_change_output_policy::<NoteRefT, Self::FeeRule, Self::Error>(
-                    &net_flows,
-                    self.fallback_change_pool,
-                )?;
+                single_change_output_policy(&net_flows, self.fallback_change_pool);
 
             let s_non_dust = sapling.inputs().len() - sapling_dust.len();
             let s_allowed_dust =
@@ -238,7 +235,10 @@ mod tests {
     };
 
     #[cfg(feature = "orchard")]
-    use crate::data_api::wallet::input_selection::OrchardPayment;
+    use {
+        crate::data_api::wallet::input_selection::OrchardPayment,
+        crate::fees::orchard as orchard_fees,
+    };
 
     #[test]
     fn change_without_dust() {
@@ -254,8 +254,8 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
@@ -267,11 +267,7 @@ mod tests {
                 ))][..],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
         );
 
@@ -298,19 +294,19 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
                     note_id: 0,
                     value: NonNegativeAmount::const_from_u64(55000),
                 }][..],
-                &Vec::<Infallible>::new()[..],
+                &[] as &[Infallible],
             ),
             &(
                 orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
+                &[] as &[Infallible],
                 &[OrchardPayment::new(NonNegativeAmount::const_from_u64(
                     30000,
                 ))][..],
@@ -340,7 +336,7 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
+            &[] as &[TestTransparentInput],
             &[TxOut {
                 value: NonNegativeAmount::const_from_u64(40000),
                 script_pubkey: Script(vec![]),
@@ -351,14 +347,10 @@ mod tests {
                     note_id: 0,
                     value: NonNegativeAmount::const_from_u64(55000),
                 }][..],
-                &Vec::<Infallible>::new()[..],
+                &[] as &[Infallible],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
         );
 
@@ -383,8 +375,8 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[
@@ -402,11 +394,7 @@ mod tests {
                 ))][..],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
         );
 
@@ -431,8 +419,8 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[
@@ -454,11 +442,7 @@ mod tests {
                 ))][..],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
         );
 

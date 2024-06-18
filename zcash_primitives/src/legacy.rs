@@ -322,6 +322,11 @@ impl Script {
         Vector::write(&mut writer, &self.0, |w, e| w.write_u8(*e))
     }
 
+    /// Returns the length of this script as encoded (including the initial CompactSize).
+    pub fn serialized_size(&self) -> usize {
+        Vector::serialized_size_of_u8_vec(&self.0)
+    }
+
     /// Returns the address that this Script contains, if any.
     pub(crate) fn address(&self) -> Option<TransparentAddress> {
         if self.0.len() == 25
@@ -374,7 +379,7 @@ impl Shl<&[u8]> for Script {
     }
 }
 
-/// A transparent address corresponding to either a public key or a `Script`.
+/// A transparent address corresponding to either a public key hash or a script hash.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TransparentAddress {
     PublicKeyHash([u8; 20]),

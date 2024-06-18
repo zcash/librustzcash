@@ -905,7 +905,7 @@ mod tests {
                 wdb.conn.execute(
                     "INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value)
                     VALUES (0, ?, 0, ?, ?, 0)",
-                    [pool_code(PoolType::Transparent).to_sql()?, u32::from(account).to_sql()?, taddr.to_sql()?])?;
+                    [pool_code(PoolType::TRANSPARENT).to_sql()?, u32::from(account).to_sql()?, taddr.to_sql()?])?;
             }
 
             Ok(())
