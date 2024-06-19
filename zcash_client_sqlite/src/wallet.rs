@@ -65,7 +65,7 @@
 //! - `memo` the shielded memo associated with the output, if any.
 
 use incrementalmerkletree::{Marking, Retention};
-use rusqlite::{self, named_params, OptionalExtension};
+use rusqlite::{self, named_params, params, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zip32::fingerprint::SeedFingerprint;
@@ -214,9 +214,13 @@ impl Account {
         &self,
         request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
+        self.uivk().default_address(request)
+    }
+
+    pub(crate) fn uivk(&self) -> UnifiedIncomingViewingKey {
         match &self.viewing_key {
-            ViewingKey::Full(ufvk) => ufvk.default_address(request),
-            ViewingKey::Incoming(uivk) => uivk.default_address(request),
+            ViewingKey::Full(ufvk) => ufvk.to_unified_incoming_viewing_key(),
+            ViewingKey::Incoming(uivk) => *uivk.clone(),
         }
     }
 }
@@ -359,7 +363,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     kind: AccountSource,
     viewing_key: ViewingKey,
     birthday: &AccountBirthday,
-) -> Result<AccountId, SqliteClientError> {
+) -> Result<Account, SqliteClientError> {
     let (hd_seed_fingerprint, hd_account_index) = match kind {
         AccountSource::Derived {
             seed_fingerprint,
@@ -387,40 +391,63 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     #[cfg(not(feature = "orchard"))]
     let birthday_orchard_tree_size: Option<u64> = None;
 
-    let account_id: AccountId = conn.query_row(
-        r#"
-        INSERT INTO accounts (
-            account_kind, hd_seed_fingerprint, hd_account_index,
-            ufvk, uivk,
-            orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
-            birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
-            recover_until_height
+    let ufvk_encoded = viewing_key.ufvk().map(|ufvk| ufvk.encode(params));
+    let account_id: AccountId = conn
+        .query_row(
+            r#"
+            INSERT INTO accounts (
+                account_kind, hd_seed_fingerprint, hd_account_index,
+                ufvk, uivk,
+                orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
+                birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
+                recover_until_height
+            )
+            VALUES (
+                :account_kind, :hd_seed_fingerprint, :hd_account_index,
+                :ufvk, :uivk,
+                :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
+                :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
+                :recover_until_height
+            )
+            RETURNING id;
+            "#,
+            named_params![
+                ":account_kind": account_kind_code(kind),
+                ":hd_seed_fingerprint": hd_seed_fingerprint.as_ref().map(|fp| fp.to_bytes()),
+                ":hd_account_index": hd_account_index.map(u32::from),
+                ":ufvk": ufvk_encoded,
+                ":uivk": viewing_key.uivk().encode(params),
+                ":orchard_fvk_item_cache": orchard_item,
+                ":sapling_fvk_item_cache": sapling_item,
+                ":p2pkh_fvk_item_cache": transparent_item,
+                ":birthday_height": u32::from(birthday.height()),
+                ":birthday_sapling_tree_size": birthday_sapling_tree_size,
+                ":birthday_orchard_tree_size": birthday_orchard_tree_size,
+                ":recover_until_height": birthday.recover_until().map(u32::from)
+            ],
+            |row| Ok(AccountId(row.get(0)?)),
         )
-        VALUES (
-            :account_kind, :hd_seed_fingerprint, :hd_account_index,
-            :ufvk, :uivk,
-            :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
-            :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
-            :recover_until_height
-        )
-        RETURNING id;
-        "#,
-        named_params![
-            ":account_kind": account_kind_code(kind),
-            ":hd_seed_fingerprint": hd_seed_fingerprint.as_ref().map(|fp| fp.to_bytes()),
-            ":hd_account_index": hd_account_index.map(u32::from),
-            ":ufvk": viewing_key.ufvk().map(|ufvk| ufvk.encode(params)),
-            ":uivk": viewing_key.uivk().encode(params),
-            ":orchard_fvk_item_cache": orchard_item,
-            ":sapling_fvk_item_cache": sapling_item,
-            ":p2pkh_fvk_item_cache": transparent_item,
-            ":birthday_height": u32::from(birthday.height()),
-            ":birthday_sapling_tree_size": birthday_sapling_tree_size,
-            ":birthday_orchard_tree_size": birthday_orchard_tree_size,
-            ":recover_until_height": birthday.recover_until().map(u32::from)
-        ],
-        |row| Ok(AccountId(row.get(0)?)),
-    )?;
+        .map_err(|e| match e {
+            rusqlite::Error::SqliteFailure(f, s)
+                if f.code == rusqlite::ErrorCode::ConstraintViolation =>
+            {
+                // An account conflict occurred.
+                // Make a best effort to determine the AccountId of the pre-existing row
+                // and provide that to our caller.
+                if s.clone().is_some_and(|s| s.contains(".ufvk")) {
+                    if let Ok(id) = conn.query_row(
+                        "SELECT id FROM accounts WHERE ufvk = ?",
+                        params![ufvk_encoded],
+                        |row| Ok(AccountId(row.get(0)?)),
+                    ) {
+                        return SqliteClientError::AccountCollision(id);
+                    }
+                }
+
+                SqliteClientError::from(rusqlite::Error::SqliteFailure(f, s))
+            }
+            _ => SqliteClientError::from(e),
+        })?;
 
     let account = Account {
         account_id,
@@ -522,10 +549,17 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     }
 
     // Always derive the default Unified Address for the account.
-    let (address, d_idx) = account.default_address(DEFAULT_UA_REQUEST)?;
+    let ua_request = account
+        .uivk()
+        .to_address_request()
+        .and_then(|ua_request| ua_request.intersect(&DEFAULT_UA_REQUEST))
+        .ok_or_else(|| {
+            SqliteClientError::AddressGeneration(AddressGenerationError::ShieldedReceiverRequired)
+        })?;
+    let (address, d_idx) = account.default_address(ua_request)?;
     insert_address(conn, params, account_id, d_idx, &address)?;
 
-    Ok(account_id)
+    Ok(account)
 }
 
 pub(crate) fn get_current_address<P: consensus::Parameters>(

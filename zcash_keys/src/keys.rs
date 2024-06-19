@@ -587,6 +587,16 @@ impl UnifiedAddressRequest {
         Self::new(_has_orchard, _has_sapling, _has_p2pkh)
     }
 
+    /// Constructs a new unified address request that includes only the receivers
+    /// that appear both in itself and a given other request.
+    pub fn intersect(&self, other: &UnifiedAddressRequest) -> Option<UnifiedAddressRequest> {
+        Self::new(
+            self.has_orchard && other.has_orchard,
+            self.has_sapling && other.has_sapling,
+            self.has_p2pkh && other.has_p2pkh,
+        )
+    }
+
     /// Construct a new unified address request from its constituent parts.
     ///
     /// Panics: at least one of `has_orchard` or `has_sapling` must be `true`.
@@ -1200,6 +1210,26 @@ impl UnifiedIncomingViewingKey {
         request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.find_address(DiversifierIndex::new(), request)
+    }
+
+    /// Constructs a [`UnifiedAddressRequest`] that includes the components of this UIVK.
+    pub fn to_address_request(&self) -> Option<UnifiedAddressRequest> {
+        #[cfg(feature = "orchard")]
+        let has_orchard = self.orchard.is_some();
+        #[cfg(not(feature = "orchard"))]
+        let has_orchard = false;
+
+        #[cfg(feature = "sapling")]
+        let has_sapling = self.sapling.is_some();
+        #[cfg(not(feature = "sapling"))]
+        let has_sapling = false;
+
+        #[cfg(feature = "transparent-inputs")]
+        let has_p2pkh = self.transparent.is_some();
+        #[cfg(not(feature = "transparent-inputs"))]
+        let has_p2pkh = false;
+
+        UnifiedAddressRequest::new(has_orchard, has_sapling, has_p2pkh)
     }
 }
 

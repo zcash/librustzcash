@@ -12,6 +12,9 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_keys::address::Address::try_from_zcash_address`
 - `zcash_keys::address::Receiver`
+- `zcash_keys::keys::UnifiedAddressRequest`
+  - `intersect`
+  - `to_address_request`
 
 ### Changed
 - `zcash_keys::Address` has a new variant `Tex`.

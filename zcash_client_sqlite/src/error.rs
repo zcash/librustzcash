@@ -11,6 +11,7 @@ use zcash_primitives::zip32;
 use zcash_primitives::{consensus::BlockHeight, transaction::components::amount::BalanceError};
 
 use crate::wallet::commitment_tree;
+use crate::AccountId;
 use crate::PRUNING_DEPTH;
 
 #[cfg(feature = "transparent-inputs")]
@@ -71,6 +72,9 @@ pub enum SqliteClientError {
 
     /// The account for which information was requested does not belong to the wallet.
     AccountUnknown,
+
+    /// The account being added collides with an existing account in the wallet with the given ID.
+    AccountCollision(AccountId),
 
     /// The account was imported, and ZIP-32 derivation information is not known for it.
     UnknownZip32Derivation,
@@ -155,6 +159,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::BadAccountData(e) => write!(f, "Failed to add account: {}", e),
             SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),
             SqliteClientError::AccountIdOutOfRange => write!(f, "Wallet account identifiers must be less than 0x7FFFFFFF."),
+            SqliteClientError::AccountCollision(id) => write!(f, "An account with ID {} already exists in the wallet.", id.0),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::AddressNotRecognized(_) => write!(f, "The address associated with a received txo is not identifiable as belonging to the wallet."),
             SqliteClientError::CommitmentTree(err) => write!(f, "An error occurred accessing or updating note commitment tree data: {}.", err),
