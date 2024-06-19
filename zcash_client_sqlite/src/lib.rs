@@ -1913,6 +1913,7 @@ mod tests {
     use zcash_client_backend::data_api::{
         chain::ChainState, Account, AccountBirthday, AccountSource, WalletRead, WalletWrite,
     };
+    use zcash_keys::keys::UnifiedSpendingKey;
     use zcash_primitives::block::BlockHash;
 
     use crate::{error::SqliteClientError, testing::TestBuilder, AccountId, DEFAULT_UA_REQUEST};
@@ -2039,6 +2040,49 @@ mod tests {
         assert_matches!(
             st.wallet_mut().import_account_hd(&seed, zip32_index, &birthday),
             Err(SqliteClientError::AccountCollision(id)) if id == first.0.id());
+    }
+
+    #[test]
+    pub(crate) fn import_account_ufvk() {
+        let mut st = TestBuilder::new().build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.wallet().params.sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let seed = vec![0u8; 32];
+        let usk = UnifiedSpendingKey::from_seed(&st.wallet().params, &seed, zip32::AccountId::ZERO)
+            .unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+
+        let account = st
+            .wallet_mut()
+            .import_account_ufvk(&ufvk, &birthday, true)
+            .unwrap();
+        assert_eq!(
+            ufvk.encode(&st.wallet().params),
+            account.ufvk().unwrap().encode(&st.wallet().params)
+        );
+    }
+
+    #[test]
+    pub(crate) fn create_account_then_conflicting_import_account_ufvk() {
+        let mut st = TestBuilder::new().build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.wallet().params.sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let seed = Secret::new(vec![0u8; 32]);
+        let seed_based = st.wallet_mut().create_account(&seed, &birthday).unwrap();
+        let seed_based_account = st.wallet().get_account(seed_based.0).unwrap().unwrap();
+        let ufvk = seed_based_account.ufvk().unwrap();
+
+        assert_matches!(
+            st.wallet_mut().import_account_ufvk(ufvk, &birthday, true),
+            Err(SqliteClientError::AccountCollision(id)) if id == seed_based.0);
     }
 
     #[cfg(feature = "transparent-inputs")]
