@@ -270,13 +270,13 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
 ) -> Result<(), MigratorError<WalletMigrationError>> {
     let seed = seed.map(Rc::new);
 
-    // Turn off foreign keys, and ensure that table replacement/modification
-    // does not break views
+    // Turn off foreign key enforcement, to ensure that table replacement does not break foreign
+    // key references in table definitions.
+    //
+    // It is necessary to perform this operation globally using the outer connection because this
+    // pragma has no effect when set or unset within a transaction.
     wdb.conn
-        .execute_batch(
-            "PRAGMA foreign_keys = OFF;
-             PRAGMA legacy_alter_table = TRUE;",
-        )
+        .execute_batch("PRAGMA foreign_keys = OFF;")
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
     let adapter = RusqliteAdapter::new(&mut wdb.conn, Some("schemer_migrations".to_string()));
     adapter.init().expect("Migrations table setup succeeds.");
@@ -325,7 +325,7 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
-    use rusqlite::{self, named_params, ToSql};
+    use rusqlite::{self, named_params, Connection, ToSql};
     use secrecy::Secret;
 
     use tempfile::NamedTempFile;
@@ -355,6 +355,15 @@ mod tests {
         zcash_client_backend::data_api::WalletWrite,
         zcash_primitives::zip32::DiversifierIndex,
     };
+
+    pub(crate) fn describe_tables(conn: &Connection) -> Result<Vec<String>, rusqlite::Error> {
+        let result = conn
+            .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' ORDER BY tbl_name")?
+            .query_and_then([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(result)
+    }
 
     #[test]
     fn verify_schema() {
@@ -390,20 +399,13 @@ mod tests {
             db::TABLE_UTXOS,
         ];
 
-        let mut tables_query = st
-            .wallet()
-            .conn
-            .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' ORDER BY tbl_name")
-            .unwrap();
-        let mut rows = tables_query.query([]).unwrap();
-        let mut expected_idx = 0;
-        while let Some(row) = rows.next().unwrap() {
-            let sql: String = row.get(0).unwrap();
+        let rows = describe_tables(&st.wallet().conn).unwrap();
+        assert_eq!(rows.len(), expected_tables.len());
+        for (actual, expected) in rows.iter().zip(expected_tables.iter()) {
             assert_eq!(
-                re.replace_all(&sql, " "),
-                re.replace_all(expected_tables[expected_idx], " ").trim(),
+                re.replace_all(actual, " "),
+                re.replace_all(expected, " ").trim(),
             );
-            expected_idx += 1;
         }
 
         let expected_indices = vec![

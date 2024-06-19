@@ -12,6 +12,8 @@ use super::shardtree_support;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xeeec0d0d_fee0_4231_8c68_5f3a7c7c2245);
 
+const DEPENDENCIES: [Uuid; 1] = [shardtree_support::MIGRATION_ID];
+
 pub(super) struct Migration<P> {
     pub(super) params: P,
 }
@@ -22,7 +24,7 @@ impl<P> schemer::Migration for Migration<P> {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [shardtree_support::MIGRATION_ID].into_iter().collect()
+        DEPENDENCIES.into_iter().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -52,12 +54,10 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             INSERT INTO accounts_new (account, ufvk, birthday_height)
             SELECT account, ufvk, birthday_height FROM accounts;
 
-            PRAGMA foreign_keys=OFF;
             PRAGMA legacy_alter_table = ON;
             DROP TABLE accounts;
             ALTER TABLE accounts_new RENAME TO accounts;
-            PRAGMA legacy_alter_table = OFF;
-            PRAGMA foreign_keys=ON;",
+            PRAGMA legacy_alter_table = OFF;",
             u32::from(
                 self.params
                     .activation_height(NetworkUpgrade::Sapling)
@@ -70,5 +70,50 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
     fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
         Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use secrecy::Secret;
+    use tempfile::NamedTempFile;
+    use zcash_protocol::consensus::Network;
+
+    use super::{DEPENDENCIES, MIGRATION_ID};
+    use crate::{wallet::init::init_wallet_db_internal, WalletDb};
+
+    #[test]
+    fn migrate() {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+
+        let seed_bytes = vec![0xab; 32];
+        init_wallet_db_internal(
+            &mut db_data,
+            Some(Secret::new(seed_bytes.clone())),
+            &DEPENDENCIES,
+            false,
+        )
+        .unwrap();
+
+        db_data
+            .conn
+            .execute_batch(r#"INSERT INTO accounts (account, ufvk) VALUES (0, 'not_a_real_ufvk');"#)
+            .unwrap();
+        db_data
+            .conn
+            .execute_batch(
+                "INSERT INTO addresses (account, diversifier_index_be, address) 
+                VALUES (0, X'', 'not_a_real_address');",
+            )
+            .unwrap();
+
+        init_wallet_db_internal(
+            &mut db_data,
+            Some(Secret::new(seed_bytes)),
+            &[MIGRATION_ID],
+            false,
+        )
+        .unwrap();
     }
 }

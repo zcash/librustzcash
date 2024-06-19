@@ -116,3 +116,31 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         }),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use secrecy::Secret;
+    use tempfile::NamedTempFile;
+    use uuid::Uuid;
+    use zcash_protocol::consensus::Network;
+
+    use crate::{wallet::init::init_wallet_db_internal, WalletDb};
+
+    /// Tests that we can migrate from a completely empty wallet database to the target
+    /// migrations.
+    pub(crate) fn test_migrate(migrations: &[Uuid]) {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+
+        let seed = [0xab; 32];
+        assert_matches!(
+            init_wallet_db_internal(
+                &mut db_data,
+                Some(Secret::new(seed.to_vec())),
+                migrations,
+                false
+            ),
+            Ok(_)
+        );
+    }
+}
