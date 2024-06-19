@@ -11,8 +11,7 @@ use zcash_primitives::{
         fees::{transparent, FeeRule},
     },
 };
-
-use crate::ShieldedProtocol;
+use zcash_protocol::{PoolType, ShieldedProtocol};
 
 pub(crate) mod common;
 pub mod fixed;
@@ -25,7 +24,7 @@ pub mod zip317;
 /// A proposed change amount and output pool.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChangeValue {
-    output_pool: ShieldedProtocol,
+    output_pool: PoolType,
     value: NonNegativeAmount,
     memo: Option<MemoBytes>,
 }
@@ -33,12 +32,34 @@ pub struct ChangeValue {
 impl ChangeValue {
     /// Constructs a new change value from its constituent parts.
     pub fn new(
-        output_pool: ShieldedProtocol,
+        output_pool: PoolType,
+        value: NonNegativeAmount,
+        memo: Option<MemoBytes>,
+    ) -> Option<Self> {
+        (matches!(output_pool, PoolType::Shielded(_)) || memo.is_none()).then_some(Self {
+            output_pool,
+            value,
+            memo,
+        })
+    }
+
+    /// Constructs a new change value that will be created as a transparent output.
+    pub fn transparent(value: NonNegativeAmount) -> Self {
+        Self {
+            output_pool: PoolType::TRANSPARENT,
+            value,
+            memo: None,
+        }
+    }
+
+    /// Constructs a new change value that will be created as a shielded output.
+    pub fn shielded(
+        protocol: ShieldedProtocol,
         value: NonNegativeAmount,
         memo: Option<MemoBytes>,
     ) -> Self {
         Self {
-            output_pool,
+            output_pool: PoolType::Shielded(protocol),
             value,
             memo,
         }
@@ -46,25 +67,17 @@ impl ChangeValue {
 
     /// Constructs a new change value that will be created as a Sapling output.
     pub fn sapling(value: NonNegativeAmount, memo: Option<MemoBytes>) -> Self {
-        Self {
-            output_pool: ShieldedProtocol::Sapling,
-            value,
-            memo,
-        }
+        Self::shielded(ShieldedProtocol::Sapling, value, memo)
     }
 
     /// Constructs a new change value that will be created as an Orchard output.
     #[cfg(feature = "orchard")]
     pub fn orchard(value: NonNegativeAmount, memo: Option<MemoBytes>) -> Self {
-        Self {
-            output_pool: ShieldedProtocol::Orchard,
-            value,
-            memo,
-        }
+        Self::shielded(ShieldedProtocol::Orchard, value, memo)
     }
 
     /// Returns the pool to which the change output should be sent.
-    pub fn output_pool(&self) -> ShieldedProtocol {
+    pub fn output_pool(&self) -> PoolType {
         self.output_pool
     }
 
@@ -237,20 +250,20 @@ impl<NoteRefT> From<BalanceError> for ChangeError<BalanceError, NoteRefT> {
     }
 }
 
-/// An enumeration of actions to tak when a transaction would potentially create dust
-/// outputs (outputs that are likely to be without economic value due to fee rules.)
+/// An enumeration of actions to take when a transaction would potentially create dust
+/// outputs (outputs that are likely to be without economic value due to fee rules).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DustAction {
     /// Do not allow creation of dust outputs; instead, require that additional inputs be provided.
     Reject,
     /// Explicitly allow the creation of dust change amounts greater than the specified value.
     AllowDustChange,
-    /// Allow dust amounts to be added to the transaction fee
+    /// Allow dust amounts to be added to the transaction fee.
     AddDustToFee,
 }
 
 /// A policy describing how a [`ChangeStrategy`] should treat potentially dust-valued change
-/// outputs (outputs that are likely to be without economic value due to fee rules.)
+/// outputs (outputs that are likely to be without economic value due to fee rules).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DustOutputPolicy {
     action: DustAction,
@@ -262,7 +275,7 @@ impl DustOutputPolicy {
     ///
     /// A dust policy created with `None` as the dust threshold will delegate determination
     /// of the dust threshold to the change strategy that is evaluating the strategy; this
-    /// recommended, but an explicit value (including zero) may be provided to explicitly
+    /// is recommended, but an explicit value (including zero) may be provided to explicitly
     /// override the determination of the change strategy.
     pub fn new(action: DustAction, dust_threshold: Option<NonNegativeAmount>) -> Self {
         Self {
@@ -271,7 +284,7 @@ impl DustOutputPolicy {
         }
     }
 
-    /// Returns the action to take in the event that a dust change amount would be produced
+    /// Returns the action to take in the event that a dust change amount would be produced.
     pub fn action(&self) -> DustAction {
         self.action
     }

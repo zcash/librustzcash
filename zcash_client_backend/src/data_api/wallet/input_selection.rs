@@ -222,6 +222,8 @@ pub enum GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT> {
     Balance(BalanceError),
     /// A unified address did not contain a supported receiver.
     UnsupportedAddress(Box<UnifiedAddress>),
+    /// Support for transparent-source-only (TEX) addresses requires the transparent-inputs feature.
+    UnsupportedTexAddress,
     /// An error was encountered in change selection.
     Change(ChangeError<ChangeStrategyErrT, NoteRefT>),
 }
@@ -238,6 +240,9 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for GreedyInputSelectorErro
                 // we can't encode the UA to its string representation because we
                 // don't have network parameters here
                 write!(f, "Unified address contains no supported receivers.")
+            }
+            GreedyInputSelectorError::UnsupportedTexAddress => {
+                write!(f, "Support for transparent-source-only (TEX) addresses requires the transparent-inputs feature.")
             }
             GreedyInputSelectorError::Change(err) => {
                 write!(f, "An error occurred computing change and fees: {}", err)
@@ -367,32 +372,37 @@ where
 
             match recipient_address {
                 Address::Transparent(addr) => {
-                    payment_pools.insert(*idx, PoolType::Transparent);
+                    payment_pools.insert(*idx, PoolType::TRANSPARENT);
                     transparent_outputs.push(TxOut {
                         value: payment.amount(),
                         script_pubkey: addr.script(),
                     });
                 }
+                Address::Tex(_) => {
+                    return Err(InputSelectorError::Selection(
+                        GreedyInputSelectorError::UnsupportedTexAddress,
+                    ));
+                }
                 Address::Sapling(_) => {
-                    payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
+                    payment_pools.insert(*idx, PoolType::SAPLING);
                     sapling_outputs.push(SaplingPayment(payment.amount()));
                 }
                 Address::Unified(addr) => {
                     #[cfg(feature = "orchard")]
                     if addr.orchard().is_some() {
-                        payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Orchard));
+                        payment_pools.insert(*idx, PoolType::ORCHARD);
                         orchard_outputs.push(OrchardPayment(payment.amount()));
                         continue;
                     }
 
                     if addr.sapling().is_some() {
-                        payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
+                        payment_pools.insert(*idx, PoolType::SAPLING);
                         sapling_outputs.push(SaplingPayment(payment.amount()));
                         continue;
                     }
 
                     if let Some(addr) = addr.transparent() {
-                        payment_pools.insert(*idx, PoolType::Transparent);
+                        payment_pools.insert(*idx, PoolType::TRANSPARENT);
                         transparent_outputs.push(TxOut {
                             value: payment.amount(),
                             script_pubkey: addr.script(),
@@ -587,17 +597,9 @@ where
             target_height,
             &transparent_inputs,
             &Vec::<TxOut>::new(),
-            &(
-                ::sapling::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &sapling::EmptyBundleView,
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &orchard_fees::EmptyBundleView,
             &self.dust_output_policy,
         );
 
@@ -612,17 +614,9 @@ where
                     target_height,
                     &transparent_inputs,
                     &Vec::<TxOut>::new(),
-                    &(
-                        ::sapling::builder::BundleType::DEFAULT,
-                        &Vec::<Infallible>::new()[..],
-                        &Vec::<Infallible>::new()[..],
-                    ),
+                    &sapling::EmptyBundleView,
                     #[cfg(feature = "orchard")]
-                    &(
-                        orchard::builder::BundleType::DEFAULT,
-                        &Vec::<Infallible>::new()[..],
-                        &Vec::<Infallible>::new()[..],
-                    ),
+                    &orchard_fees::EmptyBundleView,
                     &self.dust_output_policy,
                 )?
             }

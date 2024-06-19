@@ -41,6 +41,26 @@ impl<'a, NoteRef, In: InputView<NoteRef>, Out: OutputView> BundleView<NoteRef>
     }
 }
 
+/// A [`BundleView`] for the empty bundle with [`BundleType::DEFAULT`] bundle type.
+pub struct EmptyBundleView;
+
+impl<NoteRef> BundleView<NoteRef> for EmptyBundleView {
+    type In = Infallible;
+    type Out = Infallible;
+
+    fn bundle_type(&self) -> BundleType {
+        BundleType::DEFAULT
+    }
+
+    fn inputs(&self) -> &[Self::In] {
+        &[]
+    }
+
+    fn outputs(&self) -> &[Self::Out] {
+        &[]
+    }
+}
+
 /// A trait that provides a minimized view of an Orchard input suitable for use in fee and change
 /// calculation.
 pub trait InputView<NoteRef> {

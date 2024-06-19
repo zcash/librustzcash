@@ -420,7 +420,7 @@ mod tests {
             BlockHeight::from(3),
             Some(transparent::Bundle {
                 vin: vec![TxIn {
-                    prevout: OutPoint::new([1u8; 32], 1),
+                    prevout: OutPoint::fake(),
                     script_sig: Script(vec![]),
                     sequence: 0,
                 }],

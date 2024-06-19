@@ -138,6 +138,7 @@ use {
 
 pub mod commitment_tree;
 pub(crate) mod common;
+mod db;
 pub mod init;
 #[cfg(feature = "orchard")]
 pub(crate) mod orchard;
@@ -656,9 +657,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
         let ua_str: String = row.get(0)?;
         let di_vec: Vec<u8> = row.get(1)?;
         let mut di: [u8; 11] = di_vec.try_into().map_err(|_| {
-            SqliteClientError::CorruptedData(
-                "Diverisifier index is not an 11-byte value".to_owned(),
-            )
+            SqliteClientError::CorruptedData("Diversifier index is not an 11-byte value".to_owned())
         })?;
         di.reverse(); // BE -> LE conversion
 
@@ -698,12 +697,12 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
         }
     }
 
-    if let Some((taddr, child_index)) = get_legacy_transparent_address(params, conn, account)? {
+    if let Some((taddr, address_index)) = get_legacy_transparent_address(params, conn, account)? {
         ret.insert(
             taddr,
             Some(TransparentAddressMetadata::new(
                 Scope::External.into(),
-                child_index,
+                address_index,
             )),
         );
     }
@@ -1451,9 +1450,7 @@ pub(crate) fn get_received_memo(
         ShieldedProtocol::Orchard => fetch_memo(ORCHARD_TABLES_PREFIX, "action_index")?.flatten(),
         #[cfg(not(feature = "orchard"))]
         ShieldedProtocol::Orchard => {
-            return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
-                ShieldedProtocol::Orchard,
-            )))
+            return Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD))
         }
     };
 
@@ -2954,7 +2951,7 @@ mod tests {
 
         // Create a fake transparent output.
         let value = NonNegativeAmount::const_from_u64(100000);
-        let outpoint = OutPoint::new([1u8; 32], 1);
+        let outpoint = OutPoint::fake();
         let txout = TxOut {
             value,
             script_pubkey: taddr.script(),
@@ -3133,7 +3130,6 @@ mod tests {
 
         // Create a fake transparent output.
         let value = NonNegativeAmount::from_u64(100000).unwrap();
-        let outpoint = OutPoint::new([1u8; 32], 1);
         let txout = TxOut {
             value,
             script_pubkey: taddr.script(),
@@ -3141,7 +3137,7 @@ mod tests {
 
         // Pretend the output was received in the chain tip.
         let height = st.wallet().chain_height().unwrap().unwrap();
-        let utxo = WalletTransparentOutput::from_parts(outpoint, txout, height).unwrap();
+        let utxo = WalletTransparentOutput::from_parts(OutPoint::fake(), txout, height).unwrap();
         st.wallet_mut()
             .put_received_transparent_utxo(&utxo)
             .unwrap();

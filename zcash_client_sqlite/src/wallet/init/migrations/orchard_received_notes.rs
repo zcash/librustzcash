@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::{PoolType, ShieldedProtocol};
+use zcash_client_backend::PoolType;
 
 use super::full_account_ids;
 use crate::wallet::{init::WalletMigrationError, pool_code};
@@ -72,8 +72,8 @@ impl RusqliteMigration for Migration {
         )?;
 
         transaction.execute_batch({
-            let sapling_pool_code = pool_code(PoolType::Shielded(ShieldedProtocol::Sapling));
-            let orchard_pool_code = pool_code(PoolType::Shielded(ShieldedProtocol::Orchard));
+            let sapling_pool_code = pool_code(PoolType::SAPLING);
+            let orchard_pool_code = pool_code(PoolType::ORCHARD);
             &format!(
                 "CREATE VIEW v_received_notes AS
                     SELECT
@@ -109,8 +109,8 @@ impl RusqliteMigration for Migration {
         })?;
 
         transaction.execute_batch({
-            let sapling_pool_code = pool_code(PoolType::Shielded(ShieldedProtocol::Sapling));
-            let orchard_pool_code = pool_code(PoolType::Shielded(ShieldedProtocol::Orchard));
+            let sapling_pool_code = pool_code(PoolType::SAPLING);
+            let orchard_pool_code = pool_code(PoolType::ORCHARD);
             &format!(
                 "CREATE VIEW v_received_note_spends AS
                 SELECT
@@ -128,7 +128,7 @@ impl RusqliteMigration for Migration {
         })?;
 
         transaction.execute_batch({
-            let transparent_pool_code = pool_code(PoolType::Transparent);
+            let transparent_pool_code = pool_code(PoolType::TRANSPARENT);
             &format!(
                 "DROP VIEW v_transactions;
                 CREATE VIEW v_transactions AS
@@ -257,7 +257,7 @@ impl RusqliteMigration for Migration {
         })?;
 
         transaction.execute_batch({
-            let transparent_pool_code = pool_code(PoolType::Transparent);
+            let transparent_pool_code = pool_code(PoolType::TRANSPARENT);
             &format!(
                 "DROP VIEW v_tx_outputs;
                 CREATE VIEW v_tx_outputs AS
