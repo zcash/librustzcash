@@ -180,10 +180,7 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     )])
     .unwrap();
 
-    // TODO: This test was originally written to use the pre-zip-313 fee rule
-    // and has not yet been updated.
-    #[allow(deprecated)]
-    let fee_rule = StandardFeeRule::PreZip313;
+    let fee_rule = StandardFeeRule::Zip317;
 
     let change_memo = "Test change memo".parse::<Memo>().unwrap();
     let change_strategy = standard::SingleOutputChangeStrategy::new(
@@ -686,10 +683,7 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
     let account_id = account.account_id();
     let dfvk = T::test_account_fvk(&st);
 
-    // TODO: This test was originally written to use the pre-zip-313 fee rule
-    // and has not yet been updated.
-    #[allow(deprecated)]
-    let fee_rule = StandardFeeRule::PreZip313;
+    let fee_rule = StandardFeeRule::Zip317;
 
     // Add funds to the wallet in a single note
     let value = NonNegativeAmount::const_from_u64(50000);
@@ -836,10 +830,7 @@ pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
     let extsk2 = T::sk(&[0xf5; 32]);
     let addr2 = T::sk_default_address(&extsk2);
 
-    // TODO: This test was originally written to use the pre-zip-313 fee rule
-    // and has not yet been updated.
-    #[allow(deprecated)]
-    let fee_rule = StandardFeeRule::PreZip313;
+    let fee_rule = StandardFeeRule::Zip317;
 
     #[allow(clippy::type_complexity)]
     let send_and_recover_with_policy = |st: &mut TestState<BlockCache>,
@@ -921,7 +912,7 @@ pub(crate) fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note
-    let value = NonNegativeAmount::const_from_u64(60000);
+    let value = NonNegativeAmount::const_from_u64(70000);
     let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h, 1);
 
@@ -929,10 +920,7 @@ pub(crate) fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
     assert_eq!(st.get_total_balance(account_id), value);
     assert_eq!(st.get_spendable_balance(account_id, 1), value);
 
-    // TODO: This test was originally written to use the pre-zip-313 fee rule
-    // and has not yet been updated.
-    #[allow(deprecated)]
-    let fee_rule = StandardFeeRule::PreZip313;
+    let fee_rule = StandardFeeRule::Zip317;
 
     // TODO: generate_next_block_from_tx does not currently support transparent outputs.
     let to = TransparentAddress::PublicKeyHash([7; 20]).into();
@@ -968,7 +956,7 @@ pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester>() {
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note owned by the internal spending key
-    let value = NonNegativeAmount::const_from_u64(60000);
+    let value = NonNegativeAmount::const_from_u64(70000);
     let (h, _, _) = st.generate_next_block(&dfvk, AddressType::Internal, value);
     st.scan_cached_blocks(h, 1);
 
@@ -995,10 +983,7 @@ pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester>() {
     );
     assert_matches!(change_note_scope, Ok(Some(Scope::Internal)));
 
-    // TODO: This test was originally written to use the pre-zip-313 fee rule
-    // and has not yet been updated.
-    #[allow(deprecated)]
-    let fee_rule = StandardFeeRule::PreZip313;
+    let fee_rule = StandardFeeRule::Zip317;
 
     // TODO: generate_next_block_from_tx does not currently support transparent outputs.
     let to = TransparentAddress::PublicKeyHash([7; 20]).into();
@@ -1235,10 +1220,7 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
     let res0 = st.wallet_mut().put_received_transparent_utxo(&utxo);
     assert_matches!(res0, Ok(_));
 
-    // TODO: This test was originally written to use the pre-zip-313 fee rule
-    // and has not yet been updated.
-    #[allow(deprecated)]
-    let fee_rule = StandardFeeRule::PreZip313;
+    let fee_rule = StandardFeeRule::Zip317;
 
     let input_selector = GreedyInputSelector::new(
         standard::SingleOutputChangeStrategy::new(fee_rule, None, T::SHIELDED_PROTOCOL),
