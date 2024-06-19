@@ -20,6 +20,13 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.70.0.
+- `zcash_client_backend::{fixed,standard,zip317}::SingleOutputChangeStrategy`
+  now implement a different strategy for choosing whether there will be any
+  change, and its value. This can avoid leaking information about note amounts
+  in some cases. It also ensures that there will be a change output whenever a
+  `change_memo` is given, and defends against losing money by using
+  `DustAction::AddDustToFee` with a too-high dust threshold.
+  See [#1430](https://github.com/zcash/librustzcash/pull/1430) for details.
 - `zcash_client_backend::zip321` has been extracted to, and is now a reexport 
   of the root module of the `zip321` crate. Several of the APIs of this module
   have changed as a consequence of this extraction; please see the `zip321`
