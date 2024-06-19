@@ -37,19 +37,13 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &rusqlite::Transaction<'_>) -> Result<(), Self::Error> {
-        let mut get_accounts = transaction.prepare(
-            r#"
-            SELECT id, ufvk, uivk
-            FROM accounts
-            "#,
-        )?;
+        let mut get_accounts = transaction.prepare("SELECT id, ufvk, uivk FROM accounts")?;
 
         let mut update_address = transaction.prepare(
             r#"UPDATE "addresses"
                SET address = :address
                WHERE account_id = :account_id
-               AND diversifier_index_be = :j
-            "#,
+               AND diversifier_index_be = :j"#,
         )?;
 
         let mut accounts = get_accounts.query([])?;

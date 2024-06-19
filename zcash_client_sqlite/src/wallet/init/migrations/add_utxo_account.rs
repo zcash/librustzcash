@@ -230,3 +230,13 @@ fn get_legacy_transparent_address<P: consensus::Parameters>(
         Ok(None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::wallet::init::migrations::tests::test_migrate;
+
+    #[test]
+    fn migrate() {
+        test_migrate(&[super::MIGRATION_ID]);
+    }
+}
