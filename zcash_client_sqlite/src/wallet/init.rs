@@ -262,7 +262,7 @@ pub fn init_wallet_db<P: consensus::Parameters + 'static>(
     init_wallet_db_internal(wdb, seed, &[], true)
 }
 
-pub(crate) fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
+fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     wdb: &mut WalletDb<rusqlite::Connection, P>,
     seed: Option<SecretVec<u8>>,
     target_migrations: &[Uuid],
@@ -400,6 +400,7 @@ mod tests {
         ];
 
         let rows = describe_tables(&st.wallet().conn).unwrap();
+        assert_eq!(rows.len(), expected_tables.len());
         for (actual, expected) in rows.iter().zip(expected_tables.iter()) {
             assert_eq!(
                 re.replace_all(actual, " "),

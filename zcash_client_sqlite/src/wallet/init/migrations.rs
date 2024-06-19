@@ -126,6 +126,8 @@ mod tests {
 
     use crate::{wallet::init::init_wallet_db_internal, WalletDb};
 
+    /// Tests that we can migrate from a completely empty wallet database to the target
+    /// migrations.
     pub(crate) fn test_migrate(migrations: &[Uuid]) {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
