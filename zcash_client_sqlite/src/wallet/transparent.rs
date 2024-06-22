@@ -767,7 +767,7 @@ pub(crate) fn get_reserved_ephemeral_addresses<P: consensus::Parameters>(
                 let address_index =
                     NonHardenedChildIndex::from_index(index as u32).expect("valid index");
                 result.insert(
-                    ephemeral_ivk.derive_address(address_index)?,
+                    ephemeral_ivk.derive_ephemeral_address(address_index)?,
                     Some(TransparentAddressMetadata::new(
                         EPHEMERAL_SCOPE,
                         address_index,
@@ -861,7 +861,7 @@ pub(crate) fn reserve_next_n_ephemeral_addresses<P: consensus::Parameters>(
         .map(|address_index| {
             let child = NonHardenedChildIndex::from_index(address_index as u32)
                 .expect("valid by construction");
-            let address = ephemeral_ivk.derive_address(child)?;
+            let address = ephemeral_ivk.derive_ephemeral_address(child)?;
             stmt_insert_ephemeral_address.execute(named_params![
                 ":account_id": account_id.0,
                 ":address_index": address_index,

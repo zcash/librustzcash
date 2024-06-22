@@ -432,7 +432,19 @@ impl private::SealedChangeLevelKey for EphemeralIvk {
     }
 }
 
-impl IncomingViewingKey for EphemeralIvk {}
+#[cfg(feature = "transparent-inputs")]
+impl EphemeralIvk {
+    /// Derives a transparent address at the provided child index.
+    pub fn derive_ephemeral_address(
+        &self,
+        address_index: NonHardenedChildIndex,
+    ) -> Result<TransparentAddress, bip32::Error> {
+        use private::SealedChangeLevelKey;
+        let child_key = self.extended_pubkey().derive_child(address_index.into())?;
+        #[allow(deprecated)]
+        Ok(pubkey_to_address(child_key.public_key()))
+    }
+}
 
 /// Internal outgoing viewing key used for autoshielding.
 pub struct InternalOvk([u8; 32]);
