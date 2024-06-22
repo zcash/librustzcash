@@ -639,6 +639,19 @@ fn ephemeral_address_check_internal<P: consensus::Parameters>(
     address_str: &str,
     reject_all_ephemeral: bool,
 ) -> Result<(), SqliteClientError> {
+    // It is intentional that we don't require `t.mined_height` to be non-null.
+    // That is, we conservatively treat an ephemeral address as potentially
+    // reused even if we think that the transaction where we had evidence of
+    // its use is at present unmined. This should never occur in supported
+    // situations where only a single correctly operating wallet instance is
+    // using a given seed, because such a wallet will not reuse an address that
+    // it ever reserved.
+    //
+    // `COALESCE(used_in_tx, mined_in_tx)` can only differ from `used_in_tx`
+    // if the address was reserved, an error occurred in transaction creation
+    // before calling `mark_ephemeral_address_as_used`, and then we observed
+    // the address to have been used in a mined transaction (presumably by
+    // another wallet instance, or due to a bug) anyway.
     let res = wdb
         .conn
         .0

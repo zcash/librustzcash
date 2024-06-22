@@ -32,6 +32,8 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   - `ChangeValue::{transparent, shielded}`
   - `sapling::EmptyBundleView`
   - `orchard::EmptyBundleView`
+- `zcash_client_backend::proposal`:
+  - `impl Hash for {StepOutput, StepOutputIndex}`
 - `zcash_client_backend::scanning`:
   - `testing` module
 - `zcash_client_backend::sync` module, behind the `sync` feature flag.
@@ -68,7 +70,7 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
     shielded pool.
   - `ChangeStrategy::compute_balance`: this trait method has two additional
     parameters when the "transparent-inputs" feature is enabled. These are
-    used to specify amounts of additional transparent inputs and outputs,
+    used to specify amounts of additional transparent P2PKH inputs and outputs,
     for which `InputView` or `OutputView` instances may not be available.
     Empty slices can be passed to obtain the previous behaviour.
 - `zcash_client_backend::input_selection::GreedyInputSelectorError` has a

@@ -896,6 +896,9 @@ pub trait WalletRead {
     /// The set contains all non-ephemeral transparent receivers that are known to have
     /// been derived under this account. Wallets should scan the chain for UTXOs sent to
     /// these receivers.
+    ///
+    /// Use [`Self::get_reserved_ephemeral_addresses`] to obtain the ephemeral transparent
+    /// receivers.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
         &self,
@@ -923,7 +926,29 @@ pub trait WalletRead {
     ///
     /// The set contains all ephemeral transparent receivers that are known to have
     /// been derived under this account. Wallets should scan the chain for UTXOs sent to
-    /// these receivers.
+    /// these receivers, but do not need to do so regularly. Under expected usage, outputs
+    /// would only be detected with these receivers in the following situations:
+    ///
+    /// - This wallet created a payment to a ZIP 320 (TEX) address, but the second
+    ///   transaction (that spent the output sent to the ephemeral address) did not get
+    ///   mined before it expired.
+    ///   - In this case the output will already be known to the wallet (because it
+    ///     stores the transactions that it creates).
+    ///
+    /// - Another wallet app using the same seed phrase created a payment to a ZIP 320
+    ///   address, and this wallet queried for the ephemeral UTXOs after the first
+    ///   transaction was mined but before the second transaction was mined.
+    ///   - In this case, the output should not be considered unspent until the expiry
+    ///     height of the transaction it was received in has passed. Wallets creating
+    ///     payments to TEX addresses generally set the same expiry height for the first
+    ///     and second transactions, meaning that this wallet does not need to observe
+    ///     the second transaction to determine when it would have expired.
+    ///
+    /// - A TEX address recipient decided to return funds that the wallet had sent to
+    ///   them.
+    ///
+    /// In all cases, the wallet should re-shield the unspent outputs, in a separate
+    /// transaction per ephemeral address, before re-spending the funds.
     #[cfg(feature = "transparent-inputs")]
     fn get_reserved_ephemeral_addresses(
         &self,

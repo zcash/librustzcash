@@ -120,7 +120,8 @@ pub enum SqliteClientError {
 
     /// An ephemeral address (given in string form) would be reused, or incorrectly used as an
     /// external address. If it is known to have been used in a previous transaction, the txid
-    /// is given.
+    /// is given (if there is more than one such known transaction, the choice of txid is
+    /// unspecified).
     #[cfg(feature = "transparent-inputs")]
     EphemeralAddressReuse(String, Option<TxId>),
 }

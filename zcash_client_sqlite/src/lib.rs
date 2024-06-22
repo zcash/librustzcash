@@ -1291,7 +1291,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     {
                         if let Some(address) = txout.recipient_address() {
                             // TODO: we really want to only mark outputs when a transaction has been
-                            // *reliably* mined.
+                            // *reliably* mined, because that is strictly more conservative in avoiding
+                            // going over the gap limit.
                             #[cfg(feature = "transparent-inputs")]
                             wallet::transparent::mark_ephemeral_address_as_mined(wdb.conn.0, &wdb.params, &address, tx_ref).map_err(SqliteClientError::from)?;
 

@@ -318,6 +318,12 @@ pub trait ChangeStrategy {
     /// change outputs recommended by this operation. If insufficient funds are available to
     /// supply the requested outputs and required fees, implementations should return
     /// [`ChangeError::InsufficientFunds`].
+    ///
+    #[cfg_attr(
+        feature = "transparent-inputs",
+        doc = "The `ephemeral_input_amounts` and `ephemeral_output_amounts` parameters
+               specify the amounts of additional transparent P2PKH inputs and outputs."
+    )]
     #[allow(clippy::too_many_arguments)]
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
         &self,
