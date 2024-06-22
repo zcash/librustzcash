@@ -5,23 +5,28 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use zcash_client_backend::data_api::AccountBalance;
 use zcash_keys::address::Address;
+use zcash_keys::keys::AddressGenerationError;
 use zip32::{DiversifierIndex, Scope};
 
 use zcash_address::unified::{Encoding, Ivk, Uivk};
 use zcash_client_backend::wallet::{TransparentAddressMetadata, WalletTransparentOutput};
-use zcash_keys::encoding::AddressCodec;
+use zcash_keys::encoding::{encode_transparent_address_p, AddressCodec};
 use zcash_primitives::{
     legacy::{
-        keys::{IncomingViewingKey, NonHardenedChildIndex},
+        keys::{EphemeralIvk, IncomingViewingKey, NonHardenedChildIndex, TransparentKeyScope},
         Script, TransparentAddress,
     },
-    transaction::components::{amount::NonNegativeAmount, Amount, OutPoint, TxOut},
+    transaction::{
+        components::{amount::NonNegativeAmount, Amount, OutPoint, TxOut},
+        TxId,
+    },
 };
 use zcash_protocol::consensus::{self, BlockHeight};
 
 use crate::{error::SqliteClientError, AccountId, UtxoId};
+use crate::{SqlTransaction, WalletDb};
 
-use super::{chain_tip_height, get_account_ids};
+use super::{chain_tip_height, get_account, get_account_ids};
 
 pub(crate) fn detect_spending_accounts<'a>(
     conn: &Connection,
@@ -239,6 +244,9 @@ pub(crate) fn get_unspent_transparent_output(
     result
 }
 
+/// Returns spendable transparent outputs that have been received by this wallet at the given
+/// transparent address, as outputs of transactions in blocks mined at a height less than or
+/// equal to the provided `max_height`.
 pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -301,10 +309,13 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     Ok(utxos)
 }
 
-/// Returns the unspent balance for each transparent address associated with the specified account,
-/// such that the block that included the transaction was mined at a height less than or equal to
-/// the provided `summary_height`.
-pub(crate) fn get_transparent_address_balances<P: consensus::Parameters>(
+/// Returns a mapping from each transparent receiver associated with the specified account
+/// to its not-yet-shielded UTXO balance, including only the effects of transactions mined
+/// at a block height less than or equal to `summary_height`.
+///
+/// Only non-ephemeral transparent receivers with a non-zero balance at the summary height
+/// will be included.
+pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account: AccountId,
@@ -438,63 +449,107 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     params: &P,
     output: &WalletTransparentOutput,
 ) -> Result<UtxoId, SqliteClientError> {
+    if let Some(receiving_account) = find_account_for_transparent_output(conn, params, output)? {
+        put_transparent_output(
+            conn,
+            params,
+            output.outpoint(),
+            output.txout(),
+            Some(output.height()),
+            output.recipient_address(),
+            receiving_account,
+        )
+    } else {
+        // The UTXO was not for any of our transparent addresses.
+        Err(SqliteClientError::AddressNotRecognized(
+            *output.recipient_address(),
+        ))
+    }
+}
+
+/// Attempts to determine the account that received the given transparent output.
+///
+/// The following three locations in the wallet's key tree are searched:
+/// - Transparent receivers that have been generated as part of a Unified Address.
+/// - Transparent ephemeral addresses that have been reserved.
+/// - "Legacy transparent addresses" (at BIP 44 address index 0 within an account).
+///
+/// Returns `Ok(None)` if the transparent output's recipient address is not in any of the
+/// above locations. This means the wallet considers the output "not interesting".
+pub(crate) fn find_account_for_transparent_output<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    output: &WalletTransparentOutput,
+) -> Result<Option<AccountId>, SqliteClientError> {
     let address_str = output.recipient_address().encode(params);
-    let account_id = conn
+
+    if let Some(account_id) = conn
         .query_row(
             "SELECT account_id FROM addresses WHERE cached_transparent_receiver_address = :address",
             named_params![":address": &address_str],
             |row| Ok(AccountId(row.get(0)?)),
         )
-        .optional()?;
-
-    if let Some(account) = account_id {
-        Ok(put_transparent_output(conn, params, output, account)?)
-    } else {
-        // If the UTXO is received at the legacy transparent address (at BIP 44 address
-        // index 0 within its particular account, which we specifically ensure is returned
-        // from `get_transparent_receivers`), there may be no entry in the addresses table
-        // that can be used to tie the address to a particular account. In this case, we
-        // look up the legacy address for each account in the wallet, and check whether it
-        // matches the address for the received UTXO; if so, insert/update it directly.
-        get_account_ids(conn)?
-            .into_iter()
-            .find_map(
-                |account| match get_legacy_transparent_address(params, conn, account) {
-                    Ok(Some((legacy_taddr, _))) if &legacy_taddr == output.recipient_address() => {
-                        Some(
-                            put_transparent_output(conn, params, output, account)
-                                .map_err(SqliteClientError::from),
-                        )
-                    }
-                    Ok(_) => None,
-                    Err(e) => Some(Err(e)),
-                },
-            )
-            // The UTXO was not for any of the legacy transparent addresses.
-            .unwrap_or_else(|| {
-                Err(SqliteClientError::AddressNotRecognized(
-                    *output.recipient_address(),
-                ))
-            })
+        .optional()?
+    {
+        return Ok(Some(account_id));
     }
+
+    // Note that this does not search ephemeral addresses that have not yet been reserved.
+    if let Some(account_id) = conn
+        .query_row(
+            "SELECT account_id FROM ephemeral_addresses WHERE address = :address",
+            named_params![":address": &address_str],
+            |row| Ok(AccountId(row.get(0)?)),
+        )
+        .optional()?
+    {
+        return Ok(Some(account_id));
+    }
+
+    // If the UTXO is received at the legacy transparent address (at BIP 44 address
+    // index 0 within its particular account, which we specifically ensure is returned
+    // from `get_transparent_receivers`), there may be no entry in the addresses table
+    // that can be used to tie the address to a particular account. In this case, we
+    // look up the legacy address for each account in the wallet, and check whether it
+    // matches the address for the received UTXO.
+    for account_id in get_account_ids(conn)? {
+        if let Some((legacy_taddr, _)) = get_legacy_transparent_address(params, conn, account_id)? {
+            if &legacy_taddr == output.recipient_address() {
+                return Ok(Some(account_id));
+            }
+        }
+    }
+    Ok(None)
 }
 
+/// Add a transparent output relevant to this wallet to the database.
+///
+/// `output_height` may be None if this is an ephemeral output from a
+/// transaction we created, that we do not yet know to have been mined.
 pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    output: &WalletTransparentOutput,
-    received_by_account: AccountId,
-) -> Result<UtxoId, rusqlite::Error> {
+    outpoint: &OutPoint,
+    txout: &TxOut,
+    output_height: Option<BlockHeight>,
+    address: &TransparentAddress,
+    receiving_account: AccountId,
+) -> Result<UtxoId, SqliteClientError> {
+    let output_height = output_height.map(u32::from);
+
     // Check whether we have an entry in the blocks table for the output height;
     // if not, the transaction will be updated with its mined height when the
     // associated block is scanned.
-    let block = conn
-        .query_row(
-            "SELECT height FROM blocks WHERE height = :height",
-            named_params![":height": &u32::from(output.height())],
-            |row| row.get::<_, u32>(0),
-        )
-        .optional()?;
+    let block = match output_height {
+        Some(height) => conn
+            .query_row(
+                "SELECT height FROM blocks WHERE height = :height",
+                named_params![":height": height],
+                |row| row.get::<_, u32>(0),
+            )
+            .optional()?,
+        None => None,
+    };
 
     let id_tx = conn.query_row(
         "INSERT INTO transactions (txid, block, mined_height)
@@ -504,9 +559,9 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
              mined_height = :mined_height
          RETURNING id_tx",
         named_params![
-           ":txid": &output.outpoint().hash().to_vec(),
+           ":txid": &outpoint.hash().to_vec(),
            ":block": block,
-           ":mined_height": u32::from(output.height())
+           ":mined_height": output_height
         ],
         |row| row.get::<_, i64>(0),
     )?;
@@ -533,15 +588,271 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
 
     let sql_args = named_params![
         ":transaction_id": id_tx,
-        ":output_index": &output.outpoint().n(),
-        ":account_id": received_by_account.0,
-        ":address": &output.recipient_address().encode(params),
-        ":script": &output.txout().script_pubkey.0,
-        ":value_zat": &i64::from(Amount::from(output.txout().value)),
-        ":height": &u32::from(output.height()),
+        ":output_index": &outpoint.n(),
+        ":account_id": receiving_account.0,
+        ":address": &address.encode(params),
+        ":script": &txout.script_pubkey.0,
+        ":value_zat": &i64::from(Amount::from(txout.value)),
+        ":height": output_height,
     ];
 
-    stmt_upsert_transparent_output.query_row(sql_args, |row| row.get::<_, i64>(0).map(UtxoId))
+    let utxo_id = stmt_upsert_transparent_output
+        .query_row(sql_args, |row| row.get::<_, i64>(0).map(UtxoId))?;
+    Ok(utxo_id)
+}
+
+/// If `address` is one of our ephemeral addresses, mark it as having an output
+/// in a transaction that we have just created. This has no effect if `address` is
+/// not one of our ephemeral addresses.
+///
+/// Returns a `SqliteClientError::EphemeralAddressReuse` error if the address was
+/// already used.
+pub(crate) fn mark_ephemeral_address_as_used<P: consensus::Parameters>(
+    wdb: &mut WalletDb<SqlTransaction<'_>, P>,
+    ephemeral_address: &TransparentAddress,
+    tx_ref: i64,
+) -> Result<(), SqliteClientError> {
+    let address_str = encode_transparent_address_p(&wdb.params, ephemeral_address);
+    ephemeral_address_check_internal(wdb, &address_str, false)?;
+
+    wdb.conn.0.execute(
+        "UPDATE ephemeral_addresses SET used_in_tx = :used_in_tx WHERE address = :address",
+        named_params![":used_in_tx": &tx_ref, ":address": address_str],
+    )?;
+    Ok(())
+}
+
+/// Returns a `SqliteClientError::EphemeralAddressReuse` error if `address` is
+/// an ephemeral transparent address.
+pub(crate) fn check_address_is_not_ephemeral<P: consensus::Parameters>(
+    wdb: &mut WalletDb<SqlTransaction<'_>, P>,
+    address_str: &str,
+) -> Result<(), SqliteClientError> {
+    ephemeral_address_check_internal(wdb, address_str, true)
+}
+
+/// Returns a `SqliteClientError::EphemeralAddressReuse` error if the address was
+/// already used. If `reject_all_ephemeral` is set, return an error if the address
+/// is ephemeral at all, regardless of reuse.
+fn ephemeral_address_check_internal<P: consensus::Parameters>(
+    wdb: &mut WalletDb<SqlTransaction<'_>, P>,
+    address_str: &str,
+    reject_all_ephemeral: bool,
+) -> Result<(), SqliteClientError> {
+    let res = wdb
+        .conn
+        .0
+        .query_row(
+            "SELECT t.txid FROM ephemeral_addresses
+            LEFT OUTER JOIN transactions t
+            ON t.id_tx = COALESCE(used_in_tx, mined_in_tx)
+            WHERE address = :address",
+            named_params![":address": address_str],
+            |row| row.get::<_, Option<Vec<u8>>>(0),
+        )
+        .optional()?;
+
+    match res {
+        Some(Some(txid_bytes)) => {
+            let txid = TxId::from_bytes(
+                txid_bytes
+                    .try_into()
+                    .map_err(|_| SqliteClientError::CorruptedData("invalid txid".to_owned()))?,
+            );
+            Err(SqliteClientError::EphemeralAddressReuse(
+                address_str.to_owned(),
+                Some(txid),
+            ))
+        }
+        Some(None) if reject_all_ephemeral => Err(SqliteClientError::EphemeralAddressReuse(
+            address_str.to_owned(),
+            None,
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// If `address` is one of our ephemeral addresses, mark it as having an output
+/// in the given mined transaction (which may or may not be a transaction we sent).
+/// This has no effect if `address` is not one of our ephemeral addresses.
+pub(crate) fn mark_ephemeral_address_as_mined<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    address: &TransparentAddress,
+    tx_ref: i64,
+) -> Result<(), SqliteClientError> {
+    let address_str = encode_transparent_address_p(params, address);
+
+    conn.execute(
+        "UPDATE ephemeral_addresses SET mined_in_tx = :mined_in_tx WHERE address = :address",
+        named_params![":mined_in_tx": &tx_ref, ":address": address_str],
+    )?;
+    Ok(())
+}
+
+/// Returns the ephemeral transparent IVK for a given account ID.
+pub(crate) fn get_ephemeral_ivk<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    account_id: AccountId,
+) -> Result<EphemeralIvk, SqliteClientError> {
+    use zcash_client_backend::data_api::Account;
+
+    Ok(get_account(conn, params, account_id)?
+        .ok_or(SqliteClientError::AccountUnknown)?
+        .ufvk()
+        .and_then(|ufvk| ufvk.transparent())
+        .ok_or(SqliteClientError::UnknownZip32Derivation)?
+        .derive_ephemeral_ivk()?)
+}
+
+// Same as Bitcoin.
+const GAP_LIMIT: i32 = 20;
+
+const EPHEMERAL_SCOPE: TransparentKeyScope = match TransparentKeyScope::custom(2) {
+    Some(s) => s,
+    None => unreachable!(),
+};
+
+/// Returns a vector with all ephemeral transparent addresses potentially belonging to this wallet.
+/// If `for_detection` is true, this includes addresses for an additional GAP_LIMIT indices.
+pub(crate) fn get_reserved_ephemeral_addresses<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    account_id: AccountId,
+    for_detection: bool,
+) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, SqliteClientError> {
+    let mut stmt = conn.prepare(
+        "SELECT address, address_index FROM ephemeral_addresses WHERE account_id = :account ORDER BY address_index",
+    )?;
+    let mut rows = stmt.query(named_params! { ":account": account_id.0 })?;
+
+    let mut result = HashMap::new();
+    let mut first_unused_index: Option<i32> = Some(0);
+
+    while let Some(row) = rows.next()? {
+        let addr_str: String = row.get(0)?;
+        let raw_index: u32 = row.get(1)?;
+        first_unused_index = i32::try_from(raw_index)
+            .map_err(|e| SqliteClientError::CorruptedData(e.to_string()))?
+            .checked_add(1);
+        let address_index = NonHardenedChildIndex::from_index(raw_index).expect("just checked");
+        result.insert(
+            TransparentAddress::decode(params, &addr_str)?,
+            Some(TransparentAddressMetadata::new(
+                EPHEMERAL_SCOPE,
+                address_index,
+            )),
+        );
+    }
+
+    if for_detection {
+        if let Some(first) = first_unused_index {
+            let ephemeral_ivk = get_ephemeral_ivk(conn, params, account_id)?;
+
+            for index in first..=first.saturating_add(GAP_LIMIT - 1) {
+                let address_index =
+                    NonHardenedChildIndex::from_index(index as u32).expect("valid index");
+                result.insert(
+                    ephemeral_ivk.derive_address(address_index)?,
+                    Some(TransparentAddressMetadata::new(
+                        EPHEMERAL_SCOPE,
+                        address_index,
+                    )),
+                );
+            }
+        }
+    }
+    Ok(result)
+}
+
+/// Returns a vector with the next `n` previously unreserved ephemeral addresses for
+/// the given account.
+///
+/// # Errors
+///
+/// * `SqliteClientError::AccountUnknown`, if there is no account with the given id.
+/// * `SqliteClientError::UnknownZip32Derivation`, if the account is imported and
+///   it is not possible to derive new addresses for it.
+/// * `SqliteClientError::ReachedGapLimit`, if it is not possible to reserve `n` addresses
+///   within the gap limit after the last address in this account that is known to have an
+///   output in a mined transaction.
+/// * `SqliteClientError::AddressGeneration(AddressGenerationError::DiversifierSpaceExhausted)`,
+///   if the limit on transparent address indices has been reached.
+pub(crate) fn reserve_next_n_ephemeral_addresses<P: consensus::Parameters>(
+    wdb: &mut WalletDb<SqlTransaction<'_>, P>,
+    account_id: AccountId,
+    n: u32,
+) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
+    if n == 0 {
+        return Ok(vec![]);
+    }
+    assert!(n > 0);
+
+    let ephemeral_ivk = get_ephemeral_ivk(wdb.conn.0, &wdb.params, account_id)?;
+
+    let last_gap_index: i32 = wdb
+        .conn
+        .0
+        .query_row(
+            "SELECT address_index FROM ephemeral_addresses
+             WHERE account_id = :account_id AND mined_in_tx IS NOT NULL
+             ORDER BY address_index DESC LIMIT 1",
+            named_params![":account_id": account_id.0],
+            |row| row.get::<_, u32>(0),
+        )
+        .optional()?
+        .map_or(Ok(-1i32), |i| {
+            i32::try_from(i).map_err(|e| SqliteClientError::CorruptedData(e.to_string()))
+        })?
+        .saturating_add(GAP_LIMIT);
+
+    let (first_index, last_index) = wdb
+        .conn
+        .0
+        .query_row(
+            "SELECT address_index FROM ephemeral_addresses
+             WHERE account_id = :account_id
+             ORDER BY address_index DESC LIMIT 1",
+            named_params![":account_id": account_id.0],
+            |row| row.get::<_, u32>(0),
+        )
+        .optional()?
+        .map_or(Ok(-1i32), |i| {
+            i32::try_from(i).map_err(|e| SqliteClientError::CorruptedData(e.to_string()))
+        })
+        .map(|i: i32| i.checked_add(1).zip(i.checked_add(n.try_into().ok()?)))?
+        .ok_or(SqliteClientError::AddressGeneration(
+            AddressGenerationError::DiversifierSpaceExhausted,
+        ))?;
+
+    assert!(last_index >= first_index);
+    if last_index > last_gap_index {
+        return Err(SqliteClientError::ReachedGapLimit);
+    }
+
+    // used_in_tx and mined_in_tx are initially NULL
+    let mut stmt_insert_ephemeral_address = wdb.conn.0.prepare_cached(
+        "INSERT INTO ephemeral_addresses (account_id, address_index, address)
+         VALUES (:account_id, :address_index, :address)",
+    )?;
+
+    (first_index..=last_index)
+        .map(|address_index| {
+            let child = NonHardenedChildIndex::from_index(address_index as u32)
+                .expect("valid by construction");
+            let address = ephemeral_ivk.derive_address(child)?;
+            stmt_insert_ephemeral_address.execute(named_params![
+                ":account_id": account_id.0,
+                ":address_index": address_index,
+                ":address": encode_transparent_address_p(&wdb.params, &address)
+            ])?;
+            Ok((
+                address,
+                TransparentAddressMetadata::new(EPHEMERAL_SCOPE, child),
+            ))
+        })
+        .collect()
 }
 
 #[cfg(test)]

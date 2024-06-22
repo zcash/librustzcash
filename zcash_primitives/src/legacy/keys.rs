@@ -21,7 +21,7 @@ use super::TransparentAddress;
 pub struct TransparentKeyScope(u32);
 
 impl TransparentKeyScope {
-    pub fn custom(i: u32) -> Option<Self> {
+    pub const fn custom(i: u32) -> Option<Self> {
         if i < (1 << 31) {
             Some(TransparentKeyScope(i))
         } else {
@@ -223,6 +223,14 @@ impl AccountPubKey {
             .map(InternalIvk)
     }
 
+    /// Derives the public key at the "ephemeral" path
+    /// `m/44'/<coin_type>'/<account>'/2`.
+    pub fn derive_ephemeral_ivk(&self) -> Result<EphemeralIvk, bip32::Error> {
+        self.0
+            .derive_child(ChildNumber::new(2, false)?)
+            .map(EphemeralIvk)
+    }
+
     /// Derives the internal ovk and external ovk corresponding to this
     /// transparent fvk. As specified in [ZIP 316][transparent-ovk].
     ///
@@ -404,6 +412,27 @@ impl private::SealedChangeLevelKey for InternalIvk {
 }
 
 impl IncomingViewingKey for InternalIvk {}
+
+/// An incoming viewing key at the "ephemeral" path
+/// `m/44'/<coin_type>'/<account>'/2`.
+///
+/// This allows derivation of ephemeral addresses for use within the wallet.
+#[derive(Clone, Debug)]
+pub struct EphemeralIvk(ExtendedPublicKey<PublicKey>);
+
+impl private::SealedChangeLevelKey for EphemeralIvk {
+    const SCOPE: TransparentKeyScope = TransparentKeyScope(2);
+
+    fn extended_pubkey(&self) -> &ExtendedPublicKey<PublicKey> {
+        &self.0
+    }
+
+    fn from_extended_pubkey(key: ExtendedPublicKey<PublicKey>) -> Self {
+        EphemeralIvk(key)
+    }
+}
+
+impl IncomingViewingKey for EphemeralIvk {}
 
 /// Internal outgoing viewing key used for autoshielding.
 pub struct InternalOvk([u8; 32]);

@@ -328,6 +328,8 @@ pub trait ChangeStrategy {
         sapling: &impl sapling::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
+        #[cfg(feature = "transparent-inputs")] ephemeral_input_amounts: &[NonNegativeAmount],
+        #[cfg(feature = "transparent-inputs")] ephemeral_output_amounts: &[NonNegativeAmount],
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
 }
 

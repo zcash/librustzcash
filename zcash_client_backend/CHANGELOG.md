@@ -6,6 +6,23 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Notable changes
+`zcash_client_backend` now supports TEX (transparent-source-only) addresses as specified
+in ZIP 320. Sending to one or more TEX addresses will automatically create a multi-step
+proposal that uses two transactions. This is intended to be used in conjunction with
+`zcash_client_sqlite` 0.11 or later.
+
+In order to take advantage of this support, client wallets will need to be able to send
+multiple transactions created from `zcash_client_backend::data_api::wallet::create_proposed_transactions`.
+This API was added in `zcash_client_backend` 0.11.0 but previously could only return a
+single transaction.
+
+**Note:** This feature changes the use of transparent addresses in ways that are relevant
+to security and access to funds, and that may interact with other wallet behaviour. In
+particular it exposes new ephemeral transparent addresses belonging to the wallet, which
+need to be scanned in order to recover funds if the first transaction of the proposal is
+mined but the second is not, or if someone (e.g. the TEX-address recipient) sends back
+funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for details.
 
 ### Added
 - `zcash_client_backend::data_api`:
@@ -17,7 +34,8 @@ and this library adheres to Rust's notion of
   - `orchard::EmptyBundleView`
 - `zcash_client_backend::scanning`:
   - `testing` module
-- `zcash_client_backend::sync` module, behind the `sync` feature flag
+- `zcash_client_backend::sync` module, behind the `sync` feature flag.
+- `zcash_client_backend::wallet::Recipient::map_ephemeral_transparent_outpoint`
 
 ### Changed
 - MSRV is now 1.70.0.
@@ -33,6 +51,8 @@ and this library adheres to Rust's notion of
   have changed as a consequence of this extraction; please see the `zip321`
   CHANGELOG for details.
 - `zcash_client_backend::data_api`:
+  - `WalletRead` has a new `get_reserved_ephemeral_addresses` method.
+  - `WalletWrite` has a new `reserve_next_n_ephemeral_addresses` method.
   - `error::Error` has a new `Address` variant.
   - `wallet::input_selection::InputSelectorError` has a new `Address` variant.
 - `zcash_client_backend::proto::proposal::Proposal::{from_standard_proposal, 
@@ -46,12 +66,19 @@ and this library adheres to Rust's notion of
     if a memo is given for the transparent pool. Use `ChangeValue::shielded`
     to avoid this error case when creating a `ChangeValue` known to be for a
     shielded pool.
+  - `ChangeStrategy::compute_balance`: this trait method has two additional
+    parameters when the "transparent-inputs" feature is enabled. These are
+    used to specify amounts of additional transparent inputs and outputs,
+    for which `InputView` or `OutputView` instances may not be available.
+    Empty slices can be passed to obtain the previous behaviour.
 - `zcash_client_backend::input_selection::GreedyInputSelectorError` has a
   new variant `UnsupportedTexAddress`.
 - `zcash_client_backend::wallet::Recipient` variants have changed. Instead of
-  wrapping protocol-address types, the `Recipient` type now wraps a
-  `zcash_address::ZcashAddress`. This simplifies the process of tracking the
-  original address to which value was sent.
+  wrapping protocol-address types, the `External` and `InternalAccount` variants
+  now wrap a `zcash_address::ZcashAddress`. This simplifies the process of
+  tracking the original address to which value was sent. There is also a new
+  `EphemeralTransparent` variant, and an additional generic parameter for the
+  type of metadata associated with an ephemeral transparent outpoint.
 
 ### Removed
 - `zcash_client_backend::data_api`:

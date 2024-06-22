@@ -176,6 +176,14 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::ChainHeightUnknown => {
             unreachable!("we don't call methods that require a known chain height")
         }
+        #[cfg(feature = "transparent-inputs")]
+        SqliteClientError::ReachedGapLimit => {
+            unreachable!("we don't do ephemeral address tracking")
+        }
+        #[cfg(feature = "transparent-inputs")]
+        SqliteClientError::EphemeralAddressReuse(_, _) => {
+            unreachable!("we don't do ephemeral address tracking")
+        }
     }
 }
 
@@ -376,6 +384,7 @@ mod tests {
             db::TABLE_ACCOUNTS,
             db::TABLE_ADDRESSES,
             db::TABLE_BLOCKS,
+            db::TABLE_EPHEMERAL_ADDRESSES,
             db::TABLE_NULLIFIER_MAP,
             db::TABLE_ORCHARD_RECEIVED_NOTE_SPENDS,
             db::TABLE_ORCHARD_RECEIVED_NOTES,
@@ -413,6 +422,7 @@ mod tests {
             db::INDEX_ACCOUNTS_UIVK,
             db::INDEX_HD_ACCOUNT,
             db::INDEX_ADDRESSES_ACCOUNTS,
+            db::INDEX_EPHEMERAL_ADDRESSES_ADDRESS,
             db::INDEX_NF_MAP_LOCATOR_IDX,
             db::INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT,
             db::INDEX_ORCHARD_RECEIVED_NOTES_TX,

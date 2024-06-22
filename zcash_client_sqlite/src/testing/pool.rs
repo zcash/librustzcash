@@ -62,13 +62,14 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    zcash_client_backend::{
-        fees::TransactionBalance, proposal::Step, wallet::WalletTransparentOutput,
+    zcash_client_backend::wallet::WalletTransparentOutput,
+    zcash_primitives::transaction::{
+        components::{OutPoint, TxOut},
+        fees::zip317,
     },
-    zcash_primitives::transaction::components::{OutPoint, TxOut},
 };
 
-#[cfg(any(feature = "transparent-inputs", feature = "orchard"))]
+#[cfg(feature = "orchard")]
 use zcash_client_backend::PoolType;
 
 pub(crate) type OutputRecoveryError = Error<
@@ -301,14 +302,8 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
 
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
-    use std::collections::BTreeSet;
-
-    use nonempty::NonEmpty;
-    use zcash_client_backend::{
-        fees::ChangeValue,
-        proposal::{Proposal, StepOutput, StepOutputIndex},
-    };
-    use zcash_primitives::{legacy::keys::IncomingViewingKey, transaction::TxId};
+    use zcash_address::ZcashAddress;
+    use zcash_client_backend::fees::ChangeValue;
 
     let mut st = TestBuilder::new()
         .with_block_cache()
@@ -318,151 +313,168 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
 
-    // Add funds to the wallet in a single note
-    let value = NonNegativeAmount::const_from_u64(100000);
-    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-    st.scan_cached_blocks(h, 1);
-
-    // Spendable balance matches total balance
-    assert_eq!(st.get_total_balance(account.account_id()), value);
-    assert_eq!(st.get_spendable_balance(account.account_id(), 1), value);
-
-    assert_eq!(
-        block_max_scanned(&st.wallet().conn, &st.wallet().params)
-            .unwrap()
-            .unwrap()
-            .block_height(),
-        h
-    );
-
-    // Generate a single-step proposal. Then, instead of executing that proposal,
-    // we will use its only step as the first step in a multi-step proposal that
-    // spends the first step's output.
-
-    // The first step will deshield to the wallet's default transparent address
-    let to0 = Address::Transparent(account.usk().default_transparent_address().0);
-    let request0 = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        to0.to_zcash_address(&st.network()),
-        NonNegativeAmount::const_from_u64(50000),
-    )])
-    .unwrap();
-
     let fee_rule = StandardFeeRule::Zip317;
     let input_selector = GreedyInputSelector::new(
         standard::SingleOutputChangeStrategy::new(fee_rule, None, T::SHIELDED_PROTOCOL),
         DustOutputPolicy::default(),
     );
-    let proposal0 = st
-        .propose_transfer(
-            account.account_id(),
-            &input_selector,
-            request0,
-            NonZeroU32::new(1).unwrap(),
-        )
+
+    let add_funds = |st: &mut TestState<_>, value| {
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        st.scan_cached_blocks(h, 1);
+
+        assert_eq!(
+            block_max_scanned(&st.wallet().conn, &st.wallet().params)
+                .unwrap()
+                .unwrap()
+                .block_height(),
+            h
+        );
+        assert_eq!(st.get_spendable_balance(account.account_id(), 1), value);
+    };
+
+    let value = NonNegativeAmount::const_from_u64(100000);
+    let amount = NonNegativeAmount::const_from_u64(50000);
+
+    let run_test = |st: &mut TestState<_>, expected_index| {
+        // Add funds to the wallet.
+        add_funds(st, value);
+
+        let expected_step0_fee = (zip317::MARGINAL_FEE * 3).unwrap();
+        let expected_step1_fee = zip317::MINIMUM_FEE;
+        let expected_ephemeral = (amount + expected_step1_fee).unwrap();
+        let expected_step0_change =
+            (value - expected_ephemeral - expected_step0_fee).expect("sufficient funds");
+        assert!(expected_step0_change.is_positive());
+
+        // Generate a ZIP 320 proposal, sending to the wallet's default transparent address
+        // expressed as a TEX address.
+        let tex_addr = match account.usk().default_transparent_address().0 {
+            TransparentAddress::PublicKeyHash(data) => Address::Tex(data),
+            _ => unreachable!(),
+        };
+        let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+            tex_addr.to_zcash_address(&st.network()),
+            amount,
+        )])
         .unwrap();
 
-    let min_target_height = proposal0.min_target_height();
-    let step0 = &proposal0.steps().head;
+        let proposal = st
+            .propose_transfer(
+                account.account_id(),
+                &input_selector,
+                request,
+                NonZeroU32::new(1).unwrap(),
+            )
+            .unwrap();
 
-    assert_eq!(
-        step0.balance().proposed_change(),
-        [ChangeValue::shielded(
-            T::SHIELDED_PROTOCOL,
-            NonNegativeAmount::const_from_u64(35000),
-            None
-        )]
-    );
-    assert_eq!(
-        step0.balance().fee_required(),
-        NonNegativeAmount::const_from_u64(15000)
-    );
+        let steps: Vec<_> = proposal.steps().iter().cloned().collect();
+        assert_eq!(steps.len(), 2);
 
-    // We'll use an internal transparent address that hasn't been added to the wallet
-    // to simulate an external transparent recipient.
-    let to1 = Address::Transparent(
-        account
-            .usk()
-            .transparent()
-            .to_account_pubkey()
-            .derive_internal_ivk()
-            .unwrap()
-            .default_address()
-            .0,
-    );
-    let request1 = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        to1.to_zcash_address(&st.network()),
-        NonNegativeAmount::const_from_u64(40000),
+        assert_eq!(
+            steps[0].balance().proposed_change(),
+            [
+                ChangeValue::shielded(T::SHIELDED_PROTOCOL, expected_step0_change, None),
+                ChangeValue::transparent((amount + expected_step1_fee).unwrap()),
+            ]
+        );
+        assert_eq!(steps[0].balance().fee_required(), expected_step0_fee);
+        assert_eq!(steps[1].balance().proposed_change(), []);
+        assert_eq!(steps[1].balance().fee_required(), expected_step1_fee);
+
+        let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
+        );
+        assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 2);
+        let txids = create_proposed_result.unwrap();
+
+        // Verify that the stored sent outputs match what we're expecting.
+        let mut stmt_sent = st
+            .wallet()
+            .conn
+            .prepare(
+                "SELECT value, to_address, ephemeral_addresses.address, ephemeral_addresses.address_index
+                 FROM sent_notes
+                 JOIN transactions ON transactions.id_tx = sent_notes.tx
+                 LEFT JOIN ephemeral_addresses ON ephemeral_addresses.used_in_tx = sent_notes.tx
+                 WHERE transactions.txid = ?
+                 ORDER BY value",
+            )
+            .unwrap();
+
+        // Check that there are sent outputs with the correct values.
+        let confirmed_sent: Vec<Vec<_>> = txids
+            .iter()
+            .map(|sent_txid| {
+                stmt_sent
+                    .query(rusqlite::params![sent_txid.as_ref()])
+                    .unwrap()
+                    .mapped(|row| {
+                        let v: u32 = row.get(0)?;
+                        let to_address: Option<String> = row.get(1)?;
+                        let ephemeral_address: Option<String> = row.get(2)?;
+                        let address_index: Option<u32> = row.get(3)?;
+                        Ok((u64::from(v), to_address, ephemeral_address, address_index))
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap()
+            })
+            .collect();
+
+        assert!(expected_step0_change < expected_ephemeral);
+        assert_eq!(confirmed_sent.len(), 2);
+        assert_eq!(confirmed_sent[0].len(), 2);
+        assert_eq!(
+            confirmed_sent[0][0].0,
+            u64::try_from(expected_step0_change).unwrap()
+        );
+        let (ephemeral_v, to_addr, ephemeral_addr, index) = confirmed_sent[0][1].clone();
+        assert_eq!(ephemeral_v, u64::try_from(expected_ephemeral).unwrap());
+        assert!(to_addr.is_some());
+        assert_eq!(ephemeral_addr, to_addr);
+        assert_eq!(index, Some(expected_index));
+
+        assert_eq!(confirmed_sent[1].len(), 1);
+        assert_matches!(
+            confirmed_sent[1][0].clone(),
+            (sent_v, sent_to_addr, None, None)
+            if sent_v == u64::try_from(amount).unwrap() && sent_to_addr == Some(tex_addr.encode(&st.wallet().params)));
+
+        (ephemeral_addr.unwrap(), txids.head)
+    };
+
+    // Each transfer should use a different ephemeral address.
+    let (ephemeral0, txid0) = run_test(&mut st, 0);
+    let (ephemeral1, _) = run_test(&mut st, 1);
+    assert!(ephemeral0 != ephemeral1);
+
+    add_funds(&mut st, value);
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        ZcashAddress::try_from_encoded(&ephemeral0).expect("valid address"),
+        amount,
     )])
     .unwrap();
 
-    let step1 = Step::from_parts(
-        &[step0.clone()],
-        request1,
-        [(0, PoolType::TRANSPARENT)].into_iter().collect(),
-        vec![],
-        None,
-        vec![StepOutput::new(0, StepOutputIndex::Payment(0))],
-        TransactionBalance::new(vec![], NonNegativeAmount::const_from_u64(10000)).unwrap(),
-        false,
-    )
-    .unwrap();
-
-    let proposal = Proposal::multi_step(
-        fee_rule,
-        min_target_height,
-        NonEmpty::from_vec(vec![step0.clone(), step1]).unwrap(),
-    )
-    .unwrap();
+    // Attempting to use the same address again should cause an error.
+    let proposal = st
+        .propose_transfer(
+            account.account_id(),
+            &input_selector,
+            request,
+            NonZeroU32::new(1).unwrap(),
+        )
+        .unwrap();
 
     let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal,
     );
-    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 2);
-    let txids = create_proposed_result.unwrap();
-
-    // Verify that the stored sent outputs match what we're expecting
-    let mut stmt_sent = st
-        .wallet()
-        .conn
-        .prepare(
-            "SELECT value
-            FROM sent_notes
-            JOIN transactions ON transactions.id_tx = sent_notes.tx
-            WHERE transactions.txid = ?",
-        )
-        .unwrap();
-
-    // Check that there are sent outputs with the correct values for each transaction.
-    let confirmed_sent: Vec<BTreeSet<(&TxId, u32)>> = txids
-        .iter()
-        .map(|sent_txid| {
-            stmt_sent
-                .query(rusqlite::params![sent_txid.as_ref()])
-                .unwrap()
-                .mapped(|row| {
-                    let value: u32 = row.get(0)?;
-                    Ok((sent_txid, value))
-                })
-                .collect::<Result<BTreeSet<_>, _>>()
-                .unwrap()
-        })
-        .collect();
-
-    assert_eq!(
-        confirmed_sent.get(0),
-        Some(
-            &[(&txids[0], 35000), (&txids[0], 50000)]
-                .iter()
-                .cloned()
-                .collect()
-        ),
-    );
-    assert_eq!(
-        confirmed_sent.get(1),
-        Some(&[(&txids[1], 40000)].iter().cloned().collect()),
-    );
+    assert_matches!(
+        &create_proposed_result,
+        Err(Error::DataSource(SqliteClientError::EphemeralAddressReuse(addr, Some(txid)))) if addr == &ephemeral0 && txid == &txid0);
 }
 
 #[allow(deprecated)]

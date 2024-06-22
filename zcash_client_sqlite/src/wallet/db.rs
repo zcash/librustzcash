@@ -76,6 +76,43 @@ CREATE INDEX "addresses_accounts" ON "addresses" (
     "account_id" ASC
 )"#;
 
+/// Stores ephemeral transparent addresses used for ZIP 320. For each account, these addresses are
+/// allocated sequentially by address index under custom scope 2 at the "change" level of the BIP 32
+/// address hierarchy. Only "reserved" ephemeral addresses, that is addresses that have been allocated
+/// for use in a ZIP 320 transaction proposal, are stored in the table. Addresses are never removed.
+/// New ones should only be reserved via the `WalletWrite::reserve_next_n_ephemeral_addresses` API.
+/// All of the addresses in the table should be scanned for incoming funds.
+///
+/// ### Columns
+/// - `address` contains the string (Base58Check) encoding of a transparent P2PKH address.
+/// - `used_in_tx` indicates that the address has been used by this wallet in a transaction (which
+///   has not necessarily been mined yet). This should only be set once, when the txid is known.
+/// - `mined_in_tx` is non-null iff the address has been observed in a mined transaction (which may
+///   have been sent by this wallet or another one using the same seed, or by a TEX address recipient
+///   sending back the funds). This is used to advance the "gap limit", as well as to heuristically
+///   reduce the chance of address reuse collisions with another wallet using the same seed.
+///
+/// Note that the fact that `used_in_tx` and `mined_in_tx` reference specific transactions is primarily
+/// a debugging aid. We only really care which addresses have been used, and whether we can allocate
+/// a new address within the gap limit.
+pub(super) const TABLE_EPHEMERAL_ADDRESSES: &str = r#"
+CREATE TABLE ephemeral_addresses (
+    account_id INTEGER NOT NULL,
+    address_index INTEGER NOT NULL,
+    address TEXT NOT NULL,
+    used_in_tx INTEGER,
+    mined_in_tx INTEGER,
+    FOREIGN KEY (account_id) REFERENCES accounts(id),
+    FOREIGN KEY (used_in_tx) REFERENCES transactions(id_tx),
+    FOREIGN KEY (mined_in_tx) REFERENCES transactions(id_tx),
+    PRIMARY KEY (account_id, address_index)
+) WITHOUT ROWID"#;
+// "WITHOUT ROWID" tells SQLite to use a clustered index on the (composite) primary key.
+pub(super) const INDEX_EPHEMERAL_ADDRESSES_ADDRESS: &str = r#"
+CREATE INDEX ephemeral_addresses_address ON ephemeral_addresses (
+    address ASC
+)"#;
+
 /// Stores information about every block that the wallet has scanned.
 ///
 /// Note that this table does not contain any rows for blocks that the wallet might have

@@ -17,7 +17,8 @@ use crate::ShieldedProtocol;
 
 use super::{
     common::{calculate_net_flows, single_change_output_balance, single_change_output_policy},
-    sapling as sapling_fees, ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance,
+    sapling as sapling_fees, ChangeError, ChangeStrategy, DustOutputPolicy, NonNegativeAmount,
+    TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
@@ -67,7 +68,10 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
+        #[cfg(feature = "transparent-inputs")] ephemeral_input_amounts: &[NonNegativeAmount],
+        #[cfg(feature = "transparent-inputs")] ephemeral_output_amounts: &[NonNegativeAmount],
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
+        // We intentionally never count ephemeral inputs as dust.
         let mut transparent_dust: Vec<_> = transparent_inputs
             .iter()
             .filter_map(|i| {
@@ -115,6 +119,10 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             let t_non_dust = transparent_inputs.len() - transparent_dust.len();
             let t_allowed_dust = transparent_outputs.len().saturating_sub(t_non_dust);
 
+            #[cfg(not(feature = "transparent-inputs"))]
+            let (ephemeral_input_amounts, ephemeral_output_amounts) =
+                (&[] as &[NonNegativeAmount], &[] as &[NonNegativeAmount]);
+
             // We add one to either the Sapling or Orchard outputs for the (single)
             // change output. Note that this means that wallet-internal shielding
             // transactions are an opportunity to spend a dust note.
@@ -124,6 +132,8 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 sapling,
                 #[cfg(feature = "orchard")]
                 orchard,
+                ephemeral_input_amounts,
+                ephemeral_output_amounts,
             )?;
             let (_, sapling_change, orchard_change) =
                 single_change_output_policy(&net_flows, self.fallback_change_pool);
@@ -206,6 +216,10 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             self.fee_rule.marginal_fee(),
             self.change_memo.clone(),
             self.fallback_change_pool,
+            #[cfg(feature = "transparent-inputs")]
+            ephemeral_input_amounts,
+            #[cfg(feature = "transparent-inputs")]
+            ephemeral_output_amounts,
         )
     }
 }
@@ -268,6 +282,10 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
+            #[cfg(feature = "transparent-inputs")]
+            &[],
+            #[cfg(feature = "transparent-inputs")]
+            &[],
         );
 
         assert_matches!(
@@ -311,6 +329,10 @@ mod tests {
                 ))][..],
             ),
             &DustOutputPolicy::default(),
+            #[cfg(feature = "transparent-inputs")]
+            &[],
+            #[cfg(feature = "transparent-inputs")]
+            &[],
         );
 
         assert_matches!(
@@ -363,6 +385,10 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             dust_output_policy,
+            #[cfg(feature = "transparent-inputs")]
+            &[],
+            #[cfg(feature = "transparent-inputs")]
+            &[],
         );
 
         assert_matches!(
@@ -406,6 +432,10 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
+            #[cfg(feature = "transparent-inputs")]
+            &[],
+            #[cfg(feature = "transparent-inputs")]
+            &[],
         );
 
         assert_matches!(
@@ -449,6 +479,10 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
+            #[cfg(feature = "transparent-inputs")]
+            &[],
+            #[cfg(feature = "transparent-inputs")]
+            &[],
         );
 
         assert_matches!(
@@ -498,6 +532,10 @@ mod tests {
                 DustAction::AllowDustChange,
                 Some(NonNegativeAmount::const_from_u64(1000)),
             ),
+            #[cfg(feature = "transparent-inputs")]
+            &[],
+            #[cfg(feature = "transparent-inputs")]
+            &[],
         );
 
         assert_matches!(
@@ -558,6 +596,10 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             dust_output_policy,
+            #[cfg(feature = "transparent-inputs")]
+            &[],
+            #[cfg(feature = "transparent-inputs")]
+            &[],
         );
 
         assert_matches!(
@@ -610,6 +652,10 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
+            #[cfg(feature = "transparent-inputs")]
+            &[],
+            #[cfg(feature = "transparent-inputs")]
+            &[],
         );
 
         // We will get an error here, because the dust input now isn't free to add

@@ -292,14 +292,14 @@ impl<FeeRuleT: Debug, NoteRef> Debug for Proposal<FeeRuleT, NoteRef> {
 }
 
 /// A reference to either a payment or change output within a step.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StepOutputIndex {
     Payment(usize),
     Change(usize),
 }
 
 /// A reference to the output of a step in a proposal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StepOutput {
     step_index: usize,
     output_index: StepOutputIndex,

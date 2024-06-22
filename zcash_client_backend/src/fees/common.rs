@@ -5,7 +5,11 @@ use zcash_primitives::{
     memo::MemoBytes,
     transaction::{
         components::amount::{BalanceError, NonNegativeAmount},
-        fees::{transparent, zip317::MINIMUM_FEE, FeeRule},
+        fees::{
+            transparent::{self, InputSize},
+            zip317::{MINIMUM_FEE, P2PKH_STANDARD_OUTPUT_SIZE},
+            FeeRule,
+        },
     },
 };
 use zcash_protocol::ShieldedProtocol;
@@ -49,6 +53,8 @@ pub(crate) fn calculate_net_flows<NoteRefT: Clone, F: FeeRule, E>(
     transparent_outputs: &[impl transparent::OutputView],
     sapling: &impl sapling_fees::BundleView<NoteRefT>,
     #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
+    ephemeral_input_amounts: &[NonNegativeAmount],
+    ephemeral_output_amounts: &[NonNegativeAmount],
 ) -> Result<NetFlows, ChangeError<E, NoteRefT>>
 where
     E: From<F::Error> + From<BalanceError>,
@@ -58,11 +64,13 @@ where
     let t_in = transparent_inputs
         .iter()
         .map(|t_in| t_in.coin().value)
+        .chain(ephemeral_input_amounts.iter().cloned())
         .sum::<Option<_>>()
         .ok_or_else(overflow)?;
     let t_out = transparent_outputs
         .iter()
         .map(|t_out| t_out.value())
+        .chain(ephemeral_output_amounts.iter().cloned())
         .sum::<Option<_>>()
         .ok_or_else(overflow)?;
     let sapling_in = sapling
@@ -156,6 +164,8 @@ pub(crate) fn single_change_output_balance<
     default_dust_threshold: NonNegativeAmount,
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedProtocol,
+    #[cfg(feature = "transparent-inputs")] ephemeral_input_amounts: &[NonNegativeAmount],
+    #[cfg(feature = "transparent-inputs")] ephemeral_output_amounts: &[NonNegativeAmount],
 ) -> Result<TransactionBalance, ChangeError<E, NoteRefT>>
 where
     E: From<F::Error> + From<BalanceError>,
@@ -163,12 +173,18 @@ where
     let overflow = || ChangeError::StrategyError(E::from(BalanceError::Overflow));
     let underflow = || ChangeError::StrategyError(E::from(BalanceError::Underflow));
 
+    #[cfg(not(feature = "transparent-inputs"))]
+    let (ephemeral_input_amounts, ephemeral_output_amounts) =
+        (&[] as &[NonNegativeAmount], &[] as &[NonNegativeAmount]);
+
     let net_flows = calculate_net_flows::<NoteRefT, F, E>(
         transparent_inputs,
         transparent_outputs,
         sapling,
         #[cfg(feature = "orchard")]
         orchard,
+        ephemeral_input_amounts,
+        ephemeral_output_amounts,
     )?;
     let total_in = net_flows
         .total_in()
@@ -240,12 +256,29 @@ where
     // Note that using the `DustAction::AddDustToFee` policy inherently leaks
     // more information.
 
+    let transparent_input_sizes = transparent_inputs
+        .iter()
+        .map(|i| i.serialized_size())
+        .chain(
+            ephemeral_input_amounts
+                .iter()
+                .map(|_| InputSize::STANDARD_P2PKH),
+        );
+    let transparent_output_sizes = transparent_outputs
+        .iter()
+        .map(|i| i.serialized_size())
+        .chain(
+            ephemeral_output_amounts
+                .iter()
+                .map(|_| P2PKH_STANDARD_OUTPUT_SIZE),
+        );
+
     let fee_without_change = fee_rule
         .fee_required(
             params,
             target_height,
-            transparent_inputs.iter().map(|i| i.serialized_size()),
-            transparent_outputs.iter().map(|i| i.serialized_size()),
+            transparent_input_sizes.clone(),
+            transparent_output_sizes.clone(),
             sapling_input_count,
             sapling_output_count,
             orchard_action_count,
@@ -258,8 +291,8 @@ where
             .fee_required(
                 params,
                 target_height,
-                transparent_inputs.iter().map(|i| i.serialized_size()),
-                transparent_outputs.iter().map(|i| i.serialized_size()),
+                transparent_input_sizes,
+                transparent_output_sizes,
                 sapling_input_count,
                 sapling_output_count_with_change,
                 orchard_action_count_with_change,
@@ -274,7 +307,8 @@ where
         (total_out + fee_without_change).ok_or_else(overflow)?;
     let total_out_plus_fee_with_change = (total_out + fee_with_change).ok_or_else(overflow)?;
 
-    let (change, fee) = {
+    #[allow(unused_mut)]
+    let (mut change, fee) = {
         if transparent && total_in < total_out_plus_fee_without_change {
             // Case 1 for a tx with all transparent flows.
             return Err(ChangeError::InsufficientFunds {
@@ -362,6 +396,12 @@ where
             }
         }
     };
+    #[cfg(feature = "transparent-inputs")]
+    change.extend(
+        ephemeral_output_amounts
+            .iter()
+            .map(|&amount| ChangeValue::transparent(amount)),
+    );
 
     TransactionBalance::new(change, fee).map_err(|_| overflow())
 }

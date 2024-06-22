@@ -116,6 +116,10 @@ pub mod proposed_input {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TransactionBalance {
     /// A list of change output values.
+    ///
+    /// Each `ChangeValue` for the transparent value pool must be consumed by
+    /// a subsequent step. These represent ephemeral outputs that will each be
+    /// given a unique t-address.
     #[prost(message, repeated, tag = "1")]
     pub proposed_change: ::prost::alloc::vec::Vec<ChangeValue>,
     /// The fee to be paid by the proposed transaction, in zatoshis.

@@ -3,6 +3,7 @@ mod add_transaction_views;
 mod add_utxo_account;
 mod addresses_table;
 mod ensure_orchard_ua_receiver;
+mod ephemeral_addresses;
 mod full_account_ids;
 mod initial_setup;
 mod nullifier_map;
@@ -66,6 +67,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                                             orchard_received_notes
     //                                                  /         \
     //                           ensure_orchard_ua_receiver     utxos_to_txos
+    //                                                                |
+    //                                                       ephemeral_addresses
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -116,6 +119,7 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
             params: params.clone(),
         }),
         Box::new(utxos_to_txos::Migration),
+        Box::new(ephemeral_addresses::Migration),
     ]
 }
 

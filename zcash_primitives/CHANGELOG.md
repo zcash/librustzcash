@@ -11,6 +11,9 @@ and this library adheres to Rust's notion of
   - `impl From<TransparentKeyScope> for bip32::ChildNumber`
   - `impl From<NonHardenedChildIndex> for bip32::ChildNumber`
   - `impl TryFrom<bip32::ChildNumber> for NonHardenedChildIndex`
+  - `EphemeralIvk`
+  - `AccountPubKey::derive_ephemeral_ivk`
+  - `TransparentKeyScope::custom` is now `const`.
 - `zcash_primitives::legacy::Script::serialized_size`
 - `zcash_primitives::transaction::fees::transparent`:
   - `InputSize`

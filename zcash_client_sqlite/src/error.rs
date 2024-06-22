@@ -16,7 +16,7 @@ use crate::PRUNING_DEPTH;
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::encoding::TransparentCodecError,
-    zcash_primitives::legacy::TransparentAddress,
+    zcash_primitives::{legacy::TransparentAddress, transaction::TxId},
 };
 
 /// The primary error type for the SQLite wallet backend.
@@ -112,6 +112,17 @@ pub enum SqliteClientError {
 
     /// An error occurred in computing wallet balance
     BalanceError(BalanceError),
+
+    /// The proposal cannot be constructed until transactions with previously reserved
+    /// ephemeral address outputs have been mined.
+    #[cfg(feature = "transparent-inputs")]
+    ReachedGapLimit,
+
+    /// An ephemeral address (given in string form) would be reused, or incorrectly used as an
+    /// external address. If it is known to have been used in a previous transaction, the txid
+    /// is given.
+    #[cfg(feature = "transparent-inputs")]
+    EphemeralAddressReuse(String, Option<TxId>),
 }
 
 impl error::Error for SqliteClientError {
@@ -162,6 +173,12 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::ChainHeightUnknown => write!(f, "Chain height unknown; please call `update_chain_tip`"),
             SqliteClientError::UnsupportedPoolType(t) => write!(f, "Pool type is not currently supported: {}", t),
             SqliteClientError::BalanceError(e) => write!(f, "Balance error: {}", e),
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::ReachedGapLimit => write!(f, "The proposal cannot be constructed until transactions with previously reserved ephemeral address outputs have been mined."),
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::EphemeralAddressReuse(address_str, Some(txid)) => write!(f, "The ephemeral address {address_str} previously used in txid {txid} would be reused."),
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::EphemeralAddressReuse(address_str, None) => write!(f, "The ephemeral address {address_str} would be reused, or incorrectly used as an external address."),
         }
     }
 }
