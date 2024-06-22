@@ -602,7 +602,7 @@ where
                         // The ephemeral output should always be at the last change index.
                         assert_eq!(
                             *balance.proposed_change().last().expect("nonempty"),
-                            ChangeValue::transparent(ephemeral_output_amounts[0])
+                            ChangeValue::ephemeral_transparent(ephemeral_output_amounts[0])
                         );
                         let ephemeral_stepoutput = StepOutput::new(
                             0,

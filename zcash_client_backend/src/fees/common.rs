@@ -400,7 +400,7 @@ where
     change.extend(
         ephemeral_output_amounts
             .iter()
-            .map(|&amount| ChangeValue::transparent(amount)),
+            .map(|&amount| ChangeValue::ephemeral_transparent(amount)),
     );
 
     TransactionBalance::new(change, fee).map_err(|_| overflow())

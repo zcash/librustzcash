@@ -72,7 +72,7 @@ pub struct ReceivedOutput {
     #[prost(uint64, tag = "4")]
     pub value: u64,
 }
-/// A reference a payment in a prior step of the proposal. This payment must
+/// A reference to a payment in a prior step of the proposal. This payment must
 /// belong to the wallet.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -82,7 +82,7 @@ pub struct PriorStepOutput {
     #[prost(uint32, tag = "2")]
     pub payment_index: u32,
 }
-/// A reference a change output from a prior step of the proposal.
+/// A reference to a change or ephemeral output from a prior step of the proposal.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PriorStepChange {
@@ -115,32 +115,36 @@ pub mod proposed_input {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TransactionBalance {
-    /// A list of change output values.
-    ///
-    /// Each `ChangeValue` for the transparent value pool must be consumed by
-    /// a subsequent step. These represent ephemeral outputs that will each be
-    /// given a unique t-address.
+    /// A list of change or ephemeral output values.
     #[prost(message, repeated, tag = "1")]
     pub proposed_change: ::prost::alloc::vec::Vec<ChangeValue>,
     /// The fee to be paid by the proposed transaction, in zatoshis.
     #[prost(uint64, tag = "2")]
     pub fee_required: u64,
 }
-/// A proposed change output. If the transparent value pool is selected,
-/// the `memo` field must be null.
+/// A proposed change or ephemeral output. If the transparent value pool is
+/// selected, the `memo` field must be null.
+///
+/// When the `isEphemeral` field of a `ChangeValue` is set, it represents
+/// an ephemeral output, which must be spent by a subsequent step. This is
+/// only supported for transparent outputs. Each ephemeral output will be
+/// given a unique t-address.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ChangeValue {
-    /// The value of a change output to be created, in zatoshis.
+    /// The value of a change or ephemeral output to be created, in zatoshis.
     #[prost(uint64, tag = "1")]
     pub value: u64,
-    /// The value pool in which the change output should be created.
+    /// The value pool in which the change or ephemeral output should be created.
     #[prost(enumeration = "ValuePool", tag = "2")]
     pub value_pool: i32,
-    /// The optional memo that should be associated with the newly created change output.
-    /// Memos must not be present for transparent change outputs.
+    /// The optional memo that should be associated with the newly created output.
+    /// Memos must not be present for transparent outputs.
     #[prost(message, optional, tag = "3")]
     pub memo: ::core::option::Option<MemoBytes>,
+    /// Whether this is to be an ephemeral output.
+    #[prost(bool, tag = "4")]
+    pub is_ephemeral: bool,
 }
 /// An object wrapper for memo bytes, to facilitate representing the
 /// `change_memo == None` case.

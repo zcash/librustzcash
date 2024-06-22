@@ -335,7 +335,7 @@ pub const PROPOSAL_SER_V1: u32 = 1;
 /// representation.
 #[derive(Debug, Clone)]
 pub enum ProposalDecodingError<DbError> {
-    /// The encoded proposal contained no steps
+    /// The encoded proposal contained no steps.
     NoSteps,
     /// The ZIP 321 transaction request URI was invalid.
     Zip321(Zip321Error),
@@ -366,6 +366,8 @@ pub enum ProposalDecodingError<DbError> {
     TransparentMemo,
     /// Change outputs to the specified pool are not supported.
     InvalidChangeRecipient(PoolType),
+    /// Ephemeral outputs to the specified pool are not supported.
+    InvalidEphemeralRecipient(PoolType),
 }
 
 impl<E> From<Zip321Error> for ProposalDecodingError<E> {
@@ -422,6 +424,11 @@ impl<E: Display> Display for ProposalDecodingError<E> {
             ProposalDecodingError::InvalidChangeRecipient(pool_type) => write!(
                 f,
                 "Change outputs to the {} pool are not supported.",
+                pool_type
+            ),
+            ProposalDecodingError::InvalidEphemeralRecipient(pool_type) => write!(
+                f,
+                "Ephemeral outputs to the {} pool are not supported.",
                 pool_type
             ),
         }
@@ -572,6 +579,7 @@ impl proposal::Proposal {
                             memo: change.memo().map(|memo_bytes| proposal::MemoBytes {
                                 value: memo_bytes.as_slice().to_vec(),
                             }),
+                            is_ephemeral: change.is_ephemeral(),
                         })
                         .collect(),
                     fee_required: step.balance().fee_required().into(),
@@ -662,7 +670,7 @@ impl proposal::Proposal {
                                     PoolType::Transparent => {
                                         #[cfg(not(feature = "transparent-inputs"))]
                                         return Err(ProposalDecodingError::ValuePoolNotSupported(
-                                            1,
+                                            out.value_pool,
                                         ));
 
                                         #[cfg(feature = "transparent-inputs")]
@@ -751,18 +759,27 @@ impl proposal::Proposal {
                                             .map_err(ProposalDecodingError::MemoInvalid)
                                     })
                                     .transpose()?;
-                                match cv.pool_type()? {
-                                    PoolType::Shielded(ShieldedProtocol::Sapling) => {
+                                match (cv.pool_type()?, cv.is_ephemeral) {
+                                    (PoolType::Shielded(ShieldedProtocol::Sapling), false) => {
                                         Ok(ChangeValue::sapling(value, memo))
                                     }
                                     #[cfg(feature = "orchard")]
-                                    PoolType::Shielded(ShieldedProtocol::Orchard) => {
+                                    (PoolType::Shielded(ShieldedProtocol::Orchard), false) => {
                                         Ok(ChangeValue::orchard(value, memo))
                                     }
-                                    PoolType::Transparent if memo.is_some() => {
+                                    (PoolType::Transparent, _) if memo.is_some() => {
                                         Err(ProposalDecodingError::TransparentMemo)
                                     }
-                                    t => Err(ProposalDecodingError::InvalidChangeRecipient(t)),
+                                    #[cfg(feature = "transparent-inputs")]
+                                    (PoolType::Transparent, true) => {
+                                        Ok(ChangeValue::ephemeral_transparent(value))
+                                    }
+                                    (pool, false) => {
+                                        Err(ProposalDecodingError::InvalidChangeRecipient(pool))
+                                    }
+                                    (pool, true) => {
+                                        Err(ProposalDecodingError::InvalidEphemeralRecipient(pool))
+                                    }
                                 }
                             })
                             .collect::<Result<Vec<_>, _>>()?,

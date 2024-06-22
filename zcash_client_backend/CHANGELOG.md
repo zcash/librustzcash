@@ -29,7 +29,7 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   - `chain::BlockCache` trait, behind the `sync` feature flag.
   - `WalletRead::get_spendable_transparent_outputs`.
 - `zcash_client_backend::fees`:
-  - `ChangeValue::{transparent, shielded}`
+  - `ChangeValue::{ephemeral_transparent, shielded}`
   - `sapling::EmptyBundleView`
   - `orchard::EmptyBundleView`
 - `zcash_client_backend::proposal`:
@@ -64,6 +64,9 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   - The return type of `ChangeValue::output_pool`, and the type of the
     `output_pool` argument to `ChangeValue::new`, have changed from
     `ShieldedProtocol` to `zcash_protocol::PoolType`.
+  - `ChangeValue::new` takes an additional `is_ephemeral` parameter indicating
+    whether the value is ephemeral (i.e. for use in a subsequent proposal step)
+    or change.
   - The return type of `ChangeValue::new` is now optional; it returns `None`
     if a memo is given for the transparent pool. Use `ChangeValue::shielded`
     to avoid this error case when creating a `ChangeValue` known to be for a
@@ -75,6 +78,8 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
     Empty slices can be passed to obtain the previous behaviour.
 - `zcash_client_backend::input_selection::GreedyInputSelectorError` has a
   new variant `UnsupportedTexAddress`.
+- `zcash_client_backend::proto::ProposalDecodingError` has a new variant
+  `InvalidEphemeralRecipient`.
 - `zcash_client_backend::wallet::Recipient` variants have changed. Instead of
   wrapping protocol-address types, the `External` and `InternalAccount` variants
   now wrap a `zcash_address::ZcashAddress`. This simplifies the process of

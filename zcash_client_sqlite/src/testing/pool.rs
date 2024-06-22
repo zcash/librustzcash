@@ -302,7 +302,6 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
 
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
-    use zcash_address::ZcashAddress;
     use zcash_client_backend::fees::ChangeValue;
 
     let mut st = TestBuilder::new()
@@ -312,12 +311,6 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
-
-    let fee_rule = StandardFeeRule::Zip317;
-    let input_selector = GreedyInputSelector::new(
-        standard::SingleOutputChangeStrategy::new(fee_rule, None, T::SHIELDED_PROTOCOL),
-        DustOutputPolicy::default(),
-    );
 
     let add_funds = |st: &mut TestState<_>, value| {
         let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
@@ -353,34 +346,37 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
             TransparentAddress::PublicKeyHash(data) => Address::Tex(data),
             _ => unreachable!(),
         };
-        let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
-            tex_addr.to_zcash_address(&st.network()),
-            amount,
-        )])
-        .unwrap();
+        // As of this commit, change memos are not correctly handled in ZIP 320 proposals.
+        let change_memo = None;
 
+        // We use `st.propose_standard_transfer` here in order to also test round-trip
+        // serialization of the proposal.
         let proposal = st
-            .propose_transfer(
+            .propose_standard_transfer::<Infallible>(
                 account.account_id(),
-                &input_selector,
-                request,
+                StandardFeeRule::Zip317,
                 NonZeroU32::new(1).unwrap(),
+                &tex_addr,
+                amount,
+                None,
+                change_memo.clone(),
+                T::SHIELDED_PROTOCOL,
             )
             .unwrap();
 
         let steps: Vec<_> = proposal.steps().iter().cloned().collect();
         assert_eq!(steps.len(), 2);
 
+        assert_eq!(steps[0].balance().fee_required(), expected_step0_fee);
+        assert_eq!(steps[1].balance().fee_required(), expected_step1_fee);
         assert_eq!(
             steps[0].balance().proposed_change(),
             [
-                ChangeValue::shielded(T::SHIELDED_PROTOCOL, expected_step0_change, None),
-                ChangeValue::transparent((amount + expected_step1_fee).unwrap()),
+                ChangeValue::shielded(T::SHIELDED_PROTOCOL, expected_step0_change, change_memo),
+                ChangeValue::ephemeral_transparent((amount + expected_step1_fee).unwrap()),
             ]
         );
-        assert_eq!(steps[0].balance().fee_required(), expected_step0_fee);
         assert_eq!(steps[1].balance().proposed_change(), []);
-        assert_eq!(steps[1].balance().fee_required(), expected_step1_fee);
 
         let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
             account.usk(),
@@ -451,19 +447,24 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     assert!(ephemeral0 != ephemeral1);
 
     add_funds(&mut st, value);
-    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        ZcashAddress::try_from_encoded(&ephemeral0).expect("valid address"),
-        amount,
-    )])
-    .unwrap();
+
+    let ephemeral_taddr = Address::decode(&st.wallet().params, &ephemeral0).expect("valid address");
+    assert_matches!(
+        ephemeral_taddr,
+        Address::Transparent(TransparentAddress::PublicKeyHash(_))
+    );
 
     // Attempting to use the same address again should cause an error.
     let proposal = st
-        .propose_transfer(
+        .propose_standard_transfer::<Infallible>(
             account.account_id(),
-            &input_selector,
-            request,
+            StandardFeeRule::Zip317,
             NonZeroU32::new(1).unwrap(),
+            &ephemeral_taddr,
+            amount,
+            None,
+            None,
+            T::SHIELDED_PROTOCOL,
         )
         .unwrap();
 

@@ -27,28 +27,44 @@ pub struct ChangeValue {
     output_pool: PoolType,
     value: NonNegativeAmount,
     memo: Option<MemoBytes>,
+    is_ephemeral: bool,
 }
 
 impl ChangeValue {
-    /// Constructs a new change value from its constituent parts.
+    /// Constructs a new change or ephemeral value from its constituent parts.
+    ///
+    /// Currently, the only supported combinations are change sent to a shielded
+    /// pool, or (if the "transparent-inputs" feature is enabled) an ephemeral
+    /// output to the transparent pool.
     pub fn new(
         output_pool: PoolType,
         value: NonNegativeAmount,
         memo: Option<MemoBytes>,
+        is_ephemeral: bool,
     ) -> Option<Self> {
-        (matches!(output_pool, PoolType::Shielded(_)) || memo.is_none()).then_some(Self {
+        match output_pool {
+            PoolType::Shielded(_) => !is_ephemeral,
+            #[cfg(feature = "transparent-inputs")]
+            PoolType::Transparent => is_ephemeral && memo.is_none(),
+            #[cfg(not(feature = "transparent-inputs"))]
+            PoolType::Transparent => false,
+        }
+        .then_some(Self {
             output_pool,
             value,
             memo,
+            is_ephemeral,
         })
     }
 
-    /// Constructs a new change value that will be created as a transparent output.
-    pub fn transparent(value: NonNegativeAmount) -> Self {
+    /// Constructs a new ephemeral transparent output value.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn ephemeral_transparent(value: NonNegativeAmount) -> Self {
         Self {
             output_pool: PoolType::TRANSPARENT,
             value,
             memo: None,
+            is_ephemeral: true,
         }
     }
 
@@ -62,6 +78,7 @@ impl ChangeValue {
             output_pool: PoolType::Shielded(protocol),
             value,
             memo,
+            is_ephemeral: false,
         }
     }
 
@@ -76,19 +93,24 @@ impl ChangeValue {
         Self::shielded(ShieldedProtocol::Orchard, value, memo)
     }
 
-    /// Returns the pool to which the change output should be sent.
+    /// Returns the pool to which the change or ephemeral output should be sent.
     pub fn output_pool(&self) -> PoolType {
         self.output_pool
     }
 
-    /// Returns the value of the change output to be created, in zatoshis.
+    /// Returns the value of the change or ephemeral output to be created, in zatoshis.
     pub fn value(&self) -> NonNegativeAmount {
         self.value
     }
 
-    /// Returns the memo to be associated with the change output.
+    /// Returns the memo to be associated with the output.
     pub fn memo(&self) -> Option<&MemoBytes> {
         self.memo.as_ref()
+    }
+
+    /// Whether this is to be an ephemeral output.
+    pub fn is_ephemeral(&self) -> bool {
+        self.is_ephemeral
     }
 }
 

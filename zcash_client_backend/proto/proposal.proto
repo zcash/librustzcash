@@ -73,14 +73,14 @@ message ReceivedOutput {
     uint64 value = 4;
 }
 
-// A reference a payment in a prior step of the proposal. This payment must
+// A reference to a payment in a prior step of the proposal. This payment must
 // belong to the wallet.
 message PriorStepOutput {
     uint32 stepIndex = 1;
     uint32 paymentIndex = 2;
 }
 
-// A reference a change output from a prior step of the proposal.
+// A reference to a change or ephemeral output from a prior step of the proposal.
 message PriorStepChange {
     uint32 stepIndex = 1;
     uint32 changeIndex = 2;
@@ -112,26 +112,29 @@ enum FeeRule {
 
 // The proposed change outputs and fee value.
 message TransactionBalance {
-    // A list of change output values.
-    //
-    // Each `ChangeValue` for the transparent value pool must be consumed by
-    // a subsequent step. These represent ephemeral outputs that will each be
-    // given a unique t-address.
+    // A list of change or ephemeral output values.
     repeated ChangeValue proposedChange = 1;
     // The fee to be paid by the proposed transaction, in zatoshis.
     uint64 feeRequired = 2;
 }
 
-// A proposed change output. If the transparent value pool is selected,
-// the `memo` field must be null.
+// A proposed change or ephemeral output. If the transparent value pool is
+// selected, the `memo` field must be null.
+//
+// When the `isEphemeral` field of a `ChangeValue` is set, it represents
+// an ephemeral output, which must be spent by a subsequent step. This is
+// only supported for transparent outputs. Each ephemeral output will be
+// given a unique t-address.
 message ChangeValue {
-    // The value of a change output to be created, in zatoshis.
+    // The value of a change or ephemeral output to be created, in zatoshis.
     uint64 value = 1;
-    // The value pool in which the change output should be created.
+    // The value pool in which the change or ephemeral output should be created.
     ValuePool valuePool = 2;
-    // The optional memo that should be associated with the newly created change output.
-    // Memos must not be present for transparent change outputs.
+    // The optional memo that should be associated with the newly created output.
+    // Memos must not be present for transparent outputs.
     MemoBytes memo = 3;
+    // Whether this is to be an ephemeral output.
+    bool isEphemeral = 4;
 }
 
 // An object wrapper for memo bytes, to facilitate representing the

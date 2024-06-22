@@ -52,7 +52,7 @@ use crate::{
     decrypt_transaction,
     fees::{self, DustOutputPolicy},
     keys::UnifiedSpendingKey,
-    proposal::{Proposal, ProposalError, Step, StepOutputIndex},
+    proposal::{Proposal, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
     zip321::{self, Payment},
     PoolType, ShieldedProtocol,
@@ -74,7 +74,11 @@ use zip32::Scope;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::{fees::ChangeValue, proposal::StepOutput, wallet::TransparentAddressMetadata},
+    crate::{
+        fees::ChangeValue,
+        proposal::{ProposalError, StepOutput},
+        wallet::TransparentAddressMetadata,
+    },
     input_selection::ShieldingSelector,
     std::collections::HashMap,
     zcash_keys::encoding::AddressCodec,
@@ -624,8 +628,10 @@ where
         step_results.push((step, step_result));
     }
 
-    // Change step outputs represent ephemeral outputs that must be referenced exactly once.
-    // (We don't support transparent change.)
+    // Ephemeral outputs must be referenced exactly once. Currently this is all
+    // transparent outputs using `StepOutputIndex::Change`.
+    // TODO: if we support transparent change, this will need to be updated to
+    // not require it to be referenced by a later step.
     #[cfg(feature = "transparent-inputs")]
     if unused_transparent_outputs
         .into_keys()
@@ -670,32 +676,39 @@ where
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
-    #[cfg(feature = "transparent-inputs")]
+    #[allow(unused_variables)]
     let step_index = prior_step_results.len();
 
-    // Spending shielded outputs of prior multi-step transaction steps (either payments or change)
-    // is not supported.
+    // We only support spending transparent payments or ephemeral outputs from a prior step.
     //
-    // TODO: Maybe support this at some point? Doing so would require a higher-level approach in
-    // the wallet that waits for transactions with shielded outputs to be mined and only then
-    // attempts to perform the next step.
+    // TODO: Maybe support spending prior shielded outputs at some point? Doing so would require
+    // a higher-level approach in the wallet that waits for transactions with shielded outputs to
+    // be mined and only then attempts to perform the next step.
+    #[cfg(feature = "transparent-inputs")]
     for input_ref in proposal_step.prior_step_inputs() {
-        let prior_pool = prior_step_results
+        let supported = prior_step_results
             .get(input_ref.step_index())
             .and_then(|(prior_step, _)| match input_ref.output_index() {
-                StepOutputIndex::Payment(i) => prior_step.payment_pools().get(&i).cloned(),
-                StepOutputIndex::Change(i) => prior_step
-                    .balance()
-                    .proposed_change()
-                    .get(i)
-                    .map(|change| change.output_pool()),
+                StepOutputIndex::Payment(i) => prior_step
+                    .payment_pools()
+                    .get(&i)
+                    .map(|&pool| pool == PoolType::TRANSPARENT),
+                StepOutputIndex::Change(i) => {
+                    prior_step.balance().proposed_change().get(i).map(|change| {
+                        change.is_ephemeral() && change.output_pool() == PoolType::TRANSPARENT
+                    })
+                }
             })
             .ok_or(Error::Proposal(ProposalError::ReferenceError(*input_ref)))?;
 
-        // Return an error on trying to spend a prior shielded output.
-        if matches!(prior_pool, PoolType::Shielded(_)) {
+        // Return an error on trying to spend a prior shielded output or non-ephemeral change output.
+        if !supported {
             return Err(Error::ProposalNotSupported);
         }
+    }
+    #[cfg(not(feature = "transparent-inputs"))]
+    if !proposal_step.prior_step_inputs().is_empty() {
+        return Err(Error::ProposalNotSupported);
     }
 
     let account_id = wallet_db
