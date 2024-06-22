@@ -1856,8 +1856,10 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     // spends in the transaction.
     conn.execute(
         "UPDATE transparent_received_outputs
-         SET max_observed_unspent_height = NULL
-         WHERE max_observed_unspent_height > :height",
+         SET max_observed_unspent_height = CASE WHEN tx.mined_height <= :height THEN :height ELSE NULL END
+         FROM transactions tx
+         WHERE tx.id_tx = transaction_id
+         AND max_observed_unspent_height > :height",
         named_params![":height": u32::from(block_height)],
     )?;
 
@@ -1866,8 +1868,8 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     conn.execute(
         "UPDATE transactions
          SET block = NULL, mined_height = NULL, tx_index = NULL
-         WHERE block > ?",
-        [u32::from(block_height)],
+         WHERE mined_height > :height",
+        named_params![":height": u32::from(block_height)],
     )?;
 
     // If we're removing scanned blocks, we need to truncate the note commitment tree and remove

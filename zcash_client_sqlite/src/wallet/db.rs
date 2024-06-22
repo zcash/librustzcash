@@ -211,8 +211,8 @@ CREATE INDEX orchard_received_notes_tx ON orchard_received_notes (
 
 /// A junction table between received Orchard notes and the transactions that spend them.
 ///
-/// This is identical to [`TABLE_SAPLING_RECEIVED_NOTE_SPENDS`]; see its documentation for
-/// details.
+/// Thie plays the same role for Orchard notes as does [`TABLE_SAPLING_RECEIVED_NOTE_SPENDS`] for
+/// Sapling notes; see its documentation for details.
 pub(super) const TABLE_ORCHARD_RECEIVED_NOTE_SPENDS: &str = "
 CREATE TABLE orchard_received_note_spends (
     orchard_received_note_id INTEGER NOT NULL,
@@ -245,7 +245,10 @@ CREATE TABLE orchard_received_note_spends (
 /// - `transaction_id`: Reference to the transaction in which this TXO was created
 /// - `output_index`: The output index of this TXO in the transaction referred to by `transaction_id`
 /// - `account_id`: The account that controls spend authority for this TXO
-/// - `address`: The address to which this TXO was sent
+/// - `address`: The address to which this TXO was sent. We store this address to make querying
+///   for UTXOs for a single address easier, because when shielding we always select UTXOs
+///   for only a single address at a time to prevent linking addresses in the shielding
+///   transaction.
 /// - `script`: The full txout script
 /// - `value_zat`: The value of the TXO in zatoshis
 /// - `max_observed_unspent_height`: The maximum block height at which this TXO was either
