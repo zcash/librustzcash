@@ -93,8 +93,9 @@ CREATE INDEX "addresses_accounts" ON "addresses" (
 ///   reduce the chance of address reuse collisions with another wallet using the same seed.
 ///
 /// Note that the fact that `used_in_tx` and `mined_in_tx` reference specific transactions is primarily
-/// a debugging aid. We only really care which addresses have been used, and whether we can allocate
-/// a new address within the gap limit.
+/// a debugging aid (although the latter allows us to account for whether the referenced transaction
+/// is unmined). We only really care which addresses have been used, and whether we can allocate a
+/// new address within the gap limit.
 pub(super) const TABLE_EPHEMERAL_ADDRESSES: &str = r#"
 CREATE TABLE ephemeral_addresses (
     account_id INTEGER NOT NULL,

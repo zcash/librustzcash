@@ -804,12 +804,19 @@ pub(crate) fn reserve_next_n_ephemeral_addresses<P: consensus::Parameters>(
 
     let ephemeral_ivk = get_ephemeral_ivk(wdb.conn.0, &wdb.params, account_id)?;
 
+    // The inner join with `transactions` excludes addresses for which
+    // `mined_in_tx` is NULL. The query also excludes addresses observed
+    // to have been mined in a transaction that we currently see as unmined.
+    // This is conservative in terms of avoiding violation of the gap
+    // invariant: it can only cause us to get to the end of the gap (and
+    // start reporting `ReachedGapLimit` errors) sooner.
     let last_gap_index: i32 = wdb
         .conn
         .0
         .query_row(
             "SELECT address_index FROM ephemeral_addresses
-             WHERE account_id = :account_id AND mined_in_tx IS NOT NULL
+             JOIN transactions t ON t.id_tx = mined_in_tx
+             WHERE account_id = :account_id AND t.mined_height IS NOT NULL
              ORDER BY address_index DESC LIMIT 1",
             named_params![":account_id": account_id.0],
             |row| row.get::<_, u32>(0),
