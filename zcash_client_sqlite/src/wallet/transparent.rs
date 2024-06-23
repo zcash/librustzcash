@@ -687,18 +687,40 @@ fn ephemeral_address_check_internal<P: consensus::Parameters>(
 
 /// If `address` is one of our ephemeral addresses, mark it as having an output
 /// in the given mined transaction (which may or may not be a transaction we sent).
-/// This has no effect if `address` is not one of our ephemeral addresses.
+///
+/// `tx_ref` must be a valid transaction reference. This call has no effect if
+/// `address` is not one of our ephemeral addresses.
 pub(crate) fn mark_ephemeral_address_as_mined<P: consensus::Parameters>(
-    conn: &rusqlite::Connection,
-    params: &P,
+    wdb: &mut WalletDb<SqlTransaction<'_>, P>,
     address: &TransparentAddress,
     tx_ref: i64,
 ) -> Result<(), SqliteClientError> {
-    let address_str = encode_transparent_address_p(params, address);
+    let address_str = encode_transparent_address_p(&wdb.params, address);
 
-    conn.execute(
+    // Figure out which transaction was mined earlier: `tx_ref`, or any existing
+    // tx referenced by `mined_in_tx` for the given address. Prefer the existing
+    // reference in case of a tie or if both transactions are unmined.
+    // This slightly reduces the chance of unnecessarily reaching the gap limit
+    // too early in some corner cases (because the earlier transaction is less
+    // likely to be unmined).
+    //
+    // The query should always return a value if `tx_ref` is valid.
+    let earlier_ref = wdb.conn.0.query_row(
+        "SELECT id_tx FROM transactions
+         LEFT OUTER JOIN ephemeral_addresses e
+         ON id_tx = e.mined_in_tx
+         WHERE id_tx = :tx_ref OR e.address = :address
+         ORDER BY mined_height ASC NULLS LAST,
+                  tx_index ASC NULLS LAST,
+                  e.mined_in_tx ASC NULLS LAST
+         LIMIT 1",
+        named_params![":tx_ref": &tx_ref, ":address": address_str],
+        |row| row.get::<_, i64>(0),
+    )?;
+
+    wdb.conn.0.execute(
         "UPDATE ephemeral_addresses SET mined_in_tx = :mined_in_tx WHERE address = :address",
-        named_params![":mined_in_tx": &tx_ref, ":address": address_str],
+        named_params![":mined_in_tx": &earlier_ref, ":address": address_str],
     )?;
     Ok(())
 }

@@ -1294,7 +1294,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             // *reliably* mined, because that is strictly more conservative in avoiding
                             // going over the gap limit.
                             #[cfg(feature = "transparent-inputs")]
-                            wallet::transparent::mark_ephemeral_address_as_mined(wdb.conn.0, &wdb.params, &address, tx_ref).map_err(SqliteClientError::from)?;
+                            wallet::transparent::mark_ephemeral_address_as_mined(wdb, &address, tx_ref)?;
 
                             let receiver = Receiver::Transparent(address);
 
