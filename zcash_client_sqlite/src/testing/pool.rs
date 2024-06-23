@@ -302,6 +302,8 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
 
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
+    use std::str::FromStr;
+
     use zcash_client_backend::fees::ChangeValue;
 
     let mut st = TestBuilder::new()
@@ -346,8 +348,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
             TransparentAddress::PublicKeyHash(data) => Address::Tex(data),
             _ => unreachable!(),
         };
-        // As of this commit, change memos are not correctly handled in ZIP 320 proposals.
-        let change_memo = None;
+        let change_memo = Some(Memo::from_str("change").expect("valid memo").encode());
 
         // We use `st.propose_standard_transfer` here in order to also test round-trip
         // serialization of the proposal.

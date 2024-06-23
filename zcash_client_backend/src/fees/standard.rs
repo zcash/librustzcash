@@ -68,6 +68,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
+        #[cfg(feature = "transparent-inputs")] ignore_change_memo: bool,
         #[cfg(feature = "transparent-inputs")] ephemeral_input_amounts: &[NonNegativeAmount],
         #[cfg(feature = "transparent-inputs")] ephemeral_output_amounts: &[NonNegativeAmount],
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
@@ -87,6 +88,8 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 #[cfg(feature = "orchard")]
                 orchard,
                 dust_output_policy,
+                #[cfg(feature = "transparent-inputs")]
+                ignore_change_memo,
                 #[cfg(feature = "transparent-inputs")]
                 ephemeral_input_amounts,
                 #[cfg(feature = "transparent-inputs")]
@@ -108,6 +111,8 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 orchard,
                 dust_output_policy,
                 #[cfg(feature = "transparent-inputs")]
+                ignore_change_memo,
+                #[cfg(feature = "transparent-inputs")]
                 ephemeral_input_amounts,
                 #[cfg(feature = "transparent-inputs")]
                 ephemeral_output_amounts,
@@ -127,6 +132,8 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 #[cfg(feature = "orchard")]
                 orchard,
                 dust_output_policy,
+                #[cfg(feature = "transparent-inputs")]
+                ignore_change_memo,
                 #[cfg(feature = "transparent-inputs")]
                 ephemeral_input_amounts,
                 #[cfg(feature = "transparent-inputs")]

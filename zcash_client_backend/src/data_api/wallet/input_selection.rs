@@ -475,6 +475,8 @@ where
                         &orchard_fees::EmptyBundleView,
                         &self.dust_output_policy,
                         #[cfg(feature = "transparent-inputs")]
+                        true,
+                        #[cfg(feature = "transparent-inputs")]
                         &[NonNegativeAmount::ZERO],
                         #[cfg(feature = "transparent-inputs")]
                         &[],
@@ -493,6 +495,8 @@ where
                     #[cfg(feature = "orchard")]
                     &orchard_fees::EmptyBundleView,
                     &self.dust_output_policy,
+                    #[cfg(feature = "transparent-inputs")]
+                    true,
                     #[cfg(feature = "transparent-inputs")]
                     &[tr1_required_input_value],
                     #[cfg(feature = "transparent-inputs")]
@@ -573,6 +577,8 @@ where
                     &orchard_outputs[..],
                 ),
                 &self.dust_output_policy,
+                #[cfg(feature = "transparent-inputs")]
+                false,
                 #[cfg(feature = "transparent-inputs")]
                 &[],
                 #[cfg(feature = "transparent-inputs")]
@@ -764,6 +770,8 @@ where
             &orchard_fees::EmptyBundleView,
             &self.dust_output_policy,
             #[cfg(feature = "transparent-inputs")]
+            false,
+            #[cfg(feature = "transparent-inputs")]
             &[],
             #[cfg(feature = "transparent-inputs")]
             &[],
@@ -784,6 +792,8 @@ where
                     #[cfg(feature = "orchard")]
                     &orchard_fees::EmptyBundleView,
                     &self.dust_output_policy,
+                    #[cfg(feature = "transparent-inputs")]
+                    false,
                     #[cfg(feature = "transparent-inputs")]
                     &[],
                     #[cfg(feature = "transparent-inputs")]

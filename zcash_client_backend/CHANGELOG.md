@@ -71,11 +71,12 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
     if a memo is given for the transparent pool. Use `ChangeValue::shielded`
     to avoid this error case when creating a `ChangeValue` known to be for a
     shielded pool.
-  - `ChangeStrategy::compute_balance`: this trait method has two additional
+  - `ChangeStrategy::compute_balance`: this trait method has three additional
     parameters when the "transparent-inputs" feature is enabled. These are
-    used to specify amounts of additional transparent P2PKH inputs and outputs,
-    for which `InputView` or `OutputView` instances may not be available.
-    Empty slices can be passed to obtain the previous behaviour.
+    used to specify whether the change memo should be ignored, and the amounts
+    of additional transparent P2PKH inputs and outputs. Passing `false` for
+    `ignore_change_memo` and empty slices for the other two arguments will
+    retain the previous behaviour.
 - `zcash_client_backend::input_selection::GreedyInputSelectorError` has a
   new variant `UnsupportedTexAddress`.
 - `zcash_client_backend::proto::ProposalDecodingError` has a new variant
