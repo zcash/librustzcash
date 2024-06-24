@@ -83,6 +83,7 @@ pub enum Recipient<AccountId, N, O> {
 }
 
 impl<AccountId, N, O> Recipient<AccountId, N, O> {
+    /// Return a copy of this `Recipient` with `f` applied to the note metadata, if any.
     pub fn map_internal_account_note<B, F: FnOnce(N) -> B>(
         self,
         f: F,
@@ -110,6 +111,7 @@ impl<AccountId, N, O> Recipient<AccountId, N, O> {
         }
     }
 
+    /// Return a copy of this `Recipient` with `f` applied to the output metadata, if any.
     pub fn map_ephemeral_transparent_outpoint<B, F: FnOnce(O) -> B>(
         self,
         f: F,
@@ -139,6 +141,8 @@ impl<AccountId, N, O> Recipient<AccountId, N, O> {
 }
 
 impl<AccountId, N, O> Recipient<AccountId, Option<N>, O> {
+    /// Return a copy of this `Recipient` with optional note metadata transposed to
+    /// an optional result.
     pub fn internal_account_note_transpose_option(self) -> Option<Recipient<AccountId, N, O>> {
         match self {
             Recipient::External(addr, pool) => Some(Recipient::External(addr, pool)),
