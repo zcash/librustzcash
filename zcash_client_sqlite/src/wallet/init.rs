@@ -177,7 +177,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
             unreachable!("we don't call methods that require a known chain height")
         }
         #[cfg(feature = "transparent-inputs")]
-        SqliteClientError::ReachedGapLimit => {
+        SqliteClientError::ReachedGapLimit(_, _) => {
             unreachable!("we don't do ephemeral address tracking")
         }
         #[cfg(feature = "transparent-inputs")]

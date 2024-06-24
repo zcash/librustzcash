@@ -633,6 +633,7 @@ impl OvkPolicy {
 }
 
 /// Metadata related to the ZIP 32 derivation of a transparent address.
+/// This is implicitly scoped to an account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg(feature = "transparent-inputs")]
 pub struct TransparentAddressMetadata {

@@ -1,19 +1,24 @@
 //! Functions for transparent input support in the wallet.
+use std::cmp::max;
+use std::collections::{HashMap, HashSet};
+
 use rusqlite::OptionalExtension;
 use rusqlite::{named_params, Connection, Row};
-use std::collections::HashMap;
-use std::collections::HashSet;
-use zcash_client_backend::data_api::AccountBalance;
-use zcash_keys::address::Address;
-use zcash_keys::keys::AddressGenerationError;
 use zip32::{DiversifierIndex, Scope};
 
 use zcash_address::unified::{Encoding, Ivk, Uivk};
-use zcash_client_backend::wallet::{TransparentAddressMetadata, WalletTransparentOutput};
-use zcash_keys::encoding::{encode_transparent_address_p, AddressCodec};
+use zcash_client_backend::{
+    data_api::AccountBalance,
+    keys::AddressGenerationError,
+    wallet::{TransparentAddressMetadata, WalletTransparentOutput},
+};
+use zcash_keys::{
+    address::Address,
+    encoding::{encode_transparent_address_p, AddressCodec},
+};
 use zcash_primitives::{
     legacy::{
-        keys::{EphemeralIvk, IncomingViewingKey, NonHardenedChildIndex, TransparentKeyScope},
+        keys::{EphemeralIvk, IncomingViewingKey, NonHardenedChildIndex},
         Script, TransparentAddress,
     },
     transaction::{
@@ -27,6 +32,8 @@ use crate::{error::SqliteClientError, AccountId, UtxoId};
 use crate::{SqlTransaction, WalletDb};
 
 use super::{chain_tip_height, get_account, get_account_ids};
+
+mod ephemeral;
 
 pub(crate) fn detect_spending_accounts<'a>(
     conn: &Connection,
@@ -494,7 +501,7 @@ pub(crate) fn find_account_for_transparent_output<P: consensus::Parameters>(
         return Ok(Some(account_id));
     }
 
-    // Note that this does not search ephemeral addresses that have not yet been reserved.
+    // Search ephemeral addresses that have already been reserved.
     if let Some(account_id) = conn
         .query_row(
             "SELECT account_id FROM ephemeral_addresses WHERE address = :address",
@@ -741,14 +748,6 @@ pub(crate) fn get_ephemeral_ivk<P: consensus::Parameters>(
         .derive_ephemeral_ivk()?)
 }
 
-// Same as Bitcoin.
-const GAP_LIMIT: i32 = 20;
-
-const EPHEMERAL_SCOPE: TransparentKeyScope = match TransparentKeyScope::custom(2) {
-    Some(s) => s,
-    None => unreachable!(),
-};
-
 /// Returns a vector with all ephemeral transparent addresses potentially belonging to this wallet.
 /// If `for_detection` is true, this includes addresses for an additional GAP_LIMIT indices.
 pub(crate) fn get_reserved_ephemeral_addresses<P: consensus::Parameters>(
@@ -771,30 +770,19 @@ pub(crate) fn get_reserved_ephemeral_addresses<P: consensus::Parameters>(
         first_unused_index = i32::try_from(raw_index)
             .map_err(|e| SqliteClientError::CorruptedData(e.to_string()))?
             .checked_add(1);
-        let address_index = NonHardenedChildIndex::from_index(raw_index).expect("just checked");
-        result.insert(
-            TransparentAddress::decode(params, &addr_str)?,
-            Some(TransparentAddressMetadata::new(
-                EPHEMERAL_SCOPE,
-                address_index,
-            )),
-        );
+        let address_index = NonHardenedChildIndex::from_index(raw_index).unwrap();
+        let address = TransparentAddress::decode(params, &addr_str)?;
+        result.insert(address, Some(ephemeral::metadata(address_index)));
     }
 
     if for_detection {
         if let Some(first) = first_unused_index {
             let ephemeral_ivk = get_ephemeral_ivk(conn, params, account_id)?;
 
-            for index in first..=first.saturating_add(GAP_LIMIT - 1) {
-                let address_index =
-                    NonHardenedChildIndex::from_index(index as u32).expect("valid index");
-                result.insert(
-                    ephemeral_ivk.derive_ephemeral_address(address_index)?,
-                    Some(TransparentAddressMetadata::new(
-                        EPHEMERAL_SCOPE,
-                        address_index,
-                    )),
-                );
+            for raw_index in ephemeral::range_after(first, ephemeral::GAP_LIMIT) {
+                let address_index = NonHardenedChildIndex::from_index(raw_index).unwrap();
+                let address = ephemeral_ivk.derive_ephemeral_address(address_index)?;
+                result.insert(address, Some(ephemeral::metadata(address_index)));
             }
         }
     }
@@ -827,52 +815,18 @@ pub(crate) fn reserve_next_n_ephemeral_addresses<P: consensus::Parameters>(
     assert!(n > 0);
 
     let ephemeral_ivk = get_ephemeral_ivk(wdb.conn.0, &wdb.params, account_id)?;
+    let last_reserved_index = ephemeral::last_reserved_index(wdb.conn.0, account_id)?;
+    let last_safe_index = ephemeral::last_safe_index(wdb.conn.0, account_id)?;
+    let allocation = ephemeral::range_after(last_reserved_index, n);
 
-    // The inner join with `transactions` excludes addresses for which
-    // `mined_in_tx` is NULL. The query also excludes addresses observed
-    // to have been mined in a transaction that we currently see as unmined.
-    // This is conservative in terms of avoiding violation of the gap
-    // invariant: it can only cause us to get to the end of the gap (and
-    // start reporting `ReachedGapLimit` errors) sooner.
-    let last_gap_index: i32 = wdb
-        .conn
-        .0
-        .query_row(
-            "SELECT address_index FROM ephemeral_addresses
-             JOIN transactions t ON t.id_tx = mined_in_tx
-             WHERE account_id = :account_id AND t.mined_height IS NOT NULL
-             ORDER BY address_index DESC LIMIT 1",
-            named_params![":account_id": account_id.0],
-            |row| row.get::<_, u32>(0),
-        )
-        .optional()?
-        .map_or(Ok(-1i32), |i| {
-            i32::try_from(i).map_err(|e| SqliteClientError::CorruptedData(e.to_string()))
-        })?
-        .saturating_add(GAP_LIMIT);
-
-    let (first_index, last_index) = wdb
-        .conn
-        .0
-        .query_row(
-            "SELECT address_index FROM ephemeral_addresses
-             WHERE account_id = :account_id
-             ORDER BY address_index DESC LIMIT 1",
-            named_params![":account_id": account_id.0],
-            |row| row.get::<_, u32>(0),
-        )
-        .optional()?
-        .map_or(Ok(-1i32), |i| {
-            i32::try_from(i).map_err(|e| SqliteClientError::CorruptedData(e.to_string()))
-        })
-        .map(|i: i32| i.checked_add(1).zip(i.checked_add(n.try_into().ok()?)))?
-        .ok_or(SqliteClientError::AddressGeneration(
+    if allocation.clone().count() < n.try_into().unwrap() {
+        return Err(SqliteClientError::AddressGeneration(
             AddressGenerationError::DiversifierSpaceExhausted,
-        ))?;
-
-    assert!(last_index >= first_index);
-    if last_index > last_gap_index {
-        return Err(SqliteClientError::ReachedGapLimit);
+        ));
+    }
+    if *allocation.end() > last_safe_index {
+        let unsafe_index = max(*allocation.start(), last_safe_index.saturating_add(1));
+        return Err(SqliteClientError::ReachedGapLimit(account_id, unsafe_index));
     }
 
     // used_in_tx and mined_in_tx are initially NULL
@@ -881,20 +835,17 @@ pub(crate) fn reserve_next_n_ephemeral_addresses<P: consensus::Parameters>(
          VALUES (:account_id, :address_index, :address)",
     )?;
 
-    (first_index..=last_index)
-        .map(|address_index| {
-            let child = NonHardenedChildIndex::from_index(address_index as u32)
-                .expect("valid by construction");
-            let address = ephemeral_ivk.derive_ephemeral_address(child)?;
+    allocation
+        .map(|raw_index| {
+            let address_index = NonHardenedChildIndex::from_index(raw_index).unwrap();
+            let address = ephemeral_ivk.derive_ephemeral_address(address_index)?;
+
             stmt_insert_ephemeral_address.execute(named_params![
                 ":account_id": account_id.0,
-                ":address_index": address_index,
+                ":address_index": raw_index,
                 ":address": encode_transparent_address_p(&wdb.params, &address)
             ])?;
-            Ok((
-                address,
-                TransparentAddressMetadata::new(EPHEMERAL_SCOPE, child),
-            ))
+            Ok((address, ephemeral::metadata(address_index)))
         })
         .collect()
 }

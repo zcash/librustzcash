@@ -15,6 +15,7 @@ use crate::PRUNING_DEPTH;
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    crate::AccountId,
     zcash_client_backend::encoding::TransparentCodecError,
     zcash_primitives::{legacy::TransparentAddress, transaction::TxId},
 };
@@ -114,9 +115,10 @@ pub enum SqliteClientError {
     BalanceError(BalanceError),
 
     /// The proposal cannot be constructed until transactions with previously reserved
-    /// ephemeral address outputs have been mined.
+    /// ephemeral address outputs have been mined. The parameters are the account id and
+    /// the index that could not safely be reserved.
     #[cfg(feature = "transparent-inputs")]
-    ReachedGapLimit,
+    ReachedGapLimit(AccountId, u32),
 
     /// An ephemeral address would be reused, or incorrectly used as an external address.
     /// The parameters are the address in string form, and if it is known to have been
@@ -175,7 +177,10 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::UnsupportedPoolType(t) => write!(f, "Pool type is not currently supported: {}", t),
             SqliteClientError::BalanceError(e) => write!(f, "Balance error: {}", e),
             #[cfg(feature = "transparent-inputs")]
-            SqliteClientError::ReachedGapLimit => write!(f, "The proposal cannot be constructed until transactions with previously reserved ephemeral address outputs have been mined."),
+            SqliteClientError::ReachedGapLimit(account_id, bad_index) => write!(f,
+                "The proposal cannot be constructed until transactions with previously reserved ephemeral address outputs have been mined. \
+                 The ephemeral address in account {account_id:?} at index {bad_index} could not be safely reserved.",
+            ),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::EphemeralAddressReuse(address_str, Some(txid)) => write!(f, "The ephemeral address {address_str} previously used in txid {txid} would be reused."),
             #[cfg(feature = "transparent-inputs")]
