@@ -188,131 +188,133 @@ impl RusqliteMigration for Migration {
             FROM transparent_received_output_spends;
 
             CREATE VIEW v_transactions AS
-                WITH
-                notes AS (
-                    -- Outputs received in this transaction
-                    SELECT ro.account_id              AS account_id,
-                           transactions.mined_height  AS mined_height,
-                           transactions.txid          AS txid,
-                           ro.pool                    AS pool,
-                           id_within_pool_table,
-                           ro.value                   AS value,
-                           CASE
-                                WHEN ro.is_change THEN 1
-                                ELSE 0
-                           END AS is_change,
-                           CASE
-                                WHEN ro.is_change THEN 0
-                                ELSE 1
-                           END AS received_count,
-                           CASE
-                             WHEN (ro.memo IS NULL OR ro.memo = X'F6')
-                               THEN 0
-                             ELSE 1
-                           END AS memo_present
-                    FROM v_received_outputs ro
-                    JOIN transactions
-                         ON transactions.id_tx = ro.transaction_id
-                    UNION
-                    -- Outputs spent in this transaction
-                    SELECT ro.account_id              AS account_id,
-                           transactions.mined_height  AS mined_height,
-                           transactions.txid          AS txid,
-                           ro.pool                    AS pool,
-                           id_within_pool_table,
-                           -ro.value                  AS value,
-                           0                          AS is_change,
-                           0                          AS received_count,
-                           0                          AS memo_present
-                    FROM v_received_outputs ro
-                    JOIN v_received_output_spends ros
-                         ON ros.pool = ro.pool
-                         AND ros.received_output_id = ro.id_within_pool_table
-                    JOIN transactions
-                         ON transactions.id_tx = ro.transaction_id
-                ),
-                -- Obtain a count of the notes that the wallet created in each transaction,
-                -- not counting change notes.
-                sent_note_counts AS (
-                    SELECT sent_notes.from_account_id     AS account_id,
-                           transactions.txid              AS txid,
-                           COUNT(DISTINCT sent_notes.id)  AS sent_notes,
-                           SUM(
-                             CASE
-                               WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6' OR ro.transaction_id IS NOT NULL)
-                                 THEN 0
-                               ELSE 1
-                             END
-                           ) AS memo_count
-                    FROM sent_notes
-                    JOIN transactions
-                         ON transactions.id_tx = sent_notes.tx
-                    LEFT JOIN v_received_outputs ro
-                         ON sent_notes.id = ro.sent_note_id
-                    WHERE COALESCE(ro.is_change, 0) = 0
-                    GROUP BY account_id, txid
-                ),
-                blocks_max_height AS (
-                    SELECT MAX(blocks.height) AS max_height FROM blocks
-                )
-                SELECT notes.account_id             AS account_id,
-                       notes.mined_height           AS mined_height,
-                       notes.txid                   AS txid,
-                       transactions.tx_index        AS tx_index,
-                       transactions.expiry_height   AS expiry_height,
-                       transactions.raw             AS raw,
-                       SUM(notes.value)             AS account_balance_delta,
-                       transactions.fee             AS fee_paid,
-                       SUM(notes.is_change) > 0     AS has_change,
-                       MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,
-                       SUM(notes.received_count)         AS received_note_count,
-                       SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
-                       blocks.time                       AS block_time,
-                       (
-                            blocks.height IS NULL
-                            AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height
-                       ) AS expired_unmined
-                FROM notes
-                LEFT JOIN transactions
-                     ON notes.txid = transactions.txid
-                JOIN blocks_max_height
-                LEFT JOIN blocks ON blocks.height = notes.mined_height
-                LEFT JOIN sent_note_counts
-                     ON sent_note_counts.account_id = notes.account_id
-                     AND sent_note_counts.txid = notes.txid
-                GROUP BY notes.account_id, notes.txid;
-
-            CREATE VIEW v_tx_outputs AS
-                SELECT transactions.txid            AS txid,
-                       ro.pool                      AS output_pool,
-                       ro.output_index              AS output_index,
-                       sent_notes.from_account_id   AS from_account_id,
-                       ro.account_id                AS to_account_id,
-                       NULL                         AS to_address,
-                       ro.value                     AS value,
-                       ro.is_change                 AS is_change,
-                       ro.memo                      AS memo
+            WITH
+            notes AS (
+                -- Outputs received in this transaction
+                SELECT ro.account_id              AS account_id,
+                       transactions.mined_height  AS mined_height,
+                       transactions.txid          AS txid,
+                       ro.pool                    AS pool,
+                       id_within_pool_table,
+                       ro.value                   AS value,
+                       CASE
+                            WHEN ro.is_change THEN 1
+                            ELSE 0
+                       END AS change_note_count,
+                       CASE
+                            WHEN ro.is_change THEN 0
+                            ELSE 1
+                       END AS received_count,
+                       CASE
+                         WHEN (ro.memo IS NULL OR ro.memo = X'F6')
+                           THEN 0
+                         ELSE 1
+                       END AS memo_present
                 FROM v_received_outputs ro
                 JOIN transactions
-                    ON transactions.id_tx = ro.transaction_id
-                LEFT JOIN sent_notes
-                    ON sent_notes.id = ro.sent_note_id
+                     ON transactions.id_tx = ro.transaction_id
                 UNION
-                SELECT transactions.txid            AS txid,
-                       sent_notes.output_pool       AS output_pool,
-                       sent_notes.output_index      AS output_index,
-                       sent_notes.from_account_id   AS from_account_id,
-                       ro.account_id                AS to_account_id,
-                       sent_notes.to_address        AS to_address,
-                       sent_notes.value             AS value,
-                       0                            AS is_change,
-                       sent_notes.memo              AS memo
+                -- Outputs spent in this transaction
+                SELECT ro.account_id              AS account_id,
+                       transactions.mined_height  AS mined_height,
+                       transactions.txid          AS txid,
+                       ro.pool                    AS pool,
+                       id_within_pool_table,
+                       -ro.value                  AS value,
+                       0                          AS change_note_count,
+                       0                          AS received_count,
+                       0                          AS memo_present
+                FROM v_received_outputs ro
+                JOIN v_received_output_spends ros
+                     ON ros.pool = ro.pool
+                     AND ros.received_output_id = ro.id_within_pool_table
+                JOIN transactions
+                     ON transactions.id_tx = ro.transaction_id
+            ),
+            -- Obtain a count of the notes that the wallet created in each transaction,
+            -- not counting change notes.
+            sent_note_counts AS (
+                SELECT sent_notes.from_account_id     AS account_id,
+                       transactions.txid              AS txid,
+                       COUNT(DISTINCT sent_notes.id)  AS sent_notes,
+                       SUM(
+                         CASE
+                           WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6' OR ro.transaction_id IS NOT NULL)
+                             THEN 0
+                           ELSE 1
+                         END
+                       ) AS memo_count
                 FROM sent_notes
                 JOIN transactions
-                    ON transactions.id_tx = sent_notes.tx
+                     ON transactions.id_tx = sent_notes.tx
                 LEFT JOIN v_received_outputs ro
-                    ON sent_notes.id = ro.sent_note_id
-                WHERE COALESCE(ro.is_change, 0) = 0;
+                     ON sent_notes.id = ro.sent_note_id
+                WHERE COALESCE(ro.is_change, 0) = 0
+                GROUP BY account_id, txid
+            ),
+            blocks_max_height AS (
+                SELECT MAX(blocks.height) AS max_height FROM blocks
+            )
+            SELECT notes.account_id             AS account_id,
+                   notes.mined_height           AS mined_height,
+                   notes.txid                   AS txid,
+                   transactions.tx_index        AS tx_index,
+                   transactions.expiry_height   AS expiry_height,
+                   transactions.raw             AS raw,
+                   SUM(notes.value)             AS account_balance_delta,
+                   transactions.fee             AS fee_paid,
+                   SUM(notes.change_note_count) > 0  AS has_change,
+                   MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,
+                   SUM(notes.received_count)         AS received_note_count,
+                   SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
+                   blocks.time                       AS block_time,
+                   (
+                        blocks.height IS NULL
+                        AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height
+                   ) AS expired_unmined
+            FROM notes
+            LEFT JOIN transactions
+                 ON notes.txid = transactions.txid
+            JOIN blocks_max_height
+            LEFT JOIN blocks ON blocks.height = notes.mined_height
+            LEFT JOIN sent_note_counts
+                 ON sent_note_counts.account_id = notes.account_id
+                 AND sent_note_counts.txid = notes.txid
+            GROUP BY notes.account_id, notes.txid;
+
+            CREATE VIEW v_tx_outputs AS
+            -- select all outputs received by the wallet
+            SELECT transactions.txid            AS txid,
+                   ro.pool                      AS output_pool,
+                   ro.output_index              AS output_index,
+                   sent_notes.from_account_id   AS from_account_id,
+                   ro.account_id                AS to_account_id,
+                   NULL                         AS to_address,
+                   ro.value                     AS value,
+                   ro.is_change                 AS is_change,
+                   ro.memo                      AS memo
+            FROM v_received_outputs ro
+            JOIN transactions
+                ON transactions.id_tx = ro.transaction_id
+            -- join to the sent_notes table to obtain `from_account_id`
+            LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
+            UNION
+            -- select all outputs sent from the wallet to external recipients
+            SELECT transactions.txid            AS txid,
+                   sent_notes.output_pool       AS output_pool,
+                   sent_notes.output_index      AS output_index,
+                   sent_notes.from_account_id   AS from_account_id,
+                   NULL                         AS to_account_id,
+                   sent_notes.to_address        AS to_address,
+                   sent_notes.value             AS value,
+                   FALSE                        AS is_change,
+                   sent_notes.memo              AS memo
+            FROM sent_notes
+            JOIN transactions
+                ON transactions.id_tx = sent_notes.tx
+            LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
+            -- exclude any sent notes for which a row exists in the v_received_outputs view
+            WHERE ro.account_id IS NULL;
 
             DROP TABLE utxos;
 

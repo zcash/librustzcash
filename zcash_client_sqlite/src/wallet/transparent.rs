@@ -365,7 +365,6 @@ pub(crate) fn add_transparent_account_balances(
     mempool_height: BlockHeight,
     account_balances: &mut HashMap<AccountId, AccountBalance>,
 ) -> Result<(), SqliteClientError> {
-    let transparent_trace = tracing::info_span!("stmt_transparent_balances").entered();
     let mut stmt_account_balances = conn.prepare(
         "SELECT u.account_id, SUM(u.value_zat)
          FROM transparent_received_outputs u
@@ -404,7 +403,6 @@ pub(crate) fn add_transparent_account_balances(
             .or_insert(AccountBalance::ZERO)
             .add_unshielded_value(value)?;
     }
-    drop(transparent_trace);
     Ok(())
 }
 

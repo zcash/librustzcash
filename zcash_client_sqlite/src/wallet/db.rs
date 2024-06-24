@@ -609,7 +609,7 @@ notes AS (
            CASE
                 WHEN ro.is_change THEN 1
                 ELSE 0
-           END AS is_change,
+           END AS change_note_count,
            CASE
                 WHEN ro.is_change THEN 0
                 ELSE 1
@@ -630,7 +630,7 @@ notes AS (
            ro.pool                    AS pool,
            id_within_pool_table,
            -ro.value                  AS value,
-           0                          AS is_change,
+           0                          AS change_note_count,
            0                          AS received_count,
            0                          AS memo_present
     FROM v_received_outputs ro
@@ -672,7 +672,7 @@ SELECT notes.account_id             AS account_id,
        transactions.raw             AS raw,
        SUM(notes.value)             AS account_balance_delta,
        transactions.fee             AS fee_paid,
-       SUM(notes.is_change) > 0     AS has_change,
+       SUM(notes.change_note_count) > 0  AS has_change,
        MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,
        SUM(notes.received_count)         AS received_note_count,
        SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
@@ -691,8 +691,22 @@ LEFT JOIN sent_note_counts
      AND sent_note_counts.txid = notes.txid
 GROUP BY notes.account_id, notes.txid";
 
+/// Selects all outputs received by the wallet, plus any outputs sent from the wallet to
+/// external recipients.
+///
+/// This will contain:
+/// * Outputs received from external recipients
+/// * Outputs sent to external recipients
+/// * Outputs received as part of a wallet-internal operation, including
+///   both outputs received as a consequence of wallet-internal transfers
+///   and as change.
+///
+/// The `to_address` column will only contain an address when the recipient is
+/// external. In all other cases, the recipient account id indicates the account
+/// that controls the output.
 pub(super) const VIEW_TX_OUTPUTS: &str = "
 CREATE VIEW v_tx_outputs AS
+-- select all outputs received by the wallet
 SELECT transactions.txid            AS txid,
        ro.pool                      AS output_pool,
        ro.output_index              AS output_index,
@@ -705,24 +719,25 @@ SELECT transactions.txid            AS txid,
 FROM v_received_outputs ro
 JOIN transactions
     ON transactions.id_tx = ro.transaction_id
-LEFT JOIN sent_notes
-    ON sent_notes.id = ro.sent_note_id
+-- join to the sent_notes table to obtain `from_account_id`
+LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
 UNION
+-- select all outputs sent from the wallet to external recipients
 SELECT transactions.txid            AS txid,
        sent_notes.output_pool       AS output_pool,
        sent_notes.output_index      AS output_index,
        sent_notes.from_account_id   AS from_account_id,
-       ro.account_id                AS to_account_id,
+       NULL                         AS to_account_id,
        sent_notes.to_address        AS to_address,
        sent_notes.value             AS value,
-       0                            AS is_change,
+       FALSE                        AS is_change,
        sent_notes.memo              AS memo
 FROM sent_notes
 JOIN transactions
     ON transactions.id_tx = sent_notes.tx
-LEFT JOIN v_received_outputs ro
-    ON sent_notes.id = ro.sent_note_id
-WHERE COALESCE(ro.is_change, 0) = 0";
+LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
+-- exclude any sent notes for which a row exists in the v_received_outputs view
+WHERE ro.account_id IS NULL";
 
 pub(super) fn view_sapling_shard_scan_ranges<P: Parameters>(params: &P) -> String {
     format!(

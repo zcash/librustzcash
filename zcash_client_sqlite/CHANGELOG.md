@@ -11,6 +11,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_sqlite::error::SqliteClientError` has changed variants:
   - Removed `HdwalletError`.
   - Added `TransparentDerivation`.
+- The `block` column of the `v_transactions` view has been renamed to `mined_height`.
 
 ## [0.10.3] - 2024-04-08
 
