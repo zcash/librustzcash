@@ -504,15 +504,32 @@ pub(crate) fn find_account_for_transparent_output<P: consensus::Parameters>(
         return Ok(Some(account_id));
     }
 
+    let account_ids = get_account_ids(conn)?;
+
     // If the UTXO is received at the legacy transparent address (at BIP 44 address
     // index 0 within its particular account, which we specifically ensure is returned
     // from `get_transparent_receivers`), there may be no entry in the addresses table
     // that can be used to tie the address to a particular account. In this case, we
     // look up the legacy address for each account in the wallet, and check whether it
     // matches the address for the received UTXO.
-    for account_id in get_account_ids(conn)? {
+    for &account_id in account_ids.iter() {
         if let Some((legacy_taddr, _)) = get_legacy_transparent_address(params, conn, account_id)? {
             if &legacy_taddr == output.recipient_address() {
+                return Ok(Some(account_id));
+            }
+        }
+    }
+
+    // Finally we check for ephemeral addresses within the gap limit.
+    for account_id in account_ids {
+        let ephemeral_ivk = ephemeral::get_ephemeral_ivk(conn, params, account_id)?;
+        let last_reserved_index = ephemeral::last_reserved_index(conn, account_id)?;
+
+        for raw_index in ephemeral::range_after(last_reserved_index, ephemeral::GAP_LIMIT) {
+            let address_index = NonHardenedChildIndex::from_index(raw_index).unwrap();
+
+            if &ephemeral_ivk.derive_ephemeral_address(address_index)? == output.recipient_address()
+            {
                 return Ok(Some(account_id));
             }
         }
