@@ -1157,7 +1157,7 @@ where
             .filter(|(_, change_value)| matches!(change_value.output_pool(), PoolType::Transparent))
             .collect();
         let num_ephemeral_outputs =
-            u32::try_from(ephemeral_outputs.len()).map_err(|_| Error::ProposalNotSupported)?;
+            i32::try_from(ephemeral_outputs.len()).map_err(|_| Error::ProposalNotSupported)?;
 
         let addresses_and_metadata = wallet_db
             .reserve_next_n_ephemeral_addresses(account_id, num_ephemeral_outputs)
