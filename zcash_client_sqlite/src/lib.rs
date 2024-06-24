@@ -540,7 +540,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         account: Self::AccountId,
         for_detection: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
-        wallet::transparent::get_reserved_ephemeral_addresses(
+        wallet::transparent::ephemeral::get_reserved_ephemeral_addresses(
             self.conn.borrow(),
             &self.params,
             account,
@@ -1294,7 +1294,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             // *reliably* mined, because that is strictly more conservative in avoiding
                             // going over the gap limit.
                             #[cfg(feature = "transparent-inputs")]
-                            wallet::transparent::mark_ephemeral_address_as_mined(wdb, &address, tx_ref)?;
+                            wallet::transparent::ephemeral::mark_ephemeral_address_as_mined(wdb, &address, tx_ref)?;
 
                             let receiver = Receiver::Transparent(address);
 
@@ -1450,7 +1450,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             ephemeral_address,
                             *receiving_account,
                         )?;
-                        wallet::transparent::mark_ephemeral_address_as_used(
+                        wallet::transparent::ephemeral::mark_ephemeral_address_as_used(
                             wdb,
                             ephemeral_address,
                             tx_ref,
@@ -1459,7 +1459,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     #[cfg(feature = "transparent-inputs")]
                     Recipient::External(zcash_address, PoolType::Transparent) => {
                         // Always reject sending to one of our ephemeral addresses.
-                        wallet::transparent::check_address_is_not_ephemeral(
+                        wallet::transparent::ephemeral::check_address_is_not_ephemeral(
                             wdb,
                             &zcash_address.encode(),
                         )?;
@@ -1485,7 +1485,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         n: i32,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         self.transactionally(|wdb| {
-            wallet::transparent::reserve_next_n_ephemeral_addresses(wdb, account_id, n)
+            wallet::transparent::ephemeral::reserve_next_n_ephemeral_addresses(wdb, account_id, n)
         })
     }
 }
