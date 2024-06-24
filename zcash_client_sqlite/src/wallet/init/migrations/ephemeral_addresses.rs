@@ -42,7 +42,8 @@ impl RusqliteMigration for Migration {
                 FOREIGN KEY (account_id) REFERENCES accounts(id),
                 FOREIGN KEY (used_in_tx) REFERENCES transactions(id_tx),
                 FOREIGN KEY (mined_in_tx) REFERENCES transactions(id_tx),
-                PRIMARY KEY (account_id, address_index)
+                PRIMARY KEY (account_id, address_index),
+                CONSTRAINT address_index_in_range CHECK (address_index >= 0 AND address_index <= 0x7FFFFFFF)
             ) WITHOUT ROWID;
             CREATE INDEX ephemeral_addresses_address ON ephemeral_addresses (
                 address ASC

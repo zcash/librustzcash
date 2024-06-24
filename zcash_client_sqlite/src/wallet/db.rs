@@ -106,8 +106,11 @@ CREATE TABLE ephemeral_addresses (
     FOREIGN KEY (account_id) REFERENCES accounts(id),
     FOREIGN KEY (used_in_tx) REFERENCES transactions(id_tx),
     FOREIGN KEY (mined_in_tx) REFERENCES transactions(id_tx),
-    PRIMARY KEY (account_id, address_index)
+    PRIMARY KEY (account_id, address_index),
+    CONSTRAINT address_index_in_range CHECK (address_index >= 0 AND address_index <= 0x7FFFFFFF)
 ) WITHOUT ROWID"#;
+// Hexadecimal integer literals were added in SQLite version 3.8.6 (2014-08-15).
+// libsqlite3-sys requires at least version 3.14.0.
 // "WITHOUT ROWID" tells SQLite to use a clustered index on the (composite) primary key.
 pub(super) const INDEX_EPHEMERAL_ADDRESSES_ADDRESS: &str = r#"
 CREATE INDEX ephemeral_addresses_address ON ephemeral_addresses (
