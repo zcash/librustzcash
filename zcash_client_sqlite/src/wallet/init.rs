@@ -395,8 +395,8 @@ mod tests {
             db::TABLE_SQLITE_SEQUENCE,
             db::TABLE_TRANSACTIONS,
             db::TABLE_TRANSPARENT_RECEIVED_OUTPUT_SPENDS,
+            db::TABLE_TRANSPARENT_RECEIVED_OUTPUTS,
             db::TABLE_TX_LOCATOR_MAP,
-            db::TABLE_UTXOS,
         ];
 
         let rows = describe_tables(&st.wallet().conn).unwrap();
@@ -421,7 +421,7 @@ mod tests {
             db::INDEX_SENT_NOTES_FROM_ACCOUNT,
             db::INDEX_SENT_NOTES_TO_ACCOUNT,
             db::INDEX_SENT_NOTES_TX,
-            db::INDEX_UTXOS_RECEIVED_BY_ACCOUNT,
+            db::INDEX_TRANSPARENT_RECEIVED_OUTPUTS_ACCOUNT_ID,
         ];
         let mut indices_query = st
             .wallet()
@@ -443,8 +443,8 @@ mod tests {
             db::view_orchard_shard_scan_ranges(&st.network()),
             db::view_orchard_shard_unscanned_ranges(),
             db::VIEW_ORCHARD_SHARDS_SCAN_STATE.to_owned(),
-            db::VIEW_RECEIVED_NOTE_SPENDS.to_owned(),
-            db::VIEW_RECEIVED_NOTES.to_owned(),
+            db::VIEW_RECEIVED_OUTPUT_SPENDS.to_owned(),
+            db::VIEW_RECEIVED_OUTPUTS.to_owned(),
             db::view_sapling_shard_scan_ranges(&st.network()),
             db::view_sapling_shard_unscanned_ranges(),
             db::VIEW_SAPLING_SHARDS_SCAN_STATE.to_owned(),

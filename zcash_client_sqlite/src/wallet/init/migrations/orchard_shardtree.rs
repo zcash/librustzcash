@@ -11,7 +11,7 @@ use zcash_client_backend::data_api::scanning::ScanPriority;
 use zcash_protocol::consensus::{self, BlockHeight, NetworkUpgrade};
 
 use super::shardtree_support;
-use crate::wallet::{init::WalletMigrationError, scan_queue_extrema, scanning::priority_code};
+use crate::wallet::{chain_tip_height, init::WalletMigrationError, scanning::priority_code};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x3a6487f7_e068_42bb_9d12_6bb8dbe6da00);
 
@@ -142,10 +142,10 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
         // Treat the current best-known chain tip height as the height to use for Orchard
         // initialization, bounded below by NU5 activation.
-        if let Some(orchard_init_height) = scan_queue_extrema(transaction)?.and_then(|r| {
+        if let Some(orchard_init_height) = chain_tip_height(transaction)?.and_then(|h| {
             self.params
                 .activation_height(NetworkUpgrade::Nu5)
-                .map(|orchard_activation| std::cmp::max(orchard_activation, *r.end()))
+                .map(|orchard_activation| std::cmp::max(orchard_activation, h))
         }) {
             // If a scan range exists that contains the Orchard init height, split it in two at the
             // init height.

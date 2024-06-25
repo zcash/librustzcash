@@ -59,9 +59,9 @@ pub(super) const INDEX_HD_ACCOUNT: &str =
 /// Stores diversified Unified Addresses that have been generated from accounts in the
 /// wallet.
 ///
-/// - The `cached_transparent_receiver_address` column contains the transparent receiver
-///   component of the UA. It is cached directly in the table to make account lookups for
-///   transparent outputs more efficient, enabling joins to [`TABLE_UTXOS`].
+/// - The `cached_transparent_receiver_address` column contains the transparent receiver component
+///   of the UA. It is cached directly in the table to make account lookups for transparent outputs
+///   more efficient, enabling joins to [`TABLE_TRANSPARENT_RECEIVED_OUTPUTS`].
 pub(super) const TABLE_ADDRESSES: &str = r#"
 CREATE TABLE "addresses" (
     account_id INTEGER NOT NULL,
@@ -80,7 +80,7 @@ CREATE INDEX "addresses_accounts" ON "addresses" (
 ///
 /// Note that this table does not contain any rows for blocks that the wallet might have
 /// observed partial information about (for example, a transparent output fetched and
-/// stored in [`TABLE_UTXOS`]). This may change in future.
+/// stored in [`TABLE_TRANSPARENT_RECEIVED_OUTPUTS`]). This may change in future.
 pub(super) const TABLE_BLOCKS: &str = "
 CREATE TABLE blocks (
     height INTEGER PRIMARY KEY,
@@ -99,22 +99,32 @@ CREATE TABLE blocks (
 /// data that is not recoverable from the chain (for example, transactions created by the
 /// wallet that expired before being mined).
 ///
-/// - The `block` column stores the height (in the wallet's chain view) of the mined block
-///   containing the transaction. It is `NULL` for transactions that have not yet been
-///   observed in scanned blocks, including transactions in the mempool or that have
-///   expired.
-pub(super) const TABLE_TRANSACTIONS: &str = "
-CREATE TABLE transactions (
+/// ### Columns
+/// - `created`: The time at which the transaction was created as a string in the format
+///   `yyyy-MM-dd HH:mm:ss.fffffffzzz`.
+/// - `block`: stores the height (in the wallet's chain view) of the mined block containing the
+///   transaction. It is `NULL` for transactions that have not yet been observed in scanned blocks,
+///   including transactions in the mempool or that have expired.
+/// - `mined_height`: stores the height (in the wallet's chain view) of the mined block containing
+///   the transaction. It is present to allow the block height for a retrieved transaction to be
+///   stored without requiring that the entire block containing the transaction be scanned; the
+///   foreign key constraint on `block` prevents that column from being populated prior to complete
+///   scanning of the block. This is constrained to be equal to the `block` column if `block` is
+///   non-null.
+pub(super) const TABLE_TRANSACTIONS: &str = r#"
+CREATE TABLE "transactions" (
     id_tx INTEGER PRIMARY KEY,
     txid BLOB NOT NULL UNIQUE,
     created TEXT,
     block INTEGER,
+    mined_height INTEGER,
     tx_index INTEGER,
     expiry_height INTEGER,
     raw BLOB,
     fee INTEGER,
-    FOREIGN KEY (block) REFERENCES blocks(height)
-)";
+    FOREIGN KEY (block) REFERENCES blocks(height),
+    CONSTRAINT height_consistency CHECK (block IS NULL OR mined_height = block)
+)"#;
 
 /// Stores the Sapling notes received by the wallet.
 ///
@@ -201,8 +211,8 @@ CREATE INDEX orchard_received_notes_tx ON orchard_received_notes (
 
 /// A junction table between received Orchard notes and the transactions that spend them.
 ///
-/// This is identical to [`TABLE_SAPLING_RECEIVED_NOTE_SPENDS`]; see its documentation for
-/// details.
+/// Thie plays the same role for Orchard notes as does [`TABLE_SAPLING_RECEIVED_NOTE_SPENDS`] for
+/// Sapling notes; see its documentation for details.
 pub(super) const TABLE_ORCHARD_RECEIVED_NOTE_SPENDS: &str = "
 CREATE TABLE orchard_received_note_spends (
     orchard_received_note_id INTEGER NOT NULL,
@@ -216,54 +226,75 @@ CREATE TABLE orchard_received_note_spends (
     UNIQUE (orchard_received_note_id, transaction_id)
 )";
 
-/// Stores the current UTXO set for the wallet, as well as any transparent outputs
-/// previously observed by the wallet.
+/// Stores the transparent outputs received by the wallet.
 ///
 /// Originally this table only stored the current UTXO set (as of latest refresh), and the
 /// table was cleared prior to loading in the latest UTXO set. We now upsert instead of
 /// insert into the database, meaning that spent outputs are left in the database. This
-/// makes it similar to the `*_received_notes` tables in that it can store history, but
-/// has several downsides:
-/// - The table has incomplete contents for recovered-from-seed wallets.
-/// - The table can have inconsistent contents for seeds loaded into multiple wallets
+/// makes it similar to the `*_received_notes` tables in that it can store history.
+/// Depending upon how transparent TXOs for the wallet are discovered, the following
+/// may be true:
+/// - The table may have incomplete contents for recovered-from-seed wallets.
+/// - The table may have inconsistent contents for seeds loaded into multiple wallets
 ///   simultaneously.
-/// - The wallet's transparent balance can be incorrect prior to "transaction enhancement"
+/// - The wallet's transparent balance may be incorrect prior to "transaction enhancement"
 ///   (downloading the full transaction containing the transparent output spend).
-pub(super) const TABLE_UTXOS: &str = r#"
-CREATE TABLE "utxos" (
+///
+/// ### Columns:
+/// - `id`: Primary key
+/// - `transaction_id`: Reference to the transaction in which this TXO was created
+/// - `output_index`: The output index of this TXO in the transaction referred to by `transaction_id`
+/// - `account_id`: The account that controls spend authority for this TXO
+/// - `address`: The address to which this TXO was sent. We store this address to make querying
+///   for UTXOs for a single address easier, because when shielding we always select UTXOs
+///   for only a single address at a time to prevent linking addresses in the shielding
+///   transaction.
+/// - `script`: The full txout script
+/// - `value_zat`: The value of the TXO in zatoshis
+/// - `max_observed_unspent_height`: The maximum block height at which this TXO was either
+///   observed to be a member of the UTXO set at the start of the block, or observed
+///   to be an output of a transaction mined in the block. This is intended to be used to
+///   determine when the TXO is no longer a part of the UTXO set, in the case that the
+///   transaction that spends it is not detected by the wallet.
+pub(super) const TABLE_TRANSPARENT_RECEIVED_OUTPUTS: &str = r#"
+CREATE TABLE transparent_received_outputs (
     id INTEGER PRIMARY KEY,
-    received_by_account_id INTEGER NOT NULL,
+    transaction_id INTEGER NOT NULL,
+    output_index INTEGER NOT NULL,
+    account_id INTEGER NOT NULL,
     address TEXT NOT NULL,
-    prevout_txid BLOB NOT NULL,
-    prevout_idx INTEGER NOT NULL,
     script BLOB NOT NULL,
     value_zat INTEGER NOT NULL,
-    height INTEGER NOT NULL,
-    FOREIGN KEY (received_by_account_id) REFERENCES accounts(id),
-    CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
+    max_observed_unspent_height INTEGER,
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id_tx),
+    FOREIGN KEY (account_id) REFERENCES accounts(id),
+    CONSTRAINT transparent_output_unique UNIQUE (transaction_id, output_index)
 )"#;
-pub(super) const INDEX_UTXOS_RECEIVED_BY_ACCOUNT: &str =
-    r#"CREATE INDEX utxos_received_by_account ON "utxos" (received_by_account_id)"#;
+pub(super) const INDEX_TRANSPARENT_RECEIVED_OUTPUTS_ACCOUNT_ID: &str = r#"
+CREATE INDEX idx_transparent_received_outputs_account_id
+ON "transparent_received_outputs" (account_id)"#;
 
-/// A junction table between received transparent outputs and the transactions that spend
-/// them.
+/// A junction table between received transparent outputs and the transactions that spend them.
 ///
-/// This is identical to [`TABLE_SAPLING_RECEIVED_NOTE_SPENDS`]; see its documentation for
-/// details. Note however that [`TABLE_UTXOS`] and [`TABLE_SAPLING_RECEIVED_NOTES`] are
-/// not equivalent, and care must be taken when interpreting the result of joining this
-/// table to [`TABLE_UTXOS`].
-pub(super) const TABLE_TRANSPARENT_RECEIVED_OUTPUT_SPENDS: &str = "
-CREATE TABLE transparent_received_output_spends (
+/// This plays the same role for transparent TXOs as does [`TABLE_SAPLING_RECEIVED_NOTE_SPENDS`]
+/// for Sapling notes. However, [`TABLE_TRANSPARENT_RECEIVED_OUTPUTS`] differs from
+/// [`TABLE_SAPLING_RECEIVED_NOTES`] and [`TABLE_ORCHARD_RECEIVED_NOTES`] in that an
+/// associated `transactions` record may have its `mined_height` set without there existing a
+/// corresponding record in the `blocks` table for a block at that height, due to the asymmetries
+/// between scanning for shielded notes and retrieving transparent TXOs currently implemented
+/// in [`zcash_client_backend`].
+pub(super) const TABLE_TRANSPARENT_RECEIVED_OUTPUT_SPENDS: &str = r#"
+CREATE TABLE "transparent_received_output_spends" (
     transparent_received_output_id INTEGER NOT NULL,
     transaction_id INTEGER NOT NULL,
     FOREIGN KEY (transparent_received_output_id)
-        REFERENCES utxos(id)
+        REFERENCES transparent_received_outputs(id)
         ON DELETE CASCADE,
     FOREIGN KEY (transaction_id)
         -- We do not delete transactions, so this does not cascade
         REFERENCES transactions(id_tx),
     UNIQUE (transparent_received_output_id, transaction_id)
-)";
+)"#;
 
 /// Stores the outputs of transactions created by the wallet.
 ///
@@ -497,219 +528,216 @@ pub(super) const TABLE_SQLITE_SEQUENCE: &str = "CREATE TABLE sqlite_sequence(nam
 // Views
 //
 
-pub(super) const VIEW_RECEIVED_NOTES: &str = "
-CREATE VIEW v_received_notes AS
-SELECT
-    sapling_received_notes.id AS id_within_pool_table,
-    sapling_received_notes.tx,
-    2 AS pool,
-    sapling_received_notes.output_index AS output_index,
-    account_id,
-    sapling_received_notes.value,
-    is_change,
-    sapling_received_notes.memo,
-    sent_notes.id AS sent_note_id
-FROM sapling_received_notes
-LEFT JOIN sent_notes
-ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
-    (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
+pub(super) const VIEW_RECEIVED_OUTPUTS: &str = "
+CREATE VIEW v_received_outputs AS
+    SELECT
+        sapling_received_notes.id AS id_within_pool_table,
+        sapling_received_notes.tx AS transaction_id,
+        2 AS pool,
+        sapling_received_notes.output_index,
+        account_id,
+        sapling_received_notes.value,
+        is_change,
+        sapling_received_notes.memo,
+        sent_notes.id AS sent_note_id
+    FROM sapling_received_notes
+    LEFT JOIN sent_notes
+    ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+       (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
 UNION
-SELECT
-    orchard_received_notes.id AS id_within_pool_table,
-    orchard_received_notes.tx,
-    3 AS pool,
-    orchard_received_notes.action_index AS output_index,
-    account_id,
-    orchard_received_notes.value,
-    is_change,
-    orchard_received_notes.memo,
-    sent_notes.id AS sent_note_id
-FROM orchard_received_notes
-LEFT JOIN sent_notes
-ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
-    (orchard_received_notes.tx, 3, orchard_received_notes.action_index)";
+    SELECT
+        orchard_received_notes.id AS id_within_pool_table,
+        orchard_received_notes.tx AS transaction_id,
+        3 AS pool,
+        orchard_received_notes.action_index AS output_index,
+        account_id,
+        orchard_received_notes.value,
+        is_change,
+        orchard_received_notes.memo,
+        sent_notes.id AS sent_note_id
+    FROM orchard_received_notes
+    LEFT JOIN sent_notes
+    ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+       (orchard_received_notes.tx, 3, orchard_received_notes.action_index)
+UNION
+    SELECT
+        u.id AS id_within_pool_table,
+        u.transaction_id,
+        0 AS pool,
+        u.output_index,
+        u.account_id,
+        u.value_zat AS value,
+        0 AS is_change,
+        NULL AS memo,
+        sent_notes.id AS sent_note_id
+    FROM transparent_received_outputs u
+    LEFT JOIN sent_notes
+    ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+       (u.transaction_id, 0, u.output_index)";
 
-pub(super) const VIEW_RECEIVED_NOTE_SPENDS: &str = "
-CREATE VIEW v_received_note_spends AS
+pub(super) const VIEW_RECEIVED_OUTPUT_SPENDS: &str = "
+CREATE VIEW v_received_output_spends AS
 SELECT
     2 AS pool,
-    sapling_received_note_id AS received_note_id,
+    sapling_received_note_id AS received_output_id,
     transaction_id
 FROM sapling_received_note_spends
 UNION
 SELECT
     3 AS pool,
-    orchard_received_note_id AS received_note_id,
+    orchard_received_note_id AS received_output_id,
     transaction_id
-FROM orchard_received_note_spends";
+FROM orchard_received_note_spends
+UNION
+SELECT
+    0 AS pool,
+    transparent_received_output_id AS received_output_id,
+    transaction_id
+FROM transparent_received_output_spends";
 
 pub(super) const VIEW_TRANSACTIONS: &str = "
 CREATE VIEW v_transactions AS
 WITH
 notes AS (
-    -- Shielded notes received in this transaction
-    SELECT v_received_notes.account_id     AS account_id,
-            transactions.block              AS block,
-            transactions.txid               AS txid,
-            v_received_notes.pool           AS pool,
-            id_within_pool_table,
-            v_received_notes.value          AS value,
-            CASE
-                WHEN v_received_notes.is_change THEN 1
+    -- Outputs received in this transaction
+    SELECT ro.account_id              AS account_id,
+           transactions.mined_height  AS mined_height,
+           transactions.txid          AS txid,
+           ro.pool                    AS pool,
+           id_within_pool_table,
+           ro.value                   AS value,
+           CASE
+                WHEN ro.is_change THEN 1
                 ELSE 0
-            END AS is_change,
-            CASE
-                WHEN v_received_notes.is_change THEN 0
+           END AS change_note_count,
+           CASE
+                WHEN ro.is_change THEN 0
                 ELSE 1
-            END AS received_count,
-            CASE
-                WHEN (v_received_notes.memo IS NULL OR v_received_notes.memo = X'F6')
-                THEN 0
-                ELSE 1
-            END AS memo_present
-    FROM v_received_notes
+           END AS received_count,
+           CASE
+             WHEN (ro.memo IS NULL OR ro.memo = X'F6')
+               THEN 0
+             ELSE 1
+           END AS memo_present
+    FROM v_received_outputs ro
     JOIN transactions
-            ON transactions.id_tx = v_received_notes.tx
+         ON transactions.id_tx = ro.transaction_id
     UNION
-    -- Transparent TXOs received in this transaction
-    SELECT utxos.received_by_account_id AS account_id,
-            utxos.height                 AS block,
-            utxos.prevout_txid           AS txid,
-            0                            AS pool,
-            utxos.id                     AS id_within_pool_table,
-            utxos.value_zat              AS value,
-            0                            AS is_change,
-            1                            AS received_count,
-            0                            AS memo_present
-    FROM utxos
-    UNION
-    -- Shielded notes spent in this transaction
-    SELECT v_received_notes.account_id  AS account_id,
-            transactions.block           AS block,
-            transactions.txid            AS txid,
-            v_received_notes.pool        AS pool,
-            id_within_pool_table,
-            -v_received_notes.value      AS value,
-            0                            AS is_change,
-            0                            AS received_count,
-            0                            AS memo_present
-    FROM v_received_notes
-    JOIN v_received_note_spends rns
-            ON rns.pool = v_received_notes.pool
-            AND rns.received_note_id = v_received_notes.id_within_pool_table
+    -- Outputs spent in this transaction
+    SELECT ro.account_id              AS account_id,
+           transactions.mined_height  AS mined_height,
+           transactions.txid          AS txid,
+           ro.pool                    AS pool,
+           id_within_pool_table,
+           -ro.value                  AS value,
+           0                          AS change_note_count,
+           0                          AS received_count,
+           0                          AS memo_present
+    FROM v_received_outputs ro
+    JOIN v_received_output_spends ros
+         ON ros.pool = ro.pool
+         AND ros.received_output_id = ro.id_within_pool_table
     JOIN transactions
-            ON transactions.id_tx = rns.transaction_id
-    UNION
-    -- Transparent TXOs spent in this transaction
-    SELECT utxos.received_by_account_id AS account_id,
-            transactions.block           AS block,
-            transactions.txid            AS txid,
-            0                            AS pool,
-            utxos.id                     AS id_within_pool_table,
-            -utxos.value_zat             AS value,
-            0                            AS is_change,
-            0                            AS received_count,
-            0                            AS memo_present
-    FROM utxos
-    JOIN transparent_received_output_spends tros
-            ON tros.transparent_received_output_id = utxos.id
-    JOIN transactions
-            ON transactions.id_tx = tros.transaction_id
+         ON transactions.id_tx = ro.transaction_id
 ),
 -- Obtain a count of the notes that the wallet created in each transaction,
 -- not counting change notes.
 sent_note_counts AS (
-    SELECT sent_notes.from_account_id AS account_id,
-            transactions.txid       AS txid,
-            COUNT(DISTINCT sent_notes.id) as sent_notes,
-            SUM(
-                CASE
-                WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6' OR v_received_notes.tx IS NOT NULL)
-                    THEN 0
-                ELSE 1
-                END
-            ) AS memo_count
+    SELECT sent_notes.from_account_id     AS account_id,
+           transactions.txid              AS txid,
+           COUNT(DISTINCT sent_notes.id)  AS sent_notes,
+           SUM(
+             CASE
+               WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6' OR ro.transaction_id IS NOT NULL)
+                 THEN 0
+               ELSE 1
+             END
+           ) AS memo_count
     FROM sent_notes
     JOIN transactions
-            ON transactions.id_tx = sent_notes.tx
-    LEFT JOIN v_received_notes
-            ON sent_notes.id = v_received_notes.sent_note_id
-    WHERE COALESCE(v_received_notes.is_change, 0) = 0
+         ON transactions.id_tx = sent_notes.tx
+    LEFT JOIN v_received_outputs ro
+         ON sent_notes.id = ro.sent_note_id
+    WHERE COALESCE(ro.is_change, 0) = 0
     GROUP BY account_id, txid
 ),
 blocks_max_height AS (
-    SELECT MAX(blocks.height) as max_height FROM blocks
+    SELECT MAX(blocks.height) AS max_height FROM blocks
 )
-SELECT notes.account_id                  AS account_id,
-        notes.block                       AS mined_height,
-        notes.txid                        AS txid,
-        transactions.tx_index             AS tx_index,
-        transactions.expiry_height        AS expiry_height,
-        transactions.raw                  AS raw,
-        SUM(notes.value)                  AS account_balance_delta,
-        transactions.fee                  AS fee_paid,
-        SUM(notes.is_change) > 0          AS has_change,
-        MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,
-        SUM(notes.received_count)         AS received_note_count,
-        SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
-        blocks.time                       AS block_time,
-        (
+SELECT notes.account_id             AS account_id,
+       notes.mined_height           AS mined_height,
+       notes.txid                   AS txid,
+       transactions.tx_index        AS tx_index,
+       transactions.expiry_height   AS expiry_height,
+       transactions.raw             AS raw,
+       SUM(notes.value)             AS account_balance_delta,
+       transactions.fee             AS fee_paid,
+       SUM(notes.change_note_count) > 0  AS has_change,
+       MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,
+       SUM(notes.received_count)         AS received_note_count,
+       SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
+       blocks.time                       AS block_time,
+       (
             blocks.height IS NULL
             AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height
-        ) AS expired_unmined
+       ) AS expired_unmined
 FROM notes
 LEFT JOIN transactions
-        ON notes.txid = transactions.txid
+     ON notes.txid = transactions.txid
 JOIN blocks_max_height
-LEFT JOIN blocks ON blocks.height = notes.block
+LEFT JOIN blocks ON blocks.height = notes.mined_height
 LEFT JOIN sent_note_counts
-        ON sent_note_counts.account_id = notes.account_id
-        AND sent_note_counts.txid = notes.txid
+     ON sent_note_counts.account_id = notes.account_id
+     AND sent_note_counts.txid = notes.txid
 GROUP BY notes.account_id, notes.txid";
 
+/// Selects all outputs received by the wallet, plus any outputs sent from the wallet to
+/// external recipients.
+///
+/// This will contain:
+/// * Outputs received from external recipients
+/// * Outputs sent to external recipients
+/// * Outputs received as part of a wallet-internal operation, including
+///   both outputs received as a consequence of wallet-internal transfers
+///   and as change.
+///
+/// The `to_address` column will only contain an address when the recipient is
+/// external. In all other cases, the recipient account id indicates the account
+/// that controls the output.
 pub(super) const VIEW_TX_OUTPUTS: &str = "
 CREATE VIEW v_tx_outputs AS
-SELECT transactions.txid              AS txid,
-        v_received_notes.pool          AS output_pool,
-        v_received_notes.output_index  AS output_index,
-        sent_notes.from_account_id     AS from_account_id,
-        v_received_notes.account_id    AS to_account_id,
-        NULL                           AS to_address,
-        v_received_notes.value         AS value,
-        v_received_notes.is_change     AS is_change,
-        v_received_notes.memo          AS memo
-FROM v_received_notes
-JOIN transactions
-    ON transactions.id_tx = v_received_notes.tx
-LEFT JOIN sent_notes
-    ON sent_notes.id = v_received_notes.sent_note_id
-UNION
-SELECT utxos.prevout_txid           AS txid,
-        0                            AS output_pool,
-        utxos.prevout_idx            AS output_index,
-        NULL                         AS from_account_id,
-        utxos.received_by_account_id AS to_account_id,
-        utxos.address                AS to_address,
-        utxos.value_zat              AS value,
-        0                            AS is_change,
-        NULL                         AS memo
-FROM utxos
-UNION
+-- select all outputs received by the wallet
 SELECT transactions.txid            AS txid,
-        sent_notes.output_pool       AS output_pool,
-        sent_notes.output_index      AS output_index,
-        sent_notes.from_account_id   AS from_account_id,
-        v_received_notes.account_id  AS to_account_id,
-        sent_notes.to_address        AS to_address,
-        sent_notes.value             AS value,
-        0                            AS is_change,
-        sent_notes.memo              AS memo
+       ro.pool                      AS output_pool,
+       ro.output_index              AS output_index,
+       sent_notes.from_account_id   AS from_account_id,
+       ro.account_id                AS to_account_id,
+       NULL                         AS to_address,
+       ro.value                     AS value,
+       ro.is_change                 AS is_change,
+       ro.memo                      AS memo
+FROM v_received_outputs ro
+JOIN transactions
+    ON transactions.id_tx = ro.transaction_id
+-- join to the sent_notes table to obtain `from_account_id`
+LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
+UNION
+-- select all outputs sent from the wallet to external recipients
+SELECT transactions.txid            AS txid,
+       sent_notes.output_pool       AS output_pool,
+       sent_notes.output_index      AS output_index,
+       sent_notes.from_account_id   AS from_account_id,
+       NULL                         AS to_account_id,
+       sent_notes.to_address        AS to_address,
+       sent_notes.value             AS value,
+       FALSE                        AS is_change,
+       sent_notes.memo              AS memo
 FROM sent_notes
 JOIN transactions
     ON transactions.id_tx = sent_notes.tx
-LEFT JOIN v_received_notes
-    ON sent_notes.id = v_received_notes.sent_note_id
-WHERE COALESCE(v_received_notes.is_change, 0) = 0";
+LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
+-- exclude any sent notes for which a row exists in the v_received_outputs view
+WHERE ro.account_id IS NULL";
 
 pub(super) fn view_sapling_shard_scan_ranges<P: Parameters>(params: &P) -> String {
     format!(

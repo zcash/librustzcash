@@ -665,10 +665,10 @@ pub trait InputSource {
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
 
-    /// Fetches a spendable transparent output.
+    /// Fetches the transparent output corresponding to the provided `outpoint`.
     ///
     /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or is not
-    /// spendable.
+    /// spendable as of the chain tip height.
     #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_output(
         &self,
@@ -677,14 +677,18 @@ pub trait InputSource {
         Ok(None)
     }
 
-    /// Returns a list of unspent transparent UTXOs that appear in the chain at heights up to and
-    /// including `max_height`.
+    /// Returns the list of transparent outputs received at `address` such that:
+    /// * The transaction that produced these outputs is mined or mineable as of `max_height`.
+    /// * Each returned output is unspent as of the current chain tip.
+    ///
+    /// The caller should filter these outputs to ensure they respect the desired number of
+    /// confirmations before attempting to spend them.
     #[cfg(feature = "transparent-inputs")]
-    fn get_unspent_transparent_outputs(
+    fn get_spendable_transparent_outputs(
         &self,
         _address: &TransparentAddress,
-        _max_height: BlockHeight,
-        _exclude: &[OutPoint],
+        _target_height: BlockHeight,
+        _min_confirmations: u32,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         Ok(vec![])
     }

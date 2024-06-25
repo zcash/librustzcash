@@ -15,6 +15,7 @@ mod sent_notes_to_internal;
 mod shardtree_support;
 mod ufvk_support;
 mod utxos_table;
+mod utxos_to_txos;
 mod v_sapling_shard_unscanned_ranges;
 mod v_transactions_net;
 mod v_transactions_note_uniqueness;
@@ -63,8 +64,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                           -------------------- full_account_ids
     //                                                       |
     //                                             orchard_received_notes
-    //                                                       |
-    //                                           ensure_orchard_ua_receiver
+    //                                                  /         \
+    //                           ensure_orchard_ua_receiver     utxos_to_txos
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -114,6 +115,7 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(ensure_orchard_ua_receiver::Migration {
             params: params.clone(),
         }),
+        Box::new(utxos_to_txos::Migration),
     ]
 }
 

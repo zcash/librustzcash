@@ -10,13 +10,14 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_client_backend::data_api`:
   - `chain::BlockCache` trait, behind the `sync` feature flag.
+  - `WalletRead::get_spendable_transparent_outputs`.
 - `zcash_client_backend::fees`:
   - `ChangeValue::{transparent, shielded}`
   - `sapling::EmptyBundleView`
   - `orchard::EmptyBundleView`
 - `zcash_client_backend::scanning`:
   - `testing` module
-- `zcash_client_backend::sync` module, behind the `sync` feature flag.
+- `zcash_client_backend::sync` module, behind the `sync` feature flag
 
 ### Changed
 - MSRV is now 1.70.0.
@@ -51,6 +52,12 @@ and this library adheres to Rust's notion of
   wrapping protocol-address types, the `Recipient` type now wraps a
   `zcash_address::ZcashAddress`. This simplifies the process of tracking the
   original address to which value was sent.
+
+### Removed
+- `zcash_client_backend::data_api`:
+  - `WalletRead::get_unspent_transparent_outputs` has been removed because its
+    semantics were unclear and could not be clarified. Use
+    `WalletRead::get_spendable_transparent_outputs` instead.
 
 ## [0.12.1] - 2024-03-27
 
