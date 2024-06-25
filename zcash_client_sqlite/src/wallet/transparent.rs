@@ -112,13 +112,8 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     }
 
     if let Some((taddr, address_index)) = get_legacy_transparent_address(params, conn, account)? {
-        ret.insert(
-            taddr,
-            Some(TransparentAddressMetadata::new(
-                Scope::External.into(),
-                address_index,
-            )),
-        );
+        let metadata = TransparentAddressMetadata::new(Scope::External.into(), address_index);
+        ret.insert(taddr, Some(metadata));
     }
 
     Ok(ret)

@@ -921,6 +921,41 @@ pub trait WalletRead {
         Ok(HashMap::new())
     }
 
+    /// Returns the metadata associated with a given transparent receiver in an account
+    /// controlled by this wallet.
+    ///
+    /// This is equivalent to (but may be implemented more efficiently than):
+    /// ```compile_fail
+    /// if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
+    ///     return Ok(result.clone());
+    /// }
+    /// if let Some(result) = self.get_reserved_ephemeral_addresses(account, false)?.get(address) {
+    ///     return Ok(result.clone());
+    /// }
+    /// Ok(None)
+    /// ```
+    ///
+    /// Returns `Ok(None)` if the address is not recognized, or we do not have metadata for it.
+    /// Returns `Ok(Some(metadata))` if we have the metadata.
+    #[cfg(feature = "transparent-inputs")]
+    fn get_transparent_address_metadata(
+        &self,
+        account: Self::AccountId,
+        address: &TransparentAddress,
+    ) -> Result<Option<TransparentAddressMetadata>, Self::Error> {
+        // This should be overridden.
+        if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
+            return Ok(result.clone());
+        }
+        if let Some(result) = self
+            .get_reserved_ephemeral_addresses(account, false)?
+            .get(address)
+        {
+            return Ok(result.clone());
+        }
+        Ok(None)
+    }
+
     /// Returns the set of reserved ephemeral transparent addresses associated with the
     /// given account controlled by this wallet.
     ///

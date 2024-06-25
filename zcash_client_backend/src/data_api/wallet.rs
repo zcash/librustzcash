@@ -81,7 +81,6 @@ use {
     },
     input_selection::ShieldingSelector,
     std::collections::HashMap,
-    zcash_keys::encoding::AddressCodec,
     zcash_primitives::transaction::components::TxOut,
 };
 
@@ -829,41 +828,32 @@ where
     }
 
     #[cfg(feature = "transparent-inputs")]
-    let mut known_addrs = wallet_db
-        .get_transparent_receivers(account_id)
-        .map_err(Error::DataSource)?;
-    #[cfg(feature = "transparent-inputs")]
-    let mut ephemeral_added = false;
+    let mut cache = HashMap::<TransparentAddress, TransparentAddressMetadata>::new();
 
     #[cfg(feature = "transparent-inputs")]
     let mut metadata_from_address = |addr: TransparentAddress| -> Result<
         TransparentAddressMetadata,
         ErrorT<DbT, InputsErrT, FeeRuleT>,
     > {
-        match known_addrs.get(&addr) {
-            None if !ephemeral_added => {
-                // The ephemeral addresses are added lazily to avoid extra database operations
-                // in the common case. We don't need to include them in order to be able to
-                // construct ZIP 320 transactions, because in that case the ephemeral output
-                // is represented via a "change" reference to a previous step. However, we do
-                // need them in order to create a transaction from a proposal that explicitly
-                // spends an output from an ephemeral address. This need not set `for_detection`
-                // because we only need to be able to spend outputs already detected by this
-                // wallet instance.
-                ephemeral_added = true;
-                known_addrs.extend(
-                    wallet_db
-                        .get_reserved_ephemeral_addresses(account_id, false)
-                        .map_err(Error::DataSource)?
-                        .into_iter(),
-                );
-                known_addrs.get(&addr)
+        match cache.get(&addr) {
+            Some(result) => Ok(result.clone()),
+            None => {
+                // `wallet_db.get_transparent_address_metadata` includes reserved ephemeral
+                // addresses in its lookup. We don't need to include these in order to be
+                // able to construct ZIP 320 transactions, because in that case the ephemeral
+                // output is represented via a "change" reference to a previous step. However,
+                // we do need them in order to create a transaction from a proposal that
+                // explicitly spends an output from an ephemeral address (only for outputs
+                // already detected by this wallet instance).
+
+                let result = wallet_db
+                    .get_transparent_address_metadata(account_id, &addr)
+                    .map_err(InputSelectorError::DataSource)?
+                    .ok_or(Error::AddressNotRecognized(addr))?;
+                cache.insert(addr, result.clone());
+                Ok(result)
             }
-            result => result,
         }
-        .ok_or(Error::AddressNotRecognized(addr))?
-        .clone()
-        .ok_or_else(|| Error::NoSpendingKey(addr.encode(params)))
     };
 
     #[cfg(feature = "transparent-inputs")]

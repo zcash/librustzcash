@@ -48,12 +48,13 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   `change_memo` is given, and defends against losing money by using
   `DustAction::AddDustToFee` with a too-high dust threshold.
   See [#1430](https://github.com/zcash/librustzcash/pull/1430) for details.
-- `zcash_client_backend::zip321` has been extracted to, and is now a reexport 
+- `zcash_client_backend::zip321` has been extracted to, and is now a reexport
   of the root module of the `zip321` crate. Several of the APIs of this module
   have changed as a consequence of this extraction; please see the `zip321`
   CHANGELOG for details.
 - `zcash_client_backend::data_api`:
-  - `WalletRead` has a new `get_reserved_ephemeral_addresses` method.
+  - `WalletRead` has new `get_reserved_ephemeral_addresses` and
+    `get_transparent_address_metadata` methods.
   - `WalletWrite` has a new `reserve_next_n_ephemeral_addresses` method.
   - `error::Error` has a new `Address` variant.
   - `wallet::input_selection::InputSelectorError` has a new `Address` variant.
