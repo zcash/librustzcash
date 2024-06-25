@@ -17,7 +17,7 @@ and this library adheres to Rust's notion of
   - `orchard::EmptyBundleView`
 - `zcash_client_backend::scanning`:
   - `testing` module
-- `zcash_client_backend::sync` module, behind the `sync` feature flag
+- `zcash_client_backend::sync` module, behind the `sync` feature flag.
 
 ### Changed
 - MSRV is now 1.70.0.
