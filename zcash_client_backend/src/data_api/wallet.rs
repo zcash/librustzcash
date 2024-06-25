@@ -33,7 +33,6 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
 //! [`TransactionRequest`]: crate::zip321::TransactionRequest
 //! [`propose_transfer`]: crate::data_api::wallet::propose_transfer
 
-use core::convert::Infallible;
 use nonempty::NonEmpty;
 use rand_core::OsRng;
 use sapling::{
@@ -79,6 +78,7 @@ use {
         proposal::{ProposalError, StepOutput},
         wallet::TransparentAddressMetadata,
     },
+    core::convert::Infallible,
     input_selection::ShieldingSelector,
     std::collections::HashMap,
     zcash_primitives::transaction::components::TxOut,
@@ -663,11 +663,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     proposal_step: &Step<N>,
     #[cfg(feature = "transparent-inputs")] unused_transparent_outputs: &mut HashMap<
         StepOutput,
-        (
-            TransparentAddress,
-            Option<TransparentAddressMetadata>,
-            OutPoint,
-        ),
+        (TransparentAddress, OutPoint),
     >,
 ) -> Result<BuildResult, ErrorT<DbT, InputsErrT, FeeRuleT>>
 where
@@ -884,14 +880,12 @@ where
         for input_ref in proposal_step.prior_step_inputs() {
             // A referenced transparent step output must exist and be referenced *at most* once.
             // (Exactly once in the case of ephemeral outputs.)
-            let (address, address_metadata_opt, outpoint) = unused_transparent_outputs
+            let (address, outpoint) = unused_transparent_outputs
                 .remove(input_ref)
                 .ok_or(Error::Proposal(ProposalError::ReferenceError(*input_ref)))?;
 
-            let address_metadata = match address_metadata_opt {
-                Some(meta) => meta,
-                None => metadata_from_address(address)?,
-            };
+            let address_metadata = metadata_from_address(address)?;
+
             let txout = &prior_step_results[input_ref.step_index()]
                 .1
                 .transaction()
@@ -952,11 +946,6 @@ where
         Some(sapling_dfvk.to_ovk(Scope::Internal))
     };
 
-    #[cfg(feature = "transparent-inputs")]
-    type TransparentMetadataT = TransparentAddressMetadata;
-    #[cfg(not(feature = "transparent-inputs"))]
-    type TransparentMetadataT = Infallible;
-
     #[cfg(feature = "orchard")]
     let mut orchard_output_meta: Vec<(
         Recipient<_, PoolType, _>,
@@ -971,7 +960,6 @@ where
     let mut transparent_output_meta: Vec<(
         Recipient<_, _, ()>,
         TransparentAddress,
-        Option<TransparentMetadataT>,
         NonNegativeAmount,
         StepOutputIndex,
     )> = vec![];
@@ -1030,7 +1018,6 @@ where
             transparent_output_meta.push((
                 Recipient::External(recipient_address.clone(), PoolType::TRANSPARENT),
                 to,
-                None,
                 payment.amount(),
                 StepOutputIndex::Payment(payment_index),
             ));
@@ -1154,7 +1141,8 @@ where
             .map_err(Error::DataSource)?;
         assert_eq!(addresses_and_metadata.len(), ephemeral_outputs.len());
 
-        for ((change_index, change_value), (ephemeral_address, address_metadata)) in
+        // We don't need the TransparentAddressMetadata here; we can look it up from the data source later.
+        for ((change_index, change_value), (ephemeral_address, _)) in
             ephemeral_outputs.iter().zip(addresses_and_metadata)
         {
             // This is intended for an ephemeral transparent output, rather than a
@@ -1168,7 +1156,6 @@ where
                     outpoint_metadata: (),
                 },
                 ephemeral_address,
-                Some(address_metadata),
                 change_value.value(),
                 StepOutputIndex::Change(*change_index),
             ))
@@ -1253,13 +1240,13 @@ where
 
     #[allow(unused_variables)]
     let transparent_outputs = transparent_output_meta.into_iter().enumerate().map(
-        |(n, (recipient, ephemeral_address, address_metadata_opt, value, step_output_index))| {
+        |(n, (recipient, ephemeral_address, value, step_output_index))| {
             let outpoint = OutPoint::new(txid, n as u32);
             let recipient = recipient.map_ephemeral_transparent_outpoint(|()| outpoint.clone());
             #[cfg(feature = "transparent-inputs")]
             unused_transparent_outputs.insert(
                 StepOutput::new(step_index, step_output_index),
-                (ephemeral_address, address_metadata_opt, outpoint),
+                (ephemeral_address, outpoint),
             );
             SentTransactionOutput::from_parts(n, recipient, value, None)
         },
