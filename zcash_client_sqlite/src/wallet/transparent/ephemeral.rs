@@ -36,7 +36,7 @@ const EPHEMERAL_SCOPE: TransparentKeyScope = match TransparentKeyScope::custom(2
 
 // Returns `TransparentAddressMetadata` in the ephemeral scope for the
 // given address index.
-fn metadata(address_index: NonHardenedChildIndex) -> TransparentAddressMetadata {
+pub(crate) fn metadata(address_index: NonHardenedChildIndex) -> TransparentAddressMetadata {
     TransparentAddressMetadata::new(EPHEMERAL_SCOPE, address_index)
 }
 

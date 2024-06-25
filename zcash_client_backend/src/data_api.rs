@@ -1972,6 +1972,15 @@ pub mod testing {
         }
 
         #[cfg(feature = "transparent-inputs")]
+        fn get_transparent_address_metadata(
+            &self,
+            _account: Self::AccountId,
+            _address: &TransparentAddress,
+        ) -> Result<Option<TransparentAddressMetadata>, Self::Error> {
+            Ok(None)
+        }
+
+        #[cfg(feature = "transparent-inputs")]
         fn get_reserved_ephemeral_addresses(
             &self,
             _account: Self::AccountId,

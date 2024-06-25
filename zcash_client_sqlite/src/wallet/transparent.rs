@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::OptionalExtension;
 use rusqlite::{named_params, Connection, Row};
+use zcash_keys::encoding::encode_transparent_address_p;
 use zip32::{DiversifierIndex, Scope};
 
 use zcash_address::unified::{Encoding, Ivk, Uivk};
@@ -459,6 +460,57 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
             *output.recipient_address(),
         ))
     }
+}
+
+pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    account_id: AccountId,
+    address: &TransparentAddress,
+) -> Result<Option<TransparentAddressMetadata>, SqliteClientError> {
+    let address_str = encode_transparent_address_p(params, address);
+
+    if let Some(di_vec) = conn
+        .query_row(
+            "SELECT diversifier_index_be FROM addresses
+             WHERE account_id = :account_id AND cached_transparent_receiver_address = :address",
+            named_params![":account_id": account_id.0, ":address": &address_str],
+            |row| row.get::<_, Vec<u8>>(0),
+        )
+        .optional()?
+    {
+        let address_index = address_index_from_diversifier_index_be(&di_vec)?;
+        let metadata = TransparentAddressMetadata::new(Scope::External.into(), address_index);
+        return Ok(Some(metadata));
+    }
+
+    if let Some((legacy_taddr, address_index)) =
+        get_legacy_transparent_address(params, conn, account_id)?
+    {
+        if &legacy_taddr == address {
+            let metadata = TransparentAddressMetadata::new(Scope::External.into(), address_index);
+            return Ok(Some(metadata));
+        }
+    }
+
+    // Search ephemeral addresses that have already been reserved.
+    if let Some(raw_index) = conn
+        .query_row(
+            "SELECT address_index FROM ephemeral_addresses
+             WHERE account_id = :account_id AND address = :address",
+            named_params![":account_id": account_id.0, ":address": &address_str],
+            |row| row.get::<_, u32>(0),
+        )
+        .optional()?
+    {
+        let address_index = NonHardenedChildIndex::from_index(raw_index).unwrap();
+        return Ok(Some(ephemeral::metadata(address_index)));
+    }
+
+    // We intentionally don't check for unreserved ephemeral addresses within the gap
+    // limit here. It's unnecessary to look up metadata for addresses from which we
+    // can spend.
+    Ok(None)
 }
 
 /// Attempts to determine the account that received the given transparent output.
