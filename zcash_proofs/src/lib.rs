@@ -2,39 +2,39 @@
 //!
 //! `zcash_proofs` contains the zk-SNARK circuits used by Zcash, and the APIs for creating
 //! and verifying proofs.
+//!
+//! ## Feature flags
+#![doc = document_features::document_features!()]
+//!
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 // Temporary until we have addressed all Result<T, ()> cases.
 #![allow(clippy::result_unit_err)]
 
-use bellman::groth16::{prepare_verifying_key, Parameters, PreparedVerifyingKey, VerifyingKey};
+use bellman::groth16::{prepare_verifying_key, PreparedVerifyingKey, VerifyingKey};
 use bls12_381::Bls12;
+use sapling::circuit::{
+    OutputParameters, PreparedOutputVerifyingKey, PreparedSpendVerifyingKey, SpendParameters,
+};
+
 use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::Path;
 
 #[cfg(feature = "directories")]
-use directories::BaseDirs;
-#[cfg(feature = "directories")]
 use std::path::PathBuf;
 
 pub mod circuit;
-pub mod constants;
 mod hashreader;
-pub mod sapling;
 pub mod sprout;
 
 #[cfg(any(feature = "local-prover", feature = "bundled-prover"))]
-#[cfg_attr(
-    docsrs,
-    doc(cfg(any(feature = "local-prover", feature = "bundled-prover")))
-)]
 pub mod prover;
 
 #[cfg(feature = "download-params")]
-#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 mod downloadreader;
 
 // Circuit names
@@ -63,7 +63,6 @@ const DOWNLOAD_URL: &str = "https://download.z.cash/downloads";
 
 /// The paths to the Sapling parameter files.
 #[cfg(feature = "download-params")]
-#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SaplingParameterPaths {
     /// The path to the Sapling spend parameter file.
@@ -75,15 +74,24 @@ pub struct SaplingParameterPaths {
 
 /// Returns the default folder that the Zcash proving parameters are located in.
 #[cfg(feature = "directories")]
-#[cfg_attr(docsrs, doc(cfg(feature = "directories")))]
 pub fn default_params_folder() -> Option<PathBuf> {
-    BaseDirs::new().map(|base_dirs| {
-        if cfg!(any(windows, target_os = "macos")) {
-            base_dirs.data_dir().join("ZcashParams")
-        } else {
-            base_dirs.home_dir().join(".zcash-params")
-        }
-    })
+    #[cfg(windows)]
+    {
+        use known_folders::{get_known_folder_path, KnownFolder};
+        get_known_folder_path(KnownFolder::RoamingAppData).map(|base| base.join("ZcashParams"))
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        xdg::BaseDirectories::new()
+            .ok()
+            .map(|base_dirs| base_dirs.get_data_home().join("ZcashParams"))
+    }
+
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        home::home_dir().map(|base| base.join(".zcash-params"))
+    }
 }
 
 /// Download the Zcash Sapling parameters if needed, and store them in the default location.
@@ -93,7 +101,6 @@ pub fn default_params_folder() -> Option<PathBuf> {
 ///
 /// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
 #[cfg(feature = "download-params")]
-#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 #[deprecated(
     since = "0.6.0",
     note = "please replace with `download_sapling_parameters`, and use `download_sprout_parameters` if needed"
@@ -112,7 +119,6 @@ pub fn download_parameters() -> Result<(), minreq::Error> {
 ///
 /// Returns the paths to the downloaded files.
 #[cfg(feature = "download-params")]
-#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 pub fn download_sapling_parameters(
     timeout: Option<u64>,
 ) -> Result<SaplingParameterPaths, minreq::Error> {
@@ -142,7 +148,6 @@ pub fn download_sapling_parameters(
 ///
 /// Returns the path to the downloaded file.
 #[cfg(feature = "download-params")]
-#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 pub fn download_sprout_parameters(timeout: Option<u64>) -> Result<PathBuf, minreq::Error> {
     fetch_params(SPROUT_NAME, SPROUT_HASH, SPROUT_BYTES, timeout)
 }
@@ -152,7 +157,6 @@ pub fn download_sprout_parameters(timeout: Option<u64>) -> Result<PathBuf, minre
 ///
 /// See [`download_sapling_parameters`] for details.
 #[cfg(feature = "download-params")]
-#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 fn fetch_params(
     name: &str,
     expected_hash: &str,
@@ -220,7 +224,6 @@ fn fetch_params(
 ///
 /// See [`download_sapling_parameters`] for details.
 #[cfg(feature = "download-params")]
-#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 fn stream_params_downloads_to_disk(
     params_path: &Path,
     name: &str,
@@ -278,10 +281,10 @@ fn stream_params_downloads_to_disk(
 
 /// Zcash Sprout and Sapling groth16 circuit parameters.
 pub struct ZcashParameters {
-    pub spend_params: Parameters<Bls12>,
-    pub spend_vk: PreparedVerifyingKey<Bls12>,
-    pub output_params: Parameters<Bls12>,
-    pub output_vk: PreparedVerifyingKey<Bls12>,
+    pub spend_params: SpendParameters,
+    pub spend_vk: PreparedSpendVerifyingKey,
+    pub output_params: OutputParameters,
+    pub output_vk: PreparedOutputVerifyingKey,
     pub sprout_vk: Option<PreparedVerifyingKey<Bls12>>,
 }
 
@@ -342,9 +345,11 @@ pub fn load_parameters(
     )
 }
 
-/// Parse Bls12 keys from bytes as serialized by [`Parameters::write`].
+/// Parse Bls12 keys from bytes as serialized by [`groth16::Parameters::write`].
 ///
 /// This function will panic if it encounters unparsable data.
+///
+/// [`groth16::Parameters::write`]: bellman::groth16::Parameters::write
 pub fn parse_parameters<R: io::Read>(
     spend_fs: R,
     output_fs: R,
@@ -355,10 +360,10 @@ pub fn parse_parameters<R: io::Read>(
     let mut sprout_fs = sprout_fs.map(hashreader::HashReader::new);
 
     // Deserialize params
-    let spend_params = Parameters::<Bls12>::read(&mut spend_fs, false)
-        .expect("couldn't deserialize Sapling spend parameters file");
-    let output_params = Parameters::<Bls12>::read(&mut output_fs, false)
-        .expect("couldn't deserialize Sapling spend parameters file");
+    let spend_params = SpendParameters::read(&mut spend_fs, false)
+        .expect("couldn't deserialize Sapling spend parameters");
+    let output_params = OutputParameters::read(&mut output_fs, false)
+        .expect("couldn't deserialize Sapling spend parameters");
 
     // We only deserialize the verifying key for the Sprout parameters, which
     // appears at the beginning of the parameter file. The rest is loaded
@@ -417,8 +422,8 @@ pub fn parse_parameters<R: io::Read>(
     }
 
     // Prepare verifying keys
-    let spend_vk = prepare_verifying_key(&spend_params.vk);
-    let output_vk = prepare_verifying_key(&output_params.vk);
+    let spend_vk = spend_params.prepared_verifying_key();
+    let output_vk = output_params.prepared_verifying_key();
     let sprout_vk = sprout_vk.map(|vk| prepare_verifying_key(&vk));
 
     ZcashParameters {

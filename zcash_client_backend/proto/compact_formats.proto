@@ -10,20 +10,31 @@ option swift_prefix = "";
 // Remember that proto3 fields are all optional. A field that is not present will be set to its zero value.
 // bytes fields of hashes are in canonical little-endian format.
 
+// Information about the state of the chain as of a given block.
+message ChainMetadata {
+    uint32 saplingCommitmentTreeSize = 1; // the size of the Sapling note commitment tree as of the end of this block
+    uint32 orchardCommitmentTreeSize = 2; // the size of the Orchard note commitment tree as of the end of this block
+}
+
+// A compact representation of the shielded data in a Zcash block.
+//
 // CompactBlock is a packaging of ONLY the data from a block that's needed to:
 //   1. Detect a payment to your shielded Sapling address
 //   2. Detect a spend of your shielded Sapling notes
 //   3. Update your witnesses to generate new Sapling spend proofs.
 message CompactBlock {
-    uint32 protoVersion = 1;    // the version of this wire format, for storage
-    uint64 height = 2;          // the height of this block
-    bytes hash = 3;             // the ID (hash) of this block, same as in block explorers
-    bytes prevHash = 4;         // the ID (hash) of this block's predecessor
-    uint32 time = 5;            // Unix epoch time when the block was mined
-    bytes header = 6;           // (hash, prevHash, and time) OR (full header)
-    repeated CompactTx vtx = 7; // zero or more compact transactions from this block
+    uint32 protoVersion = 1;         // the version of this wire format, for storage
+    uint64 height = 2;               // the height of this block
+    bytes hash = 3;                  // the ID (hash) of this block, same as in block explorers
+    bytes prevHash = 4;              // the ID (hash) of this block's predecessor
+    uint32 time = 5;                 // Unix epoch time when the block was mined
+    bytes header = 6;                // (hash, prevHash, and time) OR (full header)
+    repeated CompactTx vtx = 7;      // zero or more compact transactions from this block
+    ChainMetadata chainMetadata = 8; // information about the state of the chain as of this block
 }
 
+// A compact representation of the shielded data in a Zcash transaction.
+//
 // CompactTx contains the minimum information for a wallet to know if this transaction
 // is relevant to it (either pays to it or spends from it) via shielded elements
 // only. This message will not encode a transparent-to-transparent transaction.
@@ -46,25 +57,25 @@ message CompactTx {
     repeated CompactOrchardAction actions = 6;
 }
 
+// A compact representation of a [Sapling Spend](https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus).
+//
 // CompactSaplingSpend is a Sapling Spend Description as described in 7.3 of the Zcash
 // protocol specification.
 message CompactSaplingSpend {
-    bytes nf = 1;   // nullifier (see the Zcash protocol specification)
+    bytes nf = 1;   // Nullifier (see the Zcash protocol specification)
 }
 
-// output encodes the `cmu` field, `ephemeralKey` field, and a 52-byte prefix of the
-// `encCiphertext` field of a Sapling Output Description. These fields are described in
-// section 7.4 of the Zcash protocol spec:
-// https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus
-// Total size is 116 bytes.
+// A compact representation of a [Sapling Output](https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus).
+//
+// It encodes the `cmu` field, `ephemeralKey` field, and a 52-byte prefix of the
+// `encCiphertext` field of a Sapling Output Description. Total size is 116 bytes.
 message CompactSaplingOutput {
-    bytes cmu = 1;          // note commitment u-coordinate
-    bytes ephemeralKey = 2; // ephemeral public key
-    bytes ciphertext = 3;   // first 52 bytes of ciphertext
+    bytes cmu = 1;          // Note commitment u-coordinate.
+    bytes ephemeralKey = 2; // Ephemeral public key.
+    bytes ciphertext = 3;   // First 52 bytes of ciphertext.
 }
 
-// https://github.com/zcash/zips/blob/main/zip-0225.rst#orchard-action-description-orchardaction
-// (but not all fields are needed)
+// A compact representation of an [Orchard Action](https://zips.z.cash/protocol/protocol.pdf#actionencodingandconsensus).
 message CompactOrchardAction {
     bytes nullifier = 1;        // [32] The nullifier of the input note
     bytes cmx = 2;              // [32] The x-coordinate of the note commitment for the output note

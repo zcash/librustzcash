@@ -1,77 +1,77 @@
 [package]
 name = "zcash_proofs"
 description = "Zcash zk-SNARK circuits and proving APIs"
-version = "0.12.0"
+version = "0.15.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
 ]
 homepage = "https://github.com/zcash/librustzcash"
-repository = "https://github.com/zcash/librustzcash"
+repository.workspace = true
 readme = "README.md"
-license = "MIT OR Apache-2.0"
-edition = "2021"
-rust-version = "1.65"
-categories = ["cryptography::cryptocurrencies"]
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-zcash_primitives = { version = "0.12", path = "../zcash_primitives", default-features = false }
+zcash_primitives.workspace = true
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 bellman = { version = "0.14", default-features = false, features = ["groth16"] }
-bls12_381 = "0.8"
-group = "0.13"
-incrementalmerkletree = { version = "0.4", features = ["legacy-api"] }
-jubjub = "0.10"
-lazy_static = "1"
+bls12_381.workspace = true
+group.workspace = true
+jubjub.workspace = true
+lazy_static.workspace = true
 minreq = { version = "2", features = ["https"], optional = true }
-rand_core = "0.6"
-tracing = "0.1"
+rand_core.workspace = true
+sapling.workspace = true
+tracing.workspace = true
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
-blake2b_simd = "1"
-directories = { version = "5", optional = true }
+blake2b_simd.workspace = true
+document-features.workspace = true
+home = { version = "0.5", optional = true }
+known-folders = { version = "1", optional = true }
 redjubjub = "0.7"
 wagyu-zcash-parameters = { version = "0.2", optional = true }
+xdg = { version = "2.5", optional = true }
 
 [dev-dependencies]
-byteorder = "1"
-criterion = "0.4"
-rand_xorshift = "0.3"
-
-[target.'cfg(unix)'.dev-dependencies]
-pprof = { version = "0.11", features = ["criterion", "flamegraph"] } # MSRV 1.56
+byteorder.workspace = true
 
 [features]
 default = ["local-prover", "multicore"]
-bundled-prover = ["wagyu-zcash-parameters"]
-download-params = ["minreq", "directories"]
+
+## Bundles the Sapling proving parameters inside the binary, which will increase its size
+## by around 50 MiB.
+bundled-prover = ["dep:wagyu-zcash-parameters"]
+
+## Enables APIs for determining the default location on the local filesystem for storing
+## the Sprout and Sapling proving parameters.
+directories = ["dep:home", "dep:known-folders", "dep:xdg"]
+
+## Enables APIs for downloading the Sprout and Sapling proving parameters to the default
+## location on the local filesystem.
+download-params = ["dep:minreq", "directories"]
+
+## Enables APIs for loading the Sapling proving parameters from the default location on
+## the local filesystem.
 local-prover = ["directories"]
+
+## Enables multithreading support for creating proofs.
 multicore = ["bellman/multicore", "zcash_primitives/multicore"]
+
+## A feature used to isolate tests that are expensive to run. Test-only.
+expensive-tests = []
 
 [lib]
 bench = false
-
-[[bench]]
-name = "sapling"
-harness = false
-required-features = ["local-prover"]
-
-[[example]]
-name = "get-params-path"
-required-features = ["directories"]
-
-[[example]]
-name = "download-params"
-required-features = ["download-params"]
-
-[[example]]
-name = "download-sprout-and-sapling-params"
-required-features = ["download-params"]
 
 [badges]
 maintenance = { status = "actively-developed" }

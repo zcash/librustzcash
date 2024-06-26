@@ -6,13 +6,162 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.10.3] - 2024-04-08
+
+### Added
+- Added a migration to ensure that the default address for existing wallets is
+  upgraded to include an Orchard receiver.
+
+### Fixed
+- A bug in the SQL query for `WalletDb::get_account_birthday` was fixed.
+
+## [0.10.2] - 2024-03-27
+
+### Fixed
+- A bug in the SQL query for `WalletDb::get_unspent_transparent_output` was fixed.
+
+## [0.10.1] - 2024-03-25
+
+### Fixed
+- The `sent_notes` table's `received_note` constraint was excessively restrictive 
+ after zcash/librustzcash#1306. Any databases that have migrations from 
+ zcash_client_sqlite 0.10.0 applied should be wiped and restored from seed.
+ In order to ensure that the incorrect migration is not used, the migration
+ id for the `full_account_ids` migration has been changed from 
+ `0x1b104345_f27e_42da_a9e3_1de22694da43` to `0x6d02ec76_8720_4cc6_b646_c4e2ce69221c`
+
+## [0.10.0] - 2024-03-25
+
+This version was yanked, use 0.10.1 instead.
+
+### Added
+- A new `orchard` feature flag has been added to make it possible to
+  build client code without `orchard` dependendencies.
+- `zcash_client_sqlite::AccountId`
+- `zcash_client_sqlite::wallet::Account`
+- `impl From<zcash_keys::keys::AddressGenerationError> for SqliteClientError`
+
+### Changed
+- Many places that `AccountId` appeared in the API changed from
+  using `zcash_primitives::zip32::AccountId` to using an opaque `zcash_client_sqlite::AccountId`
+  type.
+  - The enum variant `zcash_client_sqlite::error::SqliteClientError::AccountUnknown`
+    no longer has a `zcash_primitives::zip32::AccountId` data value.
+  - Changes to the implementation of the `WalletWrite` trait:
+    - `create_account` function returns a unique identifier for the new account (as before),
+      except that this ID no longer happens to match the ZIP-32 account index.
+      To get the ZIP-32 account index, use the new `WalletRead::get_account` function.
+  - Two columns in the `transactions` view were renamed. They refer to the primary key field in the `accounts` table, which no longer equates to a ZIP-32 account index.
+    - `to_account` -> `to_account_id`
+    - `from_account` -> `from_account_id`
+- `zcash_client_sqlite::error::SqliteClientError` has changed variants:
+  - Added `AddressGeneration`
+  - Added `UnknownZip32Derivation`
+  - Added `BadAccountData`
+  - Removed `DiversifierIndexOutOfRange`
+  - Removed `InvalidNoteId`
+- `zcash_client_sqlite::wallet`:
+  - `init::WalletMigrationError` has added variants:
+    - `WalletMigrationError::AddressGeneration`
+    - `WalletMigrationError::CannotRevert`
+    - `WalletMigrationError::SeedNotRelevant`
+- The `v_transactions` and `v_tx_outputs` views now include Orchard notes.
+
+## [0.9.1] - 2024-03-09
+
+### Fixed
+- Documentation now correctly builds with all feature flags.
+
+## [0.9.0] - 2024-03-01
+
+### Changed
+- Migrated to `orchard 0.7`, `zcash_primitives 0.14`, `zcash_client_backend 0.11`.
+- `zcash_client_sqlite::error::SqliteClientError` has new error variants:
+  - `SqliteClientError::UnsupportedPoolType`
+  - `SqliteClientError::BalanceError`
+  - The `Bech32DecodeError` variant has been replaced with a more general
+    `DecodingError` type.
+
+## [0.8.1] - 2023-10-18
+
+### Fixed
+- Fixed a bug in `v_transactions` that was omitting value from identically-valued notes
+
+## [0.8.0] - 2023-09-25
+
+### Notable Changes
+- The `v_transactions` and `v_tx_outputs` views have changed in terms of what
+  columns are returned, and which result columns may be null. Please see the
+  `Changed` section below for additional details.
+
+### Added
+- `zcash_client_sqlite::commitment_tree` Types related to management of note
+  commitment trees using the `shardtree` crate.
+- A new default-enabled feature flag `multicore`. This allows users to disable
+  multicore support by setting `default_features = false` on their
+  `zcash_primitives`, `zcash_proofs`, and `zcash_client_sqlite` dependencies.
+- `zcash_client_sqlite::ReceivedNoteId`
+- `zcash_client_sqlite::wallet::commitment_tree` A new module containing a
+  sqlite-backed implementation of `shardtree::store::ShardStore`.
+- `impl zcash_client_backend::data_api::WalletCommitmentTrees for WalletDb`
+
 ### Changed
 - MSRV is now 1.65.0.
-- Bumped dependencies to `hdwallet 0.4`, `incrementalmerkletree 0.4`, `bs58 0.5`,
-  `zcash_primitives 0.12`
+- Bumped dependencies to `hdwallet 0.4`, `incrementalmerkletree 0.5`, `bs58 0.5`,
+  `prost 0.12`, `rusqlite 0.29`, `schemer-rusqlite 0.2.2`, `time 0.3.22`,
+  `tempfile 3.5`, `zcash_address 0.3`, `zcash_note_encryption 0.4`,
+  `zcash_primitives 0.13`, `zcash_client_backend 0.10`.
+- Added dependencies on `shardtree 0.0`, `zcash_encoding 0.2`, `byteorder 1`
+- A `CommitmentTree` variant has been added to `zcash_client_sqlite::wallet::init::WalletMigrationError`
+- `min_confirmations` parameter values are now more strongly enforced. Previously,
+  a note could be spent with fewer than `min_confirmations` confirmations if the
+  wallet did not contain enough observed blocks to satisfy the `min_confirmations`
+  value specified; this situation is now treated as an error.
+- `zcash_client_sqlite::error::SqliteClientError` has new error variants:
+  - `SqliteClientError::AccountUnknown`
+  - `SqliteClientError::BlockConflict`
+  - `SqliteClientError::CacheMiss`
+  - `SqliteClientError::ChainHeightUnknown`
+  - `SqliteClientError::CommitmentTree`
+  - `SqliteClientError::NonSequentialBlocks`
+- `zcash_client_backend::FsBlockDbError` has a new error variant:
+  - `FsBlockDbError::CacheMiss`
+- `zcash_client_sqlite::FsBlockDb::write_block_metadata` now overwrites any
+  existing metadata entries that have the same height as a new entry.
+- The `v_transactions` and `v_tx_outputs` views no longer return the
+  internal database identifier for the transaction. The `txid` column should
+  be used instead. The `tx_index`, `expiry_height`, `raw`, `fee_paid`, and
+  `expired_unmined` columns will be null for received transparent
+  transactions, in addition to the other columns that were previously
+  permitted to be null.
 
 ### Removed
 - The empty `wallet::transact` module has been removed.
+- `zcash_client_sqlite::NoteId` has been replaced with `zcash_client_sqlite::ReceivedNoteId`
+  as the `SentNoteId` variant is now unused following changes to
+  `zcash_client_backend::data_api::WalletRead`.
+- `zcash_client_sqlite::wallet::init::{init_blocks_table, init_accounts_table}`
+  have been removed. `zcash_client_backend::data_api::WalletWrite::create_account`
+  should be used instead; the initialization of the note commitment tree
+  previously performed by `init_blocks_table` is now handled by passing an
+  `AccountBirthday` containing the note commitment tree frontier as of the
+  end of the birthday height block to `create_account` instead.
+- `zcash_client_sqlite::DataConnStmtCache` has been removed in favor of using
+  `rusqlite` caching for prepared statements.
+- `zcash_client_sqlite::prepared` has been entirely removed.
+
+### Fixed
+- Fixed an off-by-one error in the `BlockSource` implementation for the SQLite-backed
+ `BlockDb` block database which could result in blocks being skipped at the start of
+ scan ranges.
+- `zcash_client_sqlite::{BlockDb, FsBlockDb}::with_blocks` now return an error
+  if `from_height` is set to a block height that does not exist in the cache.
+- `WalletDb::get_transaction` no longer returns an error when called on a transaction
+  that has not yet been mined, unless the transaction's consensus branch ID cannot be
+  determined by other means.
+- Fixed an error in `v_transactions` wherein received transparent outputs did not
+  result in a transaction entry appearing in the transaction history.
 
 ## [0.7.1] - 2023-05-17
 

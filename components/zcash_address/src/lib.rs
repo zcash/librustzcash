@@ -1,3 +1,134 @@
+//! *Parser for all defined Zcash address types.*
+//!
+//! This crate implements address parsing as a two-phase process, built around the opaque
+//! [`ZcashAddress`] type.
+//!
+//! - [`ZcashAddress`] can be parsed from, and encoded to, strings.
+//! - [`ZcashAddress::convert`] or [`ZcashAddress::convert_if_network`] can be used to
+//!   convert a parsed address into custom types that implement the [`TryFromAddress`] or
+//!   [`TryFromRawAddress`] traits.
+//! - Custom types can be converted into a [`ZcashAddress`] via its implementation of the
+//!   [`ToAddress`] trait.
+//!
+//! ```text
+//!         s.parse()              .convert()
+//!         -------->              --------->
+//! Strings           ZcashAddress            Custom types
+//!         <--------              <---------
+//!         .encode()              ToAddress
+//! ```
+//!
+//! It is important to note that this crate does not depend on any of the Zcash protocol
+//! crates (e.g. `sapling-crypto` or `orchard`). This crate has minimal dependencies by
+//! design; it focuses solely on parsing, handling those concerns for you, while exposing
+//! APIs that enable you to convert the parsed data into the Rust types you want to use.
+//!
+//! # Using this crate
+//!
+//! ## I just need to validate Zcash addresses
+//!
+//! ```
+//! # use zcash_address::ZcashAddress;
+//! fn is_valid_zcash_address(addr_string: &str) -> bool {
+//!     addr_string.parse::<ZcashAddress>().is_ok()
+//! }
+//! ```
+//!
+//! ## I want to parse Zcash addresses in a Rust wallet app that uses the `zcash_primitives` transaction builder
+//!
+//! Use `zcash_client_backend::address::RecipientAddress`, which implements the traits in
+//! this crate to parse address strings into protocol types that work with the transaction
+//! builder in the `zcash_primitives` crate (as well as the wallet functionality in the
+//! `zcash_client_backend` crate itself).
+//!
+//! > We intend to refactor the key and address types from the `zcash_client_backend` and
+//! > `zcash_primitives` crates into a separate crate focused on dealing with Zcash key
+//! > material. That crate will then be what you should use.
+//!
+//! ## I want to parse Unified Addresses
+//!
+//! See the [`unified::Address`] documentation for examples.
+//!
+//! While the [`unified::Address`] type does have parsing methods, you should still parse
+//! your address strings with [`ZcashAddress`] and then convert; this will ensure that for
+//! other Zcash address types you get a [`ConversionError::Unsupported`], which is a
+//! better error for your users.
+//!
+//! ## I want to parse mainnet Zcash addresses in a language that supports C FFI
+//!
+//! As an example, you could use static functions to create the address types in the
+//! target language from the parsed data.
+//!
+//! ```
+//! use std::ffi::{CStr, c_char, c_void};
+//! use std::ptr;
+//!
+//! use zcash_address::{ConversionError, Network, TryFromRawAddress, ZcashAddress};
+//!
+//! // Functions that return a pointer to a heap-allocated address of the given kind in
+//! // the target language. These should be augmented to return any relevant errors.
+//! extern {
+//!     fn addr_from_sapling(data: *const u8) -> *mut c_void;
+//!     fn addr_from_transparent_p2pkh(data: *const u8) -> *mut c_void;
+//! }
+//!
+//! struct ParsedAddress(*mut c_void);
+//!
+//! impl TryFromRawAddress for ParsedAddress {
+//!     type Error = &'static str;
+//!
+//!     fn try_from_raw_sapling(
+//!         data: [u8; 43],
+//!     ) -> Result<Self, ConversionError<Self::Error>> {
+//!         let parsed = unsafe { addr_from_sapling(data[..].as_ptr()) };
+//!         if parsed.is_null() {
+//!             Err("Reason for the failure".into())
+//!         } else {
+//!             Ok(Self(parsed))
+//!         }
+//!     }
+//!
+//!     fn try_from_raw_transparent_p2pkh(
+//!         data: [u8; 20],
+//!     ) -> Result<Self, ConversionError<Self::Error>> {
+//!         let parsed = unsafe { addr_from_transparent_p2pkh(data[..].as_ptr()) };
+//!         if parsed.is_null() {
+//!             Err("Reason for the failure".into())
+//!         } else {
+//!             Ok(Self(parsed))
+//!         }
+//!     }
+//! }
+//!
+//! pub extern "C" fn parse_zcash_address(encoded: *const c_char) -> *mut c_void {
+//!     let encoded = unsafe { CStr::from_ptr(encoded) }.to_str().expect("valid");
+//!
+//!     let addr = match ZcashAddress::try_from_encoded(encoded) {
+//!         Ok(addr) => addr,
+//!         Err(e) => {
+//!             // This was either an invalid address encoding, or not a Zcash address.
+//!             // You should pass this error back across the FFI.
+//!             return ptr::null_mut();
+//!         }
+//!     };
+//!
+//!     match addr.convert_if_network::<ParsedAddress>(Network::Main) {
+//!         Ok(parsed) => parsed.0,
+//!         Err(e) => {
+//!             // We didn't implement all of the methods of `TryFromRawAddress`, so if an
+//!             // address with one of those kinds is parsed, it will result in an error
+//!             // here that should be passed back across the FFI.
+//!             ptr::null_mut()
+//!         }
+//!     }
+//! }
+//! ```
+
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+// Catch documentation errors caused by code changes.
+#![deny(rustdoc::broken_intra_doc_links)]
+
 mod convert;
 mod encoding;
 mod kind;
@@ -10,6 +141,9 @@ pub use convert::{
 };
 pub use encoding::ParseError;
 pub use kind::unified;
+use kind::unified::Receiver;
+pub use zcash_protocol::consensus::NetworkType as Network;
+use zcash_protocol::{PoolType, ShieldedProtocol};
 
 /// A Zcash address.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -18,28 +152,15 @@ pub struct ZcashAddress {
     kind: AddressKind,
 }
 
-/// The Zcash network for which an address is encoded.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Network {
-    /// Zcash Mainnet.
-    Main,
-    /// Zcash Testnet.
-    Test,
-    /// Private integration / regression testing, used in `zcashd`.
-    ///
-    /// For some address types there is no distinction between test and regtest encodings;
-    /// those will always be parsed as `Network::Test`.
-    Regtest,
-}
-
 /// Known kinds of Zcash addresses.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum AddressKind {
-    Sprout(kind::sprout::Data),
-    Sapling(kind::sapling::Data),
+    Sprout([u8; 64]),
+    Sapling([u8; 43]),
     Unified(unified::Address),
-    P2pkh(kind::p2pkh::Data),
-    P2sh(kind::p2sh::Data),
+    P2pkh([u8; 20]),
+    P2sh([u8; 20]),
+    Tex([u8; 20]),
 }
 
 impl ZcashAddress {
@@ -104,6 +225,7 @@ impl ZcashAddress {
             AddressKind::Unified(data) => T::try_from_unified(self.net, data),
             AddressKind::P2pkh(data) => T::try_from_transparent_p2pkh(self.net, data),
             AddressKind::P2sh(data) => T::try_from_transparent_p2sh(self.net, data),
+            AddressKind::Tex(data) => T::try_from_tex(self.net, data),
         }
     }
 
@@ -139,10 +261,123 @@ impl ZcashAddress {
                 T::try_from_raw_transparent_p2pkh(data)
             }
             AddressKind::P2sh(data) if regtest_exception => T::try_from_raw_transparent_p2sh(data),
+            AddressKind::Tex(data) if network_matches => T::try_from_raw_tex(data),
             _ => Err(ConversionError::IncorrectNetwork {
                 expected: net,
                 actual: self.net,
             }),
+        }
+    }
+
+    /// Returns whether this address has the ability to receive transfers of the given pool type.
+    pub fn can_receive_as(&self, pool_type: PoolType) -> bool {
+        use AddressKind::*;
+        match &self.kind {
+            Sprout(_) => false,
+            Sapling(_) => pool_type == PoolType::Shielded(ShieldedProtocol::Sapling),
+            Unified(addr) => addr.has_receiver_of_type(pool_type),
+            P2pkh(_) | P2sh(_) | Tex(_) => pool_type == PoolType::Transparent,
+        }
+    }
+
+    /// Returns whether this address can receive a memo.
+    pub fn can_receive_memo(&self) -> bool {
+        use AddressKind::*;
+        match &self.kind {
+            Sprout(_) | Sapling(_) => true,
+            Unified(addr) => addr.can_receive_memo(),
+            P2pkh(_) | P2sh(_) | Tex(_) => false,
+        }
+    }
+
+    /// Returns whether or not this address contains or corresponds to the given unified address
+    /// receiver.
+    pub fn matches_receiver(&self, receiver: &Receiver) -> bool {
+        match (&self.kind, receiver) {
+            (AddressKind::Unified(ua), r) => ua.contains_receiver(r),
+            (AddressKind::Sapling(d), Receiver::Sapling(r)) => r == d,
+            (AddressKind::P2pkh(d), Receiver::P2pkh(r)) => r == d,
+            (AddressKind::Tex(d), Receiver::P2pkh(r)) => r == d,
+            (AddressKind::P2sh(d), Receiver::P2sh(r)) => r == d,
+            _ => false,
+        }
+    }
+}
+
+#[cfg(feature = "test-dependencies")]
+pub mod testing {
+    use std::convert::TryInto;
+
+    use proptest::{array::uniform20, collection::vec, prelude::any, prop_compose, prop_oneof};
+
+    use crate::{unified::address::testing::arb_unified_address, AddressKind, ZcashAddress};
+    use zcash_protocol::consensus::NetworkType;
+
+    prop_compose! {
+        fn arb_sprout_addr_kind()(
+            r_bytes in vec(any::<u8>(), 64)
+        ) -> AddressKind {
+            AddressKind::Sprout(r_bytes.try_into().unwrap())
+        }
+    }
+
+    prop_compose! {
+        fn arb_sapling_addr_kind()(
+            r_bytes in vec(any::<u8>(), 43)
+        ) -> AddressKind {
+            AddressKind::Sapling(r_bytes.try_into().unwrap())
+        }
+    }
+
+    prop_compose! {
+        fn arb_p2pkh_addr_kind()(
+            r_bytes in uniform20(any::<u8>())
+        ) -> AddressKind {
+            AddressKind::P2pkh(r_bytes)
+        }
+    }
+
+    prop_compose! {
+        fn arb_p2sh_addr_kind()(
+            r_bytes in uniform20(any::<u8>())
+        ) -> AddressKind {
+            AddressKind::P2sh(r_bytes)
+        }
+    }
+
+    prop_compose! {
+        fn arb_unified_addr_kind()(
+            uaddr in arb_unified_address()
+        ) -> AddressKind {
+            AddressKind::Unified(uaddr)
+        }
+    }
+
+    prop_compose! {
+        fn arb_tex_addr_kind()(
+            r_bytes in uniform20(any::<u8>())
+        ) -> AddressKind {
+            AddressKind::Tex(r_bytes)
+        }
+    }
+
+    prop_compose! {
+        /// Create an arbitrary, structurally-valid `ZcashAddress` value.
+        ///
+        /// Note that the data contained in the generated address does _not_ necessarily correspond
+        /// to a valid address according to the Zcash protocol; binary data in the resulting value
+        /// is entirely random.
+        pub fn arb_address(net: NetworkType)(
+            kind in prop_oneof!(
+                arb_sprout_addr_kind(),
+                arb_sapling_addr_kind(),
+                arb_p2pkh_addr_kind(),
+                arb_p2sh_addr_kind(),
+                arb_unified_addr_kind(),
+                arb_tex_addr_kind()
+            )
+        ) -> ZcashAddress {
+            ZcashAddress { net, kind }
         }
     }
 }

@@ -1,0 +1,137 @@
+// Copyright (c) 2023 The Zcash developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or https://www.opensource.org/licenses/mit-license.php .
+
+syntax = "proto3";
+package cash.z.wallet.sdk.ffi;
+
+// A data structure that describes a series of transactions to be created.
+message Proposal {
+    // The version of this serialization format.
+    uint32 protoVersion = 1;
+    // The fee rule used in constructing this proposal
+    FeeRule feeRule = 2;
+    // The target height for which the proposal was constructed
+    //
+    // The chain must contain at least this many blocks in order for the proposal to
+    // be executed.
+    uint32 minTargetHeight = 3;
+    // The series of transactions to be created.
+    repeated ProposalStep steps = 4;
+}
+
+// A data structure that describes the inputs to be consumed and outputs to
+// be produced in a proposed transaction.
+message ProposalStep {
+    // ZIP 321 serialized transaction request
+    string transactionRequest = 1;
+    // The vector of selected payment index / output pool mappings. Payment index
+    // 0 corresponds to the payment with no explicit index.
+    repeated PaymentOutputPool paymentOutputPools = 2;
+    // The anchor height to be used in creating the transaction, if any.
+    // Setting the anchor height to zero will disallow the use of any shielded
+    // inputs.
+    uint32 anchorHeight = 3;
+    // The inputs to be used in creating the transaction.
+    repeated ProposedInput inputs = 4;
+    // The total value, fee value, and change outputs of the proposed
+    // transaction
+    TransactionBalance balance = 5;
+    // A flag indicating whether the step is for a shielding transaction,
+    // used for determining which OVK to select for wallet-internal outputs.
+    bool isShielding = 6;
+}
+
+enum ValuePool {
+    // Protobuf requires that enums have a zero discriminant as the default
+    // value. However, we need to require that a known value pool is selected,
+    // and we do not want to fall back to any default, so sending the
+    // PoolNotSpecified value will be treated as an error.
+    PoolNotSpecified = 0;
+    // The transparent value pool (P2SH is not distinguished from P2PKH)
+    Transparent = 1;
+    // The Sapling value pool
+    Sapling = 2;
+    // The Orchard value pool
+    Orchard = 3;
+}
+
+// A mapping from ZIP 321 payment index to the output pool that has been chosen
+// for that payment, based upon the payment address and the selected inputs to
+// the transaction.
+message PaymentOutputPool {
+    uint32 paymentIndex = 1;
+    ValuePool valuePool = 2;
+}
+
+// The unique identifier and value for each proposed input that does not
+// require a back-reference to a prior step of the proposal.
+message ReceivedOutput {
+    bytes txid = 1;
+    ValuePool valuePool = 2;
+    uint32 index = 3;
+    uint64 value = 4;
+}
+
+// A reference a payment in a prior step of the proposal. This payment must
+// belong to the wallet.
+message PriorStepOutput {
+    uint32 stepIndex = 1;
+    uint32 paymentIndex = 2;
+}
+
+// A reference a change output from a prior step of the proposal.
+message PriorStepChange {
+    uint32 stepIndex = 1;
+    uint32 changeIndex = 2;
+}
+
+// The unique identifier and value for an input to be used in the transaction.
+message ProposedInput {
+    oneof value {
+        ReceivedOutput receivedOutput = 1;
+        PriorStepOutput priorStepOutput = 2;
+        PriorStepChange priorStepChange = 3;
+    }
+}
+
+// The fee rule used in constructing a Proposal
+enum FeeRule {
+    // Protobuf requires that enums have a zero discriminant as the default
+    // value. However, we need to require that a known fee rule is selected,
+    // and we do not want to fall back to any default, so sending the
+    // FeeRuleNotSpecified value will be treated as an error.
+    FeeRuleNotSpecified = 0;
+    // 10000 ZAT
+    PreZip313 = 1;
+    // 1000 ZAT
+    Zip313 = 2;
+    // MAX(10000, 5000 * logical_actions) ZAT
+    Zip317 = 3;
+}
+
+// The proposed change outputs and fee value.
+message TransactionBalance {
+    // A list of change output values.
+    repeated ChangeValue proposedChange = 1;
+    // The fee to be paid by the proposed transaction, in zatoshis.
+    uint64 feeRequired = 2;
+}
+
+// A proposed change output. If the transparent value pool is selected,
+// the `memo` field must be null.
+message ChangeValue {
+    // The value of a change output to be created, in zatoshis.
+    uint64 value = 1;
+    // The value pool in which the change output should be created.
+    ValuePool valuePool = 2;
+    // The optional memo that should be associated with the newly created change output.
+    // Memos must not be present for transparent change outputs.
+    MemoBytes memo = 3;
+}
+
+// An object wrapper for memo bytes, to facilitate representing the
+// `change_memo == None` case.
+message MemoBytes {
+    bytes value = 1;
+}

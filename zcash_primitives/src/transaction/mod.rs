@@ -13,27 +13,23 @@ mod tests;
 
 use blake2b_simd::Hash as Blake2bHash;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use ff::PrimeField;
 use memuse::DynamicUsage;
 use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
-use zcash_encoding::{Array, CompactSize, Vector};
+use zcash_encoding::{CompactSize, Vector};
 
 use crate::{
     consensus::{BlockHeight, BranchId},
-    sapling::redjubjub,
+    sapling::{self, builder as sapling_builder},
 };
 
 use self::{
     components::{
         amount::{Amount, BalanceError},
-        orchard as orchard_serialization,
-        sapling::{
-            self, OutputDescription, OutputDescriptionV5, SpendDescription, SpendDescriptionV5,
-        },
+        orchard as orchard_serialization, sapling as sapling_serialization,
         sprout::{self, JsDescription},
         transparent::{self, TxIn, TxOut},
         OutPoint,
@@ -42,7 +38,7 @@ use self::{
     util::sha256d::{HashReader, HashWriter},
 };
 
-#[cfg(feature = "zfuture")]
+#[cfg(zcash_unstable = "zfuture")]
 use self::components::tze::{self, TzeIn, TzeOut};
 
 const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
@@ -59,11 +55,18 @@ const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
 /// using these constants should be inspected, and use of these constants
 /// should be removed as appropriate in favor of the new consensus
 /// transaction version and group.
-#[cfg(feature = "zfuture")]
+#[cfg(zcash_unstable = "zfuture")]
 const ZFUTURE_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
-#[cfg(feature = "zfuture")]
+#[cfg(zcash_unstable = "zfuture")]
 const ZFUTURE_TX_VERSION: u32 = 0x0000FFFF;
 
+/// The identifier for a Zcash transaction.
+///
+/// - For v1-4 transactions, this is a double-SHA-256 hash of the encoded transaction.
+///   This means that it is malleable, and only a reliable identifier for transactions
+///   that have been mined.
+/// - For v5 transactions onwards, this identifier is derived only from "effecting" data,
+///   and is non-malleable in all contexts.
 #[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct TxId([u8; 32]);
 
@@ -89,6 +92,12 @@ impl fmt::Display for TxId {
 impl AsRef<[u8; 32]> for TxId {
     fn as_ref(&self) -> &[u8; 32] {
         &self.0
+    }
+}
+
+impl From<TxId> for [u8; 32] {
+    fn from(value: TxId) -> Self {
+        value.0
     }
 }
 
@@ -122,7 +131,7 @@ pub enum TxVersion {
     Overwinter,
     Sapling,
     Zip225,
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     ZFuture,
 }
 
@@ -137,7 +146,7 @@ impl TxVersion {
                 (OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID) => Ok(TxVersion::Overwinter),
                 (SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID) => Ok(TxVersion::Sapling),
                 (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::Zip225),
-                #[cfg(feature = "zfuture")]
+                #[cfg(zcash_unstable = "zfuture")]
                 (ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID) => Ok(TxVersion::ZFuture),
                 _ => Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -167,7 +176,7 @@ impl TxVersion {
                 TxVersion::Overwinter => OVERWINTER_TX_VERSION,
                 TxVersion::Sapling => SAPLING_TX_VERSION,
                 TxVersion::Zip225 => V5_TX_VERSION,
-                #[cfg(feature = "zfuture")]
+                #[cfg(zcash_unstable = "zfuture")]
                 TxVersion::ZFuture => ZFUTURE_TX_VERSION,
             }
     }
@@ -178,7 +187,7 @@ impl TxVersion {
             TxVersion::Overwinter => OVERWINTER_VERSION_GROUP_ID,
             TxVersion::Sapling => SAPLING_VERSION_GROUP_ID,
             TxVersion::Zip225 => V5_VERSION_GROUP_ID,
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => ZFUTURE_VERSION_GROUP_ID,
         }
     }
@@ -191,12 +200,13 @@ impl TxVersion {
         }
     }
 
+    /// Returns `true` if this transaction version supports the Sprout protocol.
     pub fn has_sprout(&self) -> bool {
         match self {
             TxVersion::Sprout(v) => *v >= 2u32,
             TxVersion::Overwinter | TxVersion::Sapling => true,
             TxVersion::Zip225 => false,
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
         }
     }
@@ -205,30 +215,33 @@ impl TxVersion {
         !matches!(self, TxVersion::Sprout(_))
     }
 
+    /// Returns `true` if this transaction version supports the Sapling protocol.
     pub fn has_sapling(&self) -> bool {
         match self {
             TxVersion::Sprout(_) | TxVersion::Overwinter => false,
             TxVersion::Sapling => true,
             TxVersion::Zip225 => true,
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
         }
     }
 
+    /// Returns `true` if this transaction version supports the Orchard protocol.
     pub fn has_orchard(&self) -> bool {
         match self {
             TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => false,
             TxVersion::Zip225 => true,
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
         }
     }
 
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     pub fn has_tze(&self) -> bool {
         matches!(self, TxVersion::ZFuture)
     }
 
+    /// Suggests the transaction version that should be used in the given Zcash epoch.
     pub fn suggested_for_branch(consensus_branch_id: BranchId) -> Self {
         match consensus_branch_id {
             BranchId::Sprout => TxVersion::Sprout(2),
@@ -237,7 +250,9 @@ impl TxVersion {
                 TxVersion::Sapling
             }
             BranchId::Nu5 => TxVersion::Zip225,
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "nu6")]
+            BranchId::Nu6 => TxVersion::Zip225,
+            #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => TxVersion::ZFuture,
         }
     }
@@ -246,33 +261,40 @@ impl TxVersion {
 /// Authorization state for a bundle of transaction data.
 pub trait Authorization {
     type TransparentAuth: transparent::Authorization;
-    type SaplingAuth: sapling::Authorization;
+    type SaplingAuth: sapling::bundle::Authorization;
     type OrchardAuth: orchard::bundle::Authorization;
 
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth: tze::Authorization;
 }
 
+/// [`Authorization`] marker type for fully-authorized transactions.
 #[derive(Debug)]
 pub struct Authorized;
 
 impl Authorization for Authorized {
     type TransparentAuth = transparent::Authorized;
-    type SaplingAuth = sapling::Authorized;
+    type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth = tze::Authorized;
 }
 
+/// [`Authorization`] marker type for transactions without authorization data.
+///
+/// Currently this includes Sapling proofs because the types in this crate support v4
+/// transactions, which commit to the Sapling proofs in the transaction digest.
 pub struct Unauthorized;
 
 impl Authorization for Unauthorized {
     type TransparentAuth = transparent::builder::Unauthorized;
-    type SaplingAuth = sapling::builder::Unauthorized;
-    type OrchardAuth = orchard_serialization::Unauthorized;
+    type SaplingAuth =
+        sapling_builder::InProgress<sapling_builder::Proven, sapling_builder::Unsigned>;
+    type OrchardAuth =
+        orchard::builder::InProgress<orchard::builder::Unproven, orchard::builder::Unauthorized>;
 
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth = tze::builder::Unauthorized;
 }
 
@@ -297,6 +319,7 @@ impl PartialEq for Transaction {
     }
 }
 
+/// The information contained in a Zcash transaction.
 #[derive(Debug)]
 pub struct TransactionData<A: Authorization> {
     version: TxVersion,
@@ -305,13 +328,14 @@ pub struct TransactionData<A: Authorization> {
     expiry_height: BlockHeight,
     transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
     sprout_bundle: Option<sprout::Bundle>,
-    sapling_bundle: Option<sapling::Bundle<A::SaplingAuth>>,
+    sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
     orchard_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, Amount>>,
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
 }
 
 impl<A: Authorization> TransactionData<A> {
+    /// Constructs a `TransactionData` from its constituent parts.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         version: TxVersion,
@@ -320,7 +344,7 @@ impl<A: Authorization> TransactionData<A> {
         expiry_height: BlockHeight,
         transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
         sprout_bundle: Option<sprout::Bundle>,
-        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth>>,
+        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount>>,
     ) -> Self {
         TransactionData {
@@ -332,12 +356,14 @@ impl<A: Authorization> TransactionData<A> {
             sprout_bundle,
             sapling_bundle,
             orchard_bundle,
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             tze_bundle: None,
         }
     }
 
-    #[cfg(feature = "zfuture")]
+    /// Constructs a `TransactionData` from its constituent parts, including speculative
+    /// future parts that are not in the current Zcash consensus rules.
+    #[cfg(zcash_unstable = "zfuture")]
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts_zfuture(
         version: TxVersion,
@@ -346,7 +372,7 @@ impl<A: Authorization> TransactionData<A> {
         expiry_height: BlockHeight,
         transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
         sprout_bundle: Option<sprout::Bundle>,
-        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth>>,
+        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount>>,
         tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
     ) -> Self {
@@ -363,10 +389,12 @@ impl<A: Authorization> TransactionData<A> {
         }
     }
 
+    /// Returns the transaction version.
     pub fn version(&self) -> TxVersion {
         self.version
     }
 
+    /// Returns the Zcash epoch that this transaction can be mined in.
     pub fn consensus_branch_id(&self) -> BranchId {
         self.consensus_branch_id
     }
@@ -387,7 +415,7 @@ impl<A: Authorization> TransactionData<A> {
         self.sprout_bundle.as_ref()
     }
 
-    pub fn sapling_bundle(&self) -> Option<&sapling::Bundle<A::SaplingAuth>> {
+    pub fn sapling_bundle(&self) -> Option<&sapling::Bundle<A::SaplingAuth, Amount>> {
         self.sapling_bundle.as_ref()
     }
 
@@ -395,7 +423,7 @@ impl<A: Authorization> TransactionData<A> {
         self.orchard_bundle.as_ref()
     }
 
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     pub fn tze_bundle(&self) -> Option<&tze::Bundle<A::TzeAuth>> {
         self.tze_bundle.as_ref()
     }
@@ -441,7 +469,7 @@ impl<A: Authorization> TransactionData<A> {
             digester.digest_transparent(self.transparent_bundle.as_ref()),
             digester.digest_sapling(self.sapling_bundle.as_ref()),
             digester.digest_orchard(self.orchard_bundle.as_ref()),
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             digester.digest_tze(self.tze_bundle.as_ref()),
         )
     }
@@ -456,14 +484,15 @@ impl<A: Authorization> TransactionData<A> {
             Option<transparent::Bundle<A::TransparentAuth>>,
         ) -> Option<transparent::Bundle<B::TransparentAuth>>,
         f_sapling: impl FnOnce(
-            Option<sapling::Bundle<A::SaplingAuth>>,
-        ) -> Option<sapling::Bundle<B::SaplingAuth>>,
+            Option<sapling::Bundle<A::SaplingAuth, Amount>>,
+        ) -> Option<sapling::Bundle<B::SaplingAuth, Amount>>,
         f_orchard: impl FnOnce(
             Option<orchard::bundle::Bundle<A::OrchardAuth, Amount>>,
         ) -> Option<orchard::bundle::Bundle<B::OrchardAuth, Amount>>,
-        #[cfg(feature = "zfuture")] f_tze: impl FnOnce(
+        #[cfg(zcash_unstable = "zfuture")] f_tze: impl FnOnce(
             Option<tze::Bundle<A::TzeAuth>>,
-        ) -> Option<tze::Bundle<B::TzeAuth>>,
+        )
+            -> Option<tze::Bundle<B::TzeAuth>>,
     ) -> TransactionData<B> {
         TransactionData {
             version: self.version,
@@ -474,7 +503,7 @@ impl<A: Authorization> TransactionData<A> {
             sprout_bundle: self.sprout_bundle,
             sapling_bundle: f_sapling(self.sapling_bundle),
             orchard_bundle: f_orchard(self.orchard_bundle),
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             tze_bundle: f_tze(self.tze_bundle),
         }
     }
@@ -482,9 +511,9 @@ impl<A: Authorization> TransactionData<A> {
     pub fn map_authorization<B: Authorization>(
         self,
         f_transparent: impl transparent::MapAuth<A::TransparentAuth, B::TransparentAuth>,
-        f_sapling: impl sapling::MapAuth<A::SaplingAuth, B::SaplingAuth>,
+        mut f_sapling: impl sapling_serialization::MapAuth<A::SaplingAuth, B::SaplingAuth>,
         mut f_orchard: impl orchard_serialization::MapAuth<A::OrchardAuth, B::OrchardAuth>,
-        #[cfg(feature = "zfuture")] f_tze: impl tze::MapAuth<A::TzeAuth, B::TzeAuth>,
+        #[cfg(zcash_unstable = "zfuture")] f_tze: impl tze::MapAuth<A::TzeAuth, B::TzeAuth>,
     ) -> TransactionData<B> {
         TransactionData {
             version: self.version,
@@ -495,7 +524,15 @@ impl<A: Authorization> TransactionData<A> {
                 .transparent_bundle
                 .map(|b| b.map_authorization(f_transparent)),
             sprout_bundle: self.sprout_bundle,
-            sapling_bundle: self.sapling_bundle.map(|b| b.map_authorization(f_sapling)),
+            sapling_bundle: self.sapling_bundle.map(|b| {
+                b.map_authorization(
+                    &mut f_sapling,
+                    |f, p| f.map_spend_proof(p),
+                    |f, p| f.map_output_proof(p),
+                    |f, s| f.map_auth_sig(s),
+                    |f, a| f.map_authorization(a),
+                )
+            }),
             orchard_bundle: self.orchard_bundle.map(|b| {
                 b.map_authorization(
                     &mut f_orchard,
@@ -503,7 +540,7 @@ impl<A: Authorization> TransactionData<A> {
                     |f, a| f.map_authorization(a),
                 )
             }),
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             tze_bundle: self.tze_bundle.map(|b| b.map_authorization(f_tze)),
         }
     }
@@ -530,7 +567,7 @@ impl Transaction {
                 Self::from_data_v4(data)
             }
             TxVersion::Zip225 => Ok(Self::from_data_v5(data)),
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => Ok(Self::from_data_v5(data)),
         }
     }
@@ -573,7 +610,7 @@ impl Transaction {
                 Self::read_v4(reader, version, consensus_branch_id)
             }
             TxVersion::Zip225 => Self::read_v5(reader.into_base_reader(), version),
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => Self::read_v5(reader.into_base_reader(), version),
         }
     }
@@ -593,18 +630,8 @@ impl Transaction {
             0u32.into()
         };
 
-        let (value_balance, shielded_spends, shielded_outputs) = if version.has_sapling() {
-            let vb = Self::read_amount(&mut reader)?;
-            #[allow(clippy::redundant_closure)]
-            let ss: Vec<SpendDescription<sapling::Authorized>> =
-                Vector::read(&mut reader, |r| SpendDescription::read(r))?;
-            #[allow(clippy::redundant_closure)]
-            let so: Vec<OutputDescription<sapling::GrothProofBytes>> =
-                Vector::read(&mut reader, |r| OutputDescription::read(r))?;
-            (vb, ss, so)
-        } else {
-            (Amount::zero(), vec![], vec![])
-        };
+        let (value_balance, shielded_spends, shielded_outputs) =
+            sapling_serialization::read_v4_components(&mut reader, version.has_sapling())?;
 
         let sprout_bundle = if version.has_sprout() {
             let joinsplits = Vector::read(&mut reader, |r| {
@@ -630,7 +657,9 @@ impl Transaction {
         let binding_sig = if version.has_sapling()
             && !(shielded_spends.is_empty() && shielded_outputs.is_empty())
         {
-            Some(redjubjub::Signature::read(&mut reader)?)
+            let mut sig = [0; 64];
+            reader.read_exact(&mut sig)?;
+            Some(redjubjub::Signature::from(sig))
         } else {
             None
         };
@@ -648,16 +677,16 @@ impl Transaction {
                 expiry_height,
                 transparent_bundle,
                 sprout_bundle,
-                sapling_bundle: binding_sig.map(|binding_sig| {
+                sapling_bundle: binding_sig.and_then(|binding_sig| {
                     sapling::Bundle::from_parts(
                         shielded_spends,
                         shielded_outputs,
                         value_balance,
-                        sapling::Authorized { binding_sig },
+                        sapling::bundle::Authorized { binding_sig },
                     )
                 }),
                 orchard_bundle: None,
-                #[cfg(feature = "zfuture")]
+                #[cfg(zcash_unstable = "zfuture")]
                 tze_bundle: None,
             },
         })
@@ -690,10 +719,10 @@ impl Transaction {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_v5_header_fragment(&mut reader)?;
         let transparent_bundle = Self::read_transparent(&mut reader)?;
-        let sapling_bundle = Self::read_v5_sapling(&mut reader)?;
+        let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
         let orchard_bundle = orchard_serialization::read_v5_bundle(&mut reader)?;
 
-        #[cfg(feature = "zfuture")]
+        #[cfg(zcash_unstable = "zfuture")]
         let tze_bundle = if version.has_tze() {
             Self::read_tze(&mut reader)?
         } else {
@@ -709,7 +738,7 @@ impl Transaction {
             sprout_bundle: None,
             sapling_bundle,
             orchard_bundle,
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
         };
 
@@ -733,72 +762,11 @@ impl Transaction {
     #[cfg(feature = "temporary-zcashd")]
     pub fn temporary_zcashd_read_v5_sapling<R: Read>(
         reader: R,
-    ) -> io::Result<Option<sapling::Bundle<sapling::Authorized>>> {
-        Self::read_v5_sapling(reader)
+    ) -> io::Result<Option<sapling::Bundle<sapling::bundle::Authorized, Amount>>> {
+        sapling_serialization::read_v5_bundle(reader)
     }
 
-    #[allow(clippy::redundant_closure)]
-    fn read_v5_sapling<R: Read>(
-        mut reader: R,
-    ) -> io::Result<Option<sapling::Bundle<sapling::Authorized>>> {
-        let sd_v5s = Vector::read(&mut reader, SpendDescriptionV5::read)?;
-        let od_v5s = Vector::read(&mut reader, OutputDescriptionV5::read)?;
-        let n_spends = sd_v5s.len();
-        let n_outputs = od_v5s.len();
-        let value_balance = if n_spends > 0 || n_outputs > 0 {
-            Self::read_amount(&mut reader)?
-        } else {
-            Amount::zero()
-        };
-
-        let anchor = if n_spends > 0 {
-            Some(sapling::read_base(&mut reader, "anchor")?)
-        } else {
-            None
-        };
-
-        let v_spend_proofs = Array::read(&mut reader, n_spends, |r| sapling::read_zkproof(r))?;
-        let v_spend_auth_sigs = Array::read(&mut reader, n_spends, |r| {
-            SpendDescription::read_spend_auth_sig(r)
-        })?;
-        let v_output_proofs = Array::read(&mut reader, n_outputs, |r| sapling::read_zkproof(r))?;
-
-        let binding_sig = if n_spends > 0 || n_outputs > 0 {
-            Some(redjubjub::Signature::read(&mut reader)?)
-        } else {
-            None
-        };
-
-        let shielded_spends = sd_v5s
-            .into_iter()
-            .zip(
-                v_spend_proofs
-                    .into_iter()
-                    .zip(v_spend_auth_sigs.into_iter()),
-            )
-            .map(|(sd_5, (zkproof, spend_auth_sig))| {
-                // the following `unwrap` is safe because we know n_spends > 0.
-                sd_5.into_spend_description(anchor.unwrap(), zkproof, spend_auth_sig)
-            })
-            .collect();
-
-        let shielded_outputs = od_v5s
-            .into_iter()
-            .zip(v_output_proofs.into_iter())
-            .map(|(od_5, zkproof)| od_5.into_output_description(zkproof))
-            .collect();
-
-        Ok(binding_sig.map(|binding_sig| {
-            sapling::Bundle::from_parts(
-                shielded_spends,
-                shielded_outputs,
-                value_balance,
-                sapling::Authorized { binding_sig },
-            )
-        }))
-    }
-
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     fn read_tze<R: Read>(mut reader: &mut R) -> io::Result<Option<tze::Bundle<tze::Authorized>>> {
         let vin = Vector::read(&mut reader, TzeIn::read)?;
         let vout = Vector::read(&mut reader, TzeOut::read)?;
@@ -819,7 +787,7 @@ impl Transaction {
                 self.write_v4(writer)
             }
             TxVersion::Zip225 => self.write_v5(writer),
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => self.write_v5(writer),
         }
     }
@@ -833,34 +801,11 @@ impl Transaction {
             writer.write_u32::<LittleEndian>(u32::from(self.expiry_height))?;
         }
 
-        if self.version.has_sapling() {
-            writer.write_all(
-                &self
-                    .sapling_bundle
-                    .as_ref()
-                    .map_or(Amount::zero(), |b| *b.value_balance())
-                    .to_i64_le_bytes(),
-            )?;
-            Vector::write(
-                &mut writer,
-                self.sapling_bundle
-                    .as_ref()
-                    .map_or(&[], |b| b.shielded_spends()),
-                |w, e| e.write_v4(w),
-            )?;
-            Vector::write(
-                &mut writer,
-                self.sapling_bundle
-                    .as_ref()
-                    .map_or(&[], |b| b.shielded_outputs()),
-                |w, e| e.write_v4(w),
-            )?;
-        } else if self.sapling_bundle.is_some() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Sapling components may not be present if Sapling is not active.",
-            ));
-        }
+        sapling_serialization::write_v4_components(
+            &mut writer,
+            self.sapling_bundle.as_ref(),
+            self.version.has_sapling(),
+        )?;
 
         if self.version.has_sprout() {
             if let Some(bundle) = self.sprout_bundle.as_ref() {
@@ -874,7 +819,7 @@ impl Transaction {
 
         if self.version.has_sapling() {
             if let Some(bundle) = self.sapling_bundle.as_ref() {
-                bundle.authorization().binding_sig.write(&mut writer)?;
+                writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
             }
         }
 
@@ -911,7 +856,7 @@ impl Transaction {
         self.write_transparent(&mut writer)?;
         self.write_v5_sapling(&mut writer)?;
         orchard_serialization::write_v5_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
-        #[cfg(feature = "zfuture")]
+        #[cfg(zcash_unstable = "zfuture")]
         self.write_tze(&mut writer)?;
         Ok(())
     }
@@ -926,65 +871,17 @@ impl Transaction {
 
     #[cfg(feature = "temporary-zcashd")]
     pub fn temporary_zcashd_write_v5_sapling<W: Write>(
-        sapling_bundle: Option<&sapling::Bundle<sapling::Authorized>>,
+        sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, Amount>>,
         writer: W,
     ) -> io::Result<()> {
-        Self::write_v5_sapling_inner(sapling_bundle, writer)
+        sapling_serialization::write_v5_bundle(writer, sapling_bundle)
     }
 
     pub fn write_v5_sapling<W: Write>(&self, writer: W) -> io::Result<()> {
-        Self::write_v5_sapling_inner(self.sapling_bundle.as_ref(), writer)
+        sapling_serialization::write_v5_bundle(writer, self.sapling_bundle.as_ref())
     }
 
-    fn write_v5_sapling_inner<W: Write>(
-        sapling_bundle: Option<&sapling::Bundle<sapling::Authorized>>,
-        mut writer: W,
-    ) -> io::Result<()> {
-        if let Some(bundle) = sapling_bundle {
-            Vector::write(&mut writer, bundle.shielded_spends(), |w, e| {
-                e.write_v5_without_witness_data(w)
-            })?;
-
-            Vector::write(&mut writer, bundle.shielded_outputs(), |w, e| {
-                e.write_v5_without_proof(w)
-            })?;
-
-            if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
-                writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
-            }
-            if !bundle.shielded_spends().is_empty() {
-                writer.write_all(bundle.shielded_spends()[0].anchor().to_repr().as_ref())?;
-            }
-
-            Array::write(
-                &mut writer,
-                bundle.shielded_spends().iter().map(|s| &s.zkproof()[..]),
-                |w, e| w.write_all(e),
-            )?;
-            Array::write(
-                &mut writer,
-                bundle.shielded_spends().iter().map(|s| s.spend_auth_sig()),
-                |w, e| e.write(w),
-            )?;
-
-            Array::write(
-                &mut writer,
-                bundle.shielded_outputs().iter().map(|s| &s.zkproof()[..]),
-                |w, e| w.write_all(e),
-            )?;
-
-            if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
-                bundle.authorization().binding_sig.write(&mut writer)?;
-            }
-        } else {
-            CompactSize::write(&mut writer, 0)?;
-            CompactSize::write(&mut writer, 0)?;
-        }
-
-        Ok(())
-    }
-
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     pub fn write_tze<W: Write>(&self, mut writer: W) -> io::Result<()> {
         if let Some(bundle) = &self.tze_bundle {
             Vector::write(&mut writer, &bundle.vin, |w, e| e.write(w))?;
@@ -1023,7 +920,7 @@ pub struct TxDigests<A> {
     pub transparent_digests: Option<TransparentDigests<A>>,
     pub sapling_digest: Option<A>,
     pub orchard_digest: Option<A>,
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     pub tze_digests: Option<TzeDigests<A>>,
 }
 
@@ -1033,7 +930,7 @@ pub trait TransactionDigest<A: Authorization> {
     type SaplingDigest;
     type OrchardDigest;
 
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     type TzeDigest;
 
     type Digest;
@@ -1053,7 +950,7 @@ pub trait TransactionDigest<A: Authorization> {
 
     fn digest_sapling(
         &self,
-        sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth>>,
+        sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth, Amount>>,
     ) -> Self::SaplingDigest;
 
     fn digest_orchard(
@@ -1061,7 +958,7 @@ pub trait TransactionDigest<A: Authorization> {
         orchard_bundle: Option<&orchard::Bundle<A::OrchardAuth, Amount>>,
     ) -> Self::OrchardDigest;
 
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     fn digest_tze(&self, tze_bundle: Option<&tze::Bundle<A::TzeAuth>>) -> Self::TzeDigest;
 
     fn combine(
@@ -1070,7 +967,7 @@ pub trait TransactionDigest<A: Authorization> {
         transparent_digest: Self::TransparentDigest,
         sapling_digest: Self::SaplingDigest,
         orchard_digest: Self::OrchardDigest,
-        #[cfg(feature = "zfuture")] tze_digest: Self::TzeDigest,
+        #[cfg(zcash_unstable = "zfuture")] tze_digest: Self::TzeDigest,
     ) -> Self::Digest;
 }
 
@@ -1093,7 +990,7 @@ pub mod testing {
         Authorized, Transaction, TransactionData, TxId, TxVersion,
     };
 
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     use super::components::tze::testing::{self as tze};
 
     pub fn arb_txid() -> impl Strategy<Value = TxId> {
@@ -1108,12 +1005,14 @@ pub mod testing {
                 Just(TxVersion::Sapling).boxed()
             }
             BranchId::Nu5 => Just(TxVersion::Zip225).boxed(),
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "nu6")]
+            BranchId::Nu6 => Just(TxVersion::Zip225).boxed(),
+            #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => Just(TxVersion::ZFuture).boxed(),
         }
     }
 
-    #[cfg(not(feature = "zfuture"))]
+    #[cfg(not(zcash_unstable = "zfuture"))]
     prop_compose! {
         pub fn arb_txdata(consensus_branch_id: BranchId)(
             version in arb_tx_version(consensus_branch_id),
@@ -1138,7 +1037,7 @@ pub mod testing {
         }
     }
 
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     prop_compose! {
         pub fn arb_txdata(consensus_branch_id: BranchId)(
             version in arb_tx_version(consensus_branch_id),

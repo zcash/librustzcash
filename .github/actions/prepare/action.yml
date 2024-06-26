@@ -1,0 +1,36 @@
+name: 'Prepare CI'
+description: 'Prepares feature flags'
+inputs:
+  extra-features:
+    description: 'Extra feature flags to enable'
+    required: false
+    default: ''
+  test-dependencies:
+    description: 'Include test dependencies'
+    required: false
+    default: true
+outputs:
+  feature-flags:
+    description: 'Feature flags'
+    value: ${{ steps.prepare.outputs.flags }}
+runs:
+  using: 'composite'
+  steps:
+    - id: test
+      shell: bash
+      run: echo "feature=test-dependencies" >> $GITHUB_OUTPUT
+      if: inputs.test-dependencies == 'true'
+    - name: Prepare feature flags
+      id: prepare
+      shell: bash
+      run: >
+        echo "flags=--features '
+        bundled-prover
+        download-params
+        temporary-zcashd
+        transparent-inputs
+        sapling
+        unstable
+        ${{ inputs.extra-features }}
+        ${{ steps.test.outputs.feature }}
+        '" >> $GITHUB_OUTPUT

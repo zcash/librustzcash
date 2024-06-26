@@ -1,7 +1,6 @@
 use std::io::Write;
 
 use blake2b_simd::{Hash as Blake2bHash, Params, State};
-use byteorder::{LittleEndian, WriteBytesExt};
 use zcash_encoding::Array;
 
 use crate::transaction::{
@@ -17,17 +16,18 @@ use crate::transaction::{
     Authorization, TransactionData, TransparentDigests, TxDigests,
 };
 
-#[cfg(feature = "zfuture")]
-use zcash_encoding::{CompactSize, Vector};
-
-#[cfg(feature = "zfuture")]
-use crate::transaction::{components::tze, TzeDigests};
+#[cfg(zcash_unstable = "zfuture")]
+use {
+    crate::transaction::{components::tze, TzeDigests},
+    byteorder::WriteBytesExt,
+    zcash_encoding::{CompactSize, Vector},
+};
 
 const ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash___TxInHash";
 const ZCASH_TRANSPARENT_AMOUNTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxTrAmountsHash";
 const ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxTrScriptsHash";
 
-#[cfg(feature = "zfuture")]
+#[cfg(zcash_unstable = "zfuture")]
 const ZCASH_TZE_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash__TzeInHash";
 
 fn hasher(personal: &[u8; 16]) -> State {
@@ -121,7 +121,7 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
                 txin.prevout.write(&mut ch).unwrap();
                 ch.write_all(&value.to_i64_le_bytes()).unwrap();
                 script_pubkey.write(&mut ch).unwrap();
-                ch.write_u32::<LittleEndian>(txin.sequence).unwrap();
+                ch.write_all(&txin.sequence.to_le_bytes()).unwrap();
             }
             let txin_sig_digest = ch.finalize();
 
@@ -138,7 +138,7 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
     }
 }
 
-#[cfg(feature = "zfuture")]
+#[cfg(zcash_unstable = "zfuture")]
 fn tze_input_sigdigests<A: tze::Authorization>(
     bundle: &tze::Bundle<A>,
     input: &SignableInput<'_>,
@@ -195,7 +195,7 @@ pub fn v5_signature_hash<
         ),
         txid_parts.sapling_digest,
         txid_parts.orchard_digest,
-        #[cfg(feature = "zfuture")]
+        #[cfg(zcash_unstable = "zfuture")]
         tx.tze_bundle
             .as_ref()
             .zip(txid_parts.tze_digests.as_ref())

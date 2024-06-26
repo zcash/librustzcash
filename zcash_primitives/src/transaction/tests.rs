@@ -3,10 +3,11 @@ use std::ops::Deref;
 
 use proptest::prelude::*;
 
-use crate::{consensus::BranchId, legacy::Script};
+use crate::{
+    consensus::BranchId, legacy::Script, transaction::components::amount::NonNegativeAmount,
+};
 
 use super::{
-    components::Amount,
     sapling,
     sighash::{
         SignableInput, TransparentAuthorizingContext, SIGHASH_ALL, SIGHASH_ANYONECANPAY,
@@ -20,7 +21,7 @@ use super::{
     Authorization, Transaction, TransactionData, TxDigests, TxIn,
 };
 
-#[cfg(feature = "zfuture")]
+#[cfg(zcash_unstable = "zfuture")]
 use super::components::tze;
 
 #[test]
@@ -43,7 +44,7 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     let txo = Transaction::read(&txn_bytes[..], tx.consensus_branch_id).unwrap();
 
     prop_assert_eq!(tx.version, txo.version);
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     prop_assert_eq!(tx.tze_bundle.as_ref(), txo.tze_bundle.as_ref());
     prop_assert_eq!(tx.lock_time, txo.lock_time);
     prop_assert_eq!(
@@ -61,6 +62,7 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
 proptest! {
     #[test]
     #[ignore]
+    #[cfg(feature = "expensive-tests")]
     fn tx_serialization_roundtrip_sprout(tx in arb_tx(BranchId::Sprout)) {
         check_roundtrip(tx)?;
     }
@@ -69,6 +71,7 @@ proptest! {
 proptest! {
     #[test]
     #[ignore]
+    #[cfg(feature = "expensive-tests")]
     fn tx_serialization_roundtrip_overwinter(tx in arb_tx(BranchId::Overwinter)) {
         check_roundtrip(tx)?;
     }
@@ -77,6 +80,7 @@ proptest! {
 proptest! {
     #[test]
     #[ignore]
+    #[cfg(feature = "expensive-tests")]
     fn tx_serialization_roundtrip_sapling(tx in arb_tx(BranchId::Sapling)) {
         check_roundtrip(tx)?;
     }
@@ -85,6 +89,7 @@ proptest! {
 proptest! {
     #[test]
     #[ignore]
+    #[cfg(feature = "expensive-tests")]
     fn tx_serialization_roundtrip_blossom(tx in arb_tx(BranchId::Blossom)) {
         check_roundtrip(tx)?;
     }
@@ -93,6 +98,7 @@ proptest! {
 proptest! {
     #[test]
     #[ignore]
+    #[cfg(feature = "expensive-tests")]
     fn tx_serialization_roundtrip_heartwood(tx in arb_tx(BranchId::Heartwood)) {
         check_roundtrip(tx)?;
     }
@@ -114,10 +120,11 @@ proptest! {
     }
 }
 
-#[cfg(feature = "zfuture")]
+#[cfg(zcash_unstable = "zfuture")]
 proptest! {
     #[test]
     #[ignore]
+    #[cfg(feature = "expensive-tests")]
     fn tx_serialization_roundtrip_future(tx in arb_tx(BranchId::ZFuture)) {
         check_roundtrip(tx)?;
     }
@@ -134,7 +141,7 @@ fn zip_0143() {
                 index: n as usize,
                 script_code: &tv.script_code,
                 script_pubkey: &tv.script_code,
-                value: Amount::from_nonnegative_i64(tv.amount).unwrap(),
+                value: NonNegativeAmount::from_nonnegative_i64(tv.amount).unwrap(),
             },
             _ => SignableInput::Shielded,
         };
@@ -156,7 +163,7 @@ fn zip_0243() {
                 index: n as usize,
                 script_code: &tv.script_code,
                 script_pubkey: &tv.script_code,
-                value: Amount::from_nonnegative_i64(tv.amount).unwrap(),
+                value: NonNegativeAmount::from_nonnegative_i64(tv.amount).unwrap(),
             },
             _ => SignableInput::Shielded,
         };
@@ -170,7 +177,7 @@ fn zip_0243() {
 
 #[derive(Debug)]
 struct TestTransparentAuth {
-    input_amounts: Vec<Amount>,
+    input_amounts: Vec<NonNegativeAmount>,
     input_scriptpubkeys: Vec<Script>,
 }
 
@@ -179,7 +186,7 @@ impl transparent::Authorization for TestTransparentAuth {
 }
 
 impl TransparentAuthorizingContext for TestTransparentAuth {
-    fn input_amounts(&self) -> Vec<Amount> {
+    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
         self.input_amounts.clone()
     }
 
@@ -192,10 +199,10 @@ struct TestUnauthorized;
 
 impl Authorization for TestUnauthorized {
     type TransparentAuth = TestTransparentAuth;
-    type SaplingAuth = sapling::Authorized;
+    type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth = tze::Authorized;
 }
 
@@ -214,7 +221,7 @@ fn zip_0244() {
         let input_amounts = tv
             .amounts
             .iter()
-            .map(|amount| Amount::from_nonnegative_i64(*amount).unwrap())
+            .map(|amount| NonNegativeAmount::from_nonnegative_i64(*amount).unwrap())
             .collect();
         let input_scriptpubkeys = tv
             .script_pubkeys
@@ -245,7 +252,7 @@ fn zip_0244() {
                 },
             });
 
-        #[cfg(not(feature = "zfuture"))]
+        #[cfg(not(zcash_unstable = "zfuture"))]
         let tdata = TransactionData::from_parts(
             txdata.version(),
             txdata.consensus_branch_id(),
@@ -256,7 +263,7 @@ fn zip_0244() {
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
         );
-        #[cfg(feature = "zfuture")]
+        #[cfg(zcash_unstable = "zfuture")]
         let tdata = TransactionData::from_parts_zfuture(
             txdata.version(),
             txdata.consensus_branch_id(),

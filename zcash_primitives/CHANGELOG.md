@@ -7,6 +7,258 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.15.0] - 2024-03-25
+
+### Added
+- `zcash_primitives::transaction::components::sapling::zip212_enforcement`
+
+### Changed
+- The following modules are now re-exported from the `zcash_protocol` crate.
+  Additional changes have also been made therein; refer to the `zcash_protocol`
+  changelog for details.
+  - `zcash_primitives::consensus` re-exports `zcash_protocol::consensus`.
+  - `zcash_primitives::constants` re-exports `zcash_protocol::constants`.
+  - `zcash_primitives::transaction::components::amount` re-exports
+    `zcash_protocol::value`. Many of the conversions to and from the
+    `Amount` and `NonNegativeAmount` value types now return
+    `Result<_, BalanceError>` instead of `Result<_, ()>`.
+  - `zcash_primitives::memo` re-exports `zcash_protocol::memo`.
+  - Update to `orchard` version `0.8.0`
+
+### Removed
+- `zcash_primitives::consensus::sapling_zip212_enforcement` instead use
+  `zcash_primitives::transaction::components::sapling::zip212_enforcement`.
+- From `zcash_primitive::components::transaction`:
+  - `impl From<Amount> for u64`
+  - `impl TryFrom<sapling::value::NoteValue> for NonNegativeAmount`
+  - `impl From<NonNegativeAmount> for sapling::value::NoteValue`
+  - `impl TryFrom<orchard::ValueSum> for Amount`
+  - `impl From<NonNegativeAmount> for orchard::NoteValue`
+- The `local_consensus` module and feature flag have been removed; use the module
+  from the `zcash_protocol` crate instead.
+- `unstable-nu6` and `zfuture` feature flags (use `--cfg zcash_unstable=\"nu6\"`
+  or `--cfg zcash_unstable=\"zfuture\"` in `RUSTFLAGS` and `RUSTDOCFLAGS`
+  instead).
+
+## [0.14.0] - 2024-03-01
+### Added
+- Dependency on `bellman 0.14`, `sapling-crypto 0.1`.
+- `zcash_primitives::consensus::sapling_zip212_enforcement`
+- `zcash_primitives::legacy::keys`:
+  - `AccountPrivKey::derive_secret_key`
+  - `NonHardenedChildIndex`
+  - `TransparentKeyScope`
+- `zcash_primitives::local_consensus` module, behind the `local-consensus`
+  feature flag.
+  - The `LocalNetwork` struct provides a type for specifying network upgrade
+    activation heights for a local or specific configuration of a full node.
+    Developers can make use of this type when connecting to a Regtest node by
+    replicating the activation heights used on their node configuration.
+  - `impl zcash_primitives::consensus::Parameters for LocalNetwork` uses the
+    provided activation heights, and `zcash_primitives::constants::regtest::`
+    for everything else.
+- `zcash_primitives::transaction`:
+  - `builder::{BuildConfig, FeeError, get_fee, BuildResult}`
+  - `builder::Error::SaplingBuilderNotAvailable`
+  - `components::sapling`:
+    - Sapling bundle component parsers, behind the `temporary-zcashd` feature
+      flag:
+      - `temporary_zcashd_read_spend_v4`
+      - `temporary_zcashd_read_output_v4`
+      - `temporary_zcashd_write_output_v4`
+      - `temporary_zcashd_read_v4_components`
+      - `temporary_zcashd_write_v4_components`
+  - `components::transparent`:
+    - `builder::TransparentInputInfo`
+  - `fees::StandardFeeRule`
+  - Constants in `fees::zip317`:
+    - `MARGINAL_FEE`
+    - `GRACE_ACTIONS`
+    - `P2PKH_STANDARD_INPUT_SIZE`
+    - `P2PKH_STANDARD_OUTPUT_SIZE`
+  - `impl From<TxId> for [u8; 32]`
+- `zcash_primitives::zip32`:
+  - `ChildIndex::hardened`
+  - `ChildIndex::index`
+  - `ChainCode::new`
+  - `ChainCode::as_bytes`
+  - `impl From<AccountId> for ChildIndex`
+- Additions related to `zcash_primitive::components::amount::Amount`
+  and `zcash_primitive::components::amount::NonNegativeAmount`:
+  - `impl TryFrom<Amount> for u64`
+  - `Amount::const_from_u64`
+  - `NonNegativeAmount::const_from_u64`
+  - `NonNegativeAmount::from_nonnegative_i64_le_bytes`
+  - `NonNegativeAmount::to_i64_le_bytes`
+  - `NonNegativeAmount::is_zero`
+  - `NonNegativeAmount::is_positive`
+  - `impl From<&NonNegativeAmount> for Amount`
+  - `impl From<NonNegativeAmount> for u64`
+  - `impl From<NonNegativeAmount> for zcash_primitives::sapling::value::NoteValue`
+  - `impl From<NonNegativeAmount> for orchard::::NoteValue`
+  - `impl Sum<NonNegativeAmount> for Option<NonNegativeAmount>`
+  - `impl<'a> Sum<&'a NonNegativeAmount> for Option<NonNegativeAmount>`
+  - `impl TryFrom<sapling::value::NoteValue> for NonNegativeAmount`
+  - `impl TryFrom<orchard::NoteValue> for NonNegativeAmount`
+- `impl {Clone, PartialEq, Eq} for zcash_primitives::memo::Error`
+
+### Changed
+- Migrated to `orchard 0.7`.
+- `zcash_primitives::legacy`:
+  - `TransparentAddress` variants have changed:
+    - `TransparentAddress::PublicKey` has been renamed to `PublicKeyHash`
+    - `TransparentAddress::Script` has been renamed to `ScriptHash`
+  - `keys::{derive_external_secret_key, derive_internal_secret_key}` arguments
+    changed from `u32` to `NonHardenedChildIndex`.
+- `zcash_primitives::transaction`:
+  - `builder`:
+    - `Builder` now has a generic parameter for the type of progress notifier,
+      which needs to implement `sapling::builder::ProverProgress` in order to
+      build transactions.
+    - `Builder::new` now takes a `BuildConfig` argument instead of an optional
+      Orchard anchor. Anchors for both Sapling and Orchard are now required at
+      the time of builder construction.
+    - `Builder::{build, build_zfuture}` now take
+      `&impl SpendProver, &impl OutputProver` instead of `&impl TxProver`.
+    - `Builder::add_sapling_spend` no longer takes a `diversifier` argument as
+      the diversifier may be obtained from the note.
+    - `Builder::add_sapling_spend` now takes its `ExtendedSpendingKey` argument
+      by reference.
+    - `Builder::{add_sapling_spend, add_sapling_output}` now return `Error`s
+      instead of the underlying `sapling_crypto::builder::Error`s when returning
+      `Err`.
+    - `Builder::add_orchard_spend` now takes its `SpendingKey` argument by
+      reference.
+    - `Builder::with_progress_notifier` now consumes `self` and returns a
+      `Builder` typed on the provided channel.
+    - `Builder::get_fee` now returns a `builder::FeeError` instead of the bare
+      `FeeRule::Error` when returning `Err`.
+    - `Builder::build` now returns a `Result<BuildResult, ...>` instead of
+      using a tuple to return the constructed transaction and build metadata.
+    - `Error::OrchardAnchorNotAvailable` has been renamed to
+      `OrchardBuilderNotAvailable`.
+    - `build` and `build_zfuture` each now take an additional `rng` argument.
+  - `components`:
+    - `transparent::TxOut.value` now has type `NonNegativeAmount` instead of
+      `Amount`.
+    - `sapling::MapAuth` trait methods now take `&mut self` instead of `&self`.
+    - `transparent::fees` has been moved to
+      `zcash_primitives::transaction::fees::transparent`
+    - `transparent::builder::TransparentBuilder::{inputs, outputs}` have changed
+      to return `&[TransparentInputInfo]` and `&[TxOut]` respectively, in order
+      to avoid coupling to the fee traits.
+  - `Unauthorized::SaplingAuth` now has type `InProgress<Proven, Unsigned>`.
+  - `fees::FeeRule::fee_required` now takes an additional `orchard_action_count`
+    argument.
+  - The following methods now take `NonNegativeAmount` instead of `Amount`:
+    - `builder::Builder::{add_sapling_output, add_transparent_output}`
+    - `components::transparent::builder::TransparentBuilder::add_output`
+    - `fees::fixed::FeeRule::non_standard`
+    - `fees::zip317::FeeRule::non_standard`
+  - The following methods now return `NonNegativeAmount` instead of `Amount`:
+    - `components::amount::testing::arb_nonnegative_amount`
+    - `fees::transparent`:
+      - `InputView::value`
+      - `OutputView::value`
+    - `fees::FeeRule::{fee_required, fee_required_zfuture}`
+    - `fees::fixed::FeeRule::fixed_fee`
+    - `fees::zip317::FeeRule::marginal_fee`
+    - `sighash::TransparentAuthorizingContext::input_amounts`
+- `zcash_primitives::zip32`:
+  - `ChildIndex` has been changed from an enum to an opaque struct, and no
+    longer supports non-hardened indices.
+
+### Removed
+- `zcash_primitives::constants`:
+  - All `const` values (moved to `sapling_crypto::constants`).
+- `zcash_primitives::keys` module, as it was empty after the removal of:
+  - `PRF_EXPAND_PERSONALIZATION`
+  - `OutgoingViewingKey` (use `sapling_crypto::keys::OutgoingViewingKey`
+    instead).
+  - `prf_expand, prf_expand_vec` (use `zcash_spec::PrfExpand` instead).
+- `zcash_primitives::sapling` module (use the `sapling-crypto` crate instead).
+- `zcash_primitives::transaction::components::sapling`:
+  - The following types were removed from this module (moved into
+    `sapling_crypto::bundle`):
+    - `Bundle`
+    - `SpendDescription, SpendDescriptionV5`
+    - `OutputDescription, OutputDescriptionV5`
+    - `Authorization, Authorized`
+    - `GrothProofBytes`
+  - `CompactOutputDescription` (moved to `sapling_crypto::note_encryption`).
+  - `Unproven`
+  - `builder` (moved to `sapling_crypto::builder`).
+  - `builder::Unauthorized` (use `builder::InProgress` instead).
+  - `testing::{arb_bundle, arb_output_description}` (moved into
+    `sapling_crypto::bundle::testing`).
+  - `SpendDescription::<Unauthorized>::apply_signature`
+  - `Bundle::<Unauthorized>::apply_signatures` (use
+    `Bundle::<InProgress<Proven, Unsigned>>::apply_signatures` instead).
+  - The `fees` module was removed. Its contents were unused in this crate,
+    are now instead made available by `zcash_client_backend::fees::sapling`.
+- `impl From<zcash_primitive::components::transaction::Amount> for u64`
+- `zcash_primitives::zip32`:
+  - `sapling` module (moved to `sapling_crypto::zip32`).
+  - `ChildIndex::Hardened` (use `ChildIndex::hardened` instead).
+  - `ChildIndex::NonHardened`
+  - `sapling::ExtendedFullViewingKey::derive_child`
+
+### Fixed
+- `zcash_primitives::keys::ExpandedSpendingKey::from_spending_key` now panics if the
+  spending key expands to `ask = 0`. This has a negligible probability of occurring.
+- `zcash_primitives::zip32::ExtendedSpendingKey::derive_child` now panics if the
+  child key has `ask = 0`. This has a negligible probability of occurring.
+
+## [0.13.0] - 2023-09-25
+### Added
+- `zcash_primitives::consensus::BlockHeight::saturating_sub`
+- `zcash_primitives::transaction::builder`:
+  - `Builder::add_orchard_spend`
+  - `Builder::add_orchard_output`
+- `zcash_primitives::transaction::components::orchard::builder` module
+- `impl HashSer for String` is provided under the `test-dependencies` feature
+  flag. This is a test-only impl; the identity leaf value is `_` and the combining
+  operation is concatenation.
+- `zcash_primitives::transaction::components::amount::NonNegativeAmount::ZERO`
+- Additional trait implementations for `NonNegativeAmount`:
+  - `TryFrom<Amount> for NonNegativeAmount`
+  - `Add<NonNegativeAmount> for NonNegativeAmount`
+  - `Add<NonNegativeAmount> for Option<NonNegativeAmount>`
+  - `Sub<NonNegativeAmount> for NonNegativeAmount`
+  - `Sub<NonNegativeAmount> for Option<NonNegativeAmount>`
+  - `Mul<usize> for NonNegativeAmount`
+- `zcash_primitives::block::BlockHash::try_from_slice`
+
+### Changed
+- Migrated to `incrementalmerkletree 0.5`, `orchard 0.6`.
+- `zcash_primitives::transaction`:
+  - `builder::Builder::{new, new_with_rng}` now take an optional `orchard_anchor`
+    argument which must be provided in order to enable Orchard spends and recipients.
+  - All `builder::Builder` methods now require the bound `R: CryptoRng` on
+    `Builder<'a, P, R>`. A non-`CryptoRng` randomness source is still accepted
+    by `builder::Builder::test_only_new_with_rng`, which **MUST NOT** be used in
+    production.
+  - `builder::Error` has several additional variants for Orchard-related errors.
+  - `fees::FeeRule::fee_required` now takes an additional argument,
+    `orchard_action_count`
+  - `Unauthorized`'s associated type `OrchardAuth` is now
+    `orchard::builder::InProgress<orchard::builder::Unproven, orchard::builder::Unauthorized>`
+    instead of `zcash_primitives::transaction::components::orchard::Unauthorized`
+- `zcash_primitives::consensus::NetworkUpgrade` now implements `PartialEq`, `Eq`
+- `zcash_primitives::legacy::Script` now has a custom `Debug` implementation that
+  renders script details in a much more legible fashion.
+- `zcash_primitives::sapling::redjubjub::Signature` now has a custom `Debug`
+  implementation that renders details in a much more legible fashion.
+- `zcash_primitives::sapling::tree::Node` now has a custom `Debug`
+  implementation that renders details in a much more legible fashion.
+
+### Removed
+- `impl {PartialEq, Eq} for transaction::builder::Error`
+  (use `assert_matches!` where error comparisons are required)
+- `zcash_primitives::transaction::components::orchard::Unauthorized`
+- `zcash_primitives::transaction::components::amount::DEFAULT_FEE` was
+  deprecated in 0.12.0 and has now been removed.
+
 ## [0.12.0] - 2023-06-06
 ### Added
 - `zcash_primitives::transaction`:
@@ -27,7 +279,7 @@ and this library adheres to Rust's notion of
   `incrementalmerkletree::Hashable` and `merkle_tree::HashSer`.
 - The `Hashable` bound on the `Node` parameter to the `IncrementalWitness`
   type has been removed.
-- `sapling::SAPLING_COMMITMENT_TREE_DEPTH_U8` and `sapling::SAPLING_COMMITMENT_TREE_DEPTH` 
+- `sapling::SAPLING_COMMITMENT_TREE_DEPTH_U8` and `sapling::SAPLING_COMMITMENT_TREE_DEPTH`
   have been removed; use `sapling::NOTE_COMMITMENT_TREE_DEPTH` instead.
 - `merkle_tree::{CommitmentTree, IncrementalWitness, MerklePath}` have been removed in
   favor of versions of these types that are now provided by the
@@ -89,7 +341,7 @@ and this library adheres to Rust's notion of
 - The bounds on the `H` parameter to the following methods have changed:
   - `merkle_tree::incremental::read_frontier_v0`
   - `merkle_tree::incremental::read_auth_fragment_v1`
-- The depth of the `merkle_tree::{CommitmentTree, IncrementalWitness, and MerklePath}` 
+- The depth of the `merkle_tree::{CommitmentTree, IncrementalWitness, and MerklePath}`
   data types are now statically constrained using const generic type parameters.
 - `transaction::fees::fixed::FeeRule::standard()` now uses the ZIP 317 minimum fee
   (10000 zatoshis rather than 1000 zatoshis) as the fixed fee. To be compliant with
@@ -539,6 +791,9 @@ and `zcash_encoding`.
   now takes its `MemoBytes` argument as a required field rather than an
   optional one. If the empty memo is desired, use
   `MemoBytes::from(Memo::Empty)` explicitly.
+- `zcash_primitives::zip32`:
+  - `ExtendedSpendingKey::default_address` no longer returns `Option<_>`.
+  - `ExtendedFullViewingKey::default_address` no longer returns `Option<_>`.
 
 ## [0.5.0] - 2021-03-26
 ### Added

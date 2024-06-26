@@ -1,8 +1,9 @@
 use gumdrop::Options;
+use sapling::zip32::ExtendedFullViewingKey;
 use zcash_client_backend::encoding::{decode_extended_full_viewing_key, encode_payment_address};
 use zcash_primitives::{
     constants::{mainnet, testnet},
-    zip32::{DiversifierIndex, ExtendedFullViewingKey},
+    zip32::DiversifierIndex,
 };
 
 fn parse_viewing_key(s: &str) -> Result<(ExtendedFullViewingKey, bool), &'static str> {
@@ -17,16 +18,11 @@ fn parse_viewing_key(s: &str) -> Result<(ExtendedFullViewingKey, bool), &'static
 
 fn parse_diversifier_index(s: &str) -> Result<DiversifierIndex, &'static str> {
     let i: u128 = s.parse().map_err(|_| "Diversifier index is not a number")?;
-    if i >= (1 << 88) {
-        return Err("Diversifier index too large");
-    }
-    Ok(DiversifierIndex(i.to_le_bytes()[..11].try_into().unwrap()))
+    DiversifierIndex::try_from(i).map_err(|_| "Diversifier index too large")
 }
 
 fn encode_diversifier_index(di: &DiversifierIndex) -> u128 {
-    let mut bytes = [0; 16];
-    bytes[..11].copy_from_slice(&di.0);
-    u128::from_le_bytes(bytes)
+    (*di).into()
 }
 
 #[derive(Debug, Options)]

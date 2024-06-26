@@ -1,7 +1,7 @@
 [package]
 name = "zcash_address"
 description = "Zcash address parsing and serialization"
-version = "0.3.0"
+version = "0.3.2"
 authors = [
     "Jack Grigg <jack@electriccoin.co>",
 ]
@@ -14,18 +14,23 @@ rust-version = "1.52"
 categories = ["cryptography::cryptocurrencies", "encoding"]
 keywords = ["zcash", "address", "sapling", "unified"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
-bech32 = "0.9"
-bs58 = { version = "0.5", features = ["check"] }
+bech32.workspace = true
+bs58.workspace = true
 f4jumble = { version = "0.1", path = "../f4jumble" }
-zcash_encoding = { version = "0.2", path = "../zcash_encoding" }
+zcash_protocol.workspace = true
+zcash_encoding.workspace = true
+proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
-assert_matches = "1.3.0"
-proptest = "1"
+assert_matches.workspace = true
 
 [features]
-test-dependencies = []
+test-dependencies = ["dep:proptest"]
 
 [lib]
 bench = false

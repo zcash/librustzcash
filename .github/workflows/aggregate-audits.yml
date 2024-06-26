@@ -1,0 +1,24 @@
+name: Aggregate audits
+
+on:
+  push:
+    branches: main
+    paths:
+      - '.github/workflows/aggregate-audits.yml'
+      - 'supply-chain/audits.toml'
+
+permissions:
+  contents: read
+
+jobs:
+  trigger:
+    name: Trigger
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger aggregation in zcash/rust-ecosystem
+        run: >
+          gh api repos/zcash/rust-ecosystem/dispatches
+            --field event_type="aggregate-audits"
+            --field client_payload[sha]="$GITHUB_SHA"
+        env:
+          GH_TOKEN: ${{ github.token }}

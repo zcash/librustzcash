@@ -1,5 +1,4 @@
 //! Structs representing the TZE components within Zcash transactions.
-#![cfg(feature = "zfuture")]
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::convert::TryFrom;
@@ -12,7 +11,6 @@ use super::amount::Amount;
 use crate::{extensions::transparent as tze, transaction::TxId};
 
 pub mod builder;
-pub mod fees;
 
 fn to_io_error(_: std::num::TryFromIntError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "value out of range")
@@ -253,7 +251,7 @@ pub mod testing {
 
     prop_compose! {
         pub fn arb_tzeout()(value in arb_nonnegative_amount(), precondition in arb_precondition()) -> TzeOut {
-            TzeOut { value, precondition }
+            TzeOut { value: value.into(), precondition }
         }
     }
 

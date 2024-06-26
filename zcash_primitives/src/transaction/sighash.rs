@@ -1,18 +1,18 @@
-use crate::legacy::Script;
 use blake2b_simd::Hash as Blake2bHash;
 
 use super::{
-    components::{
-        sapling::{self, GrothProofBytes},
-        transparent, Amount,
-    },
+    components::{amount::NonNegativeAmount, transparent},
     sighash_v4::v4_signature_hash,
     sighash_v5::v5_signature_hash,
     Authorization, TransactionData, TxDigests, TxVersion,
 };
+use crate::{
+    legacy::Script,
+    sapling::{self, bundle::GrothProofBytes},
+};
 
-#[cfg(feature = "zfuture")]
-use crate::extensions::transparent::Precondition;
+#[cfg(zcash_unstable = "zfuture")]
+use {super::components::Amount, crate::extensions::transparent::Precondition};
 
 pub const SIGHASH_ALL: u8 = 0x01;
 pub const SIGHASH_NONE: u8 = 0x02;
@@ -27,9 +27,9 @@ pub enum SignableInput<'a> {
         index: usize,
         script_code: &'a Script,
         script_pubkey: &'a Script,
-        value: Amount,
+        value: NonNegativeAmount,
     },
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     Tze {
         index: usize,
         precondition: &'a Precondition,
@@ -42,7 +42,7 @@ impl<'a> SignableInput<'a> {
         match self {
             SignableInput::Shielded => SIGHASH_ALL,
             SignableInput::Transparent { hash_type, .. } => *hash_type,
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             SignableInput::Tze { .. } => SIGHASH_ALL,
         }
     }
@@ -63,7 +63,7 @@ pub trait TransparentAuthorizingContext: transparent::Authorization {
     /// so that wallets can commit to the transparent input breakdown
     /// without requiring the full data of the previous transactions
     /// providing these inputs.
-    fn input_amounts(&self) -> Vec<Amount>;
+    fn input_amounts(&self) -> Vec<NonNegativeAmount>;
     /// Returns the list of all transparent input scriptPubKeys, provided
     /// so that wallets can commit to the transparent input breakdown
     /// without requiring the full data of the previous transactions
@@ -76,13 +76,12 @@ pub trait TransparentAuthorizingContext: transparent::Authorization {
 /// set of precomputed hashes produced in the construction of the
 /// transaction ID.
 pub fn signature_hash<
-    'a,
     TA: TransparentAuthorizingContext,
-    SA: sapling::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
+    SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
     A: Authorization<SaplingAuth = SA, TransparentAuth = TA>,
 >(
     tx: &TransactionData<A>,
-    signable_input: &SignableInput<'a>,
+    signable_input: &SignableInput<'_>,
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> SignatureHash {
     SignatureHash(match tx.version {
@@ -92,7 +91,7 @@ pub fn signature_hash<
 
         TxVersion::Zip225 => v5_signature_hash(tx, signable_input, txid_parts),
 
-        #[cfg(feature = "zfuture")]
+        #[cfg(zcash_unstable = "zfuture")]
         TxVersion::ZFuture => v5_signature_hash(tx, signable_input, txid_parts),
     })
 }

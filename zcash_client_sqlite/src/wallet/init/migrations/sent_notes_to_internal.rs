@@ -11,14 +11,7 @@ use super::ufvk_support;
 use crate::wallet::init::WalletMigrationError;
 
 /// This migration adds the `to_account` field to the `sent_notes` table.
-///
-/// 0ddbe561-8259-4212-9ab7-66fdc4a74e1d
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
-    0x0ddbe561,
-    0x8259,
-    0x4212,
-    b"\x9a\xb7\x66\xfd\xc4\xa7\x4e\x1d",
-);
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x0ddbe561_8259_4212_9ab7_66fdc4a74e1d);
 
 pub(super) struct Migration;
 
@@ -81,7 +74,6 @@ impl RusqliteMigration for Migration {
     }
 
     fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
-        // TODO: something better than just panic?
-        panic!("Cannot revert this migration.");
+        Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
     }
 }

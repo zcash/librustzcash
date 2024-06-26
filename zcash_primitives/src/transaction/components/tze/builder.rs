@@ -1,5 +1,4 @@
 //! Types and functions for building TZE transaction components
-#![cfg(feature = "zfuture")]
 
 use std::fmt;
 
@@ -9,7 +8,7 @@ use crate::{
         self as tx,
         components::{
             amount::{Amount, BalanceError},
-            tze::{fees, Authorization, Authorized, Bundle, OutPoint, TzeIn, TzeOut},
+            tze::{Authorization, Authorized, Bundle, OutPoint, TzeIn, TzeOut},
         },
     },
 };
@@ -36,16 +35,16 @@ pub struct TzeSigner<'a, BuildCtx> {
 }
 
 #[derive(Clone)]
-struct TzeBuildInput {
+pub struct TzeBuildInput {
     tzein: TzeIn<()>,
     coin: TzeOut,
 }
 
-impl fees::InputView for TzeBuildInput {
-    fn outpoint(&self) -> &OutPoint {
+impl TzeBuildInput {
+    pub fn outpoint(&self) -> &OutPoint {
         &self.tzein.prevout
     }
-    fn coin(&self) -> &TzeOut {
+    pub fn coin(&self) -> &TzeOut {
         &self.coin
     }
 }
@@ -72,11 +71,11 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
         }
     }
 
-    pub fn inputs(&self) -> &[impl fees::InputView] {
+    pub fn inputs(&self) -> &[TzeBuildInput] {
         &self.vin
     }
 
-    pub fn outputs(&self) -> &[impl fees::OutputView] {
+    pub fn outputs(&self) -> &[TzeOut] {
         &self.vout
     }
 

@@ -4,21 +4,28 @@ description = "Zcash Extension implementations & consensus node integration laye
 version = "0.0.0"
 authors = ["Jack Grigg <jack@z.cash>", "Kris Nuttycombe <kris@z.cash>"]
 homepage = "https://github.com/zcash/librustzcash"
-repository = "https://github.com/zcash/librustzcash"
-license = "MIT OR Apache-2.0"
-edition = "2021"
-rust-version = "1.65"
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-blake2b_simd = "1"
-zcash_primitives = { version = "0.12", path = "../zcash_primitives", default-features = false, features = ["zfuture" ] }
+blake2b_simd.workspace = true
+zcash_primitives.workspace = true
 
 [dev-dependencies]
-ff = "0.13"
-jubjub = "0.10"
-rand_core = "0.6"
-zcash_address = { version = "0.3", path = "../components/zcash_address" }
-zcash_proofs = { version = "0.12", path = "../zcash_proofs" }
+ff.workspace = true
+jubjub.workspace = true
+rand_core.workspace = true
+sapling.workspace = true
+orchard.workspace = true
+zcash_address.workspace = true
+zcash_proofs.workspace = true
 
 [features]
 transparent-inputs = []

@@ -11,12 +11,7 @@ use uuid::Uuid;
 use super::v_transactions_net;
 use crate::wallet::init::WalletMigrationError;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
-    0xbdcdcedc,
-    0x7b29,
-    0x4f1c,
-    b"\x83\x07\x35\xf9\x37\xf0\xd3\x2a",
-);
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xbdcdcedc_7b29_4f1c_8307_35f937f0d32a);
 
 pub(crate) struct Migration;
 
@@ -222,8 +217,7 @@ impl RusqliteMigration for Migration {
     }
 
     fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
-        // TODO: something better than just panic?
-        panic!("Cannot revert this migration.");
+        Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
     }
 }
 
@@ -233,10 +227,9 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use zcash_client_backend::keys::UnifiedSpendingKey;
-    use zcash_primitives::zip32::AccountId;
+    use zcash_primitives::{consensus::Network, zip32::AccountId};
 
     use crate::{
-        tests,
         wallet::init::{init_wallet_db_internal, migrations::v_transactions_net},
         WalletDb,
     };
@@ -244,25 +237,30 @@ mod tests {
     #[test]
     fn received_notes_nullable_migration() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db_internal(&mut db_data, None, &[v_transactions_net::MIGRATION_ID]).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        init_wallet_db_internal(
+            &mut db_data,
+            None,
+            &[v_transactions_net::MIGRATION_ID],
+            false,
+        )
+        .unwrap();
 
         // Create an account in the wallet
-        let usk0 =
-            UnifiedSpendingKey::from_seed(&tests::network(), &[0u8; 32][..], AccountId::from(0))
-                .unwrap();
+        let usk0 = UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::ZERO)
+            .unwrap();
         let ufvk0 = usk0.to_unified_full_viewing_key();
         db_data
             .conn
             .execute(
                 "INSERT INTO accounts (account, ufvk) VALUES (0, ?)",
-                params![ufvk0.encode(&tests::network())],
+                params![ufvk0.encode(&db_data.params)],
             )
             .unwrap();
 
         // Tx 0 contains two received notes of 2 and 5 zatoshis that are controlled by account 0.
         db_data.conn.execute_batch(
-            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '');
+            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'00');
             INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, 'tx0');
 
             INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
@@ -271,7 +269,7 @@ mod tests {
             VALUES (0, 3, 0, '', 5, '', 'nf_b', false);").unwrap();
 
         // Apply the current migration
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID]).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
 
         {
             let mut q = db_data

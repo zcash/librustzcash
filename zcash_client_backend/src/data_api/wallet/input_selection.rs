@@ -1,40 +1,71 @@
 //! Types related to the process of selecting inputs to be spent given a transaction request.
 
 use core::marker::PhantomData;
-use std::collections::BTreeSet;
-use std::fmt;
+use std::{
+    collections::BTreeMap,
+    error,
+    fmt::{self, Debug, Display},
+};
 
+use nonempty::NonEmpty;
+use zcash_address::ConversionError;
 use zcash_primitives::{
     consensus::{self, BlockHeight},
-    legacy::TransparentAddress,
     transaction::{
         components::{
-            amount::{Amount, BalanceError, NonNegativeAmount},
-            sapling::fees as sapling,
-            OutPoint, TxOut,
+            amount::{BalanceError, NonNegativeAmount},
+            TxOut,
         },
         fees::FeeRule,
     },
-    zip32::AccountId,
 };
 
 use crate::{
-    address::{RecipientAddress, UnifiedAddress},
-    data_api::WalletRead,
-    fees::{ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance},
-    wallet::{ReceivedSaplingNote, WalletTransparentOutput},
+    address::{Address, UnifiedAddress},
+    data_api::{InputSource, SimpleNoteRetention, SpendableNotes},
+    fees::{sapling, ChangeError, ChangeStrategy, DustOutputPolicy},
+    proposal::{Proposal, ProposalError, ShieldedInputs},
+    wallet::WalletTransparentOutput,
     zip321::TransactionRequest,
+    PoolType, ShieldedProtocol,
 };
 
+#[cfg(feature = "transparent-inputs")]
+use {
+    std::collections::BTreeSet, std::convert::Infallible,
+    zcash_primitives::legacy::TransparentAddress,
+    zcash_primitives::transaction::components::OutPoint,
+};
+
+#[cfg(feature = "orchard")]
+use crate::fees::orchard as orchard_fees;
+
 /// The type of errors that may be produced in input selection.
+#[derive(Debug)]
 pub enum InputSelectorError<DbErrT, SelectorErrT> {
     /// An error occurred accessing the underlying data store.
     DataSource(DbErrT),
     /// An error occurred specific to the provided input selector's selection rules.
     Selection(SelectorErrT),
+    /// Input selection attempted to generate an invalid transaction proposal.
+    Proposal(ProposalError),
+    /// An error occurred parsing the address from a payment request.
+    Address(ConversionError<&'static str>),
     /// Insufficient funds were available to satisfy the payment request that inputs were being
     /// selected to attempt to satisfy.
-    InsufficientFunds { available: Amount, required: Amount },
+    InsufficientFunds {
+        available: NonNegativeAmount,
+        required: NonNegativeAmount,
+    },
+    /// The data source does not have enough information to choose an expiry height
+    /// for the transaction.
+    SyncRequired,
+}
+
+impl<E, S> From<ConversionError<&'static str>> for InputSelectorError<E, S> {
+    fn from(value: ConversionError<&'static str>) -> Self {
+        InputSelectorError::Address(value)
+    }
 }
 
 impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE, SE> {
@@ -50,61 +81,48 @@ impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE,
             InputSelectorError::Selection(e) => {
                 write!(f, "Note selection encountered the following error: {}", e)
             }
+            InputSelectorError::Proposal(e) => {
+                write!(
+                    f,
+                    "Input selection attempted to generate an invalid proposal: {}",
+                    e
+                )
+            }
+            InputSelectorError::Address(e) => {
+                write!(
+                    f,
+                    "An error occurred decoding the address from a payment request: {}.",
+                    e
+                )
+            }
             InputSelectorError::InsufficientFunds {
                 available,
                 required,
             } => write!(
                 f,
                 "Insufficient balance (have {}, need {} including fee)",
-                i64::from(*available),
-                i64::from(*required)
+                u64::from(*available),
+                u64::from(*required)
             ),
+            InputSelectorError::SyncRequired => {
+                write!(f, "Insufficient chain data is available, sync required.")
+            }
         }
     }
 }
 
-/// A data structure that describes the inputs to be consumed and outputs to
-/// be produced in a proposed transaction.
-pub struct Proposal<FeeRuleT, NoteRef> {
-    transaction_request: TransactionRequest,
-    transparent_inputs: Vec<WalletTransparentOutput>,
-    sapling_inputs: Vec<ReceivedSaplingNote<NoteRef>>,
-    balance: TransactionBalance,
-    fee_rule: FeeRuleT,
-    target_height: BlockHeight,
-    is_shielding: bool,
-}
-
-impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
-    /// Returns the transaction request that describes the payments to be made.
-    pub fn transaction_request(&self) -> &TransactionRequest {
-        &self.transaction_request
-    }
-    /// Returns the transparent inputs that have been selected to fund the transaction.
-    pub fn transparent_inputs(&self) -> &[WalletTransparentOutput] {
-        &self.transparent_inputs
-    }
-    /// Returns the Sapling inputs that have been selected to fund the transaction.
-    pub fn sapling_inputs(&self) -> &[ReceivedSaplingNote<NoteRef>] {
-        &self.sapling_inputs
-    }
-    /// Returns the change outputs to be added to the transaction and the fee to be paid.
-    pub fn balance(&self) -> &TransactionBalance {
-        &self.balance
-    }
-    /// Returns the fee rule to be used by the transaction builder.
-    pub fn fee_rule(&self) -> &FeeRuleT {
-        &self.fee_rule
-    }
-    /// Returns the target height for which the proposal was prepared.
-    pub fn target_height(&self) -> BlockHeight {
-        self.target_height
-    }
-    /// Returns a flag indicating whether or not the proposed transaction
-    /// is exclusively wallet-internal (if it does not involve any external
-    /// recipients).
-    pub fn is_shielding(&self) -> bool {
-        self.is_shielding
+impl<DE, SE> error::Error for InputSelectorError<DE, SE>
+where
+    DE: Debug + Display + error::Error + 'static,
+    SE: Debug + Display + error::Error + 'static,
+{
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match &self {
+            Self::DataSource(e) => Some(e),
+            Self::Selection(e) => Some(e),
+            Self::Proposal(e) => Some(e),
+            _ => None,
+        }
     }
 }
 
@@ -116,12 +134,12 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
 pub trait InputSelector {
     /// The type of errors that may be generated in input selection
     type Error;
-    /// The type of data source that the input selector expects to access to obtain input notes and
-    /// UTXOs. This associated type permits input selectors that may use specialized knowledge of
-    /// the internals of a particular backing data store, if the generic API of `WalletRead` does
-    /// not provide sufficiently fine-grained operations for a particular backing store to
-    /// optimally perform input selection.
-    type DataSource: WalletRead;
+    /// The type of data source that the input selector expects to access to obtain input Sapling
+    /// notes. This associated type permits input selectors that may use specialized knowledge of
+    /// the internals of a particular backing data store, if the generic API of
+    /// `InputSource` does not provide sufficiently fine-grained operations for a particular
+    /// backing store to optimally perform input selection.
+    type InputSource: InputSource;
     /// The type of the fee rule that this input selector uses when computing fees.
     type FeeRule: FeeRule;
 
@@ -139,22 +157,38 @@ pub trait InputSelector {
     ///
     /// If insufficient funds are available to satisfy the required outputs for the shielding
     /// request, this operation must fail and return [`InputSelectorError::InsufficientFunds`].
-    #[allow(clippy::too_many_arguments)]
     #[allow(clippy::type_complexity)]
     fn propose_transaction<ParamsT>(
         &self,
         params: &ParamsT,
-        wallet_db: &Self::DataSource,
-        account: AccountId,
-        anchor_height: BlockHeight,
+        wallet_db: &Self::InputSource,
         target_height: BlockHeight,
+        anchor_height: BlockHeight,
+        account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
     ) -> Result<
-        Proposal<Self::FeeRule, <<Self as InputSelector>::DataSource as WalletRead>::NoteRef>,
-        InputSelectorError<<<Self as InputSelector>::DataSource as WalletRead>::Error, Self::Error>,
+        Proposal<Self::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
+        InputSelectorError<<Self::InputSource as InputSource>::Error, Self::Error>,
     >
     where
         ParamsT: consensus::Parameters;
+}
+
+/// A strategy for selecting transaction inputs and proposing transaction outputs
+/// for shielding-only transactions (transactions which spend transparent UTXOs and
+/// send all transaction outputs to the wallet's shielded internal address(es)).
+#[cfg(feature = "transparent-inputs")]
+pub trait ShieldingSelector {
+    /// The type of errors that may be generated in input selection
+    type Error;
+    /// The type of data source that the input selector expects to access to obtain input
+    /// transparent UTXOs. This associated type permits input selectors that may use specialized
+    /// knowledge of the internals of a particular backing data store, if the generic API of
+    /// [`InputSource`] does not provide sufficiently fine-grained operations for a
+    /// particular backing store to optimally perform input selection.
+    type InputSource: InputSource;
+    /// The type of the fee rule that this input selector uses when computing fees.
+    type FeeRule: FeeRule;
 
     /// Performs input selection and returns a proposal for the construction of a shielding
     /// transaction.
@@ -164,19 +198,18 @@ pub trait InputSelector {
     /// specified source addresses. If insufficient funds are available to satisfy the required
     /// outputs for the shielding request, this operation must fail and return
     /// [`InputSelectorError::InsufficientFunds`].
-    #[allow(clippy::too_many_arguments)]
     #[allow(clippy::type_complexity)]
     fn propose_shielding<ParamsT>(
         &self,
         params: &ParamsT,
-        wallet_db: &Self::DataSource,
+        wallet_db: &Self::InputSource,
         shielding_threshold: NonNegativeAmount,
         source_addrs: &[TransparentAddress],
-        confirmed_height: BlockHeight,
         target_height: BlockHeight,
+        min_confirmations: u32,
     ) -> Result<
-        Proposal<Self::FeeRule, <<Self as InputSelector>::DataSource as WalletRead>::NoteRef>,
-        InputSelectorError<<<Self as InputSelector>::DataSource as WalletRead>::Error, Self::Error>,
+        Proposal<Self::FeeRule, Infallible>,
+        InputSelectorError<<Self::InputSource as InputSource>::Error, Self::Error>,
     >
     where
         ParamsT: consensus::Parameters;
@@ -238,17 +271,35 @@ impl<DbErrT, ChangeStrategyErrT, NoteRefT> From<BalanceError>
     }
 }
 
-pub(crate) struct SaplingPayment(Amount);
+pub(crate) struct SaplingPayment(NonNegativeAmount);
 
 #[cfg(test)]
 impl SaplingPayment {
-    pub(crate) fn new(amount: Amount) -> Self {
+    pub(crate) fn new(amount: NonNegativeAmount) -> Self {
         SaplingPayment(amount)
     }
 }
 
 impl sapling::OutputView for SaplingPayment {
-    fn value(&self) -> Amount {
+    fn value(&self) -> NonNegativeAmount {
+        self.0
+    }
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) struct OrchardPayment(NonNegativeAmount);
+
+#[cfg(test)]
+#[cfg(feature = "orchard")]
+impl OrchardPayment {
+    pub(crate) fn new(amount: NonNegativeAmount) -> Self {
+        OrchardPayment(amount)
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl orchard_fees::OutputView for OrchardPayment {
+    fn value(&self) -> NonNegativeAmount {
         self.0
     }
 }
@@ -256,8 +307,8 @@ impl sapling::OutputView for SaplingPayment {
 /// An [`InputSelector`] implementation that uses a greedy strategy to select between available
 /// notes.
 ///
-/// This implementation performs input selection using methods available via the [`WalletRead`]
-/// interface.
+/// This implementation performs input selection using methods available via the
+/// [`InputSource`] interface.
 pub struct GreedyInputSelector<DbT, ChangeT> {
     change_strategy: ChangeT,
     dust_output_policy: DustOutputPolicy,
@@ -278,96 +329,180 @@ impl<DbT, ChangeT: ChangeStrategy> GreedyInputSelector<DbT, ChangeT> {
 
 impl<DbT, ChangeT> InputSelector for GreedyInputSelector<DbT, ChangeT>
 where
-    DbT: WalletRead,
+    DbT: InputSource,
     ChangeT: ChangeStrategy,
     ChangeT::FeeRule: Clone,
 {
     type Error = GreedyInputSelectorError<ChangeT::Error, DbT::NoteRef>;
-    type DataSource = DbT;
+    type InputSource = DbT;
     type FeeRule = ChangeT::FeeRule;
 
     #[allow(clippy::type_complexity)]
     fn propose_transaction<ParamsT>(
         &self,
         params: &ParamsT,
-        wallet_db: &Self::DataSource,
-        account: AccountId,
-        anchor_height: BlockHeight,
+        wallet_db: &Self::InputSource,
         target_height: BlockHeight,
+        anchor_height: BlockHeight,
+        account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
-    ) -> Result<Proposal<Self::FeeRule, DbT::NoteRef>, InputSelectorError<DbT::Error, Self::Error>>
+    ) -> Result<
+        Proposal<Self::FeeRule, DbT::NoteRef>,
+        InputSelectorError<<DbT as InputSource>::Error, Self::Error>,
+    >
     where
         ParamsT: consensus::Parameters,
+        Self::InputSource: InputSource,
     {
         let mut transparent_outputs = vec![];
         let mut sapling_outputs = vec![];
-        let mut output_total = Amount::zero();
-        for payment in transaction_request.payments() {
-            output_total = (output_total + payment.amount).ok_or(BalanceError::Overflow)?;
+        #[cfg(feature = "orchard")]
+        let mut orchard_outputs = vec![];
+        let mut payment_pools = BTreeMap::new();
+        for (idx, payment) in transaction_request.payments() {
+            let recipient_address: Address = payment
+                .recipient_address()
+                .clone()
+                .convert_if_network(params.network_type())?;
 
-            let mut push_transparent = |taddr: TransparentAddress| {
-                transparent_outputs.push(TxOut {
-                    value: payment.amount,
-                    script_pubkey: taddr.script(),
-                });
-            };
-            let mut push_sapling = || {
-                sapling_outputs.push(SaplingPayment(payment.amount));
-            };
-
-            match &payment.recipient_address {
-                RecipientAddress::Transparent(addr) => {
-                    push_transparent(*addr);
+            match recipient_address {
+                Address::Transparent(addr) => {
+                    payment_pools.insert(*idx, PoolType::Transparent);
+                    transparent_outputs.push(TxOut {
+                        value: payment.amount(),
+                        script_pubkey: addr.script(),
+                    });
                 }
-                RecipientAddress::Shielded(_) => {
-                    push_sapling();
+                Address::Sapling(_) => {
+                    payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
+                    sapling_outputs.push(SaplingPayment(payment.amount()));
                 }
-                RecipientAddress::Unified(addr) => {
-                    if addr.sapling().is_some() {
-                        push_sapling();
-                    } else if let Some(addr) = addr.transparent() {
-                        push_transparent(*addr);
-                    } else {
-                        return Err(InputSelectorError::Selection(
-                            GreedyInputSelectorError::UnsupportedAddress(Box::new(addr.clone())),
-                        ));
+                Address::Unified(addr) => {
+                    #[cfg(feature = "orchard")]
+                    if addr.orchard().is_some() {
+                        payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Orchard));
+                        orchard_outputs.push(OrchardPayment(payment.amount()));
+                        continue;
                     }
+
+                    if addr.sapling().is_some() {
+                        payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
+                        sapling_outputs.push(SaplingPayment(payment.amount()));
+                        continue;
+                    }
+
+                    if let Some(addr) = addr.transparent() {
+                        payment_pools.insert(*idx, PoolType::Transparent);
+                        transparent_outputs.push(TxOut {
+                            value: payment.amount(),
+                            script_pubkey: addr.script(),
+                        });
+                        continue;
+                    }
+
+                    return Err(InputSelectorError::Selection(
+                        GreedyInputSelectorError::UnsupportedAddress(Box::new(addr)),
+                    ));
                 }
             }
         }
 
-        let mut sapling_inputs: Vec<ReceivedSaplingNote<DbT::NoteRef>> = vec![];
-        let mut prior_available = Amount::zero();
-        let mut amount_required = Amount::zero();
+        let mut shielded_inputs = SpendableNotes::empty();
+        let mut prior_available = NonNegativeAmount::ZERO;
+        let mut amount_required = NonNegativeAmount::ZERO;
         let mut exclude: Vec<DbT::NoteRef> = vec![];
         // This loop is guaranteed to terminate because on each iteration we check that the amount
         // of funds selected is strictly increasing. The loop will either return a successful
         // result or the wallet will eventually run out of funds to select.
         loop {
+            #[cfg(not(feature = "orchard"))]
+            let use_sapling = true;
+            #[cfg(feature = "orchard")]
+            let (use_sapling, use_orchard) = {
+                let (sapling_input_total, orchard_input_total) = (
+                    shielded_inputs.sapling_value()?,
+                    shielded_inputs.orchard_value()?,
+                );
+
+                // Use Sapling inputs if there are no Orchard outputs or there are not sufficient
+                // Orchard outputs to cover the amount required.
+                let use_sapling =
+                    orchard_outputs.is_empty() || amount_required > orchard_input_total;
+                // Use Orchard inputs if there are insufficient Sapling funds to cover the amount
+                // reqiuired.
+                let use_orchard = !use_sapling || amount_required > sapling_input_total;
+
+                (use_sapling, use_orchard)
+            };
+
+            let sapling_inputs = if use_sapling {
+                shielded_inputs
+                    .sapling()
+                    .iter()
+                    .map(|i| (*i.internal_note_id(), i.note().value()))
+                    .collect()
+            } else {
+                vec![]
+            };
+
+            #[cfg(feature = "orchard")]
+            let orchard_inputs = if use_orchard {
+                shielded_inputs
+                    .orchard()
+                    .iter()
+                    .map(|i| (*i.internal_note_id(), i.note().value()))
+                    .collect()
+            } else {
+                vec![]
+            };
+
             let balance = self.change_strategy.compute_balance(
                 params,
                 target_height,
                 &Vec::<WalletTransparentOutput>::new(),
                 &transparent_outputs,
-                &sapling_inputs,
-                &sapling_outputs,
+                &(
+                    ::sapling::builder::BundleType::DEFAULT,
+                    &sapling_inputs[..],
+                    &sapling_outputs[..],
+                ),
+                #[cfg(feature = "orchard")]
+                &(
+                    ::orchard::builder::BundleType::DEFAULT,
+                    &orchard_inputs[..],
+                    &orchard_outputs[..],
+                ),
                 &self.dust_output_policy,
             );
 
             match balance {
                 Ok(balance) => {
-                    return Ok(Proposal {
+                    return Proposal::single_step(
                         transaction_request,
-                        transparent_inputs: vec![],
-                        sapling_inputs,
+                        payment_pools,
+                        vec![],
+                        NonEmpty::from_vec(shielded_inputs.into_vec(&SimpleNoteRetention {
+                            sapling: use_sapling,
+                            #[cfg(feature = "orchard")]
+                            orchard: use_orchard,
+                        }))
+                        .map(|notes| ShieldedInputs::from_parts(anchor_height, notes)),
                         balance,
-                        fee_rule: (*self.change_strategy.fee_rule()).clone(),
+                        (*self.change_strategy.fee_rule()).clone(),
                         target_height,
-                        is_shielding: false,
-                    });
+                        false,
+                    )
+                    .map_err(InputSelectorError::Proposal);
                 }
-                Err(ChangeError::DustInputs { mut sapling, .. }) => {
+                Err(ChangeError::DustInputs {
+                    mut sapling,
+                    #[cfg(feature = "orchard")]
+                    mut orchard,
+                    ..
+                }) => {
                     exclude.append(&mut sapling);
+                    #[cfg(feature = "orchard")]
+                    exclude.append(&mut orchard);
                 }
                 Err(ChangeError::InsufficientFunds { required, .. }) => {
                     amount_required = required;
@@ -375,16 +510,22 @@ where
                 Err(other) => return Err(other.into()),
             }
 
-            sapling_inputs = wallet_db
-                .select_spendable_sapling_notes(account, amount_required, anchor_height, &exclude)
+            #[cfg(not(feature = "orchard"))]
+            let selectable_pools = &[ShieldedProtocol::Sapling];
+            #[cfg(feature = "orchard")]
+            let selectable_pools = &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard];
+
+            shielded_inputs = wallet_db
+                .select_spendable_notes(
+                    account,
+                    amount_required,
+                    selectable_pools,
+                    anchor_height,
+                    &exclude,
+                )
                 .map_err(InputSelectorError::DataSource)?;
 
-            let new_available = sapling_inputs
-                .iter()
-                .map(|n| n.note_value)
-                .sum::<Option<Amount>>()
-                .ok_or(BalanceError::Overflow)?;
-
+            let new_available = shielded_inputs.total_value()?;
             if new_available <= prior_available {
                 return Err(InputSelectorError::InsufficientFunds {
                     required: amount_required,
@@ -397,23 +538,44 @@ where
             }
         }
     }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl<DbT, ChangeT> ShieldingSelector for GreedyInputSelector<DbT, ChangeT>
+where
+    DbT: InputSource,
+    ChangeT: ChangeStrategy,
+    ChangeT::FeeRule: Clone,
+{
+    type Error = GreedyInputSelectorError<ChangeT::Error, Infallible>;
+    type InputSource = DbT;
+    type FeeRule = ChangeT::FeeRule;
 
     #[allow(clippy::type_complexity)]
     fn propose_shielding<ParamsT>(
         &self,
         params: &ParamsT,
-        wallet_db: &Self::DataSource,
+        wallet_db: &Self::InputSource,
         shielding_threshold: NonNegativeAmount,
         source_addrs: &[TransparentAddress],
-        confirmed_height: BlockHeight,
         target_height: BlockHeight,
-    ) -> Result<Proposal<Self::FeeRule, DbT::NoteRef>, InputSelectorError<DbT::Error, Self::Error>>
+        min_confirmations: u32,
+    ) -> Result<
+        Proposal<Self::FeeRule, Infallible>,
+        InputSelectorError<<DbT as InputSource>::Error, Self::Error>,
+    >
     where
         ParamsT: consensus::Parameters,
     {
         let mut transparent_inputs: Vec<WalletTransparentOutput> = source_addrs
             .iter()
-            .map(|taddr| wallet_db.get_unspent_transparent_outputs(taddr, confirmed_height, &[]))
+            .map(|taddr| {
+                wallet_db.get_unspent_transparent_outputs(
+                    taddr,
+                    target_height - min_confirmations,
+                    &[],
+                )
+            })
             .collect::<Result<Vec<Vec<_>>, _>>()
             .map_err(InputSelectorError::DataSource)?
             .into_iter()
@@ -425,8 +587,17 @@ where
             target_height,
             &transparent_inputs,
             &Vec::<TxOut>::new(),
-            &Vec::<ReceivedSaplingNote<DbT::NoteRef>>::new(),
-            &Vec::<SaplingPayment>::new(),
+            &(
+                ::sapling::builder::BundleType::DEFAULT,
+                &Vec::<Infallible>::new()[..],
+                &Vec::<Infallible>::new()[..],
+            ),
+            #[cfg(feature = "orchard")]
+            &(
+                orchard::builder::BundleType::DEFAULT,
+                &Vec::<Infallible>::new()[..],
+                &Vec::<Infallible>::new()[..],
+            ),
             &self.dust_output_policy,
         );
 
@@ -441,8 +612,17 @@ where
                     target_height,
                     &transparent_inputs,
                     &Vec::<TxOut>::new(),
-                    &Vec::<ReceivedSaplingNote<DbT::NoteRef>>::new(),
-                    &Vec::<SaplingPayment>::new(),
+                    &(
+                        ::sapling::builder::BundleType::DEFAULT,
+                        &Vec::<Infallible>::new()[..],
+                        &Vec::<Infallible>::new()[..],
+                    ),
+                    #[cfg(feature = "orchard")]
+                    &(
+                        orchard::builder::BundleType::DEFAULT,
+                        &Vec::<Infallible>::new()[..],
+                        &Vec::<Infallible>::new()[..],
+                    ),
                     &self.dust_output_policy,
                 )?
             }
@@ -451,20 +631,22 @@ where
             }
         };
 
-        if balance.total() >= shielding_threshold.into() {
-            Ok(Proposal {
-                transaction_request: TransactionRequest::empty(),
+        if balance.total() >= shielding_threshold {
+            Proposal::single_step(
+                TransactionRequest::empty(),
+                BTreeMap::new(),
                 transparent_inputs,
-                sapling_inputs: vec![],
+                None,
                 balance,
-                fee_rule: (*self.change_strategy.fee_rule()).clone(),
+                (*self.change_strategy.fee_rule()).clone(),
                 target_height,
-                is_shielding: true,
-            })
+                true,
+            )
+            .map_err(InputSelectorError::Proposal)
         } else {
             Err(InputSelectorError::InsufficientFunds {
                 available: balance.total(),
-                required: shielding_threshold.into(),
+                required: shielding_threshold,
             })
         }
     }

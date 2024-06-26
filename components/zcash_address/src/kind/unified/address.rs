@@ -1,5 +1,6 @@
+use zcash_protocol::{PoolType, ShieldedProtocol};
+
 use super::{private::SealedItem, ParseError, Typecode};
-use crate::kind;
 
 use std::convert::{TryFrom, TryInto};
 
@@ -7,9 +8,9 @@ use std::convert::{TryFrom, TryInto};
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Receiver {
     Orchard([u8; 43]),
-    Sapling(kind::sapling::Data),
-    P2pkh(kind::p2pkh::Data),
-    P2sh(kind::p2sh::Data),
+    Sapling([u8; 43]),
+    P2pkh([u8; 20]),
+    P2sh([u8; 20]),
     Unknown { typecode: u32, data: Vec<u8> },
 }
 
@@ -56,8 +57,75 @@ impl SealedItem for Receiver {
 }
 
 /// A Unified Address.
+///
+/// # Examples
+///
+/// ```
+/// # use std::convert::Infallible;
+/// # use std::error::Error;
+/// use zcash_address::{
+///     unified::{self, Container, Encoding},
+///     ConversionError, TryFromRawAddress, ZcashAddress,
+/// };
+///
+/// # fn main() -> Result<(), Box<dyn Error>> {
+/// # let address_from_user = || "u1pg2aaph7jp8rpf6yhsza25722sg5fcn3vaca6ze27hqjw7jvvhhuxkpcg0ge9xh6drsgdkda8qjq5chpehkcpxf87rnjryjqwymdheptpvnljqqrjqzjwkc2ma6hcq666kgwfytxwac8eyex6ndgr6ezte66706e3vaqrd25dzvzkc69kw0jgywtd0cmq52q5lkw6uh7hyvzjse8ksx";
+/// let example_ua: &str = address_from_user();
+///
+/// // We can parse this directly as a `unified::Address`:
+/// let (network, ua) = unified::Address::decode(example_ua)?;
+///
+/// // Or we can parse via `ZcashAddress` (which you should do):
+/// struct MyUnifiedAddress(unified::Address);
+/// impl TryFromRawAddress for MyUnifiedAddress {
+///     // In this example we aren't checking the validity of the
+///     // inner Unified Address, but your code should do so!
+///     type Error = Infallible;
+///
+///     fn try_from_raw_unified(ua: unified::Address) -> Result<Self, ConversionError<Self::Error>> {
+///         Ok(MyUnifiedAddress(ua))
+///     }
+/// }
+/// let addr: ZcashAddress = example_ua.parse()?;
+/// let parsed = addr.convert_if_network::<MyUnifiedAddress>(network)?;
+/// assert_eq!(parsed.0, ua);
+///
+/// // We can obtain the receivers for the UA in preference order
+/// // (the order in which wallets should prefer to use them):
+/// let receivers: Vec<unified::Receiver> = ua.items();
+///
+/// // And we can create the UA from a list of receivers:
+/// let new_ua = unified::Address::try_from_items(receivers)?;
+/// assert_eq!(new_ua, ua);
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Address(pub(crate) Vec<Receiver>);
+
+impl Address {
+    /// Returns whether this address has the ability to receive transfers of the given pool type.
+    pub fn has_receiver_of_type(&self, pool_type: PoolType) -> bool {
+        self.0.iter().any(|r| match r {
+            Receiver::Orchard(_) => pool_type == PoolType::Shielded(ShieldedProtocol::Orchard),
+            Receiver::Sapling(_) => pool_type == PoolType::Shielded(ShieldedProtocol::Sapling),
+            Receiver::P2pkh(_) | Receiver::P2sh(_) => pool_type == PoolType::Transparent,
+            Receiver::Unknown { .. } => false,
+        })
+    }
+
+    /// Returns whether this address contains the given receiver.
+    pub fn contains_receiver(&self, receiver: &Receiver) -> bool {
+        self.0.contains(receiver)
+    }
+
+    /// Returns whether this address can receive a memo.
+    pub fn can_receive_memo(&self) -> bool {
+        self.0
+            .iter()
+            .any(|r| matches!(r, Receiver::Sapling(_) | Receiver::Orchard(_)))
+    }
+}
 
 impl super::private::SealedContainer for Address {
     /// The HRP for a Bech32m-encoded mainnet Unified Address.
@@ -91,27 +159,19 @@ impl super::Container for Address {
     }
 }
 
-#[cfg(any(test, feature = "test-dependencies"))]
-pub mod test_vectors;
-
-#[cfg(test)]
-mod tests {
-    use assert_matches::assert_matches;
-    use zcash_encoding::MAX_COMPACT_SIZE;
-
-    use crate::{
-        kind::unified::{private::SealedContainer, Container, Encoding},
-        Network,
-    };
-
+#[cfg(feature = "test-dependencies")]
+pub mod testing {
     use proptest::{
         array::{uniform11, uniform20, uniform32},
         collection::vec,
         prelude::*,
         sample::select,
+        strategy::Strategy,
     };
+    use zcash_encoding::MAX_COMPACT_SIZE;
 
-    use super::{Address, ParseError, Receiver, Typecode};
+    use super::{Address, Receiver};
+    use crate::unified::Typecode;
 
     prop_compose! {
         fn uniform43()(a in uniform11(0u8..), b in uniform32(0u8..)) -> [u8; 43] {
@@ -122,11 +182,13 @@ mod tests {
         }
     }
 
-    fn arb_transparent_typecode() -> impl Strategy<Value = Typecode> {
+    /// A strategy to generate an arbitrary transparent typecode.
+    pub fn arb_transparent_typecode() -> impl Strategy<Value = Typecode> {
         select(vec![Typecode::P2pkh, Typecode::P2sh])
     }
 
-    fn arb_shielded_typecode() -> impl Strategy<Value = Typecode> {
+    /// A strategy to generate an arbitrary shielded (Sapling, Orchard, or unknown) typecode.
+    pub fn arb_shielded_typecode() -> impl Strategy<Value = Typecode> {
         prop_oneof![
             Just(Typecode::Sapling),
             Just(Typecode::Orchard),
@@ -137,7 +199,7 @@ mod tests {
     /// A strategy to generate an arbitrary valid set of typecodes without
     /// duplication and containing only one of P2sh and P2pkh transparent
     /// typecodes. The resulting vector will be sorted in encoding order.
-    fn arb_typecodes() -> impl Strategy<Value = Vec<Typecode>> {
+    pub fn arb_typecodes() -> impl Strategy<Value = Vec<Typecode>> {
         prop::option::of(arb_transparent_typecode()).prop_flat_map(|transparent| {
             prop::collection::hash_set(arb_shielded_typecode(), 1..4).prop_map(move |xs| {
                 let mut typecodes: Vec<_> = xs.into_iter().chain(transparent).collect();
@@ -147,7 +209,11 @@ mod tests {
         })
     }
 
-    fn arb_unified_address_for_typecodes(
+    /// Generates an arbitrary Unified address containing receivers corresponding to the provided
+    /// set of typecodes. The receivers of this address are likely to not represent valid protocol
+    /// receivers, and should only be used for testing parsing and/or encoding functions that do
+    /// not concern themselves with the validity of the underlying receivers.
+    pub fn arb_unified_address_for_typecodes(
         typecodes: Vec<Typecode>,
     ) -> impl Strategy<Value = Vec<Receiver>> {
         typecodes
@@ -164,11 +230,33 @@ mod tests {
             .collect::<Vec<_>>()
     }
 
-    fn arb_unified_address() -> impl Strategy<Value = Address> {
+    /// Generates an arbitrary Unified address. The receivers of this address are likely to not
+    /// represent valid protocol receivers, and should only be used for testing parsing and/or
+    /// encoding functions that do not concern themselves with the validity of the underlying
+    /// receivers.
+    pub fn arb_unified_address() -> impl Strategy<Value = Address> {
         arb_typecodes()
             .prop_flat_map(arb_unified_address_for_typecodes)
             .prop_map(Address)
     }
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod test_vectors;
+
+#[cfg(test)]
+mod tests {
+    use assert_matches::assert_matches;
+
+    use crate::{
+        kind::unified::{private::SealedContainer, Container, Encoding},
+        unified::address::testing::arb_unified_address,
+        Network,
+    };
+
+    use proptest::{prelude::*, sample::select};
+
+    use super::{Address, ParseError, Receiver, Typecode};
 
     proptest! {
         #[test]

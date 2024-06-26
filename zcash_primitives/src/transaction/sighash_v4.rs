@@ -1,12 +1,17 @@
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
-use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
 
-use crate::consensus::BranchId;
+use crate::{
+    consensus::BranchId,
+    sapling::{
+        self,
+        bundle::{GrothProofBytes, OutputDescription, SpendDescription},
+    },
+};
 
 use super::{
     components::{
-        sapling::{self, GrothProofBytes, OutputDescription, SpendDescription},
+        sapling as sapling_serialization,
         sprout::JsDescription,
         transparent::{self, TxIn, TxOut},
     },
@@ -21,13 +26,6 @@ const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashOutputsHash";
 const ZCASH_JOINSPLITS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashJSplitsHash";
 const ZCASH_SHIELDED_SPENDS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSSpendsHash";
 const ZCASH_SHIELDED_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZcashSOutputHash";
-
-macro_rules! update_u32 {
-    ($h:expr, $value:expr, $tmp:expr) => {
-        (&mut $tmp[..4]).write_u32::<LittleEndian>($value).unwrap();
-        $h.update(&$tmp[..4]);
-    };
-}
 
 macro_rules! update_hash {
     ($h:expr, $cond:expr, $value:expr) => {
@@ -53,7 +51,7 @@ fn prevout_hash<TA: transparent::Authorization>(vin: &[TxIn<TA>]) -> Blake2bHash
 fn sequence_hash<TA: transparent::Authorization>(vin: &[TxIn<TA>]) -> Blake2bHash {
     let mut data = Vec::with_capacity(vin.len() * 4);
     for t_in in vin {
-        data.write_u32::<LittleEndian>(t_in.sequence).unwrap();
+        data.extend_from_slice(&t_in.sequence.to_le_bytes());
     }
     Blake2bParams::new()
         .hash_length(32)
@@ -105,7 +103,7 @@ fn joinsplits_hash(
 }
 
 fn shielded_spends_hash<
-    A: sapling::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
+    A: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
 >(
     shielded_spends: &[SpendDescription<A>],
 ) -> Blake2bHash {
@@ -114,7 +112,7 @@ fn shielded_spends_hash<
         data.extend_from_slice(&s_spend.cv().to_bytes());
         data.extend_from_slice(s_spend.anchor().to_repr().as_ref());
         data.extend_from_slice(s_spend.nullifier().as_ref());
-        s_spend.rk().write(&mut data).unwrap();
+        data.extend_from_slice(&<[u8; 32]>::from(*s_spend.rk()));
         data.extend_from_slice(s_spend.zkproof());
     }
     Blake2bParams::new()
@@ -126,7 +124,7 @@ fn shielded_spends_hash<
 fn shielded_outputs_hash(shielded_outputs: &[OutputDescription<GrothProofBytes>]) -> Blake2bHash {
     let mut data = Vec::with_capacity(shielded_outputs.len() * 948);
     for s_out in shielded_outputs {
-        s_out.write_v4(&mut data).unwrap();
+        sapling_serialization::write_output_v4(&mut data, s_out).unwrap();
     }
     Blake2bParams::new()
         .hash_length(32)
@@ -135,7 +133,7 @@ fn shielded_outputs_hash(shielded_outputs: &[OutputDescription<GrothProofBytes>]
 }
 
 pub fn v4_signature_hash<
-    SA: sapling::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
+    SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
     A: Authorization<SaplingAuth = SA>,
 >(
     tx: &TransactionData<A>,
@@ -145,18 +143,15 @@ pub fn v4_signature_hash<
     if tx.version.has_overwinter() {
         let mut personal = [0; 16];
         personal[..12].copy_from_slice(ZCASH_SIGHASH_PERSONALIZATION_PREFIX);
-        (&mut personal[12..])
-            .write_u32::<LittleEndian>(tx.consensus_branch_id.into())
-            .unwrap();
+        personal[12..].copy_from_slice(&u32::from(tx.consensus_branch_id).to_le_bytes());
 
         let mut h = Blake2bParams::new()
             .hash_length(32)
             .personal(&personal)
             .to_state();
-        let mut tmp = [0; 8];
 
-        update_u32!(h, tx.version.header(), tmp);
-        update_u32!(h, tx.version.version_group_id(), tmp);
+        h.update(&tx.version.header().to_le_bytes());
+        h.update(&tx.version.version_group_id().to_le_bytes());
         update_hash!(
             h,
             hash_type & SIGHASH_ANYONECANPAY == 0,
@@ -231,12 +226,12 @@ pub fn v4_signature_hash<
                 shielded_outputs_hash(tx.sapling_bundle.as_ref().unwrap().shielded_outputs())
             );
         }
-        update_u32!(h, tx.lock_time, tmp);
-        update_u32!(h, tx.expiry_height.into(), tmp);
+        h.update(&tx.lock_time.to_le_bytes());
+        h.update(&u32::from(tx.expiry_height).to_le_bytes());
         if tx.version.has_sapling() {
             h.update(&tx.sapling_value_balance().to_i64_le_bytes());
         }
-        update_u32!(h, hash_type.into(), tmp);
+        h.update(&u32::from(hash_type).to_le_bytes());
 
         match signable_input {
             SignableInput::Shielded => (),
@@ -251,8 +246,7 @@ pub fn v4_signature_hash<
                     bundle.vin[*index].prevout.write(&mut data).unwrap();
                     script_code.write(&mut data).unwrap();
                     data.extend_from_slice(&value.to_i64_le_bytes());
-                    data.write_u32::<LittleEndian>(bundle.vin[*index].sequence)
-                        .unwrap();
+                    data.extend_from_slice(&bundle.vin[*index].sequence.to_le_bytes());
                     h.update(&data);
                 } else {
                     panic!(
@@ -261,7 +255,7 @@ pub fn v4_signature_hash<
                 }
             }
 
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             SignableInput::Tze { .. } => {
                 panic!("A request has been made to sign a TZE input, but the transaction version is not ZFuture");
             }

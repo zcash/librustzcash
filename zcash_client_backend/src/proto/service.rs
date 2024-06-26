@@ -187,6 +187,32 @@ pub struct TreeState {
     #[prost(string, tag = "6")]
     pub orchard_tree: ::prost::alloc::string::String,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetSubtreeRootsArg {
+    /// Index identifying where to start returning subtree roots
+    #[prost(uint32, tag = "1")]
+    pub start_index: u32,
+    /// Shielded protocol to return subtree roots for
+    #[prost(enumeration = "ShieldedProtocol", tag = "2")]
+    pub shielded_protocol: i32,
+    /// Maximum number of entries to return, or 0 for all entries.
+    #[prost(uint32, tag = "3")]
+    pub max_entries: u32,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SubtreeRoot {
+    /// The 32-byte Merkle root of the subtree.
+    #[prost(bytes = "vec", tag = "2")]
+    pub root_hash: ::prost::alloc::vec::Vec<u8>,
+    /// The hash of the block that completed this subtree.
+    #[prost(bytes = "vec", tag = "3")]
+    pub completing_block_hash: ::prost::alloc::vec::Vec<u8>,
+    /// The height of the block that completed this subtree in the main chain.
+    #[prost(uint64, tag = "4")]
+    pub completing_block_height: u64,
+}
 /// Results are sorted by height, which makes it easy to issue another
 /// request that picks up from where the previous left off.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -222,7 +248,34 @@ pub struct GetAddressUtxosReplyList {
     #[prost(message, repeated, tag = "1")]
     pub address_utxos: ::prost::alloc::vec::Vec<GetAddressUtxosReply>,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ShieldedProtocol {
+    Sapling = 0,
+    Orchard = 1,
+}
+impl ShieldedProtocol {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            ShieldedProtocol::Sapling => "sapling",
+            ShieldedProtocol::Orchard => "orchard",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "sapling" => Some(Self::Sapling),
+            "orchard" => Some(Self::Orchard),
+            _ => None,
+        }
+    }
+}
 /// Generated client implementations.
+#[cfg(feature = "lightwalletd-tonic")]
 pub mod compact_tx_streamer_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
@@ -230,17 +283,6 @@ pub mod compact_tx_streamer_client {
     #[derive(Debug, Clone)]
     pub struct CompactTxStreamerClient<T> {
         inner: tonic::client::Grpc<T>,
-    }
-    impl CompactTxStreamerClient<tonic::transport::Channel> {
-        /// Attempt to create a new client by connecting to a given endpoint.
-        pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
-        where
-            D: TryInto<tonic::transport::Endpoint>,
-            D::Error: Into<StdError>,
-        {
-            let conn = tonic::transport::Endpoint::new(dst)?.connect().await?;
-            Ok(Self::new(conn))
-        }
     }
     impl<T> CompactTxStreamerClient<T>
     where
@@ -366,6 +408,37 @@ pub mod compact_tx_streamer_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /// Same as GetBlock except actions contain only nullifiers
+        pub async fn get_block_nullifiers(
+            &mut self,
+            request: impl tonic::IntoRequest<super::BlockId>,
+        ) -> std::result::Result<
+            tonic::Response<crate::proto::compact_formats::CompactBlock>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetBlockNullifiers",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetBlockNullifiers",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
         /// Return a list of consecutive compact blocks
         pub async fn get_block_range(
             &mut self,
@@ -395,6 +468,39 @@ pub mod compact_tx_streamer_client {
                     GrpcMethod::new(
                         "cash.z.wallet.sdk.rpc.CompactTxStreamer",
                         "GetBlockRange",
+                    ),
+                );
+            self.inner.server_streaming(req, path, codec).await
+        }
+        /// Same as GetBlockRange except actions contain only nullifiers
+        pub async fn get_block_range_nullifiers(
+            &mut self,
+            request: impl tonic::IntoRequest<super::BlockRange>,
+        ) -> std::result::Result<
+            tonic::Response<
+                tonic::codec::Streaming<crate::proto::compact_formats::CompactBlock>,
+            >,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetBlockRangeNullifiers",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetBlockRangeNullifiers",
                     ),
                 );
             self.inner.server_streaming(req, path, codec).await
@@ -670,6 +776,38 @@ pub mod compact_tx_streamer_client {
                     ),
                 );
             self.inner.unary(req, path, codec).await
+        }
+        /// Returns a stream of information about roots of subtrees of the Sapling and Orchard
+        /// note commitment trees.
+        pub async fn get_subtree_roots(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetSubtreeRootsArg>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::SubtreeRoot>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetSubtreeRoots",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetSubtreeRoots",
+                    ),
+                );
+            self.inner.server_streaming(req, path, codec).await
         }
         pub async fn get_address_utxos(
             &mut self,

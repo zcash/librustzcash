@@ -18,10 +18,8 @@
 //!   **MUST NOT** write to the database without using these APIs. Callers **MAY** read
 //!   the database directly in order to extract information for display to users.
 //!
-//! # Features
-//!
-//! The `mainnet` feature configures the light client for use with the Zcash mainnet. By
-//! default, the light client is configured for use with the Zcash testnet.
+//! ## Feature flags
+#![doc = document_features::document_features!()]
 //!
 //! [`WalletRead`]: zcash_client_backend::data_api::WalletRead
 //! [`WalletWrite`]: zcash_client_backend::data_api::WalletWrite
@@ -29,41 +27,69 @@
 //! [`CompactBlock`]: zcash_client_backend::proto::compact_formats::CompactBlock
 //! [`init_cache_database`]: crate::chain::init::init_cache_database
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 
-use rusqlite::Connection;
+use incrementalmerkletree::{Position, Retention};
+use maybe_rayon::{
+    prelude::{IndexedParallelIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
+use nonempty::NonEmpty;
+use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
-use std::collections::HashMap;
-use std::fmt;
-use std::path::Path;
+use shardtree::{error::ShardTreeError, ShardTree};
+use std::{
+    borrow::Borrow, collections::HashMap, convert::AsRef, fmt, num::NonZeroU32, ops::Range,
+    path::Path,
+};
+use subtle::ConditionallySelectable;
+use tracing::{debug, trace, warn};
 
+use zcash_client_backend::{
+    address::UnifiedAddress,
+    data_api::{
+        self,
+        chain::{BlockSource, ChainState, CommitmentTreeRoot},
+        scanning::{ScanPriority, ScanRange},
+        Account, AccountBirthday, AccountSource, BlockMetadata, DecryptedTransaction, InputSource,
+        NullifierQuery, ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+    },
+    keys::{
+        AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
+    },
+    proto::compact_formats::CompactBlock,
+    wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
+    DecryptedOutput, PoolType, ShieldedProtocol, TransferType,
+};
+use zcash_keys::address::Receiver;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
-    legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
-    sapling::{self},
-    transaction::{
-        components::{amount::Amount, OutPoint},
-        Transaction, TxId,
-    },
-    zip32::{AccountId, DiversifierIndex, ExtendedFullViewingKey},
+    transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
+    zip32::{self, DiversifierIndex, Scope},
+};
+use zip32::fingerprint::SeedFingerprint;
+
+use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
+
+#[cfg(feature = "orchard")]
+use {
+    incrementalmerkletree::frontier::Frontier,
+    shardtree::store::{Checkpoint, ShardStore},
+    std::collections::BTreeMap,
+    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
 };
 
-use zcash_client_backend::{
-    address::{AddressMetadata, UnifiedAddress},
-    data_api::{
-        self, chain::BlockSource, DecryptedTransaction, NullifierQuery, PoolType, PrunedBlock,
-        Recipient, SentTransaction, WalletRead, WalletWrite,
-    },
-    keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
-    proto::compact_formats::CompactBlock,
-    wallet::{ReceivedSaplingNote, WalletTransparentOutput},
-    DecryptedOutput, TransferType,
+#[cfg(feature = "transparent-inputs")]
+use {
+    zcash_client_backend::wallet::TransparentAddressMetadata,
+    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
 };
-
-use crate::error::SqliteClientError;
 
 #[cfg(feature = "unstable")]
 use {
@@ -72,31 +98,63 @@ use {
     std::{fs, io},
 };
 
-mod prepared;
-pub use prepared::DataConnStmtCache;
-
 pub mod chain;
 pub mod error;
 pub mod wallet;
+use wallet::{
+    commitment_tree::{self, put_shard_roots},
+    SubtreeScanProgress,
+};
+
+#[cfg(test)]
+mod testing;
 
 /// The maximum number of blocks the wallet is allowed to rewind. This is
 /// consistent with the bound in zcashd, and allows block data deeper than
 /// this delta from the chain tip to be pruned.
-pub(crate) const PRUNING_HEIGHT: u32 = 100;
+pub(crate) const PRUNING_DEPTH: u32 = 100;
 
-/// A newtype wrapper for sqlite primary key values for the notes
-/// table.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum NoteId {
-    SentNoteId(i64),
-    ReceivedNoteId(i64),
+/// The number of blocks to verify ahead when the chain tip is updated.
+pub(crate) const VERIFY_LOOKAHEAD: u32 = 10;
+
+pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
+
+#[cfg(feature = "orchard")]
+pub(crate) const ORCHARD_TABLES_PREFIX: &str = "orchard";
+
+#[cfg(not(feature = "orchard"))]
+pub(crate) const UA_ORCHARD: bool = false;
+#[cfg(feature = "orchard")]
+pub(crate) const UA_ORCHARD: bool = true;
+
+#[cfg(not(feature = "transparent-inputs"))]
+pub(crate) const UA_TRANSPARENT: bool = false;
+#[cfg(feature = "transparent-inputs")]
+pub(crate) const UA_TRANSPARENT: bool = true;
+
+pub(crate) const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
+    UnifiedAddressRequest::unsafe_new(UA_ORCHARD, true, UA_TRANSPARENT);
+
+/// The ID type for accounts.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+pub struct AccountId(u32);
+
+impl ConditionallySelectable for AccountId {
+    fn conditional_select(a: &Self, b: &Self, choice: subtle::Choice) -> Self {
+        AccountId(ConditionallySelectable::conditional_select(
+            &a.0, &b.0, choice,
+        ))
+    }
 }
 
-impl fmt::Display for NoteId {
+/// An opaque type for received note identifiers.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ReceivedNoteId(pub(crate) ShieldedProtocol, pub(crate) i64);
+
+impl fmt::Display for ReceivedNoteId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            NoteId::SentNoteId(id) => write!(f, "Sent Note {}", id),
-            NoteId::ReceivedNoteId(id) => write!(f, "Received Note {}", id),
+            ReceivedNoteId(protocol, id) => write!(f, "Received {:?} Note: {}", protocol, id),
         }
     }
 }
@@ -107,12 +165,21 @@ impl fmt::Display for NoteId {
 pub struct UtxoId(pub i64);
 
 /// A wrapper for the SQLite connection to the wallet database.
-pub struct WalletDb<P> {
-    conn: Connection,
+pub struct WalletDb<C, P> {
+    conn: C,
     params: P,
 }
 
-impl<P: consensus::Parameters> WalletDb<P> {
+/// A wrapper for a SQLite transaction affecting the wallet database.
+pub struct SqlTransaction<'conn>(pub(crate) &'conn rusqlite::Transaction<'conn>);
+
+impl Borrow<rusqlite::Connection> for SqlTransaction<'_> {
+    fn borrow(&self) -> &rusqlite::Connection {
+        self.0
+    }
+}
+
+impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
     /// Construct a connection to the wallet database stored at the specified path.
     pub fn for_path<F: AsRef<Path>>(path: F, params: P) -> Result<Self, rusqlite::Error> {
         Connection::open(path).and_then(move |conn| {
@@ -121,542 +188,1122 @@ impl<P: consensus::Parameters> WalletDb<P> {
         })
     }
 
-    /// Given a wallet database connection, obtain a handle for the write operations
-    /// for that database. This operation may eagerly initialize and cache sqlite
-    /// prepared statements that are used in write operations.
-    pub fn get_update_ops(&self) -> Result<DataConnStmtCache<'_, P>, SqliteClientError> {
-        DataConnStmtCache::new(self)
+    pub fn transactionally<F, A, E: From<rusqlite::Error>>(&mut self, f: F) -> Result<A, E>
+    where
+        F: FnOnce(&mut WalletDb<SqlTransaction<'_>, P>) -> Result<A, E>,
+    {
+        let tx = self.conn.transaction()?;
+        let mut wdb = WalletDb {
+            conn: SqlTransaction(&tx),
+            params: self.params.clone(),
+        };
+        let result = f(&mut wdb)?;
+        tx.commit()?;
+        Ok(result)
     }
 }
 
-impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for WalletDb<C, P> {
     type Error = SqliteClientError;
-    type NoteRef = NoteId;
-    type TxRef = i64;
+    type NoteRef = ReceivedNoteId;
+    type AccountId = AccountId;
 
-    fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
-        wallet::block_height_extrema(self).map_err(SqliteClientError::from)
-    }
-
-    fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        wallet::get_min_unspent_height(self).map_err(SqliteClientError::from)
-    }
-
-    fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
-        wallet::get_block_hash(self, block_height).map_err(SqliteClientError::from)
-    }
-
-    fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        wallet::get_tx_height(self, txid).map_err(SqliteClientError::from)
-    }
-
-    fn get_unified_full_viewing_keys(
+    fn get_spendable_note(
         &self,
-    ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
-        wallet::get_unified_full_viewing_keys(self)
-    }
+        txid: &TxId,
+        protocol: ShieldedProtocol,
+        index: u32,
+    ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
+        match protocol {
+            ShieldedProtocol::Sapling => wallet::sapling::get_spendable_sapling_note(
+                self.conn.borrow(),
+                &self.params,
+                txid,
+                index,
+            )
+            .map(|opt| opt.map(|n| n.map_note(Note::Sapling))),
+            ShieldedProtocol::Orchard => {
+                #[cfg(feature = "orchard")]
+                return wallet::orchard::get_spendable_orchard_note(
+                    self.conn.borrow(),
+                    &self.params,
+                    txid,
+                    index,
+                )
+                .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
 
-    fn get_account_for_ufvk(
-        &self,
-        ufvk: &UnifiedFullViewingKey,
-    ) -> Result<Option<AccountId>, Self::Error> {
-        wallet::get_account_for_ufvk(self, ufvk)
-    }
-
-    fn get_current_address(
-        &self,
-        account: AccountId,
-    ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        wallet::get_current_address(self, account).map(|res| res.map(|(addr, _)| addr))
-    }
-
-    fn is_valid_account_extfvk(
-        &self,
-        account: AccountId,
-        extfvk: &ExtendedFullViewingKey,
-    ) -> Result<bool, Self::Error> {
-        wallet::is_valid_account_extfvk(self, account, extfvk)
-    }
-
-    fn get_balance_at(
-        &self,
-        account: AccountId,
-        anchor_height: BlockHeight,
-    ) -> Result<Amount, Self::Error> {
-        wallet::get_balance_at(self, account, anchor_height)
-    }
-
-    fn get_transaction(&self, id_tx: i64) -> Result<Transaction, Self::Error> {
-        wallet::get_transaction(self, id_tx)
-    }
-
-    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Option<Memo>, Self::Error> {
-        match id_note {
-            NoteId::SentNoteId(id_note) => wallet::get_sent_memo(self, id_note),
-            NoteId::ReceivedNoteId(id_note) => wallet::get_received_memo(self, id_note),
+                #[cfg(not(feature = "orchard"))]
+                return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
+                    ShieldedProtocol::Orchard,
+                )));
+            }
         }
     }
 
-    fn get_commitment_tree(
-        &self,
-        block_height: BlockHeight,
-    ) -> Result<Option<sapling::CommitmentTree>, Self::Error> {
-        wallet::sapling::get_sapling_commitment_tree(self, block_height)
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn get_witnesses(
-        &self,
-        block_height: BlockHeight,
-    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
-        wallet::sapling::get_sapling_witnesses(self, block_height)
-    }
-
-    fn get_sapling_nullifiers(
-        &self,
-        query: data_api::NullifierQuery,
-    ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error> {
-        match query {
-            NullifierQuery::Unspent => wallet::sapling::get_sapling_nullifiers(self),
-            NullifierQuery::All => wallet::sapling::get_all_sapling_nullifiers(self),
-        }
-    }
-
-    fn get_spendable_sapling_notes(
+    fn select_spendable_notes(
         &self,
         account: AccountId,
+        target_value: NonNegativeAmount,
+        _sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
-        wallet::sapling::get_spendable_sapling_notes(self, account, anchor_height, exclude)
+    ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
+        Ok(SpendableNotes::new(
+            wallet::sapling::select_spendable_sapling_notes(
+                self.conn.borrow(),
+                &self.params,
+                account,
+                target_value,
+                anchor_height,
+                exclude,
+            )?,
+            #[cfg(feature = "orchard")]
+            wallet::orchard::select_spendable_orchard_notes(
+                self.conn.borrow(),
+                &self.params,
+                account,
+                target_value,
+                anchor_height,
+                exclude,
+            )?,
+        ))
     }
 
-    fn select_spendable_sapling_notes(
+    #[cfg(feature = "transparent-inputs")]
+    fn get_unspent_transparent_output(
         &self,
-        account: AccountId,
-        target_value: Amount,
-        anchor_height: BlockHeight,
-        exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
-        wallet::sapling::select_spendable_sapling_notes(
-            self,
-            account,
-            target_value,
-            anchor_height,
-            exclude,
-        )
+        outpoint: &OutPoint,
+    ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
+        wallet::get_unspent_transparent_output(self.conn.borrow(), outpoint)
     }
 
-    fn get_transparent_receivers(
-        &self,
-        _account: AccountId,
-    ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error> {
-        #[cfg(feature = "transparent-inputs")]
-        return wallet::get_transparent_receivers(&self.params, &self.conn, _account);
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        panic!(
-            "The wallet must be compiled with the transparent-inputs feature to use this method."
-        );
-    }
-
-    fn get_unspent_transparent_outputs(
-        &self,
-        _address: &TransparentAddress,
-        _max_height: BlockHeight,
-        _exclude: &[OutPoint],
-    ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
-        #[cfg(feature = "transparent-inputs")]
-        return wallet::get_unspent_transparent_outputs(self, _address, _max_height, _exclude);
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        panic!(
-            "The wallet must be compiled with the transparent-inputs feature to use this method."
-        );
-    }
-
-    fn get_transparent_balances(
-        &self,
-        _account: AccountId,
-        _max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
-        #[cfg(feature = "transparent-inputs")]
-        return wallet::get_transparent_balances(self, _account, _max_height);
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        panic!(
-            "The wallet must be compiled with the transparent-inputs feature to use this method."
-        );
-    }
-}
-
-impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
-    type Error = SqliteClientError;
-    type NoteRef = NoteId;
-    type TxRef = i64;
-
-    fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
-        self.wallet_db.block_height_extrema()
-    }
-
-    fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        self.wallet_db.get_min_unspent_height()
-    }
-
-    fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
-        self.wallet_db.get_block_hash(block_height)
-    }
-
-    fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        self.wallet_db.get_tx_height(txid)
-    }
-
-    fn get_unified_full_viewing_keys(
-        &self,
-    ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
-        self.wallet_db.get_unified_full_viewing_keys()
-    }
-
-    fn get_account_for_ufvk(
-        &self,
-        ufvk: &UnifiedFullViewingKey,
-    ) -> Result<Option<AccountId>, Self::Error> {
-        self.wallet_db.get_account_for_ufvk(ufvk)
-    }
-
-    fn get_current_address(
-        &self,
-        account: AccountId,
-    ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        self.wallet_db.get_current_address(account)
-    }
-
-    fn is_valid_account_extfvk(
-        &self,
-        account: AccountId,
-        extfvk: &ExtendedFullViewingKey,
-    ) -> Result<bool, Self::Error> {
-        self.wallet_db.is_valid_account_extfvk(account, extfvk)
-    }
-
-    fn get_balance_at(
-        &self,
-        account: AccountId,
-        anchor_height: BlockHeight,
-    ) -> Result<Amount, Self::Error> {
-        self.wallet_db.get_balance_at(account, anchor_height)
-    }
-
-    fn get_transaction(&self, id_tx: i64) -> Result<Transaction, Self::Error> {
-        self.wallet_db.get_transaction(id_tx)
-    }
-
-    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Option<Memo>, Self::Error> {
-        self.wallet_db.get_memo(id_note)
-    }
-
-    fn get_commitment_tree(
-        &self,
-        block_height: BlockHeight,
-    ) -> Result<Option<sapling::CommitmentTree>, Self::Error> {
-        self.wallet_db.get_commitment_tree(block_height)
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn get_witnesses(
-        &self,
-        block_height: BlockHeight,
-    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
-        self.wallet_db.get_witnesses(block_height)
-    }
-
-    fn get_sapling_nullifiers(
-        &self,
-        query: data_api::NullifierQuery,
-    ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error> {
-        self.wallet_db.get_sapling_nullifiers(query)
-    }
-
-    fn get_spendable_sapling_notes(
-        &self,
-        account: AccountId,
-        anchor_height: BlockHeight,
-        exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
-        self.wallet_db
-            .get_spendable_sapling_notes(account, anchor_height, exclude)
-    }
-
-    fn select_spendable_sapling_notes(
-        &self,
-        account: AccountId,
-        target_value: Amount,
-        anchor_height: BlockHeight,
-        exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
-        self.wallet_db
-            .select_spendable_sapling_notes(account, target_value, anchor_height, exclude)
-    }
-
-    fn get_transparent_receivers(
-        &self,
-        account: AccountId,
-    ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error> {
-        self.wallet_db.get_transparent_receivers(account)
-    }
-
+    #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_outputs(
         &self,
         address: &TransparentAddress,
         max_height: BlockHeight,
         exclude: &[OutPoint],
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
-        self.wallet_db
-            .get_unspent_transparent_outputs(address, max_height, exclude)
+        wallet::get_unspent_transparent_outputs(
+            self.conn.borrow(),
+            &self.params,
+            address,
+            max_height,
+            exclude,
+        )
+    }
+}
+
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for WalletDb<C, P> {
+    type Error = SqliteClientError;
+    type AccountId = AccountId;
+    type Account = wallet::Account;
+
+    fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error> {
+        wallet::get_account_ids(self.conn.borrow())
     }
 
+    fn get_account(
+        &self,
+        account_id: Self::AccountId,
+    ) -> Result<Option<Self::Account>, Self::Error> {
+        wallet::get_account(self.conn.borrow(), &self.params, account_id)
+    }
+
+    fn get_derived_account(
+        &self,
+        seed: &SeedFingerprint,
+        account_id: zip32::AccountId,
+    ) -> Result<Option<Self::Account>, Self::Error> {
+        wallet::get_derived_account(self.conn.borrow(), &self.params, seed, account_id)
+    }
+
+    fn validate_seed(
+        &self,
+        account_id: Self::AccountId,
+        seed: &SecretVec<u8>,
+    ) -> Result<bool, Self::Error> {
+        if let Some(account) = self.get_account(account_id)? {
+            if let AccountSource::Derived {
+                seed_fingerprint,
+                account_index,
+            } = account.source()
+            {
+                wallet::seed_matches_derived_account(
+                    &self.params,
+                    seed,
+                    &seed_fingerprint,
+                    account_index,
+                    &account.uivk(),
+                )
+            } else {
+                Err(SqliteClientError::UnknownZip32Derivation)
+            }
+        } else {
+            // Missing account is documented to return false.
+            Ok(false)
+        }
+    }
+
+    fn seed_relevance_to_derived_accounts(
+        &self,
+        seed: &SecretVec<u8>,
+    ) -> Result<SeedRelevance<Self::AccountId>, Self::Error> {
+        let mut has_accounts = false;
+        let mut has_derived = false;
+        let mut relevant_account_ids = vec![];
+
+        for account_id in self.get_account_ids()? {
+            has_accounts = true;
+            let account = self.get_account(account_id)?.expect("account ID exists");
+
+            // If the account is imported, the seed _might_ be relevant, but the only
+            // way we could determine that is by brute-forcing the ZIP 32 account
+            // index space, which we're not going to do. The method name indicates to
+            // the caller that we only check derived accounts.
+            if let AccountSource::Derived {
+                seed_fingerprint,
+                account_index,
+            } = account.source()
+            {
+                has_derived = true;
+
+                if wallet::seed_matches_derived_account(
+                    &self.params,
+                    seed,
+                    &seed_fingerprint,
+                    account_index,
+                    &account.uivk(),
+                )? {
+                    // The seed is relevant to this account.
+                    relevant_account_ids.push(account_id);
+                }
+            }
+        }
+
+        Ok(
+            if let Some(account_ids) = NonEmpty::from_vec(relevant_account_ids) {
+                SeedRelevance::Relevant { account_ids }
+            } else if has_derived {
+                SeedRelevance::NotRelevant
+            } else if has_accounts {
+                SeedRelevance::NoDerivedAccounts
+            } else {
+                SeedRelevance::NoAccounts
+            },
+        )
+    }
+
+    fn get_account_for_ufvk(
+        &self,
+        ufvk: &UnifiedFullViewingKey,
+    ) -> Result<Option<Self::Account>, Self::Error> {
+        wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
+    }
+
+    fn get_current_address(
+        &self,
+        account: AccountId,
+    ) -> Result<Option<UnifiedAddress>, Self::Error> {
+        wallet::get_current_address(self.conn.borrow(), &self.params, account)
+            .map(|res| res.map(|(addr, _)| addr))
+    }
+
+    fn get_account_birthday(&self, account: AccountId) -> Result<BlockHeight, Self::Error> {
+        wallet::account_birthday(self.conn.borrow(), account).map_err(SqliteClientError::from)
+    }
+
+    fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        wallet::wallet_birthday(self.conn.borrow()).map_err(SqliteClientError::from)
+    }
+
+    fn get_wallet_summary(
+        &self,
+        min_confirmations: u32,
+    ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
+        // This will return a runtime error if we call `get_wallet_summary` from two
+        // threads at the same time, as transactions cannot nest.
+        wallet::get_wallet_summary(
+            &self.conn.borrow().unchecked_transaction()?,
+            &self.params,
+            min_confirmations,
+            &SubtreeScanProgress,
+        )
+    }
+
+    fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        wallet::scan_queue_extrema(self.conn.borrow())
+            .map(|h| h.map(|range| *range.end()))
+            .map_err(SqliteClientError::from)
+    }
+
+    fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
+        wallet::get_block_hash(self.conn.borrow(), block_height).map_err(SqliteClientError::from)
+    }
+
+    fn block_metadata(&self, height: BlockHeight) -> Result<Option<BlockMetadata>, Self::Error> {
+        wallet::block_metadata(self.conn.borrow(), &self.params, height)
+    }
+
+    fn block_fully_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
+        wallet::block_fully_scanned(self.conn.borrow(), &self.params)
+    }
+
+    fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
+        wallet::get_max_height_hash(self.conn.borrow()).map_err(SqliteClientError::from)
+    }
+
+    fn block_max_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
+        wallet::block_max_scanned(self.conn.borrow(), &self.params)
+    }
+
+    fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error> {
+        wallet::scanning::suggest_scan_ranges(self.conn.borrow(), ScanPriority::Historic)
+            .map_err(SqliteClientError::from)
+    }
+
+    fn get_target_and_anchor_heights(
+        &self,
+        min_confirmations: NonZeroU32,
+    ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+        wallet::get_target_and_anchor_heights(self.conn.borrow(), min_confirmations)
+            .map_err(SqliteClientError::from)
+    }
+
+    fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        wallet::get_min_unspent_height(self.conn.borrow()).map_err(SqliteClientError::from)
+    }
+
+    fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+        wallet::get_tx_height(self.conn.borrow(), txid).map_err(SqliteClientError::from)
+    }
+
+    fn get_unified_full_viewing_keys(
+        &self,
+    ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
+        wallet::get_unified_full_viewing_keys(self.conn.borrow(), &self.params)
+    }
+
+    fn get_memo(&self, note_id: NoteId) -> Result<Option<Memo>, Self::Error> {
+        let sent_memo = wallet::get_sent_memo(self.conn.borrow(), note_id)?;
+        if sent_memo.is_some() {
+            Ok(sent_memo)
+        } else {
+            wallet::get_received_memo(self.conn.borrow(), note_id)
+        }
+    }
+
+    fn get_transaction(&self, txid: TxId) -> Result<Option<Transaction>, Self::Error> {
+        wallet::get_transaction(self.conn.borrow(), &self.params, txid)
+            .map(|res| res.map(|(_, tx)| tx))
+    }
+
+    fn get_sapling_nullifiers(
+        &self,
+        query: NullifierQuery,
+    ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error> {
+        wallet::sapling::get_sapling_nullifiers(self.conn.borrow(), query)
+    }
+
+    #[cfg(feature = "orchard")]
+    fn get_orchard_nullifiers(
+        &self,
+        query: NullifierQuery,
+    ) -> Result<Vec<(AccountId, orchard::note::Nullifier)>, Self::Error> {
+        wallet::orchard::get_orchard_nullifiers(self.conn.borrow(), query)
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_transparent_receivers(
+        &self,
+        account: AccountId,
+    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+        wallet::get_transparent_receivers(self.conn.borrow(), &self.params, account)
+    }
+
+    #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
         &self,
         account: AccountId,
         max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
-        self.wallet_db.get_transparent_balances(account, max_height)
+    ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
+        wallet::get_transparent_balances(self.conn.borrow(), &self.params, account, max_height)
     }
 }
 
-impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
-    fn transactionally<F, A>(&mut self, f: F) -> Result<A, SqliteClientError>
-    where
-        F: FnOnce(&mut Self) -> Result<A, SqliteClientError>,
-    {
-        self.wallet_db.conn.execute("BEGIN IMMEDIATE", [])?;
-        match f(self) {
-            Ok(result) => {
-                self.wallet_db.conn.execute("COMMIT", [])?;
-                Ok(result)
-            }
-            Err(error) => {
-                match self.wallet_db.conn.execute("ROLLBACK", []) {
-                    Ok(_) => Err(error),
-                    Err(e) =>
-                        // Panicking here is probably the right thing to do, because it
-                        // means the database is corrupt.
-                        panic!(
-                            "Rollback failed with error {} while attempting to recover from error {}; database is likely corrupt.",
-                            e,
-                            error
-                        )
-                }
-            }
-        }
-    }
-}
-
-impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
+impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P> {
     type UtxoRef = UtxoId;
 
     fn create_account(
         &mut self,
         seed: &SecretVec<u8>,
+        birthday: &AccountBirthday,
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
-        self.transactionally(|stmts| {
-            let account = wallet::get_max_account_id(stmts.wallet_db)?
-                .map(|a| AccountId::from(u32::from(a) + 1))
-                .unwrap_or_else(|| AccountId::from(0));
+        self.transactionally(|wdb| {
+            let seed_fingerprint =
+                SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
+                    SqliteClientError::BadAccountData(
+                        "Seed must be between 32 and 252 bytes in length.".to_owned(),
+                    )
+                })?;
+            let account_index = wallet::max_zip32_account_index(wdb.conn.0, &seed_fingerprint)?
+                .map(|a| a.next().ok_or(SqliteClientError::AccountIdOutOfRange))
+                .transpose()?
+                .unwrap_or(zip32::AccountId::ZERO);
 
-            if u32::from(account) >= 0x7FFFFFFF {
-                return Err(SqliteClientError::AccountIdOutOfRange);
-            }
-
-            let usk = UnifiedSpendingKey::from_seed(
-                &stmts.wallet_db.params,
-                seed.expose_secret(),
-                account,
-            )
-            .map_err(|_| SqliteClientError::KeyDerivationError(account))?;
+            let usk =
+                UnifiedSpendingKey::from_seed(&wdb.params, seed.expose_secret(), account_index)
+                    .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
-            wallet::add_account(stmts.wallet_db, account, &ufvk)?;
+            let account_id = wallet::add_account(
+                wdb.conn.0,
+                &wdb.params,
+                AccountSource::Derived {
+                    seed_fingerprint,
+                    account_index,
+                },
+                wallet::ViewingKey::Full(Box::new(ufvk)),
+                birthday,
+            )?;
 
-            Ok((account, usk))
+            Ok((account_id, usk))
         })
     }
 
     fn get_next_available_address(
         &mut self,
         account: AccountId,
+        request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        match self.get_unified_full_viewing_keys()?.get(&account) {
-            Some(ufvk) => {
-                let search_from = match wallet::get_current_address(self.wallet_db, account)? {
-                    Some((_, mut last_diversifier_index)) => {
-                        last_diversifier_index
-                            .increment()
-                            .map_err(|_| SqliteClientError::DiversifierIndexOutOfRange)?;
-                        last_diversifier_index
-                    }
-                    None => DiversifierIndex::default(),
-                };
+        self.transactionally(
+            |wdb| match wdb.get_unified_full_viewing_keys()?.get(&account) {
+                Some(ufvk) => {
+                    let search_from =
+                        match wallet::get_current_address(wdb.conn.0, &wdb.params, account)? {
+                            Some((_, mut last_diversifier_index)) => {
+                                last_diversifier_index.increment().map_err(|_| {
+                                    AddressGenerationError::DiversifierSpaceExhausted
+                                })?;
+                                last_diversifier_index
+                            }
+                            None => DiversifierIndex::default(),
+                        };
 
-                let (addr, diversifier_index) = ufvk
-                    .find_address(search_from)
-                    .ok_or(SqliteClientError::DiversifierIndexOutOfRange)?;
+                    let (addr, diversifier_index) = ufvk.find_address(search_from, request)?;
 
-                self.stmt_insert_address(account, diversifier_index, &addr)?;
+                    wallet::insert_address(
+                        wdb.conn.0,
+                        &wdb.params,
+                        account,
+                        diversifier_index,
+                        &addr,
+                    )?;
 
-                Ok(Some(addr))
-            }
-            None => Ok(None),
-        }
+                    Ok(Some(addr))
+                }
+                None => Ok(None),
+            },
+        )
     }
 
-    #[tracing::instrument(skip_all, fields(height = u32::from(block.block_height)))]
+    fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error> {
+        let tx = self.conn.transaction()?;
+        wallet::scanning::update_chain_tip(&tx, &self.params, tip_height)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(height = blocks.first().map(|b| u32::from(b.height())), count = blocks.len()))]
     #[allow(clippy::type_complexity)]
-    fn advance_by_block(
+    fn put_blocks(
         &mut self,
-        block: &PrunedBlock,
-        updated_witnesses: &[(Self::NoteRef, sapling::IncrementalWitness)],
-    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
-        // database updates for each block are transactional
-        self.transactionally(|up| {
-            // Insert the block into the database.
-            wallet::insert_block(
-                up,
-                block.block_height,
-                block.block_hash,
-                block.block_time,
-                block.commitment_tree,
-            )?;
+        from_state: &ChainState,
+        blocks: Vec<ScannedBlock<Self::AccountId>>,
+    ) -> Result<(), Self::Error> {
+        struct BlockPositions {
+            height: BlockHeight,
+            sapling_start_position: Position,
+            #[cfg(feature = "orchard")]
+            orchard_start_position: Position,
+        }
 
-            let mut new_witnesses = vec![];
-            for tx in block.transactions {
-                let tx_row = wallet::put_tx_meta(up, tx, block.block_height)?;
-
-                // Mark notes as spent and remove them from the scanning cache
-                for spend in &tx.sapling_spends {
-                    wallet::sapling::mark_sapling_note_spent(up, tx_row, spend.nf())?;
+        self.transactionally(|wdb| {
+            let start_positions = blocks.first().map(|block| BlockPositions {
+                height: block.height(),
+                sapling_start_position: Position::from(
+                    u64::from(block.sapling().final_tree_size())
+                        - u64::try_from(block.sapling().commitments().len()).unwrap(),
+                ),
+                #[cfg(feature = "orchard")]
+                orchard_start_position: Position::from(
+                    u64::from(block.orchard().final_tree_size())
+                        - u64::try_from(block.orchard().commitments().len()).unwrap(),
+                ),
+            });
+            let mut sapling_commitments = vec![];
+            #[cfg(feature = "orchard")]
+            let mut orchard_commitments = vec![];
+            let mut last_scanned_height = None;
+            let mut note_positions = vec![];
+            for block in blocks.into_iter() {
+                if last_scanned_height
+                    .iter()
+                    .any(|prev| block.height() != *prev + 1)
+                {
+                    return Err(SqliteClientError::NonSequentialBlocks);
                 }
 
-                for output in &tx.sapling_outputs {
-                    let received_note_id = wallet::sapling::put_received_note(up, output, tx_row)?;
+                // Insert the block into the database.
+                wallet::put_block(
+                    wdb.conn.0,
+                    block.height(),
+                    block.block_hash(),
+                    block.block_time(),
+                    block.sapling().final_tree_size(),
+                    block.sapling().commitments().len().try_into().unwrap(),
+                    #[cfg(feature = "orchard")]
+                    block.orchard().final_tree_size(),
+                    #[cfg(feature = "orchard")]
+                    block.orchard().commitments().len().try_into().unwrap(),
+                )?;
 
-                    // Save witness for note.
-                    new_witnesses.push((received_note_id, output.witness().clone()));
+                for tx in block.transactions() {
+                    let tx_row = wallet::put_tx_meta(wdb.conn.0, tx, block.height())?;
+
+                    // Mark notes as spent and remove them from the scanning cache
+                    for spend in tx.sapling_spends() {
+                        wallet::sapling::mark_sapling_note_spent(wdb.conn.0, tx_row, spend.nf())?;
+                    }
+                    #[cfg(feature = "orchard")]
+                    for spend in tx.orchard_spends() {
+                        wallet::orchard::mark_orchard_note_spent(wdb.conn.0, tx_row, spend.nf())?;
+                    }
+
+                    for output in tx.sapling_outputs() {
+                        // Check whether this note was spent in a later block range that
+                        // we previously scanned.
+                        let spent_in = output
+                            .nf()
+                            .map(|nf| {
+                                wallet::query_nullifier_map::<_, Scope>(
+                                    wdb.conn.0,
+                                    ShieldedProtocol::Sapling,
+                                    nf,
+                                )
+                            })
+                            .transpose()?
+                            .flatten();
+
+                        wallet::sapling::put_received_note(wdb.conn.0, output, tx_row, spent_in)?;
+                    }
+                    #[cfg(feature = "orchard")]
+                    for output in tx.orchard_outputs() {
+                        // Check whether this note was spent in a later block range that
+                        // we previously scanned.
+                        let spent_in = output
+                            .nf()
+                            .map(|nf| {
+                                wallet::query_nullifier_map::<_, Scope>(
+                                    wdb.conn.0,
+                                    ShieldedProtocol::Orchard,
+                                    &nf.to_bytes(),
+                                )
+                            })
+                            .transpose()?
+                            .flatten();
+
+                        wallet::orchard::put_received_note(wdb.conn.0, output, tx_row, spent_in)?;
+                    }
                 }
+
+                // Insert the new nullifiers from this block into the nullifier map.
+                wallet::insert_nullifier_map(
+                    wdb.conn.0,
+                    block.height(),
+                    ShieldedProtocol::Sapling,
+                    block.sapling().nullifier_map(),
+                )?;
+                #[cfg(feature = "orchard")]
+                wallet::insert_nullifier_map(
+                    wdb.conn.0,
+                    block.height(),
+                    ShieldedProtocol::Orchard,
+                    &block
+                        .orchard()
+                        .nullifier_map()
+                        .iter()
+                        .map(|(txid, idx, nfs)| {
+                            (*txid, *idx, nfs.iter().map(|nf| nf.to_bytes()).collect())
+                        })
+                        .collect::<Vec<_>>(),
+                )?;
+
+                note_positions.extend(block.transactions().iter().flat_map(|wtx| {
+                    let iter = wtx.sapling_outputs().iter().map(|out| {
+                        (
+                            ShieldedProtocol::Sapling,
+                            out.note_commitment_tree_position(),
+                        )
+                    });
+                    #[cfg(feature = "orchard")]
+                    let iter = iter.chain(wtx.orchard_outputs().iter().map(|out| {
+                        (
+                            ShieldedProtocol::Orchard,
+                            out.note_commitment_tree_position(),
+                        )
+                    }));
+
+                    iter
+                }));
+
+                last_scanned_height = Some(block.height());
+                let block_commitments = block.into_commitments();
+                trace!(
+                    "Sapling commitments for {:?}: {:?}",
+                    last_scanned_height,
+                    block_commitments
+                        .sapling
+                        .iter()
+                        .map(|(_, r)| *r)
+                        .collect::<Vec<_>>()
+                );
+                #[cfg(feature = "orchard")]
+                trace!(
+                    "Orchard commitments for {:?}: {:?}",
+                    last_scanned_height,
+                    block_commitments
+                        .orchard
+                        .iter()
+                        .map(|(_, r)| *r)
+                        .collect::<Vec<_>>()
+                );
+
+                sapling_commitments.extend(block_commitments.sapling.into_iter().map(Some));
+                #[cfg(feature = "orchard")]
+                orchard_commitments.extend(block_commitments.orchard.into_iter().map(Some));
             }
 
-            // Insert current new_witnesses into the database.
-            for (received_note_id, witness) in updated_witnesses.iter().chain(new_witnesses.iter())
+            // Prune the nullifier map of entries we no longer need.
+            if let Some(meta) = wdb.block_fully_scanned()? {
+                wallet::prune_nullifier_map(
+                    wdb.conn.0,
+                    meta.block_height().saturating_sub(PRUNING_DEPTH),
+                )?;
+            }
+
+            // We will have a start position and a last scanned height in all cases where
+            // `blocks` is non-empty.
+            if let Some((start_positions, last_scanned_height)) =
+                start_positions.zip(last_scanned_height)
             {
-                if let NoteId::ReceivedNoteId(rnid) = *received_note_id {
-                    wallet::sapling::insert_witness(up, rnid, witness, block.block_height)?;
-                } else {
-                    return Err(SqliteClientError::InvalidNoteId);
+                // Create subtrees from the note commitments in parallel.
+                const CHUNK_SIZE: usize = 1024;
+                let sapling_subtrees = sapling_commitments
+                    .par_chunks_mut(CHUNK_SIZE)
+                    .enumerate()
+                    .filter_map(|(i, chunk)| {
+                        let start =
+                            start_positions.sapling_start_position + (i * CHUNK_SIZE) as u64;
+                        let end = start + chunk.len() as u64;
+
+                        shardtree::LocatedTree::from_iter(
+                            start..end,
+                            SAPLING_SHARD_HEIGHT.into(),
+                            chunk.iter_mut().map(|n| n.take().expect("always Some")),
+                        )
+                    })
+                    .map(|res| (res.subtree, res.checkpoints))
+                    .collect::<Vec<_>>();
+
+                #[cfg(feature = "orchard")]
+                let orchard_subtrees = orchard_commitments
+                    .par_chunks_mut(CHUNK_SIZE)
+                    .enumerate()
+                    .filter_map(|(i, chunk)| {
+                        let start =
+                            start_positions.orchard_start_position + (i * CHUNK_SIZE) as u64;
+                        let end = start + chunk.len() as u64;
+
+                        shardtree::LocatedTree::from_iter(
+                            start..end,
+                            ORCHARD_SHARD_HEIGHT.into(),
+                            chunk.iter_mut().map(|n| n.take().expect("always Some")),
+                        )
+                    })
+                    .map(|res| (res.subtree, res.checkpoints))
+                    .collect::<Vec<_>>();
+
+                // Collect the complete set of Sapling checkpoints
+                #[cfg(feature = "orchard")]
+                let sapling_checkpoint_positions: BTreeMap<BlockHeight, Position> =
+                    sapling_subtrees
+                        .iter()
+                        .flat_map(|(_, checkpoints)| checkpoints.iter())
+                        .map(|(k, v)| (*k, *v))
+                        .collect();
+
+                #[cfg(feature = "orchard")]
+                let orchard_checkpoint_positions: BTreeMap<BlockHeight, Position> =
+                    orchard_subtrees
+                        .iter()
+                        .flat_map(|(_, checkpoints)| checkpoints.iter())
+                        .map(|(k, v)| (*k, *v))
+                        .collect();
+
+                #[cfg(feature = "orchard")]
+                fn ensure_checkpoints<
+                    'a,
+                    H,
+                    I: Iterator<Item = &'a BlockHeight>,
+                    const DEPTH: u8,
+                >(
+                    // An iterator of checkpoints heights for which we wish to ensure that
+                    // checkpoints exists.
+                    ensure_heights: I,
+                    // The map of checkpoint positions from which we will draw note commitment tree
+                    // position information for the newly created checkpoints.
+                    existing_checkpoint_positions: &BTreeMap<BlockHeight, Position>,
+                    // The frontier whose position will be used for an inserted checkpoint when
+                    // there is no preceding checkpoint in existing_checkpoint_positions.
+                    state_final_tree: &Frontier<H, DEPTH>,
+                ) -> Vec<(BlockHeight, Checkpoint)> {
+                    ensure_heights
+                        .flat_map(|ensure_height| {
+                            existing_checkpoint_positions
+                                .range::<BlockHeight, _>(..=*ensure_height)
+                                .last()
+                                .map_or_else(
+                                    || {
+                                        Some((
+                                            *ensure_height,
+                                            state_final_tree
+                                                .value()
+                                                .map_or_else(Checkpoint::tree_empty, |t| {
+                                                    Checkpoint::at_position(t.position())
+                                                }),
+                                        ))
+                                    },
+                                    |(existing_checkpoint_height, position)| {
+                                        if *existing_checkpoint_height < *ensure_height {
+                                            Some((
+                                                *ensure_height,
+                                                Checkpoint::at_position(*position),
+                                            ))
+                                        } else {
+                                            // The checkpoint already exists, so we don't need to
+                                            // do anything.
+                                            None
+                                        }
+                                    },
+                                )
+                                .into_iter()
+                        })
+                        .collect::<Vec<_>>()
                 }
+
+                #[cfg(feature = "orchard")]
+                let (missing_sapling_checkpoints, missing_orchard_checkpoints) = (
+                    ensure_checkpoints(
+                        orchard_checkpoint_positions.keys(),
+                        &sapling_checkpoint_positions,
+                        from_state.final_sapling_tree(),
+                    ),
+                    ensure_checkpoints(
+                        sapling_checkpoint_positions.keys(),
+                        &orchard_checkpoint_positions,
+                        from_state.final_orchard_tree(),
+                    ),
+                );
+
+                // Update the Sapling note commitment tree with all newly read note commitments
+                {
+                    let mut sapling_subtrees_iter = sapling_subtrees.into_iter();
+                    wdb.with_sapling_tree_mut::<_, _, Self::Error>(|sapling_tree| {
+                        debug!(
+                            "Sapling initial tree size at {:?}: {:?}",
+                            from_state.block_height(),
+                            from_state.final_sapling_tree().tree_size()
+                        );
+                        sapling_tree.insert_frontier(
+                            from_state.final_sapling_tree().clone(),
+                            Retention::Checkpoint {
+                                id: from_state.block_height(),
+                                is_marked: false,
+                            },
+                        )?;
+
+                        for (tree, checkpoints) in &mut sapling_subtrees_iter {
+                            sapling_tree.insert_tree(tree, checkpoints)?;
+                        }
+
+                        // Ensure we have a Sapling checkpoint for each checkpointed Orchard block height.
+                        // We skip all checkpoints below the minimum retained checkpoint in the
+                        // Sapling tree, because branches below this height may be pruned.
+                        #[cfg(feature = "orchard")]
+                        {
+                            let min_checkpoint_height = sapling_tree
+                                .store()
+                                .min_checkpoint_id()
+                                .map_err(ShardTreeError::Storage)?
+                                .expect(
+                                    "At least one checkpoint was inserted (by insert_frontier)",
+                                );
+
+                            for (height, checkpoint) in &missing_sapling_checkpoints {
+                                if *height > min_checkpoint_height {
+                                    sapling_tree
+                                        .store_mut()
+                                        .add_checkpoint(*height, checkpoint.clone())
+                                        .map_err(ShardTreeError::Storage)?;
+                                }
+                            }
+                        }
+
+                        Ok(())
+                    })?;
+                }
+
+                // Update the Orchard note commitment tree with all newly read note commitments
+                #[cfg(feature = "orchard")]
+                {
+                    let mut orchard_subtrees = orchard_subtrees.into_iter();
+                    wdb.with_orchard_tree_mut::<_, _, Self::Error>(|orchard_tree| {
+                        debug!(
+                            "Orchard initial tree size at {:?}: {:?}",
+                            from_state.block_height(),
+                            from_state.final_orchard_tree().tree_size()
+                        );
+                        orchard_tree.insert_frontier(
+                            from_state.final_orchard_tree().clone(),
+                            Retention::Checkpoint {
+                                id: from_state.block_height(),
+                                is_marked: false,
+                            },
+                        )?;
+
+                        for (tree, checkpoints) in &mut orchard_subtrees {
+                            orchard_tree.insert_tree(tree, checkpoints)?;
+                        }
+
+                        // Ensure we have an Orchard checkpoint for each checkpointed Sapling block height.
+                        // We skip all checkpoints below the minimum retained checkpoint in the
+                        // Orchard tree, because branches below this height may be pruned.
+                        {
+                            let min_checkpoint_height = orchard_tree
+                                .store()
+                                .min_checkpoint_id()
+                                .map_err(ShardTreeError::Storage)?
+                                .expect(
+                                    "At least one checkpoint was inserted (by insert_frontier)",
+                                );
+
+                            for (height, checkpoint) in &missing_orchard_checkpoints {
+                                if *height > min_checkpoint_height {
+                                    debug!(
+                                        "Adding missing Orchard checkpoint for height: {:?}: {:?}",
+                                        height,
+                                        checkpoint.position()
+                                    );
+                                    orchard_tree
+                                        .store_mut()
+                                        .add_checkpoint(*height, checkpoint.clone())
+                                        .map_err(ShardTreeError::Storage)?;
+                                }
+                            }
+                        }
+                        Ok(())
+                    })?;
+                }
+
+                wallet::scanning::scan_complete(
+                    wdb.conn.0,
+                    &wdb.params,
+                    Range {
+                        start: start_positions.height,
+                        end: last_scanned_height + 1,
+                    },
+                    &note_positions,
+                )?;
             }
 
-            // Prune the stored witnesses (we only expect rollbacks of at most PRUNING_HEIGHT blocks).
-            wallet::prune_witnesses(up, block.block_height - PRUNING_HEIGHT)?;
-
-            // Update now-expired transactions that didn't get mined.
-            wallet::update_expired_notes(up, block.block_height)?;
-
-            Ok(new_witnesses)
+            Ok(())
         })
+    }
+
+    fn put_received_transparent_utxo(
+        &mut self,
+        _output: &WalletTransparentOutput,
+    ) -> Result<Self::UtxoRef, Self::Error> {
+        #[cfg(feature = "transparent-inputs")]
+        return wallet::put_received_transparent_utxo(&self.conn, &self.params, _output);
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        panic!(
+            "The wallet must be compiled with the transparent-inputs feature to use this method."
+        );
     }
 
     fn store_decrypted_tx(
         &mut self,
-        d_tx: DecryptedTransaction,
-    ) -> Result<Self::TxRef, Self::Error> {
-        self.transactionally(|up| {
-            let tx_ref = wallet::put_tx_data(up, d_tx.tx, None, None)?;
+        d_tx: DecryptedTransaction<AccountId>,
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| {
+            let tx_ref = wallet::put_tx_data(wdb.conn.0, d_tx.tx(), None, None)?;
+            let funding_accounts = wallet::get_funding_accounts(wdb.conn.0, d_tx.tx())?;
+            let funding_account = funding_accounts.iter().next().copied();
+            if funding_accounts.len() > 1 {
+                warn!(
+                    "More than one wallet account detected as funding transaction {:?}, selecting {:?}",
+                    d_tx.tx().txid(),
+                    funding_account.unwrap()
+                )
+            }
 
-            let mut spending_account_id: Option<AccountId> = None;
-            for output in d_tx.sapling_outputs {
-                match output.transfer_type {
-                    TransferType::Outgoing | TransferType::WalletInternal => {
-                        let recipient = if output.transfer_type == TransferType::Outgoing {
-                            Recipient::Sapling(output.note.recipient())
-                        } else {
-                            Recipient::InternalAccount(output.account, PoolType::Sapling)
+            for output in d_tx.sapling_outputs() {
+                match output.transfer_type() {
+                    TransferType::Outgoing => {
+                        let recipient = {
+                            let receiver = Receiver::Sapling(output.note().recipient());
+                            let wallet_address = wallet::select_receiving_address(
+                                &wdb.params,
+                                wdb.conn.0,
+                                *output.account(),
+                                &receiver
+                            )?.unwrap_or_else(||
+                                receiver.to_zcash_address(wdb.params.network_type())
+                            );
+
+                            Recipient::External(wallet_address, PoolType::Shielded(ShieldedProtocol::Sapling))
                         };
 
                         wallet::put_sent_output(
-                            up,
-                            output.account,
+                            wdb.conn.0,
+                            *output.account(),
                             tx_ref,
-                            output.index,
+                            output.index(),
                             &recipient,
-                            Amount::from_u64(output.note.value().inner()).map_err(|_|
-                                SqliteClientError::CorruptedData("Note value is not a valid Zcash amount.".to_string()))?,
-                            Some(&output.memo),
+                            output.note_value(),
+                            Some(output.memo()),
                         )?;
+                    }
+                    TransferType::WalletInternal => {
+                        wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref, None)?;
 
-                        if matches!(recipient, Recipient::InternalAccount(_, _)) {
-                            wallet::sapling::put_received_note(up, output, tx_ref)?;
-                        }
+                        let recipient = Recipient::InternalAccount {
+                            receiving_account: *output.account(),
+                            external_address: None,
+                            note: Note::Sapling(output.note().clone()),
+                        };
+
+                        wallet::put_sent_output(
+                            wdb.conn.0,
+                            *output.account(),
+                            tx_ref,
+                            output.index(),
+                            &recipient,
+                            output.note_value(),
+                            Some(output.memo()),
+                        )?;
                     }
                     TransferType::Incoming => {
-                        match spending_account_id {
-                            Some(id) =>
-                                if id != output.account {
-                                    panic!("Unable to determine a unique account identifier for z->t spend.");
-                                }
-                            None => {
-                                spending_account_id = Some(output.account);
-                            }
-                        }
+                        wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref, None)?;
 
-                        wallet::sapling::put_received_note(up, output, tx_ref)?;
+                        if let Some(account_id) = funding_account {
+                            let recipient = Recipient::InternalAccount {
+                                receiving_account: *output.account(),
+                                external_address: {
+                                    let receiver = Receiver::Sapling(output.note().recipient());
+                                    Some(wallet::select_receiving_address(
+                                        &wdb.params,
+                                        wdb.conn.0,
+                                        *output.account(),
+                                        &receiver
+                                    )?.unwrap_or_else(||
+                                        receiver.to_zcash_address(wdb.params.network_type())
+                                    ))
+                                },
+                                note: Note::Sapling(output.note().clone()),
+                            };
+
+                            wallet::put_sent_output(
+                                wdb.conn.0,
+                                account_id,
+                                tx_ref,
+                                output.index(),
+                                &recipient,
+                                output.note_value(),
+                                Some(output.memo()),
+                            )?;
+                        }
+                    }
+                }
+            }
+
+            #[cfg(feature = "orchard")]
+            for output in d_tx.orchard_outputs() {
+                match output.transfer_type() {
+                    TransferType::Outgoing => {
+                        let recipient = {
+                            let receiver = Receiver::Orchard(output.note().recipient());
+                            let wallet_address = wallet::select_receiving_address(
+                                &wdb.params,
+                                wdb.conn.0,
+                                *output.account(),
+                                &receiver
+                            )?.unwrap_or_else(||
+                                receiver.to_zcash_address(wdb.params.network_type())
+                            );
+
+                            Recipient::External(wallet_address, PoolType::Shielded(ShieldedProtocol::Orchard))
+                        };
+
+                        wallet::put_sent_output(
+                            wdb.conn.0,
+                            *output.account(),
+                            tx_ref,
+                            output.index(),
+                            &recipient,
+                            output.note_value(),
+                            Some(output.memo()),
+                        )?;
+                    }
+                    TransferType::WalletInternal => {
+                        wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
+
+                        let recipient = Recipient::InternalAccount {
+                            receiving_account: *output.account(),
+                            external_address: None,
+                            note: Note::Orchard(*output.note()),
+                        };
+
+                        wallet::put_sent_output(
+                            wdb.conn.0,
+                            *output.account(),
+                            tx_ref,
+                            output.index(),
+                            &recipient,
+                            output.note_value(),
+                            Some(output.memo()),
+                        )?;
+                    }
+                    TransferType::Incoming => {
+                        wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
+
+                        if let Some(account_id) = funding_account {
+                            // Even if the recipient address is external, record the send as internal.
+                            let recipient = Recipient::InternalAccount {
+                                receiving_account: *output.account(),
+                                external_address: {
+                                    let receiver = Receiver::Orchard(output.note().recipient());
+                                    Some(wallet::select_receiving_address(
+                                        &wdb.params,
+                                        wdb.conn.0,
+                                        *output.account(),
+                                        &receiver
+                                    )?.unwrap_or_else(||
+                                        receiver.to_zcash_address(wdb.params.network_type())
+                                    ))
+                                },
+                                note: Note::Orchard(*output.note()),
+                            };
+
+                            wallet::put_sent_output(
+                                wdb.conn.0,
+                                account_id,
+                                tx_ref,
+                                output.index(),
+                                &recipient,
+                                output.note_value(),
+                                Some(output.memo()),
+                            )?;
+                        }
                     }
                 }
             }
 
             // If any of the utxos spent in the transaction are ours, mark them as spent.
             #[cfg(feature = "transparent-inputs")]
-            for txin in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vin.iter()) {
-                wallet::mark_transparent_utxo_spent(up, tx_ref, &txin.prevout)?;
+            for txin in d_tx
+                .tx()
+                .transparent_bundle()
+                .iter()
+                .flat_map(|b| b.vin.iter())
+            {
+                wallet::mark_transparent_utxo_spent(wdb.conn.0, tx_ref, &txin.prevout)?;
             }
 
             // If we have some transparent outputs:
-            if !d_tx.tx.transparent_bundle().iter().any(|b| b.vout.is_empty()) {
-                let nullifiers = self.wallet_db.get_sapling_nullifiers(data_api::NullifierQuery::All)?;
-                // If the transaction contains shielded spends from our wallet, we will store z->t
+            if d_tx
+                .tx()
+                .transparent_bundle()
+                .iter()
+                .any(|b| !b.vout.is_empty())
+            {
+                // If the transaction contains spends from our wallet, we will store z->t
                 // transactions we observe in the same way they would be stored by
                 // create_spend_to_address.
-                if let Some((account_id, _)) = nullifiers.iter().find(
-                    |(_, nf)|
-                        d_tx.tx.sapling_bundle().iter().flat_map(|b| b.shielded_spends().iter())
-                        .any(|input| nf == input.nullifier())
-                ) {
-                    for (output_index, txout) in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
+                let funding_accounts = wallet::get_funding_accounts(wdb.conn.0, d_tx.tx())?;
+                let funding_account = funding_accounts.iter().next().copied();
+                if let Some(account_id) = funding_account {
+                    if funding_accounts.len() > 1 {
+                        warn!(
+                            "More than one wallet account detected as funding transaction {:?}, selecting {:?}",
+                            d_tx.tx().txid(),
+                            account_id
+                        )
+                    }
+
+                    for (output_index, txout) in d_tx
+                        .tx()
+                        .transparent_bundle()
+                        .iter()
+                        .flat_map(|b| b.vout.iter())
+                        .enumerate()
+                    {
                         if let Some(address) = txout.recipient_address() {
+                            let receiver = Receiver::Transparent(address);
+
+                            #[cfg(feature = "transparent-inputs")]
+                            let recipient_addr = wallet::select_receiving_address(
+                                &wdb.params,
+                                wdb.conn.0,
+                                account_id,
+                                &receiver
+                            )?.unwrap_or_else(||
+                                receiver.to_zcash_address(wdb.params.network_type())
+                            );
+
+                            #[cfg(not(feature = "transparent-inputs"))]
+                            let recipient_addr = receiver.to_zcash_address(wdb.params.network_type());
+
+                            let recipient = Recipient::External(recipient_addr, PoolType::Transparent);
+
                             wallet::put_sent_output(
-                                up,
-                                *account_id,
+                                wdb.conn.0,
+                                account_id,
                                 tx_ref,
                                 output_index,
-                                &Recipient::Transparent(address),
+                                &recipient,
                                 txout.value,
-                                None
+                                None,
                             )?;
                         }
                     }
                 }
             }
-            Ok(tx_ref)
+
+            Ok(())
         })
     }
 
-    fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error> {
-        // Update the database atomically, to ensure the result is internally consistent.
-        self.transactionally(|up| {
+    fn store_sent_tx(&mut self, sent_tx: &SentTransaction<AccountId>) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| {
             let tx_ref = wallet::put_tx_data(
-                up,
-                sent_tx.tx,
-                Some(sent_tx.fee_amount),
-                Some(sent_tx.created),
+                wdb.conn.0,
+                sent_tx.tx(),
+                Some(sent_tx.fee_amount()),
+                Some(sent_tx.created()),
             )?;
 
             // Mark notes as spent.
@@ -667,57 +1314,283 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             //
             // Assumes that create_spend_to_address() will never be called in parallel, which is a
             // reasonable assumption for a light client such as a mobile phone.
-            if let Some(bundle) = sent_tx.tx.sapling_bundle() {
+            if let Some(bundle) = sent_tx.tx().sapling_bundle() {
                 for spend in bundle.shielded_spends() {
-                    wallet::sapling::mark_sapling_note_spent(up, tx_ref, spend.nullifier())?;
-                }
-            }
-
-            #[cfg(feature = "transparent-inputs")]
-            for utxo_outpoint in &sent_tx.utxos_spent {
-                wallet::mark_transparent_utxo_spent(up, tx_ref, utxo_outpoint)?;
-            }
-
-            for output in &sent_tx.outputs {
-                wallet::insert_sent_output(up, tx_ref, sent_tx.account, output)?;
-
-                if let Some((account, note)) = output.sapling_change_to() {
-                    wallet::sapling::put_received_note(
-                        up,
-                        &DecryptedOutput {
-                            index: output.output_index(),
-                            note: note.clone(),
-                            account: *account,
-                            memo: output
-                                .memo()
-                                .map_or_else(MemoBytes::empty, |memo| memo.clone()),
-                            transfer_type: TransferType::WalletInternal,
-                        },
+                    wallet::sapling::mark_sapling_note_spent(
+                        wdb.conn.0,
                         tx_ref,
+                        spend.nullifier(),
                     )?;
                 }
             }
+            if let Some(_bundle) = sent_tx.tx().orchard_bundle() {
+                #[cfg(feature = "orchard")]
+                for action in _bundle.actions() {
+                    wallet::orchard::mark_orchard_note_spent(
+                        wdb.conn.0,
+                        tx_ref,
+                        action.nullifier(),
+                    )?;
+                }
 
-            // Return the row number of the transaction, so the caller can fetch it for sending.
-            Ok(tx_ref)
+                #[cfg(not(feature = "orchard"))]
+                panic!("Sent a transaction with Orchard Actions without `orchard` enabled?");
+            }
+
+            #[cfg(feature = "transparent-inputs")]
+            for utxo_outpoint in sent_tx.utxos_spent() {
+                wallet::mark_transparent_utxo_spent(wdb.conn.0, tx_ref, utxo_outpoint)?;
+            }
+
+            for output in sent_tx.outputs() {
+                wallet::insert_sent_output(wdb.conn.0, tx_ref, *sent_tx.account_id(), output)?;
+
+                match output.recipient() {
+                    Recipient::InternalAccount {
+                        receiving_account,
+                        note: Note::Sapling(note),
+                        ..
+                    } => {
+                        wallet::sapling::put_received_note(
+                            wdb.conn.0,
+                            &DecryptedOutput::new(
+                                output.output_index(),
+                                note.clone(),
+                                *receiving_account,
+                                output
+                                    .memo()
+                                    .map_or_else(MemoBytes::empty, |memo| memo.clone()),
+                                TransferType::WalletInternal,
+                            ),
+                            tx_ref,
+                            None,
+                        )?;
+                    }
+                    #[cfg(feature = "orchard")]
+                    Recipient::InternalAccount {
+                        receiving_account,
+                        note: Note::Orchard(note),
+                        ..
+                    } => {
+                        wallet::orchard::put_received_note(
+                            wdb.conn.0,
+                            &DecryptedOutput::new(
+                                output.output_index(),
+                                *note,
+                                *receiving_account,
+                                output
+                                    .memo()
+                                    .map_or_else(MemoBytes::empty, |memo| memo.clone()),
+                                TransferType::WalletInternal,
+                            ),
+                            tx_ref,
+                            None,
+                        )?;
+                    }
+                    _ => (),
+                }
+            }
+
+            Ok(())
         })
     }
 
     fn truncate_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
-        wallet::truncate_to_height(self.wallet_db, block_height)
+        self.transactionally(|wdb| {
+            wallet::truncate_to_height(wdb.conn.0, &wdb.params, block_height)
+        })
+    }
+}
+
+impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Connection, P> {
+    type Error = commitment_tree::Error;
+    type SaplingShardStore<'a> =
+        SqliteShardStore<&'a rusqlite::Transaction<'a>, sapling::Node, SAPLING_SHARD_HEIGHT>;
+
+    fn with_sapling_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
+    where
+        for<'a> F: FnMut(
+            &'a mut ShardTree<
+                Self::SaplingShardStore<'a>,
+                { sapling::NOTE_COMMITMENT_TREE_DEPTH },
+                SAPLING_SHARD_HEIGHT,
+            >,
+        ) -> Result<A, E>,
+        E: From<ShardTreeError<Self::Error>>,
+    {
+        let tx = self
+            .conn
+            .transaction()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        let shard_store = SqliteShardStore::from_connection(&tx, SAPLING_TABLES_PREFIX)
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        let result = {
+            let mut shardtree = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
+            callback(&mut shardtree)?
+        };
+
+        tx.commit()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        Ok(result)
     }
 
-    fn put_received_transparent_utxo(
+    fn put_sapling_subtree_roots(
         &mut self,
-        _output: &WalletTransparentOutput,
-    ) -> Result<Self::UtxoRef, Self::Error> {
-        #[cfg(feature = "transparent-inputs")]
-        return wallet::put_received_transparent_utxo(self, _output);
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<sapling::Node>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        let tx = self
+            .conn
+            .transaction()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        put_shard_roots::<_, { sapling::NOTE_COMMITMENT_TREE_DEPTH }, SAPLING_SHARD_HEIGHT>(
+            &tx,
+            SAPLING_TABLES_PREFIX,
+            start_index,
+            roots,
+        )?;
+        tx.commit()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        Ok(())
+    }
 
-        #[cfg(not(feature = "transparent-inputs"))]
-        panic!(
-            "The wallet must be compiled with the transparent-inputs feature to use this method."
+    #[cfg(feature = "orchard")]
+    type OrchardShardStore<'a> = SqliteShardStore<
+        &'a rusqlite::Transaction<'a>,
+        orchard::tree::MerkleHashOrchard,
+        ORCHARD_SHARD_HEIGHT,
+    >;
+
+    #[cfg(feature = "orchard")]
+    fn with_orchard_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
+    where
+        for<'a> F: FnMut(
+            &'a mut ShardTree<
+                Self::OrchardShardStore<'a>,
+                { ORCHARD_SHARD_HEIGHT * 2 },
+                ORCHARD_SHARD_HEIGHT,
+            >,
+        ) -> Result<A, E>,
+        E: From<ShardTreeError<Self::Error>>,
+    {
+        let tx = self
+            .conn
+            .transaction()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        let shard_store = SqliteShardStore::from_connection(&tx, ORCHARD_TABLES_PREFIX)
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        let result = {
+            let mut shardtree = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
+            callback(&mut shardtree)?
+        };
+
+        tx.commit()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        Ok(result)
+    }
+
+    #[cfg(feature = "orchard")]
+    fn put_orchard_subtree_roots(
+        &mut self,
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        let tx = self
+            .conn
+            .transaction()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        put_shard_roots::<_, { ORCHARD_SHARD_HEIGHT * 2 }, ORCHARD_SHARD_HEIGHT>(
+            &tx,
+            ORCHARD_TABLES_PREFIX,
+            start_index,
+            roots,
+        )?;
+        tx.commit()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        Ok(())
+    }
+}
+
+impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTransaction<'conn>, P> {
+    type Error = commitment_tree::Error;
+    type SaplingShardStore<'a> =
+        SqliteShardStore<&'a rusqlite::Transaction<'a>, sapling::Node, SAPLING_SHARD_HEIGHT>;
+
+    fn with_sapling_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
+    where
+        for<'a> F: FnMut(
+            &'a mut ShardTree<
+                Self::SaplingShardStore<'a>,
+                { sapling::NOTE_COMMITMENT_TREE_DEPTH },
+                SAPLING_SHARD_HEIGHT,
+            >,
+        ) -> Result<A, E>,
+        E: From<ShardTreeError<commitment_tree::Error>>,
+    {
+        let mut shardtree = ShardTree::new(
+            SqliteShardStore::from_connection(self.conn.0, SAPLING_TABLES_PREFIX)
+                .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?,
+            PRUNING_DEPTH.try_into().unwrap(),
         );
+        let result = callback(&mut shardtree)?;
+
+        Ok(result)
+    }
+
+    fn put_sapling_subtree_roots(
+        &mut self,
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<sapling::Node>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        put_shard_roots::<_, { sapling::NOTE_COMMITMENT_TREE_DEPTH }, SAPLING_SHARD_HEIGHT>(
+            self.conn.0,
+            SAPLING_TABLES_PREFIX,
+            start_index,
+            roots,
+        )
+    }
+
+    #[cfg(feature = "orchard")]
+    type OrchardShardStore<'a> = SqliteShardStore<
+        &'a rusqlite::Transaction<'a>,
+        orchard::tree::MerkleHashOrchard,
+        ORCHARD_SHARD_HEIGHT,
+    >;
+
+    #[cfg(feature = "orchard")]
+    fn with_orchard_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
+    where
+        for<'a> F: FnMut(
+            &'a mut ShardTree<
+                Self::OrchardShardStore<'a>,
+                { ORCHARD_SHARD_HEIGHT * 2 },
+                ORCHARD_SHARD_HEIGHT,
+            >,
+        ) -> Result<A, E>,
+        E: From<ShardTreeError<Self::Error>>,
+    {
+        let mut shardtree = ShardTree::new(
+            SqliteShardStore::from_connection(self.conn.0, ORCHARD_TABLES_PREFIX)
+                .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?,
+            PRUNING_DEPTH.try_into().unwrap(),
+        );
+        let result = callback(&mut shardtree)?;
+
+        Ok(result)
+    }
+
+    #[cfg(feature = "orchard")]
+    fn put_orchard_subtree_roots(
+        &mut self,
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        put_shard_roots::<_, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }, ORCHARD_SHARD_HEIGHT>(
+            self.conn.0,
+            ORCHARD_TABLES_PREFIX,
+            start_index,
+            roots,
+        )
     }
 }
 
@@ -734,17 +1607,14 @@ impl BlockDb {
 impl BlockSource for BlockDb {
     type Error = SqliteClientError;
 
-    fn with_blocks<F, DbErrT, NoteRef>(
+    fn with_blocks<F, DbErrT>(
         &self,
         from_height: Option<BlockHeight>,
-        limit: Option<u32>,
+        limit: Option<usize>,
         with_row: F,
-    ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>
+    ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
     where
-        F: FnMut(
-            CompactBlock,
-        )
-            -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>,
+        F: FnMut(CompactBlock) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>,
     {
         chain::blockdb_with_blocks(self, from_height, limit, with_row)
     }
@@ -806,6 +1676,7 @@ pub enum FsBlockDbError {
     InvalidBlockstoreRoot(PathBuf),
     InvalidBlockPath(PathBuf),
     CorruptedData(String),
+    CacheMiss(BlockHeight),
 }
 
 #[cfg(feature = "unstable")]
@@ -839,7 +1710,7 @@ impl FsBlockDb {
     /// files as described for [`FsBlockDb`].
     ///
     /// An application using this constructor should ensure that they call
-    /// [`zcash_client_sqlite::chain::init::init_blockmetadb`] at application startup to ensure
+    /// [`crate::chain::init::init_blockmeta_db`] at application startup to ensure
     /// that the resulting metadata database is properly initialized and has had all required
     /// migrations applied before use.
     pub fn for_path<P: AsRef<Path>>(fsblockdb_root: P) -> Result<Self, FsBlockDbError> {
@@ -864,7 +1735,8 @@ impl FsBlockDb {
         Ok(chain::blockmetadb_get_max_cached_height(&self.conn)?)
     }
 
-    /// Adds a set of block metadata entries to the metadata database.
+    /// Adds a set of block metadata entries to the metadata database, overwriting any
+    /// existing entries at the given block heights.
     ///
     /// This will return an error if any block file corresponding to one of these metadata records
     /// is absent from the blocks directory.
@@ -915,17 +1787,14 @@ impl FsBlockDb {
 impl BlockSource for FsBlockDb {
     type Error = FsBlockDbError;
 
-    fn with_blocks<F, DbErrT, NoteRef>(
+    fn with_blocks<F, DbErrT>(
         &self,
         from_height: Option<BlockHeight>,
-        limit: Option<u32>,
+        limit: Option<usize>,
         with_row: F,
-    ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>
+    ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
     where
-        F: FnMut(
-            CompactBlock,
-        )
-            -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>,
+        F: FnMut(CompactBlock) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>,
     {
         fsblockdb_with_blocks(self, from_height, limit, with_row)
     }
@@ -972,6 +1841,13 @@ impl std::fmt::Display for FsBlockDbError {
                     e,
                 )
             }
+            FsBlockDbError::CacheMiss(height) => {
+                write!(
+                    f,
+                    "Requested height {} does not exist in the block cache",
+                    height
+                )
+            }
         }
     }
 }
@@ -982,353 +1858,99 @@ extern crate assert_matches;
 
 #[cfg(test)]
 mod tests {
-    use prost::Message;
-    use rand_core::{OsRng, RngCore};
-    use rusqlite::params;
-    use std::collections::HashMap;
+    use secrecy::SecretVec;
+    use zcash_client_backend::data_api::{WalletRead, WalletWrite};
+    use zcash_primitives::block::BlockHash;
+
+    use crate::{testing::TestBuilder, AccountId, DEFAULT_UA_REQUEST};
 
     #[cfg(feature = "unstable")]
-    use std::{fs::File, path::Path};
-
-    #[cfg(feature = "transparent-inputs")]
-    use zcash_primitives::{legacy, legacy::keys::IncomingViewingKey};
-
-    use zcash_note_encryption::Domain;
-    use zcash_primitives::{
-        block::BlockHash,
-        consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
-        legacy::TransparentAddress,
-        memo::MemoBytes,
-        sapling::{
-            note_encryption::{sapling_note_encryption, SaplingDomain},
-            util::generate_random_rseed,
-            value::NoteValue,
-            Note, Nullifier, PaymentAddress,
-        },
-        transaction::components::Amount,
-        zip32::{sapling::DiversifiableFullViewingKey, DiversifierIndex},
+    use {
+        crate::testing::AddressType, zcash_client_backend::keys::sapling,
+        zcash_primitives::transaction::components::amount::NonNegativeAmount,
     };
 
-    use zcash_client_backend::{
-        data_api::{WalletRead, WalletWrite},
-        keys::{sapling, UnifiedFullViewingKey},
-        proto::compact_formats::{
-            CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
-        },
-    };
+    #[test]
+    fn validate_seed() {
+        let st = TestBuilder::new()
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account = st.test_account().unwrap();
 
-    use crate::{
-        wallet::init::{init_accounts_table, init_wallet_db},
-        AccountId, WalletDb,
-    };
-
-    use super::BlockDb;
-
-    #[cfg(feature = "unstable")]
-    use super::{
-        chain::{init::init_blockmeta_db, BlockMeta},
-        FsBlockDb,
-    };
-
-    #[cfg(feature = "mainnet")]
-    pub(crate) fn network() -> Network {
-        Network::MainNetwork
-    }
-
-    #[cfg(not(feature = "mainnet"))]
-    pub(crate) fn network() -> Network {
-        Network::TestNetwork
-    }
-
-    #[cfg(feature = "mainnet")]
-    pub(crate) fn sapling_activation_height() -> BlockHeight {
-        Network::MainNetwork
-            .activation_height(NetworkUpgrade::Sapling)
-            .unwrap()
-    }
-
-    #[cfg(not(feature = "mainnet"))]
-    pub(crate) fn sapling_activation_height() -> BlockHeight {
-        Network::TestNetwork
-            .activation_height(NetworkUpgrade::Sapling)
-            .unwrap()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn init_test_accounts_table(
-        db_data: &WalletDb<Network>,
-    ) -> (DiversifiableFullViewingKey, Option<TransparentAddress>) {
-        let (ufvk, taddr) = init_test_accounts_table_ufvk(db_data);
-        (ufvk.sapling().unwrap().clone(), taddr)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn init_test_accounts_table_ufvk(
-        db_data: &WalletDb<Network>,
-    ) -> (UnifiedFullViewingKey, Option<TransparentAddress>) {
-        let seed = [0u8; 32];
-        let account = AccountId::from(0);
-        let extsk = sapling::spending_key(&seed, network().coin_type(), account);
-        let dfvk = extsk.to_diversifiable_full_viewing_key();
-
-        #[cfg(feature = "transparent-inputs")]
-        let (tkey, taddr) = {
-            let tkey = legacy::keys::AccountPrivKey::from_seed(&network(), &seed, account)
+        assert!({
+            st.wallet()
+                .validate_seed(account.account_id(), st.test_seed().unwrap())
                 .unwrap()
-                .to_account_pubkey();
-            let taddr = tkey.derive_external_ivk().unwrap().default_address().0;
-            (Some(tkey), Some(taddr))
-        };
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        let taddr = None;
-
-        let ufvk = UnifiedFullViewingKey::new(
-            #[cfg(feature = "transparent-inputs")]
-            tkey,
-            Some(dfvk),
-            None,
-        )
-        .unwrap();
-
-        let ufvks = HashMap::from([(account, ufvk.clone())]);
-        init_accounts_table(db_data, &ufvks).unwrap();
-
-        (ufvk, taddr)
-    }
-
-    #[allow(dead_code)]
-    pub(crate) enum AddressType {
-        DefaultExternal,
-        DiversifiedExternal(DiversifierIndex),
-        Internal,
-    }
-
-    /// Create a fake CompactBlock at the given height, containing a single output paying
-    /// an address. Returns the CompactBlock and the nullifier for the new note.
-    pub(crate) fn fake_compact_block(
-        height: BlockHeight,
-        prev_hash: BlockHash,
-        dfvk: &DiversifiableFullViewingKey,
-        req: AddressType,
-        value: Amount,
-    ) -> (CompactBlock, Nullifier) {
-        let to = match req {
-            AddressType::DefaultExternal => dfvk.default_address().1,
-            AddressType::DiversifiedExternal(idx) => dfvk.find_address(idx).unwrap().1,
-            AddressType::Internal => dfvk.change_address().1,
-        };
-
-        // Create a fake Note for the account
-        let mut rng = OsRng;
-        let rseed = generate_random_rseed(&network(), height, &mut rng);
-        let note = Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
-        let encryptor = sapling_note_encryption::<_, Network>(
-            Some(dfvk.fvk().ovk),
-            note.clone(),
-            MemoBytes::empty(),
-            &mut rng,
-        );
-        let cmu = note.cmu().to_bytes().to_vec();
-        let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
-            .0
-            .to_vec();
-        let enc_ciphertext = encryptor.encrypt_note_plaintext();
-
-        // Create a fake CompactBlock containing the note
-        let cout = CompactSaplingOutput {
-            cmu,
-            ephemeral_key,
-            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
-        };
-        let mut ctx = CompactTx::default();
-        let mut txid = vec![0; 32];
-        rng.fill_bytes(&mut txid);
-        ctx.hash = txid;
-        ctx.outputs.push(cout);
-        let mut cb = CompactBlock {
-            hash: {
-                let mut hash = vec![0; 32];
-                rng.fill_bytes(&mut hash);
-                hash
-            },
-            height: height.into(),
-            ..Default::default()
-        };
-        cb.prev_hash.extend_from_slice(&prev_hash.0);
-        cb.vtx.push(ctx);
-        (cb, note.nf(&dfvk.fvk().vk.nk, 0))
-    }
-
-    /// Create a fake CompactBlock at the given height, spending a single note from the
-    /// given address.
-    pub(crate) fn fake_compact_block_spending(
-        height: BlockHeight,
-        prev_hash: BlockHash,
-        (nf, in_value): (Nullifier, Amount),
-        dfvk: &DiversifiableFullViewingKey,
-        to: PaymentAddress,
-        value: Amount,
-    ) -> CompactBlock {
-        let mut rng = OsRng;
-        let rseed = generate_random_rseed(&network(), height, &mut rng);
-
-        // Create a fake CompactBlock containing the note
-        let cspend = CompactSaplingSpend { nf: nf.to_vec() };
-        let mut ctx = CompactTx::default();
-        let mut txid = vec![0; 32];
-        rng.fill_bytes(&mut txid);
-        ctx.hash = txid;
-        ctx.spends.push(cspend);
-
-        // Create a fake Note for the payment
-        ctx.outputs.push({
-            let note = Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
-            let encryptor = sapling_note_encryption::<_, Network>(
-                Some(dfvk.fvk().ovk),
-                note.clone(),
-                MemoBytes::empty(),
-                &mut rng,
-            );
-            let cmu = note.cmu().to_bytes().to_vec();
-            let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
-                .0
-                .to_vec();
-            let enc_ciphertext = encryptor.encrypt_note_plaintext();
-
-            CompactSaplingOutput {
-                cmu,
-                ephemeral_key,
-                ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
-            }
         });
 
-        // Create a fake Note for the change
-        ctx.outputs.push({
-            let change_addr = dfvk.default_address().1;
-            let rseed = generate_random_rseed(&network(), height, &mut rng);
-            let note = Note::from_parts(
-                change_addr,
-                NoteValue::from_raw((in_value - value).unwrap().into()),
-                rseed,
-            );
-            let encryptor = sapling_note_encryption::<_, Network>(
-                Some(dfvk.fvk().ovk),
-                note.clone(),
-                MemoBytes::empty(),
-                &mut rng,
-            );
-            let cmu = note.cmu().to_bytes().to_vec();
-            let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
-                .0
-                .to_vec();
-            let enc_ciphertext = encryptor.encrypt_note_plaintext();
-
-            CompactSaplingOutput {
-                cmu,
-                ephemeral_key,
-                ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
-            }
+        // check that passing an invalid account results in a failure
+        assert!({
+            let wrong_account_index = AccountId(3);
+            !st.wallet()
+                .validate_seed(wrong_account_index, st.test_seed().unwrap())
+                .unwrap()
         });
 
-        let mut cb = CompactBlock {
-            hash: {
-                let mut hash = vec![0; 32];
-                rng.fill_bytes(&mut hash);
-                hash
-            },
-            height: height.into(),
-            ..Default::default()
-        };
-        cb.prev_hash.extend_from_slice(&prev_hash.0);
-        cb.vtx.push(ctx);
-        cb
-    }
-
-    /// Insert a fake CompactBlock into the cache DB.
-    pub(crate) fn insert_into_cache(db_cache: &BlockDb, cb: &CompactBlock) {
-        let cb_bytes = cb.encode_to_vec();
-        db_cache
-            .0
-            .prepare("INSERT INTO compactblocks (height, data) VALUES (?, ?)")
-            .unwrap()
-            .execute(params![u32::from(cb.height()), cb_bytes,])
-            .unwrap();
-    }
-
-    #[cfg(feature = "unstable")]
-    pub(crate) fn store_in_fsblockdb<P: AsRef<Path>>(
-        fsblockdb_root: P,
-        cb: &CompactBlock,
-    ) -> BlockMeta {
-        use std::io::Write;
-
-        let meta = BlockMeta {
-            height: cb.height(),
-            block_hash: cb.hash(),
-            block_time: cb.time,
-            sapling_outputs_count: cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum(),
-            orchard_actions_count: cb.vtx.iter().map(|tx| tx.actions.len() as u32).sum(),
-        };
-
-        let blocks_dir = fsblockdb_root.as_ref().join("blocks");
-        let block_path = meta.block_file_path(&blocks_dir);
-
-        File::create(block_path)
-            .unwrap()
-            .write_all(&cb.encode_to_vec())
-            .unwrap();
-
-        meta
+        // check that passing an invalid seed results in a failure
+        assert!({
+            !st.wallet()
+                .validate_seed(account.account_id(), &SecretVec::new(vec![1u8; 32]))
+                .unwrap()
+        });
     }
 
     #[test]
     pub(crate) fn get_next_available_address() {
-        use tempfile::NamedTempFile;
+        let mut st = TestBuilder::new()
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account = st.test_account().cloned().unwrap();
 
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network()).unwrap();
-
-        let account = AccountId::from(0);
-        init_wallet_db(&mut db_data, None).unwrap();
-        let _ = init_test_accounts_table_ufvk(&db_data);
-
-        let current_addr = db_data.get_current_address(account).unwrap();
+        let current_addr = st
+            .wallet()
+            .get_current_address(account.account_id())
+            .unwrap();
         assert!(current_addr.is_some());
 
-        let mut update_ops = db_data.get_update_ops().unwrap();
-        let addr2 = update_ops.get_next_available_address(account).unwrap();
+        let addr2 = st
+            .wallet_mut()
+            .get_next_available_address(account.account_id(), DEFAULT_UA_REQUEST)
+            .unwrap();
         assert!(addr2.is_some());
         assert_ne!(current_addr, addr2);
 
-        let addr2_cur = db_data.get_current_address(account).unwrap();
+        let addr2_cur = st
+            .wallet()
+            .get_current_address(account.account_id())
+            .unwrap();
         assert_eq!(addr2, addr2_cur);
     }
 
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn transparent_receivers() {
-        use secrecy::Secret;
-        use tempfile::NamedTempFile;
-
-        use crate::{chain::init::init_cache_database, wallet::init::init_wallet_db};
-
-        let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
-        init_cache_database(&db_cache).unwrap();
-
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network()).unwrap();
-        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
-
         // Add an account to the wallet.
-        let (ufvk, taddr) = init_test_accounts_table_ufvk(&db_data);
-        let taddr = taddr.unwrap();
+        let st = TestBuilder::new()
+            .with_block_cache()
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account = st.test_account().unwrap();
+        let ufvk = account.usk().to_unified_full_viewing_key();
+        let (taddr, _) = account.usk().default_transparent_address();
 
-        let receivers = db_data.get_transparent_receivers(0.into()).unwrap();
+        let receivers = st
+            .wallet()
+            .get_transparent_receivers(account.account_id())
+            .unwrap();
 
         // The receiver for the default UA should be in the set.
-        assert!(receivers.contains_key(ufvk.default_address().0.transparent().unwrap()));
+        assert!(receivers.contains_key(
+            ufvk.default_address(DEFAULT_UA_REQUEST)
+                .expect("A valid default address exists for the UFVK")
+                .0
+                .transparent()
+                .unwrap()
+        ));
 
         // The default t-addr should be in the set.
         assert!(receivers.contains_key(&taddr));
@@ -1337,72 +1959,47 @@ mod tests {
     #[cfg(feature = "unstable")]
     #[test]
     pub(crate) fn fsblockdb_api() {
-        // Initialise a BlockMeta DB in a new directory.
-        let fsblockdb_root = tempfile::tempdir().unwrap();
-        let mut db_meta = FsBlockDb::for_path(&fsblockdb_root).unwrap();
-        init_blockmeta_db(&mut db_meta).unwrap();
+        use zcash_primitives::consensus::NetworkConstants;
+        use zcash_primitives::zip32;
+
+        let mut st = TestBuilder::new().with_fs_block_cache().build();
 
         // The BlockMeta DB starts off empty.
-        assert_eq!(db_meta.get_max_cached_height().unwrap(), None);
+        assert_eq!(st.cache().get_max_cached_height().unwrap(), None);
 
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
-        let account = AccountId::from(0);
-        let extsk = sapling::spending_key(&seed, network().coin_type(), account);
+        let hd_account_index = zip32::AccountId::ZERO;
+        let extsk = sapling::spending_key(&seed, st.wallet().params.coin_type(), hd_account_index);
         let dfvk = extsk.to_diversifiable_full_viewing_key();
-        let (cb1, _) = fake_compact_block(
-            BlockHeight::from_u32(1),
-            BlockHash([1; 32]),
+        let (h1, meta1, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
-            Amount::from_u64(5).unwrap(),
+            NonNegativeAmount::const_from_u64(5),
         );
-        let (cb2, _) = fake_compact_block(
-            BlockHeight::from_u32(2),
-            BlockHash([2; 32]),
+        let (h2, meta2, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
-            Amount::from_u64(10).unwrap(),
+            NonNegativeAmount::const_from_u64(10),
         );
-
-        // Write the CompactBlocks to the BlockMeta DB's corresponding disk storage.
-        let meta1 = store_in_fsblockdb(&fsblockdb_root, &cb1);
-        let meta2 = store_in_fsblockdb(&fsblockdb_root, &cb2);
 
         // The BlockMeta DB is not updated until we do so explicitly.
-        assert_eq!(db_meta.get_max_cached_height().unwrap(), None);
+        assert_eq!(st.cache().get_max_cached_height().unwrap(), None);
 
         // Inform the BlockMeta DB about the newly-persisted CompactBlocks.
-        db_meta.write_block_metadata(&[meta1, meta2]).unwrap();
+        st.cache().write_block_metadata(&[meta1, meta2]).unwrap();
 
         // The BlockMeta DB now sees blocks up to height 2.
-        assert_eq!(
-            db_meta.get_max_cached_height().unwrap(),
-            Some(BlockHeight::from_u32(2)),
-        );
-        assert_eq!(
-            db_meta.find_block(BlockHeight::from_u32(1)).unwrap(),
-            Some(meta1),
-        );
-        assert_eq!(
-            db_meta.find_block(BlockHeight::from_u32(2)).unwrap(),
-            Some(meta2),
-        );
-        assert_eq!(db_meta.find_block(BlockHeight::from_u32(3)).unwrap(), None);
+        assert_eq!(st.cache().get_max_cached_height().unwrap(), Some(h2),);
+        assert_eq!(st.cache().find_block(h1).unwrap(), Some(meta1));
+        assert_eq!(st.cache().find_block(h2).unwrap(), Some(meta2));
+        assert_eq!(st.cache().find_block(h2 + 1).unwrap(), None);
 
         // Rewinding to height 1 should cause the metadata for height 2 to be deleted.
-        db_meta
-            .truncate_to_height(BlockHeight::from_u32(1))
-            .unwrap();
-        assert_eq!(
-            db_meta.get_max_cached_height().unwrap(),
-            Some(BlockHeight::from_u32(1)),
-        );
-        assert_eq!(
-            db_meta.find_block(BlockHeight::from_u32(1)).unwrap(),
-            Some(meta1),
-        );
-        assert_eq!(db_meta.find_block(BlockHeight::from_u32(2)).unwrap(), None);
-        assert_eq!(db_meta.find_block(BlockHeight::from_u32(3)).unwrap(), None);
+        st.cache().truncate_to_height(h1).unwrap();
+        assert_eq!(st.cache().get_max_cached_height().unwrap(), Some(h1));
+        assert_eq!(st.cache().find_block(h1).unwrap(), Some(meta1));
+        assert_eq!(st.cache().find_block(h2).unwrap(), None);
+        assert_eq!(st.cache().find_block(h2 + 1).unwrap(), None);
     }
 }

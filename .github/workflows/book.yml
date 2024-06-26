@@ -9,13 +9,19 @@ jobs:
   deploy:
     runs-on: ubuntu-18.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+      - id: prepare
+        uses: ./.github/actions/prepare
       - uses: dtolnay/rust-toolchain@nightly
         id: toolchain
       - run: rustup override set ${{steps.toolchain.outputs.name}}
 
       - name: Build latest rustdocs
-        run: cargo doc --no-deps --workspace --all-features
+        run: >
+          cargo doc
+          --no-deps
+          --workspace
+          ${{ steps.prepare.outputs.feature-flags }}
         env:
           RUSTDOCFLAGS: -Z unstable-options --enable-index-page --cfg docsrs
 
@@ -25,7 +31,7 @@ jobs:
           mv ./target/doc ./book/book/rustdoc/latest
 
       - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./book/book

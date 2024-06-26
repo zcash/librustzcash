@@ -7,10 +7,9 @@ use std::io::{self, Read, Write};
 
 use crate::legacy::{Script, TransparentAddress};
 
-use super::amount::{Amount, BalanceError};
+use super::amount::{Amount, BalanceError, NonNegativeAmount};
 
 pub mod builder;
-pub mod fees;
 
 pub trait Authorization: Debug {
     type ScriptSig: Debug + Clone + PartialEq;
@@ -82,7 +81,7 @@ impl<A: Authorization> Bundle<A> {
         let output_sum = self
             .vout
             .iter()
-            .map(|p| p.value)
+            .map(|p| Amount::from(p.value))
             .sum::<Option<Amount>>()
             .ok_or(BalanceError::Overflow)?;
 
@@ -159,7 +158,7 @@ impl TxIn<Authorized> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TxOut {
-    pub value: Amount,
+    pub value: NonNegativeAmount,
     pub script_pubkey: Script,
 }
 
@@ -168,7 +167,7 @@ impl TxOut {
         let value = {
             let mut tmp = [0u8; 8];
             reader.read_exact(&mut tmp)?;
-            Amount::from_nonnegative_i64_le_bytes(tmp)
+            NonNegativeAmount::from_nonnegative_i64_le_bytes(tmp)
         }
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
         let script_pubkey = Script::read(&mut reader)?;

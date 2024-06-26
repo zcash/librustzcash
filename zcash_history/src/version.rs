@@ -1,7 +1,7 @@
 use std::fmt;
 use std::io;
 
-use blake2::Params as Blake2Params;
+use blake2b_simd::Params as Blake2Params;
 use byteorder::{ByteOrder, LittleEndian};
 
 use crate::{node_data, NodeData, MAX_NODE_DATA_SIZE};

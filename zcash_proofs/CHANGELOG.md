@@ -7,6 +7,42 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.15.0] - 2024-03-25
+
+### Changed
+- Migrated to `zcash_primitives 0.15`.
+
+## [0.14.0] - 2024-03-01
+### Added
+- `impl zcash_primitives::sapling::prover::{SpendProver, OutputProver}` for
+  `zcash_proofs::prover::LocalTxProver`
+
+### Changed
+- Migrated to `zcash_primitives 0.14`.
+- The `zcash_proofs::ZcashParameters` Sapling fields now use the parameter and
+  viewing key newtypes defined in `zcash_primitives::sapling::circuit`.
+
+### Removed
+- `zcash_proofs::circuit::sapling` (moved to `zcash_primitives::sapling::circuit`).
+- `zcash_proofs::circuit::{ecc, pedersen_hash}`
+- `zcash_proofs::constants`
+- `zcash_proofs::sapling`:
+  - `BatchValidator` (moved to `zcash_primitives::sapling`).
+  - `SaplingProvingContext`
+  - `SaplingVerificationContext` (moved to `zcash_primitives::sapling`).
+
+## [0.13.0] - 2023-09-25
+### Changed
+- Bumped dependencies to `zcash_primitives 0.13`.
+
+### Removed
+- Unused `incrementalmerkletree` dependency.
+
+## [0.12.1] - 2023-06-28
+### Changed
+- Replaced internal `directories` dependency which now transitively depends on
+  MPL-licensed code.
+
 ## [0.12.0] - 2023-06-06
 ### Changed
 - Bumped dependencies to `incrementalmerkletree 0.4`, `zcash_primitives 0.12`
@@ -79,7 +115,7 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_proofs::ZcashParameters`
 - `zcash_proofs::parse_parameters`
-- `zcash_proofs::prover::LocalProver::from_bytes`
+- `zcash_proofs::prover::LocalTxProver::from_bytes`
 - The `zcash_proofs::constants` module, containing constants and helpers used by
   the `zcash_proofs::circuit::ecc::fixed_base_multiplication` gadget:
   - The `FixedGeneratorOwned` type alias.

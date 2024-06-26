@@ -1,23 +1,114 @@
+//! Transparent key components.
+
 use hdwallet::{
     traits::{Deserialize, Serialize},
     ExtendedPrivKey, ExtendedPubKey, KeyIndex,
 };
 use secp256k1::PublicKey;
 use sha2::{Digest, Sha256};
+use subtle::{Choice, ConstantTimeEq};
 
-use crate::{consensus, keys::prf_expand_vec, zip32::AccountId};
+use zcash_protocol::consensus::{self, NetworkConstants};
+use zcash_spec::PrfExpand;
+use zip32::AccountId;
 
 use super::TransparentAddress;
 
-const MAX_TRANSPARENT_CHILD_INDEX: u32 = 0x7FFFFFFF;
+/// The scope of a transparent key.
+///
+/// This type can represent [`zip32`] internal and external scopes, as well as custom scopes that
+/// may be used in non-hardened derivation at the `change` level of the BIP 44 key path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TransparentKeyScope(u32);
 
-/// A type representing a BIP-44 private key at the account path level
-/// `m/44'/<coin_type>'/<account>'
+impl TransparentKeyScope {
+    pub fn custom(i: u32) -> Option<Self> {
+        if i < (1 << 31) {
+            Some(TransparentKeyScope(i))
+        } else {
+            None
+        }
+    }
+}
+
+impl From<zip32::Scope> for TransparentKeyScope {
+    fn from(value: zip32::Scope) -> Self {
+        match value {
+            zip32::Scope::External => TransparentKeyScope(0),
+            zip32::Scope::Internal => TransparentKeyScope(1),
+        }
+    }
+}
+
+impl From<TransparentKeyScope> for KeyIndex {
+    fn from(value: TransparentKeyScope) -> Self {
+        KeyIndex::Normal(value.0)
+    }
+}
+
+/// A child index for a derived transparent address.
+///
+/// Only NON-hardened derivation is supported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NonHardenedChildIndex(u32);
+
+impl ConstantTimeEq for NonHardenedChildIndex {
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.ct_eq(&other.0)
+    }
+}
+
+impl NonHardenedChildIndex {
+    pub const ZERO: NonHardenedChildIndex = NonHardenedChildIndex(0);
+
+    /// Parses the given ZIP 32 child index.
+    ///
+    /// Returns `None` if the hardened bit is set.
+    pub fn from_index(i: u32) -> Option<Self> {
+        if i < (1 << 31) {
+            Some(NonHardenedChildIndex(i))
+        } else {
+            None
+        }
+    }
+
+    /// Returns the index as a 32-bit integer.
+    pub fn index(&self) -> u32 {
+        self.0
+    }
+
+    pub fn next(&self) -> Option<Self> {
+        // overflow cannot happen because self.0 is 31 bits, and the next index is at most 32 bits
+        // which in that case would lead from_index to return None.
+        Self::from_index(self.0 + 1)
+    }
+}
+
+impl TryFrom<KeyIndex> for NonHardenedChildIndex {
+    type Error = ();
+
+    fn try_from(value: KeyIndex) -> Result<Self, Self::Error> {
+        match value {
+            KeyIndex::Normal(i) => NonHardenedChildIndex::from_index(i).ok_or(()),
+            KeyIndex::Hardened(_) => Err(()),
+        }
+    }
+}
+
+impl From<NonHardenedChildIndex> for KeyIndex {
+    fn from(value: NonHardenedChildIndex) -> Self {
+        Self::Normal(value.index())
+    }
+}
+
+/// A [BIP44] private key at the account path level `m/44'/<coin_type>'/<account>'`.
+///
+/// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 #[derive(Clone, Debug)]
 pub struct AccountPrivKey(ExtendedPrivKey);
 
 impl AccountPrivKey {
-    /// Performs derivation of the extended private key for the BIP-44 path:
+    /// Performs derivation of the extended private key for the BIP44 path:
     /// `m/44'/<coin_type>'/<account>'`.
     ///
     /// This produces the root of the derivation tree for transparent
@@ -42,28 +133,35 @@ impl AccountPrivKey {
         AccountPubKey(ExtendedPubKey::from_private_key(&self.0))
     }
 
-    /// Derives the BIP-44 private spending key for the external (incoming payment) child path
-    /// `m/44'/<coin_type>'/<account>'/0/<child_index>`.
-    pub fn derive_external_secret_key(
+    /// Derives the BIP44 private spending key for the child path
+    /// `m/44'/<coin_type>'/<account>'/<scope>/<child_index>`.
+    pub fn derive_secret_key(
         &self,
-        child_index: u32,
+        scope: TransparentKeyScope,
+        child_index: NonHardenedChildIndex,
     ) -> Result<secp256k1::SecretKey, hdwallet::error::Error> {
         self.0
-            .derive_private_key(KeyIndex::Normal(0))?
-            .derive_private_key(KeyIndex::Normal(child_index))
+            .derive_private_key(scope.into())?
+            .derive_private_key(child_index.into())
             .map(|k| k.private_key)
     }
 
-    /// Derives the BIP-44 private spending key for the internal (change) child path
+    /// Derives the BIP44 private spending key for the external (incoming payment) child path
+    /// `m/44'/<coin_type>'/<account>'/0/<child_index>`.
+    pub fn derive_external_secret_key(
+        &self,
+        child_index: NonHardenedChildIndex,
+    ) -> Result<secp256k1::SecretKey, hdwallet::error::Error> {
+        self.derive_secret_key(zip32::Scope::External.into(), child_index)
+    }
+
+    /// Derives the BIP44 private spending key for the internal (change) child path
     /// `m/44'/<coin_type>'/<account>'/1/<child_index>`.
     pub fn derive_internal_secret_key(
         &self,
-        child_index: u32,
+        child_index: NonHardenedChildIndex,
     ) -> Result<secp256k1::SecretKey, hdwallet::error::Error> {
-        self.0
-            .derive_private_key(KeyIndex::Normal(1))?
-            .derive_private_key(KeyIndex::Normal(child_index))
-            .map(|k| k.private_key)
+        self.derive_secret_key(zip32::Scope::Internal.into(), child_index)
     }
 
     /// Returns the `AccountPrivKey` serialized using the encoding for a
@@ -81,16 +179,17 @@ impl AccountPrivKey {
     }
 }
 
-/// A type representing a BIP-44 public key at the account path level
-/// `m/44'/<coin_type>'/<account>'`.
+/// A [BIP44] public key at the account path level `m/44'/<coin_type>'/<account>'`.
 ///
 /// This provides the necessary derivation capability for the transparent component of a unified
 /// full viewing key.
+///
+/// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 #[derive(Clone, Debug)]
 pub struct AccountPubKey(ExtendedPubKey);
 
 impl AccountPubKey {
-    /// Derives the BIP-44 public key at the external "change level" path
+    /// Derives the BIP44 public key at the external "change level" path
     /// `m/44'/<coin_type>'/<account>'/0`.
     pub fn derive_external_ivk(&self) -> Result<ExternalIvk, hdwallet::error::Error> {
         self.0
@@ -98,7 +197,7 @@ impl AccountPubKey {
             .map(ExternalIvk)
     }
 
-    /// Derives the BIP-44 public key at the internal "change level" path
+    /// Derives the BIP44 public key at the internal "change level" path
     /// `m/44'/<coin_type>'/<account>'/1`.
     pub fn derive_internal_ivk(&self) -> Result<InternalIvk, hdwallet::error::Error> {
         self.0
@@ -111,11 +210,8 @@ impl AccountPubKey {
     ///
     /// [transparent-ovk]: https://zips.z.cash/zip-0316#deriving-internal-keys
     pub fn ovks_for_shielding(&self) -> (InternalOvk, ExternalOvk) {
-        let i_ovk = prf_expand_vec(
-            &self.0.chain_code,
-            &[&[0xd0], &self.0.public_key.serialize()],
-        );
-        let i_ovk = i_ovk.as_bytes();
+        let i_ovk = PrfExpand::TRANSPARENT_ZIP316_OVK
+            .with(&self.0.chain_code, &self.0.public_key.serialize());
         let ovk_external = ExternalOvk(i_ovk[..32].try_into().unwrap());
         let ovk_internal = InternalOvk(i_ovk[32..].try_into().unwrap());
 
@@ -151,7 +247,7 @@ impl AccountPubKey {
 /// Derives the P2PKH transparent address corresponding to the given pubkey.
 #[deprecated(note = "This function will be removed from the public API in an upcoming refactor.")]
 pub fn pubkey_to_address(pubkey: &secp256k1::PublicKey) -> TransparentAddress {
-    TransparentAddress::PublicKey(
+    TransparentAddress::PublicKeyHash(
         *ripemd::Ripemd160::digest(Sha256::digest(pubkey.serialize())).as_ref(),
     )
 }
@@ -164,35 +260,51 @@ pub(crate) mod private {
     }
 }
 
+/// Trait representing a transparent "incoming viewing key".
+///
+/// Unlike the Sapling and Orchard shielded protocols (which have viewing keys built into
+/// their key trees and bound to specific spending keys), the transparent protocol has no
+/// "viewing key" concept. Transparent viewing keys are instead emulated by making two
+/// observations:
+///
+/// - [BIP32] hierarchical derivation is structured as a tree.
+/// - The [BIP44] key paths use non-hardened derivation below the account level.
+///
+/// A transparent viewing key for an account is thus defined as the root of a specific
+/// non-hardened subtree underneath the account's path.
+///
+/// [BIP32]: https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki
+/// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 pub trait IncomingViewingKey: private::SealedChangeLevelKey + std::marker::Sized {
     /// Derives a transparent address at the provided child index.
     #[allow(deprecated)]
     fn derive_address(
         &self,
-        child_index: u32,
+        child_index: NonHardenedChildIndex,
     ) -> Result<TransparentAddress, hdwallet::error::Error> {
         let child_key = self
             .extended_pubkey()
-            .derive_public_key(KeyIndex::Normal(child_index))?;
+            .derive_public_key(child_index.into())?;
         Ok(pubkey_to_address(&child_key.public_key))
     }
 
     /// Searches the space of child indexes for an index that will
     /// generate a valid transparent address, and returns the resulting
     /// address and the index at which it was generated.
-    fn default_address(&self) -> (TransparentAddress, u32) {
-        let mut child_index = 0;
-        while child_index <= MAX_TRANSPARENT_CHILD_INDEX {
+    fn default_address(&self) -> (TransparentAddress, NonHardenedChildIndex) {
+        let mut child_index = NonHardenedChildIndex::ZERO;
+        loop {
             match self.derive_address(child_index) {
                 Ok(addr) => {
                     return (addr, child_index);
                 }
                 Err(_) => {
-                    child_index += 1;
+                    child_index = child_index.next().unwrap_or_else(|| {
+                        panic!("Exhausted child index space attempting to find a default address.");
+                    });
                 }
             }
         }
-        panic!("Exhausted child index space attempting to find a default address.");
     }
 
     fn serialize(&self) -> Vec<u8> {
@@ -212,9 +324,12 @@ pub trait IncomingViewingKey: private::SealedChangeLevelKey + std::marker::Sized
     }
 }
 
-/// A type representing an incoming viewing key at the BIP-44 "external"
-/// path `m/44'/<coin_type>'/<account>'/0`. This allows derivation
-/// of child addresses that may be provided to external parties.
+/// An incoming viewing key at the [BIP44] "external" path
+/// `m/44'/<coin_type>'/<account>'/0`.
+///
+/// This allows derivation of child addresses that may be provided to external parties.
+///
+/// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 #[derive(Clone, Debug)]
 pub struct ExternalIvk(ExtendedPubKey);
 
@@ -230,10 +345,13 @@ impl private::SealedChangeLevelKey for ExternalIvk {
 
 impl IncomingViewingKey for ExternalIvk {}
 
-/// A type representing an incoming viewing key at the BIP-44 "internal"
-/// path `m/44'/<coin_type>'/<account>'/1`. This allows derivation
-/// of change addresses for use within the wallet, but which should
+/// An incoming viewing key at the [BIP44] "internal" path
+/// `m/44'/<coin_type>'/<account>'/1`.
+///
+/// This allows derivation of change addresses for use within the wallet, but which should
 /// not be shared with external parties.
+///
+/// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 #[derive(Clone, Debug)]
 pub struct InternalIvk(ExtendedPubKey);
 
@@ -249,7 +367,7 @@ impl private::SealedChangeLevelKey for InternalIvk {
 
 impl IncomingViewingKey for InternalIvk {}
 
-/// Internal ovk used for autoshielding.
+/// Internal outgoing viewing key used for autoshielding.
 pub struct InternalOvk([u8; 32]);
 
 impl InternalOvk {
@@ -258,7 +376,7 @@ impl InternalOvk {
     }
 }
 
-/// External ovk used by zcashd for transparent -> shielded spends to
+/// External outgoing viewing key used by `zcashd` for transparent-to-shielded spends to
 /// external receivers.
 pub struct ExternalOvk([u8; 32]);
 
@@ -270,7 +388,11 @@ impl ExternalOvk {
 
 #[cfg(test)]
 mod tests {
+    use hdwallet::KeyIndex;
+    use subtle::ConstantTimeEq;
+
     use super::AccountPubKey;
+    use super::NonHardenedChildIndex;
 
     #[test]
     fn check_ovk_test_vectors() {
@@ -516,5 +638,55 @@ mod tests {
             assert_eq!(tv.internal_ovk, internal.as_bytes());
             assert_eq!(tv.external_ovk, external.as_bytes());
         }
+    }
+
+    #[test]
+    fn nonhardened_indexes_accepted() {
+        assert_eq!(0, NonHardenedChildIndex::from_index(0).unwrap().index());
+        assert_eq!(
+            0x7fffffff,
+            NonHardenedChildIndex::from_index(0x7fffffff)
+                .unwrap()
+                .index()
+        );
+    }
+
+    #[test]
+    fn hardened_indexes_rejected() {
+        assert!(NonHardenedChildIndex::from_index(0x80000000).is_none());
+        assert!(NonHardenedChildIndex::from_index(0xffffffff).is_none());
+    }
+
+    #[test]
+    fn nonhardened_index_next() {
+        assert_eq!(1, NonHardenedChildIndex::ZERO.next().unwrap().index());
+        assert!(NonHardenedChildIndex::from_index(0x7fffffff)
+            .unwrap()
+            .next()
+            .is_none());
+    }
+
+    #[test]
+    fn nonhardened_index_ct_eq() {
+        assert!(check(
+            NonHardenedChildIndex::ZERO,
+            NonHardenedChildIndex::ZERO
+        ));
+        assert!(!check(
+            NonHardenedChildIndex::ZERO,
+            NonHardenedChildIndex::ZERO.next().unwrap()
+        ));
+
+        fn check<T: ConstantTimeEq>(v1: T, v2: T) -> bool {
+            v1.ct_eq(&v2).into()
+        }
+    }
+
+    #[test]
+    fn nonhardened_index_tryfrom_keyindex() {
+        let nh: NonHardenedChildIndex = KeyIndex::Normal(0).try_into().unwrap();
+        assert_eq!(nh.index(), 0);
+
+        assert!(NonHardenedChildIndex::try_from(KeyIndex::Hardened(0)).is_err());
     }
 }

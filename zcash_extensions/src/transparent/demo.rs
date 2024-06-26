@@ -476,26 +476,26 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<B> {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
+
     use blake2b_simd::Params;
     use ff::Field;
     use rand_core::OsRng;
 
+    use sapling::{zip32::ExtendedSpendingKey, Node, Rseed};
     use zcash_primitives::{
-        consensus::{BlockHeight, BranchId, NetworkUpgrade, Parameters},
-        constants,
+        consensus::{BlockHeight, BranchId, NetworkType, NetworkUpgrade, Parameters},
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
-        sapling::{self, Node, Rseed},
         transaction::{
-            builder::Builder,
+            builder::{BuildConfig, Builder},
             components::{
-                amount::Amount,
+                amount::{Amount, NonNegativeAmount},
                 tze::{Authorized, Bundle, OutPoint, TzeIn, TzeOut},
             },
             fees::fixed,
             Transaction, TransactionData, TxVersion,
         },
-        zip32::ExtendedSpendingKey,
     };
     use zcash_proofs::prover::LocalTxProver;
 
@@ -513,38 +513,17 @@ mod tests {
                 NetworkUpgrade::Heartwood => Some(BlockHeight::from_u32(903_800)),
                 NetworkUpgrade::Canopy => Some(BlockHeight::from_u32(1_028_500)),
                 NetworkUpgrade::Nu5 => Some(BlockHeight::from_u32(1_200_000)),
+                #[cfg(zcash_unstable = "nu6")]
+                NetworkUpgrade::Nu6 => Some(BlockHeight::from_u32(1_300_000)),
                 NetworkUpgrade::ZFuture => Some(BlockHeight::from_u32(1_400_000)),
             }
         }
 
-        fn address_network(&self) -> Option<zcash_address::Network> {
-            None
-        }
-
-        fn coin_type(&self) -> u32 {
-            constants::testnet::COIN_TYPE
-        }
-
-        fn hrp_sapling_extended_spending_key(&self) -> &str {
-            constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY
-        }
-
-        fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
-            constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
-        }
-
-        fn hrp_sapling_payment_address(&self) -> &str {
-            constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS
-        }
-
-        fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
-            constants::testnet::B58_PUBKEY_ADDRESS_PREFIX
-        }
-
-        fn b58_script_address_prefix(&self) -> [u8; 2] {
-            constants::testnet::B58_SCRIPT_ADDRESS_PREFIX
+        fn network_type(&self) -> NetworkType {
+            NetworkType::Test
         }
     }
+
     fn demo_hashes(preimage_1: &[u8; 32], preimage_2: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
         let hash_2 = {
             let mut hash = [0; 32];
@@ -636,9 +615,19 @@ mod tests {
         }
     }
 
-    fn demo_builder<'a>(height: BlockHeight) -> DemoBuilder<Builder<'a, FutureNetwork, OsRng>> {
+    fn demo_builder<'a>(
+        height: BlockHeight,
+        sapling_anchor: sapling::Anchor,
+    ) -> DemoBuilder<Builder<'a, FutureNetwork, ()>> {
         DemoBuilder {
-            txn_builder: Builder::new(FutureNetwork, height),
+            txn_builder: Builder::new(
+                FutureNetwork,
+                height,
+                BuildConfig::Standard {
+                    sapling_anchor: Some(sapling_anchor),
+                    orchard_anchor: Some(orchard::Anchor::empty_tree()),
+                },
+            ),
             extension_id: 0,
         }
     }
@@ -796,11 +785,7 @@ mod tests {
             .activation_height(NetworkUpgrade::ZFuture)
             .unwrap();
 
-        // Only run the test if we have the prover parameters.
-        let prover = match LocalTxProver::with_default_location() {
-            Some(prover) => prover,
-            None => return,
-        };
+        let prover = LocalTxProver::bundled();
 
         //
         // Opening transaction
@@ -815,7 +800,10 @@ mod tests {
         // create some inputs to spend
         let extsk = ExtendedSpendingKey::master(&[]);
         let to = extsk.default_address().1;
-        let note1 = to.create_note(110000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
+        let note1 = to.create_note(
+            sapling::value::NoteValue::from_raw(110000),
+            Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)),
+        );
         let cm1 = Node::from_cmu(&note1.cmu());
         let mut tree = sapling::CommitmentTree::empty();
         // fake that the note appears in some previous
@@ -823,48 +811,54 @@ mod tests {
         tree.append(cm1).unwrap();
         let witness1 = sapling::IncrementalWitness::from_tree(tree);
 
-        let mut builder_a = demo_builder(tx_height);
+        let mut builder_a = demo_builder(tx_height, witness1.root().into());
         builder_a
-            .add_sapling_spend(extsk, *to.diversifier(), note1, witness1.path().unwrap())
+            .add_sapling_spend::<Infallible>(&extsk, note1, witness1.path().unwrap())
             .unwrap();
 
-        let value = Amount::from_u64(100000).unwrap();
+        let value = NonNegativeAmount::const_from_u64(100000);
         let (h1, h2) = demo_hashes(&preimage_1, &preimage_2);
         builder_a
-            .demo_open(value, h1)
+            .demo_open(value.into(), h1)
             .map_err(|e| format!("open failure: {:?}", e))
             .unwrap();
-        let (tx_a, _) = builder_a
+        let res_a = builder_a
             .txn_builder
-            .build_zfuture(&prover, &fee_rule)
+            .build_zfuture(OsRng, &prover, &prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
-        let tze_a = tx_a.tze_bundle().unwrap();
+        let tze_a = res_a.transaction().tze_bundle().unwrap();
 
         //
         // Transfer
         //
 
-        let mut builder_b = demo_builder(tx_height + 1);
-        let prevout_a = (OutPoint::new(tx_a.txid(), 0), tze_a.vout[0].clone());
+        let mut builder_b = demo_builder(tx_height + 1, sapling::Anchor::empty_tree());
+        let prevout_a = (
+            OutPoint::new(res_a.transaction().txid(), 0),
+            tze_a.vout[0].clone(),
+        );
         let value_xfr = (value - fee_rule.fixed_fee()).unwrap();
         builder_b
-            .demo_transfer_to_close(prevout_a, value_xfr, preimage_1, h2)
+            .demo_transfer_to_close(prevout_a, value_xfr.into(), preimage_1, h2)
             .map_err(|e| format!("transfer failure: {:?}", e))
             .unwrap();
-        let (tx_b, _) = builder_b
+        let res_b = builder_b
             .txn_builder
-            .build_zfuture(&prover, &fee_rule)
+            .build_zfuture(OsRng, &prover, &prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
-        let tze_b = tx_b.tze_bundle().unwrap();
+        let tze_b = res_b.transaction().tze_bundle().unwrap();
 
         //
         // Closing transaction
         //
 
-        let mut builder_c = demo_builder(tx_height + 2);
-        let prevout_b = (OutPoint::new(tx_a.txid(), 0), tze_b.vout[0].clone());
+        let mut builder_c = demo_builder(tx_height + 2, sapling::Anchor::empty_tree());
+        let prevout_b = (
+            OutPoint::new(res_a.transaction().txid(), 0),
+            tze_b.vout[0].clone(),
+        );
         builder_c
             .demo_close(prevout_b, preimage_2)
             .map_err(|e| format!("close failure: {:?}", e))
@@ -872,27 +866,31 @@ mod tests {
 
         builder_c
             .add_transparent_output(
-                &TransparentAddress::PublicKey([0; 20]),
+                &TransparentAddress::PublicKeyHash([0; 20]),
                 (value_xfr - fee_rule.fixed_fee()).unwrap(),
             )
             .unwrap();
 
-        let (tx_c, _) = builder_c
+        let res_c = builder_c
             .txn_builder
-            .build_zfuture(&prover, &fee_rule)
+            .build_zfuture(OsRng, &prover, &prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
-        let tze_c = tx_c.tze_bundle().unwrap();
+        let tze_c = res_c.transaction().tze_bundle().unwrap();
 
         // Verify tx_b
-        let ctx0 = Ctx { tx: &tx_b };
+        let ctx0 = Ctx {
+            tx: res_b.transaction(),
+        };
         assert_eq!(
             Program.verify(&tze_a.vout[0].precondition, &tze_b.vin[0].witness, &ctx0),
             Ok(())
         );
 
         // Verify tx_c
-        let ctx1 = Ctx { tx: &tx_c };
+        let ctx1 = Ctx {
+            tx: res_c.transaction(),
+        };
         assert_eq!(
             Program.verify(&tze_b.vout[0].precondition, &tze_c.vin[0].witness, &ctx1),
             Ok(())

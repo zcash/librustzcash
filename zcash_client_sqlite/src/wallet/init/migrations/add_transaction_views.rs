@@ -2,7 +2,6 @@
 use std::collections::HashSet;
 
 use rusqlite::{self, types::ToSql, OptionalExtension};
-use schemer::{self};
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
@@ -17,12 +16,7 @@ use zcash_primitives::{
 use super::{add_utxo_account, sent_notes_to_internal};
 use crate::wallet::init::WalletMigrationError;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
-    0x282fad2e,
-    0x8372,
-    0x4ca0,
-    b"\x8b\xed\x71\x82\x13\x20\x90\x9f",
-);
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x282fad2e_8372_4ca0_8bed_71821320909f);
 
 pub(crate) struct Migration;
 
@@ -272,8 +266,7 @@ impl RusqliteMigration for Migration {
     }
 
     fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
-        // TODO: something better than just panic?
-        panic!("Cannot revert this migration.");
+        Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
     }
 }
 
@@ -283,10 +276,9 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use zcash_client_backend::keys::UnifiedSpendingKey;
-    use zcash_primitives::zip32::AccountId;
+    use zcash_primitives::{consensus::Network, zip32::AccountId};
 
     use crate::{
-        tests,
         wallet::init::{init_wallet_db_internal, migrations::addresses_table},
         WalletDb,
     };
@@ -310,24 +302,24 @@ mod tests {
 
     #[test]
     fn transaction_views() {
+        let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db_internal(&mut db_data, None, &[addresses_table::MIGRATION_ID]).unwrap();
-        let usk =
-            UnifiedSpendingKey::from_seed(&tests::network(), &[0u8; 32][..], AccountId::from(0))
-                .unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[addresses_table::MIGRATION_ID], false)
+            .unwrap();
+        let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32][..], AccountId::ZERO).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
 
         db_data
             .conn
             .execute(
                 "INSERT INTO accounts (account, ufvk) VALUES (0, ?)",
-                params![ufvk.encode(&tests::network())],
+                params![ufvk.encode(&network)],
             )
             .unwrap();
 
         db_data.conn.execute_batch(
-            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '');
+            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'00');
             INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, '');
 
             INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value)
@@ -345,7 +337,7 @@ mod tests {
             VALUES (0, 4, 0, '', 7, '', 'c', true, X'63');",
         ).unwrap();
 
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID]).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
 
         let mut q = db_data
             .conn
@@ -402,12 +394,21 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn migrate_from_wm2() {
+        use zcash_client_backend::keys::UnifiedAddressRequest;
+        use zcash_primitives::{
+            legacy::keys::NonHardenedChildIndex, transaction::components::amount::NonNegativeAmount,
+        };
+
+        use crate::UA_TRANSPARENT;
+
+        let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
         init_wallet_db_internal(
             &mut db_data,
             None,
             &[utxos_table::MIGRATION_ID, ufvk_support::MIGRATION_ID],
+            false,
         )
         .unwrap();
 
@@ -424,7 +425,7 @@ mod tests {
                     sequence: 0,
                 }],
                 vout: vec![TxOut {
-                    value: Amount::from_i64(1100000000).unwrap(),
+                    value: NonNegativeAmount::const_from_u64(1100000000),
                     script_pubkey: Script(vec![]),
                 }],
                 authorization: Authorized,
@@ -439,28 +440,32 @@ mod tests {
         let mut tx_bytes = vec![];
         tx.write(&mut tx_bytes).unwrap();
 
-        let usk =
-            UnifiedSpendingKey::from_seed(&tests::network(), &[0u8; 32][..], AccountId::from(0))
-                .unwrap();
+        let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32][..], AccountId::ZERO).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
-        let (ua, _) = ufvk.default_address();
+        let (ua, _) = ufvk
+            .default_address(UnifiedAddressRequest::unsafe_new(
+                false,
+                true,
+                UA_TRANSPARENT,
+            ))
+            .expect("A valid default address exists for the UFVK");
         let taddr = ufvk
             .transparent()
             .and_then(|k| {
                 k.derive_external_ivk()
                     .ok()
-                    .map(|k| k.derive_address(0).unwrap())
+                    .map(|k| k.derive_address(NonHardenedChildIndex::ZERO).unwrap())
             })
-            .map(|a| a.encode(&tests::network()));
+            .map(|a| a.encode(&network));
 
         db_data.conn.execute(
             "INSERT INTO accounts (account, ufvk, address, transparent_address) VALUES (0, ?, ?, ?)",
-            params![ufvk.encode(&tests::network()), ua.encode(&tests::network()), &taddr]
+            params![ufvk.encode(&network), ua.encode(&network), &taddr]
         ).unwrap();
         db_data
             .conn
             .execute_batch(
-                "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '');",
+                "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'00');",
             )
             .unwrap();
         db_data.conn.execute(
@@ -476,7 +481,7 @@ mod tests {
             )
             .unwrap();
 
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID]).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
 
         let fee = db_data
             .conn

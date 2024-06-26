@@ -2,27 +2,30 @@
 //!
 //! `zcash_primitives` is a library that provides the core structs and functions necessary
 //! for working with Zcash.
+//!
+//! ## Feature flags
+#![doc = document_features::document_features!()]
+//!
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 // Temporary until we have addressed all Result<T, ()> cases.
 #![allow(clippy::result_unit_err)]
+// Present to reduce refactoring noise from changing all the imports inside this crate for
+// the `sapling` crate extraction.
+#![allow(clippy::single_component_path_imports)]
 
 pub mod block;
-pub mod consensus;
-pub mod constants;
-pub mod keys;
+pub use zcash_protocol::consensus;
+pub use zcash_protocol::constants;
 pub mod legacy;
-pub mod memo;
+pub use zcash_protocol::memo;
 pub mod merkle_tree;
-pub mod sapling;
+use sapling;
 pub mod transaction;
-pub mod zip32;
-pub mod zip339;
-
-#[cfg(feature = "zfuture")]
+pub use zip32;
+#[cfg(zcash_unstable = "zfuture")]
 pub mod extensions;
-
-#[cfg(test)]
-mod test_vectors;
+pub mod zip339;

@@ -1,0 +1,100 @@
+[package]
+name = "zcash_keys"
+description = "Zcash key and address management"
+version = "0.2.0"
+authors = [
+    "Jack Grigg <jack@z.cash>",
+    "Kris Nuttycombe <kris@electriccoin.co>"
+]
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+readme = "README.md"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+zcash_address.workspace = true
+zcash_encoding.workspace = true
+zcash_primitives.workspace = true
+zcash_protocol.workspace = true
+zip32.workspace = true
+
+# Dependencies exposed in a public API:
+nonempty.workspace = true
+
+# - CSPRNG
+rand_core.workspace = true
+
+# - Encodings
+bech32.workspace = true
+bs58.workspace = true
+
+# - Transparent protocols
+hdwallet = { workspace = true, optional = true }
+
+# - Logging and metrics
+memuse.workspace = true
+tracing.workspace = true
+
+# - Secret management
+secrecy.workspace = true
+subtle.workspace = true
+
+# - Shielded protocols
+bls12_381.workspace = true
+group.workspace = true
+orchard = { workspace = true, optional = true }
+sapling = { workspace = true, optional = true }
+
+# - Test dependencies
+proptest = { workspace = true, optional = true }
+
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Documentation
+document-features.workspace = true
+
+# - Encodings
+byteorder = { workspace = true, optional = true }
+
+# - Digests
+blake2b_simd = { workspace = true }
+
+[dev-dependencies]
+hex.workspace = true
+jubjub.workspace = true
+proptest.workspace = true
+rand_core.workspace = true
+zcash_address = { workspace = true, features = ["test-dependencies"] }
+zcash_primitives = { workspace = true, features = ["test-dependencies"] }
+
+[features]
+## Enables use of transparent key parts and addresses
+transparent-inputs = ["dep:hdwallet", "zcash_primitives/transparent-inputs"]
+
+## Enables use of Orchard key parts and addresses
+orchard = ["dep:orchard"]
+
+## Enables use of Sapling key parts and addresses
+sapling = ["dep:sapling"]
+
+## Exposes APIs that are useful for testing, such as `proptest` strategies.
+test-dependencies = [
+    "dep:proptest",
+    "orchard?/test-dependencies",
+    "zcash_primitives/test-dependencies",
+]
+
+#! ### Experimental features
+
+## Exposes unstable APIs. Their behaviour may change at any time.
+unstable = ["dep:byteorder"]
+
+[badges]
+maintenance = { status = "actively-developed" }

@@ -7,30 +7,52 @@ use core::cmp::max;
 use crate::{
     consensus::{self, BlockHeight},
     legacy::TransparentAddress,
-    transaction::components::{
-        amount::{Amount, BalanceError},
-        transparent::{fees as transparent, OutPoint},
+    transaction::{
+        components::{
+            amount::{BalanceError, NonNegativeAmount},
+            transparent::OutPoint,
+        },
+        fees::transparent,
     },
 };
 
-/// The minimum conventional fee using the standard [ZIP 317] constants. Equivalent to
-/// `(FeeRule::standard().marginal_fee() * FeeRule::standard().grace_actions()).unwrap()`,
-/// but as a constant.
+/// The standard [ZIP 317] marginal fee.
 ///
 /// [ZIP 317]: https//zips.z.cash/zip-0317
-pub const MINIMUM_FEE: Amount = Amount::const_from_i64(10_000);
+pub const MARGINAL_FEE: NonNegativeAmount = NonNegativeAmount::const_from_u64(5_000);
+
+/// The minimum number of logical actions that must be paid according to [ZIP 317].
+///
+/// [ZIP 317]: https//zips.z.cash/zip-0317
+pub const GRACE_ACTIONS: usize = 2;
+
+/// The standard size of a P2PKH input, in bytes, according to [ZIP 317].
+///
+/// [ZIP 317]: https//zips.z.cash/zip-0317
+pub const P2PKH_STANDARD_INPUT_SIZE: usize = 150;
+
+/// The standard size of a P2PKH output, in bytes, according to [ZIP 317].
+///
+/// [ZIP 317]: https//zips.z.cash/zip-0317
+pub const P2PKH_STANDARD_OUTPUT_SIZE: usize = 34;
+
+/// The minimum conventional fee computed from the standard [ZIP 317] constants. Equivalent to
+/// `MARGINAL_FEE * GRACE_ACTIONS`.
+///
+/// [ZIP 317]: https//zips.z.cash/zip-0317
+pub const MINIMUM_FEE: NonNegativeAmount = NonNegativeAmount::const_from_u64(10_000);
 
 /// A [`FeeRule`] implementation that implements the [ZIP 317] fee rule.
 ///
-/// This fee rule supports only P2pkh transparent inputs; an error will be returned if a coin
-/// containing a non-p2pkh script is provided as an input.  This fee rule may slightly overestimate
-/// fees in case where the user is attempting to spend more than ~150 transparent inputs.
+/// This fee rule supports Orchard, Sapling, and (P2PKH only) transparent inputs.
+/// Returns an error if a coin containing a non-p2pkh script is provided as an input.
+/// This fee rule may slightly overestimate fees in case where the user is attempting to spend more than ~150 transparent inputs.
 ///
 /// [`FeeRule`]: crate::transaction::fees::FeeRule
 /// [ZIP 317]: https//zips.z.cash/zip-0317
 #[derive(Clone, Debug)]
 pub struct FeeRule {
-    marginal_fee: Amount,
+    marginal_fee: NonNegativeAmount,
     grace_actions: usize,
     p2pkh_standard_input_size: usize,
     p2pkh_standard_output_size: usize,
@@ -42,10 +64,10 @@ impl FeeRule {
     /// [ZIP 317]: https//zips.z.cash/zip-0317
     pub fn standard() -> Self {
         Self {
-            marginal_fee: Amount::from_u64(5000).unwrap(),
-            grace_actions: 2,
-            p2pkh_standard_input_size: 150,
-            p2pkh_standard_output_size: 34,
+            marginal_fee: MARGINAL_FEE,
+            grace_actions: GRACE_ACTIONS,
+            p2pkh_standard_input_size: P2PKH_STANDARD_INPUT_SIZE,
+            p2pkh_standard_output_size: P2PKH_STANDARD_OUTPUT_SIZE,
         }
     }
 
@@ -54,7 +76,7 @@ impl FeeRule {
     /// Returns `None` if either `p2pkh_standard_input_size` or `p2pkh_standard_output_size` are
     /// zero.
     pub fn non_standard(
-        marginal_fee: Amount,
+        marginal_fee: NonNegativeAmount,
         grace_actions: usize,
         p2pkh_standard_input_size: usize,
         p2pkh_standard_output_size: usize,
@@ -72,7 +94,7 @@ impl FeeRule {
     }
 
     /// Returns the ZIP 317 marginal fee.
-    pub fn marginal_fee(&self) -> Amount {
+    pub fn marginal_fee(&self) -> NonNegativeAmount {
         self.marginal_fee
     }
     /// Returns the ZIP 317 number of grace actions
@@ -129,11 +151,12 @@ impl super::FeeRule for FeeRule {
         transparent_outputs: &[impl transparent::OutputView],
         sapling_input_count: usize,
         sapling_output_count: usize,
-    ) -> Result<Amount, Self::Error> {
+        orchard_action_count: usize,
+    ) -> Result<NonNegativeAmount, Self::Error> {
         let non_p2pkh_inputs: Vec<_> = transparent_inputs
             .iter()
             .filter_map(|t_in| match t_in.coin().script_pubkey.address() {
-                Some(TransparentAddress::PublicKey(_)) => None,
+                Some(TransparentAddress::PublicKeyHash(_)) => None,
                 _ => Some(t_in.outpoint()),
             })
             .cloned()
@@ -151,7 +174,8 @@ impl super::FeeRule for FeeRule {
         let logical_actions = max(
             ceildiv(t_in_total_size, self.p2pkh_standard_input_size),
             ceildiv(t_out_total_size, self.p2pkh_standard_output_size),
-        ) + max(sapling_input_count, sapling_output_count);
+        ) + max(sapling_input_count, sapling_output_count)
+            + orchard_action_count;
 
         (self.marginal_fee * max(self.grace_actions, logical_actions))
             .ok_or_else(|| BalanceError::Overflow.into())

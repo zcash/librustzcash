@@ -1,293 +1,86 @@
-use core::fmt::Debug;
-
 use ff::PrimeField;
-use memuse::DynamicUsage;
+use redjubjub::SpendAuth;
+use sapling::note_encryption::Zip212Enforcement;
+use zcash_protocol::consensus::{BlockHeight, NetworkUpgrade, Parameters, ZIP212_GRACE_PERIOD};
 
 use std::io::{self, Read, Write};
 
-use zcash_note_encryption::{EphemeralKeyBytes, ShieldedOutput};
+use zcash_encoding::{Array, CompactSize, Vector};
+use zcash_note_encryption::{EphemeralKeyBytes, ENC_CIPHERTEXT_SIZE, OUT_CIPHERTEXT_SIZE};
 
 use crate::{
-    consensus,
     sapling::{
-        note::ExtractedNoteCommitment,
-        note_encryption::{
-            CompactNoteCiphertextBytes, NoteCiphertextBytes, SaplingDomain, COMPACT_NOTE_SIZE,
+        bundle::{
+            Authorization, Authorized, Bundle, GrothProofBytes, OutputDescription,
+            OutputDescriptionV5, SpendDescription, SpendDescriptionV5,
         },
-        redjubjub::{self, PublicKey, Signature},
+        note::ExtractedNoteCommitment,
         value::ValueCommitment,
         Nullifier,
     },
+    transaction::Transaction,
 };
 
-use super::{amount::Amount, GROTH_PROOF_SIZE};
+use super::{Amount, GROTH_PROOF_SIZE};
 
-pub type GrothProofBytes = [u8; GROTH_PROOF_SIZE];
+/// Returns the enforcement policy for ZIP 212 at the given height.
+pub fn zip212_enforcement(params: &impl Parameters, height: BlockHeight) -> Zip212Enforcement {
+    if params.is_nu_active(NetworkUpgrade::Canopy, height) {
+        let grace_period_end_height =
+            params.activation_height(NetworkUpgrade::Canopy).unwrap() + ZIP212_GRACE_PERIOD;
 
-pub mod builder;
-pub mod fees;
-
-/// Defines the authorization type of a Sapling bundle.
-pub trait Authorization: Debug {
-    type SpendProof: Clone + Debug;
-    type OutputProof: Clone + Debug;
-    type AuthSig: Clone + Debug;
+        if height < grace_period_end_height {
+            Zip212Enforcement::GracePeriod
+        } else {
+            Zip212Enforcement::On
+        }
+    } else {
+        Zip212Enforcement::Off
+    }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Unproven;
-
-impl Authorization for Unproven {
-    type SpendProof = ();
-    type OutputProof = ();
-    type AuthSig = ();
-}
-
-/// Authorizing data for a bundle of Sapling spends and outputs, ready to be committed to
-/// the ledger.
-#[derive(Debug, Copy, Clone)]
-pub struct Authorized {
-    pub binding_sig: redjubjub::Signature,
-}
-
-impl Authorization for Authorized {
-    type SpendProof = GrothProofBytes;
-    type OutputProof = GrothProofBytes;
-    type AuthSig = redjubjub::Signature;
-}
-
+/// A map from one bundle authorization to another.
+///
+/// For use with [`TransactionData::map_authorization`].
+///
+/// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
 pub trait MapAuth<A: Authorization, B: Authorization> {
-    fn map_spend_proof(&self, p: A::SpendProof) -> B::SpendProof;
-    fn map_output_proof(&self, p: A::OutputProof) -> B::OutputProof;
-    fn map_auth_sig(&self, s: A::AuthSig) -> B::AuthSig;
-    fn map_authorization(&self, a: A) -> B;
+    fn map_spend_proof(&mut self, p: A::SpendProof) -> B::SpendProof;
+    fn map_output_proof(&mut self, p: A::OutputProof) -> B::OutputProof;
+    fn map_auth_sig(&mut self, s: A::AuthSig) -> B::AuthSig;
+    fn map_authorization(&mut self, a: A) -> B;
 }
 
 /// The identity map.
 ///
 /// This can be used with [`TransactionData::map_authorization`] when you want to map the
-/// authorization of a subset of the transaction's bundles.
+/// authorization of a subset of a transaction's bundles.
 ///
 /// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
 impl MapAuth<Authorized, Authorized> for () {
     fn map_spend_proof(
-        &self,
+        &mut self,
         p: <Authorized as Authorization>::SpendProof,
     ) -> <Authorized as Authorization>::SpendProof {
         p
     }
 
     fn map_output_proof(
-        &self,
+        &mut self,
         p: <Authorized as Authorization>::OutputProof,
     ) -> <Authorized as Authorization>::OutputProof {
         p
     }
 
     fn map_auth_sig(
-        &self,
+        &mut self,
         s: <Authorized as Authorization>::AuthSig,
     ) -> <Authorized as Authorization>::AuthSig {
         s
     }
 
-    fn map_authorization(&self, a: Authorized) -> Authorized {
+    fn map_authorization(&mut self, a: Authorized) -> Authorized {
         a
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Bundle<A: Authorization> {
-    shielded_spends: Vec<SpendDescription<A>>,
-    shielded_outputs: Vec<OutputDescription<A::OutputProof>>,
-    value_balance: Amount,
-    authorization: A,
-}
-
-impl<A: Authorization> Bundle<A> {
-    /// Constructs a `Bundle` from its constituent parts.
-    #[cfg(feature = "temporary-zcashd")]
-    pub fn temporary_zcashd_from_parts(
-        shielded_spends: Vec<SpendDescription<A>>,
-        shielded_outputs: Vec<OutputDescription<A::OutputProof>>,
-        value_balance: Amount,
-        authorization: A,
-    ) -> Self {
-        Self::from_parts(
-            shielded_spends,
-            shielded_outputs,
-            value_balance,
-            authorization,
-        )
-    }
-
-    /// Constructs a `Bundle` from its constituent parts.
-    pub(crate) fn from_parts(
-        shielded_spends: Vec<SpendDescription<A>>,
-        shielded_outputs: Vec<OutputDescription<A::OutputProof>>,
-        value_balance: Amount,
-        authorization: A,
-    ) -> Self {
-        Bundle {
-            shielded_spends,
-            shielded_outputs,
-            value_balance,
-            authorization,
-        }
-    }
-
-    /// Returns the list of spends in this bundle.
-    pub fn shielded_spends(&self) -> &[SpendDescription<A>] {
-        &self.shielded_spends
-    }
-
-    /// Returns the list of outputs in this bundle.
-    pub fn shielded_outputs(&self) -> &[OutputDescription<A::OutputProof>] {
-        &self.shielded_outputs
-    }
-
-    /// Returns the net value moved into or out of the Sapling shielded pool.
-    ///
-    /// This is the sum of Sapling spends minus the sum of Sapling outputs.
-    pub fn value_balance(&self) -> &Amount {
-        &self.value_balance
-    }
-
-    /// Returns the authorization for this bundle.
-    ///
-    /// In the case of a `Bundle<Authorized>`, this is the binding signature.
-    pub fn authorization(&self) -> &A {
-        &self.authorization
-    }
-
-    pub fn map_authorization<B: Authorization, F: MapAuth<A, B>>(self, f: F) -> Bundle<B> {
-        Bundle {
-            shielded_spends: self
-                .shielded_spends
-                .into_iter()
-                .map(|d| SpendDescription {
-                    cv: d.cv,
-                    anchor: d.anchor,
-                    nullifier: d.nullifier,
-                    rk: d.rk,
-                    zkproof: f.map_spend_proof(d.zkproof),
-                    spend_auth_sig: f.map_auth_sig(d.spend_auth_sig),
-                })
-                .collect(),
-            shielded_outputs: self
-                .shielded_outputs
-                .into_iter()
-                .map(|o| OutputDescription {
-                    cv: o.cv,
-                    cmu: o.cmu,
-                    ephemeral_key: o.ephemeral_key,
-                    enc_ciphertext: o.enc_ciphertext,
-                    out_ciphertext: o.out_ciphertext,
-                    zkproof: f.map_output_proof(o.zkproof),
-                })
-                .collect(),
-            value_balance: self.value_balance,
-            authorization: f.map_authorization(self.authorization),
-        }
-    }
-}
-
-impl DynamicUsage for Bundle<Authorized> {
-    fn dynamic_usage(&self) -> usize {
-        self.shielded_spends.dynamic_usage() + self.shielded_outputs.dynamic_usage()
-    }
-
-    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
-        let bounds = (
-            self.shielded_spends.dynamic_usage_bounds(),
-            self.shielded_outputs.dynamic_usage_bounds(),
-        );
-
-        (
-            bounds.0 .0 + bounds.1 .0,
-            bounds.0 .1.zip(bounds.1 .1).map(|(a, b)| a + b),
-        )
-    }
-}
-
-#[derive(Clone)]
-pub struct SpendDescription<A: Authorization> {
-    cv: ValueCommitment,
-    anchor: bls12_381::Scalar,
-    nullifier: Nullifier,
-    rk: PublicKey,
-    zkproof: A::SpendProof,
-    spend_auth_sig: A::AuthSig,
-}
-
-impl<A: Authorization> std::fmt::Debug for SpendDescription<A> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(
-            f,
-            "SpendDescription(cv = {:?}, anchor = {:?}, nullifier = {:?}, rk = {:?}, spend_auth_sig = {:?})",
-            self.cv, self.anchor, self.nullifier, self.rk, self.spend_auth_sig
-        )
-    }
-}
-
-impl<A: Authorization> SpendDescription<A> {
-    #[cfg(feature = "temporary-zcashd")]
-    pub fn temporary_zcashd_from_parts(
-        cv: ValueCommitment,
-        anchor: bls12_381::Scalar,
-        nullifier: Nullifier,
-        rk: PublicKey,
-        zkproof: A::SpendProof,
-        spend_auth_sig: A::AuthSig,
-    ) -> Self {
-        Self {
-            cv,
-            anchor,
-            nullifier,
-            rk,
-            zkproof,
-            spend_auth_sig,
-        }
-    }
-
-    /// Returns the commitment to the value consumed by this spend.
-    pub fn cv(&self) -> &ValueCommitment {
-        &self.cv
-    }
-
-    /// Returns the root of the Sapling commitment tree that this spend commits to.
-    pub fn anchor(&self) -> &bls12_381::Scalar {
-        &self.anchor
-    }
-
-    /// Returns the nullifier of the note being spent.
-    pub fn nullifier(&self) -> &Nullifier {
-        &self.nullifier
-    }
-
-    /// Returns the randomized verification key for the note being spent.
-    pub fn rk(&self) -> &PublicKey {
-        &self.rk
-    }
-
-    /// Returns the proof for this spend.
-    pub fn zkproof(&self) -> &A::SpendProof {
-        &self.zkproof
-    }
-
-    /// Returns the authorization signature for this spend.
-    pub fn spend_auth_sig(&self) -> &A::AuthSig {
-        &self.spend_auth_sig
-    }
-}
-
-impl DynamicUsage for SpendDescription<Authorized> {
-    fn dynamic_usage(&self) -> usize {
-        self.zkproof.dynamic_usage()
-    }
-
-    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
-        self.zkproof.dynamic_usage_bounds()
     }
 }
 
@@ -317,10 +110,10 @@ fn read_cmu<R: Read>(mut reader: R) -> io::Result<ExtractedNoteCommitment> {
 
 /// Consensus rules (§7.3) & (§7.4):
 /// - Canonical encoding is enforced here
-pub fn read_base<R: Read>(mut reader: R, field: &str) -> io::Result<bls12_381::Scalar> {
+pub fn read_base<R: Read>(mut reader: R, field: &str) -> io::Result<jubjub::Base> {
     let mut f = [0u8; 32];
     reader.read_exact(&mut f)?;
-    Option::from(bls12_381::Scalar::from_repr(f)).ok_or_else(|| {
+    Option::from(jubjub::Base::from_repr(f)).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("{} not in field", field),
@@ -340,508 +133,399 @@ pub fn read_zkproof<R: Read>(mut reader: R) -> io::Result<GrothProofBytes> {
     Ok(zkproof)
 }
 
-impl SpendDescription<Authorized> {
-    pub fn read_nullifier<R: Read>(mut reader: R) -> io::Result<Nullifier> {
-        let mut nullifier = Nullifier([0u8; 32]);
-        reader.read_exact(&mut nullifier.0)?;
-        Ok(nullifier)
-    }
+fn read_nullifier<R: Read>(mut reader: R) -> io::Result<Nullifier> {
+    let mut nullifier = Nullifier([0u8; 32]);
+    reader.read_exact(&mut nullifier.0)?;
+    Ok(nullifier)
+}
 
-    /// Consensus rules (§4.4):
-    /// - Canonical encoding is enforced here.
-    /// - "Not small order" is enforced in SaplingVerificationContext::check_spend()
-    pub fn read_rk<R: Read>(mut reader: R) -> io::Result<PublicKey> {
-        PublicKey::read(&mut reader)
-    }
+/// Consensus rules (§4.4):
+/// - Canonical encoding is enforced here.
+/// - "Not small order" is enforced in SaplingVerificationContext::check_spend()
+fn read_rk<R: Read>(mut reader: R) -> io::Result<redjubjub::VerificationKey<SpendAuth>> {
+    let mut bytes = [0; 32];
+    reader.read_exact(&mut bytes)?;
+    redjubjub::VerificationKey::try_from(bytes)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
 
-    /// Consensus rules (§4.4):
-    /// - Canonical encoding is enforced here.
-    /// - Signature validity is enforced in SaplingVerificationContext::check_spend()
-    pub fn read_spend_auth_sig<R: Read>(mut reader: R) -> io::Result<Signature> {
-        Signature::read(&mut reader)
-    }
+/// Consensus rules (§4.4):
+/// - Canonical encoding is enforced here.
+/// - Signature validity is enforced in SaplingVerificationContext::check_spend()
+fn read_spend_auth_sig<R: Read>(mut reader: R) -> io::Result<redjubjub::Signature<SpendAuth>> {
+    let mut sig = [0; 64];
+    reader.read_exact(&mut sig)?;
+    Ok(redjubjub::Signature::from(sig))
+}
 
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        // Consensus rules (§4.4) & (§4.5):
-        // - Canonical encoding is enforced here.
-        // - "Not small order" is enforced in SaplingVerificationContext::(check_spend()/check_output())
-        //   (located in zcash_proofs::sapling::verifier).
-        let cv = read_value_commitment(&mut reader)?;
-        // Consensus rules (§7.3) & (§7.4):
-        // - Canonical encoding is enforced here
-        let anchor = read_base(&mut reader, "anchor")?;
-        let nullifier = Self::read_nullifier(&mut reader)?;
-        let rk = Self::read_rk(&mut reader)?;
-        let zkproof = read_zkproof(&mut reader)?;
-        let spend_auth_sig = Self::read_spend_auth_sig(&mut reader)?;
+#[cfg(feature = "temporary-zcashd")]
+pub fn temporary_zcashd_read_spend_v4<R: Read>(
+    reader: R,
+) -> io::Result<SpendDescription<Authorized>> {
+    read_spend_v4(reader)
+}
 
-        Ok(SpendDescription {
-            cv,
-            anchor,
-            nullifier,
-            rk,
-            zkproof,
-            spend_auth_sig,
-        })
-    }
+fn read_spend_v4<R: Read>(mut reader: R) -> io::Result<SpendDescription<Authorized>> {
+    // Consensus rules (§4.4) & (§4.5):
+    // - Canonical encoding is enforced here.
+    // - "Not small order" is enforced in SaplingVerificationContext::(check_spend()/check_output())
+    //   (located in zcash_proofs::sapling::verifier).
+    let cv = read_value_commitment(&mut reader)?;
+    // Consensus rules (§7.3) & (§7.4):
+    // - Canonical encoding is enforced here
+    let anchor = read_base(&mut reader, "anchor")?;
+    let nullifier = read_nullifier(&mut reader)?;
+    let rk = read_rk(&mut reader)?;
+    let zkproof = read_zkproof(&mut reader)?;
+    let spend_auth_sig = read_spend_auth_sig(&mut reader)?;
 
-    pub fn write_v4<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.cv.to_bytes())?;
-        writer.write_all(self.anchor.to_repr().as_ref())?;
-        writer.write_all(&self.nullifier.0)?;
-        self.rk.write(&mut writer)?;
-        writer.write_all(&self.zkproof)?;
-        self.spend_auth_sig.write(&mut writer)
-    }
+    Ok(SpendDescription::from_parts(
+        cv,
+        anchor,
+        nullifier,
+        rk,
+        zkproof,
+        spend_auth_sig,
+    ))
+}
 
-    pub fn write_v5_without_witness_data<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.cv.to_bytes())?;
-        writer.write_all(&self.nullifier.0)?;
-        self.rk.write(&mut writer)
+fn write_spend_v4<W: Write>(mut writer: W, spend: &SpendDescription<Authorized>) -> io::Result<()> {
+    writer.write_all(&spend.cv().to_bytes())?;
+    writer.write_all(spend.anchor().to_repr().as_ref())?;
+    writer.write_all(&spend.nullifier().0)?;
+    writer.write_all(&<[u8; 32]>::from(*spend.rk()))?;
+    writer.write_all(spend.zkproof())?;
+    writer.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))
+}
+
+fn write_spend_v5_without_witness_data<W: Write>(
+    mut writer: W,
+    spend: &SpendDescription<Authorized>,
+) -> io::Result<()> {
+    writer.write_all(&spend.cv().to_bytes())?;
+    writer.write_all(&spend.nullifier().0)?;
+    writer.write_all(&<[u8; 32]>::from(*spend.rk()))
+}
+
+fn read_spend_v5<R: Read>(mut reader: &mut R) -> io::Result<SpendDescriptionV5> {
+    let cv = read_value_commitment(&mut reader)?;
+    let nullifier = read_nullifier(&mut reader)?;
+    let rk = read_rk(&mut reader)?;
+
+    Ok(SpendDescriptionV5::from_parts(cv, nullifier, rk))
+}
+
+#[cfg(feature = "temporary-zcashd")]
+pub fn temporary_zcashd_read_output_v4<R: Read>(
+    mut reader: R,
+) -> io::Result<OutputDescription<GrothProofBytes>> {
+    read_output_v4(&mut reader)
+}
+
+fn read_output_v4<R: Read>(mut reader: &mut R) -> io::Result<OutputDescription<GrothProofBytes>> {
+    // Consensus rules (§4.5):
+    // - Canonical encoding is enforced here.
+    // - "Not small order" is enforced in SaplingVerificationContext::check_output()
+    //   (located in zcash_proofs::sapling::verifier).
+    let cv = read_value_commitment(&mut reader)?;
+
+    // Consensus rule (§7.4): Canonical encoding is enforced here
+    let cmu = read_cmu(&mut reader)?;
+
+    // Consensus rules (§4.5):
+    // - Canonical encoding is enforced in librustzcash_sapling_check_output by zcashd
+    // - "Not small order" is enforced in SaplingVerificationContext::check_output()
+    let mut ephemeral_key = EphemeralKeyBytes([0u8; 32]);
+    reader.read_exact(&mut ephemeral_key.0)?;
+
+    let mut enc_ciphertext = [0u8; ENC_CIPHERTEXT_SIZE];
+    let mut out_ciphertext = [0u8; OUT_CIPHERTEXT_SIZE];
+    reader.read_exact(&mut enc_ciphertext)?;
+    reader.read_exact(&mut out_ciphertext)?;
+
+    let zkproof = read_zkproof(&mut reader)?;
+
+    Ok(OutputDescription::from_parts(
+        cv,
+        cmu,
+        ephemeral_key,
+        enc_ciphertext,
+        out_ciphertext,
+        zkproof,
+    ))
+}
+
+#[cfg(feature = "temporary-zcashd")]
+pub fn temporary_zcashd_write_output_v4<W: Write>(
+    writer: W,
+    output: &OutputDescription<GrothProofBytes>,
+) -> io::Result<()> {
+    write_output_v4(writer, output)
+}
+
+pub(crate) fn write_output_v4<W: Write>(
+    mut writer: W,
+    output: &OutputDescription<GrothProofBytes>,
+) -> io::Result<()> {
+    writer.write_all(&output.cv().to_bytes())?;
+    writer.write_all(output.cmu().to_bytes().as_ref())?;
+    writer.write_all(output.ephemeral_key().as_ref())?;
+    writer.write_all(output.enc_ciphertext())?;
+    writer.write_all(output.out_ciphertext())?;
+    writer.write_all(output.zkproof())
+}
+
+fn write_output_v5_without_proof<W: Write>(
+    mut writer: W,
+    output: &OutputDescription<GrothProofBytes>,
+) -> io::Result<()> {
+    writer.write_all(&output.cv().to_bytes())?;
+    writer.write_all(output.cmu().to_bytes().as_ref())?;
+    writer.write_all(output.ephemeral_key().as_ref())?;
+    writer.write_all(output.enc_ciphertext())?;
+    writer.write_all(output.out_ciphertext())
+}
+
+fn read_output_v5<R: Read>(mut reader: &mut R) -> io::Result<OutputDescriptionV5> {
+    let cv = read_value_commitment(&mut reader)?;
+    let cmu = read_cmu(&mut reader)?;
+
+    // Consensus rules (§4.5):
+    // - Canonical encoding is enforced in librustzcash_sapling_check_output by zcashd
+    // - "Not small order" is enforced in SaplingVerificationContext::check_output()
+    let mut ephemeral_key = EphemeralKeyBytes([0u8; 32]);
+    reader.read_exact(&mut ephemeral_key.0)?;
+
+    let mut enc_ciphertext = [0u8; 580];
+    let mut out_ciphertext = [0u8; 80];
+    reader.read_exact(&mut enc_ciphertext)?;
+    reader.read_exact(&mut out_ciphertext)?;
+
+    Ok(OutputDescriptionV5::from_parts(
+        cv,
+        cmu,
+        ephemeral_key,
+        enc_ciphertext,
+        out_ciphertext,
+    ))
+}
+
+/// Reads the Sapling components of a v4 transaction.
+#[cfg(feature = "temporary-zcashd")]
+#[allow(clippy::type_complexity)]
+pub fn temporary_zcashd_read_v4_components<R: Read>(
+    reader: R,
+    tx_has_sapling: bool,
+) -> io::Result<(
+    Amount,
+    Vec<SpendDescription<Authorized>>,
+    Vec<OutputDescription<GrothProofBytes>>,
+)> {
+    read_v4_components(reader, tx_has_sapling)
+}
+
+/// Reads the Sapling components of a v4 transaction.
+#[allow(clippy::type_complexity)]
+pub(crate) fn read_v4_components<R: Read>(
+    mut reader: R,
+    tx_has_sapling: bool,
+) -> io::Result<(
+    Amount,
+    Vec<SpendDescription<Authorized>>,
+    Vec<OutputDescription<GrothProofBytes>>,
+)> {
+    if tx_has_sapling {
+        let vb = Transaction::read_amount(&mut reader)?;
+        #[allow(clippy::redundant_closure)]
+        let ss: Vec<SpendDescription<Authorized>> =
+            Vector::read(&mut reader, |r| read_spend_v4(r))?;
+        #[allow(clippy::redundant_closure)]
+        let so: Vec<OutputDescription<GrothProofBytes>> =
+            Vector::read(&mut reader, |r| read_output_v4(r))?;
+        Ok((vb, ss, so))
+    } else {
+        Ok((Amount::zero(), vec![], vec![]))
     }
 }
 
-#[derive(Clone)]
-pub struct SpendDescriptionV5 {
-    cv: ValueCommitment,
-    nullifier: Nullifier,
-    rk: PublicKey,
+/// Writes the Sapling components of a v4 transaction.
+#[cfg(feature = "temporary-zcashd")]
+pub fn temporary_zcashd_write_v4_components<W: Write>(
+    writer: W,
+    bundle: Option<&Bundle<Authorized, Amount>>,
+    tx_has_sapling: bool,
+) -> io::Result<()> {
+    write_v4_components(writer, bundle, tx_has_sapling)
 }
 
-impl SpendDescriptionV5 {
-    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let cv = read_value_commitment(&mut reader)?;
-        let nullifier = SpendDescription::read_nullifier(&mut reader)?;
-        let rk = SpendDescription::read_rk(&mut reader)?;
-
-        Ok(SpendDescriptionV5 { cv, nullifier, rk })
+/// Writes the Sapling components of a v4 transaction.
+pub(crate) fn write_v4_components<W: Write>(
+    mut writer: W,
+    bundle: Option<&Bundle<Authorized, Amount>>,
+    tx_has_sapling: bool,
+) -> io::Result<()> {
+    if tx_has_sapling {
+        writer.write_all(
+            &bundle
+                .map_or(Amount::zero(), |b| *b.value_balance())
+                .to_i64_le_bytes(),
+        )?;
+        Vector::write(
+            &mut writer,
+            bundle.map_or(&[], |b| b.shielded_spends()),
+            |w, e| write_spend_v4(w, e),
+        )?;
+        Vector::write(
+            &mut writer,
+            bundle.map_or(&[], |b| b.shielded_outputs()),
+            |w, e| write_output_v4(w, e),
+        )?;
+    } else if bundle.is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Sapling components may not be present if Sapling is not active.",
+        ));
     }
 
-    pub fn into_spend_description(
-        self,
-        anchor: bls12_381::Scalar,
-        zkproof: GrothProofBytes,
-        spend_auth_sig: Signature,
-    ) -> SpendDescription<Authorized> {
-        SpendDescription {
-            cv: self.cv,
-            anchor,
-            nullifier: self.nullifier,
-            rk: self.rk,
-            zkproof,
-            spend_auth_sig,
-        }
-    }
+    Ok(())
 }
 
-#[derive(Clone)]
-pub struct OutputDescription<Proof> {
-    cv: ValueCommitment,
-    cmu: ExtractedNoteCommitment,
-    ephemeral_key: EphemeralKeyBytes,
-    enc_ciphertext: [u8; 580],
-    out_ciphertext: [u8; 80],
-    zkproof: Proof,
-}
+/// Reads a [`Bundle`] from a v5 transaction format.
+#[allow(clippy::redundant_closure)]
+pub(crate) fn read_v5_bundle<R: Read>(
+    mut reader: R,
+) -> io::Result<Option<Bundle<Authorized, Amount>>> {
+    let sd_v5s = Vector::read(&mut reader, read_spend_v5)?;
+    let od_v5s = Vector::read(&mut reader, read_output_v5)?;
+    let n_spends = sd_v5s.len();
+    let n_outputs = od_v5s.len();
+    let value_balance = if n_spends > 0 || n_outputs > 0 {
+        Transaction::read_amount(&mut reader)?
+    } else {
+        Amount::zero()
+    };
 
-impl<Proof> OutputDescription<Proof> {
-    /// Returns the commitment to the value consumed by this output.
-    pub fn cv(&self) -> &ValueCommitment {
-        &self.cv
-    }
-
-    /// Returns the commitment to the new note being created.
-    pub fn cmu(&self) -> &ExtractedNoteCommitment {
-        &self.cmu
-    }
-
-    pub fn ephemeral_key(&self) -> &EphemeralKeyBytes {
-        &self.ephemeral_key
-    }
-
-    /// Returns the encrypted note ciphertext.
-    pub fn enc_ciphertext(&self) -> &[u8; 580] {
-        &self.enc_ciphertext
-    }
-
-    /// Returns the output recovery ciphertext.
-    pub fn out_ciphertext(&self) -> &[u8; 80] {
-        &self.out_ciphertext
-    }
-
-    /// Returns the proof for this output.
-    pub fn zkproof(&self) -> &Proof {
-        &self.zkproof
-    }
-
-    #[cfg(feature = "temporary-zcashd")]
-    pub fn temporary_zcashd_from_parts(
-        cv: ValueCommitment,
-        cmu: ExtractedNoteCommitment,
-        ephemeral_key: EphemeralKeyBytes,
-        enc_ciphertext: [u8; 580],
-        out_ciphertext: [u8; 80],
-        zkproof: Proof,
-    ) -> Self {
-        Self::from_parts(
-            cv,
-            cmu,
-            ephemeral_key,
-            enc_ciphertext,
-            out_ciphertext,
-            zkproof,
-        )
-    }
-
-    #[cfg(any(test, feature = "temporary-zcashd"))]
-    pub(crate) fn from_parts(
-        cv: ValueCommitment,
-        cmu: ExtractedNoteCommitment,
-        ephemeral_key: EphemeralKeyBytes,
-        enc_ciphertext: [u8; 580],
-        out_ciphertext: [u8; 80],
-        zkproof: Proof,
-    ) -> Self {
-        OutputDescription {
-            cv,
-            cmu,
-            ephemeral_key,
-            enc_ciphertext,
-            out_ciphertext,
-            zkproof,
-        }
-    }
-}
-
-#[cfg(test)]
-impl<Proof> OutputDescription<Proof> {
-    pub(crate) fn cv_mut(&mut self) -> &mut ValueCommitment {
-        &mut self.cv
-    }
-    pub(crate) fn cmu_mut(&mut self) -> &mut ExtractedNoteCommitment {
-        &mut self.cmu
-    }
-    pub(crate) fn ephemeral_key_mut(&mut self) -> &mut EphemeralKeyBytes {
-        &mut self.ephemeral_key
-    }
-    pub(crate) fn enc_ciphertext_mut(&mut self) -> &mut [u8; 580] {
-        &mut self.enc_ciphertext
-    }
-    pub(crate) fn out_ciphertext_mut(&mut self) -> &mut [u8; 80] {
-        &mut self.out_ciphertext
-    }
-}
-
-impl<Proof: DynamicUsage> DynamicUsage for OutputDescription<Proof> {
-    fn dynamic_usage(&self) -> usize {
-        self.zkproof.dynamic_usage()
-    }
-
-    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
-        self.zkproof.dynamic_usage_bounds()
-    }
-}
-
-impl<P: consensus::Parameters, A> ShieldedOutput<SaplingDomain<P>> for OutputDescription<A> {
-    fn ephemeral_key(&self) -> EphemeralKeyBytes {
-        self.ephemeral_key.clone()
-    }
-
-    fn cmstar_bytes(&self) -> [u8; 32] {
-        self.cmu.to_bytes()
-    }
-
-    fn enc_ciphertext(&self) -> Option<NoteCiphertextBytes> {
-        Some(NoteCiphertextBytes(self.enc_ciphertext))
-    }
-
-    fn enc_ciphertext_compact(&self) -> CompactNoteCiphertextBytes {
-        CompactNoteCiphertextBytes(
-            self.enc_ciphertext[0..COMPACT_NOTE_SIZE]
-                .try_into()
-                .unwrap(),
-        )
-    }
-}
-
-impl<A> std::fmt::Debug for OutputDescription<A> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(
-            f,
-            "OutputDescription(cv = {:?}, cmu = {:?}, ephemeral_key = {:?})",
-            self.cv, self.cmu, self.ephemeral_key
-        )
-    }
-}
-
-impl OutputDescription<GrothProofBytes> {
-    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        // Consensus rules (§4.5):
-        // - Canonical encoding is enforced here.
-        // - "Not small order" is enforced in SaplingVerificationContext::check_output()
-        //   (located in zcash_proofs::sapling::verifier).
-        let cv = read_value_commitment(&mut reader)?;
-
-        // Consensus rule (§7.4): Canonical encoding is enforced here
-        let cmu = read_cmu(&mut reader)?;
-
-        // Consensus rules (§4.5):
-        // - Canonical encoding is enforced in librustzcash_sapling_check_output by zcashd
-        // - "Not small order" is enforced in SaplingVerificationContext::check_output()
-        let mut ephemeral_key = EphemeralKeyBytes([0u8; 32]);
-        reader.read_exact(&mut ephemeral_key.0)?;
-
-        let mut enc_ciphertext = [0u8; 580];
-        let mut out_ciphertext = [0u8; 80];
-        reader.read_exact(&mut enc_ciphertext)?;
-        reader.read_exact(&mut out_ciphertext)?;
-
-        let zkproof = read_zkproof(&mut reader)?;
-
-        Ok(OutputDescription {
-            cv,
-            cmu,
-            ephemeral_key,
-            enc_ciphertext,
-            out_ciphertext,
-            zkproof,
-        })
-    }
-
-    pub fn write_v4<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.cv.to_bytes())?;
-        writer.write_all(self.cmu.to_bytes().as_ref())?;
-        writer.write_all(self.ephemeral_key.as_ref())?;
-        writer.write_all(&self.enc_ciphertext)?;
-        writer.write_all(&self.out_ciphertext)?;
-        writer.write_all(&self.zkproof)
-    }
-
-    pub fn write_v5_without_proof<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.cv.to_bytes())?;
-        writer.write_all(self.cmu.to_bytes().as_ref())?;
-        writer.write_all(self.ephemeral_key.as_ref())?;
-        writer.write_all(&self.enc_ciphertext)?;
-        writer.write_all(&self.out_ciphertext)
-    }
-}
-
-#[derive(Clone)]
-pub struct OutputDescriptionV5 {
-    cv: ValueCommitment,
-    cmu: ExtractedNoteCommitment,
-    ephemeral_key: EphemeralKeyBytes,
-    enc_ciphertext: [u8; 580],
-    out_ciphertext: [u8; 80],
-}
-
-memuse::impl_no_dynamic_usage!(OutputDescriptionV5);
-
-impl OutputDescriptionV5 {
-    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let cv = read_value_commitment(&mut reader)?;
-        let cmu = read_cmu(&mut reader)?;
-
-        // Consensus rules (§4.5):
-        // - Canonical encoding is enforced in librustzcash_sapling_check_output by zcashd
-        // - "Not small order" is enforced in SaplingVerificationContext::check_output()
-        let mut ephemeral_key = EphemeralKeyBytes([0u8; 32]);
-        reader.read_exact(&mut ephemeral_key.0)?;
-
-        let mut enc_ciphertext = [0u8; 580];
-        let mut out_ciphertext = [0u8; 80];
-        reader.read_exact(&mut enc_ciphertext)?;
-        reader.read_exact(&mut out_ciphertext)?;
-
-        Ok(OutputDescriptionV5 {
-            cv,
-            cmu,
-            ephemeral_key,
-            enc_ciphertext,
-            out_ciphertext,
-        })
-    }
-
-    pub fn into_output_description(
-        self,
-        zkproof: GrothProofBytes,
-    ) -> OutputDescription<GrothProofBytes> {
-        OutputDescription {
-            cv: self.cv,
-            cmu: self.cmu,
-            ephemeral_key: self.ephemeral_key,
-            enc_ciphertext: self.enc_ciphertext,
-            out_ciphertext: self.out_ciphertext,
-            zkproof,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct CompactOutputDescription {
-    pub ephemeral_key: EphemeralKeyBytes,
-    pub cmu: ExtractedNoteCommitment,
-    pub enc_ciphertext: [u8; COMPACT_NOTE_SIZE],
-}
-
-memuse::impl_no_dynamic_usage!(CompactOutputDescription);
-
-impl<A> From<OutputDescription<A>> for CompactOutputDescription {
-    fn from(out: OutputDescription<A>) -> CompactOutputDescription {
-        CompactOutputDescription {
-            ephemeral_key: out.ephemeral_key,
-            cmu: out.cmu,
-            enc_ciphertext: out.enc_ciphertext[..COMPACT_NOTE_SIZE].try_into().unwrap(),
-        }
-    }
-}
-
-impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>> for CompactOutputDescription {
-    fn ephemeral_key(&self) -> EphemeralKeyBytes {
-        self.ephemeral_key.clone()
-    }
-
-    fn cmstar_bytes(&self) -> [u8; 32] {
-        self.cmu.to_bytes()
-    }
-
-    fn enc_ciphertext(&self) -> Option<NoteCiphertextBytes> {
+    let anchor = if n_spends > 0 {
+        Some(read_base(&mut reader, "anchor")?)
+    } else {
         None
+    };
+
+    let v_spend_proofs = Array::read(&mut reader, n_spends, |r| read_zkproof(r))?;
+    let v_spend_auth_sigs = Array::read(&mut reader, n_spends, |r| read_spend_auth_sig(r))?;
+    let v_output_proofs = Array::read(&mut reader, n_outputs, |r| read_zkproof(r))?;
+
+    let binding_sig = if n_spends > 0 || n_outputs > 0 {
+        let mut sig = [0; 64];
+        reader.read_exact(&mut sig)?;
+        Some(redjubjub::Signature::from(sig))
+    } else {
+        None
+    };
+
+    let shielded_spends = sd_v5s
+        .into_iter()
+        .zip(
+            v_spend_proofs
+                .into_iter()
+                .zip(v_spend_auth_sigs.into_iter()),
+        )
+        .map(|(sd_5, (zkproof, spend_auth_sig))| {
+            // the following `unwrap` is safe because we know n_spends > 0.
+            sd_5.into_spend_description(anchor.unwrap(), zkproof, spend_auth_sig)
+        })
+        .collect();
+
+    let shielded_outputs = od_v5s
+        .into_iter()
+        .zip(v_output_proofs.into_iter())
+        .map(|(od_5, zkproof)| od_5.into_output_description(zkproof))
+        .collect();
+
+    Ok(binding_sig.and_then(|binding_sig| {
+        Bundle::from_parts(
+            shielded_spends,
+            shielded_outputs,
+            value_balance,
+            Authorized { binding_sig },
+        )
+    }))
+}
+
+/// Writes a [`Bundle`] in the v5 transaction format.
+pub(crate) fn write_v5_bundle<W: Write>(
+    mut writer: W,
+    sapling_bundle: Option<&Bundle<Authorized, Amount>>,
+) -> io::Result<()> {
+    if let Some(bundle) = sapling_bundle {
+        Vector::write(&mut writer, bundle.shielded_spends(), |w, e| {
+            write_spend_v5_without_witness_data(w, e)
+        })?;
+
+        Vector::write(&mut writer, bundle.shielded_outputs(), |w, e| {
+            write_output_v5_without_proof(w, e)
+        })?;
+
+        if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
+            writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
+        }
+        if !bundle.shielded_spends().is_empty() {
+            writer.write_all(bundle.shielded_spends()[0].anchor().to_repr().as_ref())?;
+        }
+
+        Array::write(
+            &mut writer,
+            bundle.shielded_spends().iter().map(|s| &s.zkproof()[..]),
+            |w, e| w.write_all(e),
+        )?;
+        Array::write(
+            &mut writer,
+            bundle.shielded_spends().iter().map(|s| s.spend_auth_sig()),
+            |w, e| w.write_all(&<[u8; 64]>::from(**e)),
+        )?;
+
+        Array::write(
+            &mut writer,
+            bundle.shielded_outputs().iter().map(|s| &s.zkproof()[..]),
+            |w, e| w.write_all(e),
+        )?;
+
+        if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
+            writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
+        }
+    } else {
+        CompactSize::write(&mut writer, 0)?;
+        CompactSize::write(&mut writer, 0)?;
     }
 
-    fn enc_ciphertext_compact(&self) -> CompactNoteCiphertextBytes {
-        CompactNoteCiphertextBytes(self.enc_ciphertext)
-    }
+    Ok(())
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
-    use ff::Field;
-    use group::{Group, GroupEncoding};
-    use proptest::collection::vec;
     use proptest::prelude::*;
-    use rand::{rngs::StdRng, SeedableRng};
 
     use crate::{
-        constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
-        sapling::{
-            note::ExtractedNoteCommitment,
-            redjubjub::{PrivateKey, PublicKey},
-            value::{
-                testing::{arb_note_value_bounded, arb_trapdoor},
-                ValueCommitment, MAX_NOTE_VALUE,
-            },
-            Nullifier,
-        },
+        sapling::bundle::{testing as t_sap, Authorized, Bundle},
         transaction::{
-            components::{amount::testing::arb_amount, GROTH_PROOF_SIZE},
+            components::{amount::testing::arb_amount, Amount},
             TxVersion,
         },
     };
 
-    use super::{Authorized, Bundle, GrothProofBytes, OutputDescription, SpendDescription};
-
     prop_compose! {
-        fn arb_extended_point()(rng_seed in prop::array::uniform32(any::<u8>())) -> jubjub::ExtendedPoint {
-            let mut rng = StdRng::from_seed(rng_seed);
-            let scalar = jubjub::Scalar::random(&mut rng);
-            jubjub::ExtendedPoint::generator() * scalar
-        }
-    }
-
-    prop_compose! {
-        /// produce a spend description with invalid data (useful only for serialization
-        /// roundtrip testing).
-        fn arb_spend_description(n_spends: usize)(
-            value in arb_note_value_bounded(MAX_NOTE_VALUE.checked_div(n_spends as u64).unwrap_or(0)),
-            rcv in arb_trapdoor(),
-            anchor in vec(any::<u8>(), 64)
-                .prop_map(|v| <[u8;64]>::try_from(v.as_slice()).unwrap())
-                .prop_map(|v| bls12_381::Scalar::from_bytes_wide(&v)),
-            nullifier in prop::array::uniform32(any::<u8>())
-                .prop_map(|v| Nullifier::from_slice(&v).unwrap()),
-            zkproof in vec(any::<u8>(), GROTH_PROOF_SIZE)
-                .prop_map(|v| <[u8;GROTH_PROOF_SIZE]>::try_from(v.as_slice()).unwrap()),
-            rng_seed in prop::array::uniform32(prop::num::u8::ANY),
-            fake_sighash_bytes in prop::array::uniform32(prop::num::u8::ANY),
-        ) -> SpendDescription<Authorized> {
-            let mut rng = StdRng::from_seed(rng_seed);
-            let sk1 = PrivateKey(jubjub::Fr::random(&mut rng));
-            let rk = PublicKey::from_private(&sk1, SPENDING_KEY_GENERATOR);
-            let cv = ValueCommitment::derive(value, rcv);
-            SpendDescription {
-                cv,
-                anchor,
-                nullifier,
-                rk,
-                zkproof,
-                spend_auth_sig: sk1.sign(&fake_sighash_bytes, &mut rng, SPENDING_KEY_GENERATOR),
-            }
-        }
-    }
-
-    prop_compose! {
-        /// produce an output description with invalid data (useful only for serialization
-        /// roundtrip testing).
-        pub fn arb_output_description(n_outputs: usize)(
-            value in arb_note_value_bounded(MAX_NOTE_VALUE.checked_div(n_outputs as u64).unwrap_or(0)),
-            rcv in arb_trapdoor(),
-            cmu in vec(any::<u8>(), 64)
-                .prop_map(|v| <[u8;64]>::try_from(v.as_slice()).unwrap())
-                .prop_map(|v| bls12_381::Scalar::from_bytes_wide(&v)),
-            enc_ciphertext in vec(any::<u8>(), 580)
-                .prop_map(|v| <[u8;580]>::try_from(v.as_slice()).unwrap()),
-            epk in arb_extended_point(),
-            out_ciphertext in vec(any::<u8>(), 80)
-                .prop_map(|v| <[u8;80]>::try_from(v.as_slice()).unwrap()),
-            zkproof in vec(any::<u8>(), GROTH_PROOF_SIZE)
-                .prop_map(|v| <[u8;GROTH_PROOF_SIZE]>::try_from(v.as_slice()).unwrap()),
-        ) -> OutputDescription<GrothProofBytes> {
-            let cv = ValueCommitment::derive(value, rcv);
-            let cmu = ExtractedNoteCommitment::from_bytes(&cmu.to_bytes()).unwrap();
-            OutputDescription {
-                cv,
-                cmu,
-                ephemeral_key: epk.to_bytes().into(),
-                enc_ciphertext,
-                out_ciphertext,
-                zkproof,
-            }
-        }
-    }
-
-    prop_compose! {
-        pub fn arb_bundle()(
-            n_spends in 0usize..30,
-            n_outputs in 0usize..30,
+        fn arb_bundle()(
+            value_balance in arb_amount()
         )(
-            shielded_spends in vec(arb_spend_description(n_spends), n_spends),
-            shielded_outputs in vec(arb_output_description(n_outputs), n_outputs),
-            value_balance in arb_amount(),
-            rng_seed in prop::array::uniform32(prop::num::u8::ANY),
-            fake_bvk_bytes in prop::array::uniform32(prop::num::u8::ANY),
-        ) -> Option<Bundle<Authorized>> {
-            if shielded_spends.is_empty() && shielded_outputs.is_empty() {
-                None
-            } else {
-                let mut rng = StdRng::from_seed(rng_seed);
-                let bsk = PrivateKey(jubjub::Fr::random(&mut rng));
-
-                Some(
-                    Bundle {
-                        shielded_spends,
-                        shielded_outputs,
-                        value_balance,
-                        authorization: Authorized { binding_sig: bsk.sign(&fake_bvk_bytes, &mut rng, VALUE_COMMITMENT_RANDOMNESS_GENERATOR) },
-                    }
-                )
-            }
+            bundle in t_sap::arb_bundle(value_balance)
+        ) -> Option<Bundle<Authorized, Amount>> {
+            bundle
         }
     }
 
     pub fn arb_bundle_for_version(
         v: TxVersion,
-    ) -> impl Strategy<Value = Option<Bundle<Authorized>>> {
+    ) -> impl Strategy<Value = Option<Bundle<Authorized, Amount>>> {
         if v.has_sapling() {
             Strategy::boxed(arb_bundle())
         } else {

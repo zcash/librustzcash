@@ -2,31 +2,80 @@ use std::fmt;
 
 use zcash_primitives::{
     consensus::{self, BlockHeight},
+    memo::MemoBytes,
     transaction::{
         components::{
-            amount::{Amount, BalanceError},
-            sapling::fees as sapling,
-            transparent::fees as transparent,
+            amount::{BalanceError, NonNegativeAmount},
             OutPoint,
         },
-        fees::FeeRule,
+        fees::{transparent, FeeRule},
     },
 };
 
+use crate::ShieldedProtocol;
+
+pub(crate) mod common;
 pub mod fixed;
+#[cfg(feature = "orchard")]
+pub mod orchard;
+pub mod sapling;
+pub mod standard;
 pub mod zip317;
 
 /// A proposed change amount and output pool.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ChangeValue {
-    Sapling(Amount),
+pub struct ChangeValue {
+    output_pool: ShieldedProtocol,
+    value: NonNegativeAmount,
+    memo: Option<MemoBytes>,
 }
 
 impl ChangeValue {
-    pub fn value(&self) -> Amount {
-        match self {
-            ChangeValue::Sapling(value) => *value,
+    /// Constructs a new change value from its constituent parts.
+    pub fn new(
+        output_pool: ShieldedProtocol,
+        value: NonNegativeAmount,
+        memo: Option<MemoBytes>,
+    ) -> Self {
+        Self {
+            output_pool,
+            value,
+            memo,
         }
+    }
+
+    /// Constructs a new change value that will be created as a Sapling output.
+    pub fn sapling(value: NonNegativeAmount, memo: Option<MemoBytes>) -> Self {
+        Self {
+            output_pool: ShieldedProtocol::Sapling,
+            value,
+            memo,
+        }
+    }
+
+    /// Constructs a new change value that will be created as an Orchard output.
+    #[cfg(feature = "orchard")]
+    pub fn orchard(value: NonNegativeAmount, memo: Option<MemoBytes>) -> Self {
+        Self {
+            output_pool: ShieldedProtocol::Orchard,
+            value,
+            memo,
+        }
+    }
+
+    /// Returns the pool to which the change output should be sent.
+    pub fn output_pool(&self) -> ShieldedProtocol {
+        self.output_pool
+    }
+
+    /// Returns the value of the change output to be created, in zatoshis.
+    pub fn value(&self) -> NonNegativeAmount {
+        self.value
+    }
+
+    /// Returns the memo to be associated with the change output.
+    pub fn memo(&self) -> Option<&MemoBytes> {
+        self.memo.as_ref()
     }
 }
 
@@ -36,38 +85,46 @@ impl ChangeValue {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransactionBalance {
     proposed_change: Vec<ChangeValue>,
-    fee_required: Amount,
-    total: Amount,
+    fee_required: NonNegativeAmount,
+
+    // A cache for the sum of proposed change and fee; we compute it on construction anyway, so we
+    // cache the resulting value.
+    total: NonNegativeAmount,
 }
 
 impl TransactionBalance {
     /// Constructs a new balance from its constituent parts.
-    pub fn new(proposed_change: Vec<ChangeValue>, fee_required: Amount) -> Option<Self> {
-        proposed_change
+    pub fn new(
+        proposed_change: Vec<ChangeValue>,
+        fee_required: NonNegativeAmount,
+    ) -> Result<Self, ()> {
+        let total = proposed_change
             .iter()
-            .map(|v| v.value())
-            .chain(Some(fee_required))
-            .sum::<Option<Amount>>()
-            .map(|total| TransactionBalance {
-                proposed_change,
-                fee_required,
-                total,
-            })
+            .map(|c| c.value())
+            .chain(Some(fee_required).into_iter())
+            .sum::<Option<NonNegativeAmount>>()
+            .ok_or(())?;
+
+        Ok(Self {
+            proposed_change,
+            fee_required,
+            total,
+        })
     }
 
-    /// The change values proposed by the [`ChangeStrategy`] that computed this balance.  
+    /// The change values proposed by the [`ChangeStrategy`] that computed this balance.
     pub fn proposed_change(&self) -> &[ChangeValue] {
         &self.proposed_change
     }
 
     /// Returns the fee computed for the transaction, assuming that the suggested
     /// change outputs are added to the transaction.
-    pub fn fee_required(&self) -> Amount {
+    pub fn fee_required(&self) -> NonNegativeAmount {
         self.fee_required
     }
 
     /// Returns the sum of the proposed change outputs and the required fee.
-    pub fn total(&self) -> Amount {
+    pub fn total(&self) -> NonNegativeAmount {
         self.total
     }
 }
@@ -79,10 +136,10 @@ pub enum ChangeError<E, NoteRefT> {
     /// required outputs and fees.
     InsufficientFunds {
         /// The total of the inputs provided to change selection
-        available: Amount,
+        available: NonNegativeAmount,
         /// The total amount of input value required to fund the requested outputs,
         /// including the required fees.
-        required: Amount,
+        required: NonNegativeAmount,
     },
     /// Some of the inputs provided to the transaction were determined to currently have no
     /// economic value (i.e. their inclusion in a transaction causes fees to rise in an amount
@@ -90,11 +147,43 @@ pub enum ChangeError<E, NoteRefT> {
     DustInputs {
         /// The outpoints corresponding to transparent inputs having no current economic value.
         transparent: Vec<OutPoint>,
-        /// The identifiers for Sapling inputs having not current economic value
+        /// The identifiers for Sapling inputs having no current economic value
         sapling: Vec<NoteRefT>,
+        /// The identifiers for Orchard inputs having no current economic value
+        #[cfg(feature = "orchard")]
+        orchard: Vec<NoteRefT>,
     },
     /// An error occurred that was specific to the change selection strategy in use.
     StrategyError(E),
+    /// The proposed bundle structure would violate bundle type construction rules.
+    BundleError(&'static str),
+}
+
+impl<E, NoteRefT> ChangeError<E, NoteRefT> {
+    pub(crate) fn map<E0, F: FnOnce(E) -> E0>(self, f: F) -> ChangeError<E0, NoteRefT> {
+        match self {
+            ChangeError::InsufficientFunds {
+                available,
+                required,
+            } => ChangeError::InsufficientFunds {
+                available,
+                required,
+            },
+            ChangeError::DustInputs {
+                transparent,
+                sapling,
+                #[cfg(feature = "orchard")]
+                orchard,
+            } => ChangeError::DustInputs {
+                transparent,
+                sapling,
+                #[cfg(feature = "orchard")]
+                orchard,
+            },
+            ChangeError::StrategyError(e) => ChangeError::StrategyError(f(e)),
+            ChangeError::BundleError(e) => ChangeError::BundleError(e),
+        }
+    }
 }
 
 impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
@@ -106,19 +195,37 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
             } => write!(
                 f,
                 "Insufficient funds: required {} zatoshis, but only {} zatoshis were available.",
-                i64::from(required),
-                i64::from(available)
+                u64::from(*required),
+                u64::from(*available)
             ),
             ChangeError::DustInputs {
                 transparent,
                 sapling,
+                #[cfg(feature = "orchard")]
+                orchard,
             } => {
+                #[cfg(feature = "orchard")]
+                let orchard_len = orchard.len();
+                #[cfg(not(feature = "orchard"))]
+                let orchard_len = 0;
+
                 // we can't encode the UA to its string representation because we
                 // don't have network parameters here
-                write!(f, "Insufficient funds: {} dust inputs were present, but would cost more to spend than they are worth.", transparent.len() + sapling.len())
+                write!(
+                    f,
+                    "Insufficient funds: {} dust inputs were present, but would cost more to spend than they are worth.",
+                    transparent.len() + sapling.len() + orchard_len,
+                )
             }
             ChangeError::StrategyError(err) => {
                 write!(f, "{}", err)
+            }
+            ChangeError::BundleError(err) => {
+                write!(
+                    f,
+                    "The proposed transaction structure violates bundle type constraints: {}",
+                    err
+                )
             }
         }
     }
@@ -147,7 +254,7 @@ pub enum DustAction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DustOutputPolicy {
     action: DustAction,
-    dust_threshold: Option<Amount>,
+    dust_threshold: Option<NonNegativeAmount>,
 }
 
 impl DustOutputPolicy {
@@ -157,7 +264,7 @@ impl DustOutputPolicy {
     /// of the dust threshold to the change strategy that is evaluating the strategy; this
     /// recommended, but an explicit value (including zero) may be provided to explicitly
     /// override the determination of the change strategy.
-    pub fn new(action: DustAction, dust_threshold: Option<Amount>) -> Self {
+    pub fn new(action: DustAction, dust_threshold: Option<NonNegativeAmount>) -> Self {
         Self {
             action,
             dust_threshold,
@@ -170,7 +277,7 @@ impl DustOutputPolicy {
     }
     /// Returns a value that will be used to override the dust determination logic of the
     /// change policy, if any.
-    pub fn dust_threshold(&self) -> Option<Amount> {
+    pub fn dust_threshold(&self) -> Option<NonNegativeAmount> {
         self.dust_threshold
     }
 }
@@ -205,20 +312,25 @@ pub trait ChangeStrategy {
         target_height: BlockHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
-        sapling_inputs: &[impl sapling::InputView<NoteRefT>],
-        sapling_outputs: &[impl sapling::OutputView],
+        sapling: &impl sapling::BundleView<NoteRefT>,
+        #[cfg(feature = "orchard")] orchard: &impl orchard::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use zcash_primitives::transaction::components::{
-        amount::Amount,
-        sapling::fees as sapling,
-        transparent::{fees as transparent, OutPoint, TxOut},
+    use zcash_primitives::transaction::{
+        components::{
+            amount::NonNegativeAmount,
+            transparent::{OutPoint, TxOut},
+        },
+        fees::transparent,
     };
 
+    use super::sapling;
+
+    #[derive(Debug)]
     pub(crate) struct TestTransparentInput {
         pub outpoint: OutPoint,
         pub coin: TxOut,
@@ -235,14 +347,14 @@ pub(crate) mod tests {
 
     pub(crate) struct TestSaplingInput {
         pub note_id: u32,
-        pub value: Amount,
+        pub value: NonNegativeAmount,
     }
 
     impl sapling::InputView<u32> for TestSaplingInput {
         fn note_id(&self) -> &u32 {
             &self.note_id
         }
-        fn value(&self) -> Amount {
+        fn value(&self) -> NonNegativeAmount {
             self.value
         }
     }

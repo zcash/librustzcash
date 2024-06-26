@@ -9,14 +9,7 @@ use uuid::Uuid;
 use crate::wallet::init::WalletMigrationError;
 
 /// Identifier for the migration that performs the initial setup of the wallet database.
-///
-/// bc4f5e57-d600-4b6c-990f-b3538f0bfce1,
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
-    0xbc4f5e57,
-    0xd600,
-    0x4b6c,
-    b"\x99\x0f\xb3\x53\x8f\x0b\xfc\xe1",
-);
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xbc4f5e57_d600_4b6c_990f_b3538f0bfce1);
 
 pub(super) struct Migration;
 
@@ -111,6 +104,6 @@ impl RusqliteMigration for Migration {
     fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         // We should never down-migrate the first migration, as that can irreversibly
         // destroy data.
-        panic!("Cannot revert the initial migration.");
+        Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
     }
 }

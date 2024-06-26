@@ -1,22 +1,22 @@
 use crate::{
     consensus::{self, BlockHeight},
-    transaction::components::{amount::Amount, transparent::fees as transparent},
-    transaction::fees::zip317,
+    transaction::components::amount::NonNegativeAmount,
+    transaction::fees::{transparent, zip317},
 };
 
-#[cfg(feature = "zfuture")]
-use crate::transaction::components::tze::fees as tze;
+#[cfg(zcash_unstable = "zfuture")]
+use crate::transaction::fees::tze;
 
 /// A fee rule that always returns a fixed fee, irrespective of the structure of
 /// the transaction being constructed.
 #[derive(Clone, Copy, Debug)]
 pub struct FeeRule {
-    fixed_fee: Amount,
+    fixed_fee: NonNegativeAmount,
 }
 
 impl FeeRule {
     /// Creates a new nonstandard fixed fee rule with the specified fixed fee.
-    pub fn non_standard(fixed_fee: Amount) -> Self {
+    pub fn non_standard(fixed_fee: NonNegativeAmount) -> Self {
         Self { fixed_fee }
     }
 
@@ -40,7 +40,7 @@ impl FeeRule {
     }
 
     /// Returns the fixed fee amount which which this rule was configured.
-    pub fn fixed_fee(&self) -> Amount {
+    pub fn fixed_fee(&self) -> NonNegativeAmount {
         self.fixed_fee
     }
 }
@@ -56,12 +56,13 @@ impl super::FeeRule for FeeRule {
         _transparent_outputs: &[impl transparent::OutputView],
         _sapling_input_count: usize,
         _sapling_output_count: usize,
-    ) -> Result<Amount, Self::Error> {
+        _orchard_action_count: usize,
+    ) -> Result<NonNegativeAmount, Self::Error> {
         Ok(self.fixed_fee)
     }
 }
 
-#[cfg(feature = "zfuture")]
+#[cfg(zcash_unstable = "zfuture")]
 impl super::FutureFeeRule for FeeRule {
     fn fee_required_zfuture<P: consensus::Parameters>(
         &self,
@@ -71,9 +72,10 @@ impl super::FutureFeeRule for FeeRule {
         _transparent_outputs: &[impl transparent::OutputView],
         _sapling_input_count: usize,
         _sapling_output_count: usize,
+        _orchard_action_count: usize,
         _tze_inputs: &[impl tze::InputView],
         _tze_outputs: &[impl tze::OutputView],
-    ) -> Result<Amount, Self::Error> {
+    ) -> Result<NonNegativeAmount, Self::Error> {
         Ok(self.fixed_fee)
     }
 }

@@ -6,11 +6,10 @@ use crate::{
     legacy::{Script, TransparentAddress},
     transaction::{
         components::{
-            amount::{Amount, BalanceError},
-            transparent::{self, fees, Authorization, Authorized, Bundle, TxIn, TxOut},
+            amount::{Amount, BalanceError, NonNegativeAmount},
+            transparent::{self, Authorization, Authorized, Bundle, TxIn, TxOut},
         },
         sighash::TransparentAuthorizingContext,
-        OutPoint,
     },
 };
 
@@ -18,6 +17,7 @@ use crate::{
 use {
     crate::transaction::{
         self as tx,
+        components::transparent::OutPoint,
         sighash::{signature_hash, SignableInput, SIGHASH_ALL},
         TransactionData, TxDigests,
     },
@@ -40,24 +40,9 @@ impl fmt::Display for Error {
     }
 }
 
-/// An uninhabited type that allows the type of [`TransparentBuilder::inputs`]
-/// to resolve when the transparent-inputs feature is not turned on.
-#[cfg(not(feature = "transparent-inputs"))]
-enum InvalidTransparentInput {}
-
-#[cfg(not(feature = "transparent-inputs"))]
-impl fees::InputView for InvalidTransparentInput {
-    fn outpoint(&self) -> &OutPoint {
-        panic!("transparent-inputs feature flag is not enabled.");
-    }
-    fn coin(&self) -> &TxOut {
-        panic!("transparent-inputs feature flag is not enabled.");
-    }
-}
-
 #[cfg(feature = "transparent-inputs")]
 #[derive(Debug, Clone)]
-struct TransparentInputInfo {
+pub struct TransparentInputInfo {
     sk: secp256k1::SecretKey,
     pubkey: [u8; secp256k1::constants::PUBLIC_KEY_SIZE],
     utxo: OutPoint,
@@ -65,12 +50,12 @@ struct TransparentInputInfo {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl fees::InputView for TransparentInputInfo {
-    fn outpoint(&self) -> &OutPoint {
+impl TransparentInputInfo {
+    pub fn outpoint(&self) -> &OutPoint {
         &self.utxo
     }
 
-    fn coin(&self) -> &TxOut {
+    pub fn coin(&self) -> &TxOut {
         &self.coin
     }
 }
@@ -109,19 +94,13 @@ impl TransparentBuilder {
 
     /// Returns the list of transparent inputs that will be consumed by the transaction being
     /// constructed.
-    pub fn inputs(&self) -> &[impl fees::InputView] {
-        #[cfg(feature = "transparent-inputs")]
-        return &self.inputs;
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        {
-            let invalid: &[InvalidTransparentInput] = &[];
-            invalid
-        }
+    #[cfg(feature = "transparent-inputs")]
+    pub fn inputs(&self) -> &[TransparentInputInfo] {
+        &self.inputs
     }
 
     /// Returns the transparent outputs that will be produced by the transaction being constructed.
-    pub fn outputs(&self) -> &[impl fees::OutputView] {
+    pub fn outputs(&self) -> &[TxOut] {
         &self.vout
     }
 
@@ -133,16 +112,12 @@ impl TransparentBuilder {
         utxo: OutPoint,
         coin: TxOut,
     ) -> Result<(), Error> {
-        if coin.value.is_negative() {
-            return Err(Error::InvalidAmount);
-        }
-
         // Ensure that the RIPEMD-160 digest of the public key associated with the
         // provided secret key matches that of the address to which the provided
         // output may be spent.
         let pubkey = secp256k1::PublicKey::from_secret_key(&self.secp, &sk).serialize();
         match coin.script_pubkey.address() {
-            Some(TransparentAddress::PublicKey(hash)) => {
+            Some(TransparentAddress::PublicKeyHash(hash)) => {
                 use ripemd::Ripemd160;
                 use sha2::Sha256;
 
@@ -163,11 +138,11 @@ impl TransparentBuilder {
         Ok(())
     }
 
-    pub fn add_output(&mut self, to: &TransparentAddress, value: Amount) -> Result<(), Error> {
-        if value.is_negative() {
-            return Err(Error::InvalidAmount);
-        }
-
+    pub fn add_output(
+        &mut self,
+        to: &TransparentAddress,
+        value: NonNegativeAmount,
+    ) -> Result<(), Error> {
         self.vout.push(TxOut {
             value,
             script_pubkey: to.script(),
@@ -182,20 +157,20 @@ impl TransparentBuilder {
             .inputs
             .iter()
             .map(|input| input.coin.value)
-            .sum::<Option<Amount>>()
+            .sum::<Option<NonNegativeAmount>>()
             .ok_or(BalanceError::Overflow)?;
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let input_sum = Amount::zero();
+        let input_sum = NonNegativeAmount::ZERO;
 
         let output_sum = self
             .vout
             .iter()
             .map(|vo| vo.value)
-            .sum::<Option<Amount>>()
+            .sum::<Option<NonNegativeAmount>>()
             .ok_or(BalanceError::Overflow)?;
 
-        (input_sum - output_sum).ok_or(BalanceError::Underflow)
+        (Amount::from(input_sum) - Amount::from(output_sum)).ok_or(BalanceError::Underflow)
     }
 
     pub fn build(self) -> Option<transparent::Bundle<Unauthorized>> {
@@ -228,7 +203,6 @@ impl TransparentBuilder {
 
 impl TxIn<Unauthorized> {
     #[cfg(feature = "transparent-inputs")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "transparent-inputs")))]
     pub fn new(prevout: OutPoint) -> Self {
         TxIn {
             prevout,
@@ -240,7 +214,7 @@ impl TxIn<Unauthorized> {
 
 #[cfg(not(feature = "transparent-inputs"))]
 impl TransparentAuthorizingContext for Unauthorized {
-    fn input_amounts(&self) -> Vec<Amount> {
+    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
         vec![]
     }
 
@@ -251,7 +225,7 @@ impl TransparentAuthorizingContext for Unauthorized {
 
 #[cfg(feature = "transparent-inputs")]
 impl TransparentAuthorizingContext for Unauthorized {
-    fn input_amounts(&self) -> Vec<Amount> {
+    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
         return self.inputs.iter().map(|txin| txin.coin.value).collect();
     }
 

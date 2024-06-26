@@ -1,0 +1,238 @@
+
+# cargo-vet audits file
+
+[criteria.crypto-reviewed]
+description = "The cryptographic code in this crate has been reviewed for correctness by a member of a designated set of cryptography experts within the project."
+
+[criteria.license-reviewed]
+description = "The license of this crate has been reviewed for compatibility with its usage in this repository."
+
+[audits]
+
+[[trusted.equihash]]
+criteria = "safe-to-deploy"
+user-id = 6289 # str4d
+start = "2020-06-26"
+end = "2025-04-22"
+
+[[trusted.f4jumble]]
+criteria = ["safe-to-deploy", "crypto-reviewed"]
+user-id = 6289 # str4d
+start = "2021-09-22"
+end = "2025-04-22"
+
+[[trusted.halo2_gadgets]]
+criteria = ["safe-to-deploy", "crypto-reviewed"]
+user-id = 1244 # ebfull
+start = "2022-05-10"
+end = "2025-04-22"
+
+[[trusted.halo2_legacy_pdqsort]]
+criteria = ["safe-to-deploy", "crypto-reviewed"]
+user-id = 199950 # Daira Emma Hopwood (daira)
+start = "2023-02-24"
+end = "2025-04-22"
+
+[[trusted.halo2_proofs]]
+criteria = ["safe-to-deploy", "crypto-reviewed"]
+user-id = 1244 # ebfull
+start = "2022-05-10"
+end = "2025-04-22"
+
+[[trusted.incrementalmerkletree]]
+criteria = "safe-to-deploy"
+user-id = 6289 # str4d
+start = "2021-12-17"
+end = "2025-04-22"
+
+[[trusted.incrementalmerkletree]]
+criteria = "safe-to-deploy"
+user-id = 1244 # ebfull
+start = "2021-06-24"
+end = "2025-04-22"
+
+[[trusted.incrementalmerkletree]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2023-02-28"
+end = "2025-04-22"
+
+[[trusted.orchard]]
+criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
+user-id = 6289 # str4d
+start = "2021-01-07"
+end = "2025-04-22"
+
+[[trusted.orchard]]
+criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
+user-id = 1244 # ebfull
+start = "2022-10-19"
+end = "2025-04-22"
+
+[[trusted.sapling-crypto]]
+criteria = ["safe-to-deploy", "crypto-reviewed"]
+user-id = 6289 # str4d
+start = "2024-01-26"
+end = "2025-04-22"
+
+[[trusted.shardtree]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2022-12-15"
+end = "2025-04-22"
+
+[[trusted.windows-sys]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-11-15"
+end = "2025-04-22"
+
+[[trusted.windows-targets]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-09"
+end = "2025-04-22"
+
+[[trusted.windows_aarch64_gnullvm]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-01"
+end = "2025-04-22"
+
+[[trusted.windows_aarch64_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-11-05"
+end = "2025-04-22"
+
+[[trusted.windows_i686_gnu]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-28"
+end = "2025-04-22"
+
+[[trusted.windows_i686_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-27"
+end = "2025-04-22"
+
+[[trusted.windows_x86_64_gnu]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-28"
+end = "2025-04-22"
+
+[[trusted.windows_x86_64_gnullvm]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-01"
+end = "2025-04-22"
+
+[[trusted.windows_x86_64_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-27"
+end = "2025-04-22"
+
+[[trusted.zcash_address]]
+criteria = "safe-to-deploy"
+user-id = 1244 # ebfull
+start = "2022-10-19"
+end = "2025-04-22"
+
+[[trusted.zcash_address]]
+criteria = "safe-to-deploy"
+user-id = 6289 # str4d
+start = "2021-03-07"
+end = "2025-04-22"
+
+[[trusted.zcash_client_backend]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2024-03-25"
+end = "2025-04-22"
+
+[[trusted.zcash_client_sqlite]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2024-03-25"
+end = "2025-04-22"
+
+[[trusted.zcash_encoding]]
+criteria = "safe-to-deploy"
+user-id = 1244 # ebfull
+start = "2022-10-19"
+end = "2025-04-22"
+
+[[trusted.zcash_extensions]]
+criteria = "safe-to-deploy"
+user-id = 6289 # str4d
+start = "2020-04-24"
+end = "2025-04-23"
+
+[[trusted.zcash_history]]
+criteria = "safe-to-deploy"
+user-id = 1244 # ebfull
+start = "2020-03-04"
+end = "2025-04-22"
+
+[[trusted.zcash_history]]
+criteria = "safe-to-deploy"
+user-id = 6289 # str4d
+start = "2024-03-01"
+end = "2025-04-22"
+
+[[trusted.zcash_keys]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2024-01-15"
+end = "2025-04-22"
+
+[[trusted.zcash_note_encryption]]
+criteria = ["safe-to-deploy", "crypto-reviewed"]
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2023-03-22"
+end = "2025-04-22"
+
+[[trusted.zcash_primitives]]
+criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
+user-id = 6289 # str4d
+start = "2021-03-26"
+end = "2025-04-22"
+
+[[trusted.zcash_primitives]]
+criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
+user-id = 1244 # ebfull
+start = "2019-10-08"
+end = "2025-04-22"
+
+[[trusted.zcash_proofs]]
+criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
+user-id = 6289 # str4d
+start = "2021-03-26"
+end = "2025-04-22"
+
+[[trusted.zcash_protocol]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2024-01-27"
+end = "2025-04-22"
+
+[[trusted.zcash_spec]]
+criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
+user-id = 6289 # str4d
+start = "2023-12-07"
+end = "2025-04-22"
+
+[[trusted.zip32]]
+criteria = "safe-to-deploy"
+user-id = 6289 # str4d
+start = "2023-12-06"
+end = "2025-04-22"
+
+[[trusted.zip321]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2024-01-15"
+end = "2025-04-22"

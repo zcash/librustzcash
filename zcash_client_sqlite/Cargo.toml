@@ -1,69 +1,134 @@
 [package]
 name = "zcash_client_sqlite"
 description = "An SQLite-based Zcash light client"
-version = "0.7.1"
+version = "0.10.3"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
 ]
 homepage = "https://github.com/zcash/librustzcash"
-repository = "https://github.com/zcash/librustzcash"
+repository.workspace = true
 readme = "README.md"
-license = "MIT OR Apache-2.0"
-edition = "2021"
-rust-version = "1.65"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+
+[package.metadata.docs.rs]
+# Manually specify features while `orchard` is not in the public API.
+#all-features = true
+features = [
+    "multicore",
+    "test-dependencies",
+    "transparent-inputs",
+    "unstable",
+]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-incrementalmerkletree = { version = "0.4", features = ["legacy-api"] }
-zcash_client_backend = { version = "0.9", path = "../zcash_client_backend" }
-zcash_primitives = { version = "0.12", path = "../zcash_primitives", default-features = false }
+zcash_address.workspace = true
+zcash_client_backend = { workspace = true, features = ["unstable-serialization", "unstable-spanning-tree"] }
+zcash_encoding.workspace = true
+zcash_keys = { workspace = true, features = ["orchard", "sapling"] }
+zcash_primitives.workspace = true
+zcash_protocol.workspace = true
+zip32.workspace = true
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - Errors
-bs58 = { version = "0.5", features = ["check"] }
-hdwallet = { version = "0.4", optional = true }
+bs58.workspace = true
+hdwallet = { workspace = true, optional = true }
 
 # - Logging and metrics
-tracing = "0.1"
+tracing.workspace = true
 
-# - Protobuf interfaces
-prost = "0.11"
+# - Serialization
+byteorder.workspace = true
+nonempty.workspace = true
+prost.workspace = true
+group.workspace = true
+jubjub.workspace = true
 
 # - Secret management
-secrecy = "0.8"
+secrecy.workspace = true
+subtle.workspace = true
+
+# - Shielded protocols
+orchard = { workspace = true, optional = true }
+sapling.workspace = true
+
+# - Note commitment trees
+incrementalmerkletree.workspace = true
+shardtree = { workspace = true, features = ["legacy-api"] }
 
 # - SQLite databases
-group = "0.13"
-jubjub = "0.10"
-rusqlite = { version = "0.25", features = ["bundled", "time", "array"] }
+# Warning: One of the downstream consumers requires that SQLite be available through
+# CocoaPods, due to being bound to React Native. We need to ensure that the SQLite
+# version required for `rusqlite` is a version that is available through CocoaPods.
+rusqlite = { version = "0.29.0", features = ["bundled", "time", "array"] }
 schemer = "0.2"
-schemer-rusqlite = "0.2.1"
-time = "0.2"
+schemer-rusqlite = "0.2.2"
+time = "0.3.22"
 uuid = "1.1"
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+document-features.workspace = true
+maybe-rayon.workspace = true
 
 [dev-dependencies]
-assert_matches = "1.5"
-proptest = "1.0.0"
-rand_core = "0.6"
+assert_matches.workspace = true
+bls12_381.workspace = true
+incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
+pasta_curves.workspace = true
+shardtree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
+orchard = { workspace = true, features = ["test-dependencies"] }
+proptest.workspace = true
+rand_chacha.workspace = true
+rand_core.workspace = true
 regex = "1.4"
 tempfile = "3.5.0"
-zcash_note_encryption = "0.4"
-zcash_proofs = { version = "0.12", path = "../zcash_proofs" }
-zcash_primitives = { version = "0.12", path = "../zcash_primitives", features = ["test-dependencies"] }
-zcash_address = { version = "0.3", path = "../components/zcash_address", features = ["test-dependencies"] }
+zcash_keys = { workspace = true, features = ["test-dependencies"] }
+zcash_note_encryption.workspace = true
+zcash_proofs = { workspace = true, features = ["bundled-prover"] }
+zcash_primitives = { workspace = true, features = ["test-dependencies"] }
+zcash_protocol = { workspace = true, features = ["local-consensus"] }
+zcash_client_backend = { workspace = true, features = ["test-dependencies", "unstable-serialization", "unstable-spanning-tree"] }
+zcash_address = { workspace = true, features = ["test-dependencies"] }
 
 [features]
-mainnet = []
+default = ["multicore"]
+
+## Enables multithreading support for creating proofs and building subtrees.
+multicore = ["maybe-rayon/threads", "zcash_primitives/multicore"]
+
+## Enables support for storing data related to the sending and receiving of 
+## Orchard funds.
+orchard = ["dep:orchard", "zcash_client_backend/orchard", "zcash_keys/orchard"]
+
+## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
+    "incrementalmerkletree/test-dependencies",
     "zcash_primitives/test-dependencies",
     "zcash_client_backend/test-dependencies",
+    "incrementalmerkletree/test-dependencies",
 ]
-transparent-inputs = ["hdwallet", "zcash_client_backend/transparent-inputs"]
+
+## Enables receiving transparent funds and sending to transparent recipients
+transparent-inputs = [
+  "dep:hdwallet", 
+  "zcash_keys/transparent-inputs",
+  "zcash_client_backend/transparent-inputs"
+]
+
+#! ### Experimental features
+
+## Exposes unstable APIs. Their behaviour may change at any time.
 unstable = ["zcash_client_backend/unstable"]
+
+## A feature used to isolate tests that are expensive to run. Test-only.
+expensive-tests = []
 
 [lib]
 bench = false
