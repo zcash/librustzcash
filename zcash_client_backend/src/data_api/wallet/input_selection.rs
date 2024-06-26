@@ -464,6 +464,9 @@ where
                 // The ephemeral input going into transaction 1 must be able to pay that
                 // transaction's fee, as well as the TEX address payments.
 
+                // First compute the required total without providing any input value,
+                // catching the `InsufficientFunds` error to obtain the required amount
+                // given the provided change strategy.
                 let tr1_required_input_value =
                     match self.change_strategy.compute_balance::<_, DbT::NoteRef>(
                         params,
@@ -475,7 +478,7 @@ where
                         &orchard_fees::EmptyBundleView,
                         &self.dust_output_policy,
                         #[cfg(feature = "transparent-inputs")]
-                        true,
+                        true, // ignore change memo to avoid adding a change output
                         #[cfg(feature = "transparent-inputs")]
                         &[NonNegativeAmount::ZERO],
                         #[cfg(feature = "transparent-inputs")]
@@ -486,6 +489,8 @@ where
                         Err(other) => return Err(other.into()),
                     };
 
+                // Now recompute to obtain the `TransactionBalance` and verify that it
+                // fully accounts for the required fees.
                 let tr1_balance = self.change_strategy.compute_balance::<_, DbT::NoteRef>(
                     params,
                     target_height,
@@ -496,7 +501,7 @@ where
                     &orchard_fees::EmptyBundleView,
                     &self.dust_output_policy,
                     #[cfg(feature = "transparent-inputs")]
-                    true,
+                    true, // ignore change memo to avoid adding a change output
                     #[cfg(feature = "transparent-inputs")]
                     &[tr1_required_input_value],
                     #[cfg(feature = "transparent-inputs")]

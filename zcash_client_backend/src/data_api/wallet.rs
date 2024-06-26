@@ -604,7 +604,9 @@ where
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
-    // The set of transparent StepOutputs available and unused from prior steps.
+    // The set of transparent `StepOutput`s available and unused from prior steps.
+    // When a transparent `StepOutput` is created, it is added to the map. When it
+    // is consumed, it is removed from the map.
     #[cfg(feature = "transparent-inputs")]
     let mut unused_transparent_outputs = HashMap::new();
 

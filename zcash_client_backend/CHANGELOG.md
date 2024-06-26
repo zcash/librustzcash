@@ -9,8 +9,7 @@ and this library adheres to Rust's notion of
 ### Notable changes
 `zcash_client_backend` now supports TEX (transparent-source-only) addresses as specified
 in ZIP 320. Sending to one or more TEX addresses will automatically create a multi-step
-proposal that uses two transactions. This is intended to be used in conjunction with
-`zcash_client_sqlite` 0.11 or later.
+proposal that uses two transactions.
 
 In order to take advantage of this support, client wallets will need to be able to send
 multiple transactions created from `zcash_client_backend::data_api::wallet::create_proposed_transactions`.

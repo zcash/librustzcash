@@ -26,6 +26,10 @@ use crate::{error::SqliteClientError, wallet::get_account, AccountId, SqlTransac
 pub(crate) const GAP_LIMIT: i32 = 20;
 
 // The custom scope used for derivation of ephemeral addresses.
+//
+// This must match the constant used in
+// `zcash_primitives::legacy::keys::AccountPubKey::derive_ephemeral_ivk`.
+//
 // TODO: consider moving this to `zcash_primitives::legacy::keys`, or else
 // provide a way to derive `ivk`s for custom scopes in general there, so that
 // the constant isn't duplicated.
@@ -49,9 +53,9 @@ pub(crate) fn last_reserved_index(
     match conn
         .query_row(
             "SELECT address_index FROM ephemeral_addresses
-         WHERE account_id = :account_id
-         ORDER BY address_index DESC
-         LIMIT 1",
+             WHERE account_id = :account_id
+             ORDER BY address_index DESC
+             LIMIT 1",
             named_params![":account_id": account_id.0],
             |row| row.get::<_, i32>(0),
         )
@@ -261,9 +265,9 @@ fn ephemeral_address_check_internal<P: consensus::Parameters>(
         .0
         .query_row(
             "SELECT t.txid FROM ephemeral_addresses
-            LEFT OUTER JOIN transactions t
-            ON t.id_tx = COALESCE(used_in_tx, mined_in_tx)
-            WHERE address = :address",
+             LEFT OUTER JOIN transactions t
+             ON t.id_tx = COALESCE(used_in_tx, mined_in_tx)
+             WHERE address = :address",
             named_params![":address": address_str],
             |row| row.get::<_, Option<Vec<u8>>>(0),
         )
