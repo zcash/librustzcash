@@ -329,7 +329,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     };
 
     let value = NonNegativeAmount::const_from_u64(100000);
-    let amount = NonNegativeAmount::const_from_u64(50000);
+    let transfer_amount = NonNegativeAmount::const_from_u64(50000);
 
     let run_test = |st: &mut TestState<_>, expected_index| {
         // Add funds to the wallet.
@@ -337,7 +337,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
         let expected_step0_fee = (zip317::MARGINAL_FEE * 3).unwrap();
         let expected_step1_fee = zip317::MINIMUM_FEE;
-        let expected_ephemeral = (amount + expected_step1_fee).unwrap();
+        let expected_ephemeral = (transfer_amount + expected_step1_fee).unwrap();
         let expected_step0_change =
             (value - expected_ephemeral - expected_step0_fee).expect("sufficient funds");
         assert!(expected_step0_change.is_positive());
@@ -358,7 +358,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
                 StandardFeeRule::Zip317,
                 NonZeroU32::new(1).unwrap(),
                 &tex_addr,
-                amount,
+                transfer_amount,
                 None,
                 change_memo.clone(),
                 T::SHIELDED_PROTOCOL,
@@ -374,7 +374,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
             steps[0].balance().proposed_change(),
             [
                 ChangeValue::shielded(T::SHIELDED_PROTOCOL, expected_step0_change, change_memo),
-                ChangeValue::ephemeral_transparent((amount + expected_step1_fee).unwrap()),
+                ChangeValue::ephemeral_transparent((transfer_amount + expected_step1_fee).unwrap()),
             ]
         );
         assert_eq!(steps[1].balance().proposed_change(), []);
@@ -437,7 +437,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         assert_matches!(
             confirmed_sent[1][0].clone(),
             (sent_v, sent_to_addr, None, None)
-            if sent_v == u64::try_from(amount).unwrap() && sent_to_addr == Some(tex_addr.encode(&st.wallet().params)));
+            if sent_v == u64::try_from(transfer_amount).unwrap() && sent_to_addr == Some(tex_addr.encode(&st.wallet().params)));
 
         (ephemeral_addr.unwrap(), txids.head)
     };
@@ -462,7 +462,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
             StandardFeeRule::Zip317,
             NonZeroU32::new(1).unwrap(),
             &ephemeral_taddr,
-            amount,
+            transfer_amount,
             None,
             None,
             T::SHIELDED_PROTOCOL,
