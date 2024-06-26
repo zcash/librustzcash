@@ -1133,7 +1133,9 @@ where
             .proposed_change()
             .iter()
             .enumerate()
-            .filter(|(_, change_value)| matches!(change_value.output_pool(), PoolType::Transparent))
+            .filter(|(_, change_value)| {
+                change_value.is_ephemeral() && change_value.output_pool() == PoolType::Transparent
+            })
             .collect();
         let num_ephemeral_outputs =
             i32::try_from(ephemeral_outputs.len()).map_err(|_| Error::ProposalNotSupported)?;
