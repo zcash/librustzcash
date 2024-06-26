@@ -353,6 +353,51 @@ impl Default for DustOutputPolicy {
     }
 }
 
+/// `EphemeralParameters` can be used to specify variations on how balance
+/// and fees are computed that are relevant to transactions using ephemeral
+/// transparent outputs.
+#[cfg(feature = "transparent-inputs")]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EphemeralParameters {
+    ignore_change_memo: bool,
+    ephemeral_input_amount: Option<NonNegativeAmount>,
+    ephemeral_output_amount: Option<NonNegativeAmount>,
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl EphemeralParameters {
+    /// Returns an `EphemeralParameters` with the following parameters:
+    ///
+    /// * `ignore_change_memo`: `true` if the change memo should be
+    ///   ignored for the purpose of deciding whether there will be a
+    ///   change output.
+    /// * `ephemeral_input_amount`: specifies that there will be an
+    ///   additional P2PKH input of the given amount.
+    /// * `ephemeral_output_amount`: specifies that there will be an
+    ///   additional P2PKH output of the given amount.
+    pub fn new(
+        ignore_change_memo: bool,
+        ephemeral_input_amount: Option<NonNegativeAmount>,
+        ephemeral_output_amount: Option<NonNegativeAmount>,
+    ) -> Self {
+        Self {
+            ignore_change_memo,
+            ephemeral_input_amount,
+            ephemeral_output_amount,
+        }
+    }
+
+    pub fn ignore_change_memo(&self) -> bool {
+        self.ignore_change_memo
+    }
+    pub fn ephemeral_input_amount(&self) -> Option<NonNegativeAmount> {
+        self.ephemeral_input_amount
+    }
+    pub fn ephemeral_output_amount(&self) -> Option<NonNegativeAmount> {
+        self.ephemeral_output_amount
+    }
+}
+
 /// A trait that represents the ability to compute the suggested change and fees that must be paid
 /// by a transaction having a specified set of inputs and outputs.
 pub trait ChangeStrategy {
@@ -373,8 +418,9 @@ pub trait ChangeStrategy {
     ///
     #[cfg_attr(
         feature = "transparent-inputs",
-        doc = "The `ephemeral_input_amounts` and `ephemeral_output_amounts` parameters
-               specify the amounts of additional transparent P2PKH inputs and outputs."
+        doc = "`ephemeral_parameters` can be used to specify variations on how balance
+               and fees are computed that are relevant to transactions using ephemeral
+               transparent outputs; see [`EphemeralParameters::new`]."
     )]
     #[allow(clippy::too_many_arguments)]
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
@@ -386,9 +432,7 @@ pub trait ChangeStrategy {
         sapling: &impl sapling::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
-        #[cfg(feature = "transparent-inputs")] ignore_change_memo: bool,
-        #[cfg(feature = "transparent-inputs")] ephemeral_input_amounts: &[NonNegativeAmount],
-        #[cfg(feature = "transparent-inputs")] ephemeral_output_amounts: &[NonNegativeAmount],
+        #[cfg(feature = "transparent-inputs")] ephemeral_parameters: &EphemeralParameters,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
 }
 

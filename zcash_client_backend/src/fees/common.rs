@@ -5,11 +5,7 @@ use zcash_primitives::{
     memo::MemoBytes,
     transaction::{
         components::amount::{BalanceError, NonNegativeAmount},
-        fees::{
-            transparent::{self, InputSize},
-            zip317::{MINIMUM_FEE, P2PKH_STANDARD_OUTPUT_SIZE},
-            FeeRule,
-        },
+        fees::{transparent, zip317::MINIMUM_FEE, FeeRule},
     },
 };
 use zcash_protocol::ShieldedProtocol;
@@ -17,6 +13,14 @@ use zcash_protocol::ShieldedProtocol;
 use super::{
     sapling as sapling_fees, ChangeError, ChangeValue, DustAction, DustOutputPolicy,
     TransactionBalance,
+};
+
+#[cfg(feature = "transparent-inputs")]
+use {
+    super::EphemeralParameters,
+    zcash_primitives::transaction::fees::{
+        transparent::InputSize, zip317::P2PKH_STANDARD_OUTPUT_SIZE,
+    },
 };
 
 #[cfg(feature = "orchard")]
@@ -53,24 +57,27 @@ pub(crate) fn calculate_net_flows<NoteRefT: Clone, F: FeeRule, E>(
     transparent_outputs: &[impl transparent::OutputView],
     sapling: &impl sapling_fees::BundleView<NoteRefT>,
     #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
-    ephemeral_input_amounts: &[NonNegativeAmount],
-    ephemeral_output_amounts: &[NonNegativeAmount],
+    #[cfg(feature = "transparent-inputs")] ephemeral_input_amount: Option<NonNegativeAmount>,
+    #[cfg(feature = "transparent-inputs")] ephemeral_output_amount: Option<NonNegativeAmount>,
 ) -> Result<NetFlows, ChangeError<E, NoteRefT>>
 where
     E: From<F::Error> + From<BalanceError>,
 {
     let overflow = || ChangeError::StrategyError(E::from(BalanceError::Overflow));
 
+    #[cfg(not(feature = "transparent-inputs"))]
+    let (ephemeral_input_amount, ephemeral_output_amount) = (None, None);
+
     let t_in = transparent_inputs
         .iter()
         .map(|t_in| t_in.coin().value)
-        .chain(ephemeral_input_amounts.iter().cloned())
+        .chain(ephemeral_input_amount)
         .sum::<Option<_>>()
         .ok_or_else(overflow)?;
     let t_out = transparent_outputs
         .iter()
         .map(|t_out| t_out.value())
-        .chain(ephemeral_output_amounts.iter().cloned())
+        .chain(ephemeral_output_amount)
         .sum::<Option<_>>()
         .ok_or_else(overflow)?;
     let sapling_in = sapling
@@ -162,20 +169,18 @@ pub(crate) fn single_change_output_balance<
     #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
     dust_output_policy: &DustOutputPolicy,
     default_dust_threshold: NonNegativeAmount,
-    change_memo: Option<MemoBytes>,
+    change_memo: Option<&MemoBytes>,
     fallback_change_pool: ShieldedProtocol,
-    #[cfg(feature = "transparent-inputs")] ephemeral_input_amounts: &[NonNegativeAmount],
-    #[cfg(feature = "transparent-inputs")] ephemeral_output_amounts: &[NonNegativeAmount],
+    #[cfg(feature = "transparent-inputs")] ephemeral_parameters: &EphemeralParameters,
 ) -> Result<TransactionBalance, ChangeError<E, NoteRefT>>
 where
     E: From<F::Error> + From<BalanceError>,
 {
+    #[cfg(feature = "transparent-inputs")]
+    let change_memo = change_memo.filter(|_| !ephemeral_parameters.ignore_change_memo());
+
     let overflow = || ChangeError::StrategyError(E::from(BalanceError::Overflow));
     let underflow = || ChangeError::StrategyError(E::from(BalanceError::Underflow));
-
-    #[cfg(not(feature = "transparent-inputs"))]
-    let (ephemeral_input_amounts, ephemeral_output_amounts) =
-        (&[] as &[NonNegativeAmount], &[] as &[NonNegativeAmount]);
 
     let net_flows = calculate_net_flows::<NoteRefT, F, E>(
         transparent_inputs,
@@ -183,8 +188,10 @@ where
         sapling,
         #[cfg(feature = "orchard")]
         orchard,
-        ephemeral_input_amounts,
-        ephemeral_output_amounts,
+        #[cfg(feature = "transparent-inputs")]
+        ephemeral_parameters.ephemeral_input_amount(),
+        #[cfg(feature = "transparent-inputs")]
+        ephemeral_parameters.ephemeral_output_amount(),
     )?;
     let total_in = net_flows
         .total_in()
@@ -251,27 +258,25 @@ where
     //   and the sum of their outputs learns the sum of the inputs if no change
     //   output is present); and
     // * we will then always have an shielded output in which to put change_memo,
-    //   if one is given.
+    //   if one is used.
     //
     // Note that using the `DustAction::AddDustToFee` policy inherently leaks
     // more information.
 
-    let transparent_input_sizes = transparent_inputs
-        .iter()
-        .map(|i| i.serialized_size())
-        .chain(
-            ephemeral_input_amounts
-                .iter()
-                .map(|_| InputSize::STANDARD_P2PKH),
-        );
-    let transparent_output_sizes = transparent_outputs
-        .iter()
-        .map(|i| i.serialized_size())
-        .chain(
-            ephemeral_output_amounts
-                .iter()
-                .map(|_| P2PKH_STANDARD_OUTPUT_SIZE),
-        );
+    let transparent_input_sizes = transparent_inputs.iter().map(|i| i.serialized_size());
+    #[cfg(feature = "transparent-inputs")]
+    let transparent_input_sizes = transparent_input_sizes.chain(
+        ephemeral_parameters
+            .ephemeral_input_amount()
+            .map(|_| InputSize::STANDARD_P2PKH),
+    );
+    let transparent_output_sizes = transparent_outputs.iter().map(|i| i.serialized_size());
+    #[cfg(feature = "transparent-inputs")]
+    let transparent_output_sizes = transparent_output_sizes.chain(
+        ephemeral_parameters
+            .ephemeral_output_amount()
+            .map(|_| P2PKH_STANDARD_OUTPUT_SIZE),
+    );
 
     let fee_without_change = fee_rule
         .fee_required(
@@ -300,7 +305,7 @@ where
             .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?,
     );
 
-    // We don't create a fully-transparent transaction if a change memo is requested.
+    // We don't create a fully-transparent transaction if a change memo is used.
     let transparent = net_flows.is_transparent() && change_memo.is_none();
 
     let total_out_plus_fee_without_change =
@@ -328,9 +333,13 @@ where
             // Case 3b or 3c.
             let proposed_change =
                 (total_in - total_out_plus_fee_with_change).expect("checked above");
-            let simple_case = |memo| {
+            let simple_case = || {
                 (
-                    vec![ChangeValue::shielded(change_pool, proposed_change, memo)],
+                    vec![ChangeValue::shielded(
+                        change_pool,
+                        proposed_change,
+                        change_memo.cloned(),
+                    )],
                     fee_with_change,
                 )
             };
@@ -349,7 +358,7 @@ where
                         // * zero-valued notes do not require witness tracking;
                         // * the effect on trial decryption overhead is small.
                         if proposed_change.is_zero() {
-                            simple_case(change_memo)
+                            simple_case()
                         } else {
                             let shortfall =
                                 (dust_threshold - proposed_change).ok_or_else(underflow)?;
@@ -360,7 +369,7 @@ where
                             });
                         }
                     }
-                    DustAction::AllowDustChange => simple_case(change_memo),
+                    DustAction::AllowDustChange => simple_case(),
                     DustAction::AddDustToFee => {
                         // Zero-valued change is also always allowed for this policy, but when
                         // no change memo is given, we might omit the change output instead.
@@ -376,13 +385,13 @@ where
                         if fee_with_dust > reasonable_fee {
                             // Defend against losing money by using AddDustToFee with a too-high
                             // dust threshold.
-                            simple_case(change_memo)
+                            simple_case()
                         } else if change_memo.is_some() {
                             (
                                 vec![ChangeValue::shielded(
                                     change_pool,
                                     NonNegativeAmount::ZERO,
-                                    change_memo,
+                                    change_memo.cloned(),
                                 )],
                                 fee_with_dust,
                             )
@@ -392,15 +401,15 @@ where
                     }
                 }
             } else {
-                simple_case(change_memo)
+                simple_case()
             }
         }
     };
     #[cfg(feature = "transparent-inputs")]
     change.extend(
-        ephemeral_output_amounts
-            .iter()
-            .map(|&amount| ChangeValue::ephemeral_transparent(amount)),
+        ephemeral_parameters
+            .ephemeral_output_amount()
+            .map(ChangeValue::ephemeral_transparent),
     );
 
     TransactionBalance::new(change, fee).map_err(|_| overflow())

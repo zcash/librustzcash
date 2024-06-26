@@ -33,7 +33,7 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        fees::ChangeValue,
+        fees::{ChangeValue, EphemeralParameters},
         proposal::{Step, StepOutput, StepOutputIndex},
         zip321::Payment,
     },
@@ -457,16 +457,17 @@ where
         }
 
         #[cfg(feature = "transparent-inputs")]
-        let (ephemeral_output_amounts, tr1_balance_opt) = {
+        let (ephemeral_parameters, tr1_balance_opt) = {
             if tr1_transparent_outputs.is_empty() {
-                (vec![], None)
+                (Default::default(), None)
             } else {
                 // The ephemeral input going into transaction 1 must be able to pay that
                 // transaction's fee, as well as the TEX address payments.
 
-                // First compute the required total without providing any input value,
+                // First compute the required total with an additional zero input,
                 // catching the `InsufficientFunds` error to obtain the required amount
-                // given the provided change strategy.
+                // given the provided change strategy. Ignore the change memo in order
+                // to avoid adding a change output.
                 let tr1_required_input_value =
                     match self.change_strategy.compute_balance::<_, DbT::NoteRef>(
                         params,
@@ -477,12 +478,7 @@ where
                         #[cfg(feature = "orchard")]
                         &orchard_fees::EmptyBundleView,
                         &self.dust_output_policy,
-                        #[cfg(feature = "transparent-inputs")]
-                        true, // ignore change memo to avoid adding a change output
-                        #[cfg(feature = "transparent-inputs")]
-                        &[NonNegativeAmount::ZERO],
-                        #[cfg(feature = "transparent-inputs")]
-                        &[],
+                        &EphemeralParameters::new(true, Some(NonNegativeAmount::ZERO), None),
                     ) {
                         Err(ChangeError::InsufficientFunds { required, .. }) => required,
                         Ok(_) => NonNegativeAmount::ZERO, // shouldn't happen
@@ -500,16 +496,14 @@ where
                     #[cfg(feature = "orchard")]
                     &orchard_fees::EmptyBundleView,
                     &self.dust_output_policy,
-                    #[cfg(feature = "transparent-inputs")]
-                    true, // ignore change memo to avoid adding a change output
-                    #[cfg(feature = "transparent-inputs")]
-                    &[tr1_required_input_value],
-                    #[cfg(feature = "transparent-inputs")]
-                    &[],
+                    &EphemeralParameters::new(true, Some(tr1_required_input_value), None),
                 )?;
                 assert_eq!(tr1_balance.total(), tr1_balance.fee_required());
 
-                (vec![tr1_required_input_value], Some(tr1_balance))
+                (
+                    EphemeralParameters::new(false, None, Some(tr1_required_input_value)),
+                    Some(tr1_balance),
+                )
             }
         };
 
@@ -583,11 +577,7 @@ where
                 ),
                 &self.dust_output_policy,
                 #[cfg(feature = "transparent-inputs")]
-                false,
-                #[cfg(feature = "transparent-inputs")]
-                &[],
-                #[cfg(feature = "transparent-inputs")]
-                &ephemeral_output_amounts,
+                &ephemeral_parameters,
             );
 
             match balance {
@@ -613,7 +603,11 @@ where
                         // The ephemeral output should always be at the last change index.
                         assert_eq!(
                             *balance.proposed_change().last().expect("nonempty"),
-                            ChangeValue::ephemeral_transparent(ephemeral_output_amounts[0])
+                            ChangeValue::ephemeral_transparent(
+                                ephemeral_parameters
+                                    .ephemeral_output_amount()
+                                    .expect("ephemeral output is present")
+                            )
                         );
                         let ephemeral_stepoutput = StepOutput::new(
                             0,
@@ -775,11 +769,7 @@ where
             &orchard_fees::EmptyBundleView,
             &self.dust_output_policy,
             #[cfg(feature = "transparent-inputs")]
-            false,
-            #[cfg(feature = "transparent-inputs")]
-            &[],
-            #[cfg(feature = "transparent-inputs")]
-            &[],
+            &Default::default(),
         );
 
         let balance = match trial_balance {
@@ -798,11 +788,7 @@ where
                     &orchard_fees::EmptyBundleView,
                     &self.dust_output_policy,
                     #[cfg(feature = "transparent-inputs")]
-                    false,
-                    #[cfg(feature = "transparent-inputs")]
-                    &[],
-                    #[cfg(feature = "transparent-inputs")]
-                    &[],
+                    &Default::default(),
                 )?
             }
             Err(other) => {

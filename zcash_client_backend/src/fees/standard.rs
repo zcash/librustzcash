@@ -21,6 +21,9 @@ use super::{
     TransactionBalance,
 };
 
+#[cfg(feature = "transparent-inputs")]
+use super::EphemeralParameters;
+
 #[cfg(feature = "orchard")]
 use super::orchard as orchard_fees;
 
@@ -68,9 +71,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
-        #[cfg(feature = "transparent-inputs")] ignore_change_memo: bool,
-        #[cfg(feature = "transparent-inputs")] ephemeral_input_amounts: &[NonNegativeAmount],
-        #[cfg(feature = "transparent-inputs")] ephemeral_output_amounts: &[NonNegativeAmount],
+        #[cfg(feature = "transparent-inputs")] ephemeral_parameters: &EphemeralParameters,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         #[allow(deprecated)]
         match self.fee_rule() {
@@ -89,11 +90,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 orchard,
                 dust_output_policy,
                 #[cfg(feature = "transparent-inputs")]
-                ignore_change_memo,
-                #[cfg(feature = "transparent-inputs")]
-                ephemeral_input_amounts,
-                #[cfg(feature = "transparent-inputs")]
-                ephemeral_output_amounts,
+                ephemeral_parameters,
             )
             .map_err(|e| e.map(Zip317FeeError::Balance)),
             StandardFeeRule::Zip313 => fixed::SingleOutputChangeStrategy::new(
@@ -111,11 +108,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 orchard,
                 dust_output_policy,
                 #[cfg(feature = "transparent-inputs")]
-                ignore_change_memo,
-                #[cfg(feature = "transparent-inputs")]
-                ephemeral_input_amounts,
-                #[cfg(feature = "transparent-inputs")]
-                ephemeral_output_amounts,
+                ephemeral_parameters,
             )
             .map_err(|e| e.map(Zip317FeeError::Balance)),
             StandardFeeRule::Zip317 => zip317::SingleOutputChangeStrategy::new(
@@ -133,11 +126,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 orchard,
                 dust_output_policy,
                 #[cfg(feature = "transparent-inputs")]
-                ignore_change_memo,
-                #[cfg(feature = "transparent-inputs")]
-                ephemeral_input_amounts,
-                #[cfg(feature = "transparent-inputs")]
-                ephemeral_output_amounts,
+                ephemeral_parameters,
             ),
         }
     }
