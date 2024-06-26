@@ -21,51 +21,61 @@ pub mod sapling;
 pub mod standard;
 pub mod zip317;
 
-/// A proposed change amount and output pool.
+/// `ChangeValue` represents either a proposed change output to a shielded pool
+/// (with an optional change memo), or if the "transparent-inputs" feature is
+/// enabled, an ephemeral output to the transparent pool.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ChangeValue {
-    output_pool: PoolType,
-    value: NonNegativeAmount,
-    memo: Option<MemoBytes>,
-    is_ephemeral: bool,
+pub struct ChangeValue(ChangeValueInner);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ChangeValueInner {
+    Shielded {
+        protocol: ShieldedProtocol,
+        value: NonNegativeAmount,
+        memo: Option<MemoBytes>,
+    },
+    #[cfg(feature = "transparent-inputs")]
+    EphemeralTransparent { value: NonNegativeAmount },
 }
 
 impl ChangeValue {
-    /// Constructs a new change or ephemeral value from its constituent parts.
-    ///
-    /// Currently, the only supported combinations are change sent to a shielded
-    /// pool, or (if the "transparent-inputs" feature is enabled) an ephemeral
-    /// output to the transparent pool.
+    #[cfg_attr(
+        feature = "transparent-inputs",
+        doc = "Constructs a new change or ephemeral value from its constituent
+               parts. Currently, the only supported combinations are change sent
+               to a shielded pool, or an ephemeral output to the transparent pool."
+    )]
+    #[cfg_attr(
+        not(feature = "transparent-inputs"),
+        doc = "Constructs a new change value from its constituent parts.
+               Currently, `output_pool` must be a shielded pool (enable the
+               `transparent-inputs` feature to support ephemeral outputs to the
+               transparent pool). Use `ChangeValue::shielded` to avoid the
+               `Option` return."
+    )]
     pub fn new(
         output_pool: PoolType,
         value: NonNegativeAmount,
         memo: Option<MemoBytes>,
-        is_ephemeral: bool,
+        #[cfg(feature = "transparent-inputs")] is_ephemeral: bool,
     ) -> Option<Self> {
-        match output_pool {
-            PoolType::Shielded(_) => !is_ephemeral,
+        #[cfg(not(feature = "transparent-inputs"))]
+        let is_ephemeral = false;
+
+        match (output_pool, is_ephemeral) {
+            (PoolType::Shielded(protocol), false) => Some(Self::shielded(protocol, value, memo)),
             #[cfg(feature = "transparent-inputs")]
-            PoolType::Transparent => is_ephemeral && memo.is_none(),
-            #[cfg(not(feature = "transparent-inputs"))]
-            PoolType::Transparent => false,
+            (PoolType::Transparent, true) if memo.is_none() => {
+                Some(Self::ephemeral_transparent(value))
+            }
+            _ => None,
         }
-        .then_some(Self {
-            output_pool,
-            value,
-            memo,
-            is_ephemeral,
-        })
     }
 
     /// Constructs a new ephemeral transparent output value.
     #[cfg(feature = "transparent-inputs")]
     pub fn ephemeral_transparent(value: NonNegativeAmount) -> Self {
-        Self {
-            output_pool: PoolType::TRANSPARENT,
-            value,
-            memo: None,
-            is_ephemeral: true,
-        }
+        Self(ChangeValueInner::EphemeralTransparent { value })
     }
 
     /// Constructs a new change value that will be created as a shielded output.
@@ -74,12 +84,11 @@ impl ChangeValue {
         value: NonNegativeAmount,
         memo: Option<MemoBytes>,
     ) -> Self {
-        Self {
-            output_pool: PoolType::Shielded(protocol),
+        Self(ChangeValueInner::Shielded {
+            protocol,
             value,
             memo,
-            is_ephemeral: false,
-        }
+        })
     }
 
     /// Constructs a new change value that will be created as a Sapling output.
@@ -95,22 +104,43 @@ impl ChangeValue {
 
     /// Returns the pool to which the change or ephemeral output should be sent.
     pub fn output_pool(&self) -> PoolType {
-        self.output_pool
+        match &self.0 {
+            ChangeValueInner::Shielded { protocol, .. } => PoolType::Shielded(*protocol),
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::EphemeralTransparent { .. } => PoolType::Transparent,
+        }
     }
 
     /// Returns the value of the change or ephemeral output to be created, in zatoshis.
     pub fn value(&self) -> NonNegativeAmount {
-        self.value
+        match &self.0 {
+            ChangeValueInner::Shielded { value, .. } => *value,
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::EphemeralTransparent { value } => *value,
+        }
     }
 
     /// Returns the memo to be associated with the output.
     pub fn memo(&self) -> Option<&MemoBytes> {
-        self.memo.as_ref()
+        match &self.0 {
+            ChangeValueInner::Shielded { memo, .. } => memo.as_ref(),
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::EphemeralTransparent { .. } => None,
+        }
     }
 
     /// Whether this is to be an ephemeral output.
+    #[cfg_attr(
+        not(feature = "transparent-inputs"),
+        doc = "This is always false because the `transparent-inputs` feature is
+               not enabled."
+    )]
     pub fn is_ephemeral(&self) -> bool {
-        self.is_ephemeral
+        match &self.0 {
+            ChangeValueInner::Shielded { .. } => false,
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::EphemeralTransparent { .. } => true,
+        }
     }
 }
 
