@@ -688,17 +688,17 @@ impl BranchId {
             }),
             #[cfg(zcash_unstable = "nu6")]
             BranchId::Nu6 => params.activation_height(NetworkUpgrade::Nu6).map(|lower| {
-                #[cfg(feature = "zfuture")]
+                #[cfg(zcash_unstable = "zfuture")]
                 let upper = params.activation_height(NetworkUpgrade::ZFuture);
-                #[cfg(not(feature = "zfuture"))]
+                #[cfg(not(zcash_unstable = "zfuture"))]
                 let upper = None;
                 (lower, upper)
             }),
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => params.activation_height(NetworkUpgrade::Nu7).map(|lower| {
-                #[cfg(feature = "zfuture")]
+                #[cfg(zcash_unstable = "zfuture")]
                 let upper = params.activation_height(NetworkUpgrade::ZFuture);
-                #[cfg(not(feature = "zfuture"))]
+                #[cfg(not(zcash_unstable = "zfuture"))]
                 let upper = None;
                 (lower, upper)
             }),

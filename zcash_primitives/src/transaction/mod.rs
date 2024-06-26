@@ -258,7 +258,7 @@ impl TxVersion {
             TxVersion::Zip225 => true,
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::Zsa => false,
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
         }
     }
@@ -271,7 +271,7 @@ impl TxVersion {
             | TxVersion::Zip225 => false,
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::Zsa => true,
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => false,
         }
     }
@@ -395,7 +395,7 @@ pub struct TransactionData<A: Authorization> {
     orchard_zsa_bundle: Option<orchard::bundle::Bundle<A::OrchardZsaAuth, Amount, OrchardZSA>>,
     #[cfg(zcash_unstable = "nu7")]
     issue_bundle: Option<IssueBundle<A::IssueAuth>>,
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
 }
 
@@ -425,10 +425,6 @@ impl<A: Authorization> TransactionData<A> {
             sprout_bundle,
             sapling_bundle,
             orchard_bundle,
-            #[cfg(zcash_unstable = "nu7")]
-            orchard_zsa_bundle,
-            #[cfg(zcash_unstable = "nu7")]
-            issue_bundle,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle: None,
         }
@@ -447,8 +443,6 @@ impl<A: Authorization> TransactionData<A> {
         sprout_bundle: Option<sprout::Bundle>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount, OrchardVanilla>>,
-        orchard_zsa_bundle: Option<orchard::Bundle<A::OrchardZsaAuth, Amount, OrchardZSA>>,
-        issue_bundle: Option<IssueBundle<IA>>,
         tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
     ) -> Self {
         TransactionData {
@@ -460,8 +454,6 @@ impl<A: Authorization> TransactionData<A> {
             sprout_bundle,
             sapling_bundle,
             orchard_bundle,
-            orchard_zsa_bundle,
-            issue_bundle,
             tze_bundle,
         }
     }
@@ -932,7 +924,7 @@ impl Transaction {
         let orchard_zsa_bundle = orchard_serialization::read_v6_bundle(&mut reader)?;
         let issue_bundle = issuance::read_v7_bundle(&mut reader)?;
 
-        #[cfg(feature = "zfuture")]
+        #[cfg(zcash_unstable = "zfuture")]
         let tze_bundle = if version.has_tze() {
             Self::read_tze(&mut reader)?
         } else {
@@ -950,7 +942,7 @@ impl Transaction {
             orchard_bundle: None,
             orchard_zsa_bundle,
             issue_bundle,
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
         };
 
@@ -1087,7 +1079,7 @@ impl Transaction {
         self.write_v5_sapling(&mut writer)?;
         orchard_serialization::write_v6_bundle(self.orchard_zsa_bundle.as_ref(), &mut writer)?;
         issuance::write_v7_bundle(self.issue_bundle.as_ref(), &mut writer)?;
-        #[cfg(feature = "zfuture")]
+        #[cfg(zcash_unstable = "zfuture")]
         self.write_tze(&mut writer)?;
         Ok(())
     }
@@ -1265,9 +1257,9 @@ pub mod testing {
                 sapling_bundle,
                 orchard_bundle,
                 #[cfg(zcash_unstable = "nu7")]
-                _orchard_zsa_bundle,
+                orchard_zsa_bundle: _orchard_zsa_bundle,
                 #[cfg(zcash_unstable = "nu7")]
-                _issue_bundle,
+                issue_bundle: _issue_bundle,
             }
         }
     }
@@ -1282,11 +1274,9 @@ pub mod testing {
             transparent_bundle in transparent::arb_bundle(),
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard_testing::arb_bundle_for_version(version),
-            orchard_zsa_bundle in orchard_testing::arb_zsa_bundle_for_version(version),
-            issue_bundle in issuance::testing::arb_bundle_for_version(version),
             tze_bundle in tze::arb_bundle(consensus_branch_id),
             version in Just(version)
-        ) -> TransactionData<Authorized, Signed> {
+        ) -> TransactionData<Authorized> {
             TransactionData {
                 version,
                 consensus_branch_id,
@@ -1296,8 +1286,6 @@ pub mod testing {
                 sprout_bundle: None,
                 sapling_bundle,
                 orchard_bundle,
-                orchard_zsa_bundle,
-                issue_bundle,
                 tze_bundle
             }
         }

@@ -1229,7 +1229,7 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "orchard"
 version = "0.8.0"
-source = "git+https://github.com/QED-it/orchard?branch=orchardzsa-backward-compatability-0.8.0-ak#f7789bfb90c0435e5ca945ac7ddb5c92f8494ee6"
+source = "git+https://github.com/QED-it/orchard?branch=orchardzsa-backward-compatability-0.8.0-ak#984276d113f6ef2563a26feb8c634ffbda0d31c6"
 dependencies = [
  "aes",
  "bitvec",
@@ -1253,7 +1253,7 @@ dependencies = [
  "serde",
  "subtle",
  "tracing",
- "zcash_note_encryption 0.4.0 (git+https://github.com/QED-it/zcash_note_encryption?branch=zsa1)",
+ "zcash_note_encryption 0.4.0",
  "zcash_spec",
  "zip32",
 ]
@@ -2497,18 +2497,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zcash_note_encryption"
-version = "0.4.0"
-source = "git+https://github.com/QED-it/zcash_note_encryption?branch=zsa1#b8bd2a186fc04ec4f55b2db44df7374f03ab5725"
-dependencies = [
- "chacha20",
- "chacha20poly1305",
- "cipher",
- "rand_core",
- "subtle",
-]
-
-[[package]]
 name = "zcash_primitives"
 version = "0.15.0"
 dependencies = [
@@ -2545,7 +2533,7 @@ dependencies = [
  "tracing",
  "zcash_address",
  "zcash_encoding",
- "zcash_note_encryption 0.4.0 (git+https://github.com/QED-it/zcash_note_encryption?branch=fix-sapling-constants)",
+ "zcash_note_encryption",
  "zcash_protocol",
  "zcash_spec",
  "zip32",

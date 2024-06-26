@@ -315,7 +315,7 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     sapling_asks: Vec<sapling::keys::SpendAuthorizingKey>,
     orchard_saks: Vec<orchard::keys::SpendAuthorizingKey>,
     #[cfg(zcash_unstable = "zfuture")]
-    tze_builder: TzeBuilder<'a, TransactionData<Unauthorized, issuance::Unauthorized>>,
+    tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(zcash_unstable = "zfuture"))]
     tze_builder: std::marker::PhantomData<&'a ()>,
     progress_notifier: U,
@@ -876,7 +876,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
                     orchard::builder::Unproven<OrchardZSA>,
                     orchard::builder::Unauthorized,
                 >,
-                ZatBalance,
+                Amount,
                 OrchardZSA,
             >,
         > = None;
@@ -1039,7 +1039,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
 impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> ExtensionTxBuilder<'a>
     for Builder<'a, P, U>
 {
-    type BuildCtx = TransactionData<Unauthorized, issuance::Unauthorized>;
+    type BuildCtx = TransactionData<Unauthorized>;
     type BuildError = tze::builder::Error;
 
     fn add_tze_input<WBuilder, W: ToPayload>(

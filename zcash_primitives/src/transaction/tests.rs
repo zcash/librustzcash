@@ -61,7 +61,7 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
         tx.orchard_zsa_bundle.as_ref().map(|v| *v.value_balance()),
         txo.orchard_zsa_bundle.as_ref().map(|v| *v.value_balance())
     );
-    #[cfg(zcash_unstable = "zfuture")]
+    #[cfg(zcash_unstable = "nu7")]
     if tx.issue_bundle.is_some() {
         prop_assert_eq!(tx.issue_bundle.as_ref(), txo.issue_bundle.as_ref());
     }
@@ -302,8 +302,6 @@ fn zip_0244() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
-            txdata.orchard_zsa_bundle().cloned(),
-            txdata.issue_bundle().cloned(),
             txdata.tze_bundle().cloned(),
         );
         (tdata, txdata.digest(TxIdDigester))
