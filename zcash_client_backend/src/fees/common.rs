@@ -203,7 +203,15 @@ where
     })?;
 
     if proposed_change.is_zero() {
-        TransactionBalance::new(vec![], fee_amount).map_err(|_| overflow())
+        TransactionBalance::new(
+            vec![ChangeValue::new(
+                _fallback_change_pool,
+                NonNegativeAmount::const_from_u64(0),
+                change_memo,
+            )],
+            fee_amount,
+        )
+        .map_err(|_| overflow())
     } else {
         let dust_threshold = dust_output_policy
             .dust_threshold()
