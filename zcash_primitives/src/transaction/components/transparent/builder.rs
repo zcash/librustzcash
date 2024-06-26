@@ -5,6 +5,7 @@ use std::fmt;
 use crate::{
     legacy::{Script, TransparentAddress},
     transaction::{
+        self as tx,
         components::{
             amount::{Amount, BalanceError, NonNegativeAmount},
             transparent::{self, Authorization, Authorized, Bundle, TxIn, TxOut},
@@ -16,7 +17,6 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::transaction::{
-        self as tx,
         components::transparent::OutPoint,
         sighash::{signature_hash, SignableInput, SIGHASH_ALL},
         TransactionData, TxDigests,
@@ -239,9 +239,14 @@ impl TransparentAuthorizingContext for Unauthorized {
 }
 
 impl Bundle<Unauthorized> {
-    pub fn apply_signatures(
+    pub fn apply_signatures<
+        Sp: tx::sighash_v4::SproutSigDigester,
+        Sa: tx::sighash_v4::SaplingSigDigester,
+        B: tx::Bundles<Transparent = tx::Transparent<Unauthorized>, Sprout = Sp, Sapling = Sa>
+            + tx::sighash_v5::FutureBundles,
+    >(
         self,
-        #[cfg(feature = "transparent-inputs")] mtx: &TransactionData<tx::Unauthorized>,
+        #[cfg(feature = "transparent-inputs")] mtx: &TransactionData<B>,
         #[cfg(feature = "transparent-inputs")] txid_parts_cache: &TxDigests<Blake2bHash>,
     ) -> Bundle<Authorized> {
         #[cfg(feature = "transparent-inputs")]

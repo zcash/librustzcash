@@ -1,15 +1,12 @@
 use blake2b_simd::Hash as Blake2bHash;
 
 use super::{
-    components::{amount::NonNegativeAmount, transparent},
-    sighash_v4::v4_signature_hash,
-    sighash_v5::v5_signature_hash,
-    Authorization, TransactionData, TxDigests, TxVersion,
+    components::{amount::NonNegativeAmount, transparent, Bundles},
+    sighash_v4::{self, v4_signature_hash},
+    sighash_v5::{self, v5_signature_hash},
+    TransactionData, TxDigests, TxVersion,
 };
-use crate::{
-    legacy::Script,
-    sapling::{self, bundle::GrothProofBytes},
-};
+use crate::legacy::Script;
 
 #[cfg(zcash_unstable = "zfuture")]
 use {super::components::Amount, crate::extensions::transparent::Precondition};
@@ -75,15 +72,17 @@ pub trait TransparentAuthorizingContext: transparent::Authorization {
 /// the full data of the transaction, the input being signed, and the
 /// set of precomputed hashes produced in the construction of the
 /// transaction ID.
-pub fn signature_hash<
-    TA: TransparentAuthorizingContext,
-    SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
-    A: Authorization<SaplingAuth = SA, TransparentAuth = TA>,
->(
-    tx: &TransactionData<A>,
+pub fn signature_hash<B>(
+    tx: &TransactionData<B>,
     signable_input: &SignableInput,
     txid_parts: &TxDigests<Blake2bHash>,
-) -> SignatureHash {
+) -> SignatureHash
+where
+    B: Bundles + sighash_v5::FutureBundles,
+    B::Transparent: sighash_v4::TransparentSigDigester + sighash_v5::TransparentSigDigester,
+    B::Sprout: sighash_v4::SproutSigDigester,
+    B::Sapling: sighash_v4::SaplingSigDigester,
+{
     SignatureHash(match tx.version {
         TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => {
             v4_signature_hash(tx, signable_input)
