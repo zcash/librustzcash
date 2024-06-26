@@ -16,8 +16,8 @@ use zcash_primitives::{
 use crate::ShieldedProtocol;
 
 use super::{
-    common::{calculate_net_flows, single_change_output_balance, single_change_output_policy},
-    sapling as sapling_fees, ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance,
+    common::single_change_output_balance, sapling as sapling_fees, ChangeError, ChangeStrategy,
+    DustOutputPolicy, TransactionBalance,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -72,136 +72,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         dust_output_policy: &DustOutputPolicy,
         #[cfg(feature = "transparent-inputs")] ephemeral_parameters: &EphemeralParameters,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
-        // We intentionally never count ephemeral inputs as dust.
-        let mut transparent_dust: Vec<_> = transparent_inputs
-            .iter()
-            .filter_map(|i| {
-                // for now, we're just assuming p2pkh inputs, so we don't check the size of the input
-                // script
-                if i.coin().value < self.fee_rule.marginal_fee() {
-                    Some(i.outpoint().clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let mut sapling_dust: Vec<_> = sapling
-            .inputs()
-            .iter()
-            .filter_map(|i| {
-                if sapling_fees::InputView::<NoteRefT>::value(i) < self.fee_rule.marginal_fee() {
-                    Some(sapling_fees::InputView::<NoteRefT>::note_id(i).clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        #[cfg(feature = "orchard")]
-        let mut orchard_dust: Vec<NoteRefT> = orchard
-            .inputs()
-            .iter()
-            .filter_map(|i| {
-                if orchard_fees::InputView::<NoteRefT>::value(i) < self.fee_rule.marginal_fee() {
-                    Some(orchard_fees::InputView::<NoteRefT>::note_id(i).clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        #[cfg(not(feature = "orchard"))]
-        let mut orchard_dust: Vec<NoteRefT> = vec![];
-
-        // Depending on the shape of the transaction, we may be able to spend up to
-        // `grace_actions - 1` dust inputs. If we don't have any dust inputs though,
-        // we don't need to worry about any of that.
-        if !(transparent_dust.is_empty() && sapling_dust.is_empty() && orchard_dust.is_empty()) {
-            let t_non_dust = transparent_inputs.len() - transparent_dust.len();
-            let t_allowed_dust = transparent_outputs.len().saturating_sub(t_non_dust);
-
-            // We add one to either the Sapling or Orchard outputs for the (single)
-            // change output. Note that this means that wallet-internal shielding
-            // transactions are an opportunity to spend a dust note.
-            let net_flows = calculate_net_flows::<NoteRefT, Self::FeeRule, Self::Error>(
-                transparent_inputs,
-                transparent_outputs,
-                sapling,
-                #[cfg(feature = "orchard")]
-                orchard,
-                #[cfg(feature = "transparent-inputs")]
-                ephemeral_parameters.ephemeral_input_amount(),
-                #[cfg(feature = "transparent-inputs")]
-                ephemeral_parameters.ephemeral_output_amount(),
-            )?;
-            let (_, sapling_change, orchard_change) =
-                single_change_output_policy(&net_flows, self.fallback_change_pool);
-
-            let s_non_dust = sapling.inputs().len() - sapling_dust.len();
-            let s_allowed_dust =
-                (sapling.outputs().len() + sapling_change).saturating_sub(s_non_dust);
-
-            #[cfg(feature = "orchard")]
-            let (orchard_inputs_len, orchard_outputs_len) =
-                (orchard.inputs().len(), orchard.outputs().len());
-            #[cfg(not(feature = "orchard"))]
-            let (orchard_inputs_len, orchard_outputs_len) = (0, 0);
-
-            let o_non_dust = orchard_inputs_len - orchard_dust.len();
-            let o_allowed_dust = (orchard_outputs_len + orchard_change).saturating_sub(o_non_dust);
-
-            let available_grace_inputs = self
-                .fee_rule
-                .grace_actions()
-                .saturating_sub(t_non_dust)
-                .saturating_sub(s_non_dust)
-                .saturating_sub(o_non_dust);
-
-            let mut t_disallowed_dust = transparent_dust.len().saturating_sub(t_allowed_dust);
-            let mut s_disallowed_dust = sapling_dust.len().saturating_sub(s_allowed_dust);
-            let mut o_disallowed_dust = orchard_dust.len().saturating_sub(o_allowed_dust);
-
-            if available_grace_inputs > 0 {
-                // If we have available grace inputs, allocate them first to transparent dust
-                // and then to Sapling dust followed by Orchard dust. The caller has provided
-                // inputs that it is willing to spend, so we don't need to consider privacy
-                // effects at this layer.
-                let t_grace_dust = available_grace_inputs.saturating_sub(t_disallowed_dust);
-                t_disallowed_dust = t_disallowed_dust.saturating_sub(t_grace_dust);
-
-                let s_grace_dust = available_grace_inputs
-                    .saturating_sub(t_grace_dust)
-                    .saturating_sub(s_disallowed_dust);
-                s_disallowed_dust = s_disallowed_dust.saturating_sub(s_grace_dust);
-
-                let o_grace_dust = available_grace_inputs
-                    .saturating_sub(t_grace_dust)
-                    .saturating_sub(s_grace_dust)
-                    .saturating_sub(o_disallowed_dust);
-                o_disallowed_dust = o_disallowed_dust.saturating_sub(o_grace_dust);
-            }
-
-            // Truncate the lists of inputs to be disregarded in input selection to just the
-            // disallowed lengths. This has the effect of prioritizing inputs for inclusion by the
-            // order of the original input slices, with the most preferred inputs first.
-            transparent_dust.reverse();
-            transparent_dust.truncate(t_disallowed_dust);
-            sapling_dust.reverse();
-            sapling_dust.truncate(s_disallowed_dust);
-            orchard_dust.reverse();
-            orchard_dust.truncate(o_disallowed_dust);
-
-            if !(transparent_dust.is_empty() && sapling_dust.is_empty() && orchard_dust.is_empty())
-            {
-                return Err(ChangeError::DustInputs {
-                    transparent: transparent_dust,
-                    sapling: sapling_dust,
-                    #[cfg(feature = "orchard")]
-                    orchard: orchard_dust,
-                });
-            }
-        }
-
+        // TODO: consider opportunistic dust spends (#1316).
         single_change_output_balance(
             params,
             &self.fee_rule,
