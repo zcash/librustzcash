@@ -857,9 +857,11 @@ where
     #[cfg(feature = "transparent-inputs")]
     let utxos_spent = {
         let mut utxos_spent: Vec<OutPoint> = vec![];
-        let mut add_transparent_input = |address_metadata: &TransparentAddressMetadata,
-                                         outpoint: OutPoint,
-                                         txout: TxOut|
+        let add_transparent_input = |builder: &mut Builder<_, _>,
+                                     utxos_spent: &mut Vec<_>,
+                                     address_metadata: &TransparentAddressMetadata,
+                                     outpoint: OutPoint,
+                                     txout: TxOut|
          -> Result<(), ErrorT<DbT, InputsErrT, FeeRuleT>> {
             let secret_key = usk
                 .transparent()
@@ -874,6 +876,8 @@ where
 
         for utxo in proposal_step.transparent_inputs() {
             add_transparent_input(
+                &mut builder,
+                &mut utxos_spent,
                 &metadata_from_address(*utxo.recipient_address())?,
                 utxo.outpoint().clone(),
                 utxo.txout().clone(),
@@ -895,7 +899,13 @@ where
                 .ok_or(Error::Proposal(ProposalError::ReferenceError(*input_ref)))?
                 .vout[outpoint.n() as usize];
 
-            add_transparent_input(&address_metadata, outpoint, txout.clone())?;
+            add_transparent_input(
+                &mut builder,
+                &mut utxos_spent,
+                &address_metadata,
+                outpoint,
+                txout.clone(),
+            )?;
         }
         utxos_spent
     };
@@ -976,8 +986,9 @@ where
             );
         let recipient_address = payment.recipient_address();
 
-        let mut add_sapling_output = |builder: &mut Builder<_, _>,
-                                      to: sapling::PaymentAddress|
+        let add_sapling_output = |builder: &mut Builder<_, _>,
+                                  sapling_output_meta: &mut Vec<_>,
+                                  to: sapling::PaymentAddress|
          -> Result<(), ErrorT<DbT, InputsErrT, FeeRuleT>> {
             let memo = payment.memo().map_or_else(MemoBytes::empty, |m| m.clone());
             builder.add_sapling_output(sapling_external_ovk, to, payment.amount(), memo.clone())?;
@@ -990,8 +1001,9 @@ where
         };
 
         #[cfg(feature = "orchard")]
-        let mut add_orchard_output = |builder: &mut Builder<_, _>,
-                                      to: orchard::Address|
+        let add_orchard_output = |builder: &mut Builder<_, _>,
+                                  orchard_output_meta: &mut Vec<_>,
+                                  to: orchard::Address|
          -> Result<(), ErrorT<DbT, InputsErrT, FeeRuleT>> {
             let memo = payment.memo().map_or_else(MemoBytes::empty, |m| m.clone());
             builder.add_orchard_output(
@@ -1008,9 +1020,9 @@ where
             Ok(())
         };
 
-        #[allow(unused_mut)]
-        let mut add_transparent_output = |builder: &mut Builder<_, _>,
-                                          to: TransparentAddress|
+        let add_transparent_output = |builder: &mut Builder<_, _>,
+                                      transparent_output_meta: &mut Vec<_>,
+                                      to: TransparentAddress|
          -> Result<(), ErrorT<DbT, InputsErrT, FeeRuleT>> {
             if payment.memo().is_some() {
                 return Err(Error::MemoForbidden);
@@ -1038,22 +1050,22 @@ where
                 #[cfg(feature = "orchard")]
                 PoolType::Shielded(ShieldedProtocol::Orchard) => {
                     let to = *ua.orchard().expect("The mapping between payment pool and receiver is checked in step construction");
-                    add_orchard_output(&mut builder, to)?;
+                    add_orchard_output(&mut builder, &mut orchard_output_meta, to)?;
                 }
                 PoolType::Shielded(ShieldedProtocol::Sapling) => {
                     let to = *ua.sapling().expect("The mapping between payment pool and receiver is checked in step construction");
-                    add_sapling_output(&mut builder, to)?;
+                    add_sapling_output(&mut builder, &mut sapling_output_meta, to)?;
                 }
                 PoolType::Transparent => {
                     let to = *ua.transparent().expect("The mapping between payment pool and receiver is checked in step construction");
-                    add_transparent_output(&mut builder, to)?;
+                    add_transparent_output(&mut builder, &mut transparent_output_meta, to)?;
                 }
             },
             Address::Sapling(to) => {
-                add_sapling_output(&mut builder, to)?;
+                add_sapling_output(&mut builder, &mut sapling_output_meta, to)?;
             }
             Address::Transparent(to) => {
-                add_transparent_output(&mut builder, to)?;
+                add_transparent_output(&mut builder, &mut transparent_output_meta, to)?;
             }
             #[cfg(not(feature = "transparent-inputs"))]
             Address::Tex(_) => {
@@ -1065,7 +1077,7 @@ where
                     return Err(Error::ProposalNotSupported);
                 }
                 let to = TransparentAddress::PublicKeyHash(data);
-                add_transparent_output(&mut builder, to)?;
+                add_transparent_output(&mut builder, &mut transparent_output_meta, to)?;
             }
         }
     }
