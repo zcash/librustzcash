@@ -47,6 +47,14 @@ pub enum ProposalError {
     /// There was a mismatch between the payments in the proposal's transaction request
     /// and the payment pool selection values.
     PaymentPoolsMismatch,
+    /// The proposal tried to spend a change output. Mark the `ChangeValue` as ephemeral if this is intended.
+    SpendsChange(StepOutput),
+    /// A proposal step created an ephemeral output that was not spent in any later step.
+    #[cfg(feature = "transparent-inputs")]
+    EphemeralOutputLeftUnspent(StepOutput),
+    /// The proposal included a payment to a TEX address and a spend from a shielded input in the same step.
+    #[cfg(feature = "transparent-inputs")]
+    PaysTexFromShielded,
 }
 
 impl Display for ProposalError {
@@ -89,6 +97,22 @@ impl Display for ProposalError {
             ProposalError::PaymentPoolsMismatch => write!(
                 f,
                 "The chosen payment pools did not match the payments of the transaction request."
+            ),
+            ProposalError::SpendsChange(r) => write!(
+                f,
+                "The proposal attempts to spends the change output created at step {:?}.",
+                r,
+            ),
+            #[cfg(feature = "transparent-inputs")]
+            ProposalError::EphemeralOutputLeftUnspent(r) => write!(
+                f,
+                "The proposal created an ephemeral output at step {:?} that was not spent in any later step.",
+                r,
+            ),
+            #[cfg(feature = "transparent-inputs")]
+            ProposalError::PaysTexFromShielded => write!(
+                f,
+                "The proposal included a payment to a TEX address and a spend from a shielded input in the same step.",
             ),
         }
     }

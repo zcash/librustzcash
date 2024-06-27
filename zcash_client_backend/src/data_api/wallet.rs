@@ -51,7 +51,7 @@ use crate::{
     decrypt_transaction,
     fees::{self, DustOutputPolicy},
     keys::UnifiedSpendingKey,
-    proposal::{Proposal, Step, StepOutputIndex},
+    proposal::{Proposal, ProposalError, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
     zip321::{self, Payment},
     PoolType, ShieldedProtocol,
@@ -73,11 +73,7 @@ use zip32::Scope;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::{
-        fees::ChangeValue,
-        proposal::{ProposalError, StepOutput},
-        wallet::TransparentAddressMetadata,
-    },
+    crate::{fees::ChangeValue, proposal::StepOutput, wallet::TransparentAddressMetadata},
     core::convert::Infallible,
     input_selection::ShieldingSelector,
     std::collections::HashMap,
@@ -631,15 +627,13 @@ where
 
     // Ephemeral outputs must be referenced exactly once.
     #[cfg(feature = "transparent-inputs")]
-    if unused_transparent_outputs.into_keys().any(|s: StepOutput| {
-        if let StepOutputIndex::Change(i) = s.output_index() {
-            // indexing has already been checked
-            step_results[s.step_index()].0.balance().proposed_change()[i].is_ephemeral()
-        } else {
-            false
+    for so in unused_transparent_outputs.into_keys() {
+        if let StepOutputIndex::Change(i) = so.output_index() {
+            // references have already been checked
+            if step_results[so.step_index()].0.balance().proposed_change()[i].is_ephemeral() {
+                return Err(ProposalError::EphemeralOutputLeftUnspent(so).into());
+            }
         }
-    }) {
-        return Err(Error::ProposalNotSupported);
     }
 
     Ok(NonEmpty::from_vec(
@@ -674,7 +668,7 @@ where
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
-    #[allow(unused_variables)]
+    #[cfg(feature = "transparent-inputs")]
     let step_index = prior_step_results.len();
 
     // We only support spending transparent payments or transparent ephemeral outputs from a
@@ -683,31 +677,26 @@ where
     // TODO: Maybe support spending prior shielded outputs at some point? Doing so would require
     // a higher-level approach in the wallet that waits for transactions with shielded outputs to
     // be mined and only then attempts to perform the next step.
-    #[cfg(feature = "transparent-inputs")]
     for input_ref in proposal_step.prior_step_inputs() {
-        let supported = prior_step_results
+        let (prior_step, _) = prior_step_results
             .get(input_ref.step_index())
-            .and_then(|(prior_step, _)| match input_ref.output_index() {
-                StepOutputIndex::Payment(i) => prior_step
-                    .payment_pools()
-                    .get(&i)
-                    .map(|&pool| pool == PoolType::TRANSPARENT),
-                StepOutputIndex::Change(i) => {
-                    prior_step.balance().proposed_change().get(i).map(|change| {
-                        change.is_ephemeral() && change.output_pool() == PoolType::TRANSPARENT
-                    })
-                }
-            })
-            .ok_or(Error::Proposal(ProposalError::ReferenceError(*input_ref)))?;
+            .ok_or(ProposalError::ReferenceError(*input_ref))?;
 
-        // Return an error on trying to spend a prior shielded output or non-ephemeral change output.
-        if !supported {
+        let output_pool = match input_ref.output_index() {
+            StepOutputIndex::Payment(i) => prior_step.payment_pools().get(&i).cloned(),
+            StepOutputIndex::Change(i) => match prior_step.balance().proposed_change().get(i) {
+                Some(change) if !change.is_ephemeral() => {
+                    return Err(ProposalError::SpendsChange(*input_ref).into());
+                }
+                other => other.map(|change| change.output_pool()),
+            },
+        }
+        .ok_or(ProposalError::ReferenceError(*input_ref))?;
+
+        // Return an error on trying to spend a prior shielded output.
+        if output_pool != PoolType::TRANSPARENT {
             return Err(Error::ProposalNotSupported);
         }
-    }
-    #[cfg(not(feature = "transparent-inputs"))]
-    if !proposal_step.prior_step_inputs().is_empty() {
-        return Err(Error::ProposalNotSupported);
     }
 
     let account_id = wallet_db
@@ -892,7 +881,7 @@ where
                 .1
                 .transaction()
                 .transparent_bundle()
-                .ok_or(Error::Proposal(ProposalError::ReferenceError(*input_ref)))?
+                .ok_or(ProposalError::ReferenceError(*input_ref))?
                 .vout[outpoint.n() as usize];
 
             add_transparent_input(
@@ -1070,7 +1059,7 @@ where
             #[cfg(feature = "transparent-inputs")]
             Address::Tex(data) => {
                 if has_shielded_inputs {
-                    return Err(Error::ProposalNotSupported);
+                    return Err(ProposalError::PaysTexFromShielded.into());
                 }
                 let to = TransparentAddress::PublicKeyHash(data);
                 add_transparent_output(&mut builder, &mut transparent_output_meta, to)?;

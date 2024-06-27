@@ -37,11 +37,10 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     Proposal(ProposalError),
 
     /// The proposal was structurally valid, but tries to do one of these unsupported things:
-    /// * spending a prior shielded output or non-ephemeral change output;
-    /// * leaving an ephemeral output unspent;
+    /// * spending a prior shielded output;
     /// * paying to an output pool for which the corresponding feature is not enabled;
     /// * paying to a TEX address if the "transparent-inputs" feature is not enabled;
-    /// * paying to a TEX address in a transaction that has shielded inputs.
+    /// * exceeding implementation limits.
     ProposalNotSupported,
 
     /// No account could be found corresponding to a provided spending key.
@@ -120,12 +119,12 @@ where
             Error::Proposal(e) => {
                 write!(f, "Input selection attempted to construct an invalid proposal: {}", e)
             }
-            Error::ProposalNotSupported => {
-                write!(
-                    f,
-                    "The proposal was valid, but spending shielded outputs of prior transaction steps is not yet supported."
-                )
-            }
+            Error::ProposalNotSupported => write!(
+                f,
+                "The proposal was valid but tried to do something that is not supported \
+                 (spending shielded outputs of prior transaction steps, using a feature \
+                 that is not enabled, or exceeding an implementation limit).",
+            ),
             Error::KeyNotRecognized => {
                 write!(
                     f,
@@ -188,6 +187,12 @@ where
 impl<DE, CE, SE, FE> From<builder::Error<FE>> for Error<DE, CE, SE, FE> {
     fn from(e: builder::Error<FE>) -> Self {
         Error::Builder(e)
+    }
+}
+
+impl<DE, CE, SE, FE> From<ProposalError> for Error<DE, CE, SE, FE> {
+    fn from(e: ProposalError) -> Self {
+        Error::Proposal(e)
     }
 }
 

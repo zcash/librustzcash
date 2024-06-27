@@ -482,7 +482,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTester>() {
     use nonempty::NonEmpty;
-    use zcash_client_backend::proposal::Proposal;
+    use zcash_client_backend::proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex};
 
     let mut st = TestBuilder::new()
         .with_block_cache()
@@ -556,7 +556,11 @@ pub(crate) fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPo
         OvkPolicy::Sender,
         &frobbed_proposal,
     );
-    assert_matches!(create_proposed_result, Err(Error::ProposalNotSupported));
+    assert_matches!(
+        create_proposed_result,
+        Err(Error::Proposal(ProposalError::EphemeralOutputLeftUnspent(so)))
+        if so == StepOutput::new(0, StepOutputIndex::Change(1))
+    );
 }
 
 #[allow(deprecated)]
