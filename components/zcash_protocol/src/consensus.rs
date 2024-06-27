@@ -356,7 +356,9 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Nu5 => Some(BlockHeight(1_687_104)),
             #[cfg(zcash_unstable = "nu6")]
             NetworkUpgrade::Nu6 => Some(BlockHeight(1_687_106)),
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ NetworkUpgrade::Nu7 => Some(BlockHeight(1_687_107)),
+            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ NetworkUpgrade::Nu7 => {
+                Some(BlockHeight(1_687_107))
+            }
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => None,
         }
