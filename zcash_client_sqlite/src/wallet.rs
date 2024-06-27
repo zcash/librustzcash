@@ -2213,6 +2213,10 @@ pub(crate) fn get_transaction<P: Parameters>(
                     tx_data.sprout_bundle().cloned(),
                     tx_data.sapling_bundle().cloned(),
                     tx_data.orchard_bundle().cloned(),
+                    #[cfg(zcash_unstable = "nsm")]
+                    tx_data.burn_amount(),
+                    #[cfg(zcash_unstable = "tze")]
+                    tx_data.tze_bundle().cloned(),
                 )
                 .freeze()
                 .map(|t| (expiry_height, t))
