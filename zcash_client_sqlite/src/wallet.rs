@@ -1490,9 +1490,9 @@ pub(crate) fn get_transaction<P: Parameters>(
                     tx_data.sprout_bundle().cloned(),
                     tx_data.sapling_bundle().cloned(),
                     tx_data.orchard_bundle().cloned(),
-                    #[cfg(zcash_unstable = "nu7")]
+                    #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
                     tx_data.orchard_zsa_bundle().cloned(),
-                    #[cfg(zcash_unstable = "nu7")]
+                    #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
                     tx_data.issue_bundle().cloned(),
                 )
                 .freeze()
