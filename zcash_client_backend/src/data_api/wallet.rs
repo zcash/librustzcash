@@ -807,24 +807,18 @@ where
         },
     );
 
-    #[cfg(feature = "transparent-inputs")]
-    let mut has_shielded_inputs = false;
+    #[cfg(all(feature = "transparent-inputs", not(feature = "orchard")))]
+    let has_shielded_inputs = !sapling_inputs.is_empty();
+    #[cfg(all(feature = "transparent-inputs", feature = "orchard"))]
+    let has_shielded_inputs = !(sapling_inputs.is_empty() && orchard_inputs.is_empty());
 
     for (sapling_key, sapling_note, merkle_path) in sapling_inputs.into_iter() {
         builder.add_sapling_spend(&sapling_key, sapling_note.clone(), merkle_path)?;
-        #[cfg(feature = "transparent-inputs")]
-        {
-            has_shielded_inputs = true;
-        }
     }
 
     #[cfg(feature = "orchard")]
     for (orchard_note, merkle_path) in orchard_inputs.into_iter() {
         builder.add_orchard_spend(usk.orchard(), *orchard_note, merkle_path.into())?;
-        #[cfg(feature = "transparent-inputs")]
-        {
-            has_shielded_inputs = true;
-        }
     }
 
     #[cfg(feature = "transparent-inputs")]
