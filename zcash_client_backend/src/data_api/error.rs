@@ -36,8 +36,12 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     /// An error in transaction proposal construction
     Proposal(ProposalError),
 
-    /// The proposal was structurally valid, but spending shielded outputs of prior multi-step
-    /// transaction steps is not yet supported.
+    /// The proposal was structurally valid, but tries to do one of these unsupported things:
+    /// * spending a prior shielded output or non-ephemeral change output;
+    /// * leaving an ephemeral output unspent;
+    /// * paying to an output pool for which the corresponding feature is not enabled;
+    /// * paying to a TEX address if the "transparent-inputs" feature is not enabled;
+    /// * paying to a TEX address in a transaction that has shielded inputs.
     ProposalNotSupported,
 
     /// No account could be found corresponding to a provided spending key.

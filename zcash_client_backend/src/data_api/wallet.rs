@@ -677,7 +677,8 @@ where
     #[allow(unused_variables)]
     let step_index = prior_step_results.len();
 
-    // We only support spending transparent payments or ephemeral outputs from a prior step.
+    // We only support spending transparent payments or transparent ephemeral outputs from a
+    // prior step.
     //
     // TODO: Maybe support spending prior shielded outputs at some point? Doing so would require
     // a higher-level approach in the wallet that waits for transactions with shielded outputs to

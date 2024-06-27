@@ -370,6 +370,9 @@ where
         let mut orchard_outputs = vec![];
         let mut payment_pools = BTreeMap::new();
 
+        // In a ZIP 320 pair, tr0 refers to the first transaction request that
+        // collects shielded value and sends it to an ephemeral address, and tr1
+        // refers to the second transaction request that pays the TEX addresses.
         #[cfg(feature = "transparent-inputs")]
         let mut tr1_transparent_outputs = vec![];
         #[cfg(feature = "transparent-inputs")]
@@ -597,8 +600,8 @@ where
                     if let Some(tr1_balance) = tr1_balance_opt {
                         // Construct two new `TransactionRequest`s:
                         // * `tr0` excludes the TEX outputs, and in their place includes
-                        //   a single additional "change" output to the transparent pool.
-                        // * `tr1` spends from that change output to each TEX output.
+                        //   a single additional ephemeral output to the transparent pool.
+                        // * `tr1` spends from that ephemeral output to each TEX output.
 
                         // The ephemeral output should always be at the last change index.
                         assert_eq!(

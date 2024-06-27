@@ -517,7 +517,8 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
 ///
 /// The following three locations in the wallet's key tree are searched:
 /// - Transparent receivers that have been generated as part of a Unified Address.
-/// - Transparent ephemeral addresses that have been reserved.
+/// - Transparent ephemeral addresses that have been reserved or are within
+///   the gap limit from the last reserved address.
 /// - "Legacy transparent addresses" (at BIP 44 address index 0 within an account).
 ///
 /// Returns `Ok(None)` if the transparent output's recipient address is not in any of the
