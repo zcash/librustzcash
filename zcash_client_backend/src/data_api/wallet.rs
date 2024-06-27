@@ -629,15 +629,16 @@ where
         step_results.push((step, step_result));
     }
 
-    // Ephemeral outputs must be referenced exactly once. Currently this is all
-    // transparent outputs using `StepOutputIndex::Change`.
-    // TODO: if we support transparent change, this will need to be updated to
-    // not require it to be referenced by a later step.
+    // Ephemeral outputs must be referenced exactly once.
     #[cfg(feature = "transparent-inputs")]
-    if unused_transparent_outputs
-        .into_keys()
-        .any(|s: StepOutput| matches!(s.output_index(), StepOutputIndex::Change(_)))
-    {
+    if unused_transparent_outputs.into_keys().any(|s: StepOutput| {
+        if let StepOutputIndex::Change(i) = s.output_index() {
+            // indexing has already been checked
+            step_results[s.step_index()].0.balance().proposed_change()[i].is_ephemeral()
+        } else {
+            false
+        }
+    }) {
         return Err(Error::ProposalNotSupported);
     }
 

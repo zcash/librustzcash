@@ -479,6 +479,86 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         Err(Error::DataSource(SqliteClientError::EphemeralAddressReuse(addr, Some(txid)))) if addr == &ephemeral0 && txid == &txid0);
 }
 
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTester>() {
+    use nonempty::NonEmpty;
+    use zcash_client_backend::proposal::Proposal;
+
+    let mut st = TestBuilder::new()
+        .with_block_cache()
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let dfvk = T::test_account_fvk(&st);
+
+    let add_funds = |st: &mut TestState<_>, value| {
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        st.scan_cached_blocks(h, 1);
+
+        assert_eq!(
+            block_max_scanned(&st.wallet().conn, &st.wallet().params)
+                .unwrap()
+                .unwrap()
+                .block_height(),
+            h
+        );
+        assert_eq!(st.get_spendable_balance(account.account_id(), 1), value);
+    };
+
+    let value = NonNegativeAmount::const_from_u64(100000);
+    let transfer_amount = NonNegativeAmount::const_from_u64(50000);
+
+    // Add funds to the wallet.
+    add_funds(&mut st, value);
+
+    // Generate a ZIP 320 proposal, sending to the wallet's default transparent address
+    // expressed as a TEX address.
+    let tex_addr = match account.usk().default_transparent_address().0 {
+        TransparentAddress::PublicKeyHash(data) => Address::Tex(data),
+        _ => unreachable!(),
+    };
+
+    let proposal = st
+        .propose_standard_transfer::<Infallible>(
+            account.account_id(),
+            StandardFeeRule::Zip317,
+            NonZeroU32::new(1).unwrap(),
+            &tex_addr,
+            transfer_amount,
+            None,
+            None,
+            T::SHIELDED_PROTOCOL,
+        )
+        .unwrap();
+
+    // This is somewhat redundant with `send_multi_step_proposed_transfer`,
+    // but tests the case with no change memo and ensures we haven't messed
+    // up the test setup.
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
+        account.usk(),
+        OvkPolicy::Sender,
+        &proposal,
+    );
+    assert_matches!(create_proposed_result, Ok(_));
+
+    // Frobnicate the proposal to make it invalid because it does not consume
+    // the ephemeral output, by truncating it to the first step.
+    let frobbed_proposal = Proposal::multi_step(
+        *proposal.fee_rule(),
+        proposal.min_target_height(),
+        NonEmpty::singleton(proposal.steps().first().clone()),
+    )
+    .unwrap();
+
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
+        account.usk(),
+        OvkPolicy::Sender,
+        &frobbed_proposal,
+    );
+    assert_matches!(create_proposed_result, Err(Error::ProposalNotSupported));
+}
+
 #[allow(deprecated)]
 pub(crate) fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
