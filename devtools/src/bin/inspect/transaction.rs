@@ -31,7 +31,7 @@ use crate::{
     GROTH16_PARAMS, ORCHARD_VK,
 };
 
-#[cfg(zcash_unstable = "zfuture")]
+#[cfg(zcash_unstable = "tze")]
 use zcash_primitives::transaction::components::tze;
 
 pub fn is_coinbase(tx: &Transaction) -> bool {
@@ -148,7 +148,7 @@ impl Authorization for PrecomputedAuth {
     type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 
-    #[cfg(zcash_unstable = "zfuture")]
+    #[cfg(zcash_unstable = "tze")]
     type TzeAuth = tze::Authorized;
 }
 
@@ -211,7 +211,7 @@ pub(crate) fn inspect(
             f_transparent,
             (),
             (),
-            #[cfg(zcash_unstable = "zfuture")]
+            #[cfg(zcash_unstable = "tze")]
             (),
         );
         let txid_parts = tx.digest(TxIdDigester);
