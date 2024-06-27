@@ -35,6 +35,9 @@ use {
     alloc::vec::Vec,
 };
 
+#[cfg(feature = "zip-233")]
+use zcash_protocol::value::ZatBalance;
+
 #[cfg(feature = "transparent-inputs")]
 use ::transparent::builder::TransparentInputInfo;
 
@@ -308,6 +311,8 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     transparent_builder: TransparentBuilder,
     sapling_builder: Option<sapling::builder::Builder>,
     orchard_builder: Option<orchard::builder::Builder>,
+    #[cfg(feature = "zip-233")]
+    burn_amount: Option<NonNegativeAmount>,
     #[cfg(zcash_unstable = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(zcash_unstable = "zfuture"))]
@@ -391,6 +396,8 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder,
             orchard_builder,
+            #[cfg(feature = "zip-233")]
+            burn_amount: None,
             #[cfg(zcash_unstable = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
@@ -418,6 +425,8 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             transparent_builder: self.transparent_builder,
             sapling_builder: self.sapling_builder,
             orchard_builder: self.orchard_builder,
+            #[cfg(feature = "zip-233")]
+            burn_amount: self.burn_amount,
             tze_builder: self.tze_builder,
             _progress_notifier,
         }
@@ -538,6 +547,11 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
                         .map_err(|_| BalanceError::Overflow)
                 },
             )?,
+            #[cfg(feature = "zip-233")]
+            -self
+                .burn_amount
+                .map(Into::into)
+                .unwrap_or(ZatBalance::zero()),
             #[cfg(zcash_unstable = "zfuture")]
             self.tze_builder.value_balance()?,
         ];
@@ -640,6 +654,11 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
                 self.tze_builder.outputs(),
             )
             .map_err(FeeError::FeeRule)
+    }
+
+    #[cfg(feature = "zip-233")]
+    pub fn set_burn_amount(&mut self, burn_amount: Option<NonNegativeAmount>) {
+        self.burn_amount = burn_amount;
     }
 
     /// Builds a transaction from the configured spends and outputs.
@@ -795,6 +814,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             sprout_bundle: None,
             sapling_bundle,
             orchard_bundle,
+            #[cfg(feature = "zip-233")]
+            burn_amount: self.burn_amount,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
         };
@@ -871,6 +892,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             sprout_bundle: unauthed_tx.sprout_bundle,
             sapling_bundle,
             orchard_bundle,
+            #[cfg(feature = "zip-233")]
+            burn_amount: self.burn_amount,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
         };
@@ -1110,6 +1133,8 @@ mod tests {
             expiry_height: sapling_activation_height + DEFAULT_TX_EXPIRY_DELTA,
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder: None,
+            #[cfg(feature = "zip-233")]
+            burn_amount: None,
             #[cfg(zcash_unstable = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
@@ -1275,6 +1300,24 @@ mod tests {
             );
         }
 
+        // Fail if there is only a burn
+        // 0.0005 burned, 0.0001 t-ZEC fee
+        #[cfg(feature = "zip-233")]
+        {
+            let build_config = BuildConfig::Standard {
+                sapling_anchor: Some(sapling::Anchor::empty_tree()),
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            };
+            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            builder.set_burn_amount(Some(NonNegativeAmount::const_from_u64(50000)));
+
+            assert_matches!(
+                builder.mock_build(OsRng),
+                Err(Error::InsufficientFunds(expected)) if expected ==
+                    (NonNegativeAmount::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
+            );
+        }
+
         let note1 = to.create_note(
             sapling::value::NoteValue::from_raw(59999),
             Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)),
@@ -1316,6 +1359,40 @@ mod tests {
             assert_matches!(
                 builder.mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected == ZatBalance::const_from_i64(1)
+            );
+        }
+
+        // Fail if there is insufficient input
+        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 burned, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
+        #[cfg(feature = "zip-233")]
+        {
+            let build_config = BuildConfig::Standard {
+                sapling_anchor: Some(witness1.root().into()),
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            };
+            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            builder
+                .add_sapling_spend::<Infallible>(&extsk, note1.clone(), witness1.path().unwrap())
+                .unwrap();
+            builder
+                .add_sapling_output::<Infallible>(
+                    ovk,
+                    to,
+                    NonNegativeAmount::const_from_u64(30000),
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+            builder
+                .add_transparent_output(
+                    &TransparentAddress::PublicKeyHash([0; 20]),
+                    NonNegativeAmount::const_from_u64(10000),
+                )
+                .unwrap();
+            #[cfg(zcash_unstable = "nsm")]
+            builder.set_burn_amount(Some(NonNegativeAmount::const_from_u64(10000)));
+            assert_matches!(
+                builder.mock_build(OsRng),
+                Err(Error::InsufficientFunds(expected)) if expected == Amount::const_from_i64(1)
             );
         }
 
@@ -1372,6 +1449,48 @@ mod tests {
                     .fee_paid(|_| Err(BalanceError::Overflow))
                     .unwrap(),
                 ZatBalance::const_from_i64(15_000)
+            );
+        }
+
+        // Succeeds if there is sufficient input
+        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.0006 z-ZEC in
+        #[cfg(feature = "zip-233")]
+        {
+            let note1 = to.create_note(
+                sapling::value::NoteValue::from_raw(70000),
+                Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)),
+            );
+            let cmu1 = Node::from_cmu(&note1.cmu());
+            let mut tree = CommitmentTree::<Node, 32>::empty();
+            tree.append(cmu1).unwrap();
+            let witness1 = IncrementalWitness::from_tree(tree.clone());
+
+            let build_config = BuildConfig::Standard {
+                sapling_anchor: Some(witness1.root().into()),
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            };
+            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            builder
+                .add_sapling_spend::<Infallible>(&extsk, note1, witness1.path().unwrap())
+                .unwrap();
+            builder
+                .add_sapling_output::<Infallible>(
+                    ovk,
+                    to,
+                    NonNegativeAmount::const_from_u64(30000),
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+            builder
+                .add_transparent_output(
+                    &TransparentAddress::PublicKeyHash([0; 20]),
+                    NonNegativeAmount::const_from_u64(20000),
+                )
+                .unwrap();
+            builder.set_burn_amount(Some(NonNegativeAmount::const_from_u64(10000)));
+            assert_matches!(
+                builder.mock_build(OsRng),
+                Ok(res) if res.transaction().fee_paid(|_| Err(BalanceError::Overflow)).unwrap() == Amount::const_from_i64(10_000)
             );
         }
     }
