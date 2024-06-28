@@ -206,15 +206,25 @@ pub enum ChangeError<E, NoteRefT> {
         /// including the required fees.
         required: NonNegativeAmount,
     },
-    /// Some of the inputs provided to the transaction were determined to currently have no
-    /// economic value (i.e. their inclusion in a transaction causes fees to rise in an amount
-    /// greater than their value.)
+    /// Some of the inputs provided to the transaction have value less than the
+    /// marginal fee, and could not be determined to have any economic value in
+    /// the context of this input selection.
+    ///
+    /// This determination is potentially conservative in the sense that inputs
+    /// with value less than or equal to the marginal fee might be excluded, even
+    /// though in practice they would not cause the fee to increase. Inputs with
+    /// value greater than the marginal fee will never be excluded.
+    ///
+    /// The ordering of the inputs in each list is unspecified.
     DustInputs {
-        /// The outpoints corresponding to transparent inputs having no current economic value.
+        /// The outpoints for transparent inputs that could not be determined to
+        /// have economic value in the context of this input selection.
         transparent: Vec<OutPoint>,
-        /// The identifiers for Sapling inputs having no current economic value
+        /// The identifiers for Sapling inputs that could not be determined to
+        /// have economic value in the context of this input selection.
         sapling: Vec<NoteRefT>,
-        /// The identifiers for Orchard inputs having no current economic value
+        /// The identifiers for Orchard inputs that could not be determined to
+        /// have economic value in the context of this input selection.
         #[cfg(feature = "orchard")]
         orchard: Vec<NoteRefT>,
     },
@@ -415,6 +425,13 @@ pub trait ChangeStrategy {
     /// change outputs recommended by this operation. If insufficient funds are available to
     /// supply the requested outputs and required fees, implementations should return
     /// [`ChangeError::InsufficientFunds`].
+    ///
+    /// If the inputs include notes or UTXOs that are not economic to spend in the context
+    /// of this input selection, a [`ChangeError::DustInputs`] error can be returned
+    /// indicating inputs that should be removed from the selection (all of which will
+    /// have value less than or equal to the marginal fee). The caller should order the
+    /// inputs from most to least preferred to spend within each pool, so that the most
+    /// preferred ones are less likely to be indicated to remove.
     ///
     #[cfg_attr(
         feature = "transparent-inputs",

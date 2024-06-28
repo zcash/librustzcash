@@ -4,7 +4,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     transaction::{
-        components::amount::BalanceError,
+        components::amount::{BalanceError, NonNegativeAmount},
         fees::{fixed::FeeRule as FixedFeeRule, transparent},
     },
 };
@@ -78,9 +78,11 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             #[cfg(feature = "orchard")]
             orchard,
             dust_output_policy,
-            self.fee_rule().fixed_fee(),
+            self.fee_rule.fixed_fee(),
             self.change_memo.as_ref(),
             self.fallback_change_pool,
+            NonNegativeAmount::ZERO,
+            0,
             #[cfg(feature = "transparent-inputs")]
             ephemeral_parameters,
         )

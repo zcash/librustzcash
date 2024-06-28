@@ -72,7 +72,6 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         dust_output_policy: &DustOutputPolicy,
         #[cfg(feature = "transparent-inputs")] ephemeral_parameters: &EphemeralParameters,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
-        // TODO: consider opportunistic dust spends (#1316).
         single_change_output_balance(
             params,
             &self.fee_rule,
@@ -86,6 +85,8 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             self.fee_rule.marginal_fee(),
             self.change_memo.as_ref(),
             self.fallback_change_pool,
+            self.fee_rule.marginal_fee(),
+            self.fee_rule.grace_actions(),
             #[cfg(feature = "transparent-inputs")]
             ephemeral_parameters,
         )
@@ -472,10 +473,8 @@ mod tests {
             ShieldedProtocol::Sapling,
         );
 
-        // Attempt to spend three Sapling notes, one of them dust. Taking into account
-        // Sapling output padding, the dust note would be free to add to the transaction
-        // if there were only two notes (as in the `change_with_allowable_dust` test), but
-        // it is not free when there are three notes.
+        // Attempt to spend three Sapling notes, one of them dust. Adding the third
+        // note increases the number of actions, and so it is uneconomic to spend it.
         let result = change_strategy.compute_balance(
             &Network::TestNetwork,
             Network::TestNetwork
@@ -500,7 +499,7 @@ mod tests {
                     },
                 ][..],
                 &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                    40000,
+                    30000,
                 ))][..],
             ),
             #[cfg(feature = "orchard")]
@@ -510,7 +509,7 @@ mod tests {
             &Default::default(),
         );
 
-        // We will get an error here, because the dust input now isn't free to add
+        // We will get an error here, because the dust input isn't free to add
         // to the transaction.
         assert_matches!(
             result,
