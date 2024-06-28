@@ -39,39 +39,6 @@ enum ChangeValueInner {
 }
 
 impl ChangeValue {
-    #[cfg_attr(
-        feature = "transparent-inputs",
-        doc = "Constructs a new change or ephemeral value from its constituent
-               parts. Currently, the only supported combinations are change sent
-               to a shielded pool, or an ephemeral output to the transparent pool."
-    )]
-    #[cfg_attr(
-        not(feature = "transparent-inputs"),
-        doc = "Constructs a new change value from its constituent parts.
-               Currently, `output_pool` must be a shielded pool (enable the
-               `transparent-inputs` feature to support ephemeral outputs to the
-               transparent pool). Use `ChangeValue::shielded` to avoid the
-               `Option` return."
-    )]
-    pub fn new(
-        output_pool: PoolType,
-        value: NonNegativeAmount,
-        memo: Option<MemoBytes>,
-        #[cfg(feature = "transparent-inputs")] is_ephemeral: bool,
-    ) -> Option<Self> {
-        #[cfg(not(feature = "transparent-inputs"))]
-        let is_ephemeral = false;
-
-        match (output_pool, is_ephemeral) {
-            (PoolType::Shielded(protocol), false) => Some(Self::shielded(protocol, value, memo)),
-            #[cfg(feature = "transparent-inputs")]
-            (PoolType::Transparent, true) if memo.is_none() => {
-                Some(Self::ephemeral_transparent(value))
-            }
-            _ => None,
-        }
-    }
-
     /// Constructs a new ephemeral transparent output value.
     #[cfg(feature = "transparent-inputs")]
     pub fn ephemeral_transparent(value: NonNegativeAmount) -> Self {

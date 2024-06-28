@@ -28,7 +28,8 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   - `chain::BlockCache` trait, behind the `sync` feature flag.
   - `WalletRead::get_spendable_transparent_outputs`.
 - `zcash_client_backend::fees`:
-  - `ChangeValue::{ephemeral_transparent, shielded}`
+  - `ChangeValue::shielded, is_ephemeral`
+  - `ChangeValue::ephemeral_transparent` (when "transparent-inputs" is enabled)
   - `sapling::EmptyBundleView`
   - `orchard::EmptyBundleView`
 - `zcash_client_backend::proposal`:
@@ -61,16 +62,10 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   try_into_standard_proposal}` each no longer require a `consensus::Parameters` 
   argument.
 - `zcash_client_backend::data_api::fees`
-  - The return type of `ChangeValue::output_pool`, and the type of the
-    `output_pool` argument to `ChangeValue::new`, have changed from
-    `ShieldedProtocol` to `zcash_protocol::PoolType`.
-  - When the "transparent-inputs" feature is enabled, `ChangeValue::new`
-    takes an additional `is_ephemeral` parameter indicating whether the value
-    is ephemeral (i.e. for use in a subsequent proposal step) or change.
-  - The return type of `ChangeValue::new` is now optional; it returns `None`
-    if a memo is given for the transparent pool. Use `ChangeValue::shielded`
-    to avoid this error case when creating a `ChangeValue` known to be for a
-    shielded pool.
+  - When the "transparent-inputs" feature is enabled, `ChangeValue` can also
+    represent an ephemeral transparent output in a proposal. Accordingly, the
+    return type of `ChangeValue::output_pool` has (unconditionally) changed
+    from `ShieldedProtocol` to `zcash_protocol::PoolType`.
   - `ChangeStrategy::compute_balance`: this trait method has an additional
     `&EphemeralParameters` parameter when the "transparent-inputs" feature is
     enabled. This can be used to specify whether the change memo should be
@@ -92,6 +87,8 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   - `WalletRead::get_unspent_transparent_outputs` has been removed because its
     semantics were unclear and could not be clarified. Use
     `WalletRead::get_spendable_transparent_outputs` instead.
+- `zcash_client_backend::fees::ChangeValue::new`. Use `ChangeValue::shielded`
+  or `ChangeValue::ephemeral_transparent` instead.
 
 ## [0.12.1] - 2024-03-27
 
