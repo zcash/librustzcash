@@ -172,7 +172,7 @@ pub(crate) fn get_reserved_ephemeral_addresses<P: consensus::Parameters>(
 /// Returns a vector with the next `n` previously unreserved ephemeral addresses for
 /// the given account.
 ///
-/// Precondition: `n >= 0`
+/// Precondition: `n < 0x80000000`
 ///
 /// # Errors
 ///
@@ -187,12 +187,13 @@ pub(crate) fn get_reserved_ephemeral_addresses<P: consensus::Parameters>(
 pub(crate) fn reserve_next_n_ephemeral_addresses<P: consensus::Parameters>(
     wdb: &mut WalletDb<SqlTransaction<'_>, P>,
     account_id: AccountId,
-    n: i32,
+    n: u32,
 ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
     if n == 0 {
         return Ok(vec![]);
     }
     assert!(n > 0);
+    let n = i32::try_from(n).expect("precondition violated");
 
     let ephemeral_ivk = get_ephemeral_ivk(wdb.conn.0, &wdb.params, account_id)?;
     let last_reserved_index = last_reserved_index(wdb.conn.0, account_id)?;

@@ -1634,14 +1634,14 @@ pub trait WalletWrite: WalletRead {
     /// the given number of addresses, or if the account identifier does not correspond
     /// to a known account.
     ///
-    /// Precondition: `n >= 0`
+    /// Precondition: `n < 0x80000000`
     ///
     /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki#user-content-Address_gap_limit
     #[cfg(feature = "transparent-inputs")]
     fn reserve_next_n_ephemeral_addresses(
         &mut self,
         account_id: Self::AccountId,
-        n: i32,
+        n: u32,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error>;
 }
 
@@ -2056,9 +2056,9 @@ pub mod testing {
         fn reserve_next_n_ephemeral_addresses(
             &mut self,
             _account_id: Self::AccountId,
-            n: i32,
+            n: u32,
         ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
-            assert!(n >= 0);
+            assert!(n < 0x80000000);
             Err(())
         }
     }

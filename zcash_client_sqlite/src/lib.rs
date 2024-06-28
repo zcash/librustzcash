@@ -1496,7 +1496,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     fn reserve_next_n_ephemeral_addresses(
         &mut self,
         account_id: Self::AccountId,
-        n: i32,
+        n: u32,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         self.transactionally(|wdb| {
             wallet::transparent::ephemeral::reserve_next_n_ephemeral_addresses(wdb, account_id, n)
