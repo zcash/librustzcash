@@ -645,6 +645,9 @@ where
     .expect("proposal.steps is NonEmpty"))
 }
 
+// `unused_transparent_outputs` maps `StepOutput`s for transparent outputs
+// that have not been consumed so far, to the corresponding pair of
+// `TransparentAddress` and `Outpoint`.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(

@@ -36,11 +36,11 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     /// An error in transaction proposal construction
     Proposal(ProposalError),
 
-    /// The proposal was structurally valid, but tries to do one of these unsupported things:
-    /// * spending a prior shielded output;
-    /// * paying to an output pool for which the corresponding feature is not enabled;
-    /// * paying to a TEX address if the "transparent-inputs" feature is not enabled;
-    /// * exceeding implementation limits.
+    /// The proposal was structurally valid, but tried to do one of these unsupported things:
+    /// * spend a prior shielded output;
+    /// * pay to an output pool for which the corresponding feature is not enabled;
+    /// * pay to a TEX address if the "transparent-inputs" feature is not enabled;
+    /// or exceeded an implementation limit.
     ProposalNotSupported,
 
     /// No account could be found corresponding to a provided spending key.
@@ -122,8 +122,8 @@ where
             Error::ProposalNotSupported => write!(
                 f,
                 "The proposal was valid but tried to do something that is not supported \
-                 (spending shielded outputs of prior transaction steps, using a feature \
-                 that is not enabled, or exceeding an implementation limit).",
+                 (spend shielded outputs of prior transaction steps or use a feature that \
+                 is not enabled), or exceeded an implementation limit.",
             ),
             Error::KeyNotRecognized => {
                 write!(
