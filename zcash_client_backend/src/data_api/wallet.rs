@@ -675,7 +675,7 @@ where
     let step_index = prior_step_results.len();
 
     // We only support spending transparent payments or transparent ephemeral outputs from a
-    // prior step.
+    // prior step (when "transparent-inputs" is enabled).
     //
     // TODO: Maybe support spending prior shielded outputs at some point? Doing so would require
     // a higher-level approach in the wallet that waits for transactions with shielded outputs to
@@ -685,6 +685,7 @@ where
             .get(input_ref.step_index())
             .ok_or(ProposalError::ReferenceError(*input_ref))?;
 
+        #[allow(unused_variables)]
         let output_pool = match input_ref.output_index() {
             StepOutputIndex::Payment(i) => prior_step.payment_pools().get(&i).cloned(),
             StepOutputIndex::Change(i) => match prior_step.balance().proposed_change().get(i) {
@@ -696,10 +697,13 @@ where
         }
         .ok_or(ProposalError::ReferenceError(*input_ref))?;
 
-        // Return an error on trying to spend a prior shielded output.
+        // Return an error on trying to spend a prior output that is not supported.
+        #[cfg(feature = "transparent-inputs")]
         if output_pool != PoolType::TRANSPARENT {
             return Err(Error::ProposalNotSupported);
         }
+        #[cfg(not(feature = "transparent-inputs"))]
+        return Err(Error::ProposalNotSupported);
     }
 
     let account_id = wallet_db
