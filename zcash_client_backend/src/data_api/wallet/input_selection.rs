@@ -23,7 +23,7 @@ use zcash_primitives::{
 use crate::{
     address::{Address, UnifiedAddress},
     data_api::{InputSource, SimpleNoteRetention, SpendableNotes},
-    fees::{sapling, ChangeError, ChangeStrategy, DustOutputPolicy},
+    fees::{sapling, ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralParameters},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
     zip321::TransactionRequest,
@@ -33,7 +33,7 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        fees::{ChangeValue, EphemeralParameters},
+        fees::ChangeValue,
         proposal::{Step, StepOutput, StepOutputIndex},
         zip321::Payment,
     },
@@ -459,6 +459,9 @@ where
             }
         }
 
+        #[cfg(not(feature = "transparent-inputs"))]
+        let ephemeral_parameters = EphemeralParameters::NONE;
+
         #[cfg(feature = "transparent-inputs")]
         let (ephemeral_parameters, tr1_balance_opt) = {
             if tr1_transparent_outputs.is_empty() {
@@ -579,7 +582,6 @@ where
                     &orchard_outputs[..],
                 ),
                 &self.dust_output_policy,
-                #[cfg(feature = "transparent-inputs")]
                 &ephemeral_parameters,
             );
 
@@ -771,7 +773,6 @@ where
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &self.dust_output_policy,
-            #[cfg(feature = "transparent-inputs")]
             &EphemeralParameters::NONE,
         );
 

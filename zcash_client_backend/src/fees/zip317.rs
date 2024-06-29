@@ -17,11 +17,8 @@ use crate::ShieldedProtocol;
 
 use super::{
     common::single_change_output_balance, sapling as sapling_fees, ChangeError, ChangeStrategy,
-    DustOutputPolicy, TransactionBalance,
+    DustOutputPolicy, EphemeralParameters, TransactionBalance,
 };
-
-#[cfg(feature = "transparent-inputs")]
-use super::EphemeralParameters;
 
 #[cfg(feature = "orchard")]
 use super::orchard as orchard_fees;
@@ -70,7 +67,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
-        #[cfg(feature = "transparent-inputs")] ephemeral_parameters: &EphemeralParameters,
+        ephemeral_parameters: &EphemeralParameters,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         single_change_output_balance(
             params,
@@ -87,7 +84,6 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             self.fallback_change_pool,
             self.fee_rule.marginal_fee(),
             self.fee_rule.grace_actions(),
-            #[cfg(feature = "transparent-inputs")]
             ephemeral_parameters,
         )
     }
@@ -112,12 +108,10 @@ mod tests {
         fees::{
             tests::{TestSaplingInput, TestTransparentInput},
             ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy,
+            EphemeralParameters,
         },
         ShieldedProtocol,
     };
-
-    #[cfg(feature = "transparent-inputs")]
-    use crate::fees::EphemeralParameters;
 
     #[cfg(feature = "orchard")]
     use {
@@ -154,7 +148,6 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
-            #[cfg(feature = "transparent-inputs")]
             &EphemeralParameters::NONE,
         );
 
@@ -199,7 +192,6 @@ mod tests {
                 ))][..],
             ),
             &DustOutputPolicy::default(),
-            #[cfg(feature = "transparent-inputs")]
             &EphemeralParameters::NONE,
         );
 
@@ -253,7 +245,6 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             dust_output_policy,
-            #[cfg(feature = "transparent-inputs")]
             &EphemeralParameters::NONE,
         );
 
@@ -298,7 +289,6 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
-            #[cfg(feature = "transparent-inputs")]
             &EphemeralParameters::NONE,
         );
 
@@ -343,7 +333,6 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
-            #[cfg(feature = "transparent-inputs")]
             &EphemeralParameters::NONE,
         );
 
@@ -394,7 +383,6 @@ mod tests {
                 DustAction::AllowDustChange,
                 Some(NonNegativeAmount::const_from_u64(1000)),
             ),
-            #[cfg(feature = "transparent-inputs")]
             &EphemeralParameters::NONE,
         );
 
@@ -456,7 +444,6 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             dust_output_policy,
-            #[cfg(feature = "transparent-inputs")]
             &EphemeralParameters::NONE,
         );
 
@@ -508,7 +495,6 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
-            #[cfg(feature = "transparent-inputs")]
             &EphemeralParameters::NONE,
         );
 

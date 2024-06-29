@@ -5,22 +5,14 @@ use zcash_primitives::{
     memo::MemoBytes,
     transaction::{
         components::amount::{BalanceError, NonNegativeAmount},
-        fees::{transparent, zip317::MINIMUM_FEE, FeeRule},
+        fees::{transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE, FeeRule},
     },
 };
 use zcash_protocol::ShieldedProtocol;
 
 use super::{
     sapling as sapling_fees, ChangeError, ChangeValue, DustAction, DustOutputPolicy,
-    TransactionBalance,
-};
-
-#[cfg(feature = "transparent-inputs")]
-use {
-    super::EphemeralParameters,
-    zcash_primitives::transaction::fees::{
-        transparent::InputSize, zip317::P2PKH_STANDARD_OUTPUT_SIZE,
-    },
+    EphemeralParameters, TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
@@ -57,16 +49,13 @@ pub(crate) fn calculate_net_flows<NoteRefT: Clone, F: FeeRule, E>(
     transparent_outputs: &[impl transparent::OutputView],
     sapling: &impl sapling_fees::BundleView<NoteRefT>,
     #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
-    #[cfg(feature = "transparent-inputs")] ephemeral_input_amount: Option<NonNegativeAmount>,
-    #[cfg(feature = "transparent-inputs")] ephemeral_output_amount: Option<NonNegativeAmount>,
+    ephemeral_input_amount: Option<NonNegativeAmount>,
+    ephemeral_output_amount: Option<NonNegativeAmount>,
 ) -> Result<NetFlows, ChangeError<E, NoteRefT>>
 where
     E: From<F::Error> + From<BalanceError>,
 {
     let overflow = || ChangeError::StrategyError(E::from(BalanceError::Overflow));
-
-    #[cfg(not(feature = "transparent-inputs"))]
-    let (ephemeral_input_amount, ephemeral_output_amount) = (None, None);
 
     let t_in = transparent_inputs
         .iter()
@@ -173,12 +162,11 @@ pub(crate) fn single_change_output_balance<
     fallback_change_pool: ShieldedProtocol,
     marginal_fee: NonNegativeAmount,
     grace_actions: usize,
-    #[cfg(feature = "transparent-inputs")] ephemeral_parameters: &EphemeralParameters,
+    ephemeral_parameters: &EphemeralParameters,
 ) -> Result<TransactionBalance, ChangeError<E, NoteRefT>>
 where
     E: From<F::Error> + From<BalanceError>,
 {
-    #[cfg(feature = "transparent-inputs")]
     let change_memo = change_memo.filter(|_| !ephemeral_parameters.ignore_change_memo());
 
     let overflow = || ChangeError::StrategyError(E::from(BalanceError::Overflow));
@@ -190,9 +178,7 @@ where
         sapling,
         #[cfg(feature = "orchard")]
         orchard,
-        #[cfg(feature = "transparent-inputs")]
         ephemeral_parameters.ephemeral_input_amount(),
-        #[cfg(feature = "transparent-inputs")]
         ephemeral_parameters.ephemeral_output_amount(),
     )?;
 
@@ -227,7 +213,6 @@ where
             marginal_fee,
             grace_actions,
             &possible_change[..],
-            #[cfg(feature = "transparent-inputs")]
             ephemeral_parameters,
         )?;
     }
@@ -298,20 +283,22 @@ where
     // Note that using the `DustAction::AddDustToFee` policy inherently leaks
     // more information.
 
-    let transparent_input_sizes = transparent_inputs.iter().map(|i| i.serialized_size());
-    #[cfg(feature = "transparent-inputs")]
-    let transparent_input_sizes = transparent_input_sizes.chain(
-        ephemeral_parameters
-            .ephemeral_input_amount()
-            .map(|_| InputSize::STANDARD_P2PKH),
-    );
-    let transparent_output_sizes = transparent_outputs.iter().map(|i| i.serialized_size());
-    #[cfg(feature = "transparent-inputs")]
-    let transparent_output_sizes = transparent_output_sizes.chain(
-        ephemeral_parameters
-            .ephemeral_output_amount()
-            .map(|_| P2PKH_STANDARD_OUTPUT_SIZE),
-    );
+    let transparent_input_sizes = transparent_inputs
+        .iter()
+        .map(|i| i.serialized_size())
+        .chain(
+            ephemeral_parameters
+                .ephemeral_input_amount()
+                .map(|_| transparent::InputSize::STANDARD_P2PKH),
+        );
+    let transparent_output_sizes = transparent_outputs
+        .iter()
+        .map(|i| i.serialized_size())
+        .chain(
+            ephemeral_parameters
+                .ephemeral_output_amount()
+                .map(|_| P2PKH_STANDARD_OUTPUT_SIZE),
+        );
 
     let fee_without_change = fee_rule
         .fee_required(
@@ -469,7 +456,7 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
     marginal_fee: NonNegativeAmount,
     grace_actions: usize,
     possible_change: &[(usize, usize, usize)],
-    #[cfg(feature = "transparent-inputs")] ephemeral_parameters: &EphemeralParameters,
+    ephemeral_parameters: &EphemeralParameters,
 ) -> Result<(), ChangeError<E, NoteRefT>> {
     let mut t_dust: Vec<_> = transparent_inputs
         .iter()
@@ -516,11 +503,11 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
         return Ok(());
     }
 
-    let (t_inputs_len, t_outputs_len) = (transparent_inputs.len(), transparent_outputs.len());
-    #[cfg(feature = "transparent-inputs")]
     let (t_inputs_len, t_outputs_len) = (
-        t_inputs_len + usize::from(ephemeral_parameters.ephemeral_input_amount().is_some()),
-        t_outputs_len + usize::from(ephemeral_parameters.ephemeral_output_amount().is_some()),
+        transparent_inputs.len()
+            + usize::from(ephemeral_parameters.ephemeral_input_amount().is_some()),
+        transparent_outputs.len()
+            + usize::from(ephemeral_parameters.ephemeral_output_amount().is_some()),
     );
     let (s_inputs_len, s_outputs_len) = (sapling.inputs().len(), sapling.outputs().len());
     #[cfg(feature = "orchard")]

@@ -67,11 +67,12 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
     return type of `ChangeValue::output_pool` has (unconditionally) changed
     from `ShieldedProtocol` to `zcash_protocol::PoolType`.
   - `ChangeStrategy::compute_balance`: this trait method has an additional
-    `&EphemeralParameters` parameter when the "transparent-inputs" feature is
-    enabled. This can be used to specify whether the change memo should be
+    `&EphemeralParameters` parameter. If the "transparent-inputs" feature is
+    enabled, this can be used to specify whether the change memo should be
     ignored, and the amounts of additional transparent P2PKH inputs and
     outputs. Passing `&EphemeralParameters::NONE` will retain the previous
-    behaviour.
+    behaviour (and is necessary when the "transparent-inputs" feature is
+    not enabled).
 - `zcash_client_backend::input_selection::GreedyInputSelectorError` has a
   new variant `UnsupportedTexAddress`.
 - `zcash_client_backend::proto::ProposalDecodingError` has a new variant
