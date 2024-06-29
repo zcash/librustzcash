@@ -455,6 +455,11 @@ where
 /// with value less than the marginal fee might be excluded, even though in
 /// practice they would not cause the fee to increase. Outputs with value
 /// greater than the marginal fee will never be excluded.
+///
+/// `possible_change` is a slice of `(transparent_change, sapling_change, orchard_change)`
+/// tuples indicating possible combinations of how many change outputs (0 or 1)
+/// might be included in the transaction for each pool. The shape of the tuple
+/// does not depend on which protocol features are enabled.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
     transparent_inputs: &[impl transparent::InputView],
