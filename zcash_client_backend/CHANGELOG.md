@@ -70,7 +70,8 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
     `&EphemeralParameters` parameter when the "transparent-inputs" feature is
     enabled. This can be used to specify whether the change memo should be
     ignored, and the amounts of additional transparent P2PKH inputs and
-    outputs. Passing `&Default::default()` will retain the previous behaviour.
+    outputs. Passing `&EphemeralParameters::NONE` will retain the previous
+    behaviour.
 - `zcash_client_backend::input_selection::GreedyInputSelectorError` has a
   new variant `UnsupportedTexAddress`.
 - `zcash_client_backend::proto::ProposalDecodingError` has a new variant

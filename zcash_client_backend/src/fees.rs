@@ -334,7 +334,7 @@ impl Default for DustOutputPolicy {
 /// and fees are computed that are relevant to transactions using ephemeral
 /// transparent outputs.
 #[cfg(feature = "transparent-inputs")]
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EphemeralParameters {
     ignore_change_memo: bool,
     ephemeral_input_amount: Option<NonNegativeAmount>,
@@ -343,6 +343,14 @@ pub struct EphemeralParameters {
 
 #[cfg(feature = "transparent-inputs")]
 impl EphemeralParameters {
+    /// An `EphemeralParameters` indicating no use of ephemeral inputs
+    /// or outputs. It has:
+    ///
+    /// * `ignore_change_memo: false`,
+    /// * `ephemeral_input_amount: None`,
+    /// * `ephemeral_output_amount: None`.
+    pub const NONE: Self = Self::new(false, None, None);
+
     /// Returns an `EphemeralParameters` with the following parameters:
     ///
     /// * `ignore_change_memo`: `true` if the change memo should be
@@ -352,7 +360,7 @@ impl EphemeralParameters {
     ///   additional P2PKH input of the given amount.
     /// * `ephemeral_output_amount`: specifies that there will be an
     ///   additional P2PKH output of the given amount.
-    pub fn new(
+    pub const fn new(
         ignore_change_memo: bool,
         ephemeral_input_amount: Option<NonNegativeAmount>,
         ephemeral_output_amount: Option<NonNegativeAmount>,

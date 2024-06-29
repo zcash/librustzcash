@@ -109,6 +109,9 @@ mod tests {
         ShieldedProtocol,
     };
 
+    #[cfg(feature = "transparent-inputs")]
+    use crate::fees::EphemeralParameters;
+
     #[cfg(feature = "orchard")]
     use crate::fees::orchard as orchard_fees;
 
@@ -141,7 +144,7 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
             #[cfg(feature = "transparent-inputs")]
-            &Default::default(),
+            &EphemeralParameters::NONE,
         );
 
         assert_matches!(
@@ -188,7 +191,7 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
             #[cfg(feature = "transparent-inputs")]
-            &Default::default(),
+            &EphemeralParameters::NONE,
         );
 
         assert_matches!(

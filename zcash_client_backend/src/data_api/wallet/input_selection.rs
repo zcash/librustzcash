@@ -462,7 +462,7 @@ where
         #[cfg(feature = "transparent-inputs")]
         let (ephemeral_parameters, tr1_balance_opt) = {
             if tr1_transparent_outputs.is_empty() {
-                (Default::default(), None)
+                (EphemeralParameters::NONE, None)
             } else {
                 // The ephemeral input going into transaction 1 must be able to pay that
                 // transaction's fee, as well as the TEX address payments.
@@ -772,7 +772,7 @@ where
             &orchard_fees::EmptyBundleView,
             &self.dust_output_policy,
             #[cfg(feature = "transparent-inputs")]
-            &Default::default(),
+            &EphemeralParameters::NONE,
         );
 
         let balance = match trial_balance {
@@ -791,7 +791,7 @@ where
                     &orchard_fees::EmptyBundleView,
                     &self.dust_output_policy,
                     #[cfg(feature = "transparent-inputs")]
-                    &Default::default(),
+                    &EphemeralParameters::NONE,
                 )?
             }
             Err(other) => {

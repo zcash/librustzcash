@@ -116,6 +116,9 @@ mod tests {
         ShieldedProtocol,
     };
 
+    #[cfg(feature = "transparent-inputs")]
+    use crate::fees::EphemeralParameters;
+
     #[cfg(feature = "orchard")]
     use {
         crate::data_api::wallet::input_selection::OrchardPayment,
@@ -152,7 +155,7 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
             #[cfg(feature = "transparent-inputs")]
-            &Default::default(),
+            &EphemeralParameters::NONE,
         );
 
         assert_matches!(
@@ -197,7 +200,7 @@ mod tests {
             ),
             &DustOutputPolicy::default(),
             #[cfg(feature = "transparent-inputs")]
-            &Default::default(),
+            &EphemeralParameters::NONE,
         );
 
         assert_matches!(
@@ -251,7 +254,7 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             dust_output_policy,
             #[cfg(feature = "transparent-inputs")]
-            &Default::default(),
+            &EphemeralParameters::NONE,
         );
 
         assert_matches!(
@@ -296,7 +299,7 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
             #[cfg(feature = "transparent-inputs")]
-            &Default::default(),
+            &EphemeralParameters::NONE,
         );
 
         assert_matches!(
@@ -341,7 +344,7 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
             #[cfg(feature = "transparent-inputs")]
-            &Default::default(),
+            &EphemeralParameters::NONE,
         );
 
         assert_matches!(
@@ -392,7 +395,7 @@ mod tests {
                 Some(NonNegativeAmount::const_from_u64(1000)),
             ),
             #[cfg(feature = "transparent-inputs")]
-            &Default::default(),
+            &EphemeralParameters::NONE,
         );
 
         assert_matches!(
@@ -454,7 +457,7 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             dust_output_policy,
             #[cfg(feature = "transparent-inputs")]
-            &Default::default(),
+            &EphemeralParameters::NONE,
         );
 
         assert_matches!(
@@ -506,7 +509,7 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
             #[cfg(feature = "transparent-inputs")]
-            &Default::default(),
+            &EphemeralParameters::NONE,
         );
 
         // We will get an error here, because the dust input isn't free to add
