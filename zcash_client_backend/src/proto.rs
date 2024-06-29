@@ -649,9 +649,7 @@ impl proposal::Proposal {
                         })
                         .collect::<Result<BTreeMap<usize, PoolType>, ProposalDecodingError<DbError>>>()?;
 
-                    #[cfg(not(feature = "transparent-inputs"))]
-                    let transparent_inputs = vec![];
-                    #[cfg(feature = "transparent-inputs")]
+                    #[allow(unused_mut)]
                     let mut transparent_inputs = vec![];
                     let mut received_notes = vec![];
                     let mut prior_step_inputs = vec![];
