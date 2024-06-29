@@ -202,48 +202,36 @@ where
         required: total_out,
     })?;
 
-    if proposed_change.is_zero() {
-        TransactionBalance::new(
-            vec![ChangeValue::new(
-                _fallback_change_pool,
-                NonNegativeAmount::const_from_u64(0),
-                change_memo,
-            )],
-            fee_amount,
-        )
-        .map_err(|_| overflow())
-    } else {
-        let dust_threshold = dust_output_policy
-            .dust_threshold()
-            .unwrap_or(default_dust_threshold);
+    let dust_threshold = dust_output_policy
+        .dust_threshold()
+        .unwrap_or(default_dust_threshold);
 
-        if proposed_change < dust_threshold {
-            match dust_output_policy.action() {
-                DustAction::Reject => {
-                    let shortfall = (dust_threshold - proposed_change).ok_or_else(underflow)?;
+    if proposed_change < dust_threshold {
+        match dust_output_policy.action() {
+            DustAction::Reject => {
+                let shortfall = (dust_threshold - proposed_change).ok_or_else(underflow)?;
 
-                    Err(ChangeError::InsufficientFunds {
-                        available: total_in,
-                        required: (total_in + shortfall).ok_or_else(overflow)?,
-                    })
-                }
-                DustAction::AllowDustChange => TransactionBalance::new(
-                    vec![ChangeValue::new(change_pool, proposed_change, change_memo)],
-                    fee_amount,
-                )
-                .map_err(|_| overflow()),
-                DustAction::AddDustToFee => TransactionBalance::new(
-                    vec![],
-                    (fee_amount + proposed_change).ok_or_else(overflow)?,
-                )
-                .map_err(|_| overflow()),
+                Err(ChangeError::InsufficientFunds {
+                    available: total_in,
+                    required: (total_in + shortfall).ok_or_else(overflow)?,
+                })
             }
-        } else {
-            TransactionBalance::new(
+            DustAction::AllowDustChange => TransactionBalance::new(
                 vec![ChangeValue::new(change_pool, proposed_change, change_memo)],
                 fee_amount,
             )
-            .map_err(|_| overflow())
+            .map_err(|_| overflow()),
+            DustAction::AddDustToFee => TransactionBalance::new(
+                vec![],
+                (fee_amount + proposed_change).ok_or_else(overflow)?,
+            )
+            .map_err(|_| overflow()),
         }
+    } else {
+        TransactionBalance::new(
+            vec![ChangeValue::new(change_pool, proposed_change, change_memo)],
+            fee_amount,
+        )
+        .map_err(|_| overflow())
     }
 }
