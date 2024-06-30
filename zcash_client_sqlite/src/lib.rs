@@ -88,7 +88,10 @@ use {
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::wallet::TransparentAddressMetadata,
-    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
+    zcash_primitives::{
+        legacy::TransparentAddress,
+        transaction::components::{OutPoint, TxOut},
+    },
 };
 
 #[cfg(feature = "unstable")]
@@ -523,11 +526,39 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         account: AccountId,
         max_height: BlockHeight,
     ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
-        wallet::transparent::get_transparent_address_balances(
+        wallet::transparent::get_transparent_balances(
             self.conn.borrow(),
             &self.params,
             account,
             max_height,
+        )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_transparent_address_metadata(
+        &self,
+        account: Self::AccountId,
+        address: &TransparentAddress,
+    ) -> Result<Option<TransparentAddressMetadata>, Self::Error> {
+        wallet::transparent::get_transparent_address_metadata(
+            self.conn.borrow(),
+            &self.params,
+            account,
+            address,
+        )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_reserved_ephemeral_addresses(
+        &self,
+        account: Self::AccountId,
+        for_detection: bool,
+    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+        wallet::transparent::ephemeral::get_reserved_ephemeral_addresses(
+            self.conn.borrow(),
+            &self.params,
+            account,
+            for_detection,
         )
     }
 }
@@ -1084,6 +1115,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                         wallet::put_sent_output(
                             wdb.conn.0,
+                            &wdb.params,
                             *output.account(),
                             tx_ref,
                             output.index(),
@@ -1103,6 +1135,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                         wallet::put_sent_output(
                             wdb.conn.0,
+                            &wdb.params,
                             *output.account(),
                             tx_ref,
                             output.index(),
@@ -1133,6 +1166,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                             wallet::put_sent_output(
                                 wdb.conn.0,
+                                &wdb.params,
                                 account_id,
                                 tx_ref,
                                 output.index(),
@@ -1165,6 +1199,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                         wallet::put_sent_output(
                             wdb.conn.0,
+                            &wdb.params,
                             *output.account(),
                             tx_ref,
                             output.index(),
@@ -1184,6 +1219,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                         wallet::put_sent_output(
                             wdb.conn.0,
+                            &wdb.params,
                             *output.account(),
                             tx_ref,
                             output.index(),
@@ -1215,6 +1251,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                             wallet::put_sent_output(
                                 wdb.conn.0,
+                                &wdb.params,
                                 account_id,
                                 tx_ref,
                                 output.index(),
@@ -1267,6 +1304,12 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         .enumerate()
                     {
                         if let Some(address) = txout.recipient_address() {
+                            // TODO: we really want to only mark outputs when a transaction has been
+                            // *reliably* mined, because that is strictly more conservative in avoiding
+                            // going over the gap limit.
+                            #[cfg(feature = "transparent-inputs")]
+                            wallet::transparent::ephemeral::mark_ephemeral_address_as_mined(wdb, &address, tx_ref)?;
+
                             let receiver = Receiver::Transparent(address);
 
                             #[cfg(feature = "transparent-inputs")]
@@ -1286,6 +1329,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                             wallet::put_sent_output(
                                 wdb.conn.0,
+                                &wdb.params,
                                 account_id,
                                 tx_ref,
                                 output_index,
@@ -1352,7 +1396,13 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             }
 
             for output in sent_tx.outputs() {
-                wallet::insert_sent_output(wdb.conn.0, tx_ref, *sent_tx.account_id(), output)?;
+                wallet::insert_sent_output(
+                    wdb.conn.0,
+                    &wdb.params,
+                    tx_ref,
+                    *sent_tx.account_id(),
+                    output,
+                )?;
 
                 match output.recipient() {
                     Recipient::InternalAccount {
@@ -1396,7 +1446,39 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             None,
                         )?;
                     }
-                    _ => (),
+                    #[cfg(feature = "transparent-inputs")]
+                    Recipient::EphemeralTransparent {
+                        receiving_account,
+                        ephemeral_address,
+                        outpoint_metadata,
+                    } => {
+                        wallet::transparent::put_transparent_output(
+                            wdb.conn.0,
+                            &wdb.params,
+                            outpoint_metadata,
+                            &TxOut {
+                                value: output.value(),
+                                script_pubkey: ephemeral_address.script(),
+                            },
+                            None,
+                            ephemeral_address,
+                            *receiving_account,
+                        )?;
+                        wallet::transparent::ephemeral::mark_ephemeral_address_as_used(
+                            wdb,
+                            ephemeral_address,
+                            tx_ref,
+                        )?;
+                    }
+                    #[cfg(feature = "transparent-inputs")]
+                    Recipient::External(zcash_address, PoolType::Transparent) => {
+                        // Always reject sending to one of our ephemeral addresses.
+                        wallet::transparent::ephemeral::check_address_is_not_ephemeral(
+                            wdb,
+                            &zcash_address.encode(),
+                        )?;
+                    }
+                    _ => {}
                 }
             }
 
@@ -1407,6 +1489,17 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     fn truncate_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             wallet::truncate_to_height(wdb.conn.0, &wdb.params, block_height)
+        })
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn reserve_next_n_ephemeral_addresses(
+        &mut self,
+        account_id: Self::AccountId,
+        n: u32,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        self.transactionally(|wdb| {
+            wallet::transparent::ephemeral::reserve_next_n_ephemeral_addresses(wdb, account_id, n)
         })
     }
 }

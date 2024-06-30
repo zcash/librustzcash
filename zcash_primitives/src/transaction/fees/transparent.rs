@@ -16,6 +16,7 @@ use crate::transaction::components::transparent::builder::TransparentInputInfo;
 
 /// The size of a transparent input, or the outpoint corresponding to the input
 /// if the size of the script required to spend that input is unknown.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InputSize {
     /// The txin size is known.
     Known(usize),

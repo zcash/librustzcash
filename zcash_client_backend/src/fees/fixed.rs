@@ -4,7 +4,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     transaction::{
-        components::amount::BalanceError,
+        components::amount::{BalanceError, NonNegativeAmount},
         fees::{fixed::FeeRule as FixedFeeRule, transparent},
     },
 };
@@ -18,6 +18,9 @@ use super::{
 
 #[cfg(feature = "orchard")]
 use super::orchard as orchard_fees;
+
+#[cfg(feature = "transparent-inputs")]
+use super::EphemeralParameters;
 
 /// A change strategy that proposes change as a single output to the most current supported
 /// shielded pool and delegates fee calculation to the provided fee rule.
@@ -63,6 +66,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
+        #[cfg(feature = "transparent-inputs")] ephemeral_parameters: &EphemeralParameters,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         single_change_output_balance(
             params,
@@ -74,9 +78,13 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             #[cfg(feature = "orchard")]
             orchard,
             dust_output_policy,
-            self.fee_rule().fixed_fee(),
-            self.change_memo.clone(),
+            self.fee_rule.fixed_fee(),
+            self.change_memo.as_ref(),
             self.fallback_change_pool,
+            NonNegativeAmount::ZERO,
+            0,
+            #[cfg(feature = "transparent-inputs")]
+            ephemeral_parameters,
         )
     }
 }
@@ -100,6 +108,9 @@ mod tests {
         },
         ShieldedProtocol,
     };
+
+    #[cfg(feature = "transparent-inputs")]
+    use crate::fees::EphemeralParameters;
 
     #[cfg(feature = "orchard")]
     use crate::fees::orchard as orchard_fees;
@@ -132,6 +143,8 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
+            #[cfg(feature = "transparent-inputs")]
+            &EphemeralParameters::NONE,
         );
 
         assert_matches!(
@@ -177,6 +190,8 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
+            #[cfg(feature = "transparent-inputs")]
+            &EphemeralParameters::NONE,
         );
 
         assert_matches!(
