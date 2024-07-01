@@ -5,6 +5,49 @@ use byteorder::{BigEndian, ReadBytesExt};
 
 use crate::params::Params;
 
+// Rough translation of CompressArray() from:
+// https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/crypto/equihash.cpp#L39-L76
+#[cfg(any(feature = "solver", test))]
+fn compress_array(array: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u8> {
+    let index_bytes = (u32::BITS / 8) as usize;
+    assert!(bit_len >= 8);
+    assert!(8 * index_bytes >= 7 + bit_len);
+
+    let in_width: usize = (bit_len + 7) / 8 + byte_pad;
+    let out_len = bit_len * array.len() / (8 * in_width);
+
+    let mut out = Vec::with_capacity(out_len);
+    let bit_len_mask: u32 = (1 << (bit_len as u32)) - 1;
+
+    // The acc_bits least-significant bits of acc_value represent a bit sequence
+    // in big-endian order.
+    let mut acc_bits: usize = 0;
+    let mut acc_value: u32 = 0;
+
+    let mut j: usize = 0;
+    for _i in 0..out_len {
+        // When we have fewer than 8 bits left in the accumulator, read the next
+        // input element.
+        if acc_bits < 8 {
+            acc_value <<= bit_len;
+            for x in byte_pad..in_width {
+                acc_value |= (
+                    // Apply bit_len_mask across byte boundaries
+                    (array[j + x] & ((bit_len_mask >> (8 * (in_width - x - 1))) as u8)) as u32
+                )
+                    .wrapping_shl(8 * (in_width - x - 1) as u32); // Big-endian
+            }
+            j += in_width;
+            acc_bits += bit_len;
+        }
+
+        acc_bits -= 8;
+        out.push((acc_value >> acc_bits) as u8);
+    }
+
+    out
+}
+
 pub(crate) fn expand_array(vin: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u8> {
     assert!(bit_len >= 8);
     assert!(u32::BITS as usize >= 7 + bit_len);
@@ -50,6 +93,31 @@ pub(crate) fn expand_array(vin: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u
     vout
 }
 
+// Rough translation of GetMinimalFromIndices() from:
+// https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/crypto/equihash.cpp#L130-L145
+#[cfg(any(feature = "solver", test))]
+pub(crate) fn minimal_from_indices(p: Params, indices: &[u32]) -> Vec<u8> {
+    let c_bit_len = p.collision_bit_length();
+    let index_bytes = (u32::BITS / 8) as usize;
+    let digit_bytes = ((c_bit_len + 1) + 7) / 8;
+    assert!(digit_bytes <= index_bytes);
+
+    let len_indices = indices.len() * index_bytes;
+    let byte_pad = index_bytes - digit_bytes;
+
+    // Rough translation of EhIndexToArray(index, array_pointer) from:
+    // https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/crypto/equihash.cpp#L123-L128
+    //
+    // Big-endian so that lexicographic array comparison is equivalent to integer comparison.
+    let array: Vec<u8> = indices
+        .iter()
+        .flat_map(|index| index.to_be_bytes())
+        .collect();
+    assert_eq!(array.len(), len_indices);
+
+    compress_array(&array, c_bit_len + 1, byte_pad)
+}
+
 /// Returns `None` if the parameters are invalid for this minimal encoding.
 pub(crate) fn indices_from_minimal(p: Params, minimal: &[u8]) -> Option<Vec<u32>> {
     let c_bit_len = p.collision_bit_length();
@@ -76,11 +144,14 @@ pub(crate) fn indices_from_minimal(p: Params, minimal: &[u8]) -> Option<Vec<u32>
 
 #[cfg(test)]
 mod tests {
-    use super::{expand_array, indices_from_minimal, Params};
+    use crate::minimal::minimal_from_indices;
+
+    use super::{compress_array, expand_array, indices_from_minimal, Params};
 
     #[test]
-    fn array_expansion() {
+    fn array_compression_and_expansion() {
         let check_array = |(bit_len, byte_pad), compact, expanded| {
+            assert_eq!(compress_array(expanded, bit_len, byte_pad), compact);
             assert_eq!(expand_array(compact, bit_len, byte_pad), expanded);
         };
 
@@ -149,10 +220,9 @@ mod tests {
     #[test]
     fn minimal_solution_repr() {
         let check_repr = |minimal, indices| {
-            assert_eq!(
-                indices_from_minimal(Params { n: 80, k: 3 }, minimal).unwrap(),
-                indices,
-            );
+            let p = Params { n: 80, k: 3 };
+            assert_eq!(minimal_from_indices(p, indices), minimal);
+            assert_eq!(indices_from_minimal(p, minimal).unwrap(), indices);
         };
 
         // The solutions here are not intended to be valid.
