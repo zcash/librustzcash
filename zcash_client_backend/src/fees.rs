@@ -126,6 +126,9 @@ pub struct TransactionBalance {
 
 impl TransactionBalance {
     /// Constructs a new balance from its constituent parts.
+    ///
+    /// Returns `Err(())` if the proposed change is for an unsupported pool or
+    /// the total value overflows.
     pub fn new(
         proposed_change: Vec<ChangeValue>,
         fee_required: NonNegativeAmount,
@@ -136,6 +139,17 @@ impl TransactionBalance {
             .chain(Some(fee_required).into_iter())
             .sum::<Option<NonNegativeAmount>>()
             .ok_or(())?;
+
+        #[cfg(not(feature = "orchard"))]
+        if proposed_change
+            .iter()
+            .any(|cv| cv.output_pool() == PoolType::ORCHARD)
+        {
+            return Err(());
+        }
+        // A `ChangeValue` in the transparent pool can only be ephemeral by
+        // construction, and only when "transparent-inputs" is enabled, so we
+        // do not need to check that.
 
         Ok(Self {
             proposed_change,

@@ -56,11 +56,25 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   - `WalletRead` has new `get_reserved_ephemeral_addresses` and
     `get_transparent_address_metadata` methods.
   - `WalletWrite` has a new `reserve_next_n_ephemeral_addresses` method.
-  - `error::Error` has a new `Address` variant.
+  - `error::Error` and `proposal::ProposalError`:
+    - `ProposalError` has new variants `SpendsChange`, `EphemeralOutputLeftUnspent`,
+      `PaysTexFromShielded`, `TooLarge`, `SpendsPaymentFromUnsupportedPool`,
+      `PaysUnsupportedPoolRecipient`, and `PaysUnsupportedTexRecipient`
+      (some of which are conditional on the "transparent-inputs" feature).
+      Of these, `SpendsChange` and `SpendsPaymentFromUnsupportedPool` are
+      currently reported when a `Proposal` or one of its `Step`s is constructed,
+      and the others are reported from `create_proposed_transactions`.
+      This may be changed in future to report these errors earlier; callers
+      should not rely on being able to construct `Proposal`s or `Step`s that
+      would result in these errors if a transaction were created from them.
+    - The `Error::ProposalNotSupported` variant now has an argument of type
+      `ProposalError` giving the more specific error. This will be used to
+      report the errors mentioned above that have "Unsupported" in their
+      names.
+    - The `Error::UnsupportedChangeType` variant has been removed since it
+      cannot occur (see `data_api::fees::TransactionBalance` below).
+    - `Error` has a new variant `Address`.
   - `wallet::input_selection::InputSelectorError` has a new `Address` variant.
-- `zcash_client_backend::proto::proposal::Proposal::{from_standard_proposal, 
-  try_into_standard_proposal}` each no longer require a `consensus::Parameters` 
-  argument.
 - `zcash_client_backend::data_api::fees`
   - When the "transparent-inputs" feature is enabled, `ChangeValue` can also
     represent an ephemeral transparent output in a proposal. Accordingly, the
@@ -73,10 +87,16 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
     outputs. Passing `&EphemeralParameters::NONE` will retain the previous
     behaviour (and is necessary when the "transparent-inputs" feature is
     not enabled).
+  - `TransactionBalance::new` now enforces that the change and ephemeral
+    outputs are for supported pools, and will return an error if they are
+    not. This makes `data_api::error::Error::UnsupportedChangeType` impossible,
+    so it has been removed as mentioned above.
 - `zcash_client_backend::input_selection::GreedyInputSelectorError` has a
   new variant `UnsupportedTexAddress`.
-- `zcash_client_backend::proto::ProposalDecodingError` has a new variant
-  `InvalidEphemeralRecipient`.
+- `zcash_client_backend::proto`:
+  - `ProposalDecodingError` has a new variant `InvalidEphemeralRecipient`.
+  - `proposal::Proposal::{from_standard_proposal, try_into_standard_proposal}`
+    each no longer require a `consensus::Parameters` argument.
 - `zcash_client_backend::wallet::Recipient` variants have changed. Instead of
   wrapping protocol-address types, the `External` and `InternalAccount` variants
   now wrap a `zcash_address::ZcashAddress`. This simplifies the process of
