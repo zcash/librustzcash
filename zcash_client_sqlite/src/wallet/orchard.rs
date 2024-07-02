@@ -576,6 +576,12 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn proposal_fails_if_not_all_ephemeral_outputs_consumed() {
+        testing::pool::proposal_fails_if_not_all_ephemeral_outputs_consumed::<OrchardPoolTester>()
+    }
+
+    #[test]
     #[allow(deprecated)]
     fn create_to_address_fails_on_incorrect_usk() {
         testing::pool::create_to_address_fails_on_incorrect_usk::<OrchardPoolTester>()
