@@ -75,6 +75,9 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
     not enabled).
 - `zcash_client_backend::input_selection::GreedyInputSelectorError` has a
   new variant `UnsupportedTexAddress`.
+- `zcash_client_backend::proposal::ProposalError` has new variants
+  `SpendsChange`, `EphemeralOutputLeftUnspent`, and `PaysTexFromShielded`.
+  (the last two are conditional on the "transparent-inputs" feature).
 - `zcash_client_backend::proto::ProposalDecodingError` has a new variant
   `InvalidEphemeralRecipient`.
 - `zcash_client_backend::wallet::Recipient` variants have changed. Instead of

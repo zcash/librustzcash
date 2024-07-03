@@ -21,6 +21,10 @@ use super::TransparentAddress;
 pub struct TransparentKeyScope(u32);
 
 impl TransparentKeyScope {
+    /// Returns an arbitrary custom `TransparentKeyScope`. This should be used
+    /// with care: funds associated with keys derived under a custom scope may
+    /// not be recoverable if the wallet seed is restored in another wallet.
+    /// It is usually preferable to use standardized key scopes.
     pub const fn custom(i: u32) -> Option<Self> {
         if i < (1 << 31) {
             Some(TransparentKeyScope(i))
@@ -28,13 +32,24 @@ impl TransparentKeyScope {
             None
         }
     }
+
+    /// The scope used to derive keys for external transparent addresses,
+    /// intended to be used to send funds to this wallet.
+    pub const EXTERNAL: Self = TransparentKeyScope(0);
+
+    /// The scope used to derive keys for internal wallet operations, e.g.
+    /// change or UTXO management.
+    pub const INTERNAL: Self = TransparentKeyScope(1);
+
+    /// The scope used to derive keys for ephemeral transparent addresses.
+    pub const EPHEMERAL: Self = TransparentKeyScope(2);
 }
 
 impl From<zip32::Scope> for TransparentKeyScope {
     fn from(value: zip32::Scope) -> Self {
         match value {
-            zip32::Scope::External => TransparentKeyScope(0),
-            zip32::Scope::Internal => TransparentKeyScope(1),
+            zip32::Scope::External => TransparentKeyScope::EXTERNAL,
+            zip32::Scope::Internal => TransparentKeyScope::INTERNAL,
         }
     }
 }

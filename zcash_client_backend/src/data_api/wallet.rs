@@ -680,6 +680,7 @@ where
     // TODO: Maybe support spending prior shielded outputs at some point? Doing so would require
     // a higher-level approach in the wallet that waits for transactions with shielded outputs to
     // be mined and only then attempts to perform the next step.
+    #[allow(clippy::never_loop)]
     for input_ref in proposal_step.prior_step_inputs() {
         let (prior_step, _) = prior_step_results
             .get(input_ref.step_index())
@@ -1251,13 +1252,18 @@ where
 
     #[allow(unused_variables)]
     let transparent_outputs = transparent_output_meta.into_iter().enumerate().map(
-        |(n, (recipient, ephemeral_address, value, step_output_index))| {
+        |(n, (recipient, address, value, step_output_index))| {
+            // This assumes that transparent outputs are pushed onto `transparent_output_meta`
+            // with the same indices they have in the transaction's transparent outputs.
+            // We do not reorder transparent outputs; there is no reason to do so because it
+            // would not usefully improve privacy.
             let outpoint = OutPoint::new(txid, n as u32);
+
             let recipient = recipient.map_ephemeral_transparent_outpoint(|()| outpoint.clone());
             #[cfg(feature = "transparent-inputs")]
             unused_transparent_outputs.insert(
                 StepOutput::new(step_index, step_output_index),
-                (ephemeral_address, outpoint),
+                (address, outpoint),
             );
             SentTransactionOutput::from_parts(n, recipient, value, None)
         },

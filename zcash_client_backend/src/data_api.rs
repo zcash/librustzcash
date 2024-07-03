@@ -922,7 +922,7 @@ pub trait WalletRead {
     }
 
     /// Returns the metadata associated with a given transparent receiver in an account
-    /// controlled by this wallet.
+    /// controlled by this wallet, if available.
     ///
     /// This is equivalent to (but may be implemented more efficiently than):
     /// ```compile_fail
@@ -956,13 +956,19 @@ pub trait WalletRead {
         Ok(None)
     }
 
-    /// Returns the set of reserved ephemeral transparent addresses associated with the
-    /// given account controlled by this wallet.
+    /// Returns a set of ephemeral transparent addresses associated with the given
+    /// account controlled by this wallet, along with their metadata.
     ///
-    /// The set contains all ephemeral transparent receivers that are known to have
-    /// been derived under this account. Wallets should scan the chain for UTXOs sent to
-    /// these receivers, but do not need to do so regularly. Under expected usage, outputs
-    /// would only be detected with these receivers in the following situations:
+    /// If `for_detection` is false, the set only includes addresses reserved by
+    /// `reserve_next_n_ephemeral_addresses`. If `for_detection` is true, it includes
+    /// those addresses and also the ones that will be reserved next, for an additional
+    /// `GAP_LIMIT` indices (up to and including the maximum index given by
+    /// `NonHardenedChildIndex::from_index(i32::MAX as u32)`).
+    ///
+    /// Wallets should scan the chain for UTXOs sent to the ephemeral transparent
+    /// receivers obtained with `for_detection` set to `true`, but do not need to do
+    /// so regularly. Under expected usage, outputs would only be detected with these
+    /// receivers in the following situations:
     ///
     /// - This wallet created a payment to a ZIP 320 (TEX) address, but the second
     ///   transaction (that spent the output sent to the ephemeral address) did not get
@@ -1542,6 +1548,8 @@ pub trait WalletWrite: WalletRead {
     /// funds have been received by the currently-available account (in order to enable automated
     /// account recovery).
     ///
+    /// # Panics
+    ///
     /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
@@ -1634,7 +1642,9 @@ pub trait WalletWrite: WalletRead {
     /// the given number of addresses, or if the account identifier does not correspond
     /// to a known account.
     ///
-    /// Precondition: `n < 0x80000000`
+    /// # Panics
+    ///
+    /// Panics if the precondition `n < 0x80000000` does not hold.
     ///
     /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki#user-content-Address_gap_limit
     #[cfg(feature = "transparent-inputs")]

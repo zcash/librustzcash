@@ -14,6 +14,7 @@ and this library adheres to Rust's notion of
   - `EphemeralIvk`
   - `AccountPubKey::derive_ephemeral_ivk`
   - `TransparentKeyScope::custom` is now `const`.
+  - `TransparentKeyScope::{EXTERNAL, INTERNAL, EPHEMERAL}`
 - `zcash_primitives::legacy::Script::serialized_size`
 - `zcash_primitives::transaction::fees::transparent`:
   - `InputSize`

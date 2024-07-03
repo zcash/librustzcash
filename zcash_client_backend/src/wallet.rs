@@ -647,6 +647,8 @@ pub struct TransparentAddressMetadata {
 
 #[cfg(feature = "transparent-inputs")]
 impl TransparentAddressMetadata {
+    /// Returns a `TransparentAddressMetadata` in the given scope for the
+    /// given address index.
     pub fn new(scope: TransparentKeyScope, address_index: NonHardenedChildIndex) -> Self {
         Self {
             scope,

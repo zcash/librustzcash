@@ -25,23 +25,10 @@ use crate::{error::SqliteClientError, wallet::get_account, AccountId, SqlTransac
 /// of them to be mined. This is the same as the gap limit in Bitcoin.
 pub(crate) const GAP_LIMIT: i32 = 20;
 
-// The custom scope used for derivation of ephemeral addresses.
-//
-// This must match the constant used in
-// `zcash_primitives::legacy::keys::AccountPubKey::derive_ephemeral_ivk`.
-//
-// TODO: consider moving this to `zcash_primitives::legacy::keys`, or else
-// provide a way to derive `ivk`s for custom scopes in general there, so that
-// the constant isn't duplicated.
-const EPHEMERAL_SCOPE: TransparentKeyScope = match TransparentKeyScope::custom(2) {
-    Some(s) => s,
-    None => unreachable!(),
-};
-
 // Returns `TransparentAddressMetadata` in the ephemeral scope for the
 // given address index.
 pub(crate) fn metadata(address_index: NonHardenedChildIndex) -> TransparentAddressMetadata {
-    TransparentAddressMetadata::new(EPHEMERAL_SCOPE, address_index)
+    TransparentAddressMetadata::new(TransparentKeyScope::EPHEMERAL, address_index)
 }
 
 /// Returns the last reserved ephemeral address index in the given account,
@@ -61,9 +48,7 @@ pub(crate) fn last_reserved_index(
         )
         .optional()?
     {
-        Some(i) if i < 0 => Err(SqliteClientError::CorruptedData(
-            "negative index".to_owned(),
-        )),
+        Some(i) if i < 0 => unreachable!("violates constraint address_index_in_range"),
         Some(i) => Ok(i),
         None => Ok(-1),
     }
@@ -92,12 +77,10 @@ pub(crate) fn last_safe_index(
         )
         .optional()?
     {
-        Some(i) if i < 0 => Err(SqliteClientError::CorruptedData(
-            "negative index".to_owned(),
-        )),
-        Some(i) => Ok(i),
-        None => Ok(-1),
-    }?;
+        Some(i) if i < 0 => unreachable!("violates constraint address_index_in_range"),
+        Some(i) => i,
+        None => -1,
+    };
     Ok(u32::try_from(last_mined_index.saturating_add(GAP_LIMIT)).unwrap())
 }
 
@@ -105,7 +88,9 @@ pub(crate) fn last_safe_index(
 /// and is of length up to `n`. The range is truncated if necessary to end at
 /// the maximum valid address index, `i32::MAX`.
 ///
-/// Precondition: `i >= -1 and n > 0`
+/// # Panics
+///
+/// Panics if the precondition `i >= -1 and n > 0` does not hold.
 pub(crate) fn range_after(i: i32, n: i32) -> RangeInclusive<u32> {
     assert!(i >= -1);
     assert!(n > 0);
@@ -128,8 +113,12 @@ pub(crate) fn get_ephemeral_ivk<P: consensus::Parameters>(
         .derive_ephemeral_ivk()?)
 }
 
-/// Returns a vector with all ephemeral transparent addresses potentially belonging to this wallet.
-/// If `for_detection` is true, this includes addresses for an additional GAP_LIMIT indices.
+/// Returns a mapping of ephemeral transparent addresses potentially belonging
+/// to this wallet to their metadata.
+///
+/// If `for_detection` is false, the result only includes reserved addresses.
+/// If `for_detection` is true, it includes addresses for an additional
+/// `GAP_LIMIT` indices, up to the limit.
 pub(crate) fn get_reserved_ephemeral_addresses<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -172,7 +161,9 @@ pub(crate) fn get_reserved_ephemeral_addresses<P: consensus::Parameters>(
 /// Returns a vector with the next `n` previously unreserved ephemeral addresses for
 /// the given account.
 ///
-/// Precondition: `n < 0x80000000`
+/// # Panics
+///
+/// Panics if the precondition `n < 0x80000000` does not hold.
 ///
 /// # Errors
 ///

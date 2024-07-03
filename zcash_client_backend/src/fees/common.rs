@@ -521,10 +521,17 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
 
     // Return the number of allowed dust inputs from each pool.
     let allowed_dust = |(t_change, s_change, o_change): &(usize, usize, usize)| {
-        // What is the maximum number of dust inputs in each pool, out of the ones we
-        // actually have, that can be economically spent along with the non-dust inputs?
-        // Get an initial estimate by calculating the number of dust inputs in each pool
-        // that will be allowed regardless of padding or grace.
+        // Here we assume a "ZIP 317-like" fee model in which the existence of an output
+        // to a given pool implies that a corresponding input from that pool can be
+        // provided without increasing the fee. (This is also likely to be true for
+        // future fee models if we do not want to penalize use of Orchard relative to
+        // other pools.)
+        //
+        // Under that assumption, we want to calculate the maximum number of dust inputs
+        // from each pool, out of the ones we actually have, that can be economically
+        // spent along with the non-dust inputs. Get an initial estimate by calculating
+        // the number of dust inputs in each pool that will be allowed regardless of
+        // padding or grace.
 
         let t_allowed = min(
             t_dust.len(),
@@ -545,10 +552,12 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
         #[cfg(feature = "orchard")]
         let o_req_inputs = o_non_dust + o_allowed;
 
-        // This calculates the hypothetical number of actions with given extra inputs.
-        // The padding rules are subtle (they also depend on `bundle_required` for example).
-        // To reliably tell whether we can add an extra input of a given type, we will need
-        // to call them both with without that input; if the number of actions does not
+        // This calculates the hypothetical number of actions with given extra inputs,
+        // for ZIP 317 and the padding rules in effect. The padding rules for each
+        // pool are subtle (they also depend on `bundle_required` for example), so we
+        // must actually call them rather than try to predict their effect. To tell
+        // whether we can freely add an extra input from a given pool, we need to call
+        // them both with and without that input; if the number of actions does not
         // increase, then the input is free to add.
         let hypothetical_actions = |t_extra, s_extra, _o_extra| {
             let s_spend_count = sapling
