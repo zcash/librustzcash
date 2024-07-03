@@ -88,6 +88,7 @@ use {
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::wallet::TransparentAddressMetadata,
+    zcash_keys::encoding::AddressCodec,
     zcash_primitives::{
         legacy::TransparentAddress,
         transaction::components::{OutPoint, TxOut},
@@ -559,6 +560,17 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
             &self.params,
             account,
             for_detection,
+        )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn find_account_for_ephemeral_address(
+        &self,
+        address: &TransparentAddress,
+    ) -> Result<Option<Self::AccountId>, Self::Error> {
+        wallet::transparent::ephemeral::find_account_for_ephemeral_address_str(
+            self.conn.borrow(),
+            &address.encode(&self.params),
         )
     }
 }
@@ -1468,14 +1480,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             wdb,
                             ephemeral_address,
                             tx_ref,
-                        )?;
-                    }
-                    #[cfg(feature = "transparent-inputs")]
-                    Recipient::External(zcash_address, PoolType::Transparent) => {
-                        // Always reject sending to one of our ephemeral addresses.
-                        wallet::transparent::ephemeral::check_address_is_not_ephemeral(
-                            wdb,
-                            &zcash_address.encode(),
                         )?;
                     }
                     _ => {}

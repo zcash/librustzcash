@@ -443,7 +443,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     };
 
     // Each transfer should use a different ephemeral address.
-    let (ephemeral0, txid0) = run_test(&mut st, 0);
+    let (ephemeral0, _) = run_test(&mut st, 0);
     let (ephemeral1, _) = run_test(&mut st, 1);
     assert!(ephemeral0 != ephemeral1);
 
@@ -455,7 +455,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         Address::Transparent(TransparentAddress::PublicKeyHash(_))
     );
 
-    // Attempting to use the same address again should cause an error.
+    // Attempting to pay to an ephemeral address should cause an error.
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account.account_id(),
@@ -476,7 +476,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     );
     assert_matches!(
         &create_proposed_result,
-        Err(Error::DataSource(SqliteClientError::EphemeralAddressReuse(addr, Some(txid)))) if addr == &ephemeral0 && txid == &txid0);
+        Err(Error::PaysEphemeralTransparentAddress(address_str)) if address_str == &ephemeral0);
 }
 
 #[cfg(feature = "transparent-inputs")]

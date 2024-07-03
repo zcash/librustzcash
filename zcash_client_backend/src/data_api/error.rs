@@ -92,6 +92,11 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     /// belonging to the wallet.
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
+
+    /// The wallet tried to pay to an ephemeral transparent address as a normal
+    /// output.
+    #[cfg(feature = "transparent-inputs")]
+    PaysEphemeralTransparentAddress(String),
 }
 
 impl<DE, CE, SE, FE> fmt::Display for Error<DE, CE, SE, FE>
@@ -160,6 +165,10 @@ where
             #[cfg(feature = "transparent-inputs")]
             Error::AddressNotRecognized(_) => {
                 write!(f, "The specified transparent address was not recognized as belonging to the wallet.")
+            }
+            #[cfg(feature = "transparent-inputs")]
+            Error::PaysEphemeralTransparentAddress(addr) => {
+                write!(f, "The wallet tried to pay to an ephemeral transparent address as a normal output: {}", addr)
             }
         }
     }

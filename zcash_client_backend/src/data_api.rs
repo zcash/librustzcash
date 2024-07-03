@@ -998,6 +998,36 @@ pub trait WalletRead {
     ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
         Ok(HashMap::new())
     }
+
+    /// If a given transparent address has been reserved, i.e. would be included in
+    /// the map returned by `get_known_ephemeral_addresses(account_id, false)` for any
+    /// of the wallet's accounts, then return `Ok(Some(account_id))`. Otherwise return
+    /// `Ok(None)`.
+    ///
+    /// This is equivalent to (but may be implemented more efficiently than):
+    /// ```compile_fail
+    /// for account_id in self.get_account_ids()? {
+    ///     if self.get_known_ephemeral_addresses(account_id, false)?.contains_key(address)? {
+    ///         return Ok(Some(account_id));
+    ///     }
+    /// }
+    /// Ok(None)
+    /// ```
+    #[cfg(feature = "transparent-inputs")]
+    fn find_account_for_ephemeral_address(
+        &self,
+        address: &TransparentAddress,
+    ) -> Result<Option<Self::AccountId>, Self::Error> {
+        for account_id in self.get_account_ids()? {
+            if self
+                .get_known_ephemeral_addresses(account_id, false)?
+                .contains_key(address)
+            {
+                return Ok(Some(account_id));
+            }
+        }
+        Ok(None)
+    }
 }
 
 /// The relevance of a seed to a given wallet.
@@ -1997,6 +2027,14 @@ pub mod testing {
             _for_detection: bool,
         ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
             Ok(HashMap::new())
+        }
+
+        #[cfg(feature = "transparent-inputs")]
+        fn find_account_for_ephemeral_address(
+            &self,
+            _address: &TransparentAddress,
+        ) -> Result<Option<Self::AccountId>, Self::Error> {
+            Ok(None)
         }
     }
 

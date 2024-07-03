@@ -68,7 +68,6 @@ use incrementalmerkletree::{Marking, Retention};
 use rusqlite::{self, named_params, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-use zcash_keys::encoding::encode_transparent_address_p;
 use zip32::fingerprint::SeedFingerprint;
 
 use std::collections::{HashMap, HashSet};
@@ -2148,7 +2147,7 @@ fn recipient_params<P: consensus::Parameters>(
             ephemeral_address,
             ..
         } => (
-            Some(encode_transparent_address_p(params, ephemeral_address)),
+            Some(ephemeral_address.encode(params)),
             Some(*receiving_account),
             PoolType::TRANSPARENT,
         ),

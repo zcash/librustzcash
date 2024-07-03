@@ -53,14 +53,14 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   have changed as a consequence of this extraction; please see the `zip321`
   CHANGELOG for details.
 - `zcash_client_backend::data_api`:
-  - `WalletRead` has new `get_known_ephemeral_addresses` and
-    `get_transparent_address_metadata` methods.
-  - `WalletWrite` has a new `reserve_next_n_ephemeral_addresses` method.
-  - `error::Error` has a new `Address` variant.
+  - `WalletRead` has new `get_known_ephemeral_addresses`,
+    `find_account_for_ephemeral_address`, and `get_transparent_address_metadata`
+    methods when the "transparent-inputs" feature is enabled.
+  - `WalletWrite` has a new `reserve_next_n_ephemeral_addresses` method when
+    the "transparent-inputs" feature is enabled.
+  - `error::Error` has new `Address` and (when the "transparent-inputs" feature
+    is enabled) `PaysEphemeralTransparentAddress` variants.
   - `wallet::input_selection::InputSelectorError` has a new `Address` variant.
-- `zcash_client_backend::proto::proposal::Proposal::{from_standard_proposal, 
-  try_into_standard_proposal}` each no longer require a `consensus::Parameters` 
-  argument.
 - `zcash_client_backend::data_api::fees`
   - When the "transparent-inputs" feature is enabled, `ChangeValue` can also
     represent an ephemeral transparent output in a proposal. Accordingly, the
@@ -78,8 +78,10 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
 - `zcash_client_backend::proposal::ProposalError` has new variants
   `SpendsChange`, `EphemeralOutputLeftUnspent`, and `PaysTexFromShielded`.
   (the last two are conditional on the "transparent-inputs" feature).
-- `zcash_client_backend::proto::ProposalDecodingError` has a new variant
-  `InvalidEphemeralRecipient`.
+- `zcash_client_backend::proto`:
+  - `ProposalDecodingError` has a new variant `InvalidEphemeralRecipient`.
+  - `proposal::Proposal::{from_standard_proposal, try_into_standard_proposal}`
+    each no longer require a `consensus::Parameters` argument.
 - `zcash_client_backend::wallet::Recipient` variants have changed. Instead of
   wrapping protocol-address types, the `External` and `InternalAccount` variants
   now wrap a `zcash_address::ZcashAddress`. This simplifies the process of

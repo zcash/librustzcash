@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::OptionalExtension;
 use rusqlite::{named_params, Connection, Row};
-use zcash_keys::encoding::encode_transparent_address_p;
 use zip32::{DiversifierIndex, Scope};
 
 use zcash_address::unified::{Encoding, Ivk, Uivk};
@@ -468,7 +467,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
     account_id: AccountId,
     address: &TransparentAddress,
 ) -> Result<Option<TransparentAddressMetadata>, SqliteClientError> {
-    let address_str = encode_transparent_address_p(params, address);
+    let address_str = address.encode(params);
 
     if let Some(di_vec) = conn
         .query_row(
@@ -494,14 +493,8 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
     }
 
     // Search ephemeral addresses that have already been reserved.
-    if let Some(raw_index) = conn
-        .query_row(
-            "SELECT address_index FROM ephemeral_addresses
-             WHERE account_id = :account_id AND address = :address",
-            named_params![":account_id": account_id.0, ":address": &address_str],
-            |row| row.get::<_, u32>(0),
-        )
-        .optional()?
+    if let Some(raw_index) =
+        ephemeral::find_index_for_ephemeral_address_str(conn, account_id, &address_str)?
     {
         let address_index = NonHardenedChildIndex::from_index(raw_index).unwrap();
         return Ok(Some(ephemeral::metadata(address_index)));
@@ -542,13 +535,7 @@ pub(crate) fn find_account_for_transparent_output<P: consensus::Parameters>(
     }
 
     // Search ephemeral addresses that have already been reserved.
-    if let Some(account_id) = conn
-        .query_row(
-            "SELECT account_id FROM ephemeral_addresses WHERE address = :address",
-            named_params![":address": &address_str],
-            |row| Ok(AccountId(row.get(0)?)),
-        )
-        .optional()?
+    if let Some(account_id) = ephemeral::find_account_for_ephemeral_address_str(conn, &address_str)?
     {
         return Ok(Some(account_id));
     }

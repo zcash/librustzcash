@@ -6,10 +6,7 @@ use std::ops::RangeInclusive;
 use rusqlite::{named_params, OptionalExtension};
 
 use zcash_client_backend::{data_api::Account, wallet::TransparentAddressMetadata};
-use zcash_keys::{
-    encoding::{encode_transparent_address_p, AddressCodec},
-    keys::AddressGenerationError,
-};
+use zcash_keys::{encoding::AddressCodec, keys::AddressGenerationError};
 use zcash_primitives::{
     legacy::{
         keys::{EphemeralIvk, NonHardenedChildIndex, TransparentKeyScope},
@@ -158,6 +155,37 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
     Ok(result)
 }
 
+/// If this is an ephemeral address in any account, return its account id.
+pub(crate) fn find_account_for_ephemeral_address_str(
+    conn: &rusqlite::Connection,
+    address_str: &str,
+) -> Result<Option<AccountId>, SqliteClientError> {
+    // Search ephemeral addresses that have already been reserved.
+    Ok(conn
+        .query_row(
+            "SELECT account_id FROM ephemeral_addresses WHERE address = :address",
+            named_params![":address": &address_str],
+            |row| Ok(AccountId(row.get(0)?)),
+        )
+        .optional()?)
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn find_index_for_ephemeral_address_str(
+    conn: &rusqlite::Connection,
+    account_id: AccountId,
+    address_str: &str,
+) -> Result<Option<u32>, SqliteClientError> {
+    Ok(conn
+        .query_row(
+            "SELECT address_index FROM ephemeral_addresses
+        WHERE account_id = :account_id AND address = :address",
+            named_params![":account_id": account_id.0, ":address": &address_str],
+            |row| row.get::<_, u32>(0),
+        )
+        .optional()?)
+}
+
 /// Returns a vector with the next `n` previously unreserved ephemeral addresses for
 /// the given account.
 ///
@@ -215,29 +243,18 @@ pub(crate) fn reserve_next_n_ephemeral_addresses<P: consensus::Parameters>(
             stmt_insert_ephemeral_address.execute(named_params![
                 ":account_id": account_id.0,
                 ":address_index": raw_index,
-                ":address": encode_transparent_address_p(&wdb.params, &address)
+                ":address": address.encode(&wdb.params),
             ])?;
             Ok((address, metadata(address_index)))
         })
         .collect()
 }
 
-/// Returns a `SqliteClientError::EphemeralAddressReuse` error if `address` is
-/// an ephemeral transparent address.
-pub(crate) fn check_address_is_not_ephemeral<P: consensus::Parameters>(
-    wdb: &mut WalletDb<SqlTransaction<'_>, P>,
-    address_str: &str,
-) -> Result<(), SqliteClientError> {
-    ephemeral_address_check_internal(wdb, address_str, true)
-}
-
 /// Returns a `SqliteClientError::EphemeralAddressReuse` error if the address was
-/// already used. If `reject_all_ephemeral` is set, return an error if the address
-/// is ephemeral at all, regardless of reuse.
-fn ephemeral_address_check_internal<P: consensus::Parameters>(
+/// already used.
+fn ephemeral_address_reuse_check<P: consensus::Parameters>(
     wdb: &mut WalletDb<SqlTransaction<'_>, P>,
     address_str: &str,
-    reject_all_ephemeral: bool,
 ) -> Result<(), SqliteClientError> {
     // It is intentional that we don't require `t.mined_height` to be non-null.
     // That is, we conservatively treat an ephemeral address as potentially
@@ -263,25 +280,21 @@ fn ephemeral_address_check_internal<P: consensus::Parameters>(
             named_params![":address": address_str],
             |row| row.get::<_, Option<Vec<u8>>>(0),
         )
-        .optional()?;
+        .optional()?
+        .flatten();
 
-    match res {
-        Some(Some(txid_bytes)) => {
-            let txid = TxId::from_bytes(
-                txid_bytes
-                    .try_into()
-                    .map_err(|_| SqliteClientError::CorruptedData("invalid txid".to_owned()))?,
-            );
-            Err(SqliteClientError::EphemeralAddressReuse(
-                address_str.to_owned(),
-                Some(txid),
-            ))
-        }
-        Some(None) if reject_all_ephemeral => Err(SqliteClientError::EphemeralAddressReuse(
+    if let Some(txid_bytes) = res {
+        let txid = TxId::from_bytes(
+            txid_bytes
+                .try_into()
+                .map_err(|_| SqliteClientError::CorruptedData("invalid txid".to_owned()))?,
+        );
+        Err(SqliteClientError::EphemeralAddressReuse(
             address_str.to_owned(),
-            None,
-        )),
-        _ => Ok(()),
+            Some(txid),
+        ))
+    } else {
+        Ok(())
     }
 }
 
@@ -296,8 +309,8 @@ pub(crate) fn mark_ephemeral_address_as_used<P: consensus::Parameters>(
     ephemeral_address: &TransparentAddress,
     tx_ref: i64,
 ) -> Result<(), SqliteClientError> {
-    let address_str = encode_transparent_address_p(&wdb.params, ephemeral_address);
-    ephemeral_address_check_internal(wdb, &address_str, false)?;
+    let address_str = ephemeral_address.encode(&wdb.params);
+    ephemeral_address_reuse_check(wdb, &address_str)?;
 
     wdb.conn.0.execute(
         "UPDATE ephemeral_addresses SET used_in_tx = :used_in_tx WHERE address = :address",
@@ -316,7 +329,7 @@ pub(crate) fn mark_ephemeral_address_as_mined<P: consensus::Parameters>(
     address: &TransparentAddress,
     tx_ref: i64,
 ) -> Result<(), SqliteClientError> {
-    let address_str = encode_transparent_address_p(&wdb.params, address);
+    let address_str = address.encode(&wdb.params);
 
     // Figure out which transaction was mined earlier: `tx_ref`, or any existing
     // tx referenced by `mined_in_tx` for the given address. Prefer the existing
