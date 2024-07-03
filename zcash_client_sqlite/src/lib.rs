@@ -1644,7 +1644,7 @@ impl BlockSource for BlockDb {
 ///
 /// This block source is intended to be used with the following data flow:
 /// * When the cache is being filled:
-///   * The caller requests the current maximum height height at which cached data is available
+///   * The caller requests the current maximum height at which cached data is available
 ///     using [`FsBlockDb::get_max_cached_height`]. If no cached data is available, the caller
 ///     can use the wallet's synced-to height for the following operations instead.
 ///   * (recommended for privacy) the caller should round the returned height down to some 100- /
