@@ -897,7 +897,7 @@ pub trait WalletRead {
     /// been derived under this account. Wallets should scan the chain for UTXOs sent to
     /// these receivers.
     ///
-    /// Use [`Self::get_reserved_ephemeral_addresses`] to obtain the ephemeral transparent
+    /// Use [`Self::get_known_ephemeral_addresses`] to obtain the ephemeral transparent
     /// receivers.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
@@ -929,8 +929,8 @@ pub trait WalletRead {
     /// if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
     ///     return Ok(result.clone());
     /// }
-    /// if let Some(result) = self.get_reserved_ephemeral_addresses(account, false)?.get(address) {
-    ///     return Ok(result.clone());
+    /// if let Some(result) = self.get_known_ephemeral_addresses(account, false)?.get(address) {
+    ///     return Ok(Some(result.clone()));
     /// }
     /// Ok(None)
     /// ```
@@ -948,10 +948,10 @@ pub trait WalletRead {
             return Ok(result.clone());
         }
         if let Some(result) = self
-            .get_reserved_ephemeral_addresses(account, false)?
+            .get_known_ephemeral_addresses(account, false)?
             .get(address)
         {
-            return Ok(result.clone());
+            return Ok(Some(result.clone()));
         }
         Ok(None)
     }
@@ -991,11 +991,11 @@ pub trait WalletRead {
     /// In all cases, the wallet should re-shield the unspent outputs, in a separate
     /// transaction per ephemeral address, before re-spending the funds.
     #[cfg(feature = "transparent-inputs")]
-    fn get_reserved_ephemeral_addresses(
+    fn get_known_ephemeral_addresses(
         &self,
         _account: Self::AccountId,
         _for_detection: bool,
-    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
         Ok(HashMap::new())
     }
 }
@@ -1991,12 +1991,11 @@ pub mod testing {
         }
 
         #[cfg(feature = "transparent-inputs")]
-        fn get_reserved_ephemeral_addresses(
+        fn get_known_ephemeral_addresses(
             &self,
             _account: Self::AccountId,
             _for_detection: bool,
-        ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error>
-        {
+        ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
             Ok(HashMap::new())
         }
     }

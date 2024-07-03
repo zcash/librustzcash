@@ -549,12 +549,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     }
 
     #[cfg(feature = "transparent-inputs")]
-    fn get_reserved_ephemeral_addresses(
+    fn get_known_ephemeral_addresses(
         &self,
         account: Self::AccountId,
         for_detection: bool,
-    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
-        wallet::transparent::ephemeral::get_reserved_ephemeral_addresses(
+    ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
+        wallet::transparent::ephemeral::get_known_ephemeral_addresses(
             self.conn.borrow(),
             &self.params,
             account,

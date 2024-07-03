@@ -119,12 +119,12 @@ pub(crate) fn get_ephemeral_ivk<P: consensus::Parameters>(
 /// If `for_detection` is false, the result only includes reserved addresses.
 /// If `for_detection` is true, it includes addresses for an additional
 /// `GAP_LIMIT` indices, up to the limit.
-pub(crate) fn get_reserved_ephemeral_addresses<P: consensus::Parameters>(
+pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account_id: AccountId,
     for_detection: bool,
-) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, SqliteClientError> {
+) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, SqliteClientError> {
     let mut stmt = conn.prepare(
         "SELECT address, address_index FROM ephemeral_addresses WHERE account_id = :account ORDER BY address_index",
     )?;
@@ -141,7 +141,7 @@ pub(crate) fn get_reserved_ephemeral_addresses<P: consensus::Parameters>(
             .checked_add(1);
         let address_index = NonHardenedChildIndex::from_index(raw_index).unwrap();
         let address = TransparentAddress::decode(params, &addr_str)?;
-        result.insert(address, Some(metadata(address_index)));
+        result.insert(address, metadata(address_index));
     }
 
     if for_detection {
@@ -151,7 +151,7 @@ pub(crate) fn get_reserved_ephemeral_addresses<P: consensus::Parameters>(
             for raw_index in range_after(first, GAP_LIMIT) {
                 let address_index = NonHardenedChildIndex::from_index(raw_index).unwrap();
                 let address = ephemeral_ivk.derive_ephemeral_address(address_index)?;
-                result.insert(address, Some(metadata(address_index)));
+                result.insert(address, metadata(address_index));
             }
         }
     }

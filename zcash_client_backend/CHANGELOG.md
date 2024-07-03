@@ -53,7 +53,7 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   have changed as a consequence of this extraction; please see the `zip321`
   CHANGELOG for details.
 - `zcash_client_backend::data_api`:
-  - `WalletRead` has new `get_reserved_ephemeral_addresses` and
+  - `WalletRead` has new `get_known_ephemeral_addresses` and
     `get_transparent_address_metadata` methods.
   - `WalletWrite` has a new `reserve_next_n_ephemeral_addresses` method.
   - `error::Error` has a new `Address` variant.
