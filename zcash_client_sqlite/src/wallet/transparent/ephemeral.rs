@@ -74,6 +74,9 @@ pub(crate) fn first_unsafe_index(
     // to have been mined in a transaction that we currently see as unmined.
     // This is conservative in terms of avoiding violation of the gap
     // invariant: it can only cause us to get to the end of the gap sooner.
+    //
+    // TODO: do we want to only consider transactions with a minimum number
+    // of confirmations here?
     let first_unmined_index: u32 = match conn
         .query_row(
             "SELECT address_index FROM ephemeral_addresses

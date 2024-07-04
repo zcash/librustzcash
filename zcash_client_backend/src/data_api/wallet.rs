@@ -1165,9 +1165,8 @@ where
         for ((change_index, change_value), (ephemeral_address, _)) in
             ephemeral_outputs.iter().zip(addresses_and_metadata)
         {
-            // This is intended for an ephemeral transparent output, rather than a
-            // non-ephemeral transparent change output. We will report an error in
-            // `create_proposed_transactions` if a later step does not consume this output.
+            // This output is ephemeral; we will report an error in `create_proposed_transactions`
+            // if a later step does not consume it.
             builder.add_transparent_output(&ephemeral_address, change_value.value())?;
             transparent_output_meta.push((
                 Recipient::EphemeralTransparent {

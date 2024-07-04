@@ -238,9 +238,19 @@ pub(crate) fn get_unspent_transparent_output(
     result
 }
 
-/// Returns spendable transparent outputs that have been received by this wallet at the given
-/// transparent address, as outputs of transactions in blocks mined at a height less than or
-/// equal to the provided `max_height`.
+/// Returns the list of spendable transparent outputs received by this wallet at `address`
+/// such that, at height `target_height`:
+/// * the transaction that produced the output had or will have at least `min_confirmations`
+///   confirmations; and
+/// * the output is unspent as of the current chain tip.
+///
+/// An output that is potentially spent by an unmined transaction in the mempool is excluded
+/// iff the spending transaction will not be expired at `target_height`.
+///
+/// This could, in very rare circumstances, return as unspent outputs that are actually not
+/// spendable, if they are the outputs of deshielding transactions where the spend anchors have
+/// been invalidated by a rewind. There isn't a way to detect this circumstance at present, but
+/// it should be vanishingly rare as the vast majority of rewinds are of a single block.
 pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -250,10 +260,6 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
     let confirmed_height = target_height - min_confirmations;
 
-    // This could, in very rare circumstances, return as unspent outputs that are actually not
-    // spendable, if they are the outputs of deshielding transactions where the spend anchors have
-    // been invalidated by a rewind. There isn't a way to detect this circumstance at present, but
-    // it should be vanishingly rare as the vast majority of rewinds are of a single block.
     let mut stmt_utxos = conn.prepare(
         "SELECT t.txid, u.output_index, u.script,
                 u.value_zat, t.mined_height AS received_height

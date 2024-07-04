@@ -680,12 +680,14 @@ pub trait InputSource {
         Ok(None)
     }
 
-    /// Returns the list of transparent outputs received at `address` such that:
-    /// * The transaction that produced these outputs is mined or mineable as of `max_height`.
-    /// * Each returned output is unspent as of the current chain tip.
+    /// Returns the list of spendable transparent outputs received by this wallet at `address`
+    /// such that, at height `target_height`:
+    /// * the transaction that produced the output had or will have at least `min_confirmations`
+    ///   confirmations; and
+    /// * the output is unspent as of the current chain tip.
     ///
-    /// The caller should filter these outputs to ensure they respect the desired number of
-    /// confirmations before attempting to spend them.
+    /// An output that is potentially spent by an unmined transaction in the mempool is excluded
+    /// iff the spending transaction will not be expired at `target_height`.
     #[cfg(feature = "transparent-inputs")]
     fn get_spendable_transparent_outputs(
         &self,

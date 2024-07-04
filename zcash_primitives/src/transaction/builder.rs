@@ -538,8 +538,6 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     ///
     /// This fee is a function of the spends and outputs that have been added to the builder,
     /// pursuant to the specified [`FeeRule`].
-    ///
-    /// Any ephemeral inputs or outputs are *not* taken into account.
     pub fn get_fee<FR: FeeRule>(
         &self,
         fee_rule: &FR,

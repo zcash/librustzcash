@@ -120,10 +120,9 @@ pub enum SqliteClientError {
     #[cfg(feature = "transparent-inputs")]
     ReachedGapLimit(AccountId, u32),
 
-    /// An ephemeral address would be reused, or incorrectly used as an external address.
-    /// The parameters are the address in string form, and if it is known to have been
-    /// used in one or more previous transactions, the txid of the earliest of those
-    /// transactions.
+    /// An ephemeral address would be reused. The parameters are the address in string
+    /// form, and if it is known to have been used in one or more previous transactions,
+    /// the txid of the earliest of those transactions.
     #[cfg(feature = "transparent-inputs")]
     EphemeralAddressReuse(String, Option<TxId>),
 }
@@ -184,7 +183,7 @@ impl fmt::Display for SqliteClientError {
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::EphemeralAddressReuse(address_str, Some(txid)) => write!(f, "The ephemeral address {address_str} previously used in txid {txid} would be reused."),
             #[cfg(feature = "transparent-inputs")]
-            SqliteClientError::EphemeralAddressReuse(address_str, None) => write!(f, "The ephemeral address {address_str} would be reused, or incorrectly used as an external address."),
+            SqliteClientError::EphemeralAddressReuse(address_str, None) => write!(f, "The ephemeral address {address_str} would be reused."),
         }
     }
 }
