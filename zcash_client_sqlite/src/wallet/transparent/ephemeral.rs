@@ -215,7 +215,7 @@ pub(crate) fn find_index_for_ephemeral_address_str(
 pub(crate) fn reserve_next_n_ephemeral_addresses<P: consensus::Parameters>(
     wdb: &mut WalletDb<SqlTransaction<'_>, P>,
     account_id: AccountId,
-    n: u32,
+    n: usize,
 ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
     if n == 0 {
         return Ok(vec![]);
@@ -223,9 +223,12 @@ pub(crate) fn reserve_next_n_ephemeral_addresses<P: consensus::Parameters>(
 
     let first_unreserved = first_unreserved_index(wdb.conn.0, account_id)?;
     let first_unsafe = first_unsafe_index(wdb.conn.0, account_id)?;
-    let allocation = range_from(first_unreserved, n);
+    let allocation = range_from(
+        first_unreserved,
+        u32::try_from(n).map_err(|_| AddressGenerationError::DiversifierSpaceExhausted)?,
+    );
 
-    if allocation.len() < n.try_into().unwrap() {
+    if allocation.len() < n {
         return Err(AddressGenerationError::DiversifierSpaceExhausted.into());
     }
     if allocation.end > first_unsafe {

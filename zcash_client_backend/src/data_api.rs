@@ -1684,7 +1684,7 @@ pub trait WalletWrite: WalletRead {
     fn reserve_next_n_ephemeral_addresses(
         &mut self,
         account_id: Self::AccountId,
-        n: u32,
+        n: usize,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error>;
 }
 
@@ -2109,7 +2109,7 @@ pub mod testing {
         fn reserve_next_n_ephemeral_addresses(
             &mut self,
             _account_id: Self::AccountId,
-            _n: u32,
+            _n: usize,
         ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
             Err(())
         }

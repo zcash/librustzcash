@@ -1152,12 +1152,8 @@ where
             })
             .collect();
 
-        let n = ephemeral_outputs
-            .len()
-            .try_into()
-            .map_err(|_| Error::ProposalNotSupported)?;
         let addresses_and_metadata = wallet_db
-            .reserve_next_n_ephemeral_addresses(account_id, n)
+            .reserve_next_n_ephemeral_addresses(account_id, ephemeral_outputs.len())
             .map_err(Error::DataSource)?;
         assert_eq!(addresses_and_metadata.len(), ephemeral_outputs.len());
 
