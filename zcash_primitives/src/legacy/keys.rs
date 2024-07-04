@@ -435,18 +435,6 @@ impl IncomingViewingKey for InternalIvk {}
 #[derive(Clone, Debug)]
 pub struct EphemeralIvk(ExtendedPublicKey<PublicKey>);
 
-impl private::SealedChangeLevelKey for EphemeralIvk {
-    const SCOPE: TransparentKeyScope = TransparentKeyScope(2);
-
-    fn extended_pubkey(&self) -> &ExtendedPublicKey<PublicKey> {
-        &self.0
-    }
-
-    fn from_extended_pubkey(key: ExtendedPublicKey<PublicKey>) -> Self {
-        EphemeralIvk(key)
-    }
-}
-
 #[cfg(feature = "transparent-inputs")]
 impl EphemeralIvk {
     /// Derives a transparent address at the provided child index.
@@ -454,8 +442,7 @@ impl EphemeralIvk {
         &self,
         address_index: NonHardenedChildIndex,
     ) -> Result<TransparentAddress, bip32::Error> {
-        use private::SealedChangeLevelKey;
-        let child_key = self.extended_pubkey().derive_child(address_index.into())?;
+        let child_key = self.0.derive_child(address_index.into())?;
         #[allow(deprecated)]
         Ok(pubkey_to_address(child_key.public_key()))
     }
