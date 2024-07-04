@@ -103,8 +103,9 @@ tonic-build = { version = "0.11", default-features = false }
 secrecy = "0.8"
 subtle = "2.2.3"
 
-# Static constants
+# Static constants and assertions
 lazy_static = "1"
+static_assertions = "1"
 
 # Tests and benchmarks
 assert_matches = "1.5"

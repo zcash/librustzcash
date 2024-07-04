@@ -119,7 +119,9 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
             params: params.clone(),
         }),
         Box::new(utxos_to_txos::Migration),
-        Box::new(ephemeral_addresses::Migration),
+        Box::new(ephemeral_addresses::Migration {
+            params: params.clone(),
+        }),
     ]
 }
 

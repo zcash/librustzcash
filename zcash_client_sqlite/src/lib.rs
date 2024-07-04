@@ -302,7 +302,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     type Account = wallet::Account;
 
     fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error> {
-        wallet::get_account_ids(self.conn.borrow())
+        Ok(wallet::get_account_ids(self.conn.borrow())?)
     }
 
     fn get_account(
@@ -553,13 +553,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     fn get_known_ephemeral_addresses(
         &self,
         account: Self::AccountId,
-        for_detection: bool,
-    ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
+        index_range: Option<Range<u32>>,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         wallet::transparent::ephemeral::get_known_ephemeral_addresses(
             self.conn.borrow(),
             &self.params,
             account,
-            for_detection,
+            index_range,
         )
     }
 

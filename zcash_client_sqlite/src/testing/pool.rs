@@ -445,7 +445,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     // Each transfer should use a different ephemeral address.
     let (ephemeral0, _) = run_test(&mut st, 0);
     let (ephemeral1, _) = run_test(&mut st, 1);
-    assert!(ephemeral0 != ephemeral1);
+    assert_ne!(ephemeral0, ephemeral1);
 
     add_funds(&mut st, value);
 

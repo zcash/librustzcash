@@ -492,7 +492,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
         }
     }
 
-    // Search ephemeral addresses that have already been reserved.
+    // Search known ephemeral addresses.
     if let Some(raw_index) =
         ephemeral::find_index_for_ephemeral_address_str(conn, account_id, &address_str)?
     {
@@ -500,9 +500,6 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
         return Ok(Some(ephemeral::metadata(address_index)));
     }
 
-    // We intentionally don't check for unreserved ephemeral addresses within the gap
-    // limit here. It's unnecessary to look up metadata for addresses from which we
-    // can spend.
     Ok(None)
 }
 
@@ -534,7 +531,7 @@ pub(crate) fn find_account_for_transparent_output<P: consensus::Parameters>(
         return Ok(Some(account_id));
     }
 
-    // Search ephemeral addresses that have already been reserved.
+    // Search known ephemeral addresses.
     if let Some(account_id) = ephemeral::find_account_for_ephemeral_address_str(conn, &address_str)?
     {
         return Ok(Some(account_id));
@@ -556,20 +553,6 @@ pub(crate) fn find_account_for_transparent_output<P: consensus::Parameters>(
         }
     }
 
-    // Finally we check for ephemeral addresses within the gap limit.
-    for account_id in account_ids {
-        let ephemeral_ivk = ephemeral::get_ephemeral_ivk(conn, params, account_id)?;
-        let last_reserved_index = ephemeral::last_reserved_index(conn, account_id)?;
-
-        for raw_index in ephemeral::range_after(last_reserved_index, ephemeral::GAP_LIMIT) {
-            let address_index = NonHardenedChildIndex::from_index(raw_index).unwrap();
-
-            if &ephemeral_ivk.derive_ephemeral_address(address_index)? == output.recipient_address()
-            {
-                return Ok(Some(account_id));
-            }
-        }
-    }
     Ok(None)
 }
 

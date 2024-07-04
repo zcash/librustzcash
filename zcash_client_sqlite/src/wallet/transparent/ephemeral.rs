@@ -1,7 +1,6 @@
 //! Functions for wallet support of ephemeral transparent addresses.
-use std::cmp::max;
-use std::collections::HashMap;
-use std::ops::RangeInclusive;
+use std::cmp::{max, min};
+use std::ops::Range;
 
 use rusqlite::{named_params, OptionalExtension};
 
@@ -16,11 +15,11 @@ use zcash_primitives::{
 };
 use zcash_protocol::consensus;
 
-use crate::{error::SqliteClientError, wallet::get_account, AccountId, SqlTransaction, WalletDb};
-
-/// The number of ephemeral addresses that can be safely reserved without observing any
-/// of them to be mined. This is the same as the gap limit in Bitcoin.
-pub(crate) const GAP_LIMIT: i32 = 20;
+use crate::{
+    error::SqliteClientError,
+    wallet::{get_account, GAP_LIMIT},
+    AccountId, SqlTransaction, WalletDb,
+};
 
 // Returns `TransparentAddressMetadata` in the ephemeral scope for the
 // given address index.
@@ -28,12 +27,11 @@ pub(crate) fn metadata(address_index: NonHardenedChildIndex) -> TransparentAddre
     TransparentAddressMetadata::new(TransparentKeyScope::EPHEMERAL, address_index)
 }
 
-/// Returns the last reserved ephemeral address index in the given account,
-/// or -1 if the account has no reserved ephemeral addresses.
-pub(crate) fn last_reserved_index(
+/// Returns the first unstored ephemeral address index in the given account.
+pub(crate) fn first_unstored_index(
     conn: &rusqlite::Connection,
     account_id: AccountId,
-) -> Result<i32, SqliteClientError> {
+) -> Result<u32, SqliteClientError> {
     match conn
         .query_row(
             "SELECT address_index FROM ephemeral_addresses
@@ -41,19 +39,33 @@ pub(crate) fn last_reserved_index(
              ORDER BY address_index DESC
              LIMIT 1",
             named_params![":account_id": account_id.0],
-            |row| row.get::<_, i32>(0),
+            |row| row.get::<_, u32>(0),
         )
         .optional()?
     {
-        Some(i) if i < 0 => unreachable!("violates constraint address_index_in_range"),
-        Some(i) => Ok(i),
-        None => Ok(-1),
+        Some(i) if i >= (1 << 31) + GAP_LIMIT => {
+            unreachable!("violates constraint index_range_and_address_nullity")
+        }
+        Some(i) => Ok(i.checked_add(1).unwrap()),
+        None => Ok(0),
     }
 }
 
-/// Returns the last ephemeral address index in the given account that
-/// would not violate the gap invariant if used.
-pub(crate) fn last_safe_index(
+/// Returns the first unreserved ephemeral address index in the given account.
+pub(crate) fn first_unreserved_index(
+    conn: &rusqlite::Connection,
+    account_id: AccountId,
+) -> Result<u32, SqliteClientError> {
+    first_unstored_index(conn, account_id)?
+        .checked_sub(GAP_LIMIT)
+        .ok_or(SqliteClientError::CorruptedData(
+            "ephemeral_addresses table has not been initialized".to_owned(),
+        ))
+}
+
+/// Returns the first ephemeral address index in the given account that
+/// would violate the gap invariant if used.
+pub(crate) fn first_unsafe_index(
     conn: &rusqlite::Connection,
     account_id: AccountId,
 ) -> Result<u32, SqliteClientError> {
@@ -62,7 +74,7 @@ pub(crate) fn last_safe_index(
     // to have been mined in a transaction that we currently see as unmined.
     // This is conservative in terms of avoiding violation of the gap
     // invariant: it can only cause us to get to the end of the gap sooner.
-    let last_mined_index: i32 = match conn
+    let first_unmined_index: u32 = match conn
         .query_row(
             "SELECT address_index FROM ephemeral_addresses
              JOIN transactions t ON t.id_tx = mined_in_tx
@@ -70,30 +82,30 @@ pub(crate) fn last_safe_index(
              ORDER BY address_index DESC
              LIMIT 1",
             named_params![":account_id": account_id.0],
-            |row| row.get::<_, i32>(0),
+            |row| row.get::<_, u32>(0),
         )
         .optional()?
     {
-        Some(i) if i < 0 => unreachable!("violates constraint address_index_in_range"),
-        Some(i) => i,
-        None => -1,
+        Some(i) if i >= 1 << 31 => {
+            unreachable!("violates constraint index_range_and_address_nullity")
+        }
+        Some(i) => i.checked_add(1).unwrap(),
+        None => 0,
     };
-    Ok(u32::try_from(last_mined_index.saturating_add(GAP_LIMIT)).unwrap())
+    Ok(min(
+        1 << 31,
+        first_unmined_index.checked_add(GAP_LIMIT).unwrap(),
+    ))
 }
 
-/// Utility function to return an `InclusiveRange<u32>` that starts at `i + 1`
-/// and is of length up to `n`. The range is truncated if necessary to end at
-/// the maximum valid address index, `i32::MAX`.
-///
-/// # Panics
-///
-/// Panics if the precondition `i >= -1 and n > 0` does not hold.
-pub(crate) fn range_after(i: i32, n: i32) -> RangeInclusive<u32> {
-    assert!(i >= -1);
-    assert!(n > 0);
-    let first = u32::try_from(i64::from(i) + 1).unwrap();
-    let last = u32::try_from(i.saturating_add(n)).unwrap();
-    first..=last
+/// Utility function to return an `Range<u32>` that starts at `i`
+/// and is of length up to `n`. The range is truncated if necessary
+/// so that it contains no elements beyond the maximum valid address
+/// index, `(1 << 31) - 1`.
+pub(crate) fn range_from(i: u32, n: u32) -> Range<u32> {
+    let first = min(1 << 31, i);
+    let last = min(1 << 31, i.saturating_add(n));
+    first..last
 }
 
 /// Returns the ephemeral transparent IVK for a given account ID.
@@ -110,47 +122,40 @@ pub(crate) fn get_ephemeral_ivk<P: consensus::Parameters>(
         .derive_ephemeral_ivk()?)
 }
 
-/// Returns a mapping of ephemeral transparent addresses potentially belonging
-/// to this wallet to their metadata.
+/// Returns a vector of ephemeral transparent addresses associated with the given
+/// account controlled by this wallet, along with their metadata. The result includes
+/// reserved addresses, and addresses for `GAP_LIMIT` additional indices (capped to
+/// the maximum index).
 ///
-/// If `for_detection` is false, the result only includes reserved addresses.
-/// If `for_detection` is true, it includes addresses for an additional
-/// `GAP_LIMIT` indices, up to the limit.
+/// If `index_range` is some `Range`, it limits the result to addresses with indices
+/// in that range.
 pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account_id: AccountId,
-    for_detection: bool,
-) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, SqliteClientError> {
-    let mut stmt = conn.prepare(
-        "SELECT address, address_index FROM ephemeral_addresses WHERE account_id = :account ORDER BY address_index",
-    )?;
-    let mut rows = stmt.query(named_params! { ":account": account_id.0 })?;
+    index_range: Option<Range<u32>>,
+) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
+    let index_range = index_range.unwrap_or(0..(1 << 31));
 
-    let mut result = HashMap::new();
-    let mut first_unused_index: Option<i32> = Some(0);
+    let mut stmt = conn.prepare(
+        "SELECT address, address_index FROM ephemeral_addresses
+         WHERE account_id = :account AND address_index >= :start AND address_index < :end
+         ORDER BY address_index",
+    )?;
+    let mut rows = stmt.query(named_params![
+        ":account": account_id.0,
+        ":start": index_range.start,
+        ":end": min(1 << 31, index_range.end),
+    ])?;
+
+    let mut result = vec![];
 
     while let Some(row) = rows.next()? {
         let addr_str: String = row.get(0)?;
         let raw_index: u32 = row.get(1)?;
-        first_unused_index = i32::try_from(raw_index)
-            .map_err(|e| SqliteClientError::CorruptedData(e.to_string()))?
-            .checked_add(1);
         let address_index = NonHardenedChildIndex::from_index(raw_index).unwrap();
         let address = TransparentAddress::decode(params, &addr_str)?;
-        result.insert(address, metadata(address_index));
-    }
-
-    if for_detection {
-        if let Some(first) = first_unused_index {
-            let ephemeral_ivk = get_ephemeral_ivk(conn, params, account_id)?;
-
-            for raw_index in range_after(first, GAP_LIMIT) {
-                let address_index = NonHardenedChildIndex::from_index(raw_index).unwrap();
-                let address = ephemeral_ivk.derive_ephemeral_address(address_index)?;
-                result.insert(address, metadata(address_index));
-            }
-        }
+        result.push((address, metadata(address_index)));
     }
     Ok(result)
 }
@@ -189,10 +194,6 @@ pub(crate) fn find_index_for_ephemeral_address_str(
 /// Returns a vector with the next `n` previously unreserved ephemeral addresses for
 /// the given account.
 ///
-/// # Panics
-///
-/// Panics if the precondition `n < 0x80000000` does not hold.
-///
 /// # Errors
 ///
 /// * `SqliteClientError::AccountUnknown`, if there is no account with the given id.
@@ -211,43 +212,81 @@ pub(crate) fn reserve_next_n_ephemeral_addresses<P: consensus::Parameters>(
     if n == 0 {
         return Ok(vec![]);
     }
-    assert!(n > 0);
-    let n = i32::try_from(n).expect("precondition violated");
 
-    let ephemeral_ivk = get_ephemeral_ivk(wdb.conn.0, &wdb.params, account_id)?;
-    let last_reserved_index = last_reserved_index(wdb.conn.0, account_id)?;
-    let last_safe_index = last_safe_index(wdb.conn.0, account_id)?;
-    let allocation = range_after(last_reserved_index, n);
+    let first_unreserved = first_unreserved_index(wdb.conn.0, account_id)?;
+    let first_unsafe = first_unsafe_index(wdb.conn.0, account_id)?;
+    let allocation = range_from(first_unreserved, n);
 
-    if allocation.clone().count() < n.try_into().unwrap() {
-        return Err(SqliteClientError::AddressGeneration(
-            AddressGenerationError::DiversifierSpaceExhausted,
+    if allocation.len() < n.try_into().unwrap() {
+        return Err(AddressGenerationError::DiversifierSpaceExhausted.into());
+    }
+    if allocation.end > first_unsafe {
+        return Err(SqliteClientError::ReachedGapLimit(
+            account_id,
+            max(first_unreserved, first_unsafe),
         ));
     }
-    if *allocation.end() > last_safe_index {
-        let unsafe_index = max(*allocation.start(), last_safe_index.saturating_add(1));
-        return Err(SqliteClientError::ReachedGapLimit(account_id, unsafe_index));
+    reserve_until(wdb.conn.0, &wdb.params, account_id, allocation.end)?;
+    get_known_ephemeral_addresses(wdb.conn.0, &wdb.params, account_id, Some(allocation))
+}
+
+/// Initialize the `ephemeral_addresses` table. This must be called when
+/// creating or migrating an account.
+pub(crate) fn init_account<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_id: AccountId,
+) -> Result<(), SqliteClientError> {
+    reserve_until(conn, params, account_id, 0)
+}
+
+/// Extend the range of stored addresses in an account if necessary so that the
+/// index of the next address to reserve will be *at least* `next_to_reserve`.
+/// If it would already have been at least `next_to_reserve`, then do nothing.
+///
+/// Note that this is called from db migration code.
+///
+/// # Panics
+///
+/// Panics if `next_to_reserve > (1 << 31)`.
+fn reserve_until<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_id: AccountId,
+    next_to_reserve: u32,
+) -> Result<(), SqliteClientError> {
+    assert!(next_to_reserve <= 1 << 31);
+
+    let first_unstored = first_unstored_index(conn, account_id)?;
+    let range_to_store = first_unstored..(next_to_reserve.checked_add(GAP_LIMIT).unwrap());
+    if range_to_store.is_empty() {
+        return Ok(());
     }
 
+    let ephemeral_ivk = get_ephemeral_ivk(conn, params, account_id)?;
+
     // used_in_tx and mined_in_tx are initially NULL
-    let mut stmt_insert_ephemeral_address = wdb.conn.0.prepare_cached(
+    let mut stmt_insert_ephemeral_address = conn.prepare_cached(
         "INSERT INTO ephemeral_addresses (account_id, address_index, address)
          VALUES (:account_id, :address_index, :address)",
     )?;
 
-    allocation
-        .map(|raw_index| {
-            let address_index = NonHardenedChildIndex::from_index(raw_index).unwrap();
-            let address = ephemeral_ivk.derive_ephemeral_address(address_index)?;
-
-            stmt_insert_ephemeral_address.execute(named_params![
-                ":account_id": account_id.0,
-                ":address_index": raw_index,
-                ":address": address.encode(&wdb.params),
-            ])?;
-            Ok((address, metadata(address_index)))
-        })
-        .collect()
+    for raw_index in range_to_store {
+        let address_str_opt = match NonHardenedChildIndex::from_index(raw_index) {
+            Some(address_index) => Some(
+                ephemeral_ivk
+                    .derive_ephemeral_address(address_index)?
+                    .encode(params),
+            ),
+            None => None,
+        };
+        stmt_insert_ephemeral_address.execute(named_params![
+            ":account_id": account_id.0,
+            ":address_index": raw_index,
+            ":address": address_str_opt,
+        ])?;
+    }
+    Ok(())
 }
 
 /// Returns a `SqliteClientError::EphemeralAddressReuse` error if the address was
@@ -352,9 +391,25 @@ pub(crate) fn mark_ephemeral_address_as_mined<P: consensus::Parameters>(
         |row| row.get::<_, i64>(0),
     )?;
 
-    wdb.conn.0.execute(
-        "UPDATE ephemeral_addresses SET mined_in_tx = :mined_in_tx WHERE address = :address",
-        named_params![":mined_in_tx": &earlier_ref, ":address": address_str],
-    )?;
+    let mined_ephemeral = wdb
+        .conn
+        .0
+        .query_row(
+            "UPDATE ephemeral_addresses
+            SET mined_in_tx = :mined_in_tx
+            WHERE address = :address
+            RETURNING (account_id, address_index)",
+            named_params![":mined_in_tx": &earlier_ref, ":address": address_str],
+            |row| Ok((AccountId(row.get::<_, u32>(0)?), row.get::<_, u32>(1)?)),
+        )
+        .optional()?;
+
+    // If this is a known ephemeral address for an account in this wallet, we might need
+    // to extend the indices stored for that account to maintain the invariant that the
+    // last `GAP_LIMIT` addresses are unused and unmined.
+    if let Some((account_id, address_index)) = mined_ephemeral {
+        let next_to_reserve = min(1 << 31, address_index.saturating_add(1));
+        reserve_until(wdb.conn.0, &wdb.params, account_id, next_to_reserve)?;
+    }
     Ok(())
 }

@@ -133,6 +133,10 @@ pub(crate) mod transparent;
 
 pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
 
+/// The number of ephemeral addresses that can be safely reserved without observing any
+/// of them to be mined. This is the same as the gap limit in Bitcoin.
+pub(crate) const GAP_LIMIT: u32 = 20;
+
 fn parse_account_source(
     account_kind: u32,
     hd_seed_fingerprint: Option<[u8; 32]>,
@@ -508,6 +512,10 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     // Always derive the default Unified Address for the account.
     let (address, d_idx) = account.default_address(DEFAULT_UA_REQUEST)?;
     insert_address(conn, params, account_id, d_idx, &address)?;
+
+    // Initialize the `ephemeral_addresses` table.
+    #[cfg(feature = "transparent-inputs")]
+    transparent::ephemeral::init_account(conn, params, account_id)?;
 
     Ok(account_id)
 }
@@ -1914,9 +1922,11 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
 }
 
 /// Returns a vector with the IDs of all accounts known to this wallet.
+///
+/// Note that this is called from db migration code.
 pub(crate) fn get_account_ids(
     conn: &rusqlite::Connection,
-) -> Result<Vec<AccountId>, SqliteClientError> {
+) -> Result<Vec<AccountId>, rusqlite::Error> {
     let mut stmt = conn.prepare("SELECT id FROM accounts")?;
     let mut rows = stmt.query([])?;
     let mut result = Vec::new();

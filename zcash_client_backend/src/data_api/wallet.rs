@@ -1151,14 +1151,13 @@ where
                 change_value.is_ephemeral() && change_value.output_pool() == PoolType::Transparent
             })
             .collect();
-        if ephemeral_outputs.len() > i32::MAX as usize {
-            return Err(Error::ProposalNotSupported);
-        }
+
+        let n = ephemeral_outputs
+            .len()
+            .try_into()
+            .map_err(|_| Error::ProposalNotSupported)?;
         let addresses_and_metadata = wallet_db
-            .reserve_next_n_ephemeral_addresses(
-                account_id,
-                ephemeral_outputs.len().try_into().unwrap(),
-            )
+            .reserve_next_n_ephemeral_addresses(account_id, n)
             .map_err(Error::DataSource)?;
         assert_eq!(addresses_and_metadata.len(), ephemeral_outputs.len());
 

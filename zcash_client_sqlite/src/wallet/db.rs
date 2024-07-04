@@ -13,10 +13,12 @@
 // from showing up in `cargo doc --document-private-items`.
 #![allow(dead_code)]
 
+use static_assertions::const_assert_eq;
+
 use zcash_client_backend::data_api::scanning::ScanPriority;
 use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
 
-use crate::wallet::scanning::priority_code;
+use crate::wallet::{scanning::priority_code, GAP_LIMIT};
 
 /// Stores information about the accounts that the wallet is tracking.
 pub(super) const TABLE_ACCOUNTS: &str = r#"
@@ -76,12 +78,17 @@ CREATE INDEX "addresses_accounts" ON "addresses" (
     "account_id" ASC
 )"#;
 
-/// Stores ephemeral transparent addresses used for ZIP 320. For each account, these addresses are
-/// allocated sequentially by address index under custom scope 2 at the "change" level of the BIP 32
-/// address hierarchy. Only "reserved" ephemeral addresses, that is addresses that have been allocated
-/// for use in a ZIP 320 transaction proposal, are stored in the table. Addresses are never removed.
-/// New ones should only be reserved via the `WalletWrite::reserve_next_n_ephemeral_addresses` API.
-/// All of the addresses in the table should be scanned for incoming funds.
+/// Stores ephemeral transparent addresses used for ZIP 320.
+///
+/// For each account, these addresses are allocated sequentially by address index under scope 2
+/// (`TransparentKeyScope::EPHEMERAL`) at the "change" level of the BIP 32 address hierarchy.
+/// The ephemeral addresses stored in the table are exactly the "reserved" ephemeral addresses
+/// (that is addresses that have been allocated for use in a ZIP 320 transaction proposal), plus
+/// the addresses at the next `GAP_LIMIT` indices.
+///
+/// Addresses are never removed. New ones should only be reserved via the
+/// `WalletWrite::reserve_next_n_ephemeral_addresses` API. All of the addresses in the table
+/// should be scanned for incoming funds.
 ///
 /// ### Columns
 /// - `address` contains the string (Base58Check) encoding of a transparent P2PKH address.
@@ -96,22 +103,35 @@ CREATE INDEX "addresses_accounts" ON "addresses" (
 /// a debugging aid (although the latter allows us to account for whether the referenced transaction
 /// is unmined). We only really care which addresses have been used, and whether we can allocate a
 /// new address within the gap limit.
+///
+/// It is an external invariant that within each account:
+/// - the address indices are contiguous and start from 0;
+/// - the last `GAP_LIMIT` addresses have `used_in_tx` and `mined_in_tx` both NULL.
+///
+/// All but the last `GAP_LIMIT` addresses are defined to be "reserved" addresses. Since the next
+/// index to reserve is determined by dead reckoning from the last stored address, we use dummy
+/// entries after the maximum valid index in order to allow the last `GAP_LIMIT` addresses at the
+/// end of the index range to be used.
 pub(super) const TABLE_EPHEMERAL_ADDRESSES: &str = r#"
 CREATE TABLE ephemeral_addresses (
     account_id INTEGER NOT NULL,
     address_index INTEGER NOT NULL,
-    address TEXT NOT NULL,
+    address TEXT,
     used_in_tx INTEGER,
     mined_in_tx INTEGER,
     FOREIGN KEY (account_id) REFERENCES accounts(id),
     FOREIGN KEY (used_in_tx) REFERENCES transactions(id_tx),
     FOREIGN KEY (mined_in_tx) REFERENCES transactions(id_tx),
     PRIMARY KEY (account_id, address_index),
-    CONSTRAINT address_index_in_range CHECK (address_index >= 0 AND address_index <= 0x7FFFFFFF)
+    CONSTRAINT index_range_and_address_nullity CHECK (
+        (address_index BETWEEN 0 AND 0x7FFFFFFF AND address IS NOT NULL) OR
+        (address_index BETWEEN 0x80000000 AND 0x7FFFFFFF + 20 AND address IS NULL AND used_in_tx IS NULL AND mined_in_tx IS NULL)
+    )
 ) WITHOUT ROWID"#;
 // Hexadecimal integer literals were added in SQLite version 3.8.6 (2014-08-15).
 // libsqlite3-sys requires at least version 3.14.0.
 // "WITHOUT ROWID" tells SQLite to use a clustered index on the (composite) primary key.
+const_assert_eq!(GAP_LIMIT, 20);
 pub(super) const INDEX_EPHEMERAL_ADDRESSES_ADDRESS: &str = r#"
 CREATE INDEX ephemeral_addresses_address ON ephemeral_addresses (
     address ASC

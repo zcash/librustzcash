@@ -97,7 +97,10 @@ use zcash_primitives::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use {crate::wallet::TransparentAddressMetadata, zcash_primitives::legacy::TransparentAddress};
+use {
+    crate::wallet::TransparentAddressMetadata, std::ops::Range,
+    zcash_primitives::legacy::TransparentAddress,
+};
 
 #[cfg(any(test, feature = "test-dependencies"))]
 use zcash_primitives::consensus::NetworkUpgrade;
@@ -929,10 +932,11 @@ pub trait WalletRead {
     /// if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
     ///     return Ok(result.clone());
     /// }
-    /// if let Some(result) = self.get_known_ephemeral_addresses(account, false)?.get(address) {
-    ///     return Ok(Some(result.clone()));
-    /// }
-    /// Ok(None)
+    /// Ok(self
+    ///     .get_known_ephemeral_addresses(account, None)?
+    ///     .into_iter()
+    ///     .find(|(known_addr, _)| known_addr == address)
+    ///     .map(|(_, metadata)| metadata))
     /// ```
     ///
     /// Returns `Ok(None)` if the address is not recognized, or we do not have metadata for it.
@@ -947,28 +951,24 @@ pub trait WalletRead {
         if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
             return Ok(result.clone());
         }
-        if let Some(result) = self
-            .get_known_ephemeral_addresses(account, false)?
-            .get(address)
-        {
-            return Ok(Some(result.clone()));
-        }
-        Ok(None)
+        Ok(self
+            .get_known_ephemeral_addresses(account, None)?
+            .into_iter()
+            .find(|(known_addr, _)| known_addr == address)
+            .map(|(_, metadata)| metadata))
     }
 
-    /// Returns a set of ephemeral transparent addresses associated with the given
-    /// account controlled by this wallet, along with their metadata.
+    /// Returns a vector of ephemeral transparent addresses associated with the given
+    /// account controlled by this wallet, along with their metadata. The result includes
+    /// reserved addresses, and addresses for `GAP_LIMIT` additional indices (capped to
+    /// the maximum index).
     ///
-    /// If `for_detection` is false, the set only includes addresses reserved by
-    /// `reserve_next_n_ephemeral_addresses`. If `for_detection` is true, it includes
-    /// those addresses and also the ones that will be reserved next, for an additional
-    /// `GAP_LIMIT` indices (up to and including the maximum index given by
-    /// `NonHardenedChildIndex::from_index(i32::MAX as u32)`).
+    /// If `index_range` is some `Range`, it limits the result to addresses with indices
+    /// in that range.
     ///
-    /// Wallets should scan the chain for UTXOs sent to the ephemeral transparent
-    /// receivers obtained with `for_detection` set to `true`, but do not need to do
-    /// so regularly. Under expected usage, outputs would only be detected with these
-    /// receivers in the following situations:
+    /// Wallets should scan the chain for UTXOs sent to these ephemeral transparent
+    /// receivers, but do not need to do so regularly. Under expected usage, outputs
+    /// would only be detected with these receivers in the following situations:
     ///
     /// - This wallet created a payment to a ZIP 320 (TEX) address, but the second
     ///   transaction (that spent the output sent to the ephemeral address) did not get
@@ -994,9 +994,9 @@ pub trait WalletRead {
     fn get_known_ephemeral_addresses(
         &self,
         _account: Self::AccountId,
-        _for_detection: bool,
-    ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
-        Ok(HashMap::new())
+        _index_range: Option<Range<u32>>,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        Ok(vec![])
     }
 
     /// If a given transparent address has been reserved, i.e. would be included in
@@ -1007,7 +1007,11 @@ pub trait WalletRead {
     /// This is equivalent to (but may be implemented more efficiently than):
     /// ```compile_fail
     /// for account_id in self.get_account_ids()? {
-    ///     if self.get_known_ephemeral_addresses(account_id, false)?.contains_key(address)? {
+    ///     if self
+    ///         .get_known_ephemeral_addresses(account_id, None)?
+    ///         .into_iter()
+    ///         .any(|(known_addr, _)| &known_addr == address)
+    ///     {
     ///         return Ok(Some(account_id));
     ///     }
     /// }
@@ -1020,8 +1024,9 @@ pub trait WalletRead {
     ) -> Result<Option<Self::AccountId>, Self::Error> {
         for account_id in self.get_account_ids()? {
             if self
-                .get_known_ephemeral_addresses(account_id, false)?
-                .contains_key(address)
+                .get_known_ephemeral_addresses(account_id, None)?
+                .into_iter()
+                .any(|(known_addr, _)| &known_addr == address)
             {
                 return Ok(Some(account_id));
             }
@@ -1672,10 +1677,6 @@ pub trait WalletWrite: WalletRead {
     /// the given number of addresses, or if the account identifier does not correspond
     /// to a known account.
     ///
-    /// # Panics
-    ///
-    /// Panics if the precondition `n < 0x80000000` does not hold.
-    ///
     /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki#user-content-Address_gap_limit
     #[cfg(feature = "transparent-inputs")]
     fn reserve_next_n_ephemeral_addresses(
@@ -1787,7 +1788,10 @@ pub mod testing {
     };
 
     #[cfg(feature = "transparent-inputs")]
-    use {crate::wallet::TransparentAddressMetadata, zcash_primitives::legacy::TransparentAddress};
+    use {
+        crate::wallet::TransparentAddressMetadata, std::ops::Range,
+        zcash_primitives::legacy::TransparentAddress,
+    };
 
     #[cfg(feature = "orchard")]
     use super::ORCHARD_SHARD_HEIGHT;
@@ -2024,9 +2028,9 @@ pub mod testing {
         fn get_known_ephemeral_addresses(
             &self,
             _account: Self::AccountId,
-            _for_detection: bool,
-        ) -> Result<HashMap<TransparentAddress, TransparentAddressMetadata>, Self::Error> {
-            Ok(HashMap::new())
+            _index_range: Option<Range<u32>>,
+        ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+            Ok(vec![])
         }
 
         #[cfg(feature = "transparent-inputs")]
@@ -2103,9 +2107,8 @@ pub mod testing {
         fn reserve_next_n_ephemeral_addresses(
             &mut self,
             _account_id: Self::AccountId,
-            n: u32,
+            _n: u32,
         ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
-            assert!(n < 0x80000000);
             Err(())
         }
     }

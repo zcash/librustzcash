@@ -54,6 +54,9 @@ jubjub.workspace = true
 secrecy.workspace = true
 subtle.workspace = true
 
+# - Static assertions
+static_assertions.workspace = true
+
 # - Shielded protocols
 orchard = { workspace = true, optional = true }
 sapling.workspace = true
