@@ -443,21 +443,20 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     params: &P,
     output: &WalletTransparentOutput,
 ) -> Result<UtxoId, SqliteClientError> {
-    if let Some(receiving_account) = find_account_for_transparent_output(conn, params, output)? {
+    let address = output.recipient_address();
+    if let Some(receiving_account) = find_account_for_transparent_address(conn, params, address)? {
         put_transparent_output(
             conn,
             params,
             output.outpoint(),
             output.txout(),
             Some(output.height()),
-            output.recipient_address(),
+            address,
             receiving_account,
         )
     } else {
         // The UTXO was not for any of our transparent addresses.
-        Err(SqliteClientError::AddressNotRecognized(
-            *output.recipient_address(),
-        ))
+        Err(SqliteClientError::AddressNotRecognized(*address))
     }
 }
 
@@ -513,12 +512,12 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
 ///
 /// Returns `Ok(None)` if the transparent output's recipient address is not in any of the
 /// above locations. This means the wallet considers the output "not interesting".
-pub(crate) fn find_account_for_transparent_output<P: consensus::Parameters>(
+pub(crate) fn find_account_for_transparent_address<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    output: &WalletTransparentOutput,
+    address: &TransparentAddress,
 ) -> Result<Option<AccountId>, SqliteClientError> {
-    let address_str = output.recipient_address().encode(params);
+    let address_str = address.encode(params);
 
     if let Some(account_id) = conn
         .query_row(
@@ -547,7 +546,7 @@ pub(crate) fn find_account_for_transparent_output<P: consensus::Parameters>(
     // matches the address for the received UTXO.
     for &account_id in account_ids.iter() {
         if let Some((legacy_taddr, _)) = get_legacy_transparent_address(params, conn, account_id)? {
-            if &legacy_taddr == output.recipient_address() {
+            if &legacy_taddr == address {
                 return Ok(Some(account_id));
             }
         }
