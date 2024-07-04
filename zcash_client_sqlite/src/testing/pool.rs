@@ -302,9 +302,19 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
 
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
-    use std::str::FromStr;
+    use std::{collections::HashSet, str::FromStr};
 
-    use zcash_client_backend::fees::ChangeValue;
+    use rand_core::OsRng;
+    use zcash_client_backend::{
+        fees::ChangeValue,
+        wallet::{TransparentAddressMetadata, WalletTx},
+    };
+    use zcash_primitives::{
+        legacy::keys::{NonHardenedChildIndex, TransparentKeyScope},
+        transaction::builder::{BuildConfig, Builder},
+    };
+
+    use crate::wallet::{sapling::tests::test_prover, GAP_LIMIT};
 
     let mut st = TestBuilder::new()
         .with_block_cache()
@@ -312,6 +322,8 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         .build();
 
     let account = st.test_account().cloned().unwrap();
+    let account_id = account.account_id();
+    let (default_addr, default_index) = account.usk().default_transparent_address();
     let dfvk = T::test_account_fvk(&st);
 
     let add_funds = |st: &mut TestState<_>, value| {
@@ -325,7 +337,8 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
                 .block_height(),
             h
         );
-        assert_eq!(st.get_spendable_balance(account.account_id(), 1), value);
+        assert_eq!(st.get_spendable_balance(account_id, 1), value);
+        h
     };
 
     let value = NonNegativeAmount::const_from_u64(100000);
@@ -344,7 +357,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
         // Generate a ZIP 320 proposal, sending to the wallet's default transparent address
         // expressed as a TEX address.
-        let tex_addr = match account.usk().default_transparent_address().0 {
+        let tex_addr = match default_addr {
             TransparentAddress::PublicKeyHash(data) => Address::Tex(data),
             _ => unreachable!(),
         };
@@ -354,7 +367,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         // serialization of the proposal.
         let proposal = st
             .propose_standard_transfer::<Infallible>(
-                account.account_id(),
+                account_id,
                 StandardFeeRule::Zip317,
                 NonZeroU32::new(1).unwrap(),
                 &tex_addr,
@@ -439,15 +452,15 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
             (sent_v, sent_to_addr, None, None)
             if sent_v == u64::try_from(transfer_amount).unwrap() && sent_to_addr == Some(tex_addr.encode(&st.wallet().params)));
 
-        (ephemeral_addr.unwrap(), txids.head)
+        (ephemeral_addr.unwrap(), txids)
     };
 
     // Each transfer should use a different ephemeral address.
-    let (ephemeral0, _) = run_test(&mut st, 0);
-    let (ephemeral1, _) = run_test(&mut st, 1);
+    let (ephemeral0, txids0) = run_test(&mut st, 0);
+    let (ephemeral1, txids1) = run_test(&mut st, 1);
     assert_ne!(ephemeral0, ephemeral1);
 
-    add_funds(&mut st, value);
+    let height = add_funds(&mut st, value);
 
     let ephemeral_taddr = Address::decode(&st.wallet().params, &ephemeral0).expect("valid address");
     assert_matches!(
@@ -458,7 +471,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     // Attempting to pay to an ephemeral address should cause an error.
     let proposal = st
         .propose_standard_transfer::<Infallible>(
-            account.account_id(),
+            account_id,
             StandardFeeRule::Zip317,
             NonZeroU32::new(1).unwrap(),
             &ephemeral_taddr,
@@ -477,6 +490,184 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     assert_matches!(
         &create_proposed_result,
         Err(Error::PaysEphemeralTransparentAddress(address_str)) if address_str == &ephemeral0);
+
+    // Simulate another wallet sending to an ephemeral address with an index
+    // within the current gap limit. The `PaysEphemeralTransparentAddress` error
+    // prevents us from doing so straightforwardly, so we'll do it by building
+    // a transaction and calling `store_decrypted_tx` with it.
+    let known_addrs = st
+        .wallet()
+        .get_known_ephemeral_addresses(account_id, None)
+        .unwrap();
+    assert_eq!(known_addrs.len(), (GAP_LIMIT as usize) + 2);
+
+    // Check that the addresses are all distinct.
+    let known_set: HashSet<_> = known_addrs.iter().map(|(addr, _)| addr).collect();
+    assert_eq!(known_set.len(), known_addrs.len());
+    // Check that the metadata is as expected.
+    for (i, (_, meta)) in known_addrs.iter().enumerate() {
+        assert_eq!(
+            meta,
+            &TransparentAddressMetadata::new(
+                TransparentKeyScope::EPHEMERAL,
+                NonHardenedChildIndex::from_index(i.try_into().unwrap()).unwrap()
+            )
+        );
+    }
+
+    let mut builder = Builder::new(
+        st.wallet().params,
+        height + 1,
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: None,
+        },
+    );
+    let (colliding_addr, _) = &known_addrs[10];
+    assert_matches!(
+        builder.add_transparent_output(colliding_addr, (value - zip317::MINIMUM_FEE).unwrap()),
+        Ok(_)
+    );
+    let sk = account
+        .usk()
+        .transparent()
+        .derive_secret_key(Scope::External.into(), default_index)
+        .unwrap();
+    let outpoint = OutPoint::fake();
+    let txout = TxOut {
+        script_pubkey: default_addr.script(),
+        value,
+    };
+    assert_matches!(builder.add_transparent_input(sk, outpoint, txout), Ok(_));
+    let test_prover = test_prover();
+    let build_result = builder
+        .build(
+            OsRng,
+            &test_prover,
+            &test_prover,
+            &zip317::FeeRule::standard(),
+        )
+        .unwrap();
+    let decrypted_tx = DecryptedTransaction::<AccountId>::new(
+        build_result.transaction(),
+        vec![],
+        #[cfg(feature = "orchard")]
+        vec![],
+    );
+    st.wallet_mut().store_decrypted_tx(decrypted_tx).unwrap();
+
+    // That should have advanced the start of the gap to index 11.
+    let new_known_addrs = st
+        .wallet()
+        .get_known_ephemeral_addresses(account_id, None)
+        .unwrap();
+    assert_eq!(new_known_addrs.len(), (GAP_LIMIT as usize) + 11);
+    assert!(new_known_addrs.starts_with(&known_addrs));
+
+    let reservation_should_succeed = |st: &mut TestState<_>, n| {
+        let reserved = st
+            .wallet_mut()
+            .reserve_next_n_ephemeral_addresses(account_id, n)
+            .unwrap();
+        assert_eq!(reserved.len(), n);
+        reserved
+    };
+    let reservation_should_fail = |st: &mut TestState<_>, n, expected_bad_index| {
+        assert_matches!(st
+            .wallet_mut()
+            .reserve_next_n_ephemeral_addresses(account_id, n),
+            Err(SqliteClientError::ReachedGapLimit(acct, bad_index))
+            if acct == account_id && bad_index == expected_bad_index);
+    };
+
+    let next_reserved = reservation_should_succeed(&mut st, 1);
+    assert_eq!(next_reserved[0], known_addrs[11]);
+
+    // Calling `reserve_next_n_ephemeral_addresses(account_id, 1)` will have advanced
+    // the start of the gap to index 12. This also tests the `index_range` parameter.
+    let newer_known_addrs = st
+        .wallet()
+        .get_known_ephemeral_addresses(account_id, Some(5..100))
+        .unwrap();
+    assert_eq!(newer_known_addrs.len(), (GAP_LIMIT as usize) + 12 - 5);
+    assert!(newer_known_addrs.starts_with(&new_known_addrs[5..]));
+
+    // None of the five transactions created above (two from each proposal and the
+    // one built manually) have been mined yet. So, the range of address indices
+    // that are safe to reserve is still 0..20, and we have already reserved 12
+    // addresses, so trying to reserve another 9 should fail.
+    reservation_should_fail(&mut st, 9, 20);
+    reservation_should_succeed(&mut st, 8);
+    reservation_should_fail(&mut st, 1, 20);
+
+    // Now mine the transaction with the ephemeral output at index 1.
+    // We already reserved 20 addresses, so this should allow 2 more (..22).
+    // It does not matter that the transaction with ephemeral output at index 0
+    // remains unmined.
+    let (h, _) = st.generate_next_block_including(txids1.head);
+    st.scan_cached_blocks(h, 1);
+    reservation_should_succeed(&mut st, 2);
+    reservation_should_fail(&mut st, 1, 22);
+
+    // Mining the transaction with the ephemeral output at index 0 at this point
+    // should make no difference.
+    let (h, _) = st.generate_next_block_including(txids0.head);
+    st.scan_cached_blocks(h, 1);
+    reservation_should_fail(&mut st, 1, 22);
+
+    // Now mine the transaction with the ephemeral output at index 10.
+    let tx = build_result.transaction();
+    let tx_index = 1;
+    let (h, _) = st.generate_next_block_from_tx(tx_index, tx);
+    st.scan_cached_blocks(h, 1);
+
+    // The rest of this test would currently fail without the explicit call to
+    // `put_tx_meta` below. Ideally the above `scan_cached_blocks` would be
+    // sufficient, but it does not detect the transaction as interesting to the
+    // wallet. If a transaction is in the database with a null `mined_height`,
+    // as in this case, its `mined_height` will remain null unless `put_tx_meta`
+    // is called on it. Normally `put_tx_meta` would be called via `put_blocks`
+    // as a result of scanning, but that won't happen for any fully transparent
+    // transaction, and currently it also will not happen for a partially shielded
+    // transaction unless it is interesting to the wallet for another reason.
+    // Therefore we will not currently detect either collisions with uses of
+    // ephemeral outputs by other wallets, or refunds of funds sent to TEX
+    // addresses. (#1354, #1379)
+
+    // Check that what we say in the above paragraph remains true, so that we
+    // don't accidentally fix it without updating this test.
+    reservation_should_fail(&mut st, 1, 22);
+
+    // For now, we demonstrate that this problem is the only obstacle to the rest
+    // of the ZIP 320 code doing the right thing, by manually calling `put_tx_meta`:
+    crate::wallet::put_tx_meta(
+        &st.wallet_mut().conn,
+        &WalletTx::new(
+            tx.txid(),
+            tx_index,
+            vec![],
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+        ),
+        h,
+    )
+    .unwrap();
+
+    // We already reserved 22 addresses, so mining the transaction with the
+    // ephemeral output at index 10 should allow 9 more (..31).
+    reservation_should_succeed(&mut st, 9);
+    reservation_should_fail(&mut st, 1, 31);
+
+    let newest_known_addrs = st
+        .wallet()
+        .get_known_ephemeral_addresses(account_id, None)
+        .unwrap();
+    assert_eq!(newest_known_addrs.len(), (GAP_LIMIT as usize) + 31);
+    assert!(newest_known_addrs.starts_with(&known_addrs));
+    assert!(newest_known_addrs[5..].starts_with(&newer_known_addrs));
 }
 
 #[cfg(feature = "transparent-inputs")]
@@ -490,6 +681,7 @@ pub(crate) fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPo
         .build();
 
     let account = st.test_account().cloned().unwrap();
+    let account_id = account.account_id();
     let dfvk = T::test_account_fvk(&st);
 
     let add_funds = |st: &mut TestState<_>, value| {
@@ -503,7 +695,7 @@ pub(crate) fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPo
                 .block_height(),
             h
         );
-        assert_eq!(st.get_spendable_balance(account.account_id(), 1), value);
+        assert_eq!(st.get_spendable_balance(account_id, 1), value);
     };
 
     let value = NonNegativeAmount::const_from_u64(100000);
@@ -521,7 +713,7 @@ pub(crate) fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPo
 
     let proposal = st
         .propose_standard_transfer::<Infallible>(
-            account.account_id(),
+            account_id,
             StandardFeeRule::Zip317,
             NonZeroU32::new(1).unwrap(),
             &tex_addr,

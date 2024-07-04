@@ -1099,6 +1099,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         self.transactionally(|wdb| {
             let tx_ref = wallet::put_tx_data(wdb.conn.0, d_tx.tx(), None, None)?;
             let funding_accounts = wallet::get_funding_accounts(wdb.conn.0, d_tx.tx())?;
+
+            // TODO(#1305): Correctly track accounts that fund each transaction output.
             let funding_account = funding_accounts.iter().next().copied();
             if funding_accounts.len() > 1 {
                 warn!(
@@ -1287,38 +1289,27 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 wallet::transparent::mark_transparent_utxo_spent(wdb.conn.0, tx_ref, &txin.prevout)?;
             }
 
-            // If we have some transparent outputs:
-            if d_tx
-                .tx()
-                .transparent_bundle()
-                .iter()
-                .any(|b| !b.vout.is_empty())
-            {
-                // If the transaction contains spends from our wallet, we will store z->t
-                // transactions we observe in the same way they would be stored by
-                // create_spend_to_address.
-                let funding_accounts = wallet::get_funding_accounts(wdb.conn.0, d_tx.tx())?;
-                let funding_account = funding_accounts.iter().next().copied();
-                if let Some(account_id) = funding_account {
-                    if funding_accounts.len() > 1 {
-                        warn!(
-                            "More than one wallet account detected as funding transaction {:?}, selecting {:?}",
-                            d_tx.tx().txid(),
-                            account_id
-                        )
-                    }
+            // This `if` is just an optimization for cases where we would do nothing in the loop.
+            if funding_account.is_some() || cfg!(feature = "transparent-inputs") {
+                for (output_index, txout) in d_tx
+                    .tx()
+                    .transparent_bundle()
+                    .iter()
+                    .flat_map(|b| b.vout.iter())
+                    .enumerate()
+                {
+                    if let Some(address) = txout.recipient_address() {
+                        // The transaction is not necessarily mined yet, but we want to record
+                        // that an output to the address was seen in this tx anyway. This will
+                        // advance the gap regardless of whether it is mined, but an output in
+                        // an unmined transaction won't advance the range of safe indices.
+                        #[cfg(feature = "transparent-inputs")]
+                        wallet::transparent::ephemeral::mark_ephemeral_address_as_seen(wdb, &address, tx_ref)?;
 
-                    for (output_index, txout) in d_tx
-                        .tx()
-                        .transparent_bundle()
-                        .iter()
-                        .flat_map(|b| b.vout.iter())
-                        .enumerate()
-                    {
-                        if let Some(address) = txout.recipient_address() {
-                            #[cfg(feature = "transparent-inputs")]
-                            wallet::transparent::ephemeral::mark_ephemeral_address_as_mined(wdb, &address, tx_ref)?;
-
+                        // If a transaction we observe contains spends from our wallet, we will
+                        // store its transparent outputs in the same way they would be stored by
+                        // create_spend_to_address.
+                        if let Some(account_id) = funding_account {
                             let receiver = Receiver::Transparent(address);
 
                             #[cfg(feature = "transparent-inputs")]

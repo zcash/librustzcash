@@ -70,7 +70,7 @@ pub(crate) fn first_unsafe_index(
     account_id: AccountId,
 ) -> Result<u32, SqliteClientError> {
     // The inner join with `transactions` excludes addresses for which
-    // `mined_in_tx` is NULL. The query also excludes addresses observed
+    // `seen_in_tx` is NULL. The query also excludes addresses observed
     // to have been mined in a transaction that we currently see as unmined.
     // This is conservative in terms of avoiding violation of the gap
     // invariant: it can only cause us to get to the end of the gap sooner.
@@ -80,7 +80,7 @@ pub(crate) fn first_unsafe_index(
     let first_unmined_index: u32 = match conn
         .query_row(
             "SELECT address_index FROM ephemeral_addresses
-             JOIN transactions t ON t.id_tx = mined_in_tx
+             JOIN transactions t ON t.id_tx = seen_in_tx
              WHERE account_id = :account_id AND t.mined_height IS NOT NULL
              ORDER BY address_index DESC
              LIMIT 1",
@@ -164,12 +164,11 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
     Ok(result)
 }
 
-/// If this is an ephemeral address in any account, return its account id.
+/// If this is a known ephemeral address in any account, return its account id.
 pub(crate) fn find_account_for_ephemeral_address_str(
     conn: &rusqlite::Connection,
     address_str: &str,
 ) -> Result<Option<AccountId>, SqliteClientError> {
-    // Search ephemeral addresses that have already been reserved.
     Ok(conn
         .query_row(
             "SELECT account_id FROM ephemeral_addresses WHERE address = :address",
@@ -179,7 +178,7 @@ pub(crate) fn find_account_for_ephemeral_address_str(
         .optional()?)
 }
 
-#[cfg(feature = "transparent-inputs")]
+/// If this is a known ephemeral address in the given account, return its index.
 pub(crate) fn find_index_for_ephemeral_address_str(
     conn: &rusqlite::Connection,
     account_id: AccountId,
@@ -259,7 +258,7 @@ pub(crate) fn init_account<P: consensus::Parameters>(
 ///
 /// # Panics
 ///
-/// Panics if `next_to_reserve > (1 << 31)`.
+/// Panics if the precondition `next_to_reserve <= (1 << 31)` does not hold.
 fn reserve_until<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
@@ -276,7 +275,7 @@ fn reserve_until<P: consensus::Parameters>(
 
     let ephemeral_ivk = get_ephemeral_ivk(conn, params, account_id)?;
 
-    // used_in_tx and mined_in_tx are initially NULL
+    // used_in_tx and seen_in_tx are initially NULL
     let mut stmt_insert_ephemeral_address = conn.prepare_cached(
         "INSERT INTO ephemeral_addresses (account_id, address_index, address)
          VALUES (:account_id, :address_index, :address)",
@@ -314,18 +313,18 @@ fn ephemeral_address_reuse_check<P: consensus::Parameters>(
     // using a given seed, because such a wallet will not reuse an address that
     // it ever reserved.
     //
-    // `COALESCE(used_in_tx, mined_in_tx)` can only differ from `used_in_tx`
+    // `COALESCE(used_in_tx, seen_in_tx)` can only differ from `used_in_tx`
     // if the address was reserved, an error occurred in transaction creation
-    // before calling `mark_ephemeral_address_as_used`, and then we observed
-    // the address to have been used in a mined transaction (presumably by
-    // another wallet instance, or due to a bug) anyway.
+    // before calling `mark_ephemeral_address_as_used`, and then we saw the
+    // address in another transaction (presumably created by another wallet
+    // instance, or as a result of a bug) anyway.
     let res = wdb
         .conn
         .0
         .query_row(
             "SELECT t.txid FROM ephemeral_addresses
              LEFT OUTER JOIN transactions t
-             ON t.id_tx = COALESCE(used_in_tx, mined_in_tx)
+             ON t.id_tx = COALESCE(used_in_tx, seen_in_tx)
              WHERE address = :address",
             named_params![":address": address_str],
             |row| row.get::<_, Option<Vec<u8>>>(0),
@@ -362,10 +361,28 @@ pub(crate) fn mark_ephemeral_address_as_used<P: consensus::Parameters>(
     let address_str = ephemeral_address.encode(&wdb.params);
     ephemeral_address_reuse_check(wdb, &address_str)?;
 
-    wdb.conn.0.execute(
-        "UPDATE ephemeral_addresses SET used_in_tx = :used_in_tx WHERE address = :address",
-        named_params![":used_in_tx": &tx_ref, ":address": address_str],
-    )?;
+    // We update both `used_in_tx` and `seen_in_tx` here, because a used address has
+    // necessarily been seen in a transaction. We will not treat this as extending the
+    // range of addresses that are safe to reserve unless and until the transaction is
+    // observed as mined.
+    let update_result = wdb
+        .conn
+        .0
+        .query_row(
+            "UPDATE ephemeral_addresses
+             SET used_in_tx = :tx_ref, seen_in_tx = :tx_ref
+             WHERE address = :address
+             RETURNING account_id, address_index",
+            named_params![":tx_ref": &tx_ref, ":address": address_str],
+            |row| Ok((AccountId(row.get::<_, u32>(0)?), row.get::<_, u32>(1)?)),
+        )
+        .optional()?;
+
+    // Maintain the invariant that the last `GAP_LIMIT` addresses are unused and unseen.
+    if let Some((account_id, address_index)) = update_result {
+        let next_to_reserve = address_index.checked_add(1).expect("ensured by constraint");
+        reserve_until(wdb.conn.0, &wdb.params, account_id, next_to_reserve)?;
+    }
     Ok(())
 }
 
@@ -374,7 +391,7 @@ pub(crate) fn mark_ephemeral_address_as_used<P: consensus::Parameters>(
 ///
 /// `tx_ref` must be a valid transaction reference. This call has no effect if
 /// `address` is not one of our ephemeral addresses.
-pub(crate) fn mark_ephemeral_address_as_mined<P: consensus::Parameters>(
+pub(crate) fn mark_ephemeral_address_as_seen<P: consensus::Parameters>(
     wdb: &mut WalletDb<SqlTransaction<'_>, P>,
     address: &TransparentAddress,
     tx_ref: i64,
@@ -382,7 +399,7 @@ pub(crate) fn mark_ephemeral_address_as_mined<P: consensus::Parameters>(
     let address_str = address.encode(&wdb.params);
 
     // Figure out which transaction was mined earlier: `tx_ref`, or any existing
-    // tx referenced by `mined_in_tx` for the given address. Prefer the existing
+    // tx referenced by `seen_in_tx` for the given address. Prefer the existing
     // reference in case of a tie or if both transactions are unmined.
     // This slightly reduces the chance of unnecessarily reaching the gap limit
     // too early in some corner cases (because the earlier transaction is less
@@ -392,34 +409,32 @@ pub(crate) fn mark_ephemeral_address_as_mined<P: consensus::Parameters>(
     let earlier_ref = wdb.conn.0.query_row(
         "SELECT id_tx FROM transactions
          LEFT OUTER JOIN ephemeral_addresses e
-         ON id_tx = e.mined_in_tx
+         ON id_tx = e.seen_in_tx
          WHERE id_tx = :tx_ref OR e.address = :address
          ORDER BY mined_height ASC NULLS LAST,
                   tx_index ASC NULLS LAST,
-                  e.mined_in_tx ASC NULLS LAST
+                  e.seen_in_tx ASC NULLS LAST
          LIMIT 1",
         named_params![":tx_ref": &tx_ref, ":address": address_str],
         |row| row.get::<_, i64>(0),
     )?;
 
-    let mined_ephemeral = wdb
+    let update_result = wdb
         .conn
         .0
         .query_row(
             "UPDATE ephemeral_addresses
-            SET mined_in_tx = :mined_in_tx
-            WHERE address = :address
-            RETURNING (account_id, address_index)",
-            named_params![":mined_in_tx": &earlier_ref, ":address": address_str],
+             SET seen_in_tx = :seen_in_tx
+             WHERE address = :address
+             RETURNING account_id, address_index",
+            named_params![":seen_in_tx": &earlier_ref, ":address": address_str],
             |row| Ok((AccountId(row.get::<_, u32>(0)?), row.get::<_, u32>(1)?)),
         )
         .optional()?;
 
-    // If this is a known ephemeral address for an account in this wallet, we might need
-    // to extend the indices stored for that account to maintain the invariant that the
-    // last `GAP_LIMIT` addresses are unused and unmined.
-    if let Some((account_id, address_index)) = mined_ephemeral {
-        let next_to_reserve = min(1 << 31, address_index.saturating_add(1));
+    // Maintain the invariant that the last `GAP_LIMIT` addresses are unused and unseen.
+    if let Some((account_id, address_index)) = update_result {
+        let next_to_reserve = address_index.checked_add(1).expect("ensured by constraint");
         reserve_until(wdb.conn.0, &wdb.params, account_id, next_to_reserve)?;
     }
     Ok(())
