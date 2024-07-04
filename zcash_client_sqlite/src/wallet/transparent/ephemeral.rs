@@ -156,7 +156,8 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
     while let Some(row) = rows.next()? {
         let addr_str: String = row.get(0)?;
         let raw_index: u32 = row.get(1)?;
-        let address_index = NonHardenedChildIndex::from_index(raw_index).unwrap();
+        let address_index = NonHardenedChildIndex::from_index(raw_index)
+            .expect("where clause ensures this is in range");
         let address = TransparentAddress::decode(params, &addr_str)?;
         result.push((address, metadata(address_index)));
     }
@@ -183,7 +184,7 @@ pub(crate) fn find_index_for_ephemeral_address_str(
     conn: &rusqlite::Connection,
     account_id: AccountId,
     address_str: &str,
-) -> Result<Option<u32>, SqliteClientError> {
+) -> Result<Option<NonHardenedChildIndex>, SqliteClientError> {
     Ok(conn
         .query_row(
             "SELECT address_index FROM ephemeral_addresses
@@ -191,7 +192,11 @@ pub(crate) fn find_index_for_ephemeral_address_str(
             named_params![":account_id": account_id.0, ":address": &address_str],
             |row| row.get::<_, u32>(0),
         )
-        .optional()?)
+        .optional()?
+        .map(|index| {
+            NonHardenedChildIndex::from_index(index)
+                .expect("valid by constraint index_range_and_address_nullity")
+        }))
 }
 
 /// Returns a vector with the next `n` previously unreserved ephemeral addresses for

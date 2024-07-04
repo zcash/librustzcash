@@ -498,10 +498,9 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
     }
 
     // Search known ephemeral addresses.
-    if let Some(raw_index) =
+    if let Some(address_index) =
         ephemeral::find_index_for_ephemeral_address_str(conn, account_id, &address_str)?
     {
-        let address_index = NonHardenedChildIndex::from_index(raw_index).unwrap();
         return Ok(Some(ephemeral::metadata(address_index)));
     }
 
