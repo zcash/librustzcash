@@ -338,7 +338,7 @@ fn ephemeral_address_reuse_check<P: consensus::Parameters>(
         );
         Err(SqliteClientError::EphemeralAddressReuse(
             address_str.to_owned(),
-            Some(txid),
+            txid,
         ))
     } else {
         Ok(())
