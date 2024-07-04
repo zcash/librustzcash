@@ -374,7 +374,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
             steps[0].balance().proposed_change(),
             [
                 ChangeValue::shielded(T::SHIELDED_PROTOCOL, expected_step0_change, change_memo),
-                ChangeValue::ephemeral_transparent((transfer_amount + expected_step1_fee).unwrap()),
+                ChangeValue::ephemeral_transparent(expected_ephemeral),
             ]
         );
         assert_eq!(steps[1].balance().proposed_change(), []);
