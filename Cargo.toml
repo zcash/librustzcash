@@ -123,6 +123,10 @@ lto = true
 panic = 'abort'
 codegen-units = 1
 
+[profile.test]
+opt-level = 3
+debug = true
+
 [patch.crates-io]
 incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "337f59179eda51261e9ddfc6b18e8fb84ea277c9" }
 shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "337f59179eda51261e9ddfc6b18e8fb84ea277c9" }
