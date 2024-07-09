@@ -60,12 +60,23 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+      - name: Configure sccache
+        uses: actions/github-script@v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.5
       - name: Run tests
         run: >
           cargo test
           --release
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: "sccache"
       - name: Run slow tests
         run: >
           cargo test
@@ -74,6 +85,9 @@ jobs:
           ${{ steps.prepare.outputs.feature-flags }}
           --features expensive-tests
           -- --ignored
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: "sccache"
       - name: Verify working directory is clean
         run: git diff --exit-code
 
@@ -124,6 +138,14 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+      - name: Configure sccache
+        uses: actions/github-script@v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.5
       - name: Run check
         run: >
           cargo check
@@ -131,6 +153,9 @@ jobs:
           --workspace
           --tests
           ${{ steps.prepare.outputs.feature-flags }}
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: "sccache"
       - name: Verify working directory is clean
         run: git diff --exit-code
 
@@ -153,6 +178,14 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-latest
+      - name: Configure sccache
+        uses: actions/github-script@v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.5
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
       - run: rustup override set ${{steps.toolchain.outputs.name}}
@@ -165,6 +198,9 @@ jobs:
           --all-targets
           ${{ steps.prepare.outputs.feature-flags }}
           --verbose
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: "sccache"
       - name: Verify working directory is clean (excluding lockfile)
         run: git diff --exit-code ':!Cargo.lock'
 
@@ -275,6 +311,14 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: codecov-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Configure sccache
+        uses: actions/github-script@v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.5
       - name: Generate coverage report
         run: >
           cargo tarpaulin
@@ -283,6 +327,9 @@ jobs:
           --release
           --timeout 600
           --out xml
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: "sccache"
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4.5.0
         with:
