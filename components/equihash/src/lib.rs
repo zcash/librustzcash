@@ -20,6 +20,8 @@
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 
+mod minimal;
+mod params;
 mod verify;
 
 #[cfg(test)]

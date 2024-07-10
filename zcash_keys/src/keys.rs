@@ -93,7 +93,7 @@ pub enum DerivationError {
     #[cfg(feature = "orchard")]
     Orchard(orchard::zip32::Error),
     #[cfg(feature = "transparent-inputs")]
-    Transparent(hdwallet::error::Error),
+    Transparent(bip32::Error),
 }
 
 impl Display for DerivationError {
@@ -398,11 +398,11 @@ impl UnifiedSpendingKey {
                     }
                 }
                 Typecode::P2pkh => {
-                    if len != 64 {
+                    if len != 74 {
                         return Err(DecodingError::LengthMismatch(Typecode::P2pkh, len));
                     }
 
-                    let mut key = [0u8; 64];
+                    let mut key = [0u8; 74];
                     source
                         .read_exact(&mut key)
                         .map_err(|_| DecodingError::InsufficientData(Typecode::P2pkh))?;
@@ -604,8 +604,8 @@ impl UnifiedAddressRequest {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl From<hdwallet::error::Error> for DerivationError {
-    fn from(e: hdwallet::error::Error) -> Self {
+impl From<bip32::Error> for DerivationError {
+    fn from(e: bip32::Error) -> Self {
         DerivationError::Transparent(e)
     }
 }
@@ -1660,8 +1660,10 @@ mod tests {
 
                 let len = len + 2 + 169;
 
+                // Transparent part is an `xprv` transparent extended key deserialized
+                // into bytes from Base58, minus the 4 prefix bytes.
                 #[cfg(feature = "transparent-inputs")]
-                let len = len + 2 + 64;
+                let len = len + 2 + 74;
 
                 len
             };

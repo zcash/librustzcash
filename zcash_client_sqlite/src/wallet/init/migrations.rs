@@ -2,6 +2,7 @@ mod add_account_birthdays;
 mod add_transaction_views;
 mod add_utxo_account;
 mod addresses_table;
+mod ensure_orchard_ua_receiver;
 mod full_account_ids;
 mod initial_setup;
 mod nullifier_map;
@@ -14,6 +15,7 @@ mod sent_notes_to_internal;
 mod shardtree_support;
 mod ufvk_support;
 mod utxos_table;
+mod utxos_to_txos;
 mod v_sapling_shard_unscanned_ranges;
 mod v_transactions_net;
 mod v_transactions_note_uniqueness;
@@ -62,6 +64,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                           -------------------- full_account_ids
     //                                                       |
     //                                             orchard_received_notes
+    //                                                  /         \
+    //                           ensure_orchard_ua_receiver     utxos_to_txos
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -108,5 +112,37 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
             params: params.clone(),
         }),
         Box::new(orchard_received_notes::Migration),
+        Box::new(ensure_orchard_ua_receiver::Migration {
+            params: params.clone(),
+        }),
+        Box::new(utxos_to_txos::Migration),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use secrecy::Secret;
+    use tempfile::NamedTempFile;
+    use uuid::Uuid;
+    use zcash_protocol::consensus::Network;
+
+    use crate::{wallet::init::init_wallet_db_internal, WalletDb};
+
+    /// Tests that we can migrate from a completely empty wallet database to the target
+    /// migrations.
+    pub(crate) fn test_migrate(migrations: &[Uuid]) {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+
+        let seed = [0xab; 32];
+        assert_matches!(
+            init_wallet_db_internal(
+                &mut db_data,
+                Some(Secret::new(seed.to_vec())),
+                migrations,
+                false
+            ),
+            Ok(_)
+        );
+    }
 }

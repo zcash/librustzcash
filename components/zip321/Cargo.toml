@@ -1,0 +1,28 @@
+[package]
+name = "zip321"
+description = "Parsing functions and data types for Zcash ZIP 321 Payment Request URIs"
+version = "0.0.0"
+authors = [
+    "Kris Nuttycombe <kris@electriccoin.co>"
+]
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+readme = "README.md"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+
+[dependencies]
+zcash_address.workspace = true
+zcash_protocol.workspace = true
+
+# - Parsing and Encoding
+nom = "7"
+base64.workspace = true
+percent-encoding.workspace = true
+
+[dev-dependencies]
+zcash_address = { workspace = true, features = ["test-dependencies"] }
+zcash_protocol = { workspace = true, features = ["test-dependencies"] }
+proptest.workspace = true

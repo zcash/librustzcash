@@ -28,4 +28,3 @@ pub mod transaction;
 pub use zip32;
 #[cfg(zcash_unstable = "zfuture")]
 pub mod extensions;
-pub mod zip339;

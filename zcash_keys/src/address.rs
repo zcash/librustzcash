@@ -233,13 +233,82 @@ impl UnifiedAddress {
     }
 }
 
-/// An address that funds can be sent to.
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Address {
+/// An enumeration of protocol-level receiver types.
+///
+/// While these correspond to unified address receiver types, this is a distinct type because it is
+/// used to represent the protocol-level recipient of a transfer, instead of a part of an encoded
+/// address.
+pub enum Receiver {
+    #[cfg(feature = "orchard")]
+    Orchard(orchard::Address),
     #[cfg(feature = "sapling")]
     Sapling(PaymentAddress),
     Transparent(TransparentAddress),
+}
+
+impl Receiver {
+    /// Converts this receiver to a [`ZcashAddress`] for the given network.
+    ///
+    /// This conversion function selects the least-capable address format possible; this means that
+    /// Orchard receivers will be rendered as Unified addresses, Sapling receivers will be rendered
+    /// as bare Sapling addresses, and Transparent receivers will be rendered as taddrs.
+    pub fn to_zcash_address(&self, net: NetworkType) -> ZcashAddress {
+        match self {
+            #[cfg(feature = "orchard")]
+            Receiver::Orchard(addr) => {
+                let receiver = unified::Receiver::Orchard(addr.to_raw_address_bytes());
+                let ua = unified::Address::try_from_items(vec![receiver])
+                    .expect("A unified address may contain a single Orchard receiver.");
+                ZcashAddress::from_unified(net, ua)
+            }
+            #[cfg(feature = "sapling")]
+            Receiver::Sapling(addr) => ZcashAddress::from_sapling(net, addr.to_bytes()),
+            Receiver::Transparent(TransparentAddress::PublicKeyHash(data)) => {
+                ZcashAddress::from_transparent_p2pkh(net, *data)
+            }
+            Receiver::Transparent(TransparentAddress::ScriptHash(data)) => {
+                ZcashAddress::from_transparent_p2sh(net, *data)
+            }
+        }
+    }
+
+    /// Returns whether or not this receiver corresponds to `addr`, or is contained
+    /// in `addr` when the latter is a Unified Address.
+    pub fn corresponds(&self, addr: &ZcashAddress) -> bool {
+        addr.matches_receiver(&match self {
+            #[cfg(feature = "orchard")]
+            Receiver::Orchard(addr) => unified::Receiver::Orchard(addr.to_raw_address_bytes()),
+            #[cfg(feature = "sapling")]
+            Receiver::Sapling(addr) => unified::Receiver::Sapling(addr.to_bytes()),
+            Receiver::Transparent(TransparentAddress::PublicKeyHash(data)) => {
+                unified::Receiver::P2pkh(*data)
+            }
+            Receiver::Transparent(TransparentAddress::ScriptHash(data)) => {
+                unified::Receiver::P2sh(*data)
+            }
+        })
+    }
+}
+
+/// An address that funds can be sent to.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Address {
+    /// A Sapling payment address.
+    #[cfg(feature = "sapling")]
+    Sapling(PaymentAddress),
+
+    /// A transparent address corresponding to either a public key hash or a script hash.
+    Transparent(TransparentAddress),
+
+    /// A [ZIP 316] Unified Address.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
     Unified(UnifiedAddress),
+
+    /// A [ZIP 320] transparent-source-only P2PKH address, or "TEX address".
+    ///
+    /// [ZIP 320]: https://zips.z.cash/zip-0320
+    Tex([u8; 20]),
 }
 
 #[cfg(feature = "sapling")]
@@ -287,15 +356,31 @@ impl TryFromRawAddress for Address {
     fn try_from_raw_transparent_p2sh(data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
         Ok(TransparentAddress::ScriptHash(data).into())
     }
+
+    fn try_from_raw_tex(data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
+        Ok(Address::Tex(data))
+    }
 }
 
 impl Address {
+    /// Attempts to decode an [`Address`] value from its [`ZcashAddress`] encoded representation.
+    ///
+    /// Returns `None` if any error is encountered in decoding. Use
+    /// [`Self::try_from_zcash_address(s.parse()?)?`] if you need detailed error information.
     pub fn decode<P: consensus::Parameters>(params: &P, s: &str) -> Option<Self> {
-        let addr = ZcashAddress::try_from_encoded(s).ok()?;
-        addr.convert_if_network(params.network_type()).ok()
+        Self::try_from_zcash_address(params, s.parse::<ZcashAddress>().ok()?).ok()
     }
 
-    pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
+    /// Attempts to decode an [`Address`] value from its [`ZcashAddress`] encoded representation.
+    pub fn try_from_zcash_address<P: consensus::Parameters>(
+        params: &P,
+        zaddr: ZcashAddress,
+    ) -> Result<Self, ConversionError<&'static str>> {
+        zaddr.convert_if_network(params.network_type())
+    }
+
+    /// Converts this [`Address`] to its encoded [`ZcashAddress`] representation.
+    pub fn to_zcash_address<P: consensus::Parameters>(&self, params: &P) -> ZcashAddress {
         let net = params.network_type();
 
         match self {
@@ -310,17 +395,25 @@ impl Address {
                 }
             },
             Address::Unified(ua) => ua.to_address(net),
+            Address::Tex(data) => ZcashAddress::from_tex(net, *data),
         }
-        .to_string()
     }
 
-    pub fn has_receiver(&self, pool_type: PoolType) -> bool {
+    /// Converts this [`Address`] to its encoded string representation.
+    pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
+        self.to_zcash_address(params).to_string()
+    }
+
+    /// Returns whether or not this [`Address`] can receive funds in the specified pool.
+    pub fn can_receive_as(&self, pool_type: PoolType) -> bool {
         match self {
             #[cfg(feature = "sapling")]
             Address::Sapling(_) => {
                 matches!(pool_type, PoolType::Shielded(ShieldedProtocol::Sapling))
             }
-            Address::Transparent(_) => matches!(pool_type, PoolType::Transparent),
+            Address::Transparent(_) | Address::Tex(_) => {
+                matches!(pool_type, PoolType::Transparent)
+            }
             Address::Unified(ua) => match pool_type {
                 PoolType::Transparent => ua.transparent().is_some(),
                 PoolType::Shielded(ShieldedProtocol::Sapling) => {
@@ -375,6 +468,7 @@ pub mod testing {
             arb_payment_address().prop_map(Address::Sapling),
             arb_transparent_addr().prop_map(Address::Transparent),
             arb_unified_addr(Network::TestNetwork, request).prop_map(Address::Unified),
+            proptest::array::uniform20(any::<u8>()).prop_map(Address::Tex),
         ]
     }
 
@@ -383,6 +477,7 @@ pub mod testing {
         return prop_oneof![
             arb_transparent_addr().prop_map(Address::Transparent),
             arb_unified_addr(Network::TestNetwork, request).prop_map(Address::Unified),
+            proptest::array::uniform20(any::<u8>()).prop_map(Address::Tex),
         ];
     }
 }

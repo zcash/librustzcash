@@ -8,6 +8,7 @@ use std::{
 };
 
 use nonempty::NonEmpty;
+use zcash_address::ConversionError;
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     transaction::{
@@ -48,6 +49,8 @@ pub enum InputSelectorError<DbErrT, SelectorErrT> {
     Selection(SelectorErrT),
     /// Input selection attempted to generate an invalid transaction proposal.
     Proposal(ProposalError),
+    /// An error occurred parsing the address from a payment request.
+    Address(ConversionError<&'static str>),
     /// Insufficient funds were available to satisfy the payment request that inputs were being
     /// selected to attempt to satisfy.
     InsufficientFunds {
@@ -57,6 +60,12 @@ pub enum InputSelectorError<DbErrT, SelectorErrT> {
     /// The data source does not have enough information to choose an expiry height
     /// for the transaction.
     SyncRequired,
+}
+
+impl<E, S> From<ConversionError<&'static str>> for InputSelectorError<E, S> {
+    fn from(value: ConversionError<&'static str>) -> Self {
+        InputSelectorError::Address(value)
+    }
 }
 
 impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE, SE> {
@@ -76,6 +85,13 @@ impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE,
                 write!(
                     f,
                     "Input selection attempted to generate an invalid proposal: {}",
+                    e
+                )
+            }
+            InputSelectorError::Address(e) => {
+                write!(
+                    f,
+                    "An error occurred decoding the address from a payment request: {}.",
                     e
                 )
             }
@@ -206,6 +222,8 @@ pub enum GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT> {
     Balance(BalanceError),
     /// A unified address did not contain a supported receiver.
     UnsupportedAddress(Box<UnifiedAddress>),
+    /// Support for transparent-source-only (TEX) addresses requires the transparent-inputs feature.
+    UnsupportedTexAddress,
     /// An error was encountered in change selection.
     Change(ChangeError<ChangeStrategyErrT, NoteRefT>),
 }
@@ -222,6 +240,9 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for GreedyInputSelectorErro
                 // we can't encode the UA to its string representation because we
                 // don't have network parameters here
                 write!(f, "Unified address contains no supported receivers.")
+            }
+            GreedyInputSelectorError::UnsupportedTexAddress => {
+                write!(f, "Support for transparent-source-only (TEX) addresses requires the transparent-inputs feature.")
             }
             GreedyInputSelectorError::Change(err) => {
                 write!(f, "An error occurred computing change and fees: {}", err)
@@ -344,43 +365,53 @@ where
         let mut orchard_outputs = vec![];
         let mut payment_pools = BTreeMap::new();
         for (idx, payment) in transaction_request.payments() {
-            match &payment.recipient_address {
+            let recipient_address: Address = payment
+                .recipient_address()
+                .clone()
+                .convert_if_network(params.network_type())?;
+
+            match recipient_address {
                 Address::Transparent(addr) => {
-                    payment_pools.insert(*idx, PoolType::Transparent);
+                    payment_pools.insert(*idx, PoolType::TRANSPARENT);
                     transparent_outputs.push(TxOut {
-                        value: payment.amount,
+                        value: payment.amount(),
                         script_pubkey: addr.script(),
                     });
                 }
+                Address::Tex(_) => {
+                    return Err(InputSelectorError::Selection(
+                        GreedyInputSelectorError::UnsupportedTexAddress,
+                    ));
+                }
                 Address::Sapling(_) => {
-                    payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
-                    sapling_outputs.push(SaplingPayment(payment.amount));
+                    payment_pools.insert(*idx, PoolType::SAPLING);
+                    sapling_outputs.push(SaplingPayment(payment.amount()));
                 }
                 Address::Unified(addr) => {
                     #[cfg(feature = "orchard")]
                     if addr.orchard().is_some() {
-                        payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Orchard));
-                        orchard_outputs.push(OrchardPayment(payment.amount));
+                        payment_pools.insert(*idx, PoolType::ORCHARD);
+                        orchard_outputs.push(OrchardPayment(payment.amount()));
                         continue;
                     }
 
                     if addr.sapling().is_some() {
-                        payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
-                        sapling_outputs.push(SaplingPayment(payment.amount));
+                        payment_pools.insert(*idx, PoolType::SAPLING);
+                        sapling_outputs.push(SaplingPayment(payment.amount()));
                         continue;
                     }
 
                     if let Some(addr) = addr.transparent() {
-                        payment_pools.insert(*idx, PoolType::Transparent);
+                        payment_pools.insert(*idx, PoolType::TRANSPARENT);
                         transparent_outputs.push(TxOut {
-                            value: payment.amount,
+                            value: payment.amount(),
                             script_pubkey: addr.script(),
                         });
                         continue;
                     }
 
                     return Err(InputSelectorError::Selection(
-                        GreedyInputSelectorError::UnsupportedAddress(Box::new(addr.clone())),
+                        GreedyInputSelectorError::UnsupportedAddress(Box::new(addr)),
                     ));
                 }
             }
@@ -549,11 +580,7 @@ where
         let mut transparent_inputs: Vec<WalletTransparentOutput> = source_addrs
             .iter()
             .map(|taddr| {
-                wallet_db.get_unspent_transparent_outputs(
-                    taddr,
-                    target_height - min_confirmations,
-                    &[],
-                )
+                wallet_db.get_spendable_transparent_outputs(taddr, target_height, min_confirmations)
             })
             .collect::<Result<Vec<Vec<_>>, _>>()
             .map_err(InputSelectorError::DataSource)?
@@ -566,17 +593,9 @@ where
             target_height,
             &transparent_inputs,
             &Vec::<TxOut>::new(),
-            &(
-                ::sapling::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &sapling::EmptyBundleView,
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &orchard_fees::EmptyBundleView,
             &self.dust_output_policy,
         );
 
@@ -591,17 +610,9 @@ where
                     target_height,
                     &transparent_inputs,
                     &Vec::<TxOut>::new(),
-                    &(
-                        ::sapling::builder::BundleType::DEFAULT,
-                        &Vec::<Infallible>::new()[..],
-                        &Vec::<Infallible>::new()[..],
-                    ),
+                    &sapling::EmptyBundleView,
                     #[cfg(feature = "orchard")]
-                    &(
-                        orchard::builder::BundleType::DEFAULT,
-                        &Vec::<Infallible>::new()[..],
-                        &Vec::<Infallible>::new()[..],
-                    ),
+                    &orchard_fees::EmptyBundleView,
                     &self.dust_output_policy,
                 )?
             }

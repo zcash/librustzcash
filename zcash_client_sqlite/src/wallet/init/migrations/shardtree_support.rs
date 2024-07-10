@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use incrementalmerkletree::Retention;
+use incrementalmerkletree::{Marking, Retention};
 use rusqlite::{self, named_params, params};
 use schemer;
 use schemer_rusqlite::RusqliteMigration;
@@ -173,7 +173,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                                 nonempty_frontier.clone(),
                                 Retention::Checkpoint {
                                     id: block_height,
-                                    is_marked: false,
+                                    marking: Marking::Reference,
                                 },
                             )
                             .map_err(|e| match e {
@@ -278,5 +278,15 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
     fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::wallet::init::migrations::tests::test_migrate;
+
+    #[test]
+    fn migrate() {
+        test_migrate(&[super::MIGRATION_ID]);
     }
 }

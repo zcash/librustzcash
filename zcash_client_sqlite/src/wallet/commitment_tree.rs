@@ -1010,17 +1010,11 @@ pub(crate) fn put_shard_roots<
 
     let insert_into_cap = tracing::info_span!("insert_into_cap").entered();
     let cap_result = cap
-        .batch_insert(
+        .batch_insert::<(), _>(
             Position::from(start_index),
-            roots.iter().map(|r| {
-                (
-                    LevelShifter(r.root_hash().clone()),
-                    Retention::Checkpoint {
-                        id: (),
-                        is_marked: false,
-                    },
-                )
-            }),
+            roots
+                .iter()
+                .map(|r| (LevelShifter(r.root_hash().clone()), Retention::Reference)),
         )
         .map_err(ShardTreeError::Insert)?
         .expect("slice of inserted roots was verified to be nonempty");
@@ -1084,7 +1078,7 @@ mod tests {
             check_append, check_checkpoint_rewind, check_remove_mark, check_rewind_remove_mark,
             check_root_hashes, check_witness_consistency, check_witnesses,
         },
-        Position, Retention,
+        Marking, Position, Retention,
     };
     use shardtree::ShardTree;
     use zcash_client_backend::data_api::chain::CommitmentTreeRoot;
@@ -1209,7 +1203,6 @@ mod tests {
 
         // introduce some roots
         let roots = (0u32..4)
-            .into_iter()
             .map(|idx| {
                 CommitmentTreeRoot::from_parts(
                     BlockHeight::from((idx + 1) * 3),
@@ -1228,14 +1221,14 @@ mod tests {
         let checkpoint_height = BlockHeight::from(3);
         tree.batch_insert(
             Position::from(24),
-            ('a'..='h').into_iter().map(|c| {
+            ('a'..='h').map(|c| {
                 (
                     c.to_string(),
                     match c {
                         'c' => Retention::Marked,
                         'h' => Retention::Checkpoint {
                             id: checkpoint_height,
-                            is_marked: false,
+                            marking: Marking::None,
                         },
                         _ => Retention::Ephemeral,
                     },

@@ -22,7 +22,10 @@ use crate::{
             amount::{Amount, BalanceError},
             transparent::{self, builder::TransparentBuilder, TxOut},
         },
-        fees::FeeRule,
+        fees::{
+            transparent::{InputView, OutputView},
+            FeeRule,
+        },
         sighash::{signature_hash, SignableInput},
         txid::TxIdDigester,
         Transaction, TransactionData, TxVersion, Unauthorized,
@@ -554,8 +557,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             .fee_required(
                 &self.params,
                 self.target_height,
-                transparent_inputs,
-                self.transparent_builder.outputs(),
+                transparent_inputs.iter().map(|i| i.serialized_size()),
+                self.transparent_builder
+                    .outputs()
+                    .iter()
+                    .map(|i| i.serialized_size()),
                 sapling_spends,
                 self.sapling_builder
                     .as_ref()
@@ -597,8 +603,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             .fee_required_zfuture(
                 &self.params,
                 self.target_height,
-                transparent_inputs,
-                self.transparent_builder.outputs(),
+                transparent_inputs.iter().map(|i| i.serialized_size()),
+                self.transparent_builder
+                    .outputs()
+                    .iter()
+                    .map(|i| i.serialized_size()),
                 sapling_spends,
                 self.sapling_builder
                     .as_ref()

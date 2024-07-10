@@ -6,7 +6,7 @@ use rusqlite::{self, named_params};
 use schemer;
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::{PoolType, ShieldedProtocol};
+use zcash_client_backend::PoolType;
 
 use super::add_transaction_views;
 use crate::wallet::{init::WalletMigrationError, pool_code};
@@ -44,7 +44,7 @@ impl RusqliteMigration for Migration {
              SELECT tx, :output_pool, output_index, from_account, from_account, value
              FROM sent_notes",
              named_params![
-                ":output_pool": &pool_code(PoolType::Shielded(ShieldedProtocol::Sapling))
+                ":output_pool": &pool_code(PoolType::SAPLING)
              ]
         )?;
 
@@ -217,8 +217,13 @@ mod tests {
     fn v_transactions_net() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
-        init_wallet_db_internal(&mut db_data, None, &[add_transaction_views::MIGRATION_ID])
-            .unwrap();
+        init_wallet_db_internal(
+            &mut db_data,
+            None,
+            &[add_transaction_views::MIGRATION_ID],
+            false,
+        )
+        .unwrap();
 
         // Create two accounts in the wallet.
         let usk0 = UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::ZERO)
@@ -383,7 +388,7 @@ mod tests {
         }
 
         // Run this migration
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID]).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
 
         // Corrected behavior after v_transactions has been updated
         {
