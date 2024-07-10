@@ -27,7 +27,7 @@ impl<WE: fmt::Display, BE: fmt::Display> fmt::Display for Error<WE, BE> {
             Error::Wallet(e) => {
                 write!(
                     f,
-                    "The underlying datasource produced the following error: {}",
+                    "The underlying data source produced the following error: {}",
                     e
                 )
             }
