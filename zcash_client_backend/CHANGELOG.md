@@ -21,6 +21,9 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.70.0.
+- Migrated to `tonic 0.12`.
+  - The `lightwalletd-tonic` feature flag no longer works on `wasm32-wasi` due
+    to https://github.com/hyperium/tonic/issues/1783.
 - `zcash_client_backend::{fixed,standard,zip317}::SingleOutputChangeStrategy`
   now implement a different strategy for choosing whether there will be any
   change, and its value. This can avoid leaking information about note amounts
