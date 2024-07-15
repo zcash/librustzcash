@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.1.0] - 2024-07-15
 Initial release that re-exports other crates. Expect that the API surface of
 this crate will change significantly in future releases.
 MSRV is 1.70.0.
