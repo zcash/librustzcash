@@ -225,8 +225,8 @@ user-id = 1244
 user-login = "ebfull"
 
 [[publisher.zcash_extensions]]
-version = "0.0.0"
-when = "2020-04-24"
+version = "0.1.0"
+when = "2024-07-15"
 user-id = 6289
 user-login = "str4d"
 
