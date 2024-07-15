@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::fmt;
 use std::num::NonZeroU32;
 use std::{collections::BTreeMap, convert::Infallible};
@@ -1227,6 +1228,66 @@ impl<Cache> TestState<Cache> {
 
         Ok(results)
     }
+
+    /// Dump the schema and contents of the given database table, in
+    /// sqlite3 ".dump" format. The name of the table must be a static
+    /// string. This assumes that `sqlite3` is on your path and that it
+    /// invokes a compatible version of sqlite3.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `name` contains characters outside `[a-zA-Z_]`.
+    #[allow(dead_code)]
+    #[cfg(feature = "unstable")]
+    pub(crate) fn dump_table(&self, name: &'static str) {
+        assert!(name.chars().all(|c| c.is_ascii_alphabetic() || c == '_'));
+        unsafe {
+            run_sqlite3(self._data_file.path(), &format!(r#".dump "{name}""#));
+        }
+    }
+
+    /// Print the results of an arbitrary sqlite3 command (with "-safe"
+    /// and "-readonly" flags) to stderr. This is completely insecure and
+    /// should not be exposed in production. Use of the "-safe" and
+    /// "-readonly" flags is intended only to limit *accidental* misuse.
+    /// The output is unfiltered, and control codes could mess up your
+    /// terminal. This assumes that `sqlite3` is on your path and that it
+    /// invokes a compatible version of sqlite3.
+    #[allow(dead_code)]
+    #[cfg(feature = "unstable")]
+    pub(crate) unsafe fn run_sqlite3(&self, command: &str) {
+        run_sqlite3(self._data_file.path(), command)
+    }
+}
+
+// See the doc comment for `TestState::run_sqlite3` above.
+//
+// - `db_path` is the path to the database file.
+// - `command` may contain newlines.
+#[allow(dead_code)]
+#[cfg(feature = "unstable")]
+unsafe fn run_sqlite3<S: AsRef<OsStr>>(db_path: S, command: &str) {
+    use std::process::Command;
+    let output = Command::new("sqlite3")
+        .arg(db_path)
+        .arg("-safe")
+        .arg("-readonly")
+        .arg(command)
+        .output()
+        .expect("failed to execute sqlite3 process");
+
+    eprintln!(
+        "{}\n------\n{}",
+        command,
+        String::from_utf8_lossy(&output.stdout)
+    );
+    if !output.stderr.is_empty() {
+        eprintln!(
+            "------ stderr:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    eprintln!("------");
 }
 
 pub(crate) struct TransactionSummary<AccountId> {
