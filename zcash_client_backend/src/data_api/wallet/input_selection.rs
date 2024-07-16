@@ -33,7 +33,7 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        fees::{ChangeValue, EphemeralBalance},
+        fees::EphemeralBalance,
         proposal::{Step, StepOutput, StepOutputIndex},
         zip321::Payment,
     },
@@ -328,6 +328,11 @@ pub struct GreedyInputSelector<DbT, ChangeT> {
 impl<DbT, ChangeT: ChangeStrategy> GreedyInputSelector<DbT, ChangeT> {
     /// Constructs a new greedy input selector that uses the provided change strategy to determine
     /// change values and fee amounts.
+    ///
+    /// The [`ChangeStrategy`] provided must produce exactly one ephemeral change value when
+    /// computing a transaction balance if an [`EphemeralBalance::Output`] value is provided for
+    /// its ephemeral balance, or the resulting [`GreedyInputSelector`] will return an error when
+    /// attempting to construct a transaction proposal that requires such an output.
     pub fn new(change_strategy: ChangeT, dust_output_policy: DustOutputPolicy) -> Self {
         GreedyInputSelector {
             change_strategy,
@@ -605,19 +610,29 @@ where
                         //   a single additional ephemeral output to the transparent pool.
                         // * `tr1` spends from that ephemeral output to each TEX output.
 
-                        // The ephemeral output should always be at the last change index.
-                        assert_eq!(
-                            *balance.proposed_change().last().expect("nonempty"),
-                            ChangeValue::ephemeral_transparent(
-                                ephemeral_balance
-                                    .and_then(|b| b.ephemeral_output_amount())
-                                    .expect("ephemeral output is present")
-                            )
-                        );
-                        let ephemeral_stepoutput = StepOutput::new(
-                            0,
-                            StepOutputIndex::Change(balance.proposed_change().len() - 1),
-                        );
+                        // Find exactly one ephemeral change output.
+                        let ephemeral_outputs = balance
+                            .proposed_change()
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, c)| c.is_ephemeral())
+                            .collect::<Vec<_>>();
+
+                        let ephemeral_value = ephemeral_balance
+                            .and_then(|b| b.ephemeral_output_amount())
+                            .expect("ephemeral output balance exists (constructed above)");
+
+                        let ephemeral_output_index = match &ephemeral_outputs[..] {
+                            [(i, change_value)] if change_value.value() == ephemeral_value => {
+                                Ok(*i)
+                            }
+                            _ => Err(InputSelectorError::Proposal(
+                                ProposalError::EphemeralOutputsInvalid,
+                            )),
+                        }?;
+
+                        let ephemeral_stepoutput =
+                            StepOutput::new(0, StepOutputIndex::Change(ephemeral_output_index));
 
                         let tr0 = TransactionRequest::from_indexed(
                             transaction_request

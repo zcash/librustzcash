@@ -55,6 +55,10 @@ pub enum ProposalError {
     /// The proposal included a payment to a TEX address and a spend from a shielded input in the same step.
     #[cfg(feature = "transparent-inputs")]
     PaysTexFromShielded,
+    /// The change strategy provided to input selection failed to correctly generate an ephemeral
+    /// change output when needed for sending to a TEX address.
+    #[cfg(feature = "transparent-inputs")]
+    EphemeralOutputsInvalid,
 }
 
 impl Display for ProposalError {
@@ -113,6 +117,11 @@ impl Display for ProposalError {
             ProposalError::PaysTexFromShielded => write!(
                 f,
                 "The proposal included a payment to a TEX address and a spend from a shielded input in the same step.",
+            ),
+            #[cfg(feature = "transparent-inputs")]
+            ProposalError::EphemeralOutputsInvalid => write!(
+                f,
+                "The change strategy provided to input selection failed to correctly generate an ephemeral change output when needed for sending to a TEX address."
             ),
         }
     }
