@@ -15,8 +15,7 @@ mod tests;
 use blake2b_simd::Hash as Blake2bHash;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use memuse::DynamicUsage;
-use orchard::builder::Unproven;
-use orchard::orchard_flavors::OrchardVanilla;
+use orchard::{builder::Unproven, orchard_flavor::OrchardVanilla, value::NoteValue};
 use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Debug;
@@ -31,7 +30,7 @@ use crate::{
 
 #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ use crate::transaction::components::issuance;
 #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
-use orchard::{issuance::IssueBundle, orchard_flavors::OrchardZSA};
+use orchard::{issuance::IssueBundle, orchard_flavor::OrchardZSA};
 
 use self::{
     components::{
@@ -862,6 +861,12 @@ impl Transaction {
         reader.read_exact(&mut tmp)?;
         Amount::from_i64_le_bytes(tmp)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "valueBalance out of range"))
+    }
+
+    fn read_note_value<R: Read>(mut reader: R) -> io::Result<NoteValue> {
+        let mut tmp = [0; 8];
+        reader.read_exact(&mut tmp)?;
+        Ok(NoteValue::from_bytes(tmp))
     }
 
     fn read_v5<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {

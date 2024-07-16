@@ -6,13 +6,13 @@ use crate::transaction::components::issuance::read_asset;
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use nonempty::NonEmpty;
 use orchard::note::AssetBase;
-use orchard::note_encryption::OrchardDomain;
-use orchard::orchard_flavors::{OrchardVanilla, OrchardZSA};
+use orchard::note_encryption::OrchardDomainCommon;
+use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
 use orchard::{
     bundle::{Authorization, Authorized, Flags},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
     primitives::redpallas::{self, SigType, Signature, SpendAuth, VerificationKey},
-    value::ValueCommitment,
+    value::{NoteValue, ValueCommitment},
     Action, Anchor,
 };
 use zcash_encoding::{Array, CompactSize, Vector};
@@ -125,8 +125,8 @@ pub fn read_v6_bundle<R: Read>(
     }
 }
 
-fn read_burn<R: Read>(reader: &mut R) -> io::Result<(AssetBase, Amount)> {
-    Ok((read_asset(reader)?, Transaction::read_amount(reader)?))
+fn read_burn<R: Read>(reader: &mut R) -> io::Result<(AssetBase, NoteValue)> {
+    Ok((read_asset(reader)?, Transaction::read_note_value(reader)?))
 }
 
 pub fn read_value_commitment<R: Read>(mut reader: R) -> io::Result<ValueCommitment> {
@@ -186,7 +186,7 @@ pub fn read_note_ciphertext<R: Read>(
 ) -> io::Result<TransmittedNoteCiphertext<OrchardVanilla>> {
     let mut tnc = TransmittedNoteCiphertext::<OrchardVanilla> {
         epk_bytes: [0u8; 32],
-        enc_ciphertext: <OrchardVanilla as OrchardDomain>::NoteCiphertextBytes::from(
+        enc_ciphertext: <OrchardVanilla as OrchardDomainCommon>::NoteCiphertextBytes::from(
             [0u8; OrchardVanilla::ENC_CIPHERTEXT_SIZE].as_ref(),
         ),
         out_ciphertext: [0u8; 80],
@@ -204,7 +204,7 @@ pub fn read_zsa_note_ciphertext<R: Read>(
 ) -> io::Result<TransmittedNoteCiphertext<OrchardZSA>> {
     let mut tnc = TransmittedNoteCiphertext::<OrchardZSA> {
         epk_bytes: [0u8; 32],
-        enc_ciphertext: <OrchardZSA as OrchardDomain>::NoteCiphertextBytes::from(
+        enc_ciphertext: <OrchardZSA as OrchardDomainCommon>::NoteCiphertextBytes::from(
             [0u8; OrchardZSA::ENC_CIPHERTEXT_SIZE].as_ref(),
         ),
         out_ciphertext: [0u8; 80],
@@ -338,7 +338,7 @@ pub fn write_v6_bundle<W: Write>(
 
         Vector::write(&mut writer, bundle.burn(), |w, (asset, amount)| {
             w.write_all(&asset.to_bytes())?;
-            w.write_all(&amount.to_i64_le_bytes())?;
+            w.write_all(&amount.to_bytes())?;
             Ok(())
         })?;
 
@@ -371,7 +371,7 @@ pub fn write_cmx<W: Write>(mut writer: W, cmx: &ExtractedNoteCommitment) -> io::
     writer.write_all(&cmx.to_bytes())
 }
 
-pub fn write_note_ciphertext<W: Write, D: OrchardDomain>(
+pub fn write_note_ciphertext<W: Write, D: OrchardDomainCommon>(
     mut writer: W,
     nc: &TransmittedNoteCiphertext<D>,
 ) -> io::Result<()> {
@@ -380,7 +380,7 @@ pub fn write_note_ciphertext<W: Write, D: OrchardDomain>(
     writer.write_all(&nc.out_ciphertext)
 }
 
-pub fn write_action_without_auth<W: Write, D: OrchardDomain>(
+pub fn write_action_without_auth<W: Write, D: OrchardDomainCommon>(
     mut writer: W,
     act: &Action<<Authorized as Authorization>::SpendAuth, D>,
 ) -> io::Result<()> {
@@ -403,7 +403,7 @@ pub mod testing {
         testing::{self as t_orch},
         Authorized, Bundle,
     };
-    use orchard::orchard_flavors::{OrchardVanilla, OrchardZSA};
+    use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
 
     prop_compose! {
         pub fn arb_bundle(n_actions: usize)(

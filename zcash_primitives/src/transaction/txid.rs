@@ -6,11 +6,11 @@ use blake2b_simd::{Hash as Blake2bHash, Params, State};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
 use orchard::bundle;
-use orchard::orchard_flavors::OrchardVanilla;
+use orchard::orchard_flavor::OrchardVanilla;
 #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
 use orchard::{
     issuance::{IssueBundle, Signed},
-    orchard_flavors::OrchardZSA,
+    orchard_flavor::OrchardZSA,
 };
 
 use crate::{
