@@ -23,7 +23,7 @@ use zcash_primitives::{
 use crate::{
     address::{Address, UnifiedAddress},
     data_api::{InputSource, SimpleNoteRetention, SpendableNotes},
-    fees::{sapling, ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralParameters},
+    fees::{sapling, ChangeError, ChangeStrategy, DustOutputPolicy},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
     zip321::TransactionRequest,
@@ -33,7 +33,7 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        fees::ChangeValue,
+        fees::{ChangeValue, EphemeralBalance},
         proposal::{Step, StepOutput, StepOutputIndex},
         zip321::Payment,
     },
@@ -460,12 +460,12 @@ where
         }
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let ephemeral_parameters = EphemeralParameters::NONE;
+        let ephemeral_balance = None;
 
         #[cfg(feature = "transparent-inputs")]
-        let (ephemeral_parameters, tr1_balance_opt) = {
+        let (ephemeral_balance, tr1_balance_opt) = {
             if tr1_transparent_outputs.is_empty() {
-                (EphemeralParameters::NONE, None)
+                (None, None)
             } else {
                 // The ephemeral input going into transaction 1 must be able to pay that
                 // transaction's fee, as well as the TEX address payments.
@@ -484,7 +484,7 @@ where
                         #[cfg(feature = "orchard")]
                         &orchard_fees::EmptyBundleView,
                         &self.dust_output_policy,
-                        &EphemeralParameters::new(true, Some(NonNegativeAmount::ZERO), None),
+                        Some(&EphemeralBalance::Input(NonNegativeAmount::ZERO)),
                     ) {
                         Err(ChangeError::InsufficientFunds { required, .. }) => required,
                         Ok(_) => NonNegativeAmount::ZERO, // shouldn't happen
@@ -502,12 +502,12 @@ where
                     #[cfg(feature = "orchard")]
                     &orchard_fees::EmptyBundleView,
                     &self.dust_output_policy,
-                    &EphemeralParameters::new(true, Some(tr1_required_input_value), None),
+                    Some(&EphemeralBalance::Input(tr1_required_input_value)),
                 )?;
                 assert_eq!(tr1_balance.total(), tr1_balance.fee_required());
 
                 (
-                    EphemeralParameters::new(false, None, Some(tr1_required_input_value)),
+                    Some(EphemeralBalance::Output(tr1_required_input_value)),
                     Some(tr1_balance),
                 )
             }
@@ -582,7 +582,7 @@ where
                     &orchard_outputs[..],
                 ),
                 &self.dust_output_policy,
-                &ephemeral_parameters,
+                ephemeral_balance.as_ref(),
             );
 
             match balance {
@@ -609,8 +609,8 @@ where
                         assert_eq!(
                             *balance.proposed_change().last().expect("nonempty"),
                             ChangeValue::ephemeral_transparent(
-                                ephemeral_parameters
-                                    .ephemeral_output_amount()
+                                ephemeral_balance
+                                    .and_then(|b| b.ephemeral_output_amount())
                                     .expect("ephemeral output is present")
                             )
                         );
@@ -773,7 +773,7 @@ where
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &self.dust_output_policy,
-            &EphemeralParameters::NONE,
+            None,
         );
 
         let balance = match trial_balance {
@@ -791,8 +791,7 @@ where
                     #[cfg(feature = "orchard")]
                     &orchard_fees::EmptyBundleView,
                     &self.dust_output_policy,
-                    #[cfg(feature = "transparent-inputs")]
-                    &EphemeralParameters::NONE,
+                    None,
                 )?
             }
             Err(other) => {

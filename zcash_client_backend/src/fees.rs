@@ -330,61 +330,36 @@ impl Default for DustOutputPolicy {
     }
 }
 
-/// `EphemeralParameters` can be used to specify variations on how balance
-/// and fees are computed that are relevant to transactions using ephemeral
-/// transparent outputs. These are only relevant when the "transparent-inputs"
-/// feature is enabled, but to reduce feature-dependent boilerplate, the type
-/// and the `EphemeralParameters::NONE` constant are present unconditionally.
+/// `EphemeralBalance` describes the ephemeral input or output value for
+/// a transaction. It is use in the computation of fees are relevant to transactions using
+/// ephemeral transparent outputs.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EphemeralParameters {
-    ignore_change_memo: bool,
-    ephemeral_input_amount: Option<NonNegativeAmount>,
-    ephemeral_output_amount: Option<NonNegativeAmount>,
+pub enum EphemeralBalance {
+    Input(NonNegativeAmount),
+    Output(NonNegativeAmount),
 }
 
-impl EphemeralParameters {
-    /// An `EphemeralParameters` indicating no use of ephemeral inputs
-    /// or outputs. It has:
-    ///
-    /// * `ignore_change_memo: false`,
-    /// * `ephemeral_input_amount: None`,
-    /// * `ephemeral_output_amount: None`.
-    pub const NONE: Self = Self {
-        ignore_change_memo: false,
-        ephemeral_input_amount: None,
-        ephemeral_output_amount: None,
-    };
+impl EphemeralBalance {
+    pub fn is_input(&self) -> bool {
+        matches!(self, EphemeralBalance::Input(_))
+    }
 
-    /// Returns an `EphemeralParameters` with the following parameters:
-    ///
-    /// * `ignore_change_memo`: `true` if the change memo should be
-    ///   ignored for the purpose of deciding whether there will be a
-    ///   change output.
-    /// * `ephemeral_input_amount`: specifies that there will be an
-    ///   additional P2PKH input of the given amount.
-    /// * `ephemeral_output_amount`: specifies that there will be an
-    ///   additional P2PKH output of the given amount.
-    #[cfg(feature = "transparent-inputs")]
-    pub const fn new(
-        ignore_change_memo: bool,
-        ephemeral_input_amount: Option<NonNegativeAmount>,
-        ephemeral_output_amount: Option<NonNegativeAmount>,
-    ) -> Self {
-        Self {
-            ignore_change_memo,
-            ephemeral_input_amount,
-            ephemeral_output_amount,
+    pub fn is_output(&self) -> bool {
+        matches!(self, EphemeralBalance::Output(_))
+    }
+
+    pub fn ephemeral_input_amount(&self) -> Option<NonNegativeAmount> {
+        match self {
+            EphemeralBalance::Input(v) => Some(*v),
+            EphemeralBalance::Output(_) => None,
         }
     }
 
-    pub fn ignore_change_memo(&self) -> bool {
-        self.ignore_change_memo
-    }
-    pub fn ephemeral_input_amount(&self) -> Option<NonNegativeAmount> {
-        self.ephemeral_input_amount
-    }
     pub fn ephemeral_output_amount(&self) -> Option<NonNegativeAmount> {
-        self.ephemeral_output_amount
+        match self {
+            EphemeralBalance::Input(_) => None,
+            EphemeralBalance::Output(v) => Some(*v),
+        }
     }
 }
 
@@ -433,7 +408,7 @@ pub trait ChangeStrategy {
         sapling: &impl sapling::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
-        ephemeral_parameters: &EphemeralParameters,
+        ephemeral_balance: Option<&EphemeralBalance>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
 }
 

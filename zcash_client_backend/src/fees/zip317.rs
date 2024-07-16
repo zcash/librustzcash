@@ -17,7 +17,7 @@ use crate::ShieldedProtocol;
 
 use super::{
     common::single_change_output_balance, sapling as sapling_fees, ChangeError, ChangeStrategy,
-    DustOutputPolicy, EphemeralParameters, TransactionBalance,
+    DustOutputPolicy, EphemeralBalance, TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
@@ -67,7 +67,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
-        ephemeral_parameters: &EphemeralParameters,
+        ephemeral_parameters: Option<&EphemeralBalance>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         single_change_output_balance(
             params,
@@ -108,7 +108,6 @@ mod tests {
         fees::{
             tests::{TestSaplingInput, TestTransparentInput},
             ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy,
-            EphemeralParameters,
         },
         ShieldedProtocol,
     };
@@ -148,7 +147,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
-            &EphemeralParameters::NONE,
+            None,
         );
 
         assert_matches!(
@@ -192,7 +191,7 @@ mod tests {
                 ))][..],
             ),
             &DustOutputPolicy::default(),
-            &EphemeralParameters::NONE,
+            None,
         );
 
         assert_matches!(
@@ -245,7 +244,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             dust_output_policy,
-            &EphemeralParameters::NONE,
+            None,
         );
 
         assert_matches!(
@@ -289,7 +288,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
-            &EphemeralParameters::NONE,
+            None,
         );
 
         assert_matches!(
@@ -333,7 +332,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
-            &EphemeralParameters::NONE,
+            None,
         );
 
         assert_matches!(
@@ -383,7 +382,7 @@ mod tests {
                 DustAction::AllowDustChange,
                 Some(NonNegativeAmount::const_from_u64(1000)),
             ),
-            &EphemeralParameters::NONE,
+            None,
         );
 
         assert_matches!(
@@ -444,7 +443,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             dust_output_policy,
-            &EphemeralParameters::NONE,
+            None,
         );
 
         assert_matches!(
@@ -495,7 +494,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
-            &EphemeralParameters::NONE,
+            None,
         );
 
         // We will get an error here, because the dust input isn't free to add

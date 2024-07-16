@@ -28,6 +28,7 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   - `chain::BlockCache` trait, behind the `sync` feature flag.
   - `WalletRead::get_spendable_transparent_outputs`.
 - `zcash_client_backend::fees`:
+  - `EphemeralBalance`
   - `ChangeValue::shielded, is_ephemeral`
   - `ChangeValue::ephemeral_transparent` (when "transparent-inputs" is enabled)
   - `sapling::EmptyBundleView`
@@ -67,10 +68,10 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
     return type of `ChangeValue::output_pool` has (unconditionally) changed
     from `ShieldedProtocol` to `zcash_protocol::PoolType`.
   - `ChangeStrategy::compute_balance`: this trait method has an additional
-    `&EphemeralParameters` parameter. If the "transparent-inputs" feature is
+    `Option<&EphemeralBalance>` parameter. If the "transparent-inputs" feature is
     enabled, this can be used to specify whether the change memo should be
     ignored, and the amounts of additional transparent P2PKH inputs and
-    outputs. Passing `&EphemeralParameters::NONE` will retain the previous
+    outputs. Passing `None` will retain the previous
     behaviour (and is necessary when the "transparent-inputs" feature is
     not enabled).
 - `zcash_client_backend::input_selection::GreedyInputSelectorError` has a

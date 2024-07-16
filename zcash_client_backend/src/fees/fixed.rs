@@ -13,7 +13,7 @@ use crate::ShieldedProtocol;
 
 use super::{
     common::single_change_output_balance, sapling as sapling_fees, ChangeError, ChangeStrategy,
-    DustOutputPolicy, EphemeralParameters, TransactionBalance,
+    DustOutputPolicy, EphemeralBalance, TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
@@ -63,7 +63,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
-        ephemeral_parameters: &EphemeralParameters,
+        ephemeral_balance: Option<&EphemeralBalance>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         single_change_output_balance(
             params,
@@ -80,7 +80,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             self.fallback_change_pool,
             NonNegativeAmount::ZERO,
             0,
-            ephemeral_parameters,
+            ephemeral_balance,
         )
     }
 }
@@ -100,7 +100,7 @@ mod tests {
         data_api::wallet::input_selection::SaplingPayment,
         fees::{
             tests::{TestSaplingInput, TestTransparentInput},
-            ChangeError, ChangeStrategy, ChangeValue, DustOutputPolicy, EphemeralParameters,
+            ChangeError, ChangeStrategy, ChangeValue, DustOutputPolicy,
         },
         ShieldedProtocol,
     };
@@ -136,7 +136,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
-            &EphemeralParameters::NONE,
+            None,
         );
 
         assert_matches!(
@@ -182,7 +182,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
-            &EphemeralParameters::NONE,
+            None,
         );
 
         assert_matches!(
