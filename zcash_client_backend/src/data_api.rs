@@ -931,14 +931,16 @@ pub trait WalletRead {
     ///
     /// This is equivalent to (but may be implemented more efficiently than):
     /// ```compile_fail
-    /// if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
-    ///     return Ok(result.clone());
-    /// }
-    /// Ok(self
-    ///     .get_known_ephemeral_addresses(account, None)?
-    ///     .into_iter()
-    ///     .find(|(known_addr, _)| known_addr == address)
-    ///     .map(|(_, metadata)| metadata))
+    /// Ok(
+    ///     if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
+    ///         result.clone()
+    ///     } else {
+    ///         self.get_known_ephemeral_addresses(account, None)?
+    ///             .into_iter()
+    ///             .find(|(known_addr, _)| known_addr == address)
+    ///             .map(|(_, metadata)| metadata)
+    ///     },
+    /// )
     /// ```
     ///
     /// Returns `Ok(None)` if the address is not recognized, or we do not have metadata for it.
@@ -950,14 +952,16 @@ pub trait WalletRead {
         address: &TransparentAddress,
     ) -> Result<Option<TransparentAddressMetadata>, Self::Error> {
         // This should be overridden.
-        if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
-            return Ok(result.clone());
-        }
-        Ok(self
-            .get_known_ephemeral_addresses(account, None)?
-            .into_iter()
-            .find(|(known_addr, _)| known_addr == address)
-            .map(|(_, metadata)| metadata))
+        Ok(
+            if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
+                result.clone()
+            } else {
+                self.get_known_ephemeral_addresses(account, None)?
+                    .into_iter()
+                    .find(|(known_addr, _)| known_addr == address)
+                    .map(|(_, metadata)| metadata)
+            },
+        )
     }
 
     /// Returns a vector of ephemeral transparent addresses associated with the given
@@ -1001,7 +1005,7 @@ pub trait WalletRead {
         Ok(vec![])
     }
 
-    /// If a given transparent address has been reserved, i.e. would be included in
+    /// If a given ephemeral address might have been reserved, i.e. would be included in
     /// the map returned by `get_known_ephemeral_addresses(account_id, false)` for any
     /// of the wallet's accounts, then return `Ok(Some(account_id))`. Otherwise return
     /// `Ok(None)`.

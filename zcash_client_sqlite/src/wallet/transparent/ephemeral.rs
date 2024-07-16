@@ -187,7 +187,7 @@ pub(crate) fn find_index_for_ephemeral_address_str(
     Ok(conn
         .query_row(
             "SELECT address_index FROM ephemeral_addresses
-        WHERE account_id = :account_id AND address = :address",
+            WHERE account_id = :account_id AND address = :address",
             named_params![":account_id": account_id.0, ":address": &address_str],
             |row| row.get::<_, u32>(0),
         )

@@ -21,10 +21,11 @@ use super::TransparentAddress;
 pub struct TransparentKeyScope(u32);
 
 impl TransparentKeyScope {
-    /// Returns an arbitrary custom `TransparentKeyScope`. This should be used
-    /// with care: funds associated with keys derived under a custom scope may
-    /// not be recoverable if the wallet seed is restored in another wallet.
-    /// It is usually preferable to use standardized key scopes.
+    /// Returns an arbitrary custom `TransparentKeyScope`.
+    ///
+    /// This should be used with care: funds associated with keys derived under a custom
+    /// scope may not be recoverable if the wallet seed is restored in another wallet. It
+    /// is usually preferable to use standardized key scopes.
     pub const fn custom(i: u32) -> Option<Self> {
         if i < (1 << 31) {
             Some(TransparentKeyScope(i))

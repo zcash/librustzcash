@@ -384,6 +384,9 @@ where
         let mut tr1_payments = vec![];
         #[cfg(feature = "transparent-inputs")]
         let mut tr1_payment_pools = BTreeMap::new();
+        // This balance value is just used for overflow checking; the actual value of ephemeral
+        // outputs will be computed from the constructed `tr1_transparent_outputs` value
+        // constructed below.
         #[cfg(feature = "transparent-inputs")]
         let mut total_ephemeral = NonNegativeAmount::ZERO;
 

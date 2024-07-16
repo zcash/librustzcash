@@ -330,9 +330,11 @@ impl Default for DustOutputPolicy {
     }
 }
 
-/// `EphemeralBalance` describes the ephemeral input or output value for
-/// a transaction. It is use in the computation of fees are relevant to transactions using
-/// ephemeral transparent outputs.
+/// `EphemeralBalance` describes the ephemeral input or output value for a transaction. It is used
+/// in fee computation for series of transactions that use an ephemeral transparent output in an
+/// intermediate step, such as when sending from a shielded pool to a [ZIP 320] "TEX" address.
+///
+/// [ZIP 320]: https://zips.z.cash/zip-0320
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EphemeralBalance {
     Input(NonNegativeAmount),
@@ -388,16 +390,12 @@ pub trait ChangeStrategy {
     /// inputs from most to least preferred to spend within each pool, so that the most
     /// preferred ones are less likely to be indicated to remove.
     ///
-    #[cfg_attr(
-        feature = "transparent-inputs",
-        doc = "`ephemeral_parameters` can be used to specify variations on how balance
-               and fees are computed that are relevant to transactions using ephemeral
-               transparent outputs; see [`EphemeralParameters::new`]."
-    )]
-    #[cfg_attr(
-        not(feature = "transparent-inputs"),
-        doc = "`ephemeral_parameters` should be set to `&EphemeralParameters::NONE`."
-    )]
+    /// - `ephemeral_balance`: if the transaction is to be constructed with either an
+    ///   ephemeral transparent input or an ephemeral transparent output this argument
+    ///   may be used to provide the value of that input or output. The value of this
+    ///   output should be `None` in the case that there are no such items.
+    ///
+    /// [ZIP 320]: https://zips.z.cash/zip-0320
     #[allow(clippy::too_many_arguments)]
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
         &self,

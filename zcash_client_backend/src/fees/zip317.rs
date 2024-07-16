@@ -67,7 +67,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
-        ephemeral_parameters: Option<&EphemeralBalance>,
+        ephemeral_balance: Option<&EphemeralBalance>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         single_change_output_balance(
             params,
@@ -84,7 +84,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             self.fallback_change_pool,
             self.fee_rule.marginal_fee(),
             self.fee_rule.grace_actions(),
-            ephemeral_parameters,
+            ephemeral_balance,
         )
     }
 }
