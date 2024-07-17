@@ -36,8 +36,10 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     /// An error in transaction proposal construction
     Proposal(ProposalError),
 
-    /// The proposal was structurally valid, but spending shielded outputs of prior multi-step
-    /// transaction steps is not yet supported.
+    /// The proposal was structurally valid, but tried to do one of these unsupported things:
+    /// * spend a prior shielded output;
+    /// * pay to an output pool for which the corresponding feature is not enabled;
+    /// * pay to a TEX address if the "transparent-inputs" feature is not enabled.
     ProposalNotSupported,
 
     /// No account could be found corresponding to a provided spending key.
@@ -89,6 +91,11 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     /// belonging to the wallet.
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
+
+    /// The wallet tried to pay to an ephemeral transparent address as a normal
+    /// output.
+    #[cfg(feature = "transparent-inputs")]
+    PaysEphemeralTransparentAddress(String),
 }
 
 impl<DE, CE, SE, FE> fmt::Display for Error<DE, CE, SE, FE>
@@ -116,12 +123,12 @@ where
             Error::Proposal(e) => {
                 write!(f, "Input selection attempted to construct an invalid proposal: {}", e)
             }
-            Error::ProposalNotSupported => {
-                write!(
-                    f,
-                    "The proposal was valid, but spending shielded outputs of prior transaction steps is not yet supported."
-                )
-            }
+            Error::ProposalNotSupported => write!(
+                f,
+                "The proposal was valid but tried to do something that is not supported \
+                 (spend shielded outputs of prior transaction steps or use a feature that \
+                 is not enabled).",
+            ),
             Error::KeyNotRecognized => {
                 write!(
                     f,
@@ -158,6 +165,10 @@ where
             Error::AddressNotRecognized(_) => {
                 write!(f, "The specified transparent address was not recognized as belonging to the wallet.")
             }
+            #[cfg(feature = "transparent-inputs")]
+            Error::PaysEphemeralTransparentAddress(addr) => {
+                write!(f, "The wallet tried to pay to an ephemeral transparent address as a normal output: {}", addr)
+            }
         }
     }
 }
@@ -184,6 +195,12 @@ where
 impl<DE, CE, SE, FE> From<builder::Error<FE>> for Error<DE, CE, SE, FE> {
     fn from(e: builder::Error<FE>) -> Self {
         Error::Builder(e)
+    }
+}
+
+impl<DE, CE, SE, FE> From<ProposalError> for Error<DE, CE, SE, FE> {
+    fn from(e: ProposalError) -> Self {
+        Error::Proposal(e)
     }
 }
 

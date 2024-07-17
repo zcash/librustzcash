@@ -1003,7 +1003,7 @@ mod tests {
             .add_transparent_input(
                 tsk.derive_external_secret_key(NonHardenedChildIndex::ZERO)
                     .unwrap(),
-                OutPoint::new([0u8; 32], 1),
+                OutPoint::fake(),
                 prev_coin,
             )
             .unwrap();

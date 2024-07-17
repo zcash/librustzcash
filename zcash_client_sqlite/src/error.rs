@@ -15,8 +15,9 @@ use crate::PRUNING_DEPTH;
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    crate::AccountId,
     zcash_client_backend::encoding::TransparentCodecError,
-    zcash_primitives::legacy::TransparentAddress,
+    zcash_primitives::{legacy::TransparentAddress, transaction::TxId},
 };
 
 /// The primary error type for the SQLite wallet backend.
@@ -112,6 +113,18 @@ pub enum SqliteClientError {
 
     /// An error occurred in computing wallet balance
     BalanceError(BalanceError),
+
+    /// The proposal cannot be constructed until transactions with previously reserved
+    /// ephemeral address outputs have been mined. The parameters are the account id and
+    /// the index that could not safely be reserved.
+    #[cfg(feature = "transparent-inputs")]
+    ReachedGapLimit(AccountId, u32),
+
+    /// An ephemeral address would be reused. The parameters are the address in string
+    /// form, and the txid of the earliest transaction in which it is known to have been
+    /// used.
+    #[cfg(feature = "transparent-inputs")]
+    EphemeralAddressReuse(String, TxId),
 }
 
 impl error::Error for SqliteClientError {
@@ -162,6 +175,13 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::ChainHeightUnknown => write!(f, "Chain height unknown; please call `update_chain_tip`"),
             SqliteClientError::UnsupportedPoolType(t) => write!(f, "Pool type is not currently supported: {}", t),
             SqliteClientError::BalanceError(e) => write!(f, "Balance error: {}", e),
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::ReachedGapLimit(account_id, bad_index) => write!(f,
+                "The proposal cannot be constructed until transactions with previously reserved ephemeral address outputs have been mined. \
+                 The ephemeral address in account {account_id:?} at index {bad_index} could not be safely reserved.",
+            ),
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::EphemeralAddressReuse(address_str, txid) => write!(f, "The ephemeral address {address_str} previously used in txid {txid} would be reused."),
         }
     }
 }

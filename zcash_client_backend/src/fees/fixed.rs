@@ -4,7 +4,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     transaction::{
-        components::amount::BalanceError,
+        components::amount::{BalanceError, NonNegativeAmount},
         fees::{fixed::FeeRule as FixedFeeRule, transparent},
     },
 };
@@ -13,7 +13,7 @@ use crate::ShieldedProtocol;
 
 use super::{
     common::single_change_output_balance, sapling as sapling_fees, ChangeError, ChangeStrategy,
-    DustOutputPolicy, TransactionBalance,
+    DustOutputPolicy, EphemeralBalance, TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
@@ -63,6 +63,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
+        ephemeral_balance: Option<&EphemeralBalance>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         single_change_output_balance(
             params,
@@ -74,9 +75,12 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             #[cfg(feature = "orchard")]
             orchard,
             dust_output_policy,
-            self.fee_rule().fixed_fee(),
-            self.change_memo.clone(),
+            self.fee_rule.fixed_fee(),
+            self.change_memo.as_ref(),
             self.fallback_change_pool,
+            NonNegativeAmount::ZERO,
+            0,
+            ephemeral_balance,
         )
     }
 }
@@ -132,6 +136,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
+            None,
         );
 
         assert_matches!(
@@ -177,6 +182,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
+            None,
         );
 
         assert_matches!(

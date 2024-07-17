@@ -3183,6 +3183,7 @@ dependencies = [
  "schemer-rusqlite",
  "secrecy",
  "shardtree",
+ "static_assertions",
  "subtle",
  "tempfile",
  "time",

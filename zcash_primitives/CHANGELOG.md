@@ -11,6 +11,10 @@ and this library adheres to Rust's notion of
   - `impl From<TransparentKeyScope> for bip32::ChildNumber`
   - `impl From<NonHardenedChildIndex> for bip32::ChildNumber`
   - `impl TryFrom<bip32::ChildNumber> for NonHardenedChildIndex`
+  - `EphemeralIvk`
+  - `AccountPubKey::derive_ephemeral_ivk`
+  - `TransparentKeyScope::custom` is now `const`.
+  - `TransparentKeyScope::{EXTERNAL, INTERNAL, EPHEMERAL}`
 - `zcash_primitives::legacy::Script::serialized_size`
 - `zcash_primitives::transaction::fees::transparent`:
   - `InputSize`
@@ -40,6 +44,14 @@ and this library adheres to Rust's notion of
   This method now requires their `tx_in` and `tx_out` serialized sizes
   (expressed as iterators of `InputSize` for inputs and `usize` for outputs)
   rather than a slice of `InputView` or `OutputView`.
+
+### Deprecated
+- `zcash_primitives::transaction::fees::zip317::FeeRule::non_standard` has been
+  deprecated, because in general it can calculate fees that violate ZIP 317, which
+  might cause transactions built with it to fail. Maintaining the generality of the
+  current implementation imposes ongoing maintenance costs, and so it is likely to
+  be removed in the near future. Use `transaction::fees::zip317::FeeRule::standard()`
+  instead to comply with ZIP 317.
 
 ### Removed
 - The `zcash_primitives::zip339` module, which reexported parts of the API of

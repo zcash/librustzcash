@@ -102,7 +102,7 @@ use zcash_primitives::{
     memo::{Memo, MemoBytes},
     merkle_tree::read_commitment_tree,
     transaction::{
-        components::{amount::NonNegativeAmount, Amount},
+        components::{amount::NonNegativeAmount, Amount, OutPoint},
         Transaction, TransactionData, TxId,
     },
 };
@@ -132,6 +132,10 @@ pub(crate) mod scanning;
 pub(crate) mod transparent;
 
 pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
+
+/// The number of ephemeral addresses that can be safely reserved without observing any
+/// of them to be mined. This is the same as the gap limit in Bitcoin.
+pub(crate) const GAP_LIMIT: u32 = 20;
 
 fn parse_account_source(
     account_kind: u32,
@@ -508,6 +512,10 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     // Always derive the default Unified Address for the account.
     let (address, d_idx) = account.default_address(DEFAULT_UA_REQUEST)?;
     insert_address(conn, params, account_id, d_idx, &address)?;
+
+    // Initialize the `ephemeral_addresses` table.
+    #[cfg(feature = "transparent-inputs")]
+    transparent::ephemeral::init_account(conn, params, account_id)?;
 
     Ok(account_id)
 }
@@ -1914,9 +1922,11 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
 }
 
 /// Returns a vector with the IDs of all accounts known to this wallet.
+///
+/// Note that this is called from db migration code.
 pub(crate) fn get_account_ids(
     conn: &rusqlite::Connection,
-) -> Result<Vec<AccountId>, SqliteClientError> {
+) -> Result<Vec<AccountId>, rusqlite::Error> {
     let mut stmt = conn.prepare("SELECT id FROM accounts")?;
     let mut rows = stmt.query([])?;
     let mut result = Vec::new();
@@ -2136,11 +2146,21 @@ pub(crate) fn put_tx_data(
 
 // A utility function for creation of parameters for use in `insert_sent_output`
 // and `put_sent_output`
-fn recipient_params(
-    to: &Recipient<AccountId, Note>,
+fn recipient_params<P: consensus::Parameters>(
+    params: &P,
+    to: &Recipient<AccountId, Note, OutPoint>,
 ) -> (Option<String>, Option<AccountId>, PoolType) {
     match to {
         Recipient::External(addr, pool) => (Some(addr.encode()), None, *pool),
+        Recipient::EphemeralTransparent {
+            receiving_account,
+            ephemeral_address,
+            ..
+        } => (
+            Some(ephemeral_address.encode(params)),
+            Some(*receiving_account),
+            PoolType::TRANSPARENT,
+        ),
         Recipient::InternalAccount {
             receiving_account,
             external_address,
@@ -2154,8 +2174,9 @@ fn recipient_params(
 }
 
 /// Records information about a transaction output that your wallet created.
-pub(crate) fn insert_sent_output(
+pub(crate) fn insert_sent_output<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
+    params: &P,
     tx_ref: i64,
     from_account: AccountId,
     output: &SentTransactionOutput<AccountId>,
@@ -2169,7 +2190,7 @@ pub(crate) fn insert_sent_output(
             :to_address, :to_account_id, :value, :memo)",
     )?;
 
-    let (to_address, to_account_id, pool_type) = recipient_params(output.recipient());
+    let (to_address, to_account_id, pool_type) = recipient_params(params, output.recipient());
     let sql_args = named_params![
         ":tx": &tx_ref,
         ":output_pool": &pool_code(pool_type),
@@ -2198,12 +2219,13 @@ pub(crate) fn insert_sent_output(
 /// - If `recipient` is an internal account, `output_index` is an index into the Sapling outputs of
 ///   the transaction.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn put_sent_output(
+pub(crate) fn put_sent_output<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
+    params: &P,
     from_account: AccountId,
     tx_ref: i64,
     output_index: usize,
-    recipient: &Recipient<AccountId, Note>,
+    recipient: &Recipient<AccountId, Note, OutPoint>,
     value: NonNegativeAmount,
     memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
@@ -2222,7 +2244,7 @@ pub(crate) fn put_sent_output(
             memo = IFNULL(:memo, memo)",
     )?;
 
-    let (to_address, to_account_id, pool_type) = recipient_params(recipient);
+    let (to_address, to_account_id, pool_type) = recipient_params(params, recipient);
     let sql_args = named_params![
         ":tx": &tx_ref,
         ":output_pool": &pool_code(pool_type),

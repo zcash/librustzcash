@@ -367,7 +367,7 @@ mod tests {
                 usk0.transparent()
                     .derive_external_secret_key(NonHardenedChildIndex::ZERO)
                     .unwrap(),
-                transparent::OutPoint::new([1; 32], 0),
+                transparent::OutPoint::fake(),
                 transparent::TxOut {
                     value: NonNegativeAmount::const_from_u64(EXTERNAL_VALUE + INTERNAL_VALUE),
                     script_pubkey: usk0

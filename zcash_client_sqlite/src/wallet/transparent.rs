@@ -1,15 +1,16 @@
 //! Functions for transparent input support in the wallet.
+use std::collections::{HashMap, HashSet};
+
 use rusqlite::OptionalExtension;
 use rusqlite::{named_params, Connection, Row};
-use std::collections::HashMap;
-use std::collections::HashSet;
-use zcash_client_backend::data_api::AccountBalance;
-use zcash_keys::address::Address;
 use zip32::{DiversifierIndex, Scope};
 
 use zcash_address::unified::{Encoding, Ivk, Uivk};
-use zcash_client_backend::wallet::{TransparentAddressMetadata, WalletTransparentOutput};
-use zcash_keys::encoding::AddressCodec;
+use zcash_client_backend::{
+    data_api::AccountBalance,
+    wallet::{TransparentAddressMetadata, WalletTransparentOutput},
+};
+use zcash_keys::{address::Address, encoding::AddressCodec};
 use zcash_primitives::{
     legacy::{
         keys::{IncomingViewingKey, NonHardenedChildIndex},
@@ -22,6 +23,8 @@ use zcash_protocol::consensus::{self, BlockHeight};
 use crate::{error::SqliteClientError, AccountId, UtxoId};
 
 use super::{chain_tip_height, get_account_ids};
+
+pub(crate) mod ephemeral;
 
 pub(crate) fn detect_spending_accounts<'a>(
     conn: &Connection,
@@ -51,6 +54,28 @@ pub(crate) fn detect_spending_accounts<'a>(
     Ok(acc)
 }
 
+/// Returns the `NonHardenedChildIndex` corresponding to a diversifier index
+/// given as bytes in big-endian order (the reverse of the usual order).
+fn address_index_from_diversifier_index_be(
+    diversifier_index_be: &[u8],
+) -> Result<NonHardenedChildIndex, SqliteClientError> {
+    let mut di: [u8; 11] = diversifier_index_be.try_into().map_err(|_| {
+        SqliteClientError::CorruptedData("Diversifier index is not an 11-byte value".to_owned())
+    })?;
+    di.reverse(); // BE -> LE conversion
+
+    NonHardenedChildIndex::from_index(DiversifierIndex::from(di).try_into().map_err(|_| {
+        SqliteClientError::CorruptedData(
+            "Unable to get diversifier for transparent address.".to_string(),
+        )
+    })?)
+    .ok_or_else(|| {
+        SqliteClientError::CorruptedData(
+            "Unexpected hardened index for transparent address.".to_string(),
+        )
+    })
+}
+
 pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -67,10 +92,6 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     while let Some(row) = rows.next()? {
         let ua_str: String = row.get(0)?;
         let di_vec: Vec<u8> = row.get(1)?;
-        let mut di: [u8; 11] = di_vec.try_into().map_err(|_| {
-            SqliteClientError::CorruptedData("Diversifier index is not an 11-byte value".to_owned())
-        })?;
-        di.reverse(); // BE -> LE conversion
 
         let ua = Address::decode(params, &ua_str)
             .ok_or_else(|| {
@@ -85,37 +106,15 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             })?;
 
         if let Some(taddr) = ua.transparent() {
-            let index = NonHardenedChildIndex::from_index(
-                DiversifierIndex::from(di).try_into().map_err(|_| {
-                    SqliteClientError::CorruptedData(
-                        "Unable to get diversifier for transparent address.".to_string(),
-                    )
-                })?,
-            )
-            .ok_or_else(|| {
-                SqliteClientError::CorruptedData(
-                    "Unexpected hardened index for transparent address.".to_string(),
-                )
-            })?;
-
-            ret.insert(
-                *taddr,
-                Some(TransparentAddressMetadata::new(
-                    Scope::External.into(),
-                    index,
-                )),
-            );
+            let address_index = address_index_from_diversifier_index_be(&di_vec)?;
+            let metadata = TransparentAddressMetadata::new(Scope::External.into(), address_index);
+            ret.insert(*taddr, Some(metadata));
         }
     }
 
     if let Some((taddr, address_index)) = get_legacy_transparent_address(params, conn, account)? {
-        ret.insert(
-            taddr,
-            Some(TransparentAddressMetadata::new(
-                Scope::External.into(),
-                address_index,
-            )),
-        );
+        let metadata = TransparentAddressMetadata::new(Scope::External.into(), address_index);
+        ret.insert(taddr, Some(metadata));
     }
 
     Ok(ret)
@@ -239,6 +238,19 @@ pub(crate) fn get_unspent_transparent_output(
     result
 }
 
+/// Returns the list of spendable transparent outputs received by this wallet at `address`
+/// such that, at height `target_height`:
+/// * the transaction that produced the output had or will have at least `min_confirmations`
+///   confirmations; and
+/// * the output is unspent as of the current chain tip.
+///
+/// An output that is potentially spent by an unmined transaction in the mempool is excluded
+/// iff the spending transaction will not be expired at `target_height`.
+///
+/// This could, in very rare circumstances, return as unspent outputs that are actually not
+/// spendable, if they are the outputs of deshielding transactions where the spend anchors have
+/// been invalidated by a rewind. There isn't a way to detect this circumstance at present, but
+/// it should be vanishingly rare as the vast majority of rewinds are of a single block.
 pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -248,10 +260,6 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
     let confirmed_height = target_height - min_confirmations;
 
-    // This could, in very rare circumstances, return as unspent outputs that are actually not
-    // spendable, if they are the outputs of deshielding transactions where the spend anchors have
-    // been invalidated by a rewind. There isn't a way to detect this circumstance at present, but
-    // it should be vanishingly rare as the vast majority of rewinds are of a single block.
     let mut stmt_utxos = conn.prepare(
         "SELECT t.txid, u.output_index, u.script,
                 u.value_zat, t.mined_height AS received_height
@@ -301,10 +309,13 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     Ok(utxos)
 }
 
-/// Returns the unspent balance for each transparent address associated with the specified account,
-/// such that the block that included the transaction was mined at a height less than or equal to
-/// the provided `summary_height`.
-pub(crate) fn get_transparent_address_balances<P: consensus::Parameters>(
+/// Returns a mapping from each transparent receiver associated with the specified account
+/// to its not-yet-shielded UTXO balance, including only the effects of transactions mined
+/// at a block height less than or equal to `summary_height`.
+///
+/// Only non-ephemeral transparent receivers with a non-zero balance at the summary height
+/// will be included.
+pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account: AccountId,
@@ -438,63 +449,145 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     params: &P,
     output: &WalletTransparentOutput,
 ) -> Result<UtxoId, SqliteClientError> {
-    let address_str = output.recipient_address().encode(params);
-    let account_id = conn
+    let address = output.recipient_address();
+    if let Some(receiving_account) = find_account_for_transparent_address(conn, params, address)? {
+        put_transparent_output(
+            conn,
+            params,
+            output.outpoint(),
+            output.txout(),
+            Some(output.height()),
+            address,
+            receiving_account,
+        )
+    } else {
+        // The UTXO was not for any of our transparent addresses.
+        Err(SqliteClientError::AddressNotRecognized(*address))
+    }
+}
+
+pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    account_id: AccountId,
+    address: &TransparentAddress,
+) -> Result<Option<TransparentAddressMetadata>, SqliteClientError> {
+    let address_str = address.encode(params);
+
+    if let Some(di_vec) = conn
+        .query_row(
+            "SELECT diversifier_index_be FROM addresses
+             WHERE account_id = :account_id AND cached_transparent_receiver_address = :address",
+            named_params![":account_id": account_id.0, ":address": &address_str],
+            |row| row.get::<_, Vec<u8>>(0),
+        )
+        .optional()?
+    {
+        let address_index = address_index_from_diversifier_index_be(&di_vec)?;
+        let metadata = TransparentAddressMetadata::new(Scope::External.into(), address_index);
+        return Ok(Some(metadata));
+    }
+
+    if let Some((legacy_taddr, address_index)) =
+        get_legacy_transparent_address(params, conn, account_id)?
+    {
+        if &legacy_taddr == address {
+            let metadata = TransparentAddressMetadata::new(Scope::External.into(), address_index);
+            return Ok(Some(metadata));
+        }
+    }
+
+    // Search known ephemeral addresses.
+    if let Some(address_index) =
+        ephemeral::find_index_for_ephemeral_address_str(conn, account_id, &address_str)?
+    {
+        return Ok(Some(ephemeral::metadata(address_index)));
+    }
+
+    Ok(None)
+}
+
+/// Attempts to determine the account that received the given transparent output.
+///
+/// The following three locations in the wallet's key tree are searched:
+/// - Transparent receivers that have been generated as part of a Unified Address.
+/// - Transparent ephemeral addresses that have been reserved or are within
+///   the gap limit from the last reserved address.
+/// - "Legacy transparent addresses" (at BIP 44 address index 0 within an account).
+///
+/// Returns `Ok(None)` if the transparent output's recipient address is not in any of the
+/// above locations. This means the wallet considers the output "not interesting".
+pub(crate) fn find_account_for_transparent_address<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    address: &TransparentAddress,
+) -> Result<Option<AccountId>, SqliteClientError> {
+    let address_str = address.encode(params);
+
+    if let Some(account_id) = conn
         .query_row(
             "SELECT account_id FROM addresses WHERE cached_transparent_receiver_address = :address",
             named_params![":address": &address_str],
             |row| Ok(AccountId(row.get(0)?)),
         )
-        .optional()?;
-
-    if let Some(account) = account_id {
-        Ok(put_transparent_output(conn, params, output, account)?)
-    } else {
-        // If the UTXO is received at the legacy transparent address (at BIP 44 address
-        // index 0 within its particular account, which we specifically ensure is returned
-        // from `get_transparent_receivers`), there may be no entry in the addresses table
-        // that can be used to tie the address to a particular account. In this case, we
-        // look up the legacy address for each account in the wallet, and check whether it
-        // matches the address for the received UTXO; if so, insert/update it directly.
-        get_account_ids(conn)?
-            .into_iter()
-            .find_map(
-                |account| match get_legacy_transparent_address(params, conn, account) {
-                    Ok(Some((legacy_taddr, _))) if &legacy_taddr == output.recipient_address() => {
-                        Some(
-                            put_transparent_output(conn, params, output, account)
-                                .map_err(SqliteClientError::from),
-                        )
-                    }
-                    Ok(_) => None,
-                    Err(e) => Some(Err(e)),
-                },
-            )
-            // The UTXO was not for any of the legacy transparent addresses.
-            .unwrap_or_else(|| {
-                Err(SqliteClientError::AddressNotRecognized(
-                    *output.recipient_address(),
-                ))
-            })
+        .optional()?
+    {
+        return Ok(Some(account_id));
     }
+
+    // Search known ephemeral addresses.
+    if let Some(account_id) = ephemeral::find_account_for_ephemeral_address_str(conn, &address_str)?
+    {
+        return Ok(Some(account_id));
+    }
+
+    let account_ids = get_account_ids(conn)?;
+
+    // If the UTXO is received at the legacy transparent address (at BIP 44 address
+    // index 0 within its particular account, which we specifically ensure is returned
+    // from `get_transparent_receivers`), there may be no entry in the addresses table
+    // that can be used to tie the address to a particular account. In this case, we
+    // look up the legacy address for each account in the wallet, and check whether it
+    // matches the address for the received UTXO.
+    for &account_id in account_ids.iter() {
+        if let Some((legacy_taddr, _)) = get_legacy_transparent_address(params, conn, account_id)? {
+            if &legacy_taddr == address {
+                return Ok(Some(account_id));
+            }
+        }
+    }
+
+    Ok(None)
 }
 
+/// Add a transparent output relevant to this wallet to the database.
+///
+/// `output_height` may be None if this is an ephemeral output from a
+/// transaction we created, that we do not yet know to have been mined.
 pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    output: &WalletTransparentOutput,
-    received_by_account: AccountId,
-) -> Result<UtxoId, rusqlite::Error> {
+    outpoint: &OutPoint,
+    txout: &TxOut,
+    output_height: Option<BlockHeight>,
+    address: &TransparentAddress,
+    receiving_account: AccountId,
+) -> Result<UtxoId, SqliteClientError> {
+    let output_height = output_height.map(u32::from);
+
     // Check whether we have an entry in the blocks table for the output height;
     // if not, the transaction will be updated with its mined height when the
     // associated block is scanned.
-    let block = conn
-        .query_row(
-            "SELECT height FROM blocks WHERE height = :height",
-            named_params![":height": &u32::from(output.height())],
-            |row| row.get::<_, u32>(0),
-        )
-        .optional()?;
+    let block = match output_height {
+        Some(height) => conn
+            .query_row(
+                "SELECT height FROM blocks WHERE height = :height",
+                named_params![":height": height],
+                |row| row.get::<_, u32>(0),
+            )
+            .optional()?,
+        None => None,
+    };
 
     let id_tx = conn.query_row(
         "INSERT INTO transactions (txid, block, mined_height)
@@ -504,9 +597,9 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
              mined_height = :mined_height
          RETURNING id_tx",
         named_params![
-           ":txid": &output.outpoint().hash().to_vec(),
+           ":txid": &outpoint.hash().to_vec(),
            ":block": block,
-           ":mined_height": u32::from(output.height())
+           ":mined_height": output_height
         ],
         |row| row.get::<_, i64>(0),
     )?;
@@ -533,15 +626,17 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
 
     let sql_args = named_params![
         ":transaction_id": id_tx,
-        ":output_index": &output.outpoint().n(),
-        ":account_id": received_by_account.0,
-        ":address": &output.recipient_address().encode(params),
-        ":script": &output.txout().script_pubkey.0,
-        ":value_zat": &i64::from(Amount::from(output.txout().value)),
-        ":height": &u32::from(output.height()),
+        ":output_index": &outpoint.n(),
+        ":account_id": receiving_account.0,
+        ":address": &address.encode(params),
+        ":script": &txout.script_pubkey.0,
+        ":value_zat": &i64::from(Amount::from(txout.value)),
+        ":height": output_height,
     ];
 
-    stmt_upsert_transparent_output.query_row(sql_args, |row| row.get::<_, i64>(0).map(UtxoId))
+    let utxo_id = stmt_upsert_transparent_output
+        .query_row(sql_args, |row| row.get::<_, i64>(0).map(UtxoId))?;
+    Ok(utxo_id)
 }
 
 #[cfg(test)]

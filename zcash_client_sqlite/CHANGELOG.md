@@ -6,7 +6,28 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Notable changes
+`zcash_client_sqlite` now supports TEX (transparent-source-only) addresses as specified
+in ZIP 320. Sending to one or more TEX addresses will automatically create a multi-step
+proposal that uses two transactions.
+
+In order to take advantage of this support, client wallets will need to be able to send
+multiple transactions created from `zcash_client_backend::data_api::wallet::create_proposed_transactions`.
+This API was added in `zcash_client_backend` 0.11.0 but previously could only return a
+single transaction.
+
+**Note:** This feature changes the use of transparent addresses in ways that are relevant
+to security and access to funds, and that may interact with other wallet behaviour. In
+particular it exposes new ephemeral transparent addresses belonging to the wallet, which
+need to be scanned in order to recover funds if the first transaction of the proposal is
+mined but the second is not, or if someone (e.g. the TEX-address recipient) sends back
+funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for details.
+
 ### Changed
+- `zcash_client_sqlite::error::SqliteClientError` has a new `ReachedGapLimit` and
+  `EphemeralAddressReuse` variants when the "transparent-inputs" feature is enabled.
+- The result of the `v_tx_outputs` SQL query could now include transparent outputs
+  with unknown height.
 - MSRV is now 1.70.0.
 - `zcash_client_sqlite::error::SqliteClientError` has changed variants:
   - Removed `HdwalletError`.

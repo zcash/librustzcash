@@ -6,18 +6,39 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Notable changes
+`zcash_client_backend` now supports TEX (transparent-source-only) addresses as specified
+in ZIP 320. Sending to one or more TEX addresses will automatically create a multi-step
+proposal that uses two transactions.
+
+In order to take advantage of this support, client wallets will need to be able to send
+multiple transactions created from `zcash_client_backend::data_api::wallet::create_proposed_transactions`.
+This API was added in `zcash_client_backend` 0.11.0 but previously could only return a
+single transaction.
+
+**Note:** This feature changes the use of transparent addresses in ways that are relevant
+to security and access to funds, and that may interact with other wallet behaviour. In
+particular it exposes new ephemeral transparent addresses belonging to the wallet, which
+need to be scanned in order to recover funds if the first transaction of the proposal is
+mined but the second is not, or if someone (e.g. the TEX-address recipient) sends back
+funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for details.
 
 ### Added
 - `zcash_client_backend::data_api`:
   - `chain::BlockCache` trait, behind the `sync` feature flag.
   - `WalletRead::get_spendable_transparent_outputs`.
 - `zcash_client_backend::fees`:
-  - `ChangeValue::{transparent, shielded}`
+  - `EphemeralBalance`
+  - `ChangeValue::shielded, is_ephemeral`
+  - `ChangeValue::ephemeral_transparent` (when "transparent-inputs" is enabled)
   - `sapling::EmptyBundleView`
   - `orchard::EmptyBundleView`
+- `zcash_client_backend::proposal`:
+  - `impl Hash for {StepOutput, StepOutputIndex}`
 - `zcash_client_backend::scanning`:
   - `testing` module
-- `zcash_client_backend::sync` module, behind the `sync` feature flag
+- `zcash_client_backend::sync` module, behind the `sync` feature flag.
+- `zcash_client_backend::wallet::Recipient::map_ephemeral_transparent_outpoint`
 
 ### Changed
 - MSRV is now 1.70.0.
@@ -31,36 +52,54 @@ and this library adheres to Rust's notion of
   `change_memo` is given, and defends against losing money by using
   `DustAction::AddDustToFee` with a too-high dust threshold.
   See [#1430](https://github.com/zcash/librustzcash/pull/1430) for details.
-- `zcash_client_backend::zip321` has been extracted to, and is now a reexport 
+- `zcash_client_backend::zip321` has been extracted to, and is now a reexport
   of the root module of the `zip321` crate. Several of the APIs of this module
   have changed as a consequence of this extraction; please see the `zip321`
   CHANGELOG for details.
 - `zcash_client_backend::data_api`:
-  - `error::Error` has a new `Address` variant.
+  - `WalletRead` has new `get_known_ephemeral_addresses`,
+    `find_account_for_ephemeral_address`, and `get_transparent_address_metadata`
+    methods when the "transparent-inputs" feature is enabled.
+  - `WalletWrite` has a new `reserve_next_n_ephemeral_addresses` method when
+    the "transparent-inputs" feature is enabled.
+  - `error::Error` has new `Address` and (when the "transparent-inputs" feature
+    is enabled) `PaysEphemeralTransparentAddress` variants.
   - `wallet::input_selection::InputSelectorError` has a new `Address` variant.
-- `zcash_client_backend::proto::proposal::Proposal::{from_standard_proposal, 
-  try_into_standard_proposal}` each no longer require a `consensus::Parameters` 
-  argument.
 - `zcash_client_backend::data_api::fees`
-  - The return type of `ChangeValue::output_pool`, and the type of the
-    `output_pool` argument to `ChangeValue::new`, have changed from
-    `ShieldedProtocol` to `zcash_protocol::PoolType`.
-  - The return type of `ChangeValue::new` is now optional; it returns `None`
-    if a memo is given for the transparent pool. Use `ChangeValue::shielded`
-    to avoid this error case when creating a `ChangeValue` known to be for a
-    shielded pool.
+  - When the "transparent-inputs" feature is enabled, `ChangeValue` can also
+    represent an ephemeral transparent output in a proposal. Accordingly, the
+    return type of `ChangeValue::output_pool` has (unconditionally) changed
+    from `ShieldedProtocol` to `zcash_protocol::PoolType`.
+  - `ChangeStrategy::compute_balance`: this trait method has an additional
+    `Option<&EphemeralBalance>` parameter. If the "transparent-inputs" feature is
+    enabled, this can be used to specify whether the change memo should be
+    ignored, and the amounts of additional transparent P2PKH inputs and
+    outputs. Passing `None` will retain the previous
+    behaviour (and is necessary when the "transparent-inputs" feature is
+    not enabled).
 - `zcash_client_backend::input_selection::GreedyInputSelectorError` has a
   new variant `UnsupportedTexAddress`.
+- `zcash_client_backend::proposal::ProposalError` has new variants
+  `SpendsChange`, `EphemeralOutputLeftUnspent`, and `PaysTexFromShielded`.
+  (the last two are conditional on the "transparent-inputs" feature).
+- `zcash_client_backend::proto`:
+  - `ProposalDecodingError` has a new variant `InvalidEphemeralRecipient`.
+  - `proposal::Proposal::{from_standard_proposal, try_into_standard_proposal}`
+    each no longer require a `consensus::Parameters` argument.
 - `zcash_client_backend::wallet::Recipient` variants have changed. Instead of
-  wrapping protocol-address types, the `Recipient` type now wraps a
-  `zcash_address::ZcashAddress`. This simplifies the process of tracking the
-  original address to which value was sent.
+  wrapping protocol-address types, the `External` and `InternalAccount` variants
+  now wrap a `zcash_address::ZcashAddress`. This simplifies the process of
+  tracking the original address to which value was sent. There is also a new
+  `EphemeralTransparent` variant, and an additional generic parameter for the
+  type of metadata associated with an ephemeral transparent outpoint.
 
 ### Removed
 - `zcash_client_backend::data_api`:
   - `WalletRead::get_unspent_transparent_outputs` has been removed because its
     semantics were unclear and could not be clarified. Use
     `WalletRead::get_spendable_transparent_outputs` instead.
+- `zcash_client_backend::fees::ChangeValue::new`. Use `ChangeValue::shielded`
+  or `ChangeValue::ephemeral_transparent` instead.
 
 ## [0.12.1] - 2024-03-27
 

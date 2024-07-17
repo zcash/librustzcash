@@ -21,35 +21,28 @@ pub mod sapling;
 pub mod standard;
 pub mod zip317;
 
-/// A proposed change amount and output pool.
+/// `ChangeValue` represents either a proposed change output to a shielded pool
+/// (with an optional change memo), or if the "transparent-inputs" feature is
+/// enabled, an ephemeral output to the transparent pool.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ChangeValue {
-    output_pool: PoolType,
-    value: NonNegativeAmount,
-    memo: Option<MemoBytes>,
+pub struct ChangeValue(ChangeValueInner);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ChangeValueInner {
+    Shielded {
+        protocol: ShieldedProtocol,
+        value: NonNegativeAmount,
+        memo: Option<MemoBytes>,
+    },
+    #[cfg(feature = "transparent-inputs")]
+    EphemeralTransparent { value: NonNegativeAmount },
 }
 
 impl ChangeValue {
-    /// Constructs a new change value from its constituent parts.
-    pub fn new(
-        output_pool: PoolType,
-        value: NonNegativeAmount,
-        memo: Option<MemoBytes>,
-    ) -> Option<Self> {
-        (matches!(output_pool, PoolType::Shielded(_)) || memo.is_none()).then_some(Self {
-            output_pool,
-            value,
-            memo,
-        })
-    }
-
-    /// Constructs a new change value that will be created as a transparent output.
-    pub fn transparent(value: NonNegativeAmount) -> Self {
-        Self {
-            output_pool: PoolType::TRANSPARENT,
-            value,
-            memo: None,
-        }
+    /// Constructs a new ephemeral transparent output value.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn ephemeral_transparent(value: NonNegativeAmount) -> Self {
+        Self(ChangeValueInner::EphemeralTransparent { value })
     }
 
     /// Constructs a new change value that will be created as a shielded output.
@@ -58,11 +51,11 @@ impl ChangeValue {
         value: NonNegativeAmount,
         memo: Option<MemoBytes>,
     ) -> Self {
-        Self {
-            output_pool: PoolType::Shielded(protocol),
+        Self(ChangeValueInner::Shielded {
+            protocol,
             value,
             memo,
-        }
+        })
     }
 
     /// Constructs a new change value that will be created as a Sapling output.
@@ -76,19 +69,45 @@ impl ChangeValue {
         Self::shielded(ShieldedProtocol::Orchard, value, memo)
     }
 
-    /// Returns the pool to which the change output should be sent.
+    /// Returns the pool to which the change or ephemeral output should be sent.
     pub fn output_pool(&self) -> PoolType {
-        self.output_pool
+        match &self.0 {
+            ChangeValueInner::Shielded { protocol, .. } => PoolType::Shielded(*protocol),
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::EphemeralTransparent { .. } => PoolType::Transparent,
+        }
     }
 
-    /// Returns the value of the change output to be created, in zatoshis.
+    /// Returns the value of the change or ephemeral output to be created, in zatoshis.
     pub fn value(&self) -> NonNegativeAmount {
-        self.value
+        match &self.0 {
+            ChangeValueInner::Shielded { value, .. } => *value,
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::EphemeralTransparent { value } => *value,
+        }
     }
 
-    /// Returns the memo to be associated with the change output.
+    /// Returns the memo to be associated with the output.
     pub fn memo(&self) -> Option<&MemoBytes> {
-        self.memo.as_ref()
+        match &self.0 {
+            ChangeValueInner::Shielded { memo, .. } => memo.as_ref(),
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::EphemeralTransparent { .. } => None,
+        }
+    }
+
+    /// Whether this is to be an ephemeral output.
+    #[cfg_attr(
+        not(feature = "transparent-inputs"),
+        doc = "This is always false because the `transparent-inputs` feature is
+               not enabled."
+    )]
+    pub fn is_ephemeral(&self) -> bool {
+        match &self.0 {
+            ChangeValueInner::Shielded { .. } => false,
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::EphemeralTransparent { .. } => true,
+        }
     }
 }
 
@@ -154,15 +173,25 @@ pub enum ChangeError<E, NoteRefT> {
         /// including the required fees.
         required: NonNegativeAmount,
     },
-    /// Some of the inputs provided to the transaction were determined to currently have no
-    /// economic value (i.e. their inclusion in a transaction causes fees to rise in an amount
-    /// greater than their value.)
+    /// Some of the inputs provided to the transaction have value less than the
+    /// marginal fee, and could not be determined to have any economic value in
+    /// the context of this input selection.
+    ///
+    /// This determination is potentially conservative in the sense that inputs
+    /// with value less than or equal to the marginal fee might be excluded, even
+    /// though in practice they would not cause the fee to increase. Inputs with
+    /// value greater than the marginal fee will never be excluded.
+    ///
+    /// The ordering of the inputs in each list is unspecified.
     DustInputs {
-        /// The outpoints corresponding to transparent inputs having no current economic value.
+        /// The outpoints for transparent inputs that could not be determined to
+        /// have economic value in the context of this input selection.
         transparent: Vec<OutPoint>,
-        /// The identifiers for Sapling inputs having no current economic value
+        /// The identifiers for Sapling inputs that could not be determined to
+        /// have economic value in the context of this input selection.
         sapling: Vec<NoteRefT>,
-        /// The identifiers for Orchard inputs having no current economic value
+        /// The identifiers for Orchard inputs that could not be determined to
+        /// have economic value in the context of this input selection.
         #[cfg(feature = "orchard")]
         orchard: Vec<NoteRefT>,
     },
@@ -301,6 +330,41 @@ impl Default for DustOutputPolicy {
     }
 }
 
+/// `EphemeralBalance` describes the ephemeral input or output value for a transaction. It is used
+/// in fee computation for series of transactions that use an ephemeral transparent output in an
+/// intermediate step, such as when sending from a shielded pool to a [ZIP 320] "TEX" address.
+///
+/// [ZIP 320]: https://zips.z.cash/zip-0320
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EphemeralBalance {
+    Input(NonNegativeAmount),
+    Output(NonNegativeAmount),
+}
+
+impl EphemeralBalance {
+    pub fn is_input(&self) -> bool {
+        matches!(self, EphemeralBalance::Input(_))
+    }
+
+    pub fn is_output(&self) -> bool {
+        matches!(self, EphemeralBalance::Output(_))
+    }
+
+    pub fn ephemeral_input_amount(&self) -> Option<NonNegativeAmount> {
+        match self {
+            EphemeralBalance::Input(v) => Some(*v),
+            EphemeralBalance::Output(_) => None,
+        }
+    }
+
+    pub fn ephemeral_output_amount(&self) -> Option<NonNegativeAmount> {
+        match self {
+            EphemeralBalance::Input(_) => None,
+            EphemeralBalance::Output(v) => Some(*v),
+        }
+    }
+}
+
 /// A trait that represents the ability to compute the suggested change and fees that must be paid
 /// by a transaction having a specified set of inputs and outputs.
 pub trait ChangeStrategy {
@@ -318,6 +382,20 @@ pub trait ChangeStrategy {
     /// change outputs recommended by this operation. If insufficient funds are available to
     /// supply the requested outputs and required fees, implementations should return
     /// [`ChangeError::InsufficientFunds`].
+    ///
+    /// If the inputs include notes or UTXOs that are not economic to spend in the context
+    /// of this input selection, a [`ChangeError::DustInputs`] error can be returned
+    /// indicating inputs that should be removed from the selection (all of which will
+    /// have value less than or equal to the marginal fee). The caller should order the
+    /// inputs from most to least preferred to spend within each pool, so that the most
+    /// preferred ones are less likely to be indicated to remove.
+    ///
+    /// - `ephemeral_balance`: if the transaction is to be constructed with either an
+    ///   ephemeral transparent input or an ephemeral transparent output this argument
+    ///   may be used to provide the value of that input or output. The value of this
+    ///   output should be `None` in the case that there are no such items.
+    ///
+    /// [ZIP 320]: https://zips.z.cash/zip-0320
     #[allow(clippy::too_many_arguments)]
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
         &self,
@@ -328,6 +406,7 @@ pub trait ChangeStrategy {
         sapling: &impl sapling::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
+        ephemeral_balance: Option<&EphemeralBalance>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
 }
 
