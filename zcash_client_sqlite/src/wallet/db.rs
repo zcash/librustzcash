@@ -106,8 +106,8 @@ CREATE INDEX "addresses_accounts" ON "addresses" (
 ///
 /// All but the last `GAP_LIMIT` addresses are defined to be "reserved" addresses. Since the next
 /// index to reserve is determined by dead reckoning from the last stored address, we use dummy
-/// entries after the maximum valid index in order to allow the last `GAP_LIMIT` addresses at the
-/// end of the index range to be used.
+/// entries having `NULL` for the value of the `address` column after the maximum valid index in
+/// order to allow the last `GAP_LIMIT` addresses at the end of the index range to be used.
 ///
 /// Note that the fact that `used_in_tx` references a specific transaction is just a debugging aid.
 /// The same is mostly true of `seen_in_tx`, but we also take into account whether the referenced
@@ -116,6 +116,7 @@ pub(super) const TABLE_EPHEMERAL_ADDRESSES: &str = r#"
 CREATE TABLE ephemeral_addresses (
     account_id INTEGER NOT NULL,
     address_index INTEGER NOT NULL,
+    -- nullability of this column is controlled by the index_range_and_address_nullity check
     address TEXT,
     used_in_tx INTEGER,
     seen_in_tx INTEGER,
@@ -123,6 +124,7 @@ CREATE TABLE ephemeral_addresses (
     FOREIGN KEY (used_in_tx) REFERENCES transactions(id_tx),
     FOREIGN KEY (seen_in_tx) REFERENCES transactions(id_tx),
     PRIMARY KEY (account_id, address_index),
+    CONSTRAINT ephemeral_addr_uniq UNIQUE (address),
     CONSTRAINT used_implies_seen CHECK (
         used_in_tx IS NULL OR seen_in_tx IS NOT NULL
     ),
@@ -135,10 +137,6 @@ CREATE TABLE ephemeral_addresses (
 // libsqlite3-sys requires at least version 3.14.0.
 // "WITHOUT ROWID" tells SQLite to use a clustered index on the (composite) primary key.
 const_assert_eq!(GAP_LIMIT, 20);
-pub(super) const INDEX_EPHEMERAL_ADDRESSES_ADDRESS: &str = r#"
-CREATE INDEX ephemeral_addresses_address ON ephemeral_addresses (
-    address ASC
-)"#;
 
 /// Stores information about every block that the wallet has scanned.
 ///

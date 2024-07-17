@@ -45,6 +45,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             "CREATE TABLE ephemeral_addresses (
                 account_id INTEGER NOT NULL,
                 address_index INTEGER NOT NULL,
+                -- nullability of this column is controlled by the index_range_and_address_nullity check
                 address TEXT,
                 used_in_tx INTEGER,
                 seen_in_tx INTEGER,
@@ -52,6 +53,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 FOREIGN KEY (used_in_tx) REFERENCES transactions(id_tx),
                 FOREIGN KEY (seen_in_tx) REFERENCES transactions(id_tx),
                 PRIMARY KEY (account_id, address_index),
+                CONSTRAINT ephemeral_addr_uniq UNIQUE (address),
                 CONSTRAINT used_implies_seen CHECK (
                     used_in_tx IS NULL OR seen_in_tx IS NOT NULL
                 ),
@@ -59,10 +61,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     (address_index BETWEEN 0 AND 0x7FFFFFFF AND address IS NOT NULL) OR
                     (address_index BETWEEN 0x80000000 AND 0x7FFFFFFF + 20 AND address IS NULL AND used_in_tx IS NULL AND seen_in_tx IS NULL)
                 )
-            ) WITHOUT ROWID;
-            CREATE INDEX ephemeral_addresses_address ON ephemeral_addresses (
-                address ASC
-            );",
+            ) WITHOUT ROWID;"
         )?;
 
         // Make sure that at least `GAP_LIMIT` ephemeral transparent addresses are

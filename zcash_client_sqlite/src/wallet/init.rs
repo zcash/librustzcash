@@ -422,7 +422,6 @@ mod tests {
             db::INDEX_ACCOUNTS_UIVK,
             db::INDEX_HD_ACCOUNT,
             db::INDEX_ADDRESSES_ACCOUNTS,
-            db::INDEX_EPHEMERAL_ADDRESSES_ADDRESS,
             db::INDEX_NF_MAP_LOCATOR_IDX,
             db::INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT,
             db::INDEX_ORCHARD_RECEIVED_NOTES_TX,

@@ -282,14 +282,18 @@ fn reserve_until<P: consensus::Parameters>(
     )?;
 
     for raw_index in range_to_store {
-        let address_str_opt = match NonHardenedChildIndex::from_index(raw_index) {
-            Some(address_index) => Some(
+        // The range to store may contain indicies that are out of the valid range of non hardened
+        // child indices; we still store explicit rows in the ephemeral_addresses table for these
+        // so that it's possible to find the first unused address using dead reckoning with the gap
+        // limit.
+        let address_str_opt = NonHardenedChildIndex::from_index(raw_index)
+            .map(|address_index| {
                 ephemeral_ivk
-                    .derive_ephemeral_address(address_index)?
-                    .encode(params),
-            ),
-            None => None,
-        };
+                    .derive_ephemeral_address(address_index)
+                    .map(|addr| addr.encode(params))
+            })
+            .transpose()?;
+
         stmt_insert_ephemeral_address.execute(named_params![
             ":account_id": account_id.0,
             ":address_index": raw_index,
