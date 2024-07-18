@@ -71,6 +71,9 @@ secp256k1 = "0.27"
 rand = "0.8"
 rand_core = "0.6"
 
+# Currency conversions
+rust_decimal = { version = "1.35", default-features = false, features = ["serde"] }
+
 # Digests
 blake2b_simd = "1"
 sha2 = "0.10"

@@ -6,7 +6,7 @@ use arti_client::{config::TorClientConfigBuilder, TorClient};
 use tor_rtcompat::PreferredRuntime;
 use tracing::debug;
 
-mod http;
+pub mod http;
 
 /// A Tor client that exposes capabilities designed for Zcash wallets.
 pub struct Client {
