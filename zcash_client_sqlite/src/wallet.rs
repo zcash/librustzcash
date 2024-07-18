@@ -422,14 +422,12 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 // An account conflict occurred.
                 // Make a best effort to determine the AccountId of the pre-existing row
                 // and provide that to our caller.
-                if s.clone().is_some_and(|s| s.contains(".ufvk")) {
-                    if let Ok(id) = conn.query_row(
-                        "SELECT id FROM accounts WHERE ufvk = ?",
-                        params![ufvk_encoded],
-                        |row| Ok(AccountId(row.get(0)?)),
-                    ) {
-                        return SqliteClientError::AccountCollision(id);
-                    }
+                if let Ok(id) = conn.query_row(
+                    "SELECT id FROM accounts WHERE ufvk = ?",
+                    params![ufvk_encoded],
+                    |row| Ok(AccountId(row.get(0)?)),
+                ) {
+                    return SqliteClientError::AccountCollision(id);
                 }
 
                 SqliteClientError::from(rusqlite::Error::SqliteFailure(f, s))
