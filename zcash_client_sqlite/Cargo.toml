@@ -37,8 +37,8 @@ zip32.workspace = true
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - Errors
+bip32 = { workspace = true, optional = true }
 bs58.workspace = true
-hdwallet = { workspace = true, optional = true }
 
 # - Logging and metrics
 tracing.workspace = true
@@ -53,6 +53,9 @@ jubjub.workspace = true
 # - Secret management
 secrecy.workspace = true
 subtle.workspace = true
+
+# - Static assertions
+static_assertions.workspace = true
 
 # - Shielded protocols
 orchard = { workspace = true, optional = true }
@@ -96,6 +99,7 @@ zcash_primitives = { workspace = true, features = ["test-dependencies"] }
 zcash_protocol = { workspace = true, features = ["local-consensus"] }
 zcash_client_backend = { workspace = true, features = ["test-dependencies", "unstable-serialization", "unstable-spanning-tree"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
+zip321 = { workspace = true }
 
 [features]
 default = ["multicore"]
@@ -117,7 +121,7 @@ test-dependencies = [
 
 ## Enables receiving transparent funds and sending to transparent recipients
 transparent-inputs = [
-  "dep:hdwallet", 
+  "dep:bip32",
   "zcash_keys/transparent-inputs",
   "zcash_client_backend/transparent-inputs"
 ]

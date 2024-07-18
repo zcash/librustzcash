@@ -2,7 +2,7 @@
 
 use crate::{
     consensus::{self, BlockHeight},
-    transaction::components::amount::NonNegativeAmount,
+    transaction::{components::amount::NonNegativeAmount, fees::transparent::InputSize},
 };
 
 pub mod fixed;
@@ -27,8 +27,8 @@ pub trait FeeRule {
         &self,
         params: &P,
         target_height: BlockHeight,
-        transparent_inputs: &[impl transparent::InputView],
-        transparent_outputs: &[impl transparent::OutputView],
+        transparent_input_sizes: impl IntoIterator<Item = InputSize>,
+        transparent_output_sizes: impl IntoIterator<Item = usize>,
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
@@ -49,8 +49,8 @@ pub trait FutureFeeRule: FeeRule {
         &self,
         params: &P,
         target_height: BlockHeight,
-        transparent_inputs: &[impl transparent::InputView],
-        transparent_outputs: &[impl transparent::OutputView],
+        transparent_input_sizes: impl IntoIterator<Item = InputSize>,
+        transparent_output_sizes: impl IntoIterator<Item = usize>,
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
@@ -80,8 +80,8 @@ impl FeeRule for StandardFeeRule {
         &self,
         params: &P,
         target_height: BlockHeight,
-        transparent_inputs: &[impl transparent::InputView],
-        transparent_outputs: &[impl transparent::OutputView],
+        transparent_input_sizes: impl IntoIterator<Item = InputSize>,
+        transparent_output_sizes: impl IntoIterator<Item = usize>,
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
@@ -93,8 +93,8 @@ impl FeeRule for StandardFeeRule {
             Self::Zip317 => zip317::FeeRule::standard().fee_required(
                 params,
                 target_height,
-                transparent_inputs,
-                transparent_outputs,
+                transparent_input_sizes,
+                transparent_output_sizes,
                 sapling_input_count,
                 sapling_output_count,
                 orchard_action_count,

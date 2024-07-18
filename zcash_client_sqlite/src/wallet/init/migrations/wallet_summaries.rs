@@ -87,3 +87,13 @@ impl RusqliteMigration for Migration {
         Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::wallet::init::migrations::tests::test_migrate;
+
+    #[test]
+    fn migrate() {
+        test_migrate(&[super::MIGRATION_ID]);
+    }
+}

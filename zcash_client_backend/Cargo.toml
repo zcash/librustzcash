@@ -58,7 +58,7 @@ bech32.workspace = true
 bs58.workspace = true
 
 # - Errors
-hdwallet = { workspace = true, optional = true }
+bip32 = { workspace = true, optional = true }
 
 # - Logging and metrics
 memuse.workspace = true
@@ -133,7 +133,7 @@ lightwalletd-tonic-transport = ["lightwalletd-tonic", "tonic?/transport"]
 
 ## Enables receiving transparent funds and shielding them.
 transparent-inputs = [
-    "dep:hdwallet",
+    "dep:bip32",
     "zcash_keys/transparent-inputs",
     "zcash_primitives/transparent-inputs",
 ]

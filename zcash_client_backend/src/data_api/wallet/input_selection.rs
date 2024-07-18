@@ -32,9 +32,14 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    std::collections::BTreeSet, std::convert::Infallible,
-    zcash_primitives::legacy::TransparentAddress,
-    zcash_primitives::transaction::components::OutPoint,
+    crate::{
+        fees::EphemeralBalance,
+        proposal::{Step, StepOutput, StepOutputIndex},
+        zip321::Payment,
+    },
+    std::collections::BTreeSet,
+    std::convert::Infallible,
+    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
 };
 
 #[cfg(feature = "orchard")]
@@ -222,6 +227,8 @@ pub enum GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT> {
     Balance(BalanceError),
     /// A unified address did not contain a supported receiver.
     UnsupportedAddress(Box<UnifiedAddress>),
+    /// Support for transparent-source-only (TEX) addresses requires the transparent-inputs feature.
+    UnsupportedTexAddress,
     /// An error was encountered in change selection.
     Change(ChangeError<ChangeStrategyErrT, NoteRefT>),
 }
@@ -238,6 +245,9 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for GreedyInputSelectorErro
                 // we can't encode the UA to its string representation because we
                 // don't have network parameters here
                 write!(f, "Unified address contains no supported receivers.")
+            }
+            GreedyInputSelectorError::UnsupportedTexAddress => {
+                write!(f, "Support for transparent-source-only (TEX) addresses requires the transparent-inputs feature.")
             }
             GreedyInputSelectorError::Change(err) => {
                 write!(f, "An error occurred computing change and fees: {}", err)
@@ -318,6 +328,11 @@ pub struct GreedyInputSelector<DbT, ChangeT> {
 impl<DbT, ChangeT: ChangeStrategy> GreedyInputSelector<DbT, ChangeT> {
     /// Constructs a new greedy input selector that uses the provided change strategy to determine
     /// change values and fee amounts.
+    ///
+    /// The [`ChangeStrategy`] provided must produce exactly one ephemeral change value when
+    /// computing a transaction balance if an [`EphemeralBalance::Output`] value is provided for
+    /// its ephemeral balance, or the resulting [`GreedyInputSelector`] will return an error when
+    /// attempting to construct a transaction proposal that requires such an output.
     pub fn new(change_strategy: ChangeT, dust_output_policy: DustOutputPolicy) -> Self {
         GreedyInputSelector {
             change_strategy,
@@ -359,6 +374,22 @@ where
         #[cfg(feature = "orchard")]
         let mut orchard_outputs = vec![];
         let mut payment_pools = BTreeMap::new();
+
+        // In a ZIP 320 pair, tr0 refers to the first transaction request that
+        // collects shielded value and sends it to an ephemeral address, and tr1
+        // refers to the second transaction request that pays the TEX addresses.
+        #[cfg(feature = "transparent-inputs")]
+        let mut tr1_transparent_outputs = vec![];
+        #[cfg(feature = "transparent-inputs")]
+        let mut tr1_payments = vec![];
+        #[cfg(feature = "transparent-inputs")]
+        let mut tr1_payment_pools = BTreeMap::new();
+        // This balance value is just used for overflow checking; the actual value of ephemeral
+        // outputs will be computed from the constructed `tr1_transparent_outputs` value
+        // constructed below.
+        #[cfg(feature = "transparent-inputs")]
+        let mut total_ephemeral = NonNegativeAmount::ZERO;
+
         for (idx, payment) in transaction_request.payments() {
             let recipient_address: Address = payment
                 .recipient_address()
@@ -367,32 +398,61 @@ where
 
             match recipient_address {
                 Address::Transparent(addr) => {
-                    payment_pools.insert(*idx, PoolType::Transparent);
+                    payment_pools.insert(*idx, PoolType::TRANSPARENT);
                     transparent_outputs.push(TxOut {
                         value: payment.amount(),
                         script_pubkey: addr.script(),
                     });
                 }
+                #[cfg(feature = "transparent-inputs")]
+                Address::Tex(data) => {
+                    let p2pkh_addr = TransparentAddress::PublicKeyHash(data);
+
+                    tr1_payment_pools.insert(*idx, PoolType::TRANSPARENT);
+                    tr1_transparent_outputs.push(TxOut {
+                        value: payment.amount(),
+                        script_pubkey: p2pkh_addr.script(),
+                    });
+                    tr1_payments.push(
+                        Payment::new(
+                            payment.recipient_address().clone(),
+                            payment.amount(),
+                            None,
+                            payment.label().cloned(),
+                            payment.message().cloned(),
+                            payment.other_params().to_vec(),
+                        )
+                        .expect("cannot fail because memo is None"),
+                    );
+                    total_ephemeral = (total_ephemeral + payment.amount())
+                        .ok_or_else(|| GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
+                }
+                #[cfg(not(feature = "transparent-inputs"))]
+                Address::Tex(_) => {
+                    return Err(InputSelectorError::Selection(
+                        GreedyInputSelectorError::UnsupportedTexAddress,
+                    ));
+                }
                 Address::Sapling(_) => {
-                    payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
+                    payment_pools.insert(*idx, PoolType::SAPLING);
                     sapling_outputs.push(SaplingPayment(payment.amount()));
                 }
                 Address::Unified(addr) => {
                     #[cfg(feature = "orchard")]
                     if addr.orchard().is_some() {
-                        payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Orchard));
+                        payment_pools.insert(*idx, PoolType::ORCHARD);
                         orchard_outputs.push(OrchardPayment(payment.amount()));
                         continue;
                     }
 
                     if addr.sapling().is_some() {
-                        payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
+                        payment_pools.insert(*idx, PoolType::SAPLING);
                         sapling_outputs.push(SaplingPayment(payment.amount()));
                         continue;
                     }
 
                     if let Some(addr) = addr.transparent() {
-                        payment_pools.insert(*idx, PoolType::Transparent);
+                        payment_pools.insert(*idx, PoolType::TRANSPARENT);
                         transparent_outputs.push(TxOut {
                             value: payment.amount(),
                             script_pubkey: addr.script(),
@@ -407,10 +467,65 @@ where
             }
         }
 
+        #[cfg(not(feature = "transparent-inputs"))]
+        let ephemeral_balance = None;
+
+        #[cfg(feature = "transparent-inputs")]
+        let (ephemeral_balance, tr1_balance_opt) = {
+            if tr1_transparent_outputs.is_empty() {
+                (None, None)
+            } else {
+                // The ephemeral input going into transaction 1 must be able to pay that
+                // transaction's fee, as well as the TEX address payments.
+
+                // First compute the required total with an additional zero input,
+                // catching the `InsufficientFunds` error to obtain the required amount
+                // given the provided change strategy. Ignore the change memo in order
+                // to avoid adding a change output.
+                let tr1_required_input_value =
+                    match self.change_strategy.compute_balance::<_, DbT::NoteRef>(
+                        params,
+                        target_height,
+                        &[] as &[WalletTransparentOutput],
+                        &tr1_transparent_outputs,
+                        &sapling::EmptyBundleView,
+                        #[cfg(feature = "orchard")]
+                        &orchard_fees::EmptyBundleView,
+                        &self.dust_output_policy,
+                        Some(&EphemeralBalance::Input(NonNegativeAmount::ZERO)),
+                    ) {
+                        Err(ChangeError::InsufficientFunds { required, .. }) => required,
+                        Ok(_) => NonNegativeAmount::ZERO, // shouldn't happen
+                        Err(other) => return Err(other.into()),
+                    };
+
+                // Now recompute to obtain the `TransactionBalance` and verify that it
+                // fully accounts for the required fees.
+                let tr1_balance = self.change_strategy.compute_balance::<_, DbT::NoteRef>(
+                    params,
+                    target_height,
+                    &[] as &[WalletTransparentOutput],
+                    &tr1_transparent_outputs,
+                    &sapling::EmptyBundleView,
+                    #[cfg(feature = "orchard")]
+                    &orchard_fees::EmptyBundleView,
+                    &self.dust_output_policy,
+                    Some(&EphemeralBalance::Input(tr1_required_input_value)),
+                )?;
+                assert_eq!(tr1_balance.total(), tr1_balance.fee_required());
+
+                (
+                    Some(EphemeralBalance::Output(tr1_required_input_value)),
+                    Some(tr1_balance),
+                )
+            }
+        };
+
         let mut shielded_inputs = SpendableNotes::empty();
         let mut prior_available = NonNegativeAmount::ZERO;
         let mut amount_required = NonNegativeAmount::ZERO;
         let mut exclude: Vec<DbT::NoteRef> = vec![];
+
         // This loop is guaranteed to terminate because on each iteration we check that the amount
         // of funds selected is strictly increasing. The loop will either return a successful
         // result or the wallet will eventually run out of funds to select.
@@ -424,12 +539,12 @@ where
                     shielded_inputs.orchard_value()?,
                 );
 
-                // Use Sapling inputs if there are no Orchard outputs or there are not sufficient
-                // Orchard outputs to cover the amount required.
+                // Use Sapling inputs if there are no Orchard outputs or if there are insufficient
+                // funds from Orchard inputs to cover the amount required.
                 let use_sapling =
                     orchard_outputs.is_empty() || amount_required > orchard_input_total;
-                // Use Orchard inputs if there are insufficient Sapling funds to cover the amount
-                // reqiuired.
+                // Use Orchard inputs if there are insufficient funds from Sapling inputs to cover
+                // the amount required.
                 let use_orchard = !use_sapling || amount_required > sapling_input_total;
 
                 (use_sapling, use_orchard)
@@ -456,10 +571,12 @@ where
                 vec![]
             };
 
+            // In the ZIP 320 case, this is the balance for transaction 0, taking into account
+            // the ephemeral output.
             let balance = self.change_strategy.compute_balance(
                 params,
                 target_height,
-                &Vec::<WalletTransparentOutput>::new(),
+                &[] as &[WalletTransparentOutput],
                 &transparent_outputs,
                 &(
                     ::sapling::builder::BundleType::DEFAULT,
@@ -473,22 +590,109 @@ where
                     &orchard_outputs[..],
                 ),
                 &self.dust_output_policy,
+                ephemeral_balance.as_ref(),
             );
 
             match balance {
                 Ok(balance) => {
-                    return Proposal::single_step(
-                        transaction_request,
-                        payment_pools,
-                        vec![],
+                    // At this point, we have enough input value to pay for everything, so we will
+                    // return at the end of this block.
+
+                    let shielded_inputs =
                         NonEmpty::from_vec(shielded_inputs.into_vec(&SimpleNoteRetention {
                             sapling: use_sapling,
                             #[cfg(feature = "orchard")]
                             orchard: use_orchard,
                         }))
-                        .map(|notes| ShieldedInputs::from_parts(anchor_height, notes)),
+                        .map(|notes| ShieldedInputs::from_parts(anchor_height, notes));
+
+                    #[cfg(feature = "transparent-inputs")]
+                    if let Some(tr1_balance) = tr1_balance_opt {
+                        // Construct two new `TransactionRequest`s:
+                        // * `tr0` excludes the TEX outputs, and in their place includes
+                        //   a single additional ephemeral output to the transparent pool.
+                        // * `tr1` spends from that ephemeral output to each TEX output.
+
+                        // Find exactly one ephemeral change output.
+                        let ephemeral_outputs = balance
+                            .proposed_change()
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, c)| c.is_ephemeral())
+                            .collect::<Vec<_>>();
+
+                        let ephemeral_value = ephemeral_balance
+                            .and_then(|b| b.ephemeral_output_amount())
+                            .expect("ephemeral output balance exists (constructed above)");
+
+                        let ephemeral_output_index = match &ephemeral_outputs[..] {
+                            [(i, change_value)] if change_value.value() == ephemeral_value => {
+                                Ok(*i)
+                            }
+                            _ => Err(InputSelectorError::Proposal(
+                                ProposalError::EphemeralOutputsInvalid,
+                            )),
+                        }?;
+
+                        let ephemeral_stepoutput =
+                            StepOutput::new(0, StepOutputIndex::Change(ephemeral_output_index));
+
+                        let tr0 = TransactionRequest::from_indexed(
+                            transaction_request
+                                .payments()
+                                .iter()
+                                .filter(|(idx, _payment)| !tr1_payment_pools.contains_key(idx))
+                                .map(|(k, v)| (*k, v.clone()))
+                                .collect(),
+                        )
+                        .expect("removing payments from a TransactionRequest preserves validity");
+
+                        let mut steps = vec![];
+                        steps.push(
+                            Step::from_parts(
+                                &[],
+                                tr0,
+                                payment_pools,
+                                vec![],
+                                shielded_inputs,
+                                vec![],
+                                balance,
+                                false,
+                            )
+                            .map_err(InputSelectorError::Proposal)?,
+                        );
+
+                        let tr1 =
+                            TransactionRequest::new(tr1_payments).expect("valid by construction");
+                        steps.push(
+                            Step::from_parts(
+                                &steps,
+                                tr1,
+                                tr1_payment_pools,
+                                vec![],
+                                None,
+                                vec![ephemeral_stepoutput],
+                                tr1_balance,
+                                false,
+                            )
+                            .map_err(InputSelectorError::Proposal)?,
+                        );
+
+                        return Proposal::multi_step(
+                            self.change_strategy.fee_rule().clone(),
+                            target_height,
+                            NonEmpty::from_vec(steps).expect("steps is known to be nonempty"),
+                        )
+                        .map_err(InputSelectorError::Proposal);
+                    }
+
+                    return Proposal::single_step(
+                        transaction_request,
+                        payment_pools,
+                        vec![],
+                        shielded_inputs,
                         balance,
-                        (*self.change_strategy.fee_rule()).clone(),
+                        self.change_strategy.fee_rule().clone(),
                         target_height,
                         false,
                     )
@@ -570,11 +774,7 @@ where
         let mut transparent_inputs: Vec<WalletTransparentOutput> = source_addrs
             .iter()
             .map(|taddr| {
-                wallet_db.get_unspent_transparent_outputs(
-                    taddr,
-                    target_height - min_confirmations,
-                    &[],
-                )
+                wallet_db.get_spendable_transparent_outputs(taddr, target_height, min_confirmations)
             })
             .collect::<Result<Vec<Vec<_>>, _>>()
             .map_err(InputSelectorError::DataSource)?
@@ -586,19 +786,12 @@ where
             params,
             target_height,
             &transparent_inputs,
-            &Vec::<TxOut>::new(),
-            &(
-                ::sapling::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &[] as &[TxOut],
+            &sapling::EmptyBundleView,
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &orchard_fees::EmptyBundleView,
             &self.dust_output_policy,
+            None,
         );
 
         let balance = match trial_balance {
@@ -611,19 +804,12 @@ where
                     params,
                     target_height,
                     &transparent_inputs,
-                    &Vec::<TxOut>::new(),
-                    &(
-                        ::sapling::builder::BundleType::DEFAULT,
-                        &Vec::<Infallible>::new()[..],
-                        &Vec::<Infallible>::new()[..],
-                    ),
+                    &[] as &[TxOut],
+                    &sapling::EmptyBundleView,
                     #[cfg(feature = "orchard")]
-                    &(
-                        orchard::builder::BundleType::DEFAULT,
-                        &Vec::<Infallible>::new()[..],
-                        &Vec::<Infallible>::new()[..],
-                    ),
+                    &orchard_fees::EmptyBundleView,
                     &self.dust_output_policy,
+                    None,
                 )?
             }
             Err(other) => {

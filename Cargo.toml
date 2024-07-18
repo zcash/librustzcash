@@ -6,6 +6,7 @@ members = [
     "components/zcash_encoding",
     "components/zcash_protocol",
     "components/zip321",
+    "zcash",
     "zcash_client_backend",
     "zcash_client_sqlite",
     "zcash_extensions",
@@ -45,7 +46,7 @@ zcash_proofs = { version = "0.15", path = "zcash_proofs", default-features = fal
 ff = "0.13"
 group = "0.13"
 incrementalmerkletree = "0.5.1"
-shardtree = "0.3"
+shardtree = "0.3.1"
 zcash_spec = "0.1"
 
 # Payment protocols
@@ -62,9 +63,9 @@ orchard = { version = "0.8.0", default-features = false }
 pasta_curves = "0.5"
 
 # - Transparent
-hdwallet = "0.4"
+bip32 = { version = "0.5", default-features = false, features = ["secp256k1-ffi"] }
 ripemd = "0.1"
-secp256k1 = "0.26"
+secp256k1 = "0.27"
 
 # CSPRNG
 rand = "0.8"
@@ -95,16 +96,17 @@ maybe-rayon = { version = "0.1.0", default-features = false }
 rayon = "1.5"
 
 # Protobuf and gRPC
-prost = "0.12"
-tonic = { version = "0.11", default-features = false }
-tonic-build = { version = "0.11", default-features = false }
+prost = "0.13"
+tonic = { version = "0.12", default-features = false }
+tonic-build = { version = "0.12", default-features = false }
 
 # Secret management
 secrecy = "0.8"
 subtle = "2.2.3"
 
-# Static constants
+# Static constants and assertions
 lazy_static = "1"
+static_assertions = "1"
 
 # Tests and benchmarks
 assert_matches = "1.5"
@@ -122,3 +124,7 @@ zip32 = "0.1.1"
 lto = true
 panic = 'abort'
 codegen-units = 1
+
+[patch.crates-io]
+incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "337f59179eda51261e9ddfc6b18e8fb84ea277c9" }
+shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "337f59179eda51261e9ddfc6b18e8fb84ea277c9" }

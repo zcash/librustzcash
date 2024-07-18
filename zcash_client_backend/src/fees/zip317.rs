@@ -16,8 +16,8 @@ use zcash_primitives::{
 use crate::ShieldedProtocol;
 
 use super::{
-    common::{calculate_net_flows, single_change_output_balance, single_change_output_policy},
-    sapling as sapling_fees, ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance,
+    common::single_change_output_balance, sapling as sapling_fees, ChangeError, ChangeStrategy,
+    DustOutputPolicy, EphemeralBalance, TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
@@ -67,135 +67,8 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
+        ephemeral_balance: Option<&EphemeralBalance>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
-        let mut transparent_dust: Vec<_> = transparent_inputs
-            .iter()
-            .filter_map(|i| {
-                // for now, we're just assuming p2pkh inputs, so we don't check the size of the input
-                // script
-                if i.coin().value < self.fee_rule.marginal_fee() {
-                    Some(i.outpoint().clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let mut sapling_dust: Vec<_> = sapling
-            .inputs()
-            .iter()
-            .filter_map(|i| {
-                if sapling_fees::InputView::<NoteRefT>::value(i) < self.fee_rule.marginal_fee() {
-                    Some(sapling_fees::InputView::<NoteRefT>::note_id(i).clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        #[cfg(feature = "orchard")]
-        let mut orchard_dust: Vec<NoteRefT> = orchard
-            .inputs()
-            .iter()
-            .filter_map(|i| {
-                if orchard_fees::InputView::<NoteRefT>::value(i) < self.fee_rule.marginal_fee() {
-                    Some(orchard_fees::InputView::<NoteRefT>::note_id(i).clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        #[cfg(not(feature = "orchard"))]
-        let mut orchard_dust: Vec<NoteRefT> = vec![];
-
-        // Depending on the shape of the transaction, we may be able to spend up to
-        // `grace_actions - 1` dust inputs. If we don't have any dust inputs though,
-        // we don't need to worry about any of that.
-        if !(transparent_dust.is_empty() && sapling_dust.is_empty() && orchard_dust.is_empty()) {
-            let t_non_dust = transparent_inputs.len() - transparent_dust.len();
-            let t_allowed_dust = transparent_outputs.len().saturating_sub(t_non_dust);
-
-            // We add one to either the Sapling or Orchard outputs for the (single)
-            // change output. Note that this means that wallet-internal shielding
-            // transactions are an opportunity to spend a dust note.
-            let net_flows = calculate_net_flows::<NoteRefT, Self::FeeRule, Self::Error>(
-                transparent_inputs,
-                transparent_outputs,
-                sapling,
-                #[cfg(feature = "orchard")]
-                orchard,
-            )?;
-            let (_, sapling_change, orchard_change) =
-                single_change_output_policy::<NoteRefT, Self::FeeRule, Self::Error>(
-                    &net_flows,
-                    self.fallback_change_pool,
-                )?;
-
-            let s_non_dust = sapling.inputs().len() - sapling_dust.len();
-            let s_allowed_dust =
-                (sapling.outputs().len() + sapling_change).saturating_sub(s_non_dust);
-
-            #[cfg(feature = "orchard")]
-            let (orchard_inputs_len, orchard_outputs_len) =
-                (orchard.inputs().len(), orchard.outputs().len());
-            #[cfg(not(feature = "orchard"))]
-            let (orchard_inputs_len, orchard_outputs_len) = (0, 0);
-
-            let o_non_dust = orchard_inputs_len - orchard_dust.len();
-            let o_allowed_dust = (orchard_outputs_len + orchard_change).saturating_sub(o_non_dust);
-
-            let available_grace_inputs = self
-                .fee_rule
-                .grace_actions()
-                .saturating_sub(t_non_dust)
-                .saturating_sub(s_non_dust)
-                .saturating_sub(o_non_dust);
-
-            let mut t_disallowed_dust = transparent_dust.len().saturating_sub(t_allowed_dust);
-            let mut s_disallowed_dust = sapling_dust.len().saturating_sub(s_allowed_dust);
-            let mut o_disallowed_dust = orchard_dust.len().saturating_sub(o_allowed_dust);
-
-            if available_grace_inputs > 0 {
-                // If we have available grace inputs, allocate them first to transparent dust
-                // and then to Sapling dust followed by Orchard dust. The caller has provided
-                // inputs that it is willing to spend, so we don't need to consider privacy
-                // effects at this layer.
-                let t_grace_dust = available_grace_inputs.saturating_sub(t_disallowed_dust);
-                t_disallowed_dust = t_disallowed_dust.saturating_sub(t_grace_dust);
-
-                let s_grace_dust = available_grace_inputs
-                    .saturating_sub(t_grace_dust)
-                    .saturating_sub(s_disallowed_dust);
-                s_disallowed_dust = s_disallowed_dust.saturating_sub(s_grace_dust);
-
-                let o_grace_dust = available_grace_inputs
-                    .saturating_sub(t_grace_dust)
-                    .saturating_sub(s_grace_dust)
-                    .saturating_sub(o_disallowed_dust);
-                o_disallowed_dust = o_disallowed_dust.saturating_sub(o_grace_dust);
-            }
-
-            // Truncate the lists of inputs to be disregarded in input selection to just the
-            // disallowed lengths. This has the effect of prioritizing inputs for inclusion by the
-            // order of the original input slices, with the most preferred inputs first.
-            transparent_dust.reverse();
-            transparent_dust.truncate(t_disallowed_dust);
-            sapling_dust.reverse();
-            sapling_dust.truncate(s_disallowed_dust);
-            orchard_dust.reverse();
-            orchard_dust.truncate(o_disallowed_dust);
-
-            if !(transparent_dust.is_empty() && sapling_dust.is_empty() && orchard_dust.is_empty())
-            {
-                return Err(ChangeError::DustInputs {
-                    transparent: transparent_dust,
-                    sapling: sapling_dust,
-                    #[cfg(feature = "orchard")]
-                    orchard: orchard_dust,
-                });
-            }
-        }
-
         single_change_output_balance(
             params,
             &self.fee_rule,
@@ -207,15 +80,17 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             orchard,
             dust_output_policy,
             self.fee_rule.marginal_fee(),
-            self.change_memo.clone(),
+            self.change_memo.as_ref(),
             self.fallback_change_pool,
+            self.fee_rule.marginal_fee(),
+            self.fee_rule.grace_actions(),
+            ephemeral_balance,
         )
     }
 }
 
 #[cfg(test)]
 mod tests {
-
     use std::convert::Infallible;
 
     use zcash_primitives::{
@@ -232,13 +107,16 @@ mod tests {
         data_api::wallet::input_selection::SaplingPayment,
         fees::{
             tests::{TestSaplingInput, TestTransparentInput},
-            ChangeError, ChangeStrategy, ChangeValue, DustOutputPolicy,
+            ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy,
         },
         ShieldedProtocol,
     };
 
     #[cfg(feature = "orchard")]
-    use crate::data_api::wallet::input_selection::OrchardPayment;
+    use {
+        crate::data_api::wallet::input_selection::OrchardPayment,
+        crate::fees::orchard as orchard_fees,
+    };
 
     #[test]
     fn change_without_dust() {
@@ -254,8 +132,8 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
@@ -267,12 +145,9 @@ mod tests {
                 ))][..],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
+            None,
         );
 
         assert_matches!(
@@ -298,24 +173,25 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
                     note_id: 0,
                     value: NonNegativeAmount::const_from_u64(55000),
                 }][..],
-                &Vec::<Infallible>::new()[..],
+                &[] as &[Infallible],
             ),
             &(
                 orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
+                &[] as &[Infallible],
                 &[OrchardPayment::new(NonNegativeAmount::const_from_u64(
                     30000,
                 ))][..],
             ),
             &DustOutputPolicy::default(),
+            None,
         );
 
         assert_matches!(
@@ -327,7 +203,19 @@ mod tests {
     }
 
     #[test]
-    fn change_with_transparent_payments() {
+    fn change_with_transparent_payments_implicitly_allowing_zero_change() {
+        change_with_transparent_payments(&DustOutputPolicy::default())
+    }
+
+    #[test]
+    fn change_with_transparent_payments_explicitly_allowing_zero_change() {
+        change_with_transparent_payments(&DustOutputPolicy::new(
+            DustAction::AllowDustChange,
+            Some(NonNegativeAmount::ZERO),
+        ))
+    }
+
+    fn change_with_transparent_payments(dust_output_policy: &DustOutputPolicy) {
         let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
@@ -340,7 +228,7 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
+            &[] as &[TestTransparentInput],
             &[TxOut {
                 value: NonNegativeAmount::const_from_u64(40000),
                 script_pubkey: Script(vec![]),
@@ -351,40 +239,191 @@ mod tests {
                     note_id: 0,
                     value: NonNegativeAmount::const_from_u64(55000),
                 }][..],
-                &Vec::<Infallible>::new()[..],
+                &[] as &[Infallible],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
-            &DustOutputPolicy::default(),
+            &orchard_fees::EmptyBundleView,
+            dust_output_policy,
+            None,
         );
 
         assert_matches!(
             result,
-            Ok(balance) if balance.proposed_change().is_empty()
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::ZERO, None)]
                 && balance.fee_required() == NonNegativeAmount::const_from_u64(15000)
         );
     }
 
     #[test]
-    fn change_with_allowable_dust() {
+    #[cfg(feature = "transparent-inputs")]
+    fn change_fully_transparent_no_change() {
+        use crate::fees::sapling as sapling_fees;
+        use zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint};
+
         let change_strategy = SingleOutputChangeStrategy::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedProtocol::Sapling,
         );
 
-        // spend a single Sapling note that is sufficient to pay the fee
+        // Spend a single transparent UTXO that is exactly sufficient to pay the fee.
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap(),
+            &[TestTransparentInput {
+                outpoint: OutPoint::fake(),
+                coin: TxOut {
+                    value: NonNegativeAmount::const_from_u64(50000),
+                    script_pubkey: TransparentAddress::PublicKeyHash([0u8; 20]).script(),
+                },
+            }],
+            &[TxOut {
+                value: NonNegativeAmount::const_from_u64(40000),
+                script_pubkey: Script(vec![]),
+            }],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            &DustOutputPolicy::default(),
+            None,
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if
+                balance.proposed_change().is_empty() &&
+                balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn change_transparent_flows_with_shielded_change() {
+        use crate::fees::sapling as sapling_fees;
+        use zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint};
+
+        let change_strategy = SingleOutputChangeStrategy::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedProtocol::Sapling,
+        );
+
+        // Spend a single transparent UTXO that is sufficient to pay the fee.
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap(),
+            &[TestTransparentInput {
+                outpoint: OutPoint::fake(),
+                coin: TxOut {
+                    value: NonNegativeAmount::const_from_u64(63000),
+                    script_pubkey: TransparentAddress::PublicKeyHash([0u8; 20]).script(),
+                },
+            }],
+            &[TxOut {
+                value: NonNegativeAmount::const_from_u64(40000),
+                script_pubkey: Script(vec![]),
+            }],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            &DustOutputPolicy::default(),
+            None,
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(8000), None)] &&
+                balance.fee_required() == NonNegativeAmount::const_from_u64(15000)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn change_transparent_flows_with_shielded_dust_change() {
+        use crate::fees::sapling as sapling_fees;
+        use zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint};
+
+        let change_strategy = SingleOutputChangeStrategy::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedProtocol::Sapling,
+        );
+
+        // Spend a single transparent UTXO that is sufficient to pay the fee.
+        // The change will go to the fallback shielded change pool even though all inputs
+        // and payments are transparent, and even though the change amount (1000) would
+        // normally be considered dust, because we set the dust policy to allow that.
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap(),
+            &[TestTransparentInput {
+                outpoint: OutPoint::fake(),
+                coin: TxOut {
+                    value: NonNegativeAmount::const_from_u64(56000),
+                    script_pubkey: TransparentAddress::PublicKeyHash([0u8; 20]).script(),
+                },
+            }],
+            &[TxOut {
+                value: NonNegativeAmount::const_from_u64(40000),
+                script_pubkey: Script(vec![]),
+            }],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            &DustOutputPolicy::new(
+                DustAction::AllowDustChange,
+                Some(NonNegativeAmount::const_from_u64(1000)),
+            ),
+            None,
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(1000), None)] &&
+                balance.fee_required() == NonNegativeAmount::const_from_u64(15000)
+        );
+    }
+
+    #[test]
+    fn change_with_allowable_dust_implicitly_allowing_zero_change() {
+        change_with_allowable_dust(&DustOutputPolicy::default())
+    }
+
+    #[test]
+    fn change_with_allowable_dust_explicitly_allowing_zero_change() {
+        change_with_allowable_dust(&DustOutputPolicy::new(
+            DustAction::AllowDustChange,
+            Some(NonNegativeAmount::ZERO),
+        ))
+    }
+
+    fn change_with_allowable_dust(dust_output_policy: &DustOutputPolicy) {
+        let change_strategy = SingleOutputChangeStrategy::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedProtocol::Sapling,
+        );
+
+        // Spend two Sapling notes, one of them dust. There is sufficient to
+        // pay the fee: if only one note is spent then we are 1000 short, but
+        // if both notes are spent then the fee stays at 10000 (even with a
+        // zero-valued change output), so we have just enough.
         let result = change_strategy.compute_balance(
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[
@@ -402,18 +441,16 @@ mod tests {
                 ))][..],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
-            &DustOutputPolicy::default(),
+            &orchard_fees::EmptyBundleView,
+            dust_output_policy,
+            None,
         );
 
         assert_matches!(
             result,
-            Ok(balance) if balance.proposed_change().is_empty()
-                && balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::ZERO, None)] &&
+                balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
         );
     }
 
@@ -425,14 +462,15 @@ mod tests {
             ShieldedProtocol::Sapling,
         );
 
-        // spend a single Sapling note that is sufficient to pay the fee
+        // Attempt to spend three Sapling notes, one of them dust. Adding the third
+        // note increases the number of actions, and so it is uneconomic to spend it.
         let result = change_strategy.compute_balance(
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[
@@ -450,19 +488,16 @@ mod tests {
                     },
                 ][..],
                 &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                    40000,
+                    30000,
                 ))][..],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &Vec::<Infallible>::new()[..],
-                &Vec::<Infallible>::new()[..],
-            ),
+            &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
+            None,
         );
 
-        // We will get an error here, because the dust input now isn't free to add
+        // We will get an error here, because the dust input isn't free to add
         // to the transaction.
         assert_matches!(
             result,

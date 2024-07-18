@@ -16,8 +16,9 @@ use crate::PRUNING_DEPTH;
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    crate::AccountId,
     zcash_client_backend::encoding::TransparentCodecError,
-    zcash_primitives::legacy::TransparentAddress,
+    zcash_primitives::{legacy::TransparentAddress, transaction::TxId},
 };
 
 /// The primary error type for the SQLite wallet backend.
@@ -40,7 +41,7 @@ pub enum SqliteClientError {
 
     /// An error produced in legacy transparent address derivation
     #[cfg(feature = "transparent-inputs")]
-    HdwalletError(hdwallet::error::Error),
+    TransparentDerivation(bip32::Error),
 
     /// An error encountered in decoding a transparent address from its
     /// serialized form.
@@ -93,7 +94,7 @@ pub enum SqliteClientError {
     AccountIdOutOfRange,
 
     /// The address associated with a record being inserted was not recognized as
-    /// belonging to the wallet
+    /// belonging to the wallet.
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
 
@@ -116,6 +117,18 @@ pub enum SqliteClientError {
 
     /// An error occurred in computing wallet balance
     BalanceError(BalanceError),
+
+    /// The proposal cannot be constructed until transactions with previously reserved
+    /// ephemeral address outputs have been mined. The parameters are the account id and
+    /// the index that could not safely be reserved.
+    #[cfg(feature = "transparent-inputs")]
+    ReachedGapLimit(AccountId, u32),
+
+    /// An ephemeral address would be reused. The parameters are the address in string
+    /// form, and the txid of the earliest transaction in which it is known to have been
+    /// used.
+    #[cfg(feature = "transparent-inputs")]
+    EphemeralAddressReuse(String, TxId),
 }
 
 impl error::Error for SqliteClientError {
@@ -143,7 +156,7 @@ impl fmt::Display for SqliteClientError {
                 write!(f, "A rewind must be either of less than {} blocks, or at least back to block {} for your wallet; the requested height was {}.", PRUNING_DEPTH, h, r),
             SqliteClientError::DecodingError(e) => write!(f, "{}", e),
             #[cfg(feature = "transparent-inputs")]
-            SqliteClientError::HdwalletError(e) => write!(f, "{:?}", e),
+            SqliteClientError::TransparentDerivation(e) => write!(f, "{:?}", e),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::TransparentAddress(e) => write!(f, "{}", e),
             SqliteClientError::TableNotEmpty => write!(f, "Table is not empty"),
@@ -167,6 +180,13 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::ChainHeightUnknown => write!(f, "Chain height unknown; please call `update_chain_tip`"),
             SqliteClientError::UnsupportedPoolType(t) => write!(f, "Pool type is not currently supported: {}", t),
             SqliteClientError::BalanceError(e) => write!(f, "Balance error: {}", e),
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::ReachedGapLimit(account_id, bad_index) => write!(f,
+                "The proposal cannot be constructed until transactions with previously reserved ephemeral address outputs have been mined. \
+                 The ephemeral address in account {account_id:?} at index {bad_index} could not be safely reserved.",
+            ),
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::EphemeralAddressReuse(address_str, txid) => write!(f, "The ephemeral address {address_str} previously used in txid {txid} would be reused."),
         }
     }
 }
@@ -195,9 +215,9 @@ impl From<prost::DecodeError> for SqliteClientError {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl From<hdwallet::error::Error> for SqliteClientError {
-    fn from(e: hdwallet::error::Error) -> Self {
-        SqliteClientError::HdwalletError(e)
+impl From<bip32::Error> for SqliteClientError {
+    fn from(e: bip32::Error) -> Self {
+        SqliteClientError::TransparentDerivation(e)
     }
 }
 

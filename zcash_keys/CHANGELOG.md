@@ -5,6 +5,10 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Notable changes
+- `zcash_keys` now supports TEX (transparent-source-only) addresses as specified
+  in [ZIP 320](https://zips.z.cash/zip-0320).
+
 ### Added
 - `zcash_keys::address::Address::try_from_zcash_address`
 - `zcash_keys::address::Receiver`
@@ -13,7 +17,12 @@ and this library adheres to Rust's notion of
   - `to_address_request`
 
 ### Changed
+- `zcash_keys::Address` has a new variant `Tex`.
+- `zcash_keys::address::Address::has_receiver` has been renamed to `can_receive_as`.
 - MSRV is now 1.70.0.
+- `zcash_keys::keys`:
+  - The (unstable) encoding of `UnifiedSpendingKey` has changed.
+  - `DerivationError::Transparent` now contains `bip32::Error`.
 
 ## [0.2.0] - 2024-03-25
 

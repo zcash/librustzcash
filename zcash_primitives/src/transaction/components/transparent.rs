@@ -96,8 +96,19 @@ pub struct OutPoint {
 }
 
 impl OutPoint {
+    /// Constructs an `OutPoint` for the output at index `n` in the transaction
+    /// with txid `hash`.
     pub fn new(hash: [u8; 32], n: u32) -> Self {
         OutPoint { hash, n }
+    }
+
+    /// Constructs a fake `OutPoint` for use in tests.
+    #[cfg(any(test, feature = "test-dependencies"))]
+    pub const fn fake() -> Self {
+        OutPoint {
+            hash: [1u8; 32],
+            n: 1,
+        }
     }
 
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
@@ -112,18 +123,20 @@ impl OutPoint {
         writer.write_u32::<LittleEndian>(self.n)
     }
 
-    /// Returns `true` if this `OutPoint` is "null" in the Bitcoin sense: it points to the
-    /// `u32::MAX`th output of the transaction with the all-zeroes txid.
+    /// Returns `true` if this `OutPoint` is "null" in the Bitcoin sense: it has txid set to
+    /// all-zeroes and output index set to `u32::MAX`.
     fn is_null(&self) -> bool {
         // From `BaseOutPoint::IsNull()` in zcashd:
         //   return (hash.IsNull() && n == (uint32_t) -1);
         self.hash == [0; 32] && self.n == u32::MAX
     }
 
+    /// Returns the output index of this `OutPoint`.
     pub fn n(&self) -> u32 {
         self.n
     }
 
+    /// Returns the txid of the transaction containing this `OutPoint`.
     pub fn hash(&self) -> &[u8; 32] {
         &self.hash
     }

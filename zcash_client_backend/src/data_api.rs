@@ -88,15 +88,18 @@ use zcash_primitives::{
     consensus::BlockHeight,
     memo::{Memo, MemoBytes},
     transaction::{
-        components::amount::{BalanceError, NonNegativeAmount},
+        components::{
+            amount::{BalanceError, NonNegativeAmount},
+            OutPoint,
+        },
         Transaction, TxId,
     },
 };
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::wallet::TransparentAddressMetadata,
-    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
+    crate::wallet::TransparentAddressMetadata, std::ops::Range,
+    zcash_primitives::legacy::TransparentAddress,
 };
 
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -665,10 +668,10 @@ pub trait InputSource {
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
 
-    /// Fetches a spendable transparent output.
+    /// Fetches the transparent output corresponding to the provided `outpoint`.
     ///
     /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or is not
-    /// spendable.
+    /// spendable as of the chain tip height.
     #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_output(
         &self,
@@ -677,14 +680,20 @@ pub trait InputSource {
         Ok(None)
     }
 
-    /// Returns a list of unspent transparent UTXOs that appear in the chain at heights up to and
-    /// including `max_height`.
+    /// Returns the list of spendable transparent outputs received by this wallet at `address`
+    /// such that, at height `target_height`:
+    /// * the transaction that produced the output had or will have at least `min_confirmations`
+    ///   confirmations; and
+    /// * the output is unspent as of the current chain tip.
+    ///
+    /// An output that is potentially spent by an unmined transaction in the mempool is excluded
+    /// iff the spending transaction will not be expired at `target_height`.
     #[cfg(feature = "transparent-inputs")]
-    fn get_unspent_transparent_outputs(
+    fn get_spendable_transparent_outputs(
         &self,
         _address: &TransparentAddress,
-        _max_height: BlockHeight,
-        _exclude: &[OutPoint],
+        _target_height: BlockHeight,
+        _min_confirmations: u32,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         Ok(vec![])
     }
@@ -886,10 +895,14 @@ pub trait WalletRead {
         query: NullifierQuery,
     ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error>;
 
-    /// Returns the set of all transparent receivers associated with the given account.
+    /// Returns the set of non-ephemeral transparent receivers associated with the given
+    /// account controlled by this wallet.
     ///
-    /// The set contains all transparent receivers that are known to have been derived
-    /// under this account. Wallets should scan the chain for UTXOs sent to these
+    /// The set contains all non-ephemeral transparent receivers that are known to have
+    /// been derived under this account. Wallets should scan the chain for UTXOs sent to
+    /// these receivers.
+    ///
+    /// Use [`Self::get_known_ephemeral_addresses`] to obtain the ephemeral transparent
     /// receivers.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
@@ -899,8 +912,11 @@ pub trait WalletRead {
         Ok(HashMap::new())
     }
 
-    /// Returns a mapping from transparent receiver to not-yet-shielded UTXO balance,
-    /// for each address associated with a nonzero balance.
+    /// Returns a mapping from each transparent receiver associated with the specified account
+    /// to its not-yet-shielded UTXO balance as of the end of the block at the provided
+    /// `max_height`, when that balance is non-zero.
+    ///
+    /// Balances of ephemeral transparent addresses will not be included.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
         &self,
@@ -908,6 +924,120 @@ pub trait WalletRead {
         _max_height: BlockHeight,
     ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
         Ok(HashMap::new())
+    }
+
+    /// Returns the metadata associated with a given transparent receiver in an account
+    /// controlled by this wallet, if available.
+    ///
+    /// This is equivalent to (but may be implemented more efficiently than):
+    /// ```compile_fail
+    /// Ok(
+    ///     if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
+    ///         result.clone()
+    ///     } else {
+    ///         self.get_known_ephemeral_addresses(account, None)?
+    ///             .into_iter()
+    ///             .find(|(known_addr, _)| known_addr == address)
+    ///             .map(|(_, metadata)| metadata)
+    ///     },
+    /// )
+    /// ```
+    ///
+    /// Returns `Ok(None)` if the address is not recognized, or we do not have metadata for it.
+    /// Returns `Ok(Some(metadata))` if we have the metadata.
+    #[cfg(feature = "transparent-inputs")]
+    fn get_transparent_address_metadata(
+        &self,
+        account: Self::AccountId,
+        address: &TransparentAddress,
+    ) -> Result<Option<TransparentAddressMetadata>, Self::Error> {
+        // This should be overridden.
+        Ok(
+            if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
+                result.clone()
+            } else {
+                self.get_known_ephemeral_addresses(account, None)?
+                    .into_iter()
+                    .find(|(known_addr, _)| known_addr == address)
+                    .map(|(_, metadata)| metadata)
+            },
+        )
+    }
+
+    /// Returns a vector of ephemeral transparent addresses associated with the given
+    /// account controlled by this wallet, along with their metadata. The result includes
+    /// reserved addresses, and addresses for `GAP_LIMIT` additional indices (capped to
+    /// the maximum index).
+    ///
+    /// If `index_range` is some `Range`, it limits the result to addresses with indices
+    /// in that range.
+    ///
+    /// Wallets should scan the chain for UTXOs sent to these ephemeral transparent
+    /// receivers, but do not need to do so regularly. Under expected usage, outputs
+    /// would only be detected with these receivers in the following situations:
+    ///
+    /// - This wallet created a payment to a ZIP 320 (TEX) address, but the second
+    ///   transaction (that spent the output sent to the ephemeral address) did not get
+    ///   mined before it expired.
+    ///   - In this case the output will already be known to the wallet (because it
+    ///     stores the transactions that it creates).
+    ///
+    /// - Another wallet app using the same seed phrase created a payment to a ZIP 320
+    ///   address, and this wallet queried for the ephemeral UTXOs after the first
+    ///   transaction was mined but before the second transaction was mined.
+    ///   - In this case, the output should not be considered unspent until the expiry
+    ///     height of the transaction it was received in has passed. Wallets creating
+    ///     payments to TEX addresses generally set the same expiry height for the first
+    ///     and second transactions, meaning that this wallet does not need to observe
+    ///     the second transaction to determine when it would have expired.
+    ///
+    /// - A TEX address recipient decided to return funds that the wallet had sent to
+    ///   them.
+    ///
+    /// In all cases, the wallet should re-shield the unspent outputs, in a separate
+    /// transaction per ephemeral address, before re-spending the funds.
+    #[cfg(feature = "transparent-inputs")]
+    fn get_known_ephemeral_addresses(
+        &self,
+        _account: Self::AccountId,
+        _index_range: Option<Range<u32>>,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        Ok(vec![])
+    }
+
+    /// If a given ephemeral address might have been reserved, i.e. would be included in
+    /// the map returned by `get_known_ephemeral_addresses(account_id, false)` for any
+    /// of the wallet's accounts, then return `Ok(Some(account_id))`. Otherwise return
+    /// `Ok(None)`.
+    ///
+    /// This is equivalent to (but may be implemented more efficiently than):
+    /// ```compile_fail
+    /// for account_id in self.get_account_ids()? {
+    ///     if self
+    ///         .get_known_ephemeral_addresses(account_id, None)?
+    ///         .into_iter()
+    ///         .any(|(known_addr, _)| &known_addr == address)
+    ///     {
+    ///         return Ok(Some(account_id));
+    ///     }
+    /// }
+    /// Ok(None)
+    /// ```
+    #[cfg(feature = "transparent-inputs")]
+    fn find_account_for_ephemeral_address(
+        &self,
+        address: &TransparentAddress,
+    ) -> Result<Option<Self::AccountId>, Self::Error> {
+        for account_id in self.get_account_ids()? {
+            if self
+                .get_known_ephemeral_addresses(account_id, None)?
+                .into_iter()
+                .any(|(known_addr, _)| &known_addr == address)
+            {
+                return Ok(Some(account_id));
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -1239,7 +1369,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
 /// This type is capable of representing both shielded and transparent outputs.
 pub struct SentTransactionOutput<AccountId> {
     output_index: usize,
-    recipient: Recipient<AccountId, Note>,
+    recipient: Recipient<AccountId, Note, OutPoint>,
     value: NonNegativeAmount,
     memo: Option<MemoBytes>,
 }
@@ -1256,7 +1386,7 @@ impl<AccountId> SentTransactionOutput<AccountId> {
     /// * `memo` - the memo that was sent with this output
     pub fn from_parts(
         output_index: usize,
-        recipient: Recipient<AccountId, Note>,
+        recipient: Recipient<AccountId, Note, OutPoint>,
         value: NonNegativeAmount,
         memo: Option<MemoBytes>,
     ) -> Self {
@@ -1278,8 +1408,8 @@ impl<AccountId> SentTransactionOutput<AccountId> {
         self.output_index
     }
     /// Returns the recipient address of the transaction, or the account id and
-    /// resulting note for wallet-internal outputs.
-    pub fn recipient(&self) -> &Recipient<AccountId, Note> {
+    /// resulting note/outpoint for wallet-internal outputs.
+    pub fn recipient(&self) -> &Recipient<AccountId, Note, OutPoint> {
         &self.recipient
     }
     /// Returns the value of the newly created output.
@@ -1462,6 +1592,8 @@ pub trait WalletWrite: WalletRead {
     /// funds have been received by the currently-available account (in order to enable automated
     /// account recovery).
     ///
+    /// # Panics
+    ///
     /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
@@ -1583,8 +1715,11 @@ pub trait WalletWrite: WalletRead {
         received_tx: DecryptedTransaction<Self::AccountId>,
     ) -> Result<(), Self::Error>;
 
-    /// Saves information about a transaction that was constructed and sent by the wallet to the
-    /// persistent wallet store.
+    /// Saves information about a transaction constructed by the wallet to the persistent
+    /// wallet store.
+    ///
+    /// The name `store_sent_tx` is somewhat misleading; this must be called *before* the
+    /// transaction is sent to the network.
     fn store_sent_tx(
         &mut self,
         sent_tx: &SentTransaction<Self::AccountId>,
@@ -1604,6 +1739,26 @@ pub trait WalletWrite: WalletRead {
     ///
     /// There may be restrictions on heights to which it is possible to truncate.
     fn truncate_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error>;
+
+    /// Reserves the next `n` available ephemeral addresses for the given account.
+    /// This cannot be undone, so as far as possible, errors associated with transaction
+    /// construction should have been reported before calling this method.
+    ///
+    /// To ensure that sufficient information is stored on-chain to allow recovering
+    /// funds sent back to any of the used addresses, a "gap limit" of 20 addresses
+    /// should be observed as described in [BIP 44].
+    ///
+    /// Returns an error if there is insufficient space within the gap limit to allocate
+    /// the given number of addresses, or if the account identifier does not correspond
+    /// to a known account.
+    ///
+    /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki#user-content-Address_gap_limit
+    #[cfg(feature = "transparent-inputs")]
+    fn reserve_next_n_ephemeral_addresses(
+        &mut self,
+        account_id: Self::AccountId,
+        n: usize,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error>;
 }
 
 /// This trait describes a capability for manipulating wallet note commitment trees.
@@ -1708,7 +1863,10 @@ pub mod testing {
     };
 
     #[cfg(feature = "transparent-inputs")]
-    use {crate::wallet::TransparentAddressMetadata, zcash_primitives::legacy::TransparentAddress};
+    use {
+        crate::wallet::TransparentAddressMetadata, std::ops::Range,
+        zcash_primitives::legacy::TransparentAddress,
+    };
 
     #[cfg(feature = "orchard")]
     use super::ORCHARD_SHARD_HEIGHT;
@@ -1931,6 +2089,32 @@ pub mod testing {
         ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
             Ok(HashMap::new())
         }
+
+        #[cfg(feature = "transparent-inputs")]
+        fn get_transparent_address_metadata(
+            &self,
+            _account: Self::AccountId,
+            _address: &TransparentAddress,
+        ) -> Result<Option<TransparentAddressMetadata>, Self::Error> {
+            Ok(None)
+        }
+
+        #[cfg(feature = "transparent-inputs")]
+        fn get_known_ephemeral_addresses(
+            &self,
+            _account: Self::AccountId,
+            _index_range: Option<Range<u32>>,
+        ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+            Ok(vec![])
+        }
+
+        #[cfg(feature = "transparent-inputs")]
+        fn find_account_for_ephemeral_address(
+            &self,
+            _address: &TransparentAddress,
+        ) -> Result<Option<Self::AccountId>, Self::Error> {
+            Ok(None)
+        }
     }
 
     impl WalletWrite for MockWalletDb {
@@ -2010,6 +2194,15 @@ pub mod testing {
             _output: &WalletTransparentOutput,
         ) -> Result<Self::UtxoRef, Self::Error> {
             Ok(0)
+        }
+
+        #[cfg(feature = "transparent-inputs")]
+        fn reserve_next_n_ephemeral_addresses(
+            &mut self,
+            _account_id: Self::AccountId,
+            _n: usize,
+        ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+            Err(())
         }
     }
 
