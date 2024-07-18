@@ -8,6 +8,23 @@ use tracing::{error, trace};
 
 use crate::tor::{Client, Error};
 
+mod binance;
+mod coinbase;
+mod gate_io;
+mod gemini;
+mod ku_coin;
+mod mexc;
+
+/// Exchanges for which we know how to query data over Tor.
+pub mod exchanges {
+    pub use super::binance::Binance;
+    pub use super::coinbase::Coinbase;
+    pub use super::gate_io::GateIo;
+    pub use super::gemini::Gemini;
+    pub use super::ku_coin::KuCoin;
+    pub use super::mexc::Mexc;
+}
+
 /// An exchange that can be queried for ZEC data.
 #[async_trait]
 pub trait Exchange: 'static {
@@ -43,6 +60,20 @@ pub struct Exchanges {
 }
 
 impl Exchanges {
+    /// Unauthenticated connections to all known exchanges with USD/ZEC pairs.
+    ///
+    /// Gemini is treated as a "trusted" data source due to being a NYDFS-regulated
+    /// exchange.
+    pub fn unauthenticated_known_with_gemini_trusted() -> Self {
+        Self::builder(exchanges::Gemini::unauthenticated())
+            .with(exchanges::Binance::unauthenticated())
+            .with(exchanges::Coinbase::unauthenticated())
+            .with(exchanges::GateIo::unauthenticated())
+            .with(exchanges::KuCoin::unauthenticated())
+            .with(exchanges::Mexc::unauthenticated())
+            .build()
+    }
+
     /// Returns an `Exchanges` builder.
     ///
     /// The `trusted` exchange will always have its data used, _if_ data is successfully
