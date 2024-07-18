@@ -333,6 +333,8 @@ impl<DbT, ChangeT: ChangeStrategy> GreedyInputSelector<DbT, ChangeT> {
     /// computing a transaction balance if an [`EphemeralBalance::Output`] value is provided for
     /// its ephemeral balance, or the resulting [`GreedyInputSelector`] will return an error when
     /// attempting to construct a transaction proposal that requires such an output.
+    ///
+    /// [`EphemeralBalance::Output`]: crate::fees::EphemeralBalance::Output
     pub fn new(change_strategy: ChangeT, dust_output_policy: DustOutputPolicy) -> Self {
         GreedyInputSelector {
             change_strategy,
