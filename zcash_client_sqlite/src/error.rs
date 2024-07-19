@@ -16,7 +16,6 @@ use crate::PRUNING_DEPTH;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::AccountId,
     zcash_client_backend::encoding::TransparentCodecError,
     zcash_primitives::{legacy::TransparentAddress, transaction::TxId},
 };
