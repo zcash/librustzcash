@@ -10,6 +10,7 @@ enum AddressKind {
     Unified(unified::Address),
     P2pkh([u8; 20]),
     P2sh([u8; 20]),
+    Tex([u8; 20]),
 }
 
 struct Address {
@@ -66,6 +67,13 @@ impl zcash_address::TryFromAddress for Address {
             kind: AddressKind::P2sh(data),
         })
     }
+
+    fn try_from_tex(net: Network, data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
+        Ok(Address {
+            net,
+            kind: AddressKind::Tex(data),
+        })
+    }
 }
 
 pub(crate) fn inspect(addr: ZcashAddress) {
@@ -92,6 +100,7 @@ pub(crate) fn inspect(addr: ZcashAddress) {
                     AddressKind::Unified(_) => "Unified Address",
                     AddressKind::P2pkh(_) => "Transparent P2PKH",
                     AddressKind::P2sh(_) => "Transparent P2SH",
+                    AddressKind::Tex(_) => "TEX (ZIP 320)",
                 }
             );
 
