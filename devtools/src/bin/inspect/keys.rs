@@ -12,19 +12,15 @@ use zcash_primitives::{
         keys::{AccountPrivKey, IncomingViewingKey},
         TransparentAddress,
     },
-    zip32, zip339,
+    zip32,
 };
 use zcash_protocol::consensus::NetworkConstants;
 
 use crate::Context;
 
-pub(crate) fn inspect_mnemonic(
-    mnemonic: zip339::Mnemonic,
-    lang: zip339::Language,
-    context: Option<Context>,
-) {
+pub(crate) fn inspect_mnemonic(mnemonic: bip0039::Mnemonic, context: Option<Context>) {
     eprintln!("Mnemonic phrase");
-    eprintln!(" - Language: {}", lang);
+    eprintln!(" - Language: English");
 
     if let Some(((network, addr_net), accounts)) =
         context.and_then(|c| c.network().zip(c.addr_network()).zip(c.accounts()))

@@ -7,7 +7,6 @@ use gumdrop::{Options, ParsingStyle};
 use lazy_static::lazy_static;
 use secrecy::Zeroize;
 use zcash_address::ZcashAddress;
-use zcash_primitives::zip339;
 use zcash_primitives::{block::BlockHeader, consensus::BranchId, transaction::Transaction};
 use zcash_proofs::{default_params_folder, load_parameters, ZcashParameters};
 
@@ -61,11 +60,9 @@ fn main() {
         return;
     }
 
-    let lang = zip339::Language::English;
-
-    if let Ok(mnemonic) = zip339::Mnemonic::from_phrase_in(lang, &opts.data) {
+    if let Ok(mnemonic) = bip0039::Mnemonic::from_phrase(&opts.data) {
         opts.data.zeroize();
-        keys::inspect_mnemonic(mnemonic, lang, opts.context);
+        keys::inspect_mnemonic(mnemonic, opts.context);
     } else if let Ok(bytes) = hex::decode(&opts.data) {
         inspect_bytes(bytes, opts.context);
     } else if let Ok(addr) = ZcashAddress::try_from_encoded(&opts.data) {

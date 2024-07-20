@@ -31,6 +31,9 @@ use crate::{
     GROTH16_PARAMS, ORCHARD_VK,
 };
 
+#[cfg(zcash_unstable = "zfuture")]
+use zcash_primitives::transaction::components::tze;
+
 pub fn is_coinbase(tx: &Transaction) -> bool {
     tx.transparent_bundle()
         .map(|b| b.is_coinbase())
@@ -144,6 +147,9 @@ impl Authorization for PrecomputedAuth {
     type TransparentAuth = TransparentAuth;
     type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
+
+    #[cfg(zcash_unstable = "zfuture")]
+    type TzeAuth = tze::Authorized;
 }
 
 pub(crate) fn inspect(tx: Transaction, context: Option<Context>) {
@@ -154,6 +160,10 @@ pub(crate) fn inspect(tx: Transaction, context: Option<Context>) {
         // TODO: If pre-v5 and no branch ID provided in context, disable signature checks.
         TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => (),
         TxVersion::Zip225 => {
+            eprintln!(" - Consensus branch ID: {:?}", tx.consensus_branch_id());
+        }
+        #[cfg(zcash_unstable = "zfuture")]
+        TxVersion::ZFuture => {
             eprintln!(" - Consensus branch ID: {:?}", tx.consensus_branch_id());
         }
     }
@@ -190,8 +200,13 @@ pub(crate) fn inspect(tx: Transaction, context: Option<Context>) {
         tx.write(&mut buf).unwrap();
         let tx = Transaction::read(&buf[..], tx.consensus_branch_id()).unwrap();
 
-        let tx: TransactionData<PrecomputedAuth> =
-            tx.into_data().map_authorization(f_transparent, (), ());
+        let tx: TransactionData<PrecomputedAuth> = tx.into_data().map_authorization(
+            f_transparent,
+            (),
+            (),
+            #[cfg(zcash_unstable = "zfuture")]
+            (),
+        );
         let txid_parts = tx.digest(TxIdDigester);
         (tx, txid_parts)
     });

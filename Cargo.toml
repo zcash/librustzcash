@@ -6,6 +6,7 @@ members = [
     "components/zcash_encoding",
     "components/zcash_protocol",
     "components/zip321",
+    "devtools",
     "zcash",
     "zcash_client_backend",
     "zcash_client_sqlite",
@@ -43,6 +44,7 @@ zcash_primitives = { version = "0.15", path = "zcash_primitives", default-featur
 zcash_proofs = { version = "0.15", path = "zcash_proofs", default-features = false }
 
 # Shielded protocols
+bellman = { version = "0.14", default-features = false, features = ["groth16"] }
 ff = "0.13"
 group = "0.13"
 incrementalmerkletree = "0.5.1"
