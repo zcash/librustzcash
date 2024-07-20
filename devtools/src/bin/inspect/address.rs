@@ -104,45 +104,60 @@ pub(crate) fn inspect(addr: ZcashAddress) {
                 }
             );
 
-            if let AddressKind::Unified(ua) = addr.kind {
-                eprintln!(" - Receivers:");
-                for receiver in ua.items() {
-                    match receiver {
-                        unified::Receiver::Orchard(data) => {
-                            eprintln!(
-                                "   - Orchard ({})",
-                                unified::Address::try_from_items(vec![unified::Receiver::Orchard(
-                                    data
-                                )])
-                                .unwrap()
-                                .encode(&addr.net)
-                            );
-                        }
-                        unified::Receiver::Sapling(data) => {
-                            eprintln!(
-                                "   - Sapling ({})",
-                                ZcashAddress::from_sapling(addr.net, data)
-                            );
-                        }
-                        unified::Receiver::P2pkh(data) => {
-                            eprintln!(
-                                "   - Transparent P2PKH ({})",
-                                ZcashAddress::from_transparent_p2pkh(addr.net, data)
-                            );
-                        }
-                        unified::Receiver::P2sh(data) => {
-                            eprintln!(
-                                "   - Transparent P2SH ({})",
-                                ZcashAddress::from_transparent_p2sh(addr.net, data)
-                            );
-                        }
-                        unified::Receiver::Unknown { typecode, data } => {
-                            eprintln!("   - Unknown");
-                            eprintln!("     - Typecode: {}", typecode);
-                            eprintln!("     - Payload: {}", hex::encode(data));
+            match addr.kind {
+                AddressKind::Unified(ua) => {
+                    eprintln!(" - Receivers:");
+                    for receiver in ua.items() {
+                        match receiver {
+                            unified::Receiver::Orchard(data) => {
+                                eprintln!(
+                                    "   - Orchard ({})",
+                                    unified::Address::try_from_items(vec![
+                                        unified::Receiver::Orchard(data)
+                                    ])
+                                    .unwrap()
+                                    .encode(&addr.net)
+                                );
+                            }
+                            unified::Receiver::Sapling(data) => {
+                                eprintln!(
+                                    "   - Sapling ({})",
+                                    ZcashAddress::from_sapling(addr.net, data)
+                                );
+                            }
+                            unified::Receiver::P2pkh(data) => {
+                                eprintln!(
+                                    "   - Transparent P2PKH ({})",
+                                    ZcashAddress::from_transparent_p2pkh(addr.net, data)
+                                );
+                            }
+                            unified::Receiver::P2sh(data) => {
+                                eprintln!(
+                                    "   - Transparent P2SH ({})",
+                                    ZcashAddress::from_transparent_p2sh(addr.net, data)
+                                );
+                            }
+                            unified::Receiver::Unknown { typecode, data } => {
+                                eprintln!("   - Unknown");
+                                eprintln!("     - Typecode: {}", typecode);
+                                eprintln!("     - Payload: {}", hex::encode(data));
+                            }
                         }
                     }
                 }
+                AddressKind::P2pkh(data) => {
+                    eprintln!(
+                        " - Corresponding TEX: {}",
+                        ZcashAddress::from_tex(addr.net, data),
+                    );
+                }
+                AddressKind::Tex(data) => {
+                    eprintln!(
+                        " - Corresponding P2PKH: {}",
+                        ZcashAddress::from_transparent_p2pkh(addr.net, data),
+                    );
+                }
+                _ => (),
             }
         }
     }
