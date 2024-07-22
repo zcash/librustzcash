@@ -125,7 +125,7 @@ pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     account_id: AccountId,
 ) -> Result<Option<(TransparentAddress, NonHardenedChildIndex)>, SqliteClientError> {
-    use zcash_address::unified::Container;
+    use zcash_address::unified::{Container, Item};
     use zcash_primitives::legacy::keys::ExternalIvk;
 
     // Get the UIVK for the account.
@@ -147,8 +147,8 @@ pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
         }
 
         // Derive the default transparent address (if it wasn't already part of a derived UA).
-        for item in uivk.items() {
-            if let Ivk::P2pkh(tivk_bytes) = item {
+        for item in uivk.items_as_parsed() {
+            if let Item::Data(Ivk::P2pkh(tivk_bytes)) = item {
                 let tivk = ExternalIvk::deserialize(&tivk_bytes)?;
                 return Ok(Some(tivk.default_address()));
             }

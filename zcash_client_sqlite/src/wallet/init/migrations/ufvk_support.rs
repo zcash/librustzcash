@@ -81,7 +81,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         //   our second assumption above, and we report this as corrupted data.
         let mut seed_is_relevant = false;
 
-        let ua_request = UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT);
+        let ua_request =
+            UnifiedAddressRequest::unsafe_new_without_expiry(false, true, UA_TRANSPARENT);
         let mut rows = stmt_fetch_accounts.query([])?;
         while let Some(row) = rows.next()? {
             // We only need to check for the presence of the seed if we have keys that
@@ -117,12 +118,12 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         let dfvk = ufvk.sapling().ok_or_else(||
                             WalletMigrationError::CorruptedData("Derivation should have produced a UFVK containing a Sapling component.".to_owned()))?;
                         let (idx, expected_address) = dfvk.default_address();
-                        if decoded_address != expected_address {
+                        if *decoded_address != expected_address {
                             return Err(if seed_is_relevant {
                                 WalletMigrationError::CorruptedData(
                                 format!("Decoded Sapling address {} does not match the ufvk's Sapling address {} at {:?}.",
                                     address,
-                                    Address::Sapling(expected_address).encode(&self.params),
+                                    Address::from(expected_address).encode(&self.params),
                                     idx))
                             } else {
                                 WalletMigrationError::SeedNotRelevant
@@ -135,12 +136,12 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     }
                     Address::Unified(decoded_address) => {
                         let (expected_address, idx) = ufvk.default_address(ua_request)?;
-                        if decoded_address != expected_address {
+                        if *decoded_address != expected_address {
                             return Err(if seed_is_relevant {
                                 WalletMigrationError::CorruptedData(
                                 format!("Decoded unified address {} does not match the ufvk's default address {} at {:?}.",
                                     address,
-                                    Address::Unified(expected_address).encode(&self.params),
+                                    Address::from(expected_address).encode(&self.params),
                                     idx))
                             } else {
                                 WalletMigrationError::SeedNotRelevant

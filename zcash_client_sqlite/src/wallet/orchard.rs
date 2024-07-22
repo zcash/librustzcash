@@ -463,7 +463,6 @@ pub(crate) mod tests {
                 None,
                 None,
             )
-            .unwrap()
             .into()
         }
 
@@ -545,9 +544,7 @@ pub(crate) mod tests {
                     return Ok(result.map(|(note, addr, memo)| {
                         (
                             Note::Orchard(note),
-                            UnifiedAddress::from_receivers(Some(addr), None, None)
-                                .unwrap()
-                                .into(),
+                            UnifiedAddress::from_receivers(Some(addr), None, None).into(),
                             MemoBytes::from_bytes(&memo).expect("correct length"),
                         )
                     }));

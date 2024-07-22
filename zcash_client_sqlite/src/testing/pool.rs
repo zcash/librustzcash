@@ -465,7 +465,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     let ephemeral_taddr = Address::decode(&st.wallet().params, &ephemeral0).expect("valid address");
     assert_matches!(
         ephemeral_taddr,
-        Address::Transparent(TransparentAddress::PublicKeyHash(_))
+        Address::Transparent(ref b) if matches!(b.as_ref(), TransparentAddress::PublicKeyHash(_))
     );
 
     // Attempting to pay to an ephemeral address should cause an error.
@@ -1923,7 +1923,7 @@ pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTes
 
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
     let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        Address::Transparent(p1_to).to_zcash_address(&st.network()),
+        Address::Transparent(Box::new(p1_to)).to_zcash_address(&st.network()),
         transfer_amount,
     )])
     .unwrap();
