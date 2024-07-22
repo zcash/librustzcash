@@ -409,7 +409,7 @@ pub trait Encoding: private::SealedContainer {
     }
 }
 
-/// Trait for for Unified containers, that exposes the items within them.
+/// Trait for Unified containers, that exposes the items within them.
 pub trait Container {
     /// The type of item in this unified container.
     type Item: SealedItem;

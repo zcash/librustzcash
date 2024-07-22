@@ -14,7 +14,7 @@ pub struct AuthData(pub Vec<u8>);
 /// Binary parsing capability for TZE preconditions & witnesses.
 ///
 /// Serialization formats interpreted by implementations of this trait become consensus-critical
-/// upon activation of of the extension that uses them.
+/// upon activation of the extension that uses them.
 pub trait FromPayload: Sized {
     type Error;
 
@@ -25,7 +25,7 @@ pub trait FromPayload: Sized {
 /// Binary serialization capability for TZE preconditions & witnesses.
 ///
 /// Serialization formats used by implementations of this trait become consensus-critical upon
-/// activation of of the extension that uses them.
+/// activation of the extension that uses them.
 pub trait ToPayload {
     /// Returns a serialized payload and its corresponding mode.
     fn to_payload(&self) -> (u32, Vec<u8>);

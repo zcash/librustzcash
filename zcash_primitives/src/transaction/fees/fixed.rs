@@ -39,7 +39,7 @@ impl FeeRule {
         }
     }
 
-    /// Returns the fixed fee amount which which this rule was configured.
+    /// Returns the fixed fee amount which this rule was configured.
     pub fn fixed_fee(&self) -> NonNegativeAmount {
         self.fixed_fee
     }
