@@ -154,7 +154,7 @@ pub struct ZcashAddress {
 
 /// Known kinds of Zcash addresses.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum AddressKind {
+pub enum AddressKind {
     Sprout([u8; 64]),
     Sapling([u8; 43]),
     Unified(unified::Address),
@@ -301,6 +301,10 @@ impl ZcashAddress {
             (AddressKind::P2sh(d), Receiver::P2sh(r)) => r == d,
             _ => false,
         }
+    }
+
+    pub fn kind(&self) -> &AddressKind {
+        &self.kind
     }
 }
 
