@@ -230,7 +230,7 @@ impl UnifiedSpendingKey {
 
     /// Construct a USK from its constituent parts, after verifying that UIVK derivation can
     /// succeed.
-    fn from_checked_parts(
+    pub fn from_checked_parts(
         #[cfg(feature = "transparent-inputs")] transparent: legacy::AccountPrivKey,
         #[cfg(feature = "sapling")] sapling: sapling::ExtendedSpendingKey,
         #[cfg(feature = "orchard")] orchard: orchard::keys::SpendingKey,
