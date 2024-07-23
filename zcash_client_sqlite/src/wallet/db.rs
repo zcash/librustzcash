@@ -700,7 +700,7 @@ notes AS (
          ON ros.pool = ro.pool
          AND ros.received_output_id = ro.id_within_pool_table
     JOIN transactions
-         ON transactions.id_tx = ro.transaction_id
+         ON transactions.id_tx = ros.transaction_id
 ),
 -- Obtain a count of the notes that the wallet created in each transaction,
 -- not counting change notes.
