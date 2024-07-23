@@ -313,6 +313,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         legacy::keys::{NonHardenedChildIndex, TransparentKeyScope},
         transaction::builder::{BuildConfig, Builder},
     };
+    use zcash_protocol::value::ZatBalance;
 
     use crate::wallet::{sapling::tests::test_prover, GAP_LIMIT};
 
@@ -451,6 +452,34 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
             confirmed_sent[1][0].clone(),
             (sent_v, sent_to_addr, None, None)
             if sent_v == u64::try_from(transfer_amount).unwrap() && sent_to_addr == Some(tex_addr.encode(&st.wallet().params)));
+
+        // Check that the transaction history matches what we expect.
+        let tx_history = st.get_tx_history().unwrap();
+
+        let tx_0 = tx_history
+            .iter()
+            .find(|tx| tx.txid() == *txids.first())
+            .unwrap();
+        let tx_1 = tx_history
+            .iter()
+            .find(|tx| tx.txid() == *txids.last())
+            .unwrap();
+
+        assert_eq!(tx_0.account_id(), &account_id);
+        assert!(!tx_0.expired_unmined());
+        assert_eq!(tx_0.has_change(), expected_step0_change.is_positive());
+        assert_eq!(
+            tx_0.account_value_delta(),
+            -ZatBalance::from(expected_step0_fee),
+        );
+
+        assert_eq!(tx_1.account_id(), &account_id);
+        assert!(!tx_1.expired_unmined());
+        assert!(!tx_1.has_change());
+        assert_eq!(
+            tx_1.account_value_delta(),
+            -ZatBalance::from(expected_ephemeral),
+        );
 
         (ephemeral_addr.unwrap(), txids)
     };
