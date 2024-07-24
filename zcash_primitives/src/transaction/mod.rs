@@ -58,7 +58,7 @@ const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
 #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
 const V7_TX_VERSION: u32 = 7;
 #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
-const V7_VERSION_GROUP_ID: u32 = 0x26A7270C; // TODO ???
+const V7_VERSION_GROUP_ID: u32 = 0x124A69F8; // TODO ???
 
 /// These versions are used exclusively for in-development transaction
 /// serialization, and will never be active under the consensus rules.
@@ -930,7 +930,7 @@ impl Transaction {
             Self::read_v5_header_fragment(&mut reader)?;
         let transparent_bundle = Self::read_transparent(&mut reader)?;
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
-        let orchard_zsa_bundle = orchard_serialization::read_v6_bundle(&mut reader)?;
+        let orchard_zsa_bundle = orchard_serialization::read_v7_bundle(&mut reader)?;
         let issue_bundle = issuance::read_v7_bundle(&mut reader)?;
 
         #[cfg(zcash_unstable = "zfuture")]
@@ -1079,13 +1079,13 @@ impl Transaction {
         if self.sprout_bundle.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "Sprout components cannot be present when serializing to the V5 transaction format.",
+                "Sprout components cannot be present when serializing to the V7 transaction format.",
             ));
         }
         self.write_v5_header(&mut writer)?;
         self.write_transparent(&mut writer)?;
         self.write_v5_sapling(&mut writer)?;
-        orchard_serialization::write_v6_bundle(self.orchard_zsa_bundle.as_ref(), &mut writer)?;
+        orchard_serialization::write_v7_bundle(self.orchard_zsa_bundle.as_ref(), &mut writer)?;
         issuance::write_v7_bundle(self.issue_bundle.as_ref(), &mut writer)?;
         #[cfg(zcash_unstable = "zfuture")]
         self.write_tze(&mut writer)?;

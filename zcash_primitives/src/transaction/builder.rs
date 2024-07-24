@@ -55,11 +55,11 @@ use crate::{
 use crate::transaction::builder::Error::{IssuanceBuilder, IssuanceBundle};
 use orchard::note::AssetBase;
 use orchard::orchard_flavor::OrchardVanilla;
-#[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ use orchard::orchard_flavor::OrchardZSA;
 #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
 use orchard::{
     issuance::{IssueBundle, IssueInfo},
     keys::{IssuanceAuthorizingKey, IssuanceValidatingKey},
+    orchard_flavor::OrchardZSA,
 };
 #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ use rand_core::OsRng;
 

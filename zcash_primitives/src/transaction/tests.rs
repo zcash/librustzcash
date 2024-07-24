@@ -236,7 +236,12 @@ fn zip_0244() {
     fn to_test_txdata(
         tv: &self::data::zip_0244::TestVector,
     ) -> (TransactionData<TestUnauthorized>, TxDigests<Blake2bHash>) {
-        let tx = Transaction::read(&tv.tx[..], BranchId::Nu5).unwrap();
+        let tx = Transaction::read(
+            &tv.tx[..],
+            #[cfg(not(zcash_unstable = "nu6"))] /* TODO nu7 */ BranchId::Nu5,
+            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ BranchId::Nu7,
+        )
+        .unwrap();
 
         assert_eq!(tx.txid.as_ref(), &tv.txid);
         assert_eq!(tx.auth_commitment().as_ref(), &tv.auth_digest);

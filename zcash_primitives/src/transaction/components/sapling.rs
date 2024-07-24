@@ -6,7 +6,7 @@ use zcash_protocol::consensus::{BlockHeight, NetworkUpgrade, Parameters, ZIP212_
 use std::io::{self, Read, Write};
 
 use zcash_encoding::{Array, CompactSize, Vector};
-use zcash_note_encryption::{EphemeralKeyBytes, ENC_CIPHERTEXT_SIZE, OUT_CIPHERTEXT_SIZE};
+use zcash_note_encryption::{EphemeralKeyBytes, OUT_CIPHERTEXT_SIZE};
 
 use crate::{
     sapling::{
@@ -15,6 +15,7 @@ use crate::{
             OutputDescriptionV5, SpendDescription, SpendDescriptionV5,
         },
         note::ExtractedNoteCommitment,
+        note_encryption::ENC_CIPHERTEXT_SIZE,
         value::ValueCommitment,
         Nullifier,
     },

@@ -1776,7 +1776,7 @@ dependencies = [
  "redjubjub",
  "subtle",
  "tracing",
- "zcash_note_encryption 0.4.0 (git+https://github.com/QED-it/zcash_note_encryption?branch=fix-sapling-constants)",
+ "zcash_note_encryption 0.4.0 (git+https://github.com/QED-it/zcash_note_encryption?branch=note-bytes)",
  "zcash_spec",
  "zip32",
 ]
@@ -2487,7 +2487,7 @@ dependencies = [
 [[package]]
 name = "zcash_note_encryption"
 version = "0.4.0"
-source = "git+https://github.com/QED-it/zcash_note_encryption?branch=fix-sapling-constants#cf00807f5a014e434c887a1f4c8a3d04678f57d3"
+source = "git+https://github.com/QED-it/zcash_note_encryption?branch=note-bytes#e6023a923194cf27668702c88e6dc5ceeb361304"
 dependencies = [
  "chacha20",
  "chacha20poly1305",
@@ -2545,7 +2545,7 @@ dependencies = [
  "tracing",
  "zcash_address",
  "zcash_encoding",
- "zcash_note_encryption 0.4.0 (git+https://github.com/QED-it/zcash_note_encryption?branch=fix-sapling-constants)",
+ "zcash_note_encryption 0.4.0 (git+https://github.com/QED-it/zcash_note_encryption?branch=note-bytes)",
  "zcash_protocol",
  "zcash_spec",
  "zip32",
