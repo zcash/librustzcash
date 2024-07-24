@@ -600,6 +600,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
+            let spending_key_available = true;
             let account = wallet::add_account(
                 wdb.conn.0,
                 &wdb.params,
@@ -609,6 +610,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
                 birthday,
+                spending_key_available,
             )?;
 
             Ok((account.id(), usk))
@@ -634,6 +636,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
+            let spending_key_available = true;
             let account = wallet::add_account(
                 wdb.conn.0,
                 &wdb.params,
@@ -643,6 +646,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
                 birthday,
+                spending_key_available,
             )?;
 
             Ok((account, usk))
@@ -653,7 +657,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         &mut self,
         ufvk: &UnifiedFullViewingKey,
         birthday: &AccountBirthday,
-        _spending_key_available: bool,
+        spending_key_available: bool,
     ) -> Result<Self::Account, Self::Error> {
         self.transactionally(|wdb| {
             wallet::add_account(
@@ -662,6 +666,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 AccountSource::Imported,
                 wallet::ViewingKey::Full(Box::new(ufvk.to_owned())),
                 birthday,
+                spending_key_available,
             )
         })
     }

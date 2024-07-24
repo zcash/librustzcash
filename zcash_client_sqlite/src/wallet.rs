@@ -344,6 +344,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     kind: AccountSource,
     viewing_key: ViewingKey,
     birthday: &AccountBirthday,
+    spending_key_available: bool,
 ) -> Result<Account, SqliteClientError> {
     let (hd_seed_fingerprint, hd_account_index) = match kind {
         AccountSource::Derived {
@@ -381,14 +382,16 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ufvk, uivk,
                 orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
                 birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
-                recover_until_height
+                recover_until_height,
+                has_spend_key
             )
             VALUES (
                 :account_kind, :hd_seed_fingerprint, :hd_account_index,
                 :ufvk, :uivk,
                 :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
                 :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
-                :recover_until_height
+                :recover_until_height,
+                :has_spend_key
             )
             RETURNING id;
             "#,
@@ -404,7 +407,8 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ":birthday_height": u32::from(birthday.height()),
                 ":birthday_sapling_tree_size": birthday_sapling_tree_size,
                 ":birthday_orchard_tree_size": birthday_orchard_tree_size,
-                ":recover_until_height": birthday.recover_until().map(u32::from)
+                ":recover_until_height": birthday.recover_until().map(u32::from),
+                ":has_spend_key": spending_key_available as i64,
             ],
             |row| Ok(AccountId(row.get(0)?)),
         )

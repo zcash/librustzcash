@@ -36,6 +36,7 @@ CREATE TABLE "accounts" (
     birthday_sapling_tree_size INTEGER,
     birthday_orchard_tree_size INTEGER,
     recover_until_height INTEGER,
+    has_spend_key INTEGER NOT NULL DEFAULT 1,
     CHECK (
         (
         account_kind = 0
