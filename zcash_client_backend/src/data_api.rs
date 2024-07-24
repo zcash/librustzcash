@@ -1558,6 +1558,51 @@ impl AccountBirthday {
 
 /// This trait encapsulates the write capabilities required to update stored
 /// wallet data.
+///
+/// # Creating a new wallet
+///
+/// A wallet may be created by generating a new seed phrase and creating an account with that seed.
+/// Account creation is typically done with the [`WalletWrite::create_account`] method.
+///
+/// Callers should construct the [`AccountBirthday`] using
+/// [`AccountBirthday::from_treestate`] for the block at height `chain_tip_height - 100`.
+/// Setting the birthday height to a tree state below the pruning depth ensures that reorgs
+/// cannot cause funds intended for the wallet to be missed; otherwise, if the chain tip height
+/// were used for the wallet birthday, a transaction targeted at a height greater than the
+/// chain tip could be mined at a height below that tip as part of a reorg.
+///
+/// # Restoring from backup
+///
+/// A wallet may restore existing accounts rather than create new ones.
+/// This will typically be done by the user providing a seed phrase created in a previous wallet.
+/// A seed phrase will allow generation of keys for any number of accounts.
+///
+/// Knowing exactly how many accounts to activate based on the seed phrase is part of account recovery,
+/// which is that we assume only one account may have been used to receive funds.
+/// Once we find that it actually *has* received funds, we assume that the next account may have been used
+/// and create the next account and start using its keys to scan subsequent blocks.
+/// This process is repeated until we find an account that has not received funds.
+/// Account recovery has *not* yet been implemented by this crate. So a wallet app that supports multiple accounts
+/// is expected to implement it manually for now.
+///
+/// If the number of accounts is known in advance, the wallet should create all accounts
+/// before scanning the chain so that the scan can be done in a single pass for all accounts.
+///
+/// # Account creation
+///
+/// Any of several functions may be used to create the first or subsequent accounts, including:
+/// - [`WalletWrite::create_account`] takes a seed phrase and creates a new account with the smallest unused ZIP-32 account index.
+/// - [`WalletWrite::import_account_hd`] takes a seed phrase and creates an account with a specific ZIP-32 account index.
+/// - [`WalletWrite::import_account_ufvk`] creates an account with a specific Unified Full Viewing Key. No assumption of ZIP-32 HD derivation is made.
+///
+/// All of the account creation/import functions take a birthday height.
+/// If `birthday.height()` is below the current chain tip, this operation will
+/// trigger a re-scan of the blocks at and above the provided height. The birthday height is
+/// defined as the minimum block height that will be scanned for funds belonging to the wallet.
+///
+/// By convention, wallets should only allow a new account to be generated after confirmed
+/// funds have been received by the newest existing account. This allows automated
+/// account recovery to recover all funds.
 pub trait WalletWrite: WalletRead {
     /// The type of identifiers used to look up transparent UTXOs.
     type UtxoRef;
@@ -1580,24 +1625,7 @@ pub trait WalletWrite: WalletRead {
     /// The ZIP-32 account index may be obtained by calling [`WalletRead::get_account`]
     /// with the returned account identifier.
     ///
-    /// If `birthday.height()` is below the current chain tip, this operation will
-    /// trigger a re-scan of the blocks at and above the provided height. The birthday height is
-    /// defined as the minimum block height that will be scanned for funds belonging to the wallet.
-    ///
-    /// For new wallets, callers should construct the [`AccountBirthday`] using
-    /// [`AccountBirthday::from_treestate`] for the block at height `chain_tip_height - 100`.
-    /// Setting the birthday height to a tree state below the pruning depth ensures that reorgs
-    /// cannot cause funds intended for the wallet to be missed; otherwise, if the chain tip height
-    /// were used for the wallet birthday, a transaction targeted at a height greater than the
-    /// chain tip could be mined at a height below that tip as part of a reorg.
-    ///
-    /// If `seed` was imported from a backup and this method is being used to restore a previous
-    /// wallet state, you should use this method to add all of the desired accounts before scanning
-    /// the chain from the seed's birthday height.
-    ///
-    /// By convention, wallets should only allow a new account to be generated after confirmed
-    /// funds have been received by the currently-available account (in order to enable automated
-    /// account recovery).
+    /// Learn more about account creation and import in the [`WalletWrite`] trait documentation.
     ///
     /// # Panics
     ///
@@ -1618,30 +1646,10 @@ pub trait WalletWrite: WalletRead {
     /// assumed equivalent to the ZIP 32 account index. It is an opaque identifier for a  
     /// pool of funds or set of outputs controlled by a single spending authority.  
     ///
-    /// If `birthday.height()` is below the current chain tip, this operation will
-    /// trigger a re-scan of the blocks at and above the provided height. The birthday height is
-    /// defined as the minimum block height that will be scanned for funds belonging to the wallet.
+    /// Import accounts with indexes that are exactly one greater than the highest existing account index
+    /// to ensure account indexes are contiguous, thereby facilitating automated account recovery.
     ///
-    /// For new wallets, callers should construct the [`AccountBirthday`] using
-    /// [`AccountBirthday::from_treestate`] for the block at height `chain_tip_height - 100`.
-    /// Setting the birthday height to a tree state below the pruning depth ensures that reorgs
-    /// cannot cause funds intended for the wallet to be missed; otherwise, if the chain tip height
-    /// were used for the wallet birthday, a transaction targeted at a height greater than the
-    /// chain tip could be mined at a height below that tip as part of a reorg.
-    ///
-    /// If `seed` was imported from a backup and this method is being used to restore a previous
-    /// wallet state, you should use this method to add all of the desired accounts before scanning
-    /// the chain from the seed's birthday height.
-    ///
-    /// By convention, wallets should only allow a new account to be generated after confirmed
-    /// funds have been received by the currently-available account (in order to enable automated
-    /// account recovery).
-    /// The [`Self::create_occount`] function helps to conform with this convention by automatically
-    /// selecting the next unused account index, while *this* function should be used only
-    /// to import an existing account with a specific index.
-    ///
-    /// Avoid fragmenting the account indexes by importing accounts with indexes that are one greater
-    /// than the highest existing account index.
+    /// Learn more about account creation and import in the [`WalletWrite`] trait documentation.
     ///
     /// # Panics
     ///
@@ -1663,20 +1671,11 @@ pub trait WalletWrite: WalletRead {
     /// spending key is returned because the wallet has no information about how the UFVK  
     /// was derived.  
     ///
-    /// If `birthday.height()` is below the current chain tip, this operation will
-    /// trigger a re-scan of the blocks at and above the provided height. The birthday height is
-    /// defined as the minimum block height that will be scanned for funds belonging to the wallet.
-    ///
     /// Certain optimizations are possible for accounts which will never be used to spend funds.
     /// If `spending_key_available` is `false`, the wallet may choose to optimize for this case,
     /// in which case any attempt to spend funds from the account will result in an error.
     ///
-    /// For new wallets, callers should construct the [`AccountBirthday`] using
-    /// [`AccountBirthday::from_treestate`] for the block at height `chain_tip_height - 100`.
-    /// Setting the birthday height to a tree state below the pruning depth ensures that reorgs
-    /// cannot cause funds intended for the wallet to be missed; otherwise, if the chain tip height
-    /// were used for the wallet birthday, a transaction targeted at a height greater than the
-    /// chain tip could be mined at a height below that tip as part of a reorg.
+    /// Learn more about account creation and import in the [`WalletWrite`] trait documentation.
     ///
     /// # Panics
     ///
