@@ -152,9 +152,16 @@ impl Authorization for PrecomputedAuth {
     type TzeAuth = tze::Authorized;
 }
 
-pub(crate) fn inspect(tx: Transaction, context: Option<Context>) {
+pub(crate) fn inspect(
+    tx: Transaction,
+    context: Option<Context>,
+    mined_height: Option<BlockHeight>,
+) {
     eprintln!("Zcash transaction");
     eprintln!(" - ID: {}", tx.txid());
+    if let Some(height) = mined_height {
+        eprintln!(" - Mined in block {}", height);
+    }
     eprintln!(" - Version: {:?}", tx.version());
     match tx.version() {
         // TODO: If pre-v5 and no branch ID provided in context, disable signature checks.

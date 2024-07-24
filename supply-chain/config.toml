@@ -1023,8 +1023,24 @@ criteria = "safe-to-deploy"
 version = "0.21.8"
 criteria = "safe-to-deploy"
 
+[[exemptions.rustls]]
+version = "0.23.12"
+criteria = "safe-to-deploy"
+
+[[exemptions.rustls-pemfile]]
+version = "2.1.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.rustls-pki-types]]
+version = "1.7.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.rustls-webpki]]
 version = "0.101.7"
+criteria = "safe-to-deploy"
+
+[[exemptions.rustls-webpki]]
+version = "0.102.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.rusty-fork]]
@@ -1209,6 +1225,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tokio-macros]]
 version = "2.2.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.tokio-rustls]]
+version = "0.26.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio-util]]
@@ -1437,6 +1457,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.web-sys]]
 version = "0.3.65"
+criteria = "safe-to-deploy"
+
+[[exemptions.webpki-roots]]
+version = "0.26.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.which]]
