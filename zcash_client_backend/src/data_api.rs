@@ -1565,6 +1565,13 @@ pub trait WalletWrite: WalletRead {
     /// Tells the wallet to track the next available account-level spend authority, given the
     /// current set of [ZIP 316] account identifiers known to the wallet database.
     ///
+    /// The "next available account" is defined as the first unused ZIP-32 account index (counting from 0)
+    /// among all accounts that share the given seed.
+    /// When [`Self::import_account_hd`] is used to import an account with a specific index,
+    /// account indexes *may* become fragmented instead of one contiguous range.
+    /// Where fragmentation occurs, the implementations *may* choose to find the first unused
+    /// account index or add 1 to the highest existing account index.
+    ///
     /// Returns the account identifier for the newly-created wallet database entry, along with the
     /// associated [`UnifiedSpendingKey`]. Note that the unique account identifier should *not* be
     /// assumed equivalent to the ZIP 32 account index. It is an opaque identifier for a pool of
@@ -1605,13 +1612,11 @@ pub trait WalletWrite: WalletRead {
 
     /// Tells the wallet to track a specific account index for a given seed.
     ///
-    /// Returns the account for the newly-created wallet database entry, along with the
-    /// associated [`UnifiedSpendingKey`]. Note that the unique account identifier should *not* be
-    /// assumed equivalent to the ZIP 32 account index. It is an opaque identifier for a pool of
-    /// funds or set of outputs controlled by a single spending authority.
-    ///
-    /// The ZIP-32 account index may be obtained by calling [`WalletRead::get_account`]
-    /// with the returned account identifier.
+    /// Returns details about the imported account, including the unique account  
+    /// identifier for the newly-created wallet database entry, along with the associated  
+    /// [`UnifiedSpendingKey`]. Note that the unique account identifier should *not* be  
+    /// assumed equivalent to the ZIP 32 account index. It is an opaque identifier for a  
+    /// pool of funds or set of outputs controlled by a single spending authority.  
     ///
     /// If `birthday.height()` is below the current chain tip, this operation will
     /// trigger a re-scan of the blocks at and above the provided height. The birthday height is
@@ -1631,6 +1636,14 @@ pub trait WalletWrite: WalletRead {
     /// By convention, wallets should only allow a new account to be generated after confirmed
     /// funds have been received by the currently-available account (in order to enable automated
     /// account recovery).
+    /// The [`Self::create_occount`] function helps to conform with this convention by automatically
+    /// selecting the next unused account index, while *this* function should be used only
+    /// to import an existing account with a specific index.
+    ///
+    /// Avoid fragmenting the account indexes by importing accounts with indexes that are one greater
+    /// than the highest existing account index.
+    ///
+    /// # Panics
     ///
     /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
     ///
@@ -1644,7 +1657,11 @@ pub trait WalletWrite: WalletRead {
 
     /// Tells the wallet to track an account using a unified full viewing key.
     ///
-    /// Returns the account for the newly-created wallet database entry.
+    /// Returns details about the imported account, including the unique account  
+    /// identifier for the newly-created wallet database entry. Unlike the other account  
+    /// creation APIs ([`Self::create_account`] and [`Self::import_account_hd`]), no  
+    /// spending key is returned because the wallet has no information about how the UFVK  
+    /// was derived.  
     ///
     /// If `birthday.height()` is below the current chain tip, this operation will
     /// trigger a re-scan of the blocks at and above the provided height. The birthday height is
@@ -1660,6 +1677,8 @@ pub trait WalletWrite: WalletRead {
     /// cannot cause funds intended for the wallet to be missed; otherwise, if the chain tip height
     /// were used for the wallet birthday, a transaction targeted at a height greater than the
     /// chain tip could be mined at a height below that tip as part of a reorg.
+    ///
+    /// # Panics
     ///
     /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
     fn import_account_ufvk(

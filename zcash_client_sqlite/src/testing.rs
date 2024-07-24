@@ -216,7 +216,10 @@ impl<Cache> TestBuilder<Cache> {
         self
     }
 
-    pub(crate) fn with_account_having_index(mut self, index: zip32::AccountId) -> Self {
+    /// Sets the [`account_index`] field for the test account
+    ///
+    /// Call either [`with_account_from_sapling_activation`] or [`with_account_having_current_birthday`] before calling this method.
+    pub(crate) fn set_account_index(mut self, index: zip32::AccountId) -> Self {
         assert!(self.account_index.is_none());
         self.account_index = Some(index);
         self

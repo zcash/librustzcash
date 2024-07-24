@@ -26,7 +26,6 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
 ### Added
 - `zcash_client_backend::data_api`:
   - `chain::BlockCache` trait, behind the `sync` feature flag.
-  - `WalletWrite` trait methods `import_account_hd` and `import_account_ufvk`.
   - `WalletRead::get_spendable_transparent_outputs`.
 - `zcash_client_backend::fees`:
   - `EphemeralBalance`
@@ -63,6 +62,7 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
     methods when the "transparent-inputs" feature is enabled.
   - `WalletWrite` has a new `reserve_next_n_ephemeral_addresses` method when
     the "transparent-inputs" feature is enabled.
+  - `WalletWrite` has new methods `import_account_hd` and `import_account_ufvk`.
   - `error::Error` has new `Address` and (when the "transparent-inputs" feature
     is enabled) `PaysEphemeralTransparentAddress` variants.
   - `wallet::input_selection::InputSelectorError` has a new `Address` variant.

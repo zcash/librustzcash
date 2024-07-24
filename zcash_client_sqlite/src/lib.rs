@@ -2078,7 +2078,7 @@ mod tests {
     pub(crate) fn import_account_hd_0() {
         let st = TestBuilder::new()
             .with_account_from_sapling_activation(BlockHash([0; 32]))
-            .with_account_having_index(zip32::AccountId::ZERO)
+            .set_account_index(zip32::AccountId::ZERO)
             .build();
         assert_matches!(
             st.test_account().unwrap().account().source(),
@@ -2095,23 +2095,24 @@ mod tests {
         );
 
         let seed = Secret::new(vec![0u8; 32]);
-        let zip32_index = zip32::AccountId::ZERO.next().unwrap();
+        let zip32_index_1 = zip32::AccountId::ZERO.next().unwrap();
 
         let first = st
             .wallet_mut()
-            .import_account_hd(&seed, zip32_index, &birthday)
+            .import_account_hd(&seed, zip32_index_1, &birthday)
             .unwrap();
         assert_matches!(
             first.0.source(),
-            AccountSource::Derived { seed_fingerprint: _, account_index } if account_index == zip32_index);
+            AccountSource::Derived { seed_fingerprint: _, account_index } if account_index == zip32_index_1);
 
+        let zip32_index_2 = zip32_index_1.next().unwrap();
         let second = st
             .wallet_mut()
-            .import_account_hd(&seed, zip32_index.next().unwrap(), &birthday)
+            .import_account_hd(&seed, zip32_index_2, &birthday)
             .unwrap();
         assert_matches!(
             second.0.source(),
-            AccountSource::Derived { seed_fingerprint: _, account_index } if account_index == zip32_index.next().unwrap());
+            AccountSource::Derived { seed_fingerprint: _, account_index } if account_index == zip32_index_2);
     }
 
     #[test]
@@ -2124,15 +2125,15 @@ mod tests {
         );
 
         let seed = Secret::new(vec![0u8; 32]);
-        let zip32_index = zip32::AccountId::ZERO.next().unwrap();
+        let zip32_index_1 = zip32::AccountId::ZERO.next().unwrap();
 
         let first = st
             .wallet_mut()
-            .import_account_hd(&seed, zip32_index, &birthday)
+            .import_account_hd(&seed, zip32_index_1, &birthday)
             .unwrap();
 
         assert_matches!(
-            st.wallet_mut().import_account_hd(&seed, zip32_index, &birthday),
+            st.wallet_mut().import_account_hd(&seed, zip32_index_1, &birthday),
             Err(SqliteClientError::AccountCollision(id)) if id == first.0.id());
     }
 
@@ -2158,6 +2159,8 @@ mod tests {
             ufvk.encode(&st.wallet().params),
             account.ufvk().unwrap().encode(&st.wallet().params)
         );
+
+        assert_matches!(account.source(), AccountSource::Imported);
     }
 
     #[test]

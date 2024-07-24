@@ -171,7 +171,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::BadAccountData(e) => write!(f, "Failed to add account: {}", e),
             SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),
             SqliteClientError::AccountIdOutOfRange => write!(f, "Wallet account identifiers must be less than 0x7FFFFFFF."),
-            SqliteClientError::AccountCollision(id) => write!(f, "An account with ID {} already exists in the wallet.", id.0),
+            SqliteClientError::AccountCollision(id) => write!(f, "An account corresponding to the data provided already exists in the wallet with internal identifier {}.", id.0),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::AddressNotRecognized(_) => write!(f, "The address associated with a received txo is not identifiable as belonging to the wallet."),
             SqliteClientError::CommitmentTree(err) => write!(f, "An error occurred accessing or updating note commitment tree data: {}.", err),

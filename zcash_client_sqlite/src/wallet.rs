@@ -81,7 +81,7 @@ use zcash_address::ZcashAddress;
 use zcash_client_backend::{
     data_api::{
         scanning::{ScanPriority, ScanRange},
-        AccountBalance, AccountBirthday, AccountSource, BlockMetadata, Ratio,
+        Account as _, AccountBalance, AccountBirthday, AccountSource, BlockMetadata, Ratio,
         SentTransactionOutput, WalletSummary, SAPLING_SHARD_HEIGHT,
     },
     encoding::AddressCodec,
@@ -203,13 +203,6 @@ impl Account {
         request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.uivk().default_address(request)
-    }
-
-    pub(crate) fn uivk(&self) -> UnifiedIncomingViewingKey {
-        match &self.viewing_key {
-            ViewingKey::Full(ufvk) => ufvk.to_unified_incoming_viewing_key(),
-            ViewingKey::Incoming(uivk) => *uivk.clone(),
-        }
     }
 }
 
@@ -534,7 +527,9 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         )?;
     }
 
-    // Always derive the default Unified Address for the account.
+    // Always derive the default Unified Address for the account. If the account's viewing
+    // key has fewer components than the wallet supports (most likely due to this being an
+    // imported viewing key), derive an address containing the common subset of receivers.
     let ua_request = account
         .uivk()
         .to_address_request()
@@ -544,10 +539,6 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         })?;
     let (address, d_idx) = account.default_address(ua_request)?;
     insert_address(conn, params, account_id, d_idx, &address)?;
-
-    // Initialize the `ephemeral_addresses` table.
-    #[cfg(feature = "transparent-inputs")]
-    transparent::ephemeral::init_account(conn, params, account_id)?;
 
     // Initialize the `ephemeral_addresses` table.
     #[cfg(feature = "transparent-inputs")]
