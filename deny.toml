@@ -31,16 +31,27 @@ allow = [
 ]
 exceptions = [
     { name = "arrayref", allow = ["BSD-2-Clause"] },
+    { name = "async_executors", allow = ["Unlicense"] },
+    { name = "bounded-vec-deque", allow = ["BSD-3-Clause"] },
+    { name = "coarsetime", allow = ["ISC"] },
+    { name = "curve25519-dalek", allow = ["BSD-3-Clause"] },
+    { name = "ed25519-dalek", allow = ["BSD-3-Clause"] },
     { name = "matchit", allow = ["BSD-3-Clause"] },
     { name = "minreq", allow = ["ISC"] },
+    { name = "option-ext", allow = ["MPL-2.0"] },
+    { name = "priority-queue", allow = ["MPL-2.0"] },
     { name = "ring", allow = ["LicenseRef-ring"] },
     { name = "rustls-webpki", allow = ["ISC"] },
     { name = "secp256k1", allow = ["CC0-1.0"] },
     { name = "secp256k1-sys", allow = ["CC0-1.0"] },
+    { name = "simple_asn1", allow = ["ISC"] },
+    { name = "slotmap", allow = ["Zlib"] },
     { name = "subtle", allow = ["BSD-3-Clause"] },
+    { name = "tinystr", allow = ["Unicode-3.0"] },
     { name = "unicode-ident", allow = ["Unicode-DFS-2016"] },
     { name = "untrusted", allow = ["ISC"] },
     { name = "webpki-roots", allow = ["MPL-2.0"] },
+    { name = "x25519-dalek", allow = ["BSD-3-Clause"] },
 ]
 
 [[licenses.clarify]]

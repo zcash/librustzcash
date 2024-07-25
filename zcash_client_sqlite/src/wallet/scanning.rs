@@ -1134,7 +1134,7 @@ pub(crate) mod tests {
             &[FakeCompactOutput::new(
                 &dfvk,
                 AddressType::DefaultExternal,
-                // 1235 notes into into the second shard
+                // 1235 notes into the second shard
                 NonNegativeAmount::const_from_u64(10000),
             )],
             frontier_tree_size + 10,

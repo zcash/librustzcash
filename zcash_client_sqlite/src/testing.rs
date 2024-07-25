@@ -1,10 +1,9 @@
-use std::ffi::OsStr;
 use std::fmt;
 use std::num::NonZeroU32;
 use std::{collections::BTreeMap, convert::Infallible};
 
 #[cfg(feature = "unstable")]
-use std::fs::File;
+use std::{ffi::OsStr, fs::File};
 
 use group::ff::Field;
 use incrementalmerkletree::{Marking, Position, Retention};

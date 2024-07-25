@@ -128,7 +128,7 @@ impl AccountPrivKey {
     /// `m/44'/<coin_type>'/<account>'`.
     ///
     /// This produces the root of the derivation tree for transparent
-    /// viewing keys and addresses for the for the provided account.
+    /// viewing keys and addresses for the provided account.
     pub fn from_seed<P: consensus::Parameters>(
         params: &P,
         seed: &[u8],
