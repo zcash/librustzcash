@@ -1,6 +1,6 @@
 use blake2b_simd::Hash as Blake2bHash;
 
-use crate::transaction::sighash_v5::v5_signature_hash;
+use crate::transaction::sighash_v5::v5_v6_signature_hash;
 use crate::transaction::{
     sighash::{SignableInput, TransparentAuthorizingContext},
     Authorization, TransactionData, TxDigests,
@@ -15,5 +15,5 @@ pub fn v7_signature_hash<
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> Blake2bHash {
     // Currently to_hash is designed in a way that it supports both v5 and v7 signature hash
-    v5_signature_hash(tx, signable_input, txid_parts)
+    v5_v6_signature_hash(tx, signable_input, txid_parts)
 }

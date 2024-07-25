@@ -126,7 +126,7 @@ pub fn read_v7_bundle<R: Read>(
 }
 
 fn read_burn<R: Read>(reader: &mut R) -> io::Result<(AssetBase, NoteValue)> {
-    Ok((read_asset(reader)?, Transaction::read_note_value(reader)?))
+    Ok((read_asset(reader)?, read_note_value(reader)?))
 }
 
 pub fn read_value_commitment<R: Read>(mut reader: R) -> io::Result<ValueCommitment> {
@@ -277,6 +277,12 @@ pub fn read_signature<R: Read, T: SigType>(mut reader: R) -> io::Result<Signatur
     let mut bytes = [0u8; 64];
     reader.read_exact(&mut bytes)?;
     Ok(Signature::from(bytes))
+}
+
+fn read_note_value<R: Read>(mut reader: R) -> io::Result<NoteValue> {
+    let mut tmp = [0; 8];
+    reader.read_exact(&mut tmp)?;
+    Ok(NoteValue::from_bytes(tmp))
 }
 
 /// Writes an [`orchard::Bundle`] in the v5 transaction format.
@@ -440,7 +446,7 @@ pub mod testing {
     pub fn arb_zsa_bundle_for_version(
         v: TxVersion,
     ) -> impl Strategy<Value = Option<Bundle<Authorized, Amount, OrchardZSA>>> {
-        if v.has_zsa() {
+        if v.has_orchard_zsa() {
             Strategy::boxed((1usize..100).prop_flat_map(|n| prop::option::of(arb_zsa_bundle(n))))
         } else {
             Strategy::boxed(Just(None))

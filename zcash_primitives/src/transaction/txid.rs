@@ -7,11 +7,6 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
 use orchard::bundle;
 use orchard::orchard_flavor::OrchardVanilla;
-#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-use orchard::{
-    issuance::{IssueBundle, Signed},
-    orchard_flavor::OrchardZSA,
-};
 
 use crate::{
     consensus::{BlockHeight, BranchId},
@@ -27,6 +22,12 @@ use super::{
         transparent::{self, TxIn, TxOut},
     },
     Authorization, Authorized, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
+};
+
+#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+use orchard::{
+    issuance::{IssueBundle, Signed},
+    orchard_flavor::OrchardZSA,
 };
 
 #[cfg(zcash_unstable = "zfuture")]
@@ -422,7 +423,7 @@ pub(crate) fn to_hash(
     .unwrap();
 
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    if _txversion.has_zsa() {
+    if _txversion.has_orchard_zsa() {
         h.write_all(
             issue_digest
                 .unwrap_or_else(bundle::commitments::hash_issue_bundle_txid_empty)
@@ -591,7 +592,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         }
 
         #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-        if TxVersion::suggested_for_branch(consensus_branch_id).has_zsa() {
+        if TxVersion::suggested_for_branch(consensus_branch_id).has_orchard_zsa() {
             h.write_all(issue_digest.as_bytes()).unwrap();
         }
 

@@ -1038,7 +1038,7 @@ fn find_received<
     Nf,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
     SK: ScanningKeyOps<D, AccountId, Nf>,
-    Output: ShieldedOutput<D>,
+    Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>,
     NoteCommitment,
 >(
     block_height: BlockHeight,

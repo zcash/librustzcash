@@ -5,7 +5,6 @@ pub mod fees;
 pub mod sighash;
 pub mod sighash_v4;
 pub mod sighash_v5;
-pub mod sighash_v7;
 pub mod txid;
 pub mod util;
 
@@ -15,7 +14,7 @@ mod tests;
 use blake2b_simd::Hash as Blake2bHash;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use memuse::DynamicUsage;
-use orchard::{builder::Unproven, orchard_flavor::OrchardVanilla, value::NoteValue};
+use orchard::{builder::Unproven, orchard_flavor::OrchardVanilla};
 use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Debug;
@@ -28,11 +27,6 @@ use crate::{
     sapling::{self, builder as sapling_builder},
 };
 
-#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-use crate::transaction::components::issuance;
-#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-use orchard::{issuance::IssueBundle, orchard_flavor::OrchardZSA};
-
 use self::{
     components::{
         amount::{Amount, BalanceError},
@@ -44,6 +38,11 @@ use self::{
     txid::{to_txid, BlockTxCommitmentDigester, TxIdDigester},
     util::sha256d::{HashReader, HashWriter},
 };
+
+#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+use crate::transaction::components::issuance;
+#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+use orchard::{issuance::IssueBundle, orchard_flavor::OrchardZSA};
 
 #[cfg(zcash_unstable = "zfuture")]
 use self::components::tze::{self, TzeIn, TzeOut};
@@ -262,16 +261,11 @@ impl TxVersion {
         }
     }
 
-    pub fn has_zsa(&self) -> bool {
+    pub fn has_orchard_zsa(&self) -> bool {
         match self {
-            TxVersion::Sprout(_)
-            | TxVersion::Overwinter
-            | TxVersion::Sapling
-            | TxVersion::Zip225 => false,
             #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             TxVersion::Zsa => true,
-            #[cfg(zcash_unstable = "zfuture")]
-            TxVersion::ZFuture => false,
+            _ => false,
         }
     }
 
@@ -571,7 +565,7 @@ impl<A: Authorization> TransactionData<A> {
 
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     fn digest_orchard<D: TransactionDigest<A>>(&self, digester: &D) -> D::OrchardDigest {
-        if self.version.has_zsa() {
+        if self.version.has_orchard_zsa() {
             digester.digest_orchard_zsa(self.orchard_zsa_bundle.as_ref())
         } else {
             digester.digest_orchard(self.orchard_bundle.as_ref())
@@ -868,12 +862,6 @@ impl Transaction {
         reader.read_exact(&mut tmp)?;
         Amount::from_i64_le_bytes(tmp)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "valueBalance out of range"))
-    }
-
-    fn read_note_value<R: Read>(mut reader: R) -> io::Result<NoteValue> {
-        let mut tmp = [0; 8];
-        reader.read_exact(&mut tmp)?;
-        Ok(NoteValue::from_bytes(tmp))
     }
 
     fn read_v5<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
@@ -1217,8 +1205,8 @@ pub mod testing {
     use super::{
         components::{
             orchard::testing::{self as orchard_testing},
-            sapling::testing::{self as sapling},
-            transparent::testing::{self as transparent},
+            sapling::testing::{self as sapling_testing},
+            transparent::testing::{self as transparent_testing},
         },
         Authorized, Transaction, TransactionData, TxId, TxVersion,
     };
@@ -1256,8 +1244,8 @@ pub mod testing {
         )(
             lock_time in any::<u32>(),
             expiry_height in any::<u32>(),
-            transparent_bundle in transparent::arb_bundle(),
-            sapling_bundle in sapling::arb_bundle_for_version(version),
+            transparent_bundle in transparent_testing::arb_bundle(),
+            sapling_bundle in sapling_testing::arb_bundle_for_version(version),
             orchard_bundle in orchard_testing::arb_bundle_for_version(version),
             _orchard_zsa_bundle in orchard_testing::arb_zsa_bundle_for_version(version),
             _issue_bundle in issuance::testing::arb_bundle_for_version(version),

@@ -141,7 +141,7 @@ pub fn transparent_sig_digest<A: TransparentAuthorizingContext>(
 }
 
 #[cfg(zcash_unstable = "zfuture")]
-pub fn tze_input_sigdigests<A: tze::Authorization>(
+fn tze_input_sigdigests<A: tze::Authorization>(
     bundle: &tze::Bundle<A>,
     input: &SignableInput<'_>,
     txid_digests: &TzeDigests<Blake2bHash>,
@@ -170,7 +170,7 @@ pub fn tze_input_sigdigests<A: tze::Authorization>(
 }
 
 /// Implements the [Signature Digest section of ZIP 244](https://zips.z.cash/zip-0244#signature-digest)
-pub fn v5_signature_hash<
+pub fn v5_v6_signature_hash<
     TA: TransparentAuthorizingContext,
     A: Authorization<TransparentAuth = TA>,
 >(

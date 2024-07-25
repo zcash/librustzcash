@@ -14,7 +14,7 @@ use super::{
         SIGHASH_NONE, SIGHASH_SINGLE,
     },
     sighash_v4::v4_signature_hash,
-    sighash_v5::v5_signature_hash,
+    sighash_v5::v5_v6_signature_hash,
     testing::arb_tx,
     transparent::{self},
     txid::TxIdDigester,
@@ -331,18 +331,18 @@ fn zip_0244() {
             };
 
             assert_eq!(
-                v5_signature_hash(&txdata, &signable_input(SIGHASH_ALL), &txid_parts).as_ref(),
+                v5_v6_signature_hash(&txdata, &signable_input(SIGHASH_ALL), &txid_parts).as_ref(),
                 &tv.sighash_all.unwrap()
             );
 
             assert_eq!(
-                v5_signature_hash(&txdata, &signable_input(SIGHASH_NONE), &txid_parts).as_ref(),
+                v5_v6_signature_hash(&txdata, &signable_input(SIGHASH_NONE), &txid_parts).as_ref(),
                 &tv.sighash_none.unwrap()
             );
 
             if index < bundle.vout.len() {
                 assert_eq!(
-                    v5_signature_hash(&txdata, &signable_input(SIGHASH_SINGLE), &txid_parts)
+                    v5_v6_signature_hash(&txdata, &signable_input(SIGHASH_SINGLE), &txid_parts)
                         .as_ref(),
                     &tv.sighash_single.unwrap()
                 );
@@ -351,7 +351,7 @@ fn zip_0244() {
             }
 
             assert_eq!(
-                v5_signature_hash(
+                v5_v6_signature_hash(
                     &txdata,
                     &signable_input(SIGHASH_ALL | SIGHASH_ANYONECANPAY),
                     &txid_parts,
@@ -361,7 +361,7 @@ fn zip_0244() {
             );
 
             assert_eq!(
-                v5_signature_hash(
+                v5_v6_signature_hash(
                     &txdata,
                     &signable_input(SIGHASH_NONE | SIGHASH_ANYONECANPAY),
                     &txid_parts,
@@ -372,7 +372,7 @@ fn zip_0244() {
 
             if index < bundle.vout.len() {
                 assert_eq!(
-                    v5_signature_hash(
+                    v5_v6_signature_hash(
                         &txdata,
                         &signable_input(SIGHASH_SINGLE | SIGHASH_ANYONECANPAY),
                         &txid_parts,
@@ -386,7 +386,7 @@ fn zip_0244() {
         };
 
         assert_eq!(
-            v5_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),
+            v5_v6_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),
             tv.sighash_shielded
         );
     }

@@ -3,7 +3,7 @@ use blake2b_simd::Hash as Blake2bHash;
 use super::{
     components::{amount::NonNegativeAmount, transparent},
     sighash_v4::v4_signature_hash,
-    sighash_v5::v5_signature_hash,
+    sighash_v5::v5_v6_signature_hash,
     Authorization, TransactionData, TxDigests, TxVersion,
 };
 use crate::{
@@ -11,8 +11,6 @@ use crate::{
     sapling::{self, bundle::GrothProofBytes},
 };
 
-#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-use crate::transaction::sighash_v7::v7_signature_hash;
 #[cfg(zcash_unstable = "zfuture")]
 use {super::components::Amount, crate::extensions::transparent::Precondition};
 
@@ -91,12 +89,12 @@ pub fn signature_hash<
             v4_signature_hash(tx, signable_input)
         }
 
-        TxVersion::Zip225 => v5_signature_hash(tx, signable_input, txid_parts),
+        TxVersion::Zip225 => v5_v6_signature_hash(tx, signable_input, txid_parts),
 
         #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-        TxVersion::Zsa => v7_signature_hash(tx, signable_input, txid_parts),
+        TxVersion::Zsa => v5_v6_signature_hash(tx, signable_input, txid_parts),
 
         #[cfg(zcash_unstable = "zfuture")]
-        TxVersion::ZFuture => v5_signature_hash(tx, signable_input, txid_parts),
+        TxVersion::ZFuture => v5_v6_signature_hash(tx, signable_input, txid_parts),
     })
 }
