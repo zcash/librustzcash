@@ -56,12 +56,12 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
         tx.orchard_bundle.as_ref().map(|v| *v.value_balance()),
         txo.orchard_bundle.as_ref().map(|v| *v.value_balance())
     );
-    #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     prop_assert_eq!(
         tx.orchard_zsa_bundle.as_ref().map(|v| *v.value_balance()),
         txo.orchard_zsa_bundle.as_ref().map(|v| *v.value_balance())
     );
-    #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     if tx.issue_bundle.is_some() {
         prop_assert_eq!(tx.issue_bundle.as_ref(), txo.issue_bundle.as_ref());
     }
@@ -130,7 +130,7 @@ proptest! {
     }
 }
 
-#[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]
@@ -221,10 +221,10 @@ impl Authorization for TestUnauthorized {
     type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 
-    #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     type OrchardZsaAuth = orchard::bundle::Authorized;
 
-    #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     type IssueAuth = orchard::issuance::Signed;
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -239,7 +239,8 @@ fn zip_0244() {
         let tx = Transaction::read(
             &tv.tx[..],
             #[cfg(not(zcash_unstable = "nu6"))] /* TODO nu7 */ BranchId::Nu5,
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ BranchId::Nu7,
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+            BranchId::Nu7,
         )
         .unwrap();
 
@@ -292,8 +293,10 @@ fn zip_0244() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ txdata.orchard_zsa_bundle().cloned(),
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ txdata.issue_bundle().cloned(),
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+            txdata.orchard_zsa_bundle().cloned(),
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+            txdata.issue_bundle().cloned(),
         );
         #[cfg(zcash_unstable = "zfuture")]
         let tdata = TransactionData::from_parts_zfuture(

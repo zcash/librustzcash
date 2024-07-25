@@ -7666,7 +7666,7 @@ pub mod zip_0244 {
                 sighash_none_anyone: None,
                 sighash_single_anyone: None,
             },
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             TestVector {
                 tx: vec![
                     0x07, 0x00, 0x00, 0x80, 0xf8, 0x69, 0x4a, 0x12, 0x77, 0x77, 0x77, 0x77, 0x7a,
@@ -7825,7 +7825,7 @@ pub mod zip_0244 {
                 ]),
                 sighash_single_anyone: None,
             },
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             TestVector {
                 tx: vec![
                     0x07, 0x00, 0x00, 0x80, 0xf8, 0x69, 0x4a, 0x12, 0x77, 0x77, 0x77, 0x77, 0xd3,
@@ -8041,7 +8041,7 @@ pub mod zip_0244 {
                     0x40, 0x5f, 0xff, 0x6e, 0x00, 0xa0,
                 ]),
             },
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             TestVector {
                 tx: vec![
                     0x07, 0x00, 0x00, 0x80, 0xf8, 0x69, 0x4a, 0x12, 0x77, 0x77, 0x77, 0x77, 0x47,
@@ -8257,7 +8257,7 @@ pub mod zip_0244 {
                 ]),
                 sighash_single_anyone: None,
             },
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             TestVector {
                 tx: vec![
                     0x07, 0x00, 0x00, 0x80, 0xf8, 0x69, 0x4a, 0x12, 0x77, 0x77, 0x77, 0x77, 0xc9,
@@ -8448,7 +8448,7 @@ pub mod zip_0244 {
                 ]),
                 sighash_single_anyone: None,
             },
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             TestVector {
                 tx: vec![
                     0x07, 0x00, 0x00, 0x80, 0xf8, 0x69, 0x4a, 0x12, 0x77, 0x77, 0x77, 0x77, 0xf0,
@@ -8782,7 +8782,7 @@ pub mod zip_0244 {
                 sighash_none_anyone: None,
                 sighash_single_anyone: None,
             },
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             TestVector {
                 tx: vec![
                     0x07, 0x00, 0x00, 0x80, 0xf8, 0x69, 0x4a, 0x12, 0x77, 0x77, 0x77, 0x77, 0x48,
@@ -8970,7 +8970,7 @@ pub mod zip_0244 {
                 sighash_none_anyone: None,
                 sighash_single_anyone: None,
             },
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             TestVector {
                 tx: vec![
                     0x07, 0x00, 0x00, 0x80, 0xf8, 0x69, 0x4a, 0x12, 0x77, 0x77, 0x77, 0x77, 0x70,
@@ -9347,7 +9347,7 @@ pub mod zip_0244 {
                 ]),
                 sighash_single_anyone: None,
             },
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             TestVector {
                 tx: vec![
                     0x07, 0x00, 0x00, 0x80, 0xf8, 0x69, 0x4a, 0x12, 0x77, 0x77, 0x77, 0x77, 0xdf,
@@ -9774,7 +9774,7 @@ pub mod zip_0244 {
                     0x67, 0x34, 0x76, 0x5b, 0xcb, 0xa6,
                 ]),
             },
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             TestVector {
                 tx: vec![
                     0x07, 0x00, 0x00, 0x80, 0xf8, 0x69, 0x4a, 0x12, 0x77, 0x77, 0x77, 0x77, 0x08,
@@ -9957,7 +9957,7 @@ pub mod zip_0244 {
                 sighash_none_anyone: None,
                 sighash_single_anyone: None,
             },
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             TestVector {
                 tx: vec![
                     0x07, 0x00, 0x00, 0x80, 0xf8, 0x69, 0x4a, 0x12, 0x77, 0x77, 0x77, 0x77, 0x4b,
@@ -10258,7 +10258,7 @@ pub mod zip_0244 {
                     0x03, 0x5d, 0xb9, 0x38, 0x8b, 0x1b,
                 ]),
             },
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             TestVector {
                 tx: vec![
                     0x07, 0x00, 0x00, 0x80, 0xf8, 0x69, 0x4a, 0x12, 0x77, 0x77, 0x77, 0x77, 0x66,
@@ -10361,7 +10361,7 @@ pub mod zip_0244 {
                 sighash_none_anyone: None,
                 sighash_single_anyone: None,
             },
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             TestVector {
                 tx: vec![
                     0x07, 0x00, 0x00, 0x80, 0xf8, 0x69, 0x4a, 0x12, 0x77, 0x77, 0x77, 0x77, 0xdf,

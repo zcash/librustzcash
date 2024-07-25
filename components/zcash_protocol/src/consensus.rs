@@ -356,9 +356,8 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Nu5 => Some(BlockHeight(1_687_104)),
             #[cfg(zcash_unstable = "nu6")]
             NetworkUpgrade::Nu6 => Some(BlockHeight(1_687_106)),
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ NetworkUpgrade::Nu7 => {
-                Some(BlockHeight(1_687_107))
-            }
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+            NetworkUpgrade::Nu7 => Some(BlockHeight(1_687_107)),
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => None,
         }
@@ -389,9 +388,8 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Nu5 => Some(BlockHeight(1_842_420)),
             #[cfg(zcash_unstable = "nu6")]
             NetworkUpgrade::Nu6 => None,
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ NetworkUpgrade::Nu7 => {
-                Some(BlockHeight(1_842_421))
-            }
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+            NetworkUpgrade::Nu7 => Some(BlockHeight(1_842_421)),
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => None,
         }
@@ -463,7 +461,7 @@ pub enum NetworkUpgrade {
     /// The [Nu7] network upgrade.
     ///
     /// [Nu7]: https://z.cash/upgrade/nu7/
-    #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     Nu7,
     /// The ZFUTURE network upgrade.
     ///
@@ -487,7 +485,8 @@ impl fmt::Display for NetworkUpgrade {
             NetworkUpgrade::Nu5 => write!(f, "Nu5"),
             #[cfg(zcash_unstable = "nu6")]
             NetworkUpgrade::Nu6 => write!(f, "Nu6"),
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ NetworkUpgrade::Nu7 => write!(f, "Nu7"),
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+            NetworkUpgrade::Nu7 => write!(f, "Nu7"),
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => write!(f, "ZFUTURE"),
         }
@@ -505,7 +504,8 @@ impl NetworkUpgrade {
             NetworkUpgrade::Nu5 => BranchId::Nu5,
             #[cfg(zcash_unstable = "nu6")]
             NetworkUpgrade::Nu6 => BranchId::Nu6,
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ NetworkUpgrade::Nu7 => BranchId::Nu7,
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+            NetworkUpgrade::Nu7 => BranchId::Nu7,
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => BranchId::ZFuture,
         }
@@ -525,7 +525,8 @@ const UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
     NetworkUpgrade::Nu5,
     #[cfg(zcash_unstable = "nu6")]
     NetworkUpgrade::Nu6,
-    #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ NetworkUpgrade::Nu7,
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+    NetworkUpgrade::Nu7,
 ];
 
 /// The "grace period" defined in [ZIP 212].
@@ -566,7 +567,7 @@ pub enum BranchId {
     #[cfg(zcash_unstable = "nu6")]
     Nu6,
     /// The consensus rules deployed by [`NetworkUpgrade::Nu7`].
-    #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     Nu7,
     /// Candidates for future consensus rules; this branch will never
     /// activate on mainnet.
@@ -590,7 +591,8 @@ impl TryFrom<u32> for BranchId {
             0xc2d6_d0b4 => Ok(BranchId::Nu5),
             #[cfg(zcash_unstable = "nu6")]
             0xc8e7_1055 => Ok(BranchId::Nu6),
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ 0x7777_7777 => Ok(BranchId::Nu7),
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+            0x7777_7777 => Ok(BranchId::Nu7),
             #[cfg(zcash_unstable = "zfuture")]
             0xffff_ffff => Ok(BranchId::ZFuture),
             _ => Err("Unknown consensus branch ID"),
@@ -610,7 +612,8 @@ impl From<BranchId> for u32 {
             BranchId::Nu5 => 0xc2d6_d0b4,
             #[cfg(zcash_unstable = "nu6")]
             BranchId::Nu6 => 0xc8e7_1055,
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ BranchId::Nu7 => 0x7777_7777,
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+            BranchId::Nu7 => 0x7777_7777,
             #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => 0xffff_ffff,
         }
@@ -691,15 +694,14 @@ impl BranchId {
                 let upper = None;
                 (lower, upper)
             }),
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ BranchId::Nu7 => {
-                params.activation_height(NetworkUpgrade::Nu7).map(|lower| {
-                    #[cfg(zcash_unstable = "zfuture")]
-                    let upper = params.activation_height(NetworkUpgrade::ZFuture);
-                    #[cfg(not(zcash_unstable = "zfuture"))]
-                    let upper = None;
-                    (lower, upper)
-                })
-            }
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+            BranchId::Nu7 => params.activation_height(NetworkUpgrade::Nu7).map(|lower| {
+                #[cfg(zcash_unstable = "zfuture")]
+                let upper = params.activation_height(NetworkUpgrade::ZFuture);
+                #[cfg(not(zcash_unstable = "zfuture"))]
+                let upper = None;
+                (lower, upper)
+            }),
             #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => params
                 .activation_height(NetworkUpgrade::ZFuture)
@@ -730,7 +732,8 @@ pub mod testing {
             BranchId::Nu5,
             #[cfg(zcash_unstable = "nu6")]
             BranchId::Nu6,
-            #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */ BranchId::Nu7,
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+            BranchId::Nu7,
             #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture,
         ])
@@ -824,7 +827,7 @@ mod tests {
             BranchId::for_height(&MAIN_NETWORK, BlockHeight(1_687_104)),
             BranchId::Nu5,
         );
-        #[cfg(zcash_unstable = "nu6")] /* TODO nu7 */
+        #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
         assert_eq!(
             BranchId::for_height(&MAIN_NETWORK, BlockHeight(1_842_421)),
             BranchId::Nu7,
