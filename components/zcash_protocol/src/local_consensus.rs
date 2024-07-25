@@ -16,6 +16,7 @@ use crate::consensus::{BlockHeight, NetworkType, NetworkUpgrade, Parameters};
 ///     nuparams=f5b9230b:1 # Heartwood
 ///     nuparams=e9ff75a6:1 # Canopy
 ///     nuparams=c2d6d0b4:1 # NU5
+///     nuparams=c8e71055:1 # NU6
 ///     ```
 ///     would use the following `LocalNetwork` struct
 ///     ```
@@ -26,7 +27,8 @@ use crate::consensus::{BlockHeight, NetworkType, NetworkUpgrade, Parameters};
 ///         heartwood: Some(BlockHeight::from_u32(1)),
 ///         canopy: Some(BlockHeight::from_u32(1)),
 ///         nu5: Some(BlockHeight::from_u32(1)),
-///         };
+///         nu6: Some(BlockHeight::from_u32(1)),
+///     };
 ///     ```
 ///     
 #[derive(Clone, PartialEq, Eq, Copy, Debug, Hash)]
