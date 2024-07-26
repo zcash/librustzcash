@@ -1,6 +1,5 @@
 //! Structs for building transactions.
 
-use orchard::Address;
 use std::cmp::Ordering;
 use std::error;
 use std::fmt;
@@ -29,6 +28,9 @@ use crate::{
         Transaction, TransactionData, TxVersion, Unauthorized,
     },
 };
+
+use orchard::Address;
+use orchard::builder::BundleType;
 
 #[cfg(feature = "transparent-inputs")]
 use crate::transaction::components::transparent::builder::TransparentInputInfo;
@@ -240,6 +242,10 @@ impl Progress {
 /// Rules for how the builder should be configured for each shielded pool.
 #[derive(Clone, Copy)]
 pub enum BuildConfig {
+    Zsa {
+        sapling_anchor: Option<sapling::Anchor>,
+        orchard_anchor: Option<orchard::Anchor>,
+    },
     Standard {
         sapling_anchor: Option<sapling::Anchor>,
         orchard_anchor: Option<orchard::Anchor>,
@@ -253,7 +259,7 @@ impl BuildConfig {
         &self,
     ) -> Option<(sapling::builder::BundleType, sapling::Anchor)> {
         match self {
-            BuildConfig::Standard { sapling_anchor, .. } => sapling_anchor
+            BuildConfig::Standard { sapling_anchor, .. } | BuildConfig::Zsa { sapling_anchor, .. } => sapling_anchor
                 .as_ref()
                 .map(|a| (sapling::builder::BundleType::DEFAULT, *a)),
             BuildConfig::Coinbase => Some((
@@ -266,13 +272,16 @@ impl BuildConfig {
     /// Returns the Orchard bundle type and anchor for this configuration.
     pub fn orchard_builder_config(
         &self,
-    ) -> Option<(orchard::builder::BundleType, orchard::Anchor)> {
+    ) -> Option<(BundleType, orchard::Anchor)> {
         match self {
             BuildConfig::Standard { orchard_anchor, .. } => orchard_anchor
                 .as_ref()
-                .map(|a| (orchard::builder::BundleType::DEFAULT_VANILLA, *a)),
+                .map(|a| (BundleType::DEFAULT_VANILLA, *a)),
+            BuildConfig::Zsa { orchard_anchor, .. } => orchard_anchor
+                .as_ref()
+                .map(|a| (BundleType::DEFAULT_ZSA, *a)),
             BuildConfig::Coinbase => Some((
-                orchard::builder::BundleType::Coinbase,
+                BundleType::Coinbase,
                 orchard::Anchor::empty_tree(),
             )),
         }
@@ -505,43 +514,6 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
         Ok(())
     }
 
-    /// Adds an Orchard ZSA note to be spent in this bundle.
-    ///
-    /// Returns an error if the given Merkle path does not have the required anchor for
-    /// the given note.
-    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    pub fn add_orchard_zsa_spend<FE>(
-        &mut self,
-        sk: &orchard::keys::SpendingKey,
-        note: orchard::Note,
-        merkle_path: orchard::tree::MerklePath,
-    ) -> Result<(), Error<FE>> {
-        self.add_orchard_spend_impl(sk, note, merkle_path)
-    }
-
-    /// Adds an Orchard ZSA output to the transaction.
-    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    pub fn add_orchard_zsa_output<FE>(
-        &mut self,
-        ovk: Option<orchard::keys::OutgoingViewingKey>,
-        recipient: Address,
-        value: u64,
-        asset: AssetBase,
-        memo: MemoBytes,
-    ) -> Result<(), Error<FE>> {
-        self.orchard_builder
-            .as_mut()
-            .ok_or(Error::OrchardBuilderNotAvailable)?
-            .add_output(
-                ovk,
-                recipient,
-                orchard::value::NoteValue::from_raw(value),
-                asset,
-                Some(*memo.as_array()),
-            )
-            .map_err(Error::OrchardRecipient)
-    }
-
     /// Adds a Burn action to the transaction.
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     pub fn add_burn<FE>(&mut self, value: u64, asset: AssetBase) -> Result<(), Error<FE>> {
@@ -566,16 +538,10 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         note: orchard::Note,
         merkle_path: orchard::tree::MerklePath,
     ) -> Result<(), Error<FE>> {
-        assert_eq!(note.asset().is_native().unwrap_u8(), 1);
-        self.add_orchard_spend_impl(sk, note, merkle_path)
-    }
-
-    fn add_orchard_spend_impl<FE>(
-        &mut self,
-        sk: &orchard::keys::SpendingKey,
-        note: orchard::Note,
-        merkle_path: orchard::tree::MerklePath,
-    ) -> Result<(), Error<FE>> {
+        let (bundle_type, _) = self.build_config.orchard_builder_config().ok_or(Error::OrchardBuilderNotAvailable)?;
+        if bundle_type == BundleType::DEFAULT_VANILLA {
+            assert_eq!(note.asset().is_native().unwrap_u8(), 1);
+        }
         self.orchard_builder
             .as_mut()
             .ok_or(Error::OrchardBuilderNotAvailable)?
@@ -594,8 +560,13 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         ovk: Option<orchard::keys::OutgoingViewingKey>,
         recipient: Address,
         value: u64,
+        asset: AssetBase,
         memo: MemoBytes,
     ) -> Result<(), Error<FE>> {
+        let (bundle_type, _) = self.build_config.orchard_builder_config().ok_or(Error::OrchardBuilderNotAvailable)?;
+        if bundle_type == BundleType::DEFAULT_VANILLA {
+            assert_eq!(asset.is_native().unwrap_u8(), 1);
+        }
         self.orchard_builder
             .as_mut()
             .ok_or(Error::OrchardBuilderNotAvailable)?
@@ -603,7 +574,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
                 ovk,
                 recipient,
                 orchard::value::NoteValue::from_raw(value),
-                AssetBase::native(),
+                asset,
                 Some(*memo.as_array()),
             )
             .map_err(Error::OrchardRecipient)
