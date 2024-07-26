@@ -124,6 +124,9 @@ use wallet::{
     SubtreeScanProgress,
 };
 
+#[cfg(feature = "transparent-inputs")]
+use wallet::transparent::{find_account_for_transparent_address, put_transparent_output};
+
 #[cfg(test)]
 mod testing;
 
@@ -290,7 +293,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         &self,
         outpoint: &OutPoint,
     ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
-        wallet::transparent::get_unspent_transparent_output(self.conn.borrow(), outpoint)
+        wallet::transparent::get_wallet_transparent_output(self.conn.borrow(), outpoint, false)
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -1375,6 +1378,24 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         // an unmined transaction won't advance the range of safe indices.
                         #[cfg(feature = "transparent-inputs")]
                         wallet::transparent::ephemeral::mark_ephemeral_address_as_seen(wdb, &address, tx_ref)?;
+
+                        // If the output belongs to the wallet, add it to `transparent_received_outputs`.
+                        #[cfg(feature = "transparent-inputs")]
+                        if let Some(account_id) = find_account_for_transparent_address(
+                            wdb.conn.0,
+                            &wdb.params,
+                            &address
+                        )? {
+                            put_transparent_output(
+                                wdb.conn.0,
+                                &wdb.params,
+                                &OutPoint::new(d_tx.tx().txid().into(), u32::try_from(output_index).unwrap()),
+                                txout,
+                                d_tx.mined_height(),
+                                &address,
+                                account_id
+                            )?;
+                        }
 
                         // If a transaction we observe contains spends from our wallet, we will
                         // store its transparent outputs in the same way they would be stored by

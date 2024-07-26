@@ -215,6 +215,7 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
         .collect();
 
     DecryptedTransaction::new(
+        Some(height),
         tx,
         sapling_outputs,
         #[cfg(feature = "orchard")]

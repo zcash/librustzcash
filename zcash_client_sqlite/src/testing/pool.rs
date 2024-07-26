@@ -315,7 +315,9 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     };
     use zcash_protocol::value::ZatBalance;
 
-    use crate::wallet::{sapling::tests::test_prover, GAP_LIMIT};
+    use crate::wallet::{
+        sapling::tests::test_prover, transparent::get_wallet_transparent_output, GAP_LIMIT,
+    };
 
     let mut st = TestBuilder::new()
         .with_block_cache()
@@ -553,8 +555,9 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         },
     );
     let (colliding_addr, _) = &known_addrs[10];
+    let utxo_value = (value - zip317::MINIMUM_FEE).unwrap();
     assert_matches!(
-        builder.add_transparent_output(colliding_addr, (value - zip317::MINIMUM_FEE).unwrap()),
+        builder.add_transparent_output(colliding_addr, utxo_value),
         Ok(_)
     );
     let sk = account
@@ -577,13 +580,22 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
             &zip317::FeeRule::standard(),
         )
         .unwrap();
+    let txid = build_result.transaction().txid();
     let decrypted_tx = DecryptedTransaction::<AccountId>::new(
+        None,
         build_result.transaction(),
         vec![],
         #[cfg(feature = "orchard")]
         vec![],
     );
     st.wallet_mut().store_decrypted_tx(decrypted_tx).unwrap();
+
+    // We call get_wallet_transparent_output with `allow_unspendable = true` to verify
+    // storage because the decrypted transaction has not yet been mined.
+    let utxo =
+        get_wallet_transparent_output(&st.db_data.conn, &OutPoint::new(txid.into(), 0), true)
+            .unwrap();
+    assert_matches!(utxo, Some(v) if v.value() == utxo_value);
 
     // That should have advanced the start of the gap to index 11.
     let new_known_addrs = st
@@ -1532,7 +1544,7 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
             value: NonNegativeAmount::const_from_u64(10000),
             script_pubkey: taddr.script(),
         },
-        h,
+        Some(h),
     )
     .unwrap();
 

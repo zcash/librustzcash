@@ -1,6 +1,7 @@
 //! Support for legacy transparent addresses and scripts.
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
+use zcash_address::TryFromRawAddress;
 
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -404,6 +405,22 @@ impl TransparentAddress {
                 Script::default() << OpCode::Hash160 << &script_id[..] << OpCode::Equal
             }
         }
+    }
+}
+
+impl TryFromRawAddress for TransparentAddress {
+    type Error = ();
+
+    fn try_from_raw_transparent_p2pkh(
+        data: [u8; 20],
+    ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
+        Ok(TransparentAddress::PublicKeyHash(data))
+    }
+
+    fn try_from_raw_transparent_p2sh(
+        data: [u8; 20],
+    ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
+        Ok(TransparentAddress::ScriptHash(data))
     }
 }
 

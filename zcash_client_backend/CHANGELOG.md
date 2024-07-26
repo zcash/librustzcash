@@ -26,7 +26,8 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
 ### Added
 - `zcash_client_backend::data_api`:
   - `chain::BlockCache` trait, behind the `sync` feature flag.
-  - `WalletRead::get_spendable_transparent_outputs`.
+  - `WalletRead::get_spendable_transparent_outputs`
+  - `DecryptedTransaction::mined_height`
 - `zcash_client_backend::fees`:
   - `EphemeralBalance`
   - `ChangeValue::shielded, is_ephemeral`
@@ -39,7 +40,9 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   - `testing` module
 - `zcash_client_backend::sync` module, behind the `sync` feature flag.
 - `zcash_client_backend::tor` module, behind the `tor` feature flag.
-- `zcash_client_backend::wallet::Recipient::map_ephemeral_transparent_outpoint`
+- `zcash_client_backend::wallet`:
+    - `Recipient::map_ephemeral_transparent_outpoint`
+    - `WalletTransparentOutput::mined_height`
 
 ### Changed
 - MSRV is now 1.70.0.
@@ -67,6 +70,7 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   - `error::Error` has new `Address` and (when the "transparent-inputs" feature
     is enabled) `PaysEphemeralTransparentAddress` variants.
   - `wallet::input_selection::InputSelectorError` has a new `Address` variant.
+  - `DecryptedTransaction::new` takes an additional `mined_height` argument.
 - `zcash_client_backend::data_api::fees`
   - When the "transparent-inputs" feature is enabled, `ChangeValue` can also
     represent an ephemeral transparent output in a proposal. Accordingly, the
@@ -94,6 +98,9 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   tracking the original address to which value was sent. There is also a new
   `EphemeralTransparent` variant, and an additional generic parameter for the
   type of metadata associated with an ephemeral transparent outpoint.
+- `zcash_client_backend::wallet::WalletTransparentOutput::from_parts`
+  now takes its height argument as `Option<BlockHeight>` rather than
+  `BlockHeight`.
 
 ### Removed
 - `zcash_client_backend::data_api`:
@@ -102,12 +109,14 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
     `WalletRead::get_spendable_transparent_outputs` instead.
 - `zcash_client_backend::fees::ChangeValue::new`. Use `ChangeValue::shielded`
   or `ChangeValue::ephemeral_transparent` instead.
+- `zcash_client_backend::wallet::WalletTransparentOutput::height`
+  (use `WalletTransparentOutput::mined_height` instead).
 
 ## [0.12.1] - 2024-03-27
 
 ### Fixed
 - This release fixes a problem in note selection when sending to a transparent
-  recipient, whereby available funds were being incorrectly excluded from 
+  recipient, whereby available funds were being incorrectly excluded from
   input selection.
 
 ## [0.12.0] - 2024-03-25
@@ -177,11 +186,11 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
     - `get_transaction` now returns `Result<Option<Transaction>, _>` rather
       than returning an `Err` if the `txid` parameter does not correspond to
       a transaction in the database.
-  - `WalletWrite::create_account` now takes its `AccountBirthday` argument by 
+  - `WalletWrite::create_account` now takes its `AccountBirthday` argument by
     reference.
   - Changes to the `InputSource` trait:
     - `select_spendable_notes` now takes its `target_value` argument as a
-      `NonNegativeAmount`. Also, it now returns a `SpendableNotes` data 
+      `NonNegativeAmount`. Also, it now returns a `SpendableNotes` data
       structure instead of a vector.
   - Fields of `DecryptedTransaction` are now private. Use `DecryptedTransaction::new`
     and the newly provided accessors instead.
