@@ -168,7 +168,7 @@ mod tests {
 
             // Initialize the `ephemeral_addresses` table.
             #[cfg(feature = "transparent-inputs")]
-            transparent::ephemeral::init_account(&mut wdb.conn.0, &wdb.params, account_id)?;
+            transparent::ephemeral::init_account(wdb.conn.0, &wdb.params, account_id)?;
 
             Ok((account_id, usk))
         })
