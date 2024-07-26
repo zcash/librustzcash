@@ -169,7 +169,7 @@ fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, S
     let value = NonNegativeAmount::from_nonnegative_i64(raw_value).map_err(|_| {
         SqliteClientError::CorruptedData(format!("Invalid UTXO value: {}", raw_value))
     })?;
-    let height: u32 = row.get("received_height")?;
+    let height: Option<u32> = row.get("received_height")?;
 
     let outpoint = OutPoint::new(txid_bytes, index);
     WalletTransparentOutput::from_parts(
@@ -178,7 +178,7 @@ fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, S
             value,
             script_pubkey,
         },
-        BlockHeight::from(height),
+        height.map(BlockHeight::from),
     )
     .ok_or_else(|| {
         SqliteClientError::CorruptedData(
@@ -188,16 +188,18 @@ fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, S
 }
 
 /// Select an output to fund a new transaction that is targeting at least `chain_tip_height + 1`.
-pub(crate) fn get_unspent_transparent_output(
+pub(crate) fn get_wallet_transparent_output(
     conn: &rusqlite::Connection,
     outpoint: &OutPoint,
+    allow_unspendable: bool,
 ) -> Result<Option<WalletTransparentOutput>, SqliteClientError> {
     let chain_tip_height = chain_tip_height(conn)?;
 
-    // This could, in very rare circumstances, return as unspent outputs that are actually not
-    // spendable, if they are the outputs of deshielding transactions where the spend anchors have
-    // been invalidated by a rewind. There isn't a way to detect this circumstance at present, but
-    // it should be vanishingly rare as the vast majority of rewinds are of a single block.
+    // This could return as unspent outputs that are actually not spendable, if they are the
+    // outputs of deshielding transactions where the spend anchors have been invalidated by a
+    // rewind or spent in a transaction that has not been observed by this wallet. There isn't a
+    // way to detect the circumstance related to anchor invalidation at present, but it should be
+    // vanishingly rare as the vast majority of rewinds are of a single block.
     let mut stmt_select_utxo = conn.prepare_cached(
         "SELECT t.txid, u.output_index, u.script,
                 u.value_zat, t.mined_height AS received_height
@@ -207,20 +209,26 @@ pub(crate) fn get_unspent_transparent_output(
          AND u.output_index = :output_index
          -- the transaction that created the output is mined or is definitely unexpired
          AND (
-            t.mined_height IS NOT NULL -- tx is mined
-            -- TODO: uncomment the following two lines in order to enable zero-conf spends
-            -- OR t.expiry_height = 0 -- tx will not expire
-            -- OR t.expiry_height >= :mempool_height -- tx has not yet expired
+             :allow_unspendable
+             OR (
+                 (
+                    t.mined_height IS NOT NULL -- tx is mined
+                    -- TODO: uncomment the following two lines in order to enable zero-conf spends
+                    -- OR t.expiry_height = 0 -- tx will not expire
+                    -- OR t.expiry_height >= :mempool_height -- tx has not yet expired
+                 )
+                 -- and the output is unspent
+                 AND u.id NOT IN (
+                    SELECT txo_spends.transparent_received_output_id
+                    FROM transparent_received_output_spends txo_spends
+                    JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
+                    WHERE tx.mined_height IS NOT NULL  -- the spending tx is mined
+                    OR tx.expiry_height = 0 -- the spending tx will not expire
+                    OR tx.expiry_height >= :mempool_height -- the spending tx has not yet expired
+                 )
+             )
          )
-         -- and the output is unspent
-         AND u.id NOT IN (
-            SELECT txo_spends.transparent_received_output_id
-            FROM transparent_received_output_spends txo_spends
-            JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
-            WHERE tx.mined_height IS NOT NULL  -- the spending tx is mined
-            OR tx.expiry_height = 0 -- the spending tx will not expire
-            OR tx.expiry_height >= :mempool_height -- the spending tx has not yet expired
-         )",
+         ",
     )?;
 
     let result: Result<Option<WalletTransparentOutput>, SqliteClientError> = stmt_select_utxo
@@ -229,6 +237,7 @@ pub(crate) fn get_unspent_transparent_output(
                 ":txid": outpoint.hash(),
                 ":output_index": outpoint.n(),
                 ":mempool_height": chain_tip_height.map(|h| u32::from(h) + 1),
+                ":allow_unspendable": allow_unspendable
             ],
             to_unspent_transparent_output,
         )?
@@ -456,7 +465,7 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
             params,
             output.outpoint(),
             output.txout(),
-            Some(output.height()),
+            output.mined_height(),
             address,
             receiving_account,
         )
@@ -695,7 +704,8 @@ mod tests {
 
         // Pretend the output's transaction was mined at `height_1`.
         let utxo =
-            WalletTransparentOutput::from_parts(outpoint.clone(), txout.clone(), height_1).unwrap();
+            WalletTransparentOutput::from_parts(outpoint.clone(), txout.clone(), Some(height_1))
+                .unwrap();
         let res0 = st.wallet_mut().put_received_transparent_utxo(&utxo);
         assert_matches!(res0, Ok(_));
 
@@ -706,18 +716,18 @@ mod tests {
                 height_1,
                 0
             ).as_deref(),
-            Ok([ret]) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_1)
+            Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
         );
         assert_matches!(
             st.wallet().get_unspent_transparent_output(utxo.outpoint()),
-            Ok(Some(ret)) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_1)
+            Ok(Some(ret)) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
         );
 
         // Change the mined height of the UTXO and upsert; we should get back
         // the same `UtxoId`.
         let height_2 = birthday + 34567;
         st.wallet_mut().update_chain_tip(height_2).unwrap();
-        let utxo2 = WalletTransparentOutput::from_parts(outpoint, txout, height_2).unwrap();
+        let utxo2 = WalletTransparentOutput::from_parts(outpoint, txout, Some(height_2)).unwrap();
         let res1 = st.wallet_mut().put_received_transparent_utxo(&utxo2);
         assert_matches!(res1, Ok(id) if id == res0.unwrap());
 
@@ -732,7 +742,7 @@ mod tests {
         // We can still look up the specific output, and it has the expected height.
         assert_matches!(
             st.wallet().get_unspent_transparent_output(utxo2.outpoint()),
-            Ok(Some(ret)) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo2.outpoint(), utxo2.txout(), height_2)
+            Ok(Some(ret)) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo2.outpoint(), utxo2.txout(), Some(height_2))
         );
 
         // If we include `height_2` then the output is returned.
@@ -740,7 +750,7 @@ mod tests {
             st.wallet()
                 .get_spendable_transparent_outputs(taddr, height_2, 0)
                 .as_deref(),
-            Ok([ret]) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_2)
+            Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_2))
         );
 
         assert_matches!(
@@ -842,7 +852,8 @@ mod tests {
 
         // Pretend the output was received in the chain tip.
         let height = st.wallet().chain_height().unwrap().unwrap();
-        let utxo = WalletTransparentOutput::from_parts(OutPoint::fake(), txout, height).unwrap();
+        let utxo =
+            WalletTransparentOutput::from_parts(OutPoint::fake(), txout, Some(height)).unwrap();
         st.wallet_mut()
             .put_received_transparent_utxo(&utxo)
             .unwrap();

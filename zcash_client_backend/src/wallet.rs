@@ -249,7 +249,7 @@ impl<AccountId> WalletTx<AccountId> {
 pub struct WalletTransparentOutput {
     outpoint: OutPoint,
     txout: TxOut,
-    height: BlockHeight,
+    mined_height: Option<BlockHeight>,
     recipient_address: TransparentAddress,
 }
 
@@ -257,14 +257,14 @@ impl WalletTransparentOutput {
     pub fn from_parts(
         outpoint: OutPoint,
         txout: TxOut,
-        height: BlockHeight,
+        mined_height: Option<BlockHeight>,
     ) -> Option<WalletTransparentOutput> {
         txout
             .recipient_address()
             .map(|recipient_address| WalletTransparentOutput {
                 outpoint,
                 txout,
-                height,
+                mined_height,
                 recipient_address,
             })
     }
@@ -277,8 +277,8 @@ impl WalletTransparentOutput {
         &self.txout
     }
 
-    pub fn height(&self) -> BlockHeight {
-        self.height
+    pub fn mined_height(&self) -> Option<BlockHeight> {
+        self.mined_height
     }
 
     pub fn recipient_address(&self) -> &TransparentAddress {

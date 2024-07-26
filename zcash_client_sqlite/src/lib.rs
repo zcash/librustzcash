@@ -290,7 +290,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         &self,
         outpoint: &OutPoint,
     ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
-        wallet::transparent::get_unspent_transparent_output(self.conn.borrow(), outpoint)
+        wallet::transparent::get_wallet_transparent_output(self.conn.borrow(), outpoint, false)
     }
 
     #[cfg(feature = "transparent-inputs")]
