@@ -14,6 +14,7 @@ mod receiving_key_scopes;
 mod sapling_memo_consistency;
 mod sent_notes_to_internal;
 mod shardtree_support;
+mod spend_key_available;
 mod ufvk_support;
 mod utxos_table;
 mod utxos_to_txos;
@@ -63,12 +64,12 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                         \                     \       |       v_transactions_note_uniqueness
     //                          \                     \      |        /
     //                           -------------------- full_account_ids
-    //                                                       |
-    //                                             orchard_received_notes
-    //                                                  /         \
-    //                           ensure_orchard_ua_receiver     utxos_to_txos
-    //                                                                |
-    //                                                       ephemeral_addresses
+    //                                               |                \
+    //                                  orchard_received_notes        spend_key_available
+    //                                       /         \
+    //                ensure_orchard_ua_receiver     utxos_to_txos
+    //                                                     |
+    //                                            ephemeral_addresses
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -122,6 +123,7 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(ephemeral_addresses::Migration {
             params: params.clone(),
         }),
+        Box::new(spend_key_available::Migration),
     ]
 }
 

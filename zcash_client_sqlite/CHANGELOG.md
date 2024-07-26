@@ -31,6 +31,7 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
 - MSRV is now 1.70.0.
 - `zcash_client_sqlite::error::SqliteClientError` has changed variants:
   - Removed `HdwalletError`.
+  - Added `AccountCollision`.
   - Added `TransparentDerivation`.
 - The `block` column of the `v_transactions` view has been renamed to `mined_height`.
 

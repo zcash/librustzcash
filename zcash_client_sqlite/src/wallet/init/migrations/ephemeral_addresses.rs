@@ -81,7 +81,98 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
 #[cfg(test)]
 mod tests {
-    use crate::wallet::init::migrations::tests::test_migrate;
+    use rusqlite::{named_params, Connection};
+    use secrecy::{ExposeSecret, SecretVec};
+    use zcash_client_backend::data_api::AccountBirthday;
+    use zcash_keys::keys::UnifiedSpendingKey;
+    use zcash_protocol::consensus::Network;
+    use zip32::fingerprint::SeedFingerprint;
+
+    use crate::{
+        error::SqliteClientError,
+        wallet::{self, init::migrations::tests::test_migrate, transparent},
+        AccountId, WalletDb,
+    };
+
+    /// This is a minimized copy of [`wallet::create_account`] as of the time of the
+    /// creation of this migration.
+    fn create_account(
+        wdb: &mut WalletDb<Connection, Network>,
+        seed: &SecretVec<u8>,
+        birthday: &AccountBirthday,
+    ) -> Result<(AccountId, UnifiedSpendingKey), SqliteClientError> {
+        wdb.transactionally(|wdb| {
+            let seed_fingerprint =
+                SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
+                    SqliteClientError::BadAccountData(
+                        "Seed must be between 32 and 252 bytes in length.".to_owned(),
+                    )
+                })?;
+            let account_index = wallet::max_zip32_account_index(wdb.conn.0, &seed_fingerprint)?
+                .map(|a| a.next().ok_or(SqliteClientError::AccountIdOutOfRange))
+                .transpose()?
+                .unwrap_or(zip32::AccountId::ZERO);
+
+            let usk =
+                UnifiedSpendingKey::from_seed(&wdb.params, seed.expose_secret(), account_index)
+                    .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
+            let ufvk = usk.to_unified_full_viewing_key();
+
+            let orchard_item = ufvk.orchard().map(|k| k.to_bytes());
+            let sapling_item = ufvk.sapling().map(|k| k.to_bytes());
+            #[cfg(feature = "transparent-inputs")]
+            let transparent_item = ufvk.transparent().map(|k| k.serialize());
+            #[cfg(not(feature = "transparent-inputs"))]
+            let transparent_item: Option<Vec<u8>> = None;
+
+            let birthday_sapling_tree_size = Some(birthday.sapling_frontier().tree_size());
+            #[cfg(feature = "orchard")]
+            let birthday_orchard_tree_size = Some(birthday.orchard_frontier().tree_size());
+            #[cfg(not(feature = "orchard"))]
+            let birthday_orchard_tree_size: Option<u64> = None;
+
+            let account_id: AccountId = wdb.conn.0.query_row(
+                r#"
+                INSERT INTO accounts (
+                    account_kind, hd_seed_fingerprint, hd_account_index,
+                    ufvk, uivk,
+                    orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
+                    birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
+                    recover_until_height
+                )
+                VALUES (
+                    :account_kind, :hd_seed_fingerprint, :hd_account_index,
+                    :ufvk, :uivk,
+                    :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
+                    :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
+                    :recover_until_height
+                )
+                RETURNING id;
+                "#,
+                named_params![
+                    ":account_kind": 0, // 0 == Derived
+                    ":hd_seed_fingerprint": seed_fingerprint.to_bytes(),
+                    ":hd_account_index": u32::from(account_index),
+                    ":ufvk": ufvk.encode(&wdb.params),
+                    ":uivk": ufvk.to_unified_incoming_viewing_key().encode(&wdb.params),
+                    ":orchard_fvk_item_cache": orchard_item,
+                    ":sapling_fvk_item_cache": sapling_item,
+                    ":p2pkh_fvk_item_cache": transparent_item,
+                    ":birthday_height": u32::from(birthday.height()),
+                    ":birthday_sapling_tree_size": birthday_sapling_tree_size,
+                    ":birthday_orchard_tree_size": birthday_orchard_tree_size,
+                    ":recover_until_height": birthday.recover_until().map(u32::from)
+                ],
+                |row| Ok(AccountId(row.get(0)?)),
+            )?;
+
+            // Initialize the `ephemeral_addresses` table.
+            #[cfg(feature = "transparent-inputs")]
+            transparent::ephemeral::init_account(wdb.conn.0, &wdb.params, account_id)?;
+
+            Ok((account_id, usk))
+        })
+    }
 
     #[test]
     fn migrate() {
@@ -95,7 +186,7 @@ mod tests {
         use secrecy::Secret;
         use tempfile::NamedTempFile;
         use zcash_client_backend::{
-            data_api::{AccountBirthday, AccountSource, WalletWrite},
+            data_api::{AccountBirthday, AccountSource},
             wallet::TransparentAddressMetadata,
         };
         use zcash_keys::keys::UnifiedSpendingKey;
@@ -192,9 +283,8 @@ mod tests {
 
         // Creating a new account should initialize `ephemeral_addresses` for that account.
         let seed1 = vec![0x01; 32];
-        let (account1_id, _usk) = db_data
-            .create_account(&Secret::new(seed1), &birthday)
-            .unwrap();
+        let (account1_id, _usk) =
+            create_account(&mut db_data, &Secret::new(seed1), &birthday).unwrap();
         assert_ne!(account0_id, account1_id);
         check(&db_data, account1_id);
     }

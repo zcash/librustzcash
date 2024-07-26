@@ -26,6 +26,7 @@ use sapling::{
     zip32::DiversifiableFullViewingKey,
     Note, Nullifier,
 };
+use zcash_client_backend::data_api::Account as AccountTrait;
 #[allow(deprecated)]
 use zcash_client_backend::{
     address::Address,
@@ -74,7 +75,7 @@ use crate::{
     error::SqliteClientError,
     wallet::{
         commitment_tree, get_wallet_summary, init::init_wallet_db, sapling::tests::test_prover,
-        SubtreeScanProgress,
+        Account, SubtreeScanProgress,
     },
     AccountId, ReceivedNoteId, WalletDb,
 };
@@ -117,6 +118,7 @@ pub(crate) struct TestBuilder<Cache> {
     cache: Cache,
     initial_chain_state: Option<InitialChainState>,
     account_birthday: Option<AccountBirthday>,
+    account_index: Option<zip32::AccountId>,
 }
 
 impl TestBuilder<()> {
@@ -143,6 +145,7 @@ impl TestBuilder<()> {
             cache: (),
             initial_chain_state: None,
             account_birthday: None,
+            account_index: None,
         }
     }
 
@@ -154,6 +157,7 @@ impl TestBuilder<()> {
             cache: BlockCache::new(),
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
+            account_index: self.account_index,
         }
     }
 
@@ -166,6 +170,7 @@ impl TestBuilder<()> {
             cache: FsBlockCache::new(),
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
+            account_index: self.account_index,
         }
     }
 }
@@ -207,6 +212,15 @@ impl<Cache> TestBuilder<Cache> {
                 .clone(),
             None,
         ));
+        self
+    }
+
+    /// Sets the [`account_index`] field for the test account
+    ///
+    /// Call either [`with_account_from_sapling_activation`] or [`with_account_having_current_birthday`] before calling this method.
+    pub(crate) fn set_account_index(mut self, index: zip32::AccountId) -> Self {
+        assert!(self.account_index.is_none());
+        self.account_index = Some(index);
         self
     }
 
@@ -271,11 +285,17 @@ impl<Cache> TestBuilder<Cache> {
 
         let test_account = self.account_birthday.map(|birthday| {
             let seed = Secret::new(vec![0u8; 32]);
-            let (account_id, usk) = db_data.create_account(&seed, &birthday).unwrap();
+            let (account, usk) = match self.account_index {
+                Some(index) => db_data.import_account_hd(&seed, index, &birthday).unwrap(),
+                None => {
+                    let result = db_data.create_account(&seed, &birthday).unwrap();
+                    (db_data.get_account(result.0).unwrap().unwrap(), result.1)
+                }
+            };
             (
                 seed,
                 TestAccount {
-                    account_id,
+                    account,
                     usk,
                     birthday,
                 },
@@ -377,14 +397,18 @@ impl CachedBlock {
 
 #[derive(Clone)]
 pub(crate) struct TestAccount {
-    account_id: AccountId,
+    account: Account,
     usk: UnifiedSpendingKey,
     birthday: AccountBirthday,
 }
 
 impl TestAccount {
+    pub(crate) fn account(&self) -> &Account {
+        &self.account
+    }
+
     pub(crate) fn account_id(&self) -> AccountId {
-        self.account_id
+        self.account.id()
     }
 
     pub(crate) fn usk(&self) -> &UnifiedSpendingKey {

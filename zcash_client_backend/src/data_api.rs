@@ -1556,8 +1556,57 @@ impl AccountBirthday {
     }
 }
 
-/// This trait encapsulates the write capabilities required to update stored
-/// wallet data.
+/// This trait encapsulates the write capabilities required to update stored wallet data.
+///
+/// # Creating a new wallet
+///
+/// A wallet may be created by generating a new seed phrase and creating an account with that seed.
+/// Account creation is typically done with the [`WalletWrite::create_account`] method.
+///
+/// Callers should construct the [`AccountBirthday`] using [`AccountBirthday::from_treestate`] for
+/// the block at height `chain_tip_height - 100`. Setting the birthday height to a tree state below
+/// the pruning depth ensures that reorgs cannot cause funds intended for the wallet to be missed;
+/// otherwise, if the chain tip height were used for the wallet birthday, a transaction targeted at
+/// a height greater than the chain tip could be mined at a height below that tip as part of a
+/// reorg.
+///
+/// # Restoring from backup
+///
+/// A wallet may restore existing accounts rather than create new ones. This will typically be done
+/// by the user providing a seed phrase created in a previous wallet. A seed phrase will allow
+/// generation of keys for any number of accounts.
+///
+/// Knowing exactly how many accounts to activate based on the seed phrase is part of account
+/// recovery, which is that we assume only one account may have been used to receive funds. Once we
+/// find that it actually *has* received funds, we assume that the next account may have been used
+/// and create the next account and start using its keys to scan subsequent blocks. This process is
+/// repeated until we find an account that has not received funds. Account recovery has *not* yet
+/// been implemented by this crate. So a wallet app that supports multiple accounts is expected to
+/// implement it manually for now.
+///
+/// If the number of accounts is known in advance, the wallet should create all accounts before
+/// scanning the chain so that the scan can be done in a single pass for all accounts.
+///
+/// # Account creation
+///
+/// Any of several functions may be used to create the first or subsequent accounts, including:
+/// - [`WalletWrite::create_account`] takes a seed phrase and creates a new account with the
+///   smallest unused [`ZIP 32`] account index.
+/// - [`WalletWrite::import_account_hd`] takes a seed phrase and creates an account with a specific
+///   [`ZIP 32`] account index.
+/// - [`WalletWrite::import_account_ufvk`] creates an account with a specific Unified Full Viewing
+///   Key. No assumption of [`ZIP 32`] HD derivation is made.
+///
+/// All of the account creation/import functions take a birthday height. If `birthday.height()` is
+/// below the current chain tip, this operation will trigger a re-scan of the blocks at and above
+/// the provided height. The birthday height is defined as the minimum block height that will be
+/// scanned for funds belonging to the wallet.
+///
+/// By convention, wallets should only allow a new account to be generated after confirmed funds
+/// have been received by the newest existing account. This allows automated account recovery to
+/// recover all funds.
+///
+/// [`ZIP 32`]: https://zips.z.cash/zip-0032
 pub trait WalletWrite: WalletRead {
     /// The type of identifiers used to look up transparent UTXOs.
     type UtxoRef;
@@ -1565,29 +1614,22 @@ pub trait WalletWrite: WalletRead {
     /// Tells the wallet to track the next available account-level spend authority, given the
     /// current set of [ZIP 316] account identifiers known to the wallet database.
     ///
+    /// The "next available account" is defined as the first unused ZIP-32 account index (counting
+    /// from 0) among all accounts that share the given seed. When [`Self::import_account_hd`] is
+    /// used to import an account with a specific index, account indexes *may* become fragmented
+    /// instead of one contiguous range. Where fragmentation occurs, the implementations *may*
+    /// choose to find the first unused account index or add 1 to the highest existing account
+    /// index.
+    ///
     /// Returns the account identifier for the newly-created wallet database entry, along with the
     /// associated [`UnifiedSpendingKey`]. Note that the unique account identifier should *not* be
     /// assumed equivalent to the ZIP 32 account index. It is an opaque identifier for a pool of
     /// funds or set of outputs controlled by a single spending authority.
     ///
-    /// If `birthday.height()` is below the current chain tip, this operation will
-    /// trigger a re-scan of the blocks at and above the provided height. The birthday height is
-    /// defined as the minimum block height that will be scanned for funds belonging to the wallet.
+    /// The ZIP-32 account index may be obtained by calling [`WalletRead::get_account`]
+    /// with the returned account identifier.
     ///
-    /// For new wallets, callers should construct the [`AccountBirthday`] using
-    /// [`AccountBirthday::from_treestate`] for the block at height `chain_tip_height - 100`.
-    /// Setting the birthday height to a tree state below the pruning depth ensures that reorgs
-    /// cannot cause funds intended for the wallet to be missed; otherwise, if the chain tip height
-    /// were used for the wallet birthday, a transaction targeted at a height greater than the
-    /// chain tip could be mined at a height below that tip as part of a reorg.
-    ///
-    /// If `seed` was imported from a backup and this method is being used to restore a previous
-    /// wallet state, you should use this method to add all of the desired accounts before scanning
-    /// the chain from the seed's birthday height.
-    ///
-    /// By convention, wallets should only allow a new account to be generated after confirmed
-    /// funds have been received by the currently-available account (in order to enable automated
-    /// account recovery).
+    /// Learn more about account creation and import in the [`WalletWrite`] trait documentation.
     ///
     /// # Panics
     ///
@@ -1599,6 +1641,55 @@ pub trait WalletWrite: WalletRead {
         seed: &SecretVec<u8>,
         birthday: &AccountBirthday,
     ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error>;
+
+    /// Tells the wallet to track a specific account index for a given seed.
+    ///
+    /// Returns details about the imported account, including the unique account  identifier for
+    /// the newly-created wallet database entry, along with the associated  [`UnifiedSpendingKey`].
+    /// Note that the unique account identifier should *not* be  assumed equivalent to the ZIP 32
+    /// account index. It is an opaque identifier for a  pool of funds or set of outputs controlled
+    /// by a single spending authority.  
+    ///
+    /// Import accounts with indexes that are exactly one greater than the highest existing account
+    /// index to ensure account indexes are contiguous, thereby facilitating automated account
+    /// recovery.
+    ///
+    /// Learn more about account creation and import in the [`WalletWrite`] trait documentation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    fn import_account_hd(
+        &mut self,
+        seed: &SecretVec<u8>,
+        account_index: zip32::AccountId,
+        birthday: &AccountBirthday,
+    ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error>;
+
+    /// Tells the wallet to track an account using a unified full viewing key.
+    ///
+    /// Returns details about the imported account, including the unique account  identifier for
+    /// the newly-created wallet database entry. Unlike the other account  creation APIs
+    /// ([`Self::create_account`] and [`Self::import_account_hd`]), no  spending key is returned
+    /// because the wallet has no information about how the UFVK  was derived.  
+    ///
+    /// Certain optimizations are possible for accounts which will never be used to spend funds. If
+    /// `spending_key_available` is `false`, the wallet may choose to optimize for this case, in
+    /// which case any attempt to spend funds from the account will result in an error.
+    ///
+    /// Learn more about account creation and import in the [`WalletWrite`] trait documentation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
+    fn import_account_ufvk(
+        &mut self,
+        unified_key: &UnifiedFullViewingKey,
+        birthday: &AccountBirthday,
+        spending_key_available: bool,
+    ) -> Result<Self::Account, Self::Error>;
 
     /// Generates and persists the next available diversified address, given the current
     /// addresses known to the wallet.
@@ -2060,6 +2151,24 @@ pub mod testing {
             UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account)
                 .map(|k| (u32::from(account), k))
                 .map_err(|_| ())
+        }
+
+        fn import_account_hd(
+            &mut self,
+            _seed: &SecretVec<u8>,
+            _account_index: zip32::AccountId,
+            _birthday: &AccountBirthday,
+        ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error> {
+            todo!()
+        }
+
+        fn import_account_ufvk(
+            &mut self,
+            _unified_key: &UnifiedFullViewingKey,
+            _birthday: &AccountBirthday,
+            _spending_key_available: bool,
+        ) -> Result<Self::Account, Self::Error> {
+            todo!()
         }
 
         fn get_next_available_address(
