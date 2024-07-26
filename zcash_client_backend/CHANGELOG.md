@@ -26,7 +26,8 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
 ### Added
 - `zcash_client_backend::data_api`:
   - `chain::BlockCache` trait, behind the `sync` feature flag.
-  - `WalletRead::get_spendable_transparent_outputs`.
+  - `WalletRead::get_spendable_transparent_outputs`
+  - `DecryptedTransaction::mined_height`
 - `zcash_client_backend::fees`:
   - `EphemeralBalance`
   - `ChangeValue::shielded, is_ephemeral`
@@ -68,6 +69,7 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   - `error::Error` has new `Address` and (when the "transparent-inputs" feature
     is enabled) `PaysEphemeralTransparentAddress` variants.
   - `wallet::input_selection::InputSelectorError` has a new `Address` variant.
+  - `DecryptedTransaction::new` takes an additional `mined_height` argument.
 - `zcash_client_backend::data_api::fees`
   - When the "transparent-inputs" feature is enabled, `ChangeValue` can also
     represent an ephemeral transparent output in a proposal. Accordingly, the

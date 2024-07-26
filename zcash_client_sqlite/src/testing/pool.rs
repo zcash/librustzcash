@@ -582,6 +582,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         .unwrap();
     let txid = build_result.transaction().txid();
     let decrypted_tx = DecryptedTransaction::<AccountId>::new(
+        None,
         build_result.transaction(),
         vec![],
         #[cfg(feature = "orchard")]

@@ -1263,6 +1263,7 @@ impl<A> ScannedBlock<A> {
 /// The purpose of this struct is to permit atomic updates of the
 /// wallet database when transactions are successfully decrypted.
 pub struct DecryptedTransaction<'a, AccountId> {
+    mined_height: Option<BlockHeight>,
     tx: &'a Transaction,
     sapling_outputs: Vec<DecryptedOutput<sapling::Note, AccountId>>,
     #[cfg(feature = "orchard")]
@@ -1272,6 +1273,7 @@ pub struct DecryptedTransaction<'a, AccountId> {
 impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
     /// Constructs a new [`DecryptedTransaction`] from its constituent parts.
     pub fn new(
+        mined_height: Option<BlockHeight>,
         tx: &'a Transaction,
         sapling_outputs: Vec<DecryptedOutput<sapling::Note, AccountId>>,
         #[cfg(feature = "orchard")] orchard_outputs: Vec<
@@ -1279,6 +1281,7 @@ impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
         >,
     ) -> Self {
         Self {
+            mined_height,
             tx,
             sapling_outputs,
             #[cfg(feature = "orchard")]
@@ -1286,6 +1289,10 @@ impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
         }
     }
 
+    /// Returns the height at which the transaction was mined, if known.
+    pub fn mined_height(&self) -> Option<BlockHeight> {
+        self.mined_height
+    }
     /// Returns the raw transaction data.
     pub fn tx(&self) -> &Transaction {
         self.tx
