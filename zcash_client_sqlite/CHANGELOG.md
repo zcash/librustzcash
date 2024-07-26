@@ -33,7 +33,12 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   - Removed `HdwalletError`.
   - Added `AccountCollision`.
   - Added `TransparentDerivation`.
-- The `block` column of the `v_transactions` view has been renamed to `mined_height`.
+- The `v_transactions` view has been modified:
+  - The `block` column has been renamed to `mined_height`.
+  - A `spent_note_count` column has been added.
+  - An `is_shielding` column has been added, which is true for transactions where the
+    spends from the wallet are all transparent, and the outputs to the wallet are all
+    shielded.
 
 ## [0.10.3] - 2024-04-08
 
