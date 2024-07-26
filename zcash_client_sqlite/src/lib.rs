@@ -33,10 +33,6 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 use incrementalmerkletree::{Marking, Position, Retention};
-use maybe_rayon::{
-    prelude::{IndexedParallelIterator, ParallelIterator},
-    slice::ParallelSliceMut,
-};
 use nonempty::NonEmpty;
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
@@ -94,6 +90,24 @@ use {
         transaction::components::{OutPoint, TxOut},
     },
 };
+
+#[cfg(feature = "multicore")]
+use maybe_rayon::{
+    prelude::{IndexedParallelIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
+
+/// `maybe-rayon` doesn't provide this as a fallback, so we have to.
+#[cfg(not(feature = "multicore"))]
+trait ParallelSliceMut<T> {
+    fn par_chunks_mut(&mut self, chunk_size: usize) -> std::slice::ChunksMut<'_, T>;
+}
+#[cfg(not(feature = "multicore"))]
+impl<T> ParallelSliceMut<T> for [T] {
+    fn par_chunks_mut(&mut self, chunk_size: usize) -> std::slice::ChunksMut<'_, T> {
+        self.chunks_mut(chunk_size)
+    }
+}
 
 #[cfg(feature = "unstable")]
 use {
