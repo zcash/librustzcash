@@ -199,7 +199,7 @@ impl<FE> From<orchard::builder::SpendError> for Error<FE> {
 #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
 impl<FE> From<issuance::Error> for Error<FE> {
     fn from(e: issuance::Error) -> Self {
-            Error::IssuanceBundle(e)
+        Error::IssuanceBundle(e)
     }
 }
 
@@ -389,7 +389,6 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     /// The expiry height will be set to the given height plus the default transaction
     /// expiry delta (20 blocks).
     pub fn new(params: P, target_height: BlockHeight, build_config: BuildConfig) -> Self {
-
         let orchard_builder = if params.is_nu_active(NetworkUpgrade::Nu5, target_height) {
             build_config
                 .orchard_builder_config()
@@ -469,7 +468,9 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
         value: orchard::value::NoteValue,
     ) -> Result<(), Error<FE>> {
         if self.issuance_builder.is_some() {
-            return Err(Error::IssuanceBuilder("Issuance bundle already initialized"));
+            return Err(Error::IssuanceBuilder(
+                "Issuance bundle already initialized",
+            ));
         }
 
         self.issuance_builder = Some(

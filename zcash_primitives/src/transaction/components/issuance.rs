@@ -68,10 +68,8 @@ pub fn read_note<R: Read>(mut reader: R) -> io::Result<Note> {
         asset,
         rho,
         rseed,
-    )).ok_or(Error::new(
-        ErrorKind::InvalidData,
-        "Invalid note",
-    ))?)
+    ))
+    .ok_or(Error::new(ErrorKind::InvalidData, "Invalid note"))?)
 }
 
 fn read_rho<R: Read>(mut reader: R) -> io::Result<Rho> {
@@ -100,19 +98,15 @@ fn read_recipient<R: Read>(mut reader: R) -> io::Result<Address> {
 pub fn read_asset<R: Read>(reader: &mut R) -> io::Result<AssetBase> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
-    Option::from(AssetBase::from_bytes(&bytes)).ok_or(Error::new(
-        ErrorKind::InvalidData,
-        "Invalid asset",
-    ))
+    Option::from(AssetBase::from_bytes(&bytes))
+        .ok_or(Error::new(ErrorKind::InvalidData, "Invalid asset"))
 }
 
 fn read_rseed<R: Read>(mut reader: R, nullifier: &Rho) -> io::Result<RandomSeed> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
-    Option::from(RandomSeed::from_bytes(bytes, nullifier)).ok_or(Error::new(
-        ErrorKind::InvalidData,
-        "Invalid rseed",
-    ))
+    Option::from(RandomSeed::from_bytes(bytes, nullifier))
+        .ok_or(Error::new(ErrorKind::InvalidData, "Invalid rseed"))
 }
 
 /// Writes an [`IssueBundle`] in the v5 transaction format.

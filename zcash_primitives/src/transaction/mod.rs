@@ -1214,6 +1214,7 @@ pub mod testing {
     #[cfg(zcash_unstable = "zfuture")]
     use super::components::tze::testing::{self as tze};
 
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     use crate::transaction::components::issuance;
 
     pub fn arb_txid() -> impl Strategy<Value = TxId> {
@@ -1275,8 +1276,8 @@ pub mod testing {
         )(
             lock_time in any::<u32>(),
             expiry_height in any::<u32>(),
-            transparent_bundle in transparent::arb_bundle(),
-            sapling_bundle in sapling::arb_bundle_for_version(version),
+            transparent_bundle in transparent_testing::arb_bundle(),
+            sapling_bundle in sapling_testing::arb_bundle_for_version(version),
             orchard_bundle in orchard_testing::arb_bundle_for_version(version),
             tze_bundle in tze::arb_bundle(consensus_branch_id),
             version in Just(version)
