@@ -869,7 +869,8 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         let mut orchard_meta = orchard::builder::BundleMetadata::empty();
 
         if let Some(builder) = self.orchard_builder {
-            if version.has_orchard_zsa() {
+            let (bundle_type, _) = self.build_config.orchard_builder_config().ok_or(Error::OrchardBuilderNotAvailable)?;
+            if bundle_type == BundleType::DEFAULT_ZSA {
                 #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
                 {
                     let (bundle, meta) = builder
