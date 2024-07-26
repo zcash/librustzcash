@@ -62,14 +62,14 @@ pub fn read_note<R: Read>(mut reader: R) -> io::Result<Note> {
     let asset = read_asset(&mut reader)?;
     let rho = read_rho(&mut reader)?;
     let rseed = read_rseed(&mut reader, &rho)?;
-    Ok(Option::from(Note::from_parts(
+    Option::from(Note::from_parts(
         recipient,
         NoteValue::from_raw(value),
         asset,
         rho,
         rseed,
     ))
-    .ok_or(Error::new(ErrorKind::InvalidData, "Invalid note"))?)
+    .ok_or(Error::new(ErrorKind::InvalidData, "Invalid note"))
 }
 
 fn read_rho<R: Read>(mut reader: R) -> io::Result<Rho> {
