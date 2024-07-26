@@ -679,17 +679,17 @@ impl BranchId {
             BranchId::Canopy => params
                 .activation_height(NetworkUpgrade::Canopy)
                 .map(|lower| (lower, params.activation_height(NetworkUpgrade::Nu5))),
-            BranchId::Nu5 => params.activation_height(NetworkUpgrade::Nu5).map(|lower| {
-                (lower, upper_bound(lower, params))
-            }),
+            BranchId::Nu5 => params
+                .activation_height(NetworkUpgrade::Nu5)
+                .map(|lower| (lower, upper_bound(lower, params))),
             #[cfg(zcash_unstable = "nu6")]
-            BranchId::Nu6 => params.activation_height(NetworkUpgrade::Nu6).map(|lower| {
-                (lower, upper_bound(lower, params))
-            }),
+            BranchId::Nu6 => params
+                .activation_height(NetworkUpgrade::Nu6)
+                .map(|lower| (lower, upper_bound(lower, params))),
             #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-            BranchId::Nu7 => params.activation_height(NetworkUpgrade::Nu7).map(|lower| {
-                (lower, upper_bound(lower, params))
-            }),
+            BranchId::Nu7 => params
+                .activation_height(NetworkUpgrade::Nu7)
+                .map(|lower| (lower, upper_bound(lower, params))),
             #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => params
                 .activation_height(NetworkUpgrade::ZFuture)
@@ -703,9 +703,13 @@ impl BranchId {
 }
 #[allow(unused_variables)]
 fn upper_bound<P: Parameters>(target_height: BlockHeight, params: &P) -> Option<BlockHeight> {
-
     #[allow(dead_code)]
-    fn check_bound<P: Parameters>(target_height: BlockHeight, current_upper: Option<BlockHeight>, nu: NetworkUpgrade, params: &P) -> Option<BlockHeight> {
+    fn check_bound<P: Parameters>(
+        target_height: BlockHeight,
+        current_upper: Option<BlockHeight>,
+        nu: NetworkUpgrade,
+        params: &P,
+    ) -> Option<BlockHeight> {
         let nu_height = params.activation_height(nu);
         if nu_height.is_some() && nu_height.unwrap() > target_height {
             nu_height
@@ -716,13 +720,16 @@ fn upper_bound<P: Parameters>(target_height: BlockHeight, params: &P) -> Option<
 
     #[allow(unused_mut)]
     let mut upper = None;
-    #[cfg(zcash_unstable = "nu6")] {
+    #[cfg(zcash_unstable = "nu6")]
+    {
         upper = check_bound(target_height, upper, NetworkUpgrade::Nu6, params);
     }
-    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )] {
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+    {
         upper = check_bound(target_height, upper, NetworkUpgrade::Nu7, params);
     }
-    #[cfg(zcash_unstable = "zfuture")] {
+    #[cfg(zcash_unstable = "zfuture")]
+    {
         upper = check_bound(target_height, upper, NetworkUpgrade::ZFuture, params);
     }
     upper

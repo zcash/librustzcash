@@ -29,8 +29,8 @@ use crate::{
     },
 };
 
-use orchard::Address;
 use orchard::builder::BundleType;
+use orchard::Address;
 
 #[cfg(feature = "transparent-inputs")]
 use crate::transaction::components::transparent::builder::TransparentInputInfo;
@@ -259,7 +259,8 @@ impl BuildConfig {
         &self,
     ) -> Option<(sapling::builder::BundleType, sapling::Anchor)> {
         match self {
-            BuildConfig::Standard { sapling_anchor, .. } | BuildConfig::Zsa { sapling_anchor, .. } => sapling_anchor
+            BuildConfig::Standard { sapling_anchor, .. }
+            | BuildConfig::Zsa { sapling_anchor, .. } => sapling_anchor
                 .as_ref()
                 .map(|a| (sapling::builder::BundleType::DEFAULT, *a)),
             BuildConfig::Coinbase => Some((
@@ -270,9 +271,7 @@ impl BuildConfig {
     }
 
     /// Returns the Orchard bundle type and anchor for this configuration.
-    pub fn orchard_builder_config(
-        &self,
-    ) -> Option<(BundleType, orchard::Anchor)> {
+    pub fn orchard_builder_config(&self) -> Option<(BundleType, orchard::Anchor)> {
         match self {
             BuildConfig::Standard { orchard_anchor, .. } => orchard_anchor
                 .as_ref()
@@ -280,10 +279,7 @@ impl BuildConfig {
             BuildConfig::Zsa { orchard_anchor, .. } => orchard_anchor
                 .as_ref()
                 .map(|a| (BundleType::DEFAULT_ZSA, *a)),
-            BuildConfig::Coinbase => Some((
-                BundleType::Coinbase,
-                orchard::Anchor::empty_tree(),
-            )),
+            BuildConfig::Coinbase => Some((BundleType::Coinbase, orchard::Anchor::empty_tree())),
         }
     }
 }
@@ -538,7 +534,10 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         note: orchard::Note,
         merkle_path: orchard::tree::MerklePath,
     ) -> Result<(), Error<FE>> {
-        let (bundle_type, _) = self.build_config.orchard_builder_config().ok_or(Error::OrchardBuilderNotAvailable)?;
+        let (bundle_type, _) = self
+            .build_config
+            .orchard_builder_config()
+            .ok_or(Error::OrchardBuilderNotAvailable)?;
         if bundle_type == BundleType::DEFAULT_VANILLA {
             assert_eq!(note.asset().is_native().unwrap_u8(), 1);
         }
@@ -563,7 +562,10 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         asset: AssetBase,
         memo: MemoBytes,
     ) -> Result<(), Error<FE>> {
-        let (bundle_type, _) = self.build_config.orchard_builder_config().ok_or(Error::OrchardBuilderNotAvailable)?;
+        let (bundle_type, _) = self
+            .build_config
+            .orchard_builder_config()
+            .ok_or(Error::OrchardBuilderNotAvailable)?;
         if bundle_type == BundleType::DEFAULT_VANILLA {
             assert_eq!(asset.is_native().unwrap_u8(), 1);
         }
@@ -869,7 +871,10 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         let mut orchard_meta = orchard::builder::BundleMetadata::empty();
 
         if let Some(builder) = self.orchard_builder {
-            let (bundle_type, _) = self.build_config.orchard_builder_config().ok_or(Error::OrchardBuilderNotAvailable)?;
+            let (bundle_type, _) = self
+                .build_config
+                .orchard_builder_config()
+                .ok_or(Error::OrchardBuilderNotAvailable)?;
             if bundle_type == BundleType::DEFAULT_ZSA {
                 #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
                 {
