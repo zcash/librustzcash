@@ -1460,7 +1460,7 @@ impl AccountBirthday {
     /// Constructs a new [`AccountBirthday`] from its constituent parts.
     ///
     /// * `prior_chain_state`: The chain state prior to the birthday height of the account. The
-    ///    birthday height  is defined as the height of the first block to be scanned in wallet
+    ///    birthday height is defined as the height of the first block to be scanned in wallet
     ///    recovery.
     /// * `recover_until`: An optional height at which the wallet should exit "recovery mode". In
     ///    order to avoid confusing shifts in wallet balance and spendability that may temporarily be
@@ -1651,11 +1651,11 @@ pub trait WalletWrite: WalletRead {
 
     /// Tells the wallet to track a specific account index for a given seed.
     ///
-    /// Returns details about the imported account, including the unique account  identifier for
-    /// the newly-created wallet database entry, along with the associated  [`UnifiedSpendingKey`].
-    /// Note that the unique account identifier should *not* be  assumed equivalent to the ZIP 32
-    /// account index. It is an opaque identifier for a  pool of funds or set of outputs controlled
-    /// by a single spending authority.  
+    /// Returns details about the imported account, including the unique account identifier for
+    /// the newly-created wallet database entry, along with the associated [`UnifiedSpendingKey`].
+    /// Note that the unique account identifier should *not* be assumed equivalent to the ZIP 32
+    /// account index. It is an opaque identifier for a pool of funds or set of outputs controlled
+    /// by a single spending authority.
     ///
     /// Import accounts with indexes that are exactly one greater than the highest existing account
     /// index to ensure account indexes are contiguous, thereby facilitating automated account
@@ -1677,10 +1677,10 @@ pub trait WalletWrite: WalletRead {
 
     /// Tells the wallet to track an account using a unified full viewing key.
     ///
-    /// Returns details about the imported account, including the unique account  identifier for
-    /// the newly-created wallet database entry. Unlike the other account  creation APIs
-    /// ([`Self::create_account`] and [`Self::import_account_hd`]), no  spending key is returned
-    /// because the wallet has no information about how the UFVK  was derived.  
+    /// Returns details about the imported account, including the unique account identifier for
+    /// the newly-created wallet database entry. Unlike the other account creation APIs
+    /// ([`Self::create_account`] and [`Self::import_account_hd`]), no spending key is returned
+    /// because the wallet has no information about how the UFVK was derived.
     ///
     /// Certain optimizations are possible for accounts which will never be used to spend funds. If
     /// `spending_key_available` is `false`, the wallet may choose to optimize for this case, in
