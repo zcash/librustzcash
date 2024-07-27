@@ -1597,8 +1597,7 @@ impl AccountBirthday {
 /// # Account creation
 ///
 /// Any of several functions may be used to create the first or subsequent accounts, including:
-/// - [`WalletWrite::create_account`] takes a seed phrase and creates a new account with the
-///   smallest unused [`ZIP 32`] account index.
+/// - [`WalletWrite::create_account`] takes a seed phrase and creates a new account.
 /// - [`WalletWrite::import_account_hd`] takes a seed phrase and creates an account with a specific
 ///   [`ZIP 32`] account index.
 /// - [`WalletWrite::import_account_ufvk`] creates an account with a specific Unified Full Viewing
@@ -1621,12 +1620,10 @@ pub trait WalletWrite: WalletRead {
     /// Tells the wallet to track the next available account-level spend authority, given the
     /// current set of [ZIP 316] account identifiers known to the wallet database.
     ///
-    /// The "next available account" is defined as the first unused ZIP-32 account index (counting
-    /// from 0) among all accounts that share the given seed. When [`Self::import_account_hd`] is
-    /// used to import an account with a specific index, account indexes *may* become fragmented
-    /// instead of one contiguous range. Where fragmentation occurs, the implementations *may*
-    /// choose to find the first unused account index or add 1 to the highest existing account
-    /// index.
+    /// The "next available account" is defined as the ZIP-32 account index immediately following
+    /// the highest existing account index among all accounts in the wallet that share the given
+    /// seed. Users of the [`WalletWrite`] trait that only call this method are guaranteed to have
+    /// accounts with sequential indices.
     ///
     /// Returns the account identifier for the newly-created wallet database entry, along with the
     /// associated [`UnifiedSpendingKey`]. Note that the unique account identifier should *not* be
@@ -1637,6 +1634,12 @@ pub trait WalletWrite: WalletRead {
     /// with the returned account identifier.
     ///
     /// The [`WalletWrite`] trait documentation has more details about account creation and import.
+    ///
+    /// # Implementation notes
+    ///
+    /// Implementations of this method **MUST NOT** "fill in gaps" by selecting an account index
+    /// that is lower than any existing account index among all accounts in the wallet that share
+    /// the given seed.
     ///
     /// # Panics
     ///
