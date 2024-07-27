@@ -574,6 +574,13 @@ where
         .map_err(Error::from)
 }
 
+type StepResult<DbT> = (
+    BuildResult,
+    Vec<SentTransactionOutput<<DbT as WalletRead>::AccountId>>,
+    NonNegativeAmount,
+    Vec<OutPoint>,
+);
+
 /// Construct, prove, and sign a transaction or series of transactions using the inputs supplied by
 /// the given proposal, and persist it to the wallet database.
 ///
@@ -607,7 +614,6 @@ where
     #[cfg(feature = "transparent-inputs")]
     let mut unused_transparent_outputs = HashMap::new();
 
-    let created = time::OffsetDateTime::now_utc();
     let account_id = wallet_db
         .get_account_for_ufvk(&usk.to_unified_full_viewing_key())
         .map_err(Error::DataSource)?
@@ -617,7 +623,7 @@ where
     let mut step_results = Vec::with_capacity(proposal.steps().len());
     for step in proposal.steps() {
         #[allow(unused_variables)]
-        let (step_result, outputs, fee_amount, utxos_spent) = create_proposed_transaction(
+        let step_result: StepResult<DbT> = create_proposed_transaction(
             wallet_db,
             params,
             spend_prover,
@@ -632,16 +638,6 @@ where
             #[cfg(feature = "transparent-inputs")]
             &mut unused_transparent_outputs,
         )?;
-        let tx = SentTransaction {
-            tx: step_result.transaction(),
-            created,
-            account: account_id,
-            outputs,
-            fee_amount,
-            #[cfg(feature = "transparent-inputs")]
-            utxos_spent,
-        };
-        wallet_db.store_sent_tx(&tx).map_err(Error::DataSource)?;
         step_results.push((step, step_result));
     }
 
@@ -656,13 +652,31 @@ where
         }
     }
 
-    Ok(NonEmpty::from_vec(
-        step_results
-            .iter()
-            .map(|(_, r)| r.transaction().txid())
-            .collect(),
-    )
-    .expect("proposal.steps is NonEmpty"))
+    let created = time::OffsetDateTime::now_utc();
+
+    // Store the transactions only after creating all of them. This avoids undesired
+    // retransmissions in case a transaction is stored and the creation of a subsequent
+    // transaction fails.
+    let mut txids = Vec::with_capacity(proposal.steps().len());
+    #[allow(unused_variables)]
+    for (_, (build_result, outputs, fee_amount, utxos_spent)) in step_results {
+        let tx = build_result.transaction();
+        let sent_tx = SentTransaction {
+            tx,
+            created,
+            account: account_id,
+            outputs,
+            fee_amount,
+            #[cfg(feature = "transparent-inputs")]
+            utxos_spent,
+        };
+        wallet_db
+            .store_sent_tx(&sent_tx)
+            .map_err(Error::DataSource)?;
+        txids.push(tx.txid());
+    }
+
+    Ok(NonEmpty::from_vec(txids).expect("proposal.steps is NonEmpty"))
 }
 
 // `unused_transparent_outputs` maps `StepOutput`s for transparent outputs
@@ -680,21 +694,13 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     ovk_policy: OvkPolicy,
     fee_rule: &FeeRuleT,
     min_target_height: BlockHeight,
-    prior_step_results: &[(&Step<N>, BuildResult)],
+    prior_step_results: &[(&Step<N>, StepResult<DbT>)],
     proposal_step: &Step<N>,
     #[cfg(feature = "transparent-inputs")] unused_transparent_outputs: &mut HashMap<
         StepOutput,
         (TransparentAddress, OutPoint),
     >,
-) -> Result<
-    (
-        BuildResult,
-        Vec<SentTransactionOutput<<DbT as WalletRead>::AccountId>>,
-        NonNegativeAmount,
-        Vec<OutPoint>,
-    ),
-    ErrorT<DbT, InputsErrT, FeeRuleT>,
->
+) -> Result<StepResult<DbT>, ErrorT<DbT, InputsErrT, FeeRuleT>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,
@@ -910,6 +916,7 @@ where
 
             let txout = &prior_step_results[input_ref.step_index()]
                 .1
+                 .0
                 .transaction()
                 .transparent_bundle()
                 .ok_or(ProposalError::ReferenceError(*input_ref))?
