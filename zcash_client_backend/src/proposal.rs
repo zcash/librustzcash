@@ -18,7 +18,8 @@ use crate::{
     PoolType, ShieldedProtocol,
 };
 
-/// Errors that can occur in construction of a [`Step`].
+/// A [`Proposal`] or a proposal [`Step`] violated balance or structural constraints,
+/// or is unsupported.
 #[derive(Debug, Clone)]
 pub enum ProposalError {
     /// The total output value of the transaction request is not a valid Zcash amount.
@@ -47,18 +48,34 @@ pub enum ProposalError {
     /// There was a mismatch between the payments in the proposal's transaction request
     /// and the payment pool selection values.
     PaymentPoolsMismatch,
-    /// The proposal tried to spend a change output. Mark the `ChangeValue` as ephemeral if this is intended.
+    /// The proposal tried to spend a change output. Mark the `ChangeValue` as ephemeral
+    /// if this is intended.
     SpendsChange(StepOutput),
     /// A proposal step created an ephemeral output that was not spent in any later step.
     #[cfg(feature = "transparent-inputs")]
     EphemeralOutputLeftUnspent(StepOutput),
-    /// The proposal included a payment to a TEX address and a spend from a shielded input in the same step.
+    /// The proposal included a payment to a TEX address and a spend from a shielded input
+    /// in the same step.
     #[cfg(feature = "transparent-inputs")]
     PaysTexFromShielded,
     /// The change strategy provided to input selection failed to correctly generate an ephemeral
     /// change output when needed for sending to a TEX address.
     #[cfg(feature = "transparent-inputs")]
     EphemeralOutputsInvalid,
+
+    // The errors below are concerned with support rather than structural validity.
+    // However, some unsupported cases are already checked at construction of `Proposal`
+    // or `Step`, and we want to allow for all of them to be. So, in practice these
+    // errors either can now, or might in future be reported in the same places as the
+    // ones above. When a `ProposalError` is converted to a `data_api::Error`, they will
+    // be represented via the `ProposalNotSupported` variant rather than the `Proposal`
+    // variant.
+    // ----
+    /// The proposal tried to spend a prior shielded payment output; or tried to spend a
+    /// prior transparent payment output when the "transparent-inputs" feature is disabled.
+    SpendsPaymentFromUnsupportedPool(PoolType),
+    /// The proposal tried to pay to a recipient in a feature-disabled pool.
+    PaysUnsupportedPoolRecipient(PoolType),
 }
 
 impl Display for ProposalError {
@@ -104,7 +121,7 @@ impl Display for ProposalError {
             ),
             ProposalError::SpendsChange(r) => write!(
                 f,
-                "The proposal attempts to spends the change output created at step {:?}.",
+                "The proposal attempts to spend the change output created at step {:?}.",
                 r,
             ),
             #[cfg(feature = "transparent-inputs")]
@@ -123,6 +140,33 @@ impl Display for ProposalError {
                 f,
                 "The change strategy provided to input selection failed to correctly generate an ephemeral change output when needed for sending to a TEX address."
             ),
+
+            #[cfg(not(feature = "transparent-inputs"))]
+            ProposalError::SpendsPaymentFromUnsupportedPool(PoolType::Transparent) => write!(
+                f,
+                r#"A proposal tried to spend a prior transparent output, which is not supported \
+                   because the "transparent-inputs" feature is not enabled."#,
+            ),
+            ProposalError::SpendsPaymentFromUnsupportedPool(pool @ PoolType::Shielded(_)) => write!(
+                f,
+                "A proposal tried to spend a prior shielded ({}) output, which is not supported.",
+                pool,
+            ),
+            #[cfg(not(feature = "orchard"))]
+            ProposalError::PaysUnsupportedPoolRecipient(PoolType::Shielded(
+                ShieldedProtocol::Orchard,
+            )) => write!(
+                f,
+                r#"A proposal tried to pay to a recipient in the Orchard pool, which is not supported \
+                   because the "orchard" feature is not enabled."#,
+            ),
+
+            // List cases that the compiler needs to check exhaustivity so that we don't need a catch-all.
+            #[cfg(feature = "transparent-inputs")]
+            ProposalError::SpendsPaymentFromUnsupportedPool(PoolType::Transparent) =>
+                unreachable!("SpendsPaymentFromUnsupportedPool(Transparent) but it should be supported"),
+            ProposalError::PaysUnsupportedPoolRecipient(pool) =>
+                unreachable!("PaysUnsupportedPoolRecipient({}) but it should be supported", pool),
         }
     }
 }
@@ -415,6 +459,9 @@ impl<NoteRef> Step<NoteRef> {
                 return Err(ProposalError::PaymentPoolsMismatch);
             }
         }
+        // Since `payments` and `payment_pools` are the same size, every element
+        // of `payments` must also have a corresponding entry with the same index
+        // in `payment_pools`.
 
         let transparent_input_total = transparent_inputs
             .iter()
@@ -430,6 +477,7 @@ impl<NoteRef> Step<NoteRef> {
             .fold(Some(NonNegativeAmount::ZERO), |acc, a| (acc? + a))
             .ok_or(ProposalError::Overflow)?;
 
+        // Also check that the spends of prior outputs are supported.
         let prior_step_input_total = prior_step_inputs
             .iter()
             .map(|s_ref| {
@@ -437,18 +485,42 @@ impl<NoteRef> Step<NoteRef> {
                     .get(s_ref.step_index)
                     .ok_or(ProposalError::ReferenceError(*s_ref))?;
                 Ok(match s_ref.output_index {
-                    StepOutputIndex::Payment(i) => step
-                        .transaction_request
-                        .payments()
-                        .get(&i)
-                        .ok_or(ProposalError::ReferenceError(*s_ref))?
-                        .amount(),
-                    StepOutputIndex::Change(i) => step
-                        .balance
-                        .proposed_change()
-                        .get(i)
-                        .ok_or(ProposalError::ReferenceError(*s_ref))?
-                        .value(),
+                    StepOutputIndex::Payment(i) => {
+                        let payment = step
+                            .transaction_request
+                            .payments()
+                            .get(&i)
+                            .ok_or(ProposalError::ReferenceError(*s_ref))?;
+
+                        match step
+                            .payment_pools()
+                            .get(&i)
+                            .expect("payments and payment_pools are 1:1, checked when the prior step was constructed")
+                        {
+                            PoolType::Transparent => payment.amount(),
+                            &other => Err(ProposalError::SpendsPaymentFromUnsupportedPool(other))?,
+                        }
+                    }
+                    StepOutputIndex::Change(i) => {
+                        let cv = step
+                            .balance
+                            .proposed_change()
+                            .get(i)
+                            .ok_or(ProposalError::ReferenceError(*s_ref))?;
+
+                        if !cv.is_ephemeral() {
+                            Err(ProposalError::SpendsChange(*s_ref))?;
+                        }
+                        assert_eq!(cv.output_pool(), PoolType::TRANSPARENT);
+
+                        // An ephemeral transparent `ChangeValue` could not have
+                        // been constructed unless "transparent-inputs" is enabled.
+                        #[cfg(not(feature = "transparent-inputs"))]
+                        unreachable!();
+
+                        #[cfg(feature = "transparent-inputs")]
+                        cv.value()
+                    }
                 })
             })
             .collect::<Result<Vec<_>, _>>()?
@@ -458,6 +530,9 @@ impl<NoteRef> Step<NoteRef> {
 
         let input_total = (transparent_input_total + shielded_input_total + prior_step_input_total)
             .ok_or(ProposalError::Overflow)?;
+
+        // TODO: check for unsupported and invalid payments here. We cannot do so
+        // currently because we don't have access to the `network_type`.
 
         let request_total = transaction_request
             .total()
@@ -550,7 +625,7 @@ impl<NoteRef> Step<NoteRef> {
             self.balance
                 .proposed_change()
                 .iter()
-                .any(|c| c.output_pool() == pool_type)
+                .any(|cv| cv.output_pool() == pool_type)
         };
 
         input_in_this_pool() || output_in_this_pool() || change_in_this_pool()

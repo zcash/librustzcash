@@ -679,9 +679,15 @@ where
     Ok(NonEmpty::from_vec(txids).expect("proposal.steps is NonEmpty"))
 }
 
-// `unused_transparent_outputs` maps `StepOutput`s for transparent outputs
-// that have not been consumed so far, to the corresponding pair of
-// `TransparentAddress` and `Outpoint`.
+/// Creates a transaction corresponding to a proposal step.
+///
+/// Since this is only called by `create_proposed_transactions` which takes
+/// a fully validated `Proposal` as input, we may assume that the proposal,
+/// including references to prior steps, is structurally valid.
+///
+/// `unused_transparent_outputs` maps `StepOutput`s for transparent outputs
+/// that have not been consumed so far, to the corresponding pair of
+/// `TransparentAddress` and `Outpoint`.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
@@ -706,41 +712,16 @@ where
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
-    #[cfg(feature = "transparent-inputs")]
+    #[allow(unused_variables)]
     let step_index = prior_step_results.len();
 
     // We only support spending transparent payments or transparent ephemeral outputs from a
-    // prior step (when "transparent-inputs" is enabled).
+    // prior step (when "transparent-inputs" is enabled). We don't need to check that here
+    // because it is checked by construction in `proposal::Step`.
     //
     // TODO: Maybe support spending prior shielded outputs at some point? Doing so would require
     // a higher-level approach in the wallet that waits for transactions with shielded outputs to
     // be mined and only then attempts to perform the next step.
-    #[allow(clippy::never_loop)]
-    for input_ref in proposal_step.prior_step_inputs() {
-        let (prior_step, _) = prior_step_results
-            .get(input_ref.step_index())
-            .ok_or(ProposalError::ReferenceError(*input_ref))?;
-
-        #[allow(unused_variables)]
-        let output_pool = match input_ref.output_index() {
-            StepOutputIndex::Payment(i) => prior_step.payment_pools().get(&i).cloned(),
-            StepOutputIndex::Change(i) => match prior_step.balance().proposed_change().get(i) {
-                Some(change) if !change.is_ephemeral() => {
-                    return Err(ProposalError::SpendsChange(*input_ref).into());
-                }
-                other => other.map(|change| change.output_pool()),
-            },
-        }
-        .ok_or(ProposalError::ReferenceError(*input_ref))?;
-
-        // Return an error on trying to spend a prior output that is not supported.
-        #[cfg(feature = "transparent-inputs")]
-        if output_pool != PoolType::TRANSPARENT {
-            return Err(Error::ProposalNotSupported);
-        }
-        #[cfg(not(feature = "transparent-inputs"))]
-        return Err(Error::ProposalNotSupported);
-    }
 
     let (sapling_anchor, sapling_inputs) =
         if proposal_step.involves(PoolType::Shielded(ShieldedProtocol::Sapling)) {
@@ -1078,7 +1059,9 @@ where
             Address::Unified(ua) => match output_pool {
                 #[cfg(not(feature = "orchard"))]
                 PoolType::Shielded(ShieldedProtocol::Orchard) => {
-                    return Err(Error::ProposalNotSupported);
+                    // TODO: check this in `Step::from_parts`. We cannot do so currently
+                    // because we don't know the `network_type` there.
+                    return Err(ProposalError::PaysUnsupportedPoolRecipient(*output_pool).into());
                 }
                 #[cfg(feature = "orchard")]
                 PoolType::Shielded(ShieldedProtocol::Orchard) => {
@@ -1102,11 +1085,13 @@ where
             }
             #[cfg(not(feature = "transparent-inputs"))]
             Address::Tex(_) => {
-                return Err(Error::ProposalNotSupported);
+                // TODO: check this in `Step::from_parts`.
+                return Err(ProposalError::PaysUnsupportedPoolRecipient(*output_pool).into());
             }
             #[cfg(feature = "transparent-inputs")]
             Address::Tex(data) => {
                 if has_shielded_inputs {
+                    // TODO: check this in `Step::from_parts`.
                     return Err(ProposalError::PaysTexFromShielded.into());
                 }
                 let to = TransparentAddress::PublicKeyHash(data);
@@ -1139,8 +1124,9 @@ where
                 ))
             }
             PoolType::Shielded(ShieldedProtocol::Orchard) => {
+                // `TransactionBalance` enforces that change is for a supported pool.
                 #[cfg(not(feature = "orchard"))]
-                return Err(Error::UnsupportedChangeType(output_pool));
+                unreachable!();
 
                 #[cfg(feature = "orchard")]
                 {
@@ -1162,8 +1148,10 @@ where
                 }
             }
             PoolType::Transparent => {
+                // `ChangeValue` cannot be constructed with a transparent output pool
+                // if "transparent-inputs" is not enabled.
                 #[cfg(not(feature = "transparent-inputs"))]
-                return Err(Error::UnsupportedChangeType(output_pool));
+                unreachable!()
             }
         }
     }
