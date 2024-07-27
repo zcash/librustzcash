@@ -1636,7 +1636,7 @@ pub trait WalletWrite: WalletRead {
     /// The ZIP-32 account index may be obtained by calling [`WalletRead::get_account`]
     /// with the returned account identifier.
     ///
-    /// Learn more about account creation and import in the [`WalletWrite`] trait documentation.
+    /// The [`WalletWrite`] trait documentation has more details about account creation and import.
     ///
     /// # Panics
     ///
@@ -1657,11 +1657,11 @@ pub trait WalletWrite: WalletRead {
     /// account index. It is an opaque identifier for a pool of funds or set of outputs controlled
     /// by a single spending authority.
     ///
-    /// Import accounts with indexes that are exactly one greater than the highest existing account
-    /// index to ensure account indexes are contiguous, thereby facilitating automated account
+    /// Import accounts with indices that are exactly one greater than the highest existing account
+    /// index to ensure account indices are contiguous, thereby facilitating automated account
     /// recovery.
     ///
-    /// Learn more about account creation and import in the [`WalletWrite`] trait documentation.
+    /// The [`WalletWrite`] trait documentation has more details about account creation and import.
     ///
     /// # Panics
     ///
@@ -1686,7 +1686,7 @@ pub trait WalletWrite: WalletRead {
     /// `spending_key_available` is `false`, the wallet may choose to optimize for this case, in
     /// which case any attempt to spend funds from the account will result in an error.
     ///
-    /// Learn more about account creation and import in the [`WalletWrite`] trait documentation.
+    /// The [`WalletWrite`] trait documentation has more details about account creation and import.
     ///
     /// # Panics
     ///
