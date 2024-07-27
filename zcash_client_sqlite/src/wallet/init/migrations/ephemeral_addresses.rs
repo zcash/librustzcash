@@ -81,21 +81,22 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
 #[cfg(test)]
 mod tests {
-    use rusqlite::{named_params, Connection};
-    use secrecy::{ExposeSecret, SecretVec};
-    use zcash_client_backend::data_api::AccountBirthday;
-    use zcash_keys::keys::UnifiedSpendingKey;
-    use zcash_protocol::consensus::Network;
-    use zip32::fingerprint::SeedFingerprint;
+    use crate::wallet::init::migrations::tests::test_migrate;
 
-    use crate::{
-        error::SqliteClientError,
-        wallet::{self, init::migrations::tests::test_migrate, transparent},
-        AccountId, WalletDb,
+    #[cfg(feature = "transparent-inputs")]
+    use {
+        crate::{error::SqliteClientError, wallet, AccountId, WalletDb},
+        rusqlite::{named_params, Connection},
+        secrecy::{ExposeSecret, SecretVec},
+        zcash_client_backend::data_api::AccountBirthday,
+        zcash_keys::keys::UnifiedSpendingKey,
+        zcash_protocol::consensus::Network,
+        zip32::fingerprint::SeedFingerprint,
     };
 
     /// This is a minimized copy of [`wallet::create_account`] as of the time of the
     /// creation of this migration.
+    #[cfg(feature = "transparent-inputs")]
     fn create_account(
         wdb: &mut WalletDb<Connection, Network>,
         seed: &SecretVec<u8>,
@@ -168,7 +169,7 @@ mod tests {
 
             // Initialize the `ephemeral_addresses` table.
             #[cfg(feature = "transparent-inputs")]
-            transparent::ephemeral::init_account(wdb.conn.0, &wdb.params, account_id)?;
+            wallet::transparent::ephemeral::init_account(wdb.conn.0, &wdb.params, account_id)?;
 
             Ok((account_id, usk))
         })
