@@ -82,12 +82,12 @@ use zcash_client_backend::{
     data_api::{
         scanning::{ScanPriority, ScanRange},
         Account as _, AccountBalance, AccountBirthday, AccountSource, BlockMetadata, Ratio,
-        SentTransactionOutput, WalletSummary, SAPLING_SHARD_HEIGHT,
+        SentTransaction, SentTransactionOutput, WalletSummary, SAPLING_SHARD_HEIGHT,
     },
     encoding::AddressCodec,
     keys::UnifiedFullViewingKey,
     wallet::{Note, NoteId, Recipient, WalletTx},
-    PoolType, ShieldedProtocol,
+    DecryptedOutput, PoolType, ShieldedProtocol,
 };
 use zcash_keys::{
     address::{Address, Receiver, UnifiedAddress},
@@ -111,9 +111,12 @@ use zip32::{self, DiversifierIndex, Scope};
 use crate::{
     error::SqliteClientError,
     wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
-    AccountId, SqlTransaction, WalletCommitmentTrees, WalletDb, DEFAULT_UA_REQUEST, PRUNING_DEPTH,
-    SAPLING_TABLES_PREFIX,
+    AccountId, SqlTransaction, TransferType, WalletCommitmentTrees, WalletDb, DEFAULT_UA_REQUEST,
+    PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
 };
+
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::transaction::components::TxOut;
 
 use self::scanning::{parse_priority_code, priority_code, replace_queue_entries};
 
@@ -1841,6 +1844,127 @@ pub(crate) fn get_min_unspent_height(
         .map(|(s, o)| s.min(o))
         .or(min_sapling)
         .or(min_orchard))
+}
+
+pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
+    wdb: &mut WalletDb<SqlTransaction<'_>, P>,
+    sent_tx: &SentTransaction<AccountId>,
+) -> Result<(), SqliteClientError> {
+    let tx_ref = put_tx_data(
+        wdb.conn.0,
+        sent_tx.tx(),
+        Some(sent_tx.fee_amount()),
+        Some(sent_tx.created()),
+    )?;
+
+    // Mark notes as spent.
+    //
+    // This locks the notes so they aren't selected again by a subsequent call to
+    // create_spend_to_address() before this transaction has been mined (at which point the notes
+    // get re-marked as spent).
+    //
+    // Assumes that create_spend_to_address() will never be called in parallel, which is a
+    // reasonable assumption for a light client such as a mobile phone.
+    if let Some(bundle) = sent_tx.tx().sapling_bundle() {
+        for spend in bundle.shielded_spends() {
+            sapling::mark_sapling_note_spent(wdb.conn.0, tx_ref, spend.nullifier())?;
+        }
+    }
+    if let Some(_bundle) = sent_tx.tx().orchard_bundle() {
+        #[cfg(feature = "orchard")]
+        for action in _bundle.actions() {
+            orchard::mark_orchard_note_spent(wdb.conn.0, tx_ref, action.nullifier())?;
+        }
+
+        #[cfg(not(feature = "orchard"))]
+        panic!("Sent a transaction with Orchard Actions without `orchard` enabled?");
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    for utxo_outpoint in sent_tx.utxos_spent() {
+        transparent::mark_transparent_utxo_spent(wdb.conn.0, tx_ref, utxo_outpoint)?;
+    }
+
+    for output in sent_tx.outputs() {
+        insert_sent_output(
+            wdb.conn.0,
+            &wdb.params,
+            tx_ref,
+            *sent_tx.account_id(),
+            output,
+        )?;
+
+        match output.recipient() {
+            Recipient::InternalAccount {
+                receiving_account,
+                note: Note::Sapling(note),
+                ..
+            } => {
+                sapling::put_received_note(
+                    wdb.conn.0,
+                    &DecryptedOutput::new(
+                        output.output_index(),
+                        note.clone(),
+                        *receiving_account,
+                        output
+                            .memo()
+                            .map_or_else(MemoBytes::empty, |memo| memo.clone()),
+                        TransferType::WalletInternal,
+                    ),
+                    tx_ref,
+                    None,
+                )?;
+            }
+            #[cfg(feature = "orchard")]
+            Recipient::InternalAccount {
+                receiving_account,
+                note: Note::Orchard(note),
+                ..
+            } => {
+                orchard::put_received_note(
+                    wdb.conn.0,
+                    &DecryptedOutput::new(
+                        output.output_index(),
+                        *note,
+                        *receiving_account,
+                        output
+                            .memo()
+                            .map_or_else(MemoBytes::empty, |memo| memo.clone()),
+                        TransferType::WalletInternal,
+                    ),
+                    tx_ref,
+                    None,
+                )?;
+            }
+            #[cfg(feature = "transparent-inputs")]
+            Recipient::EphemeralTransparent {
+                receiving_account,
+                ephemeral_address,
+                outpoint_metadata,
+            } => {
+                transparent::put_transparent_output(
+                    wdb.conn.0,
+                    &wdb.params,
+                    outpoint_metadata,
+                    &TxOut {
+                        value: output.value(),
+                        script_pubkey: ephemeral_address.script(),
+                    },
+                    None,
+                    ephemeral_address,
+                    *receiving_account,
+                )?;
+                transparent::ephemeral::mark_ephemeral_address_as_used(
+                    wdb,
+                    ephemeral_address,
+                    tx_ref,
+                )?;
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
 }
 
 /// Truncates the database to the given height.

@@ -59,13 +59,13 @@ use zcash_client_backend::{
     },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
-    DecryptedOutput, PoolType, ShieldedProtocol, TransferType,
+    PoolType, ShieldedProtocol, TransferType,
 };
 use zcash_keys::address::Receiver;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
-    memo::{Memo, MemoBytes},
+    memo::Memo,
     transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
     zip32::{self, DiversifierIndex},
 };
@@ -85,10 +85,7 @@ use {
 use {
     zcash_client_backend::wallet::TransparentAddressMetadata,
     zcash_keys::encoding::AddressCodec,
-    zcash_primitives::{
-        legacy::TransparentAddress,
-        transaction::components::{OutPoint, TxOut},
-    },
+    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
 };
 
 #[cfg(feature = "multicore")]
@@ -1438,135 +1435,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     }
 
     fn store_sent_tx(&mut self, sent_tx: &SentTransaction<AccountId>) -> Result<(), Self::Error> {
-        self.transactionally(|wdb| {
-            let tx_ref = wallet::put_tx_data(
-                wdb.conn.0,
-                sent_tx.tx(),
-                Some(sent_tx.fee_amount()),
-                Some(sent_tx.created()),
-            )?;
-
-            // Mark notes as spent.
-            //
-            // This locks the notes so they aren't selected again by a subsequent call to
-            // create_spend_to_address() before this transaction has been mined (at which point the notes
-            // get re-marked as spent).
-            //
-            // Assumes that create_spend_to_address() will never be called in parallel, which is a
-            // reasonable assumption for a light client such as a mobile phone.
-            if let Some(bundle) = sent_tx.tx().sapling_bundle() {
-                for spend in bundle.shielded_spends() {
-                    wallet::sapling::mark_sapling_note_spent(
-                        wdb.conn.0,
-                        tx_ref,
-                        spend.nullifier(),
-                    )?;
-                }
-            }
-            if let Some(_bundle) = sent_tx.tx().orchard_bundle() {
-                #[cfg(feature = "orchard")]
-                for action in _bundle.actions() {
-                    wallet::orchard::mark_orchard_note_spent(
-                        wdb.conn.0,
-                        tx_ref,
-                        action.nullifier(),
-                    )?;
-                }
-
-                #[cfg(not(feature = "orchard"))]
-                panic!("Sent a transaction with Orchard Actions without `orchard` enabled?");
-            }
-
-            #[cfg(feature = "transparent-inputs")]
-            for utxo_outpoint in sent_tx.utxos_spent() {
-                wallet::transparent::mark_transparent_utxo_spent(
-                    wdb.conn.0,
-                    tx_ref,
-                    utxo_outpoint,
-                )?;
-            }
-
-            for output in sent_tx.outputs() {
-                wallet::insert_sent_output(
-                    wdb.conn.0,
-                    &wdb.params,
-                    tx_ref,
-                    *sent_tx.account_id(),
-                    output,
-                )?;
-
-                match output.recipient() {
-                    Recipient::InternalAccount {
-                        receiving_account,
-                        note: Note::Sapling(note),
-                        ..
-                    } => {
-                        wallet::sapling::put_received_note(
-                            wdb.conn.0,
-                            &DecryptedOutput::new(
-                                output.output_index(),
-                                note.clone(),
-                                *receiving_account,
-                                output
-                                    .memo()
-                                    .map_or_else(MemoBytes::empty, |memo| memo.clone()),
-                                TransferType::WalletInternal,
-                            ),
-                            tx_ref,
-                            None,
-                        )?;
-                    }
-                    #[cfg(feature = "orchard")]
-                    Recipient::InternalAccount {
-                        receiving_account,
-                        note: Note::Orchard(note),
-                        ..
-                    } => {
-                        wallet::orchard::put_received_note(
-                            wdb.conn.0,
-                            &DecryptedOutput::new(
-                                output.output_index(),
-                                *note,
-                                *receiving_account,
-                                output
-                                    .memo()
-                                    .map_or_else(MemoBytes::empty, |memo| memo.clone()),
-                                TransferType::WalletInternal,
-                            ),
-                            tx_ref,
-                            None,
-                        )?;
-                    }
-                    #[cfg(feature = "transparent-inputs")]
-                    Recipient::EphemeralTransparent {
-                        receiving_account,
-                        ephemeral_address,
-                        outpoint_metadata,
-                    } => {
-                        wallet::transparent::put_transparent_output(
-                            wdb.conn.0,
-                            &wdb.params,
-                            outpoint_metadata,
-                            &TxOut {
-                                value: output.value(),
-                                script_pubkey: ephemeral_address.script(),
-                            },
-                            None,
-                            ephemeral_address,
-                            *receiving_account,
-                        )?;
-                        wallet::transparent::ephemeral::mark_ephemeral_address_as_used(
-                            wdb,
-                            ephemeral_address,
-                            tx_ref,
-                        )?;
-                    }
-                    _ => {}
-                }
-            }
-
-            Ok(())
-        })
+        self.transactionally(|wdb| wallet::store_transaction_to_be_sent(wdb, sent_tx))
     }
 
     fn truncate_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
