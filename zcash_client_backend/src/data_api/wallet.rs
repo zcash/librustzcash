@@ -607,14 +607,23 @@ where
     #[cfg(feature = "transparent-inputs")]
     let mut unused_transparent_outputs = HashMap::new();
 
+    let created = time::OffsetDateTime::now_utc();
+    let account_id = wallet_db
+        .get_account_for_ufvk(&usk.to_unified_full_viewing_key())
+        .map_err(Error::DataSource)?
+        .ok_or(Error::KeyNotRecognized)?
+        .id();
+
     let mut step_results = Vec::with_capacity(proposal.steps().len());
     for step in proposal.steps() {
-        let step_result = create_proposed_transaction(
+        #[allow(unused_variables)]
+        let (step_result, outputs, fee_amount, utxos_spent) = create_proposed_transaction(
             wallet_db,
             params,
             spend_prover,
             output_prover,
             usk,
+            account_id,
             ovk_policy.clone(),
             proposal.fee_rule(),
             proposal.min_target_height(),
@@ -623,6 +632,16 @@ where
             #[cfg(feature = "transparent-inputs")]
             &mut unused_transparent_outputs,
         )?;
+        let tx = SentTransaction {
+            tx: step_result.transaction(),
+            created,
+            account: account_id,
+            outputs,
+            fee_amount,
+            #[cfg(feature = "transparent-inputs")]
+            utxos_spent,
+        };
+        wallet_db.store_sent_tx(&tx).map_err(Error::DataSource)?;
         step_results.push((step, step_result));
     }
 
@@ -657,6 +676,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     spend_prover: &impl SpendProver,
     output_prover: &impl OutputProver,
     usk: &UnifiedSpendingKey,
+    account_id: <DbT as WalletRead>::AccountId,
     ovk_policy: OvkPolicy,
     fee_rule: &FeeRuleT,
     min_target_height: BlockHeight,
@@ -666,7 +686,15 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
         StepOutput,
         (TransparentAddress, OutPoint),
     >,
-) -> Result<BuildResult, ErrorT<DbT, InputsErrT, FeeRuleT>>
+) -> Result<
+    (
+        BuildResult,
+        Vec<SentTransactionOutput<<DbT as WalletRead>::AccountId>>,
+        NonNegativeAmount,
+        Vec<OutPoint>,
+    ),
+    ErrorT<DbT, InputsErrT, FeeRuleT>,
+>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,
@@ -707,12 +735,6 @@ where
         #[cfg(not(feature = "transparent-inputs"))]
         return Err(Error::ProposalNotSupported);
     }
-
-    let account_id = wallet_db
-        .get_account_for_ufvk(&usk.to_unified_full_viewing_key())
-        .map_err(Error::DataSource)?
-        .ok_or(Error::KeyNotRecognized)?
-        .id();
 
     let (sapling_anchor, sapling_inputs) =
         if proposal_step.involves(PoolType::Shielded(ShieldedProtocol::Sapling)) {
@@ -903,6 +925,8 @@ where
         }
         utxos_spent
     };
+    #[cfg(not(feature = "transparent-inputs"))]
+    let utxos_spent = vec![];
 
     #[cfg(feature = "orchard")]
     let orchard_fvk: orchard::keys::FullViewingKey = usk.orchard().into();
@@ -1278,19 +1302,9 @@ where
     outputs.extend(sapling_outputs);
     outputs.extend(transparent_outputs);
 
-    wallet_db
-        .store_sent_tx(&SentTransaction {
-            tx: build_result.transaction(),
-            created: time::OffsetDateTime::now_utc(),
-            account: account_id,
-            outputs,
-            fee_amount: proposal_step.balance().fee_required(),
-            #[cfg(feature = "transparent-inputs")]
-            utxos_spent,
-        })
-        .map_err(Error::DataSource)?;
+    let fee_amount = proposal_step.balance().fee_required();
 
-    Ok(build_result)
+    Ok((build_result, outputs, fee_amount, utxos_spent))
 }
 
 /// Constructs a transaction that consumes available transparent UTXOs belonging to the specified
