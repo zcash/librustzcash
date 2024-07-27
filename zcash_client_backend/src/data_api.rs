@@ -1317,10 +1317,10 @@ pub struct SentTransaction<'a, AccountId> {
     tx: &'a Transaction,
     created: time::OffsetDateTime,
     account: AccountId,
-    outputs: Vec<SentTransactionOutput<AccountId>>,
+    outputs: &'a [SentTransactionOutput<AccountId>],
     fee_amount: NonNegativeAmount,
     #[cfg(feature = "transparent-inputs")]
-    utxos_spent: Vec<OutPoint>,
+    utxos_spent: &'a [OutPoint],
 }
 
 impl<'a, AccountId> SentTransaction<'a, AccountId> {
@@ -1329,9 +1329,9 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
         tx: &'a Transaction,
         created: time::OffsetDateTime,
         account: AccountId,
-        outputs: Vec<SentTransactionOutput<AccountId>>,
+        outputs: &'a [SentTransactionOutput<AccountId>],
         fee_amount: NonNegativeAmount,
-        #[cfg(feature = "transparent-inputs")] utxos_spent: Vec<OutPoint>,
+        #[cfg(feature = "transparent-inputs")] utxos_spent: &'a [OutPoint],
     ) -> Self {
         Self {
             tx,
@@ -1358,7 +1358,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
     }
     /// Returns the outputs of the transaction.
     pub fn outputs(&self) -> &[SentTransactionOutput<AccountId>] {
-        self.outputs.as_ref()
+        self.outputs
     }
     /// Returns the fee paid by the transaction.
     pub fn fee_amount(&self) -> NonNegativeAmount {
@@ -1367,7 +1367,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
     /// Returns the list of UTXOs spent in the created transaction.
     #[cfg(feature = "transparent-inputs")]
     pub fn utxos_spent(&self) -> &[OutPoint] {
-        self.utxos_spent.as_ref()
+        self.utxos_spent
     }
 }
 
@@ -1744,14 +1744,16 @@ pub trait WalletWrite: WalletRead {
         received_tx: DecryptedTransaction<Self::AccountId>,
     ) -> Result<(), Self::Error>;
 
-    /// Saves information about a transaction constructed by the wallet to the persistent
+    /// Saves information about transactions constructed by the wallet to the persistent
     /// wallet store.
     ///
-    /// The name `store_sent_tx` is somewhat misleading; this must be called *before* the
-    /// transaction is sent to the network.
-    fn store_sent_tx(
+    /// This must be called before the transactions are sent to the network.
+    ///
+    /// Transactions that have been stored by this method should be retransmitted while it
+    /// is still possible that they could be mined.
+    fn store_transactions_to_be_sent(
         &mut self,
-        sent_tx: &SentTransaction<Self::AccountId>,
+        transactions: &[SentTransaction<Self::AccountId>],
     ) -> Result<(), Self::Error>;
 
     /// Truncates the wallet database to the specified height.
@@ -2206,9 +2208,9 @@ pub mod testing {
             Ok(())
         }
 
-        fn store_sent_tx(
+        fn store_transactions_to_be_sent(
             &mut self,
-            _sent_tx: &SentTransaction<Self::AccountId>,
+            _transactions: &[SentTransaction<Self::AccountId>],
         ) -> Result<(), Self::Error> {
             Ok(())
         }

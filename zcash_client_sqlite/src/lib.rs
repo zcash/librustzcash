@@ -1434,8 +1434,16 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         })
     }
 
-    fn store_sent_tx(&mut self, sent_tx: &SentTransaction<AccountId>) -> Result<(), Self::Error> {
-        self.transactionally(|wdb| wallet::store_transaction_to_be_sent(wdb, sent_tx))
+    fn store_transactions_to_be_sent(
+        &mut self,
+        transactions: &[SentTransaction<AccountId>],
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| {
+            for sent_tx in transactions {
+                wallet::store_transaction_to_be_sent(wdb, sent_tx)?;
+            }
+            Ok(())
+        })
     }
 
     fn truncate_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
