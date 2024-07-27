@@ -5,7 +5,10 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
 
-use crate::legacy::{Script, TransparentAddress};
+use crate::{
+    legacy::{Script, TransparentAddress},
+    transaction::TxId,
+};
 
 use super::amount::{Amount, BalanceError, NonNegativeAmount};
 
@@ -91,7 +94,7 @@ impl<A: Authorization> Bundle<A> {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OutPoint {
-    hash: [u8; 32],
+    hash: TxId,
     n: u32,
 }
 
@@ -99,14 +102,17 @@ impl OutPoint {
     /// Constructs an `OutPoint` for the output at index `n` in the transaction
     /// with txid `hash`.
     pub fn new(hash: [u8; 32], n: u32) -> Self {
-        OutPoint { hash, n }
+        OutPoint {
+            hash: TxId::from_bytes(hash),
+            n,
+        }
     }
 
     /// Constructs a fake `OutPoint` for use in tests.
     #[cfg(any(test, feature = "test-dependencies"))]
     pub const fn fake() -> Self {
         OutPoint {
-            hash: [1u8; 32],
+            hash: TxId([1u8; 32]),
             n: 1,
         }
     }
@@ -115,11 +121,11 @@ impl OutPoint {
         let mut hash = [0u8; 32];
         reader.read_exact(&mut hash)?;
         let n = reader.read_u32::<LittleEndian>()?;
-        Ok(OutPoint { hash, n })
+        Ok(OutPoint::new(hash, n))
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.hash)?;
+        writer.write_all(self.hash.as_ref())?;
         writer.write_u32::<LittleEndian>(self.n)
     }
 
@@ -128,7 +134,7 @@ impl OutPoint {
     fn is_null(&self) -> bool {
         // From `BaseOutPoint::IsNull()` in zcashd:
         //   return (hash.IsNull() && n == (uint32_t) -1);
-        self.hash == [0; 32] && self.n == u32::MAX
+        self.hash.as_ref() == &[0; 32] && self.n == u32::MAX
     }
 
     /// Returns the output index of this `OutPoint`.
@@ -138,7 +144,7 @@ impl OutPoint {
 
     /// Returns the txid of the transaction containing this `OutPoint`.
     pub fn hash(&self) -> &[u8; 32] {
-        &self.hash
+        self.hash.as_ref()
     }
 }
 
