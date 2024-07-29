@@ -390,6 +390,25 @@ pub(super) const INDEX_SENT_NOTES_TO_ACCOUNT: &str =
     r#"CREATE INDEX sent_notes_to_account ON "sent_notes" (to_account_id)"#;
 pub(super) const INDEX_SENT_NOTES_TX: &str = r#"CREATE INDEX sent_notes_tx ON "sent_notes" (tx)"#;
 
+/// Stores the set of transaction ids for which the backend required additional data.
+///
+/// ### Columns:
+/// - `txid`: The transaction identifier for the transaction to retrieve state information for.
+/// - `query_type`:
+///     - `0` for raw transaction (enhancement) data,
+///     - `1` for transaction mined-ness information.
+/// - `dependent_transaction_id`: If the transaction data request is searching for information
+///   about transparent inputs to a transaction, this is a reference to that transaction record.
+///   NULL for transactions where the request for enhancement data is based on discovery due
+///   to blockchain scanning.
+pub(super) const TABLE_TX_RETRIEVAL_QUEUE: &str = r#"
+CREATE TABLE tx_retrieval_queue (
+    txid BLOB NOT NULL UNIQUE,
+    query_type INTEGER NOT NULL,
+    dependent_transaction_id INTEGER,
+    FOREIGN KEY (dependent_transaction_id) REFERENCES transactions(id_tx)
+)"#;
+
 //
 // State for shard trees
 //

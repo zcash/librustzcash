@@ -1858,6 +1858,8 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
         Some(sent_tx.created()),
     )?;
 
+    let mut detectable_via_scanning = false;
+
     // Mark notes as spent.
     //
     // This locks the notes so they aren't selected again by a subsequent call to
@@ -1867,14 +1869,18 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
     // Assumes that create_spend_to_address() will never be called in parallel, which is a
     // reasonable assumption for a light client such as a mobile phone.
     if let Some(bundle) = sent_tx.tx().sapling_bundle() {
+        detectable_via_scanning = true;
         for spend in bundle.shielded_spends() {
             sapling::mark_sapling_note_spent(wdb.conn.0, tx_ref, spend.nullifier())?;
         }
     }
     if let Some(_bundle) = sent_tx.tx().orchard_bundle() {
         #[cfg(feature = "orchard")]
-        for action in _bundle.actions() {
-            orchard::mark_orchard_note_spent(wdb.conn.0, tx_ref, action.nullifier())?;
+        {
+            detectable_via_scanning = true;
+            for action in _bundle.actions() {
+                orchard::mark_orchard_note_spent(wdb.conn.0, tx_ref, action.nullifier())?;
+            }
         }
 
         #[cfg(not(feature = "orchard"))]
@@ -1963,6 +1969,18 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
             }
             _ => {}
         }
+    }
+
+    // Add the transaction to the set to be queried for transaction status. This is only necessary
+    // at present for fully-transparent transactions, because any transaction with a shielded
+    // component will be detected via ordinary chain scanning and/or nullifier checking.
+    if !detectable_via_scanning {
+        queue_tx_retrieval(
+            wdb.conn.0,
+            std::iter::once(sent_tx.tx().txid()),
+            TxQueryType::Status,
+            None,
+        )?;
     }
 
     Ok(())
@@ -2298,6 +2316,76 @@ pub(crate) fn put_tx_data(
     stmt_upsert_tx_data
         .query_row(tx_params, |row| row.get::<_, i64>(0).map(TxRef))
         .map_err(SqliteClientError::from)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TxQueryType {
+    Status,
+    Enhancement,
+}
+
+impl TxQueryType {
+    pub(crate) fn code(&self) -> i64 {
+        match self {
+            TxQueryType::Status => 0,
+            TxQueryType::Enhancement => 1,
+        }
+    }
+
+    pub(crate) fn from_code(code: i64) -> Option<Self> {
+        match code {
+            0 => Some(TxQueryType::Status),
+            1 => Some(TxQueryType::Enhancement),
+            _ => None,
+        }
+    }
+}
+
+pub(crate) fn queue_tx_retrieval(
+    conn: &rusqlite::Transaction<'_>,
+    txids: impl Iterator<Item = TxId>,
+    query_type: TxQueryType,
+    dependent_tx_ref: Option<TxRef>,
+) -> Result<(), SqliteClientError> {
+    // Add an entry to the transaction retrieval queue if we don't already have raw transaction data.
+    let mut stmt_insert_tx = conn.prepare_cached(
+        "INSERT INTO tx_retrieval_queue (txid, query_type, dependent_transaction_id)
+        SELECT :txid, :query_type, :dependent_transaction_id
+        -- do not queue enhancement requests if we already have the raw transaction
+        WHERE NOT EXISTS (
+            SELECT 1 FROM transactions
+            WHERE txid = :txid
+            AND :query_type = :enhancement_type
+            AND raw IS NOT NULL
+        )
+        -- if there is already a status request, we can upgrade it to an enhancement request
+        ON CONFLICT (txid) DO UPDATE
+        SET query_type = MAX(:query_type, query_type),
+            dependent_transaction_id = IFNULL(:dependent_transaction_id, dependent_transaction_id)",
+    )?;
+
+    for txid in txids {
+        stmt_insert_tx.execute(named_params! {
+            ":txid": txid.as_ref(),
+            ":query_type": query_type.code(),
+            ":dependent_transaction_id": dependent_tx_ref.map(|r| r.0),
+            ":enhancement_type": TxQueryType::Enhancement.code(),
+        })?;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn notify_tx_retrieved(
+    conn: &rusqlite::Connection,
+    txid: TxId,
+) -> Result<(), SqliteClientError> {
+    conn.execute(
+        "DELETE FROM tx_retrieval_queue WHERE txid = :txid",
+        named_params![":txid": &txid.as_ref()[..]],
+    )?;
+
+    Ok(())
 }
 
 // A utility function for creation of parameters for use in `insert_sent_output`

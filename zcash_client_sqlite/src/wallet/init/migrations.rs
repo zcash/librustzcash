@@ -15,6 +15,7 @@ mod sapling_memo_consistency;
 mod sent_notes_to_internal;
 mod shardtree_support;
 mod spend_key_available;
+mod tx_retrieval_queue;
 mod ufvk_support;
 mod utxos_table;
 mod utxos_to_txos;
@@ -68,8 +69,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                                  orchard_received_notes        spend_key_available
     //                                       /         \
     //                ensure_orchard_ua_receiver     utxos_to_txos
-    //                                                     |
-    //                                            ephemeral_addresses
+    //                                                  /      \
+    //                                 ephemeral_addresses    tx_retrieval_queue
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -124,6 +125,7 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
             params: params.clone(),
         }),
         Box::new(spend_key_available::Migration),
+        Box::new(tx_retrieval_queue::Migration),
     ]
 }
 

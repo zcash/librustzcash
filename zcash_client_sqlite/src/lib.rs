@@ -118,7 +118,7 @@ pub mod error;
 pub mod wallet;
 use wallet::{
     commitment_tree::{self, put_shard_roots},
-    SubtreeScanProgress,
+    notify_tx_retrieved, SubtreeScanProgress, TxQueryType,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -787,6 +787,12 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                 for tx in block.transactions() {
                     let tx_row = wallet::put_tx_meta(wdb.conn.0, tx, block.height())?;
+                    wallet::queue_tx_retrieval(
+                        wdb.conn.0,
+                        std::iter::once(tx.txid()),
+                        TxQueryType::Enhancement,
+                        None,
+                    )?;
 
                     // Mark notes as spent and remove them from the scanning cache
                     for spend in tx.sapling_spends() {
@@ -1183,7 +1189,27 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 )
             }
 
+            // A flag used to determine whether it is necessary to query for transactions that
+            // provided transparent inputs to this transaction, in order to be able to correctly
+            // recover transparent transaction history.
+            #[cfg(feature = "transparent-inputs")]
+            let mut tx_has_wallet_outputs = false;
+
+            #[cfg(feature = "transparent-inputs")]
+            let detectable_via_scanning = {
+                let mut detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
+                #[cfg(feature = "orchard")] {
+                    detectable_via_scanning |= d_tx.tx().orchard_bundle().is_some();
+                }
+
+                detectable_via_scanning
+            };
+
             for output in d_tx.sapling_outputs() {
+                #[cfg(feature = "transparent-inputs")]
+                {
+                    tx_has_wallet_outputs = true;
+                }
                 match output.transfer_type() {
                     TransferType::Outgoing => {
                         let recipient = {
@@ -1268,6 +1294,10 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
             #[cfg(feature = "orchard")]
             for output in d_tx.orchard_outputs() {
+                #[cfg(feature = "transparent-inputs")]
+                {
+                    tx_has_wallet_outputs = true;
+                }
                 match output.transfer_type() {
                     TransferType::Outgoing => {
                         let recipient = {
@@ -1395,6 +1425,11 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                                 &address,
                                 account_id
                             )?;
+
+                            // Since the wallet created the transparent output, we need to ensure
+                            // that any transparent inputs belonging to the wallet will be
+                            // discovered.
+                            tx_has_wallet_outputs = true;
                         }
 
                         // If a transaction we observe contains spends from our wallet, we will
@@ -1428,10 +1463,48 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                                 txout.value,
                                 None,
                             )?;
+
+                            // Even though we know the funding account, we don't know that we have
+                            // information for all of the transparent inputs to the transaction.
+                            #[cfg(feature = "transparent-inputs")]
+                            {
+                                tx_has_wallet_outputs = true;
+                            }
+
+                            // If the decrypted transaction is unmined and has no shielded
+                            // components, add it to the queue for status retrieval.
+                            #[cfg(feature = "transparent-inputs")]
+                            if d_tx.mined_height().is_none() && !detectable_via_scanning {
+                                wallet::queue_tx_retrieval(
+                                    wdb.conn.0,
+                                    std::iter::once(d_tx.tx().txid()),
+                                    TxQueryType::Status,
+                                    None
+                                )?;
+                            }
                         }
                     }
                 }
             }
+
+            // If the transaction has outputs that belong to the wallet as well as transparent
+            // inputs, we may need to download the transactions corresponding to the transparent
+            // prevout references to determine whether the transaction was created (at least in
+            // part) by this wallet.
+            #[cfg(feature = "transparent-inputs")]
+            if tx_has_wallet_outputs {
+                if let Some(b) = d_tx.tx().transparent_bundle() {
+                    // queue the transparent inputs for enhancement
+                    wallet::queue_tx_retrieval(
+                        wdb.conn.0,
+                        b.vin.iter().map(|txin| *txin.prevout.txid()),
+                        TxQueryType::Enhancement,
+                        Some(tx_ref)
+                    )?;
+                }
+            }
+
+            notify_tx_retrieved(wdb.conn.0, d_tx.tx().txid())?;
 
             Ok(())
         })

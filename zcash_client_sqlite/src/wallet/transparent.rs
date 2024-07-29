@@ -228,8 +228,7 @@ pub(crate) fn get_wallet_transparent_output(
                     OR tx.expiry_height >= :mempool_height -- the spending tx has not yet expired
                  )
              )
-         )
-         ",
+         )",
     )?;
 
     let result: Result<Option<WalletTransparentOutput>, SqliteClientError> = stmt_select_utxo

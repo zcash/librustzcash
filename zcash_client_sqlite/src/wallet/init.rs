@@ -407,6 +407,7 @@ mod tests {
             db::TABLE_TRANSPARENT_RECEIVED_OUTPUT_SPENDS,
             db::TABLE_TRANSPARENT_RECEIVED_OUTPUTS,
             db::TABLE_TX_LOCATOR_MAP,
+            db::TABLE_TX_RETRIEVAL_QUEUE,
         ];
 
         let rows = describe_tables(&st.wallet().conn).unwrap();
