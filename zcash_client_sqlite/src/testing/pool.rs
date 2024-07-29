@@ -1543,7 +1543,7 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
     let utxo = WalletTransparentOutput::from_parts(
         OutPoint::fake(),
         TxOut {
-            value: NonNegativeAmount::const_from_u64(10000),
+            value: NonNegativeAmount::const_from_u64(100000),
             script_pubkey: taddr.script(),
         },
         Some(h),
