@@ -122,6 +122,7 @@ rayon.workspace = true
 # - Tor
 tokio = { workspace = true, optional = true, features = ["fs"] }
 tor-rtcompat = { workspace = true, optional = true }
+tower = { workspace = true, optional = true }
 
 # - HTTP through Tor
 http-body-util = { workspace = true, optional = true }
@@ -150,7 +151,7 @@ tokio = { version = "1.21.0", features = ["rt-multi-thread"] }
 
 [features]
 ## Enables the `tonic` gRPC client bindings for connecting to a `lightwalletd` server.
-lightwalletd-tonic = ["dep:tonic"]
+lightwalletd-tonic = ["dep:tonic", "hyper-util?/tokio"]
 
 ## Enables the `transport` feature of `tonic` producing a fully-featured client and server implementation
 lightwalletd-tonic-transport = ["lightwalletd-tonic", "tonic?/transport"]
@@ -188,6 +189,7 @@ tor = [
     "dep:tokio",
     "dep:tokio-rustls",
     "dep:tor-rtcompat",
+    "dep:tower",
     "dep:webpki-roots",
 ]
 
