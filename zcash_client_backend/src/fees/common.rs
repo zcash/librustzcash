@@ -187,6 +187,9 @@ where
     let (change_pool, sapling_change, orchard_change) =
         single_change_output_policy(&net_flows, fallback_change_pool);
 
+    #[cfg(not(feature = "orchard"))]
+    assert!(change_pool != ShieldedProtocol::Orchard);
+
     // We don't create a fully-transparent transaction if a change memo is used.
     let transparent = net_flows.is_transparent() && change_memo.is_none();
 
@@ -432,6 +435,8 @@ where
             .map(ChangeValue::ephemeral_transparent),
     );
 
+    // Any error here can only be overflow, because we checked that `change_pool`
+    // is supported and only constructed `change` to that pool.
     TransactionBalance::new(change, fee).map_err(|_| overflow())
 }
 

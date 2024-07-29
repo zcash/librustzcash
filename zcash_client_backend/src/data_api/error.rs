@@ -14,7 +14,6 @@ use zcash_primitives::transaction::{
 use crate::address::UnifiedAddress;
 use crate::data_api::wallet::input_selection::InputSelectorError;
 use crate::proposal::ProposalError;
-use crate::PoolType;
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::legacy::TransparentAddress;
@@ -33,14 +32,17 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     /// An error in note selection
     NoteSelection(SelectionError),
 
-    /// An error in transaction proposal construction
+    /// An error in transaction proposal construction. This indicates that the proposal
+    /// violated balance or structural constraints.
     Proposal(ProposalError),
 
-    /// The proposal was structurally valid, but tried to do one of these unsupported things:
-    /// * spend a prior shielded output;
-    /// * pay to an output pool for which the corresponding feature is not enabled;
-    /// * pay to a TEX address if the "transparent-inputs" feature is not enabled.
-    ProposalNotSupported,
+    /// A proposal was structurally valid, but not supported by the current feature or
+    /// chain configuration.
+    ///
+    /// This is indicative of a programming error; a transaction proposal that presumes
+    /// support for the specified pool was decoded or executed using an application that
+    /// does not provide such support.
+    ProposalNotSupported(ProposalError),
 
     /// No account could be found corresponding to a provided spending key.
     KeyNotRecognized,
@@ -63,13 +65,6 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
 
     /// It is forbidden to provide a memo when constructing a transparent output.
     MemoForbidden,
-
-    /// Attempted to send change to an unsupported pool.
-    ///
-    /// This is indicative of a programming error; execution of a transaction proposal that
-    /// presumes support for the specified pool was performed using an application that does not
-    /// provide such support.
-    UnsupportedChangeType(PoolType),
 
     /// Attempted to create a spend to an unsupported Unified Address receiver
     NoSupportedReceivers(Box<UnifiedAddress>),
@@ -123,12 +118,10 @@ where
             Error::Proposal(e) => {
                 write!(f, "Input selection attempted to construct an invalid proposal: {}", e)
             }
-            Error::ProposalNotSupported => write!(
-                f,
-                "The proposal was valid but tried to do something that is not supported \
-                 (spend shielded outputs of prior transaction steps or use a feature that \
-                 is not enabled).",
-            ),
+            Error::ProposalNotSupported(e) => {
+                // The `ProposalError` message is complete in this context too.
+                write!(f, "{}", e)
+            }
             Error::KeyNotRecognized => {
                 write!(
                     f,
@@ -149,7 +142,6 @@ where
             Error::ScanRequired => write!(f, "Must scan blocks first"),
             Error::Builder(e) => write!(f, "An error occurred building the transaction: {}", e),
             Error::MemoForbidden => write!(f, "It is not possible to send a memo to a transparent address."),
-            Error::UnsupportedChangeType(t) => write!(f, "Attempted to send change to an unsupported pool type: {}", t),
             Error::NoSupportedReceivers(ua) => write!(
                 f,
                 "A recipient's unified address does not contain any receivers to which the wallet can send funds; required one of {}",
@@ -186,6 +178,7 @@ where
             Error::CommitmentTree(e) => Some(e),
             Error::NoteSelection(e) => Some(e),
             Error::Proposal(e) => Some(e),
+            Error::ProposalNotSupported(e) => Some(e),
             Error::Builder(e) => Some(e),
             _ => None,
         }
@@ -200,7 +193,14 @@ impl<DE, CE, SE, FE> From<builder::Error<FE>> for Error<DE, CE, SE, FE> {
 
 impl<DE, CE, SE, FE> From<ProposalError> for Error<DE, CE, SE, FE> {
     fn from(e: ProposalError) -> Self {
-        Error::Proposal(e)
+        match e {
+            // These errors concern feature support or unimplemented functionality.
+            ProposalError::SpendsPaymentFromUnsupportedPool(_)
+            | ProposalError::PaysUnsupportedPoolRecipient(_) => Error::ProposalNotSupported(e),
+
+            // These errors concern balance or structural validity.
+            _ => Error::Proposal(e),
+        }
     }
 }
 
@@ -221,7 +221,8 @@ impl<DE, CE, SE, FE> From<InputSelectorError<DE, SE>> for Error<DE, CE, SE, FE> 
         match e {
             InputSelectorError::DataSource(e) => Error::DataSource(e),
             InputSelectorError::Selection(e) => Error::NoteSelection(e),
-            InputSelectorError::Proposal(e) => Error::Proposal(e),
+            // Choose `Error::Proposal` or `Error::ProposalNotSupported` as applicable.
+            InputSelectorError::Proposal(e) => e.into(),
             InputSelectorError::InsufficientFunds {
                 available,
                 required,
