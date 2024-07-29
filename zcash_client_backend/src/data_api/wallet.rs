@@ -574,12 +574,13 @@ where
         .map_err(Error::from)
 }
 
-type StepResult<DbT> = (
-    BuildResult,
-    Vec<SentTransactionOutput<<DbT as WalletRead>::AccountId>>,
-    NonNegativeAmount,
-    Vec<OutPoint>,
-);
+struct StepResult<AccountId> {
+    build_result: BuildResult,
+    outputs: Vec<SentTransactionOutput<AccountId>>,
+    fee_amount: NonNegativeAmount,
+    #[cfg(feature = "transparent-inputs")]
+    utxos_spent: Vec<OutPoint>,
+}
 
 /// Construct, prove, and sign a transaction or series of transactions using the inputs supplied by
 /// the given proposal, and persist it to the wallet database.
@@ -622,8 +623,7 @@ where
 
     let mut step_results = Vec::with_capacity(proposal.steps().len());
     for step in proposal.steps() {
-        #[allow(unused_variables)]
-        let step_result: StepResult<DbT> = create_proposed_transaction(
+        let step_result: StepResult<_> = create_proposed_transaction(
             wallet_db,
             params,
             spend_prover,
@@ -657,24 +657,26 @@ where
     // Store the transactions only after creating all of them. This avoids undesired
     // retransmissions in case a transaction is stored and the creation of a subsequent
     // transaction fails.
+    let mut transactions = Vec::with_capacity(proposal.steps().len());
     let mut txids = Vec::with_capacity(proposal.steps().len());
     #[allow(unused_variables)]
-    for (_, (build_result, outputs, fee_amount, utxos_spent)) in step_results {
-        let tx = build_result.transaction();
-        let sent_tx = SentTransaction {
+    for (_, step_result) in step_results.iter() {
+        let tx = step_result.build_result.transaction();
+        transactions.push(SentTransaction::new(
             tx,
             created,
-            account: account_id,
-            outputs,
-            fee_amount,
+            account_id,
+            &step_result.outputs,
+            step_result.fee_amount,
             #[cfg(feature = "transparent-inputs")]
-            utxos_spent,
-        };
-        wallet_db
-            .store_sent_tx(&sent_tx)
-            .map_err(Error::DataSource)?;
+            &step_result.utxos_spent,
+        ));
         txids.push(tx.txid());
     }
+
+    wallet_db
+        .store_transactions_to_be_sent(&transactions)
+        .map_err(Error::DataSource)?;
 
     Ok(NonEmpty::from_vec(txids).expect("proposal.steps is NonEmpty"))
 }
@@ -694,13 +696,13 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     ovk_policy: OvkPolicy,
     fee_rule: &FeeRuleT,
     min_target_height: BlockHeight,
-    prior_step_results: &[(&Step<N>, StepResult<DbT>)],
+    prior_step_results: &[(&Step<N>, StepResult<<DbT as WalletRead>::AccountId>)],
     proposal_step: &Step<N>,
     #[cfg(feature = "transparent-inputs")] unused_transparent_outputs: &mut HashMap<
         StepOutput,
         (TransparentAddress, OutPoint),
     >,
-) -> Result<StepResult<DbT>, ErrorT<DbT, InputsErrT, FeeRuleT>>
+) -> Result<StepResult<<DbT as WalletRead>::AccountId>, ErrorT<DbT, InputsErrT, FeeRuleT>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,
@@ -916,7 +918,7 @@ where
 
             let txout = &prior_step_results[input_ref.step_index()]
                 .1
-                 .0
+                .build_result
                 .transaction()
                 .transparent_bundle()
                 .ok_or(ProposalError::ReferenceError(*input_ref))?
@@ -932,8 +934,6 @@ where
         }
         utxos_spent
     };
-    #[cfg(not(feature = "transparent-inputs"))]
-    let utxos_spent = vec![];
 
     #[cfg(feature = "orchard")]
     let orchard_fvk: orchard::keys::FullViewingKey = usk.orchard().into();
@@ -1309,9 +1309,13 @@ where
     outputs.extend(sapling_outputs);
     outputs.extend(transparent_outputs);
 
-    let fee_amount = proposal_step.balance().fee_required();
-
-    Ok((build_result, outputs, fee_amount, utxos_spent))
+    Ok(StepResult {
+        build_result,
+        outputs,
+        fee_amount: proposal_step.balance().fee_required(),
+        #[cfg(feature = "transparent-inputs")]
+        utxos_spent,
+    })
 }
 
 /// Constructs a transaction that consumes available transparent UTXOs belonging to the specified

@@ -69,8 +69,15 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   - `WalletWrite` has new methods `import_account_hd` and `import_account_ufvk`.
   - `error::Error` has new `Address` and (when the "transparent-inputs" feature
     is enabled) `PaysEphemeralTransparentAddress` variants.
+  - The `WalletWrite::store_sent_tx` method has been renamed to
+    `store_transactions_to_be_sent`, and its signature changed to take a slice
+    of `SentTransaction`s. This can be used by the wallet storage backend (e.g.
+    `zcash_client_sqlite`) to improve transactionality of writes for multi-step
+    proposals.
   - `wallet::input_selection::InputSelectorError` has a new `Address` variant.
   - `DecryptedTransaction::new` takes an additional `mined_height` argument.
+  - `SentTransaction` now stores its `outputs` and `utxos_spent` fields as
+    references to slices, with a corresponding change to `SentTransaction::new`.
 - `zcash_client_backend::data_api::fees`
   - When the "transparent-inputs" feature is enabled, `ChangeValue` can also
     represent an ephemeral transparent output in a proposal. Accordingly, the
