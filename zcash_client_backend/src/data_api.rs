@@ -1565,10 +1565,42 @@ impl AccountBirthday {
 
 /// This trait encapsulates the write capabilities required to update stored wallet data.
 ///
+/// # Adding accounts
+///
+/// This trait provides several methods for adding accounts to the wallet data:
+/// - [`WalletWrite::create_account`]
+/// - [`WalletWrite::import_account_hd`]
+/// - [`WalletWrite::import_account_ufvk`]
+///
+/// All of these methods take an [`AccountBirthday`]. The birthday height is defined as
+/// the minimum block height that will be scanned for funds belonging to the wallet. If
+/// `birthday.height()` is below the current chain tip, the account addition operation
+/// will trigger a re-scan of the blocks at and above the provided height.
+///
+/// The order in which you call these methods will affect the resulting wallet structure:
+/// - If only [`WalletWrite::create_account`] is used, the resulting accounts will have
+///   sequential [ZIP 32] account indices within each given seed.
+/// - If [`WalletWrite::import_account_hd`] is used to import accounts with non-sequential
+///   ZIP 32 account indices from the same seed, a call to [`WalletWrite::create_account`]
+///   will use the ZIP 32 account index just after the highest-numbered existing account.
+/// - If an account is imported via [`WalletWrite::import_account_ufvk`], and then a later
+///   call to either [`WalletWrite::create_account`] or [`WalletWrite::import_account_hd`]
+///   would produce the same UFVK, an error will be returned.
+///   - A future change to this trait might introduce a method to "upgrade" an imported
+///     account with derivation information. See [zcash/librustzcash#1284] for details.
+///
+/// Users of the `WalletWrite` trait should generally distinguish in their APIs and wallet
+/// UIs between creating a new account, and importing an account that previously existed.
+/// By convention, wallets should only allow a new account to be generated after confirmed
+/// funds have been received by the newest existing account; this allows automated account
+/// recovery to discover and recover all funds within a particular seed.
+///
 /// # Creating a new wallet
 ///
-/// A wallet may be created by generating a new seed phrase and creating an account with that seed.
-/// Account creation is typically done with the [`WalletWrite::create_account`] method.
+/// To create a new wallet:
+/// - Generate a new [BIP 39] mnemonic phrase, using a crate like [`bip0039`].
+/// - Derive the corresponding seed from the mnemonic phrase.
+/// - Use [`WalletWrite::create_account`] with the resulting seed.
 ///
 /// Callers should construct the [`AccountBirthday`] using [`AccountBirthday::from_treestate`] for
 /// the block at height `chain_tip_height - 100`. Setting the birthday height to a tree state below
@@ -1577,42 +1609,31 @@ impl AccountBirthday {
 /// a height greater than the chain tip could be mined at a height below that tip as part of a
 /// reorg.
 ///
-/// # Restoring from backup
+/// # Restoring a wallet from backup
 ///
-/// A wallet may restore existing accounts rather than create new ones. This will typically be done
-/// by the user providing a seed phrase created in a previous wallet. A seed phrase will allow
-/// generation of keys for any number of accounts.
+/// To restore a backed-up wallet:
+/// - Derive the seed from its BIP 39 mnemonic phrase.
+/// - Use [`WalletWrite::import_account_hd`] once for each ZIP 32 account index that the
+///   user wants to restore.
+/// - If the highest previously-used ZIP 32 account index was _not_ restored by the user,
+///   remember this index separately as `index_max`. The first time the user wants to
+///   generate a new account, use [`WalletWrite::import_account_hd`] to create the account
+///   `index_max + 1`.
+/// - [`WalletWrite::create_account`] can be used to generate subsequent new accounts in
+///   the restored wallet.
 ///
-/// Knowing exactly how many accounts to activate based on the seed phrase is part of account
-/// recovery, which is that we assume only one account may have been used to receive funds. Once we
-/// find that it actually *has* received funds, we assume that the next account may have been used
-/// and create the next account and start using its keys to scan subsequent blocks. This process is
-/// repeated until we find an account that has not received funds. Account recovery has *not* yet
-/// been implemented by this crate. So a wallet app that supports multiple accounts is expected to
-/// implement it manually for now.
+/// Automated account recovery has not yet been implemented by this crate. A wallet app
+/// that supports multiple accounts can implement it manually by tracking account balances
+/// relative to [`WalletSummary::fully_scanned_height`], and creating new accounts as
+/// funds appear in existing accounts.
 ///
 /// If the number of accounts is known in advance, the wallet should create all accounts before
 /// scanning the chain so that the scan can be done in a single pass for all accounts.
 ///
-/// # Account creation
-///
-/// Any of several functions may be used to create the first or subsequent accounts, including:
-/// - [`WalletWrite::create_account`] takes a seed phrase and creates a new account.
-/// - [`WalletWrite::import_account_hd`] takes a seed phrase and creates an account with a specific
-///   [`ZIP 32`] account index.
-/// - [`WalletWrite::import_account_ufvk`] creates an account with a specific Unified Full Viewing
-///   Key. No assumption of [`ZIP 32`] HD derivation is made.
-///
-/// All of the account creation/import functions take a birthday height. If `birthday.height()` is
-/// below the current chain tip, this operation will trigger a re-scan of the blocks at and above
-/// the provided height. The birthday height is defined as the minimum block height that will be
-/// scanned for funds belonging to the wallet.
-///
-/// By convention, wallets should only allow a new account to be generated after confirmed funds
-/// have been received by the newest existing account. This allows automated account recovery to
-/// recover all funds.
-///
-/// [`ZIP 32`]: https://zips.z.cash/zip-0032
+/// [ZIP 32]: https://zips.z.cash/zip-0032
+/// [zcash/librustzcash#1284]: https://github.com/zcash/librustzcash/issues/1284
+/// [BIP 39]: https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki
+/// [`bip0039`]: https://crates.io/crates/bip0039
 pub trait WalletWrite: WalletRead {
     /// The type of identifiers used to look up transparent UTXOs.
     type UtxoRef;
