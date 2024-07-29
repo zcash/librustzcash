@@ -47,6 +47,28 @@ impl Client {
 
         Ok(Self { inner })
     }
+
+    /// Returns a new isolated `tor::Client` handle.
+    ///
+    /// The two `tor::Client`s will share internal state and configuration, but their
+    /// streams will never share circuits with one another.
+    ///
+    /// Use this method when you want separate parts of your program to each have a
+    /// `tor::Client` handle, but where you don't want their activities to be linkable to
+    /// one another over the Tor network.
+    ///
+    /// Calling this method is usually preferable to creating a completely separate
+    /// `tor::Client` instance, since it can share its internals with the existing
+    /// `tor::Client`.
+    ///
+    /// (Connections made with clones of the returned `tor::Client` may share circuits
+    /// with each other.)
+    #[must_use]
+    pub fn isolated_client(&self) -> Self {
+        Self {
+            inner: self.inner.isolated_client(),
+        }
+    }
 }
 
 /// Errors that can occur while creating or using a Tor [`Client`].
