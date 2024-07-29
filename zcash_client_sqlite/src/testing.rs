@@ -1177,13 +1177,16 @@ impl<Cache> TestState<Cache> {
         &self,
         min_confirmations: u32,
     ) -> Option<WalletSummary<AccountId>> {
-        get_wallet_summary(
-            &self.wallet().conn.unchecked_transaction().unwrap(),
-            &self.wallet().params,
-            min_confirmations,
-            &SubtreeScanProgress,
-        )
-        .unwrap()
+        self.wallet()
+            .read_transactionally(|wdb| {
+                get_wallet_summary(
+                    wdb.conn.0,
+                    &wdb.params,
+                    min_confirmations,
+                    &SubtreeScanProgress,
+                )
+            })
+            .unwrap()
     }
 
     /// Returns a vector of transaction summaries

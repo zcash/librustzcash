@@ -34,12 +34,13 @@
 
 use incrementalmerkletree::{Marking, Position, Retention};
 use nonempty::NonEmpty;
+use rand::{thread_rng, Rng};
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, ShardTree};
 use std::{
-    borrow::Borrow, collections::HashMap, convert::AsRef, fmt, num::NonZeroU32, ops::Range,
-    path::Path,
+    borrow::Borrow, collections::HashMap, convert::AsRef, fmt, iter::repeat, num::NonZeroU32,
+    ops::Range, path::Path, thread::sleep, time::Duration,
 };
 use subtle::ConditionallySelectable;
 use tracing::{debug, trace, warn};
@@ -221,6 +222,39 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
         let result = f(&mut wdb)?;
         tx.commit()?;
         Ok(result)
+    }
+}
+
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletDb<C, P> {
+    pub fn read_transactionally<F, A, E: From<rusqlite::Error>>(&self, f: F) -> Result<A, E>
+    where
+        F: FnOnce(&WalletDb<SqlTransaction<'_>, P>) -> Result<A, E>,
+    {
+        let mut rng = thread_rng();
+        for backoff_ms in [0u64, 1, 2, 4, 8, 16, 32].into_iter().chain(repeat(64)) {
+            match self.conn.borrow().unchecked_transaction() {
+                Ok(tx) => {
+                    let wdb = WalletDb {
+                        conn: SqlTransaction(&tx),
+                        params: self.params.clone(),
+                    };
+                    let result = f(&wdb)?;
+                    tx.commit()?;
+                    return Ok(result);
+                }
+                Err(e) if e.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy) => {
+                    // Jittered exponential backoff performs well in theory and in practice:
+                    // https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+                    let jitter_micros = rng.gen_range(0..=(backoff_ms * 1000));
+                    if backoff_ms < 64 {
+                        tracing::info!("database busy, sleeping for {jitter_micros} µs");
+                    }
+                    sleep(Duration::from_micros(jitter_micros));
+                }
+                Err(e) => Err(e)?,
+            }
+        }
+        unreachable!()
     }
 }
 
@@ -440,14 +474,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         &self,
         min_confirmations: u32,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
-        // This will return a runtime error if we call `get_wallet_summary` from two
-        // threads at the same time, as transactions cannot nest.
-        wallet::get_wallet_summary(
-            &self.conn.borrow().unchecked_transaction()?,
-            &self.params,
-            min_confirmations,
-            &SubtreeScanProgress,
-        )
+        self.read_transactionally(|wdb| {
+            wallet::get_wallet_summary(
+                wdb.conn.0,
+                &wdb.params,
+                min_confirmations,
+                &SubtreeScanProgress,
+            )
+        })
     }
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {

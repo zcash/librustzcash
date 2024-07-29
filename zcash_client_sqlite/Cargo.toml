@@ -72,6 +72,10 @@ schemer-rusqlite.workspace = true
 time.workspace = true
 uuid.workspace = true
 
+# - Randomness
+rand_core.workspace = true
+rand.workspace = true
+
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 document-features.workspace = true
@@ -86,7 +90,6 @@ shardtree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
 orchard = { workspace = true, features = ["test-dependencies"] }
 proptest.workspace = true
 rand_chacha.workspace = true
-rand_core.workspace = true
 regex = "1.4"
 tempfile = "3.5.0"
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
