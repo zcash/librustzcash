@@ -669,6 +669,7 @@ notes AS (
            ro.pool                    AS pool,
            id_within_pool_table,
            ro.value                   AS value,
+           0                          AS spent_note_count,
            CASE
                 WHEN ro.is_change THEN 1
                 ELSE 0
@@ -681,7 +682,13 @@ notes AS (
              WHEN (ro.memo IS NULL OR ro.memo = X'F6')
                THEN 0
              ELSE 1
-           END AS memo_present
+           END AS memo_present,
+           -- The wallet cannot receive transparent outputs in shielding transactions.
+           CASE
+             WHEN ro.pool = 0
+               THEN 1
+             ELSE 0
+           END AS does_not_match_shielding
     FROM v_received_outputs ro
     JOIN transactions
          ON transactions.id_tx = ro.transaction_id
@@ -693,9 +700,16 @@ notes AS (
            ro.pool                    AS pool,
            id_within_pool_table,
            -ro.value                  AS value,
+           1                          AS spent_note_count,
            0                          AS change_note_count,
            0                          AS received_count,
-           0                          AS memo_present
+           0                          AS memo_present,
+           -- The wallet cannot spend shielded outputs in shielding transactions.
+           CASE
+             WHEN ro.pool != 0
+               THEN 1
+             ELSE 0
+           END AS does_not_match_shielding
     FROM v_received_outputs ro
     JOIN v_received_output_spends ros
          ON ros.pool = ro.pool
@@ -743,7 +757,19 @@ SELECT notes.account_id             AS account_id,
        (
             blocks.height IS NULL
             AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height
-       ) AS expired_unmined
+       ) AS expired_unmined,
+       SUM(notes.spent_note_count) AS spent_note_count,
+       (
+            -- All of the wallet-spent and wallet-received notes are consistent with a
+            -- shielding transaction.
+            SUM(notes.does_not_match_shielding) = 0
+            -- The transaction contains at least one wallet-spent output.
+            AND SUM(notes.spent_note_count) > 0
+            -- The transaction contains at least one wallet-received note.
+            AND (SUM(notes.received_count) + SUM(notes.change_note_count)) > 0
+            -- We do not know about any external outputs of the transaction.
+            AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
+       ) AS is_shielding
 FROM notes
 LEFT JOIN transactions
      ON notes.txid = transactions.txid

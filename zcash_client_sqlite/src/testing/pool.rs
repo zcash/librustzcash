@@ -470,6 +470,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         assert_eq!(tx_0.account_id(), &account_id);
         assert!(!tx_0.expired_unmined());
         assert_eq!(tx_0.has_change(), expected_step0_change.is_positive());
+        assert!(!tx_0.is_shielding());
         assert_eq!(
             tx_0.account_value_delta(),
             -ZatBalance::from(expected_step0_fee),
@@ -478,6 +479,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         assert_eq!(tx_1.account_id(), &account_id);
         assert!(!tx_1.expired_unmined());
         assert!(!tx_1.has_change());
+        assert!(!tx_0.is_shielding());
         assert_eq!(
             tx_1.account_value_delta(),
             -ZatBalance::from(expected_ephemeral),
@@ -1541,7 +1543,7 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
     let utxo = WalletTransparentOutput::from_parts(
         OutPoint::fake(),
         TxOut {
-            value: NonNegativeAmount::const_from_u64(10000),
+            value: NonNegativeAmount::const_from_u64(100000),
             script_pubkey: taddr.script(),
         },
         Some(h),
@@ -1558,16 +1560,23 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
         DustOutputPolicy::default(),
     );
 
-    assert_matches!(
-        st.shield_transparent_funds(
+    let txids = st
+        .shield_transparent_funds(
             &input_selector,
             NonNegativeAmount::from_u64(10000).unwrap(),
             account.usk(),
             &[*taddr],
-            1
-        ),
-        Ok(_)
-    );
+            1,
+        )
+        .unwrap();
+    assert_eq!(txids.len(), 1);
+
+    let tx = st.get_tx_from_history(*txids.first()).unwrap().unwrap();
+    assert_eq!(tx.spent_note_count(), 1);
+    assert!(tx.has_change());
+    assert_eq!(tx.received_note_count(), 0);
+    assert_eq!(tx.sent_note_count(), 0);
+    assert!(tx.is_shielding());
 }
 
 // FIXME: This requires fixes to the test framework.

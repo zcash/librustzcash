@@ -1186,6 +1186,16 @@ impl<Cache> TestState<Cache> {
         .unwrap()
     }
 
+    /// Returns a transaction from the history.
+    #[allow(dead_code)]
+    pub(crate) fn get_tx_from_history(
+        &self,
+        txid: TxId,
+    ) -> Result<Option<TransactionSummary<AccountId>>, SqliteClientError> {
+        let history = self.get_tx_history()?;
+        Ok(history.into_iter().find(|tx| tx.txid() == txid))
+    }
+
     /// Returns a vector of transaction summaries
     pub(crate) fn get_tx_history(
         &self,
@@ -1212,11 +1222,13 @@ impl<Cache> TestState<Cache> {
                         .get::<_, Option<i64>>("fee_paid")?
                         .map(Zatoshis::from_nonnegative_i64)
                         .transpose()?,
+                    spent_note_count: row.get("spent_note_count")?,
                     has_change: row.get("has_change")?,
                     sent_note_count: row.get("sent_note_count")?,
                     received_note_count: row.get("received_note_count")?,
                     memo_count: row.get("memo_count")?,
                     expired_unmined: row.get("expired_unmined")?,
+                    is_shielding: row.get("is_shielding")?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -1320,11 +1332,13 @@ pub(crate) struct TransactionSummary<AccountId> {
     mined_height: Option<BlockHeight>,
     account_value_delta: ZatBalance,
     fee_paid: Option<Zatoshis>,
+    spent_note_count: usize,
     has_change: bool,
     sent_note_count: usize,
     received_note_count: usize,
     memo_count: usize,
     expired_unmined: bool,
+    is_shielding: bool,
 }
 
 #[allow(dead_code)]
@@ -1353,6 +1367,10 @@ impl<AccountId> TransactionSummary<AccountId> {
         self.fee_paid
     }
 
+    pub(crate) fn spent_note_count(&self) -> usize {
+        self.spent_note_count
+    }
+
     pub(crate) fn has_change(&self) -> bool {
         self.has_change
     }
@@ -1371,6 +1389,10 @@ impl<AccountId> TransactionSummary<AccountId> {
 
     pub(crate) fn memo_count(&self) -> usize {
         self.memo_count
+    }
+
+    pub(crate) fn is_shielding(&self) -> bool {
+        self.is_shielding
     }
 }
 
