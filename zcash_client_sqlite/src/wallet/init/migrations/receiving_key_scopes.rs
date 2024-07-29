@@ -516,7 +516,7 @@ mod tests {
                             // Don't need to bother with sent outputs for this test.
                             if output.transfer_type() != TransferType::Outgoing {
                                 put_received_note_before_migration(
-                                    wdb.conn.0, output, tx_ref, None,
+                                    wdb.conn.0, output, tx_ref.0, None,
                                 )
                                 .unwrap();
                             }
@@ -529,7 +529,7 @@ mod tests {
                                 }
                             }
 
-                            put_received_note_before_migration(wdb.conn.0, output, tx_ref, None)
+                            put_received_note_before_migration(wdb.conn.0, output, tx_ref.0, None)
                                 .unwrap();
                         }
                     }

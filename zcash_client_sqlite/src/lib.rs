@@ -177,10 +177,13 @@ impl fmt::Display for ReceivedNoteId {
     }
 }
 
-/// A newtype wrapper for sqlite primary key values for the utxos
-/// table.
+/// A newtype wrapper for sqlite primary key values for the utxos table.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct UtxoId(pub i64);
+
+/// A newtype wrapper for sqlite primary key values for the transactions table.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+struct TxRef(pub i64);
 
 /// A wrapper for the SQLite connection to the wallet database.
 pub struct WalletDb<C, P> {

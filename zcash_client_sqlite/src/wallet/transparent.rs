@@ -20,6 +20,7 @@ use zcash_primitives::{
 };
 use zcash_protocol::consensus::{self, BlockHeight};
 
+use crate::TxRef;
 use crate::{error::SqliteClientError, AccountId, UtxoId};
 
 use super::{chain_tip_height, get_account_ids};
@@ -429,7 +430,7 @@ pub(crate) fn add_transparent_account_balances(
 /// Marks the given UTXO as having been spent.
 pub(crate) fn mark_transparent_utxo_spent(
     conn: &rusqlite::Connection,
-    tx_ref: i64,
+    tx_ref: TxRef,
     outpoint: &OutPoint,
 ) -> Result<(), SqliteClientError> {
     let mut stmt_mark_transparent_utxo_spent = conn.prepare_cached(
@@ -443,7 +444,7 @@ pub(crate) fn mark_transparent_utxo_spent(
     )?;
 
     let sql_args = named_params![
-        ":spent_in_tx": &tx_ref,
+        ":spent_in_tx": tx_ref.0,
         ":prevout_txid": &outpoint.hash().to_vec(),
         ":prevout_idx": &outpoint.n(),
     ];

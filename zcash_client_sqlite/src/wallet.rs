@@ -108,6 +108,7 @@ use zcash_primitives::{
 };
 use zip32::{self, DiversifierIndex, Scope};
 
+use crate::TxRef;
 use crate::{
     error::SqliteClientError,
     wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
@@ -2199,7 +2200,7 @@ pub(crate) fn put_tx_meta(
     conn: &rusqlite::Connection,
     tx: &WalletTx<AccountId>,
     height: BlockHeight,
-) -> Result<i64, SqliteClientError> {
+) -> Result<TxRef, SqliteClientError> {
     // It isn't there, so insert our transaction into the database.
     let mut stmt_upsert_tx_meta = conn.prepare_cached(
         "INSERT INTO transactions (txid, block, mined_height, tx_index)
@@ -2219,7 +2220,7 @@ pub(crate) fn put_tx_meta(
     ];
 
     stmt_upsert_tx_meta
-        .query_row(tx_params, |row| row.get::<_, i64>(0))
+        .query_row(tx_params, |row| row.get::<_, i64>(0).map(TxRef))
         .map_err(SqliteClientError::from)
 }
 
@@ -2271,7 +2272,7 @@ pub(crate) fn put_tx_data(
     tx: &Transaction,
     fee: Option<NonNegativeAmount>,
     created_at: Option<time::OffsetDateTime>,
-) -> Result<i64, SqliteClientError> {
+) -> Result<TxRef, SqliteClientError> {
     let mut stmt_upsert_tx_data = conn.prepare_cached(
         "INSERT INTO transactions (txid, created, expiry_height, raw, fee)
         VALUES (:txid, :created_at, :expiry_height, :raw, :fee)
@@ -2295,7 +2296,7 @@ pub(crate) fn put_tx_data(
     ];
 
     stmt_upsert_tx_data
-        .query_row(tx_params, |row| row.get::<_, i64>(0))
+        .query_row(tx_params, |row| row.get::<_, i64>(0).map(TxRef))
         .map_err(SqliteClientError::from)
 }
 
@@ -2332,7 +2333,7 @@ fn recipient_params<P: consensus::Parameters>(
 pub(crate) fn insert_sent_output<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    tx_ref: i64,
+    tx_ref: TxRef,
     from_account: AccountId,
     output: &SentTransactionOutput<AccountId>,
 ) -> Result<(), SqliteClientError> {
@@ -2347,7 +2348,7 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
 
     let (to_address, to_account_id, pool_type) = recipient_params(params, output.recipient());
     let sql_args = named_params![
-        ":tx": &tx_ref,
+        ":tx": tx_ref.0,
         ":output_pool": &pool_code(pool_type),
         ":output_index": &i64::try_from(output.output_index()).unwrap(),
         ":from_account_id": from_account.0,
@@ -2378,7 +2379,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     from_account: AccountId,
-    tx_ref: i64,
+    tx_ref: TxRef,
     output_index: usize,
     recipient: &Recipient<AccountId, Note, OutPoint>,
     value: NonNegativeAmount,
@@ -2401,7 +2402,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
 
     let (to_address, to_account_id, pool_type) = recipient_params(params, recipient);
     let sql_args = named_params![
-        ":tx": &tx_ref,
+        ":tx": tx_ref.0,
         ":output_pool": &pool_code(pool_type),
         ":output_index": &i64::try_from(output_index).unwrap(),
         ":from_account_id": from_account.0,
@@ -2515,7 +2516,7 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
     conn: &rusqlite::Transaction<'_>,
     spend_pool: ShieldedProtocol,
     nf: &N,
-) -> Result<Option<i64>, SqliteClientError> {
+) -> Result<Option<TxRef>, SqliteClientError> {
     let mut stmt_select_locator = conn.prepare_cached(
         "SELECT block_height, tx_index, txid
         FROM nullifier_map

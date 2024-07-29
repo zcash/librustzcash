@@ -15,6 +15,7 @@ use zcash_primitives::{
 };
 use zcash_protocol::consensus;
 
+use crate::TxRef;
 use crate::{
     error::SqliteClientError,
     wallet::{get_account, GAP_LIMIT},
@@ -360,7 +361,7 @@ fn ephemeral_address_reuse_check<P: consensus::Parameters>(
 pub(crate) fn mark_ephemeral_address_as_used<P: consensus::Parameters>(
     wdb: &mut WalletDb<SqlTransaction<'_>, P>,
     ephemeral_address: &TransparentAddress,
-    tx_ref: i64,
+    tx_ref: TxRef,
 ) -> Result<(), SqliteClientError> {
     let address_str = ephemeral_address.encode(&wdb.params);
     ephemeral_address_reuse_check(wdb, &address_str)?;
@@ -377,7 +378,7 @@ pub(crate) fn mark_ephemeral_address_as_used<P: consensus::Parameters>(
              SET used_in_tx = :tx_ref, seen_in_tx = :tx_ref
              WHERE address = :address
              RETURNING account_id, address_index",
-            named_params![":tx_ref": &tx_ref, ":address": address_str],
+            named_params![":tx_ref": tx_ref.0, ":address": address_str],
             |row| Ok((AccountId(row.get::<_, u32>(0)?), row.get::<_, u32>(1)?)),
         )
         .optional()?;
@@ -398,7 +399,7 @@ pub(crate) fn mark_ephemeral_address_as_used<P: consensus::Parameters>(
 pub(crate) fn mark_ephemeral_address_as_seen<P: consensus::Parameters>(
     wdb: &mut WalletDb<SqlTransaction<'_>, P>,
     address: &TransparentAddress,
-    tx_ref: i64,
+    tx_ref: TxRef,
 ) -> Result<(), SqliteClientError> {
     let address_str = address.encode(&wdb.params);
 
@@ -419,7 +420,7 @@ pub(crate) fn mark_ephemeral_address_as_seen<P: consensus::Parameters>(
                   tx_index ASC NULLS LAST,
                   e.seen_in_tx ASC NULLS LAST
          LIMIT 1",
-        named_params![":tx_ref": &tx_ref, ":address": address_str],
+        named_params![":tx_ref": tx_ref.0, ":address": address_str],
         |row| row.get::<_, i64>(0),
     )?;
 
