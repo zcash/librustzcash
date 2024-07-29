@@ -463,7 +463,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
         }
     }
 
-    /// Adds an Issuance action to the transaction.
+    /// Creates IssuanceBundle and adds an Issuance action to the transaction.
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     pub fn init_issuance_bundle<FE>(
         &mut self,
@@ -471,6 +471,26 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
         asset_desc: String,
         recipient: Address,
         value: orchard::value::NoteValue,
+    ) -> Result<(), Error<FE>> {
+       self.init_issuance_bundle_impl(ik, asset_desc, Some(IssueInfo { recipient, value }))
+    }
+
+    /// Creates IssuanceBundle and adds a finalization action to the transaction.
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+    pub fn init_finalizing_issuance_bundle<FE>(
+        &mut self,
+        ik: IssuanceAuthorizingKey,
+        asset_desc: String,
+    ) -> Result<(), Error<FE>> {
+        self.init_issuance_bundle_impl(ik, asset_desc, None)
+    }
+
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+    fn init_issuance_bundle_impl<FE>(
+        &mut self,
+        ik: IssuanceAuthorizingKey,
+        asset_desc: String,
+        issue_info: Option<IssueInfo>,
     ) -> Result<(), Error<FE>> {
         if self.issuance_builder.is_some() {
             return Err(Error::IssuanceBuilder(
@@ -482,11 +502,11 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             IssueBundle::new(
                 IssuanceValidatingKey::from(&ik),
                 asset_desc,
-                Some(IssueInfo { recipient, value }),
+                issue_info,
                 OsRng,
             )
-            .map_err(Error::IssuanceBundle)?
-            .0,
+                .map_err(Error::IssuanceBundle)?
+                .0,
         );
         self.issuance_isk = Some(ik);
 
@@ -505,6 +525,18 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             .as_mut()
             .ok_or(Error::IssuanceBuilderNotAvailable)?
             .add_recipient(asset_desc, recipient, value, OsRng)
+            .map_err(Error::IssuanceBundle)?;
+
+        Ok(())
+    }
+
+    /// Finalizes a given asset
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+    pub fn finalize_asset<FE>(&mut self, asset_desc: String) -> Result<(), Error<FE>> {
+        self.issuance_builder
+            .as_mut()
+            .ok_or(Error::IssuanceBuilderNotAvailable)?
+            .finalize_action(asset_desc)
             .map_err(Error::IssuanceBundle)?;
 
         Ok(())
