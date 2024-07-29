@@ -85,13 +85,27 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::{error::SqliteClientError, wallet, AccountId, WalletDb},
         rusqlite::{named_params, Connection},
-        secrecy::{ExposeSecret, SecretVec},
-        zcash_client_backend::data_api::AccountBirthday,
+        secrecy::{ExposeSecret, Secret, SecretVec},
+        tempfile::NamedTempFile,
+        zcash_client_backend::{
+            data_api::{AccountBirthday, AccountSource},
+            wallet::TransparentAddressMetadata,
+        },
         zcash_keys::keys::UnifiedSpendingKey,
+        zcash_primitives::{block::BlockHash, legacy::keys::NonHardenedChildIndex},
         zcash_protocol::consensus::Network,
-        zip32::fingerprint::SeedFingerprint,
+        zip32::{fingerprint::SeedFingerprint, AccountId as Zip32AccountId},
+    };
+
+    #[cfg(feature = "transparent-inputs")]
+    use crate::{
+        error::SqliteClientError,
+        wallet::{
+            self, account_kind_code, init::init_wallet_db_internal, transparent::ephemeral,
+            GAP_LIMIT,
+        },
+        AccountId, WalletDb,
     };
 
     /// This is a minimized copy of [`wallet::create_account`] as of the time of the
@@ -183,26 +197,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn initialize_table() {
-        use rusqlite::named_params;
-        use secrecy::Secret;
-        use tempfile::NamedTempFile;
-        use zcash_client_backend::{
-            data_api::{AccountBirthday, AccountSource},
-            wallet::TransparentAddressMetadata,
-        };
-        use zcash_keys::keys::UnifiedSpendingKey;
-        use zcash_primitives::{block::BlockHash, legacy::keys::NonHardenedChildIndex};
-        use zcash_protocol::consensus::Network;
-        use zip32::{fingerprint::SeedFingerprint, AccountId as Zip32AccountId};
-
-        use crate::{
-            error::SqliteClientError,
-            wallet::{
-                account_kind_code, init::init_wallet_db_internal, transparent::ephemeral, GAP_LIMIT,
-            },
-            WalletDb,
-        };
-
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
