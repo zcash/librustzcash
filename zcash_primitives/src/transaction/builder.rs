@@ -1168,7 +1168,6 @@ mod tests {
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     use {
         crate::transaction::fees::zip317::FeeError,
-        crate::zip32::AccountId,
         orchard::keys::{FullViewingKey, IssuanceAuthorizingKey, SpendingKey},
         orchard::value::NoteValue,
         orchard::Address,
@@ -1176,6 +1175,10 @@ mod tests {
         zcash_protocol::constants::testnet::COIN_TYPE,
         zip32::Scope::External,
     };
+
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+    #[cfg(not(feature = "transparent-inputs"))]
+    use crate::zip32::AccountId;
 
     #[cfg(zcash_unstable = "zfuture")]
     #[cfg(feature = "transparent-inputs")]
