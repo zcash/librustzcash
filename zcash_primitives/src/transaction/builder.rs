@@ -472,7 +472,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
         recipient: Address,
         value: orchard::value::NoteValue,
     ) -> Result<(), Error<FE>> {
-       self.init_issuance_bundle_impl(ik, asset_desc, Some(IssueInfo { recipient, value }))
+        self.init_issuance_bundle_impl(ik, asset_desc, Some(IssueInfo { recipient, value }))
     }
 
     /// Creates IssuanceBundle and adds a finalization action to the transaction.
@@ -505,8 +505,8 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
                 issue_info,
                 OsRng,
             )
-                .map_err(Error::IssuanceBundle)?
-                .0,
+            .map_err(Error::IssuanceBundle)?
+            .0,
         );
         self.issuance_isk = Some(ik);
 
@@ -1167,14 +1167,14 @@ mod tests {
 
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     use {
-        crate::zip32::AccountId,
         crate::transaction::fees::zip317::FeeError,
-        orchard::Address,
+        crate::zip32::AccountId,
         orchard::keys::{FullViewingKey, IssuanceAuthorizingKey, SpendingKey},
         orchard::value::NoteValue,
-        zip32::Scope::External,
+        orchard::Address,
         zcash_protocol::consensus::TestNetwork,
         zcash_protocol::constants::testnet::COIN_TYPE,
+        zip32::Scope::External,
     };
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -1187,7 +1187,6 @@ mod tests {
         transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, OutPoint, TxOut},
         zip32::AccountId,
     };
-
 
     // This test only works with the transparent_inputs feature because we have to
     // be able to create a tx with a valid balance, without using Sapling inputs.
@@ -1469,10 +1468,16 @@ mod tests {
 
         let asset = "asset_desc".to_string();
 
-        builder.init_finalizing_issuance_bundle::<FeeError>(iak, asset.clone()).unwrap();
+        builder
+            .init_finalizing_issuance_bundle::<FeeError>(iak, asset.clone())
+            .unwrap();
 
         let issuance_builder = builder.issuance_builder.clone().unwrap();
-        assert_eq!(issuance_builder.actions().len(), 1, "There should be only one action");
+        assert_eq!(
+            issuance_builder.actions().len(),
+            1,
+            "There should be only one action"
+        );
         let action = issuance_builder.get_action(asset).unwrap();
         assert!(action.is_finalized(), "Action should be finalized");
         assert_eq!(action.notes().len(), 0, "Action should have zero notes");
@@ -1485,14 +1490,28 @@ mod tests {
 
         let asset = "asset_desc".to_string();
 
-        builder.init_issuance_bundle::<FeeError>(iak, asset.clone(), address, NoteValue::from_raw(42)).unwrap();
+        builder
+            .init_issuance_bundle::<FeeError>(iak, asset.clone(), address, NoteValue::from_raw(42))
+            .unwrap();
 
         let issuance_builder = builder.issuance_builder.unwrap();
-        assert_eq!(issuance_builder.actions().len(), 1, "There should be only one action");
+        assert_eq!(
+            issuance_builder.actions().len(),
+            1,
+            "There should be only one action"
+        );
         let action = issuance_builder.get_action(asset).unwrap();
-        assert_eq!(action.is_finalized(), false, "Action should not be finalized");
+        assert_eq!(
+            action.is_finalized(),
+            false,
+            "Action should not be finalized"
+        );
         assert_eq!(action.notes().len(), 1, "Action should have 1 note");
-        assert_eq!(action.notes().first().unwrap().value().inner(), 42, "Incorrect note value");
+        assert_eq!(
+            action.notes().first().unwrap().value().inner(),
+            42,
+            "Incorrect note value"
+        );
     }
 
     #[test]
@@ -1502,15 +1521,35 @@ mod tests {
 
         let asset = "asset_desc".to_string();
 
-        builder.init_issuance_bundle::<FeeError>(iak, asset.clone(), address, NoteValue::from_raw(42)).unwrap();
-        builder.add_issuance::<FeeError>(asset.clone(), address, NoteValue::from_raw(21)).unwrap();
+        builder
+            .init_issuance_bundle::<FeeError>(iak, asset.clone(), address, NoteValue::from_raw(42))
+            .unwrap();
+        builder
+            .add_issuance::<FeeError>(asset.clone(), address, NoteValue::from_raw(21))
+            .unwrap();
 
         let issuance_builder = builder.issuance_builder.unwrap();
-        assert_eq!(issuance_builder.actions().len(), 1, "There should be only one action");
+        assert_eq!(
+            issuance_builder.actions().len(),
+            1,
+            "There should be only one action"
+        );
         let action = issuance_builder.get_action(asset).unwrap();
-        assert_eq!(action.is_finalized(), false, "Action should not be finalized");
+        assert_eq!(
+            action.is_finalized(),
+            false,
+            "Action should not be finalized"
+        );
         assert_eq!(action.notes().len(), 2, "Action should have 2 notes");
-        assert_eq!(action.notes().iter().map(| note | note.value().inner()).sum::<u64>(), 42 + 21, "Incorrect notes sum");
+        assert_eq!(
+            action
+                .notes()
+                .iter()
+                .map(|note| note.value().inner())
+                .sum::<u64>(),
+            42 + 21,
+            "Incorrect notes sum"
+        );
     }
 
     #[test]
@@ -1521,31 +1560,65 @@ mod tests {
         let asset1 = "asset_desc".to_string();
         let asset2 = "asset_desc_2".to_string();
 
-        builder.init_issuance_bundle::<FeeError>(iak, asset1.clone(), address, NoteValue::from_raw(42)).unwrap();
-        builder.add_issuance::<FeeError>(asset2.clone(), address, NoteValue::from_raw(21)).unwrap();
+        builder
+            .init_issuance_bundle::<FeeError>(iak, asset1.clone(), address, NoteValue::from_raw(42))
+            .unwrap();
+        builder
+            .add_issuance::<FeeError>(asset2.clone(), address, NoteValue::from_raw(21))
+            .unwrap();
 
         let issuance_builder = builder.issuance_builder.unwrap();
-        assert_eq!(issuance_builder.actions().len(), 2, "There should be 2 actions");
+        assert_eq!(
+            issuance_builder.actions().len(),
+            2,
+            "There should be 2 actions"
+        );
 
         let action = issuance_builder.get_action(asset1).unwrap();
-        assert_eq!(action.is_finalized(), false, "Action should not be finalized");
+        assert_eq!(
+            action.is_finalized(),
+            false,
+            "Action should not be finalized"
+        );
         assert_eq!(action.notes().len(), 1, "Action should have 1 note");
-        assert_eq!(action.notes().iter().map(| note | note.value().inner()).sum::<u64>(), 42, "Incorrect notes sum");
+        assert_eq!(
+            action
+                .notes()
+                .iter()
+                .map(|note| note.value().inner())
+                .sum::<u64>(),
+            42,
+            "Incorrect notes sum"
+        );
 
         let action2 = issuance_builder.get_action(asset2).unwrap();
-        assert_eq!(action2.is_finalized(), false, "Action should not be finalized");
+        assert_eq!(
+            action2.is_finalized(),
+            false,
+            "Action should not be finalized"
+        );
         assert_eq!(action2.notes().len(), 1, "Action should have 1 note");
-        assert_eq!(action2.notes().iter().map(| note | note.value().inner()).sum::<u64>(), 21, "Incorrect notes sum");
+        assert_eq!(
+            action2
+                .notes()
+                .iter()
+                .map(|note| note.value().inner())
+                .sum::<u64>(),
+            21,
+            "Incorrect notes sum"
+        );
     }
 
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    fn prepare_zsa_test() -> (Builder<'static, TestNetwork, ()>, IssuanceAuthorizingKey, Address) {
+    fn prepare_zsa_test() -> (
+        Builder<'static, TestNetwork, ()>,
+        IssuanceAuthorizingKey,
+        Address,
+    ) {
         let seed = "0123456789abcdef0123456789abcdef".as_bytes();
 
         let iak = IssuanceAuthorizingKey::from_zip32_seed(seed, COIN_TYPE, 0).unwrap();
-        let tx_height = TEST_NETWORK
-            .activation_height(NetworkUpgrade::Nu7)
-            .unwrap();
+        let tx_height = TEST_NETWORK.activation_height(NetworkUpgrade::Nu7).unwrap();
 
         let build_config = BuildConfig::Standard {
             sapling_anchor: None,
@@ -1554,7 +1627,8 @@ mod tests {
 
         let builder = Builder::new(TEST_NETWORK, tx_height, build_config);
 
-        let sk = SpendingKey::from_zip32_seed(seed, COIN_TYPE, AccountId::try_from(0).unwrap()).unwrap();
+        let sk =
+            SpendingKey::from_zip32_seed(seed, COIN_TYPE, AccountId::try_from(0).unwrap()).unwrap();
         let fvk = FullViewingKey::from(&sk);
         let address = fvk.address_at(0u32, External);
 
