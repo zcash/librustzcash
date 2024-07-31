@@ -1229,7 +1229,7 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "orchard"
 version = "0.8.0"
-source = "git+https://github.com/QED-it/orchard?branch=zsa1#39b479ea81045e5c5ac719821fe2feb2bfce5f36"
+source = "git+https://github.com/QED-it/orchard?branch=zsa1#6e6112c80eb751a93c0fd1d881e9ca69887e1154"
 dependencies = [
  "aes",
  "bitvec",
@@ -1253,7 +1253,7 @@ dependencies = [
  "serde",
  "subtle",
  "tracing",
- "zcash_note_encryption 0.4.0 (git+https://github.com/QED-it/zcash_note_encryption?branch=zsa1)",
+ "zcash_note_encryption",
  "zcash_spec",
  "zip32",
 ]
@@ -1752,7 +1752,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.1.3"
-source = "git+https://github.com/QED-it/sapling-crypto?branch=orchard-backward-compatibility#d1aa6205f1e12af7364b768f80b085618dee781a"
+source = "git+https://github.com/QED-it/sapling-crypto?branch=zsa1#e19f4d916360842becf2842bfd9b27228e66fa81"
 dependencies = [
  "aes",
  "bellman",
@@ -1776,7 +1776,7 @@ dependencies = [
  "redjubjub",
  "subtle",
  "tracing",
- "zcash_note_encryption 0.4.0 (git+https://github.com/QED-it/zcash_note_encryption?branch=note-bytes)",
+ "zcash_note_encryption",
  "zcash_spec",
  "zip32",
 ]
@@ -2487,19 +2487,7 @@ dependencies = [
 [[package]]
 name = "zcash_note_encryption"
 version = "0.4.0"
-source = "git+https://github.com/QED-it/zcash_note_encryption?branch=note-bytes#e6023a923194cf27668702c88e6dc5ceeb361304"
-dependencies = [
- "chacha20",
- "chacha20poly1305",
- "cipher",
- "rand_core",
- "subtle",
-]
-
-[[package]]
-name = "zcash_note_encryption"
-version = "0.4.0"
-source = "git+https://github.com/QED-it/zcash_note_encryption?branch=zsa1#b8bd2a186fc04ec4f55b2db44df7374f03ab5725"
+source = "git+https://github.com/QED-it/zcash_note_encryption?branch=zsa1#58384553aab76b2ee6d6eb328cf2187fa824ec9a"
 dependencies = [
  "chacha20",
  "chacha20poly1305",
@@ -2545,7 +2533,7 @@ dependencies = [
  "tracing",
  "zcash_address",
  "zcash_encoding",
- "zcash_note_encryption 0.4.0 (git+https://github.com/QED-it/zcash_note_encryption?branch=note-bytes)",
+ "zcash_note_encryption",
  "zcash_protocol",
  "zcash_spec",
  "zip32",
