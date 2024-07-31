@@ -1703,11 +1703,20 @@ impl AccountBirthday {
 /// - If [`WalletWrite::import_account_hd`] is used to import accounts with non-sequential
 ///   ZIP 32 account indices from the same seed, a call to [`WalletWrite::create_account`]
 ///   will use the ZIP 32 account index just after the highest-numbered existing account.
-/// - If an account is imported via [`WalletWrite::import_account_ufvk`], and then a later
-///   call to either [`WalletWrite::create_account`] or [`WalletWrite::import_account_hd`]
-///   would produce the same UFVK, an error will be returned.
-///   - A future change to this trait might introduce a method to "upgrade" an imported
-///     account with derivation information. See [zcash/librustzcash#1284] for details.
+/// - If an account is added to the wallet, and then a later call to one of the methods
+///   would produce the same UFVK, an error will be returned. While any combination of
+///   method calls can cause this, there are two main ways it can occur that users of the
+///   `WalletWrite` trait should watch out for:
+///   - An account is created via [`WalletWrite::create_account`] with an auto-selected
+///     ZIP 32 account index, and that index is later imported explicitly via either
+///     [`WalletWrite::import_account_hd`] or [`WalletWrite::import_account_ufvk`].
+///   - An account is imported via [`WalletWrite::import_account_ufvk`], and the ZIP 32
+///     account index corresponding to that account's UFVK is later imported either
+///     implicitly via [`WalletWrite::create_account`] or explicitly via
+///     [`WalletWrite::import_account_hd`].
+///
+/// A future change to this trait might introduce a method to "upgrade" an imported
+/// account with derivation information. See [zcash/librustzcash#1284] for details.
 ///
 /// Users of the `WalletWrite` trait should generally distinguish in their APIs and wallet
 /// UIs between creating a new account, and importing an account that previously existed.
