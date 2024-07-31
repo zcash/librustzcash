@@ -15,8 +15,8 @@ use orchard::{
     value::{NoteValue, ValueCommitment},
     Action, Anchor,
 };
-use zcash_note_encryption::note_bytes::NoteBytes;
 use zcash_encoding::{Array, CompactSize, Vector};
+use zcash_note_encryption::note_bytes::NoteBytes;
 
 use super::Amount;
 use crate::transaction::Transaction;
@@ -189,7 +189,8 @@ pub fn read_note_ciphertext<R: Read>(
         epk_bytes: [0u8; 32],
         enc_ciphertext: <OrchardVanilla as OrchardDomainCommon>::NoteCiphertextBytes::from_slice(
             [0u8; OrchardVanilla::ENC_CIPHERTEXT_SIZE].as_ref(),
-        ).expect("OrchardVanilla note ciphertext is of the correct size"),
+        )
+        .expect("OrchardVanilla note ciphertext is of the correct size"),
         out_ciphertext: [0u8; 80],
     };
 
@@ -207,7 +208,8 @@ pub fn read_zsa_note_ciphertext<R: Read>(
         epk_bytes: [0u8; 32],
         enc_ciphertext: <OrchardZSA as OrchardDomainCommon>::NoteCiphertextBytes::from_slice(
             [0u8; OrchardZSA::ENC_CIPHERTEXT_SIZE].as_ref(),
-        ).expect("OrchardZSA note ciphertext is of the correct size"),
+        )
+        .expect("OrchardZSA note ciphertext is of the correct size"),
         out_ciphertext: [0u8; 80],
     };
 
