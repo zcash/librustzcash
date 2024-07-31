@@ -633,7 +633,7 @@ where
                         CompactAction::try_from(action).map_err(|_| ScanError::EncodingInvalid {
                             at_height: block_height,
                             txid,
-                            pool_type: ShieldedProtocol::Sapling,
+                            pool_type: ShieldedProtocol::Orchard,
                             index: i,
                         })
                     })
