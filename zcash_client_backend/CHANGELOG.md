@@ -75,6 +75,10 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
     `zcash_client_sqlite`) to improve transactionality of writes for multi-step
     proposals.
   - `wallet::input_selection::InputSelectorError` has a new `Address` variant.
+  - `wallet::decrypt_and_store_transaction` now takes an additional optional
+    `mined_height` argument that can be used to provide the mined height
+    returned by the light wallet server in a `RawTransaction` value directly to
+    the back end.
   - `DecryptedTransaction::new` takes an additional `mined_height` argument.
   - `SentTransaction` now stores its `outputs` and `utxos_spent` fields as
     references to slices, with a corresponding change to `SentTransaction::new`.

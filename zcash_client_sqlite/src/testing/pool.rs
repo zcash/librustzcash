@@ -295,7 +295,7 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     assert_eq!(tx_history.len(), 2);
 
     assert_matches!(
-        decrypt_and_store_transaction(&st.network(), st.wallet_mut(), &tx),
+        decrypt_and_store_transaction(&st.network(), st.wallet_mut(), &tx, None),
         Ok(_)
     );
 }
