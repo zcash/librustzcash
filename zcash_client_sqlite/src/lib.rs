@@ -1423,7 +1423,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                                 txout,
                                 d_tx.mined_height(),
                                 &address,
-                                account_id
+                                account_id,
+                                false
                             )?;
 
                             // Since the wallet created the transparent output, we need to ensure

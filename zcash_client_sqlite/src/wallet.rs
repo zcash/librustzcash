@@ -1960,6 +1960,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                     None,
                     ephemeral_address,
                     *receiving_account,
+                    true,
                 )?;
                 transparent::ephemeral::mark_ephemeral_address_as_used(
                     wdb,

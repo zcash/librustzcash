@@ -468,6 +468,7 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
             output.mined_height(),
             address,
             receiving_account,
+            true,
         )
     } else {
         // The UTXO was not for any of our transparent addresses.
@@ -573,6 +574,7 @@ pub(crate) fn find_account_for_transparent_address<P: consensus::Parameters>(
 ///
 /// `output_height` may be None if this is an ephemeral output from a
 /// transaction we created, that we do not yet know to have been mined.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -581,6 +583,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     output_height: Option<BlockHeight>,
     address: &TransparentAddress,
     receiving_account: AccountId,
+    known_unspent: bool,
 ) -> Result<UtxoId, SqliteClientError> {
     let output_height = output_height.map(u32::from);
 
@@ -613,6 +616,40 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
         |row| row.get::<_, i64>(0),
     )?;
 
+    let spent_height = conn
+        .query_row(
+            "SELECT t.mined_height
+             FROM transactions t
+             JOIN transparent_received_output_spends ts ON ts.transaction_id = t.id_tx
+             JOIN transparent_received_outputs tro ON tro.id = ts.transparent_received_output_id
+             WHERE tro.transaction_id = :transaction_id
+             AND tro.output_index = :output_index",
+            named_params![
+                ":transaction_id": id_tx,
+                ":output_index": &outpoint.n(),
+            ],
+            |row| {
+                row.get::<_, Option<u32>>(0)
+                    .map(|o| o.map(BlockHeight::from))
+            },
+        )
+        .optional()?
+        .flatten();
+
+    // The max observed unspent height is either the spending transaction's mined height - 1, or
+    // the current chain tip height if the UTXO was received via a path that confirmed that it was
+    // unspent, such as by querying the UTXO set of the network.
+    let max_observed_unspent = match spent_height {
+        Some(h) => Some(h - 1),
+        None => {
+            if known_unspent {
+                chain_tip_height(conn)?
+            } else {
+                None
+            }
+        }
+    };
+
     let mut stmt_upsert_transparent_output = conn.prepare_cached(
         "INSERT INTO transparent_received_outputs (
             transaction_id, output_index,
@@ -622,14 +659,14 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
         VALUES (
             :transaction_id, :output_index,
             :account_id, :address, :script,
-            :value_zat, :height
+            :value_zat, :max_observed_unspent_height
         )
         ON CONFLICT (transaction_id, output_index) DO UPDATE
         SET account_id = :account_id,
             address = :address,
             script = :script,
             value_zat = :value_zat,
-            max_observed_unspent_height = :height
+            max_observed_unspent_height = IFNULL(:max_observed_unspent_height, max_observed_unspent_height)
         RETURNING id",
     )?;
 
@@ -640,7 +677,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
         ":address": &address.encode(params),
         ":script": &txout.script_pubkey.0,
         ":value_zat": &i64::from(Amount::from(txout.value)),
-        ":height": output_height,
+        ":max_observed_unspent_height": max_observed_unspent.map(u32::from),
     ];
 
     let utxo_id = stmt_upsert_transparent_output
