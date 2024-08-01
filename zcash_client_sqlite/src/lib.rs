@@ -1185,7 +1185,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         d_tx: DecryptedTransaction<AccountId>,
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
-            let tx_ref = wallet::put_tx_data(wdb.conn.0, d_tx.tx(), None, None)?;
+            let tx_ref = wallet::put_tx_data(wdb.conn.0, d_tx.tx(), None, None, None)?;
             let funding_accounts = wallet::get_funding_accounts(wdb.conn.0, d_tx.tx())?;
 
             // TODO(#1305): Correctly track accounts that fund each transaction output.

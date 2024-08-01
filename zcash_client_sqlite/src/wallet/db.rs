@@ -174,6 +174,11 @@ CREATE TABLE blocks (
 ///   foreign key constraint on `block` prevents that column from being populated prior to complete
 ///   scanning of the block. This is constrained to be equal to the `block` column if `block` is
 ///   non-null.
+/// - `target_height`: stores the target height for which the transaction was constructed, if
+///   known. This will ordinarily be null for transactions discovered via chain scanning; it
+///   will only be set for transactions created using this wallet specifically, and not any
+///   other wallet that uses the same seed (including previous installations of the same
+///   wallet application.)
 pub(super) const TABLE_TRANSACTIONS: &str = r#"
 CREATE TABLE "transactions" (
     id_tx INTEGER PRIMARY KEY,
@@ -185,6 +190,7 @@ CREATE TABLE "transactions" (
     expiry_height INTEGER,
     raw BLOB,
     fee INTEGER,
+    target_height INTEGER,
     FOREIGN KEY (block) REFERENCES blocks(height),
     CONSTRAINT height_consistency CHECK (block IS NULL OR mined_height = block)
 )"#;

@@ -1857,6 +1857,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
         sent_tx.tx(),
         Some(sent_tx.fee_amount()),
         Some(sent_tx.created()),
+        chain_tip_height(wdb.conn.0)?.map(|h| h + 1),
     )?;
 
     let mut detectable_via_scanning = false;
@@ -2344,10 +2345,11 @@ pub(crate) fn put_tx_data(
     tx: &Transaction,
     fee: Option<NonNegativeAmount>,
     created_at: Option<time::OffsetDateTime>,
+    target_height: Option<BlockHeight>,
 ) -> Result<TxRef, SqliteClientError> {
     let mut stmt_upsert_tx_data = conn.prepare_cached(
-        "INSERT INTO transactions (txid, created, expiry_height, raw, fee)
-        VALUES (:txid, :created_at, :expiry_height, :raw, :fee)
+        "INSERT INTO transactions (txid, created, expiry_height, raw, fee, target_height)
+        VALUES (:txid, :created_at, :expiry_height, :raw, :fee, :target_height)
         ON CONFLICT (txid) DO UPDATE
         SET expiry_height = :expiry_height,
             raw = :raw,
@@ -2365,6 +2367,7 @@ pub(crate) fn put_tx_data(
         ":expiry_height": u32::from(tx.expiry_height()),
         ":raw": raw_tx,
         ":fee": fee.map(u64::from),
+        ":target_height": target_height.map(u32::from),
     ];
 
     stmt_upsert_tx_data

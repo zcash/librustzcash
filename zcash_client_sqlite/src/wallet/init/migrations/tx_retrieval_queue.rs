@@ -1,9 +1,10 @@
 //! A migration to add the `tx_retrieval_queue` table to the database.
 
-use rusqlite::Transaction;
+use rusqlite::{named_params, Transaction};
 use schemer_rusqlite::RusqliteMigration;
 use std::collections::HashSet;
 use uuid::Uuid;
+use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
 
 use crate::wallet::init::WalletMigrationError;
 
@@ -37,14 +38,30 @@ impl RusqliteMigration for Migration {
                 query_type INTEGER NOT NULL,
                 dependent_transaction_id INTEGER,
                 FOREIGN KEY (dependent_transaction_id) REFERENCES transactions(id_tx)
-            );",
+            );
+
+            ALTER TABLE transactions ADD COLUMN target_height INTEGER;",
+        )?;
+
+        // Add estimated target height information for each transaction we know to
+        // have been created by the wallet; transactions that were discovered via
+        // chain scanning will have their `created` field set to `NULL`.
+        transaction.execute(
+            "UPDATE transactions
+             SET target_height = expiry_height - :default_expiry_delta
+             WHERE expiry_height > :default_expiry_delta
+             AND created IS NOT NULL",
+            named_params![":default_expiry_delta": DEFAULT_TX_EXPIRY_DELTA],
         )?;
 
         Ok(())
     }
 
     fn down(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
-        transaction.execute_batch("DROP TABLE tx_retrieval_queue;")?;
+        transaction.execute_batch(
+            "ALTER TABLE transactions DROP COLUMN target_height;
+             DROP TABLE tx_retrieval_queue;",
+        )?;
 
         Ok(())
     }

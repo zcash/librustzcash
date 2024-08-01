@@ -21,6 +21,7 @@ and this library adheres to Rust's notion of
   - `InputView::serialized_size`
   - `OutputView::serialized_size`
 - `zcash_primitives::transaction::component::transparent::OutPoint::txid`
+- `zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA`
 
 ### Changed
 - MSRV is now 1.70.0.
