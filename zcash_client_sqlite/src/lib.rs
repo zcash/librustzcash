@@ -52,7 +52,8 @@ use zcash_client_backend::{
         scanning::{ScanPriority, ScanRange},
         Account, AccountBirthday, AccountSource, BlockMetadata, DecryptedTransaction, InputSource,
         NullifierQuery, ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        TransactionDataRequest, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -589,6 +590,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
             self.conn.borrow(),
             &address.encode(&self.params),
         )
+    }
+
+    fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {
+        let iter = std::iter::empty();
+
+        let iter = iter.chain(wallet::transaction_data_requests(self.conn.borrow())?.into_iter());
+
+        Ok(iter.collect())
     }
 }
 
@@ -1538,6 +1547,14 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         self.transactionally(|wdb| {
             wallet::transparent::ephemeral::reserve_next_n_ephemeral_addresses(wdb, account_id, n)
         })
+    }
+
+    fn set_transaction_status(
+        &mut self,
+        txid: TxId,
+        status: data_api::TransactionStatus,
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wallet::set_transaction_status(wdb.conn.0, txid, status))
     }
 }
 

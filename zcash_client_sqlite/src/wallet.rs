@@ -68,6 +68,7 @@ use incrementalmerkletree::{Marking, Retention};
 use rusqlite::{self, named_params, params, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
+use zcash_client_backend::data_api::{TransactionDataRequest, TransactionStatus};
 use zip32::fingerprint::SeedFingerprint;
 
 use std::collections::{HashMap, HashSet};
@@ -108,13 +109,13 @@ use zcash_primitives::{
 };
 use zip32::{self, DiversifierIndex, Scope};
 
-use crate::TxRef;
 use crate::{
     error::SqliteClientError,
     wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
     AccountId, SqlTransaction, TransferType, WalletCommitmentTrees, WalletDb, DEFAULT_UA_REQUEST,
     PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
 };
+use crate::{TxRef, VERIFY_LOOKAHEAD};
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::transaction::components::TxOut;
@@ -1760,7 +1761,7 @@ pub(crate) fn get_tx_height(
 ) -> Result<Option<BlockHeight>, rusqlite::Error> {
     conn.query_row(
         "SELECT block FROM transactions WHERE txid = ?",
-        [txid.as_ref().to_vec()],
+        [txid.as_ref()],
         |row| Ok(row.get::<_, Option<u32>>(0)?.map(BlockHeight::from)),
     )
     .optional()
@@ -1982,6 +1983,58 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
             TxQueryType::Status,
             None,
         )?;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn set_transaction_status(
+    conn: &rusqlite::Transaction,
+    txid: TxId,
+    status: TransactionStatus,
+) -> Result<(), SqliteClientError> {
+    match status {
+        TransactionStatus::TxidNotRecognized | TransactionStatus::NotInMainChain => {
+            // If the transaction is now expired, remove it from the retrieval queue.
+            if let Some(chain_tip) = chain_tip_height(conn)? {
+                conn.execute(
+                    "DELETE FROM tx_retrieval_queue WHERE txid IN (
+                        SELECT txid FROM transactions
+                        WHERE txid = :txid AND expiry_height < :chain_tip_minus_lookahead
+                    )",
+                    named_params![
+                        ":txid": txid.as_ref(),
+                        ":chain_tip_minus_lookahead": u32::from(chain_tip).saturating_sub(VERIFY_LOOKAHEAD)
+                    ],
+                )?;
+            }
+        }
+        TransactionStatus::Mined(height) => {
+            // The transaction has been mined, so we can set its mined height, associate it with
+            // the appropriate block, and remove it from the retrieval queue.
+            let sql_args = named_params![
+                ":txid": txid.as_ref(),
+                ":height": u32::from(height)
+            ];
+
+            conn.execute(
+                "UPDATE transactions
+                 SET mined_height = :height
+                 WHERE txid = :txid",
+                sql_args,
+            )?;
+
+            conn.execute(
+                "UPDATE transactions
+                 SET block = blocks.height
+                 FROM blocks
+                 WHERE txid = :txid
+                 AND blocks.height = :height",
+                sql_args,
+            )?;
+
+            notify_tx_retrieved(conn, txid)?;
+        }
     }
 
     Ok(())
@@ -2375,6 +2428,33 @@ pub(crate) fn queue_tx_retrieval(
     }
 
     Ok(())
+}
+
+/// Returns the vector of [`TransactionDataRequest`]s that represents the information needed by the
+/// wallet backend in order to be able to present a complete view of wallet history and memo data.
+pub(crate) fn transaction_data_requests(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<TransactionDataRequest>, SqliteClientError> {
+    let mut tx_retrieval_stmt =
+        conn.prepare_cached("SELECT txid, query_type FROM tx_retrieval_queue")?;
+
+    let result = tx_retrieval_stmt
+        .query_and_then([], |row| {
+            let txid = row.get(0).map(TxId::from_bytes)?;
+            let query_type = row.get(1).map(TxQueryType::from_code)?.ok_or_else(|| {
+                SqliteClientError::CorruptedData(
+                    "Unrecognized transaction data request type.".to_owned(),
+                )
+            })?;
+
+            Ok::<TransactionDataRequest, SqliteClientError>(match query_type {
+                TxQueryType::Status => TransactionDataRequest::GetStatus(txid),
+                TxQueryType::Enhancement => TransactionDataRequest::Enhancement(txid),
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(result)
 }
 
 pub(crate) fn notify_tx_retrieved(

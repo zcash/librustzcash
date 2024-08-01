@@ -541,6 +541,49 @@ pub struct SpendableNotes<NoteRef> {
     orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
 }
 
+/// A request for transaction data enhancement, spentness check, or discovery
+/// of spends from a given transparent address within a specific block range.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TransactionDataRequest {
+    /// Information about the chain's view of a transaction is requested.
+    ///
+    /// The caller evaluating this request on behalf of the wallet backend should respond to this
+    /// request by determining the status of the specified transaction with respect to the main
+    /// chain; if using `lightwalletd` for access to chain data, this may be performed interpreting
+    /// the results of the [`GetTransaction`] RPC method. It should then call
+    /// [`WalletWrite::set_transaction_status`] to provide the resulting transaction status
+    /// information to the wallet backend.
+    ///
+    /// [`GetTransaction`]: crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient::get_transaction
+    GetStatus(TxId),
+    /// Transaction enhancement (download of complete raw transaction data) is requested.
+    ///
+    /// The caller evaluating this request on behalf of the wallet backend should respond to this
+    /// request by providing complete data for the specified transaction to
+    /// [`wallet::decrypt_and_store_transaction`]; if using `lightwalletd` for access to chain
+    /// state, this may be obtained via the [`GetTransaction`] RPC method. If no data is available
+    /// for the specified transaction, this should be reported to the backend using
+    /// [`WalletWrite::set_transaction_status`]. A [`TransactionDataRequest::Enhancement`] request
+    /// subsumes any previously existing [`TransactionDataRequest::GetStatus`] request.
+    ///
+    /// [`GetTransaction`]: crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient::get_transaction
+    Enhancement(TxId),
+}
+
+/// Metadata about the status of a transaction obtained by inspecting the chain state.
+#[derive(Clone, Copy, Debug)]
+pub enum TransactionStatus {
+    /// The requested transaction ID was not recognized by the node.
+    TxidNotRecognized,
+    /// The requested transaction ID corresponds to a transaction that is recognized by the node,
+    /// but is in the mempool or is otherwise not mined in the main chain (but may have been mined
+    /// on a fork that was reorged away).
+    NotInMainChain,
+    /// The requested transaction ID corresponds to a transaction that has been included in the
+    /// block at the provided height.
+    Mined(BlockHeight),
+}
+
 impl<NoteRef> SpendableNotes<NoteRef> {
     /// Construct a new empty [`SpendableNotes`].
     pub fn empty() -> Self {
@@ -1039,6 +1082,20 @@ pub trait WalletRead {
         }
         Ok(None)
     }
+
+    /// Returns a vector of [`TransactionDataRequest`] values that describe information needed by
+    /// the wallet to complete its view of transaction history.
+    ///
+    /// Requests for the same transaction data may be returned repeatedly by successive data
+    /// requests. The caller of this method should consider the latest set of requests returned
+    /// by this method to be authoritative and to subsume that returned by previous calls.
+    ///
+    /// Callers should poll this method on a regular interval, not as part of ordinary chain
+    /// scanning, which already produces requests for transaction data enhancement. Note that
+    /// responding to a set of transaction data requests may result in the creation of new
+    /// transaction data requests, such as when it is necessary to fill in purely-transparent
+    /// transaction history by walking the chain backwards via transparent inputs.
+    fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error>;
 }
 
 /// The relevance of a seed to a given wallet.
@@ -1811,9 +1868,27 @@ pub trait WalletWrite: WalletRead {
     #[cfg(feature = "transparent-inputs")]
     fn reserve_next_n_ephemeral_addresses(
         &mut self,
-        account_id: Self::AccountId,
-        n: usize,
-    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error>;
+        _account_id: Self::AccountId,
+        _n: usize,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        // Default impl is required for feature-flagged trait methods to prevent
+        // breakage due to inadvertent activation of features by transitive dependencies
+        // of the implementing crate.
+        Ok(vec![])
+    }
+
+    /// Updates the wallet backend with respect to the status of a specific transaction, from the
+    /// perspective of the main chain.
+    ///
+    /// Fully transparent transactions, and transactions that do not contain either shielded inputs
+    /// or shielded outputs belonging to the wallet, may not be discovered by the process of chain
+    /// scanning; as a consequence, the wallet must actively query to determine whether such
+    /// transactions have been mined.
+    fn set_transaction_status(
+        &mut self,
+        _txid: TxId,
+        _status: TransactionStatus,
+    ) -> Result<(), Self::Error>;
 }
 
 /// This trait describes a capability for manipulating wallet note commitment trees.
@@ -1913,8 +1988,9 @@ pub mod testing {
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
         AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
-        ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes, WalletCommitmentTrees,
-        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes, TransactionDataRequest,
+        TransactionStatus, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        SAPLING_SHARD_HEIGHT,
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -2170,6 +2246,10 @@ pub mod testing {
         ) -> Result<Option<Self::AccountId>, Self::Error> {
             Ok(None)
         }
+
+        fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {
+            Ok(vec![])
+        }
     }
 
     impl WalletWrite for MockWalletDb {
@@ -2258,6 +2338,14 @@ pub mod testing {
             _n: usize,
         ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
             Err(())
+        }
+
+        fn set_transaction_status(
+            &mut self,
+            _txid: TxId,
+            _status: TransactionStatus,
+        ) -> Result<(), Self::Error> {
+            Ok(())
         }
     }
 

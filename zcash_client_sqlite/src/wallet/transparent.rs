@@ -20,10 +20,8 @@ use zcash_primitives::{
 };
 use zcash_protocol::consensus::{self, BlockHeight};
 
-use crate::TxRef;
-use crate::{error::SqliteClientError, AccountId, UtxoId};
-
 use super::{chain_tip_height, get_account_ids};
+use crate::{error::SqliteClientError, AccountId, TxRef, UtxoId};
 
 pub(crate) mod ephemeral;
 
