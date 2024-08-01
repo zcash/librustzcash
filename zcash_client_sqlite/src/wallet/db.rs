@@ -415,6 +415,23 @@ CREATE TABLE tx_retrieval_queue (
     FOREIGN KEY (dependent_transaction_id) REFERENCES transactions(id_tx)
 )"#;
 
+/// Stores the set of transaction outputs received by the wallet for which spend information
+/// (if any) should be retrieved.
+///
+/// This table is populated in the process of wallet recovery when a deshielding transaction
+/// with transparent outputs belonging to the wallet (e.g., the deshielding half of a ZIP 320
+/// transaction pair) is discovered. It is expected that such a transparent output will be
+/// spent soon after it is received in a purely transparent transaction, which the wallet
+/// currently has no means of detecting otherwise.
+pub(super) const TABLE_TRANSPARENT_SPEND_SEARCH_QUEUE: &str = r#"
+CREATE TABLE transparent_spend_search_queue (
+    address TEXT NOT NULL,
+    transaction_id INTEGER NOT NULL,
+    output_index INTEGER NOT NULL,
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id_tx),
+    CONSTRAINT value_received_height UNIQUE (transaction_id, output_index)
+)"#;
+
 //
 // State for shard trees
 //

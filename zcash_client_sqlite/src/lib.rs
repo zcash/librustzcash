@@ -596,6 +596,11 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         let iter = std::iter::empty();
 
         let iter = iter.chain(wallet::transaction_data_requests(self.conn.borrow())?.into_iter());
+        #[cfg(feature = "transparent-inputs")]
+        let iter = iter.chain(
+            wallet::transparent::transaction_data_requests(self.conn.borrow(), &self.params)?
+                .into_iter(),
+        );
 
         Ok(iter.collect())
     }
@@ -1440,6 +1445,19 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             // that any transparent inputs belonging to the wallet will be
                             // discovered.
                             tx_has_wallet_outputs = true;
+
+                            // When we receive transparent funds (particularly as ephemeral outputs
+                            // in transaction pairs sending to a ZIP 320 address) it becomes
+                            // possible that the spend of these outputs is not then later detected
+                            // if the transaction that spends them is purely transparent. This is
+                            // particularly a problem in wallet recovery.
+                            wallet::transparent::queue_transparent_spend_detection(
+                                wdb.conn.0,
+                                &wdb.params,
+                                address,
+                                tx_ref,
+                                output_index.try_into().unwrap()
+                            )?;
                         }
 
                         // If a transaction we observe contains spends from our wallet, we will

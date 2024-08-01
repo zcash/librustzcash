@@ -3,6 +3,8 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::OptionalExtension;
 use rusqlite::{named_params, Connection, Row};
+use zcash_client_backend::data_api::TransactionDataRequest;
+use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
 use zip32::{DiversifierIndex, Scope};
 
 use zcash_address::unified::{Encoding, Ivk, Uivk};
@@ -439,14 +441,26 @@ pub(crate) fn mark_transparent_utxo_spent(
          AND txo.output_index = :prevout_idx
          ON CONFLICT (transparent_received_output_id, transaction_id) DO NOTHING",
     )?;
-
-    let sql_args = named_params![
+    stmt_mark_transparent_utxo_spent.execute(named_params![
         ":spent_in_tx": tx_ref.0,
-        ":prevout_txid": &outpoint.hash().to_vec(),
-        ":prevout_idx": &outpoint.n(),
-    ];
+        ":prevout_txid": outpoint.hash().as_ref(),
+        ":prevout_idx": outpoint.n(),
+    ])?;
 
-    stmt_mark_transparent_utxo_spent.execute(sql_args)?;
+    // Since we know that the output is spent, we no longer need to search for
+    // it to find out if it has been spent.
+    let mut stmt_remove_spend_detection = conn.prepare_cached(
+        "DELETE FROM transparent_spend_search_queue
+         WHERE output_index = :prevout_idx
+         AND transaction_id IN (
+            SELECT id_tx FROM transactions WHERE txid = :prevout_txid
+         )",
+    )?;
+    stmt_remove_spend_detection.execute(named_params![
+        ":prevout_txid": outpoint.hash().as_ref(),
+        ":prevout_idx": outpoint.n(),
+    ])?;
+
     Ok(())
 }
 
@@ -472,6 +486,42 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
         // The UTXO was not for any of our transparent addresses.
         Err(SqliteClientError::AddressNotRecognized(*address))
     }
+}
+
+/// Returns the vector of [`TransactionDataRequest`]s that represents the information needed by the
+/// wallet backend in order to be able to present a complete view of wallet history and memo data.
+pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+) -> Result<Vec<TransactionDataRequest>, SqliteClientError> {
+    // We cannot construct transaction data requests for the case where we cannot determine the
+    // height at which to begin, so we require that either the target height or mined height be
+    // set. In practice, we should not encounter entries in `transparent_spend_search_queue`
+    // because under ordinary circumstances, it is populated via a call from
+    // `decrypt_and_store_transaction` on ordinary mined transaction data retrieved from the chain.
+    let mut address_request_stmt = conn.prepare_cached(
+        "SELECT ssq.address, IFNULL(t.target_height, t.mined_height + 1)
+         FROM transparent_spend_search_queue ssq
+         JOIN transactions t ON t.id_tx = ssq.transaction_id
+         WHERE t.target_height IS NOT NULL
+         OR t.mined_height IS NOT NULL",
+    )?;
+
+    let result = address_request_stmt
+        .query_and_then([], |row| {
+            let address = TransparentAddress::decode(params, &row.get::<_, String>(0)?)?;
+            let block_range_start = BlockHeight::from(row.get::<_, u32>(1)?);
+            Ok::<TransactionDataRequest, SqliteClientError>(
+                TransactionDataRequest::SpendsFromAddress {
+                    address,
+                    block_range_start,
+                    block_range_end: Some(block_range_start + DEFAULT_TX_EXPIRY_DELTA),
+                },
+            )
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(result)
 }
 
 pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
@@ -681,6 +731,33 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     let utxo_id = stmt_upsert_transparent_output
         .query_row(sql_args, |row| row.get::<_, i64>(0).map(UtxoId))?;
     Ok(utxo_id)
+}
+
+pub(crate) fn queue_transparent_spend_detection<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+    receiving_address: TransparentAddress,
+    tx_ref: TxRef,
+    output_index: u32,
+) -> Result<(), SqliteClientError> {
+    // Add an entry to the transaction retrieval queue if we don't already have raw transaction
+    // data.
+    let mut stmt = conn.prepare_cached(
+        "INSERT INTO transparent_spend_search_queue
+         (address, transaction_id, output_index)
+         VALUES
+         (:address, :transaction_id, :output_index)
+         ON CONFLICT (transaction_id, output_index) DO NOTHING",
+    )?;
+
+    let addr_str = receiving_address.encode(params);
+    stmt.execute(named_params! {
+        ":address": addr_str,
+        ":transaction_id": tx_ref.0,
+        ":output_index": output_index
+    })?;
+
+    Ok(())
 }
 
 #[cfg(test)]

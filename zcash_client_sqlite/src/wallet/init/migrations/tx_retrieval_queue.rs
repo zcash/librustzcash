@@ -40,7 +40,15 @@ impl RusqliteMigration for Migration {
                 FOREIGN KEY (dependent_transaction_id) REFERENCES transactions(id_tx)
             );
 
-            ALTER TABLE transactions ADD COLUMN target_height INTEGER;",
+            ALTER TABLE transactions ADD COLUMN target_height INTEGER;
+
+            CREATE TABLE transparent_spend_search_queue (
+                address TEXT NOT NULL,
+                transaction_id INTEGER NOT NULL,
+                output_index INTEGER NOT NULL,
+                FOREIGN KEY (transaction_id) REFERENCES transactions(id_tx),
+                CONSTRAINT value_received_height UNIQUE (transaction_id, output_index)
+            );",
         )?;
 
         // Add estimated target height information for each transaction we know to
@@ -59,7 +67,8 @@ impl RusqliteMigration for Migration {
 
     fn down(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
         transaction.execute_batch(
-            "ALTER TABLE transactions DROP COLUMN target_height;
+            "DROP TABLE transparent_spend_search_queue;
+             ALTER TABLE transactions DROP COLUMN target_height;
              DROP TABLE tx_retrieval_queue;",
         )?;
 

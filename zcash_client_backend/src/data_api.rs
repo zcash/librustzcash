@@ -568,6 +568,28 @@ pub enum TransactionDataRequest {
     ///
     /// [`GetTransaction`]: crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient::get_transaction
     Enhancement(TxId),
+    /// Information about transactions that receive or spend funds belonging to the specified
+    /// transparent address is requested.
+    ///
+    /// Fully transparent transactions, and transactions that do not contain either shielded inputs
+    /// or shielded outputs belonging to the wallet, may not be discovered by the process of chain
+    /// scanning; as a consequence, the wallet must actively query to find transactions that spend
+    /// such funds. Ideally we'd be able to query by [`OutPoint`] but this is not currently
+    /// functionality that is supported by the light wallet server.
+    ///
+    /// The caller evaluating this request on behalf of the wallet backend should respond to this
+    /// request by detecting transactions involving the specified address within the provided block
+    /// range; if using `lightwalletd` for access to chain data, this may be performed using the
+    /// [`GetTaddressTxids`] RPC method. It should then call [`wallet::decrypt_and_store_transaction`]
+    /// for each transaction so detected.
+    ///
+    /// [`GetTaddressTxids`]: crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient::get_taddress_txids
+    #[cfg(feature = "transparent-inputs")]
+    SpendsFromAddress {
+        address: TransparentAddress,
+        block_range_start: BlockHeight,
+        block_range_end: Option<BlockHeight>,
+    },
 }
 
 /// Metadata about the status of a transaction obtained by inspecting the chain state.
