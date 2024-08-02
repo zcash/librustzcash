@@ -154,7 +154,7 @@ message GetAddressUtxosReplyList {
 }
 
 service CompactTxStreamer {
-    // Return the height of the tip of the best chain
+    // Return the BlockID of the block at the tip of the best chain
     rpc GetLatestBlock(ChainSpec) returns (BlockID) {}
     // Return the compact block corresponding to the given block identifier
     rpc GetBlock(BlockID) returns (CompactBlock) {}
