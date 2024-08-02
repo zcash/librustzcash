@@ -350,7 +350,7 @@ pub mod compact_tx_streamer_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
-        /// Return the height of the tip of the best chain
+        /// Return the BlockID of the block at the tip of the best chain
         pub async fn get_latest_block(
             &mut self,
             request: impl tonic::IntoRequest<super::ChainSpec>,
