@@ -1,6 +1,7 @@
 use tonic::transport::{Channel, ClientTlsConfig};
-use zcash_client_backend::proto::service::{
-    compact_tx_streamer_client::CompactTxStreamerClient, TxFilter,
+use zcash_client_backend::proto::{
+    compact_formats::CompactBlock,
+    service::{compact_tx_streamer_client::CompactTxStreamerClient, BlockId, TxFilter},
 };
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::consensus::{BlockHeight, BranchId, Network};
@@ -56,6 +57,18 @@ impl Lightwalletd {
             inner: connect(&TESTNET).await?,
             parameters: Network::TestNetwork,
         })
+    }
+
+    pub(crate) async fn lookup_block_hash(&mut self, candidate: [u8; 32]) -> Option<CompactBlock> {
+        let request = BlockId {
+            hash: candidate.into(),
+            ..Default::default()
+        };
+        self.inner
+            .get_block(request)
+            .await
+            .ok()
+            .map(|b| b.into_inner())
     }
 
     pub(crate) async fn lookup_txid(
