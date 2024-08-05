@@ -93,6 +93,9 @@ test-dependencies = [
 
 #! ### Experimental features
 
+## Exposes unstable APIs that are compatible with FROST key management
+unstable-frost = ["orchard"]
+
 ## Exposes unstable APIs. Their behaviour may change at any time.
 unstable = ["dep:byteorder"]
 
