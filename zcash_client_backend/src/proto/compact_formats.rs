@@ -13,9 +13,9 @@ pub struct ChainMetadata {
 /// A compact representation of the shielded data in a Zcash block.
 ///
 /// CompactBlock is a packaging of ONLY the data from a block that's needed to:
-///    1. Detect a payment to your shielded Sapling address
-///    2. Detect a spend of your shielded Sapling notes
-///    3. Update your witnesses to generate new Sapling spend proofs.
+///    1. Detect a payment to your Shielded address
+///    2. Detect a spend of your Shielded notes
+///    3. Update your witnesses to generate new spend proofs.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CompactBlock {
