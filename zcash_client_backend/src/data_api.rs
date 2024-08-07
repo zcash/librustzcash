@@ -549,8 +549,8 @@ pub enum TransactionDataRequest {
     ///
     /// The caller evaluating this request on behalf of the wallet backend should respond to this
     /// request by determining the status of the specified transaction with respect to the main
-    /// chain; if using `lightwalletd` for access to chain data, this may be performed interpreting
-    /// the results of the [`GetTransaction`] RPC method. It should then call
+    /// chain; if using `lightwalletd` for access to chain data, this may be obtained by
+    /// interpreting the results of the [`GetTransaction`] RPC method. It should then call
     /// [`WalletWrite::set_transaction_status`] to provide the resulting transaction status
     /// information to the wallet backend.
     ///

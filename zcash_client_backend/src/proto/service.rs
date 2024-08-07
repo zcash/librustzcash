@@ -40,8 +40,7 @@ pub struct TxFilter {
 /// by GetMempoolStream(), the latest block height.
 ///
 /// FIXME: the documentation here about mempool status contradicts the documentation
-/// for the `height` field (which I hope is correct, and this doesn't give the latest
-/// block height for mempool transactions.)
+/// for the `height` field. See <https://github.com/zcash/librustzcash/issues/1484>
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RawTransaction {

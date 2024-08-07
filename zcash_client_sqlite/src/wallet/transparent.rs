@@ -500,7 +500,7 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
     // because under ordinary circumstances, it is populated via a call from
     // `decrypt_and_store_transaction` on ordinary mined transaction data retrieved from the chain.
     let mut address_request_stmt = conn.prepare_cached(
-        "SELECT ssq.address, IFNULL(t.target_height, t.mined_height + 1)
+        "SELECT ssq.address, IFNULL(t.target_height, t.mined_height)
          FROM transparent_spend_search_queue ssq
          JOIN transactions t ON t.id_tx = ssq.transaction_id
          WHERE t.target_height IS NOT NULL

@@ -1975,7 +1975,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
     }
 
     // Add the transaction to the set to be queried for transaction status. This is only necessary
-    // at present for fully-transparent transactions, because any transaction with a shielded
+    // at present for fully transparent transactions, because any transaction with a shielded
     // component will be detected via ordinary chain scanning and/or nullifier checking.
     if !detectable_via_scanning {
         queue_tx_retrieval(

@@ -593,9 +593,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     }
 
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {
-        let iter = std::iter::empty();
+        let iter = wallet::transaction_data_requests(self.conn.borrow())?.into_iter();
 
-        let iter = iter.chain(wallet::transaction_data_requests(self.conn.borrow())?.into_iter());
         #[cfg(feature = "transparent-inputs")]
         let iter = iter.chain(
             wallet::transparent::transaction_data_requests(self.conn.borrow(), &self.params)?
@@ -1211,6 +1210,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
             #[cfg(feature = "transparent-inputs")]
             let detectable_via_scanning = {
+                #[allow(unused_mut)]
                 let mut detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
                 #[cfg(feature = "orchard")] {
                     detectable_via_scanning |= d_tx.tx().orchard_bundle().is_some();
@@ -1450,7 +1450,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             // in transaction pairs sending to a ZIP 320 address) it becomes
                             // possible that the spend of these outputs is not then later detected
                             // if the transaction that spends them is purely transparent. This is
-                            // particularly a problem in wallet recovery.
+                            // especially a problem in wallet recovery.
                             wallet::transparent::queue_transparent_spend_detection(
                                 wdb.conn.0,
                                 &wdb.params,
