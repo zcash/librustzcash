@@ -494,11 +494,9 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
 ) -> Result<Vec<TransactionDataRequest>, SqliteClientError> {
-    // We cannot construct transaction data requests for the case where we cannot determine the
-    // height at which to begin, so we require that either the target height or mined height be
-    // set. In practice, we should not encounter entries in `transparent_spend_search_queue`
-    // because under ordinary circumstances, it is populated via a call from
-    // `decrypt_and_store_transaction` on ordinary mined transaction data retrieved from the chain.
+    // We cannot construct address-based transaction data requests for the case where we cannot
+    // determine the height at which to begin, so we require that either the target height or mined
+    // height be set. 
     let mut address_request_stmt = conn.prepare_cached(
         "SELECT ssq.address, IFNULL(t.target_height, t.mined_height)
          FROM transparent_spend_search_queue ssq
@@ -515,7 +513,7 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
                 TransactionDataRequest::SpendsFromAddress {
                     address,
                     block_range_start,
-                    block_range_end: Some(block_range_start + DEFAULT_TX_EXPIRY_DELTA),
+                    block_range_end: Some(block_range_start + DEFAULT_TX_EXPIRY_DELTA + 1),
                 },
             )
         })?
