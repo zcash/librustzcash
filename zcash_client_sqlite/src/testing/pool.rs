@@ -440,9 +440,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         // Verify that a status request has been generated for the second transaction of
         // the ZIP 320 pair.
         let tx_data_requests = st.wallet().transaction_data_requests().unwrap();
-        assert!(tx_data_requests
-            .iter()
-            .any(|r| r == &TransactionDataRequest::GetStatus(*txids.last())));
+        assert!(tx_data_requests.contains(&TransactionDataRequest::GetStatus(*txids.last())));
 
         assert!(expected_step0_change < expected_ephemeral);
         assert_eq!(confirmed_sent.len(), 2);
@@ -611,9 +609,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     // Verify that storing the fully transparent transaction causes a transaction
     // status request to be generated.
     let tx_data_requests = st.wallet().transaction_data_requests().unwrap();
-    assert!(tx_data_requests
-        .iter()
-        .any(|r| r == &TransactionDataRequest::GetStatus(txid)));
+    assert!(tx_data_requests.contains(&TransactionDataRequest::GetStatus(txid)));
 
     // We call get_wallet_transparent_output with `allow_unspendable = true` to verify
     // storage because the decrypted transaction has not yet been mined.
