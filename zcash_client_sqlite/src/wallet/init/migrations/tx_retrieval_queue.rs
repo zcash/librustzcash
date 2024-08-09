@@ -1,4 +1,4 @@
-//! A migration to add the `tx_retrieval_queue` table to the database.
+//! Adds tables for tracking transactions to be downloaded for transparent output and/or memo retrieval.
 
 use rusqlite::{named_params, Transaction};
 use schemer_rusqlite::RusqliteMigration;
@@ -24,7 +24,7 @@ impl schemer::Migration for Migration {
     }
 
     fn description(&self) -> &'static str {
-        "Adds a table for tracking transactions to be downloaded for transparent output and/or memo retrieval."
+        "Adds tables for tracking transactions to be downloaded for transparent output and/or memo retrieval."
     }
 }
 

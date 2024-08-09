@@ -86,6 +86,8 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   - `DecryptedTransaction::new` takes an additional `mined_height` argument.
   - `SentTransaction` now stores its `outputs` and `utxos_spent` fields as
     references to slices, with a corresponding change to `SentTransaction::new`.
+  - `SentTransaction` takes an additional `target_height` argument, which is used
+    to record the target height used in transaction generation.
 - `zcash_client_backend::data_api::fees`
   - When the "transparent-inputs" feature is enabled, `ChangeValue` can also
     represent an ephemeral transparent output in a proposal. Accordingly, the

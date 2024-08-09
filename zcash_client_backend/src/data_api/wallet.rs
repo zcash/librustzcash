@@ -668,6 +668,7 @@ where
         transactions.push(SentTransaction::new(
             tx,
             created,
+            proposal.min_target_height(),
             account_id,
             &step_result.outputs,
             step_result.fee_amount,

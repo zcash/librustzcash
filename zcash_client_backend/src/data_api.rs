@@ -1395,6 +1395,7 @@ impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
 pub struct SentTransaction<'a, AccountId> {
     tx: &'a Transaction,
     created: time::OffsetDateTime,
+    target_height: BlockHeight,
     account: AccountId,
     outputs: &'a [SentTransactionOutput<AccountId>],
     fee_amount: NonNegativeAmount,
@@ -1407,6 +1408,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
     pub fn new(
         tx: &'a Transaction,
         created: time::OffsetDateTime,
+        target_height: BlockHeight,
         account: AccountId,
         outputs: &'a [SentTransactionOutput<AccountId>],
         fee_amount: NonNegativeAmount,
@@ -1415,6 +1417,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
         Self {
             tx,
             created,
+            target_height,
             account,
             outputs,
             fee_amount,
@@ -1447,6 +1450,11 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
     #[cfg(feature = "transparent-inputs")]
     pub fn utxos_spent(&self) -> &[OutPoint] {
         self.utxos_spent
+    }
+
+    /// Returns the block height that this transaction was created to target.
+    pub fn target_height(&self) -> BlockHeight {
+        self.target_height
     }
 }
 

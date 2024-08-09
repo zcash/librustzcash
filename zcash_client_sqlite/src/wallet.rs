@@ -1857,7 +1857,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
         sent_tx.tx(),
         Some(sent_tx.fee_amount()),
         Some(sent_tx.created()),
-        chain_tip_height(wdb.conn.0)?.map(|h| h + 1),
+        Some(sent_tx.target_height()),
     )?;
 
     let mut detectable_via_scanning = false;
