@@ -306,9 +306,9 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     use rand_core::OsRng;
     use zcash_client_backend::{
-        data_api::TransactionDataRequest,
+        data_api::{TransactionDataRequest, TransactionStatus},
         fees::ChangeValue,
-        wallet::{TransparentAddressMetadata, WalletTx},
+        wallet::TransparentAddressMetadata,
     };
     use zcash_primitives::{
         legacy::keys::{NonHardenedChildIndex, TransparentKeyScope},
@@ -440,9 +440,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         // Verify that a status request has been generated for the second transaction of
         // the ZIP 320 pair.
         let tx_data_requests = st.wallet().transaction_data_requests().unwrap();
-        assert!(tx_data_requests
-            .iter()
-            .any(|r| r == &TransactionDataRequest::GetStatus(*txids.last())));
+        assert!(tx_data_requests.contains(&TransactionDataRequest::GetStatus(*txids.last())));
 
         assert!(expected_step0_change < expected_ephemeral);
         assert_eq!(confirmed_sent.len(), 2);
@@ -611,9 +609,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     // Verify that storing the fully transparent transaction causes a transaction
     // status request to be generated.
     let tx_data_requests = st.wallet().transaction_data_requests().unwrap();
-    assert!(tx_data_requests
-        .iter()
-        .any(|r| r == &TransactionDataRequest::GetStatus(txid)));
+    assert!(tx_data_requests.contains(&TransactionDataRequest::GetStatus(txid)));
 
     // We call get_wallet_transparent_output with `allow_unspendable = true` to verify
     // storage because the decrypted transaction has not yet been mined.
@@ -687,40 +683,25 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     let (h, _) = st.generate_next_block_from_tx(tx_index, tx);
     st.scan_cached_blocks(h, 1);
 
-    // The rest of this test would currently fail without the explicit call to
-    // `put_tx_meta` below. Ideally the above `scan_cached_blocks` would be
-    // sufficient, but it does not detect the transaction as interesting to the
+    // The above `scan_cached_blocks` does not detect `tx` as interesting to the
     // wallet. If a transaction is in the database with a null `mined_height`,
     // as in this case, its `mined_height` will remain null unless `put_tx_meta`
-    // is called on it. Normally `put_tx_meta` would be called via `put_blocks`
-    // as a result of scanning, but that won't happen for any fully transparent
-    // transaction, and currently it also will not happen for a partially shielded
-    // transaction unless it is interesting to the wallet for another reason.
-    // Therefore we will not currently detect either collisions with uses of
-    // ephemeral outputs by other wallets, or refunds of funds sent to TEX
-    // addresses. (#1354, #1379)
+    // is called on it. This happens either via `put_blocks` as a result of
+    // scanning, or via `set_transaction_status` in response to processing the
+    // `transaction_data_requests` queue. For a fully transparent transaction,
+    // the latter is required.
 
-    // Check that what we say in the above paragraph remains true, so that we
-    // don't accidentally fix it without updating this test.
+    // The reservation should fail because `tx` is not yet seen as mined.
     reservation_should_fail(&mut st, 1, 22);
 
-    // For now, we demonstrate that this problem is the only obstacle to the rest
-    // of the ZIP 320 code doing the right thing, by manually calling `put_tx_meta`:
-    crate::wallet::put_tx_meta(
-        &st.wallet_mut().conn,
-        &WalletTx::new(
-            tx.txid(),
-            tx_index,
-            vec![],
-            vec![],
-            #[cfg(feature = "orchard")]
-            vec![],
-            #[cfg(feature = "orchard")]
-            vec![],
-        ),
-        h,
-    )
-    .unwrap();
+    // Simulate the wallet processing the `transaction_data_requests` queue.
+    let tx_data_requests = st.wallet().transaction_data_requests().unwrap();
+    assert!(tx_data_requests.contains(&TransactionDataRequest::GetStatus(tx.txid())));
+
+    // Respond to the GetStatus request.
+    st.wallet_mut()
+        .set_transaction_status(tx.txid(), TransactionStatus::Mined(h))
+        .unwrap();
 
     // We already reserved 22 addresses, so mining the transaction with the
     // ephemeral output at index 10 should allow 9 more (..31).

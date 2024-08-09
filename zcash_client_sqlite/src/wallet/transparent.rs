@@ -496,7 +496,7 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
 ) -> Result<Vec<TransactionDataRequest>, SqliteClientError> {
     // We cannot construct address-based transaction data requests for the case where we cannot
     // determine the height at which to begin, so we require that either the target height or mined
-    // height be set. 
+    // height be set.
     let mut address_request_stmt = conn.prepare_cached(
         "SELECT ssq.address, IFNULL(t.target_height, t.mined_height)
          FROM transparent_spend_search_queue ssq

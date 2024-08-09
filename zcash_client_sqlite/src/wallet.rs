@@ -1994,12 +1994,13 @@ pub(crate) fn set_transaction_status(
     txid: TxId,
     status: TransactionStatus,
 ) -> Result<(), SqliteClientError> {
-    // In order to have made a Status request, we must already have had the
-    // raw transaction (the only callers of `queue_tx_retrieval` are in contexts
-    // where we must have already called `put_tx_data`). Therefore, it is safe
-    // to unconditionally delete the request from `tx_retrieval_queue` below
-    // (both in the expired case and the case where it has been mined), because
-    // we already have all the data we need about this transaction.
+    // In order to have made a Status request, we must already have had the raw
+    // transaction (the only callers of `queue_tx_retrieval` with query type
+    // GetStatus are in contexts where we must have already called `put_tx_data`).
+    // Therefore, it is safe to unconditionally delete the request from
+    // `tx_retrieval_queue` below (both in the expired case and the case where
+    // it has been mined), because we already have all the data we need about
+    // this transaction.
 
     match status {
         TransactionStatus::TxidNotRecognized | TransactionStatus::NotInMainChain => {
