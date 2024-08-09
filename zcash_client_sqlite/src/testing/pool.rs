@@ -306,6 +306,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     use rand_core::OsRng;
     use zcash_client_backend::{
+        data_api::TransactionDataRequest,
         fees::ChangeValue,
         wallet::{TransparentAddressMetadata, WalletTx},
     };
@@ -435,6 +436,13 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
                     .unwrap()
             })
             .collect();
+
+        // Verify that a status request has been generated for the second transaction of
+        // the ZIP 320 pair.
+        let tx_data_requests = st.wallet().transaction_data_requests().unwrap();
+        assert!(tx_data_requests
+            .iter()
+            .any(|r| r == &TransactionDataRequest::GetStatus(*txids.last())));
 
         assert!(expected_step0_change < expected_ephemeral);
         assert_eq!(confirmed_sent.len(), 2);
@@ -572,6 +580,13 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         script_pubkey: default_addr.script(),
         value,
     };
+    // Add the fake input to our UTXO set so that we can ensure we recognize the outpoint.
+    st.wallet_mut()
+        .put_received_transparent_utxo(
+            &WalletTransparentOutput::from_parts(outpoint.clone(), txout.clone(), None).unwrap(),
+        )
+        .unwrap();
+
     assert_matches!(builder.add_transparent_input(sk, outpoint, txout), Ok(_));
     let test_prover = test_prover();
     let build_result = builder
@@ -583,14 +598,22 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         )
         .unwrap();
     let txid = build_result.transaction().txid();
-    let decrypted_tx = DecryptedTransaction::<AccountId>::new(
-        None,
-        build_result.transaction(),
-        vec![],
-        #[cfg(feature = "orchard")]
-        vec![],
-    );
-    st.wallet_mut().store_decrypted_tx(decrypted_tx).unwrap();
+    st.wallet_mut()
+        .store_decrypted_tx(DecryptedTransaction::<AccountId>::new(
+            None,
+            build_result.transaction(),
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+        ))
+        .unwrap();
+
+    // Verify that storing the fully transparent transaction causes a transaction
+    // status request to be generated.
+    let tx_data_requests = st.wallet().transaction_data_requests().unwrap();
+    assert!(tx_data_requests
+        .iter()
+        .any(|r| r == &TransactionDataRequest::GetStatus(txid)));
 
     // We call get_wallet_transparent_output with `allow_unspendable = true` to verify
     // storage because the decrypted transaction has not yet been mined.
