@@ -1989,14 +1989,22 @@ pub(crate) fn set_transaction_status(
     txid: TxId,
     status: TransactionStatus,
 ) -> Result<(), SqliteClientError> {
-    // In order to have made a Status request, we must already have had the raw
-    // transaction (the only callers of `queue_tx_retrieval` with query type
-    // GetStatus are in contexts where we must have already called `put_tx_data`).
-    // Therefore, it is safe to unconditionally delete the request from
-    // `tx_retrieval_queue` below (both in the expired case and the case where
-    // it has been mined), because we already have all the data we need about
-    // this transaction.
-
+    // It is safe to unconditionally delete the request from `tx_retrieval_queue` below (both in
+    // the expired case and the case where it has been mined), because we already have all the data
+    // we need about this transaction:
+    // * if the status is being set in response to a `GetStatus` request, we know that we already
+    //   have the transaction data (`GetStatus` requests are only generated if we already have that
+    //   data)
+    // * if it is being set in response to an `Enhancement` request, we know that the status must
+    //   be `TxidNotRecognized` because otherwise the transaction data should have been provided to
+    //   the backend directly instead of calling `set_transaction_status`
+    //
+    // In general `Enhancement` requests are only generated in response to situations where a
+    // transaction has already been mined - either the transaction was detected by scanning the
+    // chain of `CompactBlock` values, or was discovered by walking backward from the inputs of a
+    // transparent transaction; in the case that a transaction was read from the mempool, complete
+    // transaction data will have been available and the only question that we are concerned with
+    // is whether that transaction ends up being mined or expires.
     match status {
         TransactionStatus::TxidNotRecognized | TransactionStatus::NotInMainChain => {
             // If the transaction is now expired, remove it from the retrieval queue.
