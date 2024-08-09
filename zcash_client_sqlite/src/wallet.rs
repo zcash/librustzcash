@@ -68,7 +68,7 @@ use incrementalmerkletree::{Marking, Retention};
 use rusqlite::{self, named_params, params, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-use zcash_client_backend::data_api::{TransactionDataRequest, TransactionStatus};
+use zcash_client_backend::data_api::{AccountPurpose, TransactionDataRequest, TransactionStatus};
 use zip32::fingerprint::SeedFingerprint;
 
 use std::collections::{HashMap, HashSet};
@@ -146,6 +146,7 @@ fn parse_account_source(
     account_kind: u32,
     hd_seed_fingerprint: Option<[u8; 32]>,
     hd_account_index: Option<u32>,
+    spending_key_available: bool,
 ) -> Result<AccountSource, SqliteClientError> {
     match (account_kind, hd_seed_fingerprint, hd_account_index) {
         (0, Some(seed_fp), Some(account_index)) => Ok(AccountSource::Derived {
@@ -156,7 +157,13 @@ fn parse_account_source(
                 )
             })?,
         }),
-        (1, None, None) => Ok(AccountSource::Imported),
+        (1, None, None) => Ok(AccountSource::Imported {
+            purpose: if spending_key_available {
+                AccountPurpose::Spending
+            } else {
+                AccountPurpose::ViewOnly
+            },
+        }),
         (0, None, None) | (1, Some(_), Some(_)) => Err(SqliteClientError::CorruptedData(
             "Wallet DB account_kind constraint violated".to_string(),
         )),
@@ -169,7 +176,7 @@ fn parse_account_source(
 fn account_kind_code(value: AccountSource) -> u32 {
     match value {
         AccountSource::Derived { .. } => 0,
-        AccountSource::Imported => 1,
+        AccountSource::Imported { .. } => 1,
     }
 }
 
@@ -349,14 +356,13 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     kind: AccountSource,
     viewing_key: ViewingKey,
     birthday: &AccountBirthday,
-    spending_key_available: bool,
 ) -> Result<Account, SqliteClientError> {
-    let (hd_seed_fingerprint, hd_account_index) = match kind {
+    let (hd_seed_fingerprint, hd_account_index, spending_key_available) = match kind {
         AccountSource::Derived {
             seed_fingerprint,
             account_index,
-        } => (Some(seed_fingerprint), Some(account_index)),
-        AccountSource::Imported => (None, None),
+        } => (Some(seed_fingerprint), Some(account_index), true),
+        AccountSource::Imported { purpose } => (None, None, purpose == AccountPurpose::Spending),
     };
 
     let orchard_item = viewing_key
@@ -676,7 +682,7 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     let transparent_item: Option<Vec<u8>> = None;
 
     let mut stmt = conn.prepare(
-        "SELECT id, account_kind, hd_seed_fingerprint, hd_account_index, ufvk
+        "SELECT id, account_kind, hd_seed_fingerprint, hd_account_index, ufvk, has_spend_key
         FROM accounts
         WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
            OR sapling_fvk_item_cache = :sapling_fvk_item_cache
@@ -691,12 +697,17 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
                 ":p2pkh_fvk_item_cache": transparent_item,
             ],
             |row| {
-                let account_id = row.get::<_, u32>(0).map(AccountId)?;
-                let kind = parse_account_source(row.get(1)?, row.get(2)?, row.get(3)?)?;
+                let account_id = row.get::<_, u32>("id").map(AccountId)?;
+                let kind = parse_account_source(
+                    row.get("account_kind")?,
+                    row.get("hd_seed_fingerprint")?,
+                    row.get("hd_account_index")?,
+                    row.get("has_spend_key")?,
+                )?;
 
                 // We looked up the account by FVK components, so the UFVK column must be
                 // non-null.
-                let ufvk_str: String = row.get(4)?;
+                let ufvk_str: String = row.get("ufvk")?;
                 let viewing_key = ViewingKey::Full(Box::new(
                     UnifiedFullViewingKey::decode(params, &ufvk_str).map_err(|e| {
                         SqliteClientError::CorruptedData(format!(
@@ -1501,7 +1512,7 @@ pub(crate) fn get_account<P: Parameters>(
 ) -> Result<Option<Account>, SqliteClientError> {
     let mut sql = conn.prepare_cached(
         r#"
-        SELECT account_kind, hd_seed_fingerprint, hd_account_index, ufvk, uivk
+        SELECT account_kind, hd_seed_fingerprint, hd_account_index, ufvk, uivk, has_spend_key
         FROM accounts
         WHERE id = :account_id
         "#,
@@ -1515,6 +1526,7 @@ pub(crate) fn get_account<P: Parameters>(
                 row.get("account_kind")?,
                 row.get("hd_seed_fingerprint")?,
                 row.get("hd_account_index")?,
+                row.get("has_spend_key")?,
             )?;
 
             let ufvk_str: Option<String> = row.get("ufvk")?;

@@ -321,6 +321,17 @@ impl AccountBalance {
     }
 }
 
+/// An enumeration used to control what information is tracked by the wallet for
+/// notes received by a given account.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AccountPurpose {
+    /// For spending accounts, the wallet will track information needed to spend
+    /// received notes.
+    Spending,
+    /// For view-only accounts, the wallet will not track spend information.
+    ViewOnly,
+}
+
 /// The kinds of accounts supported by `zcash_client_backend`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AccountSource {
@@ -331,7 +342,7 @@ pub enum AccountSource {
     },
 
     /// An account imported from a viewing key.
-    Imported,
+    Imported { purpose: AccountPurpose },
 }
 
 /// A set of capabilities that a client account must provide.
@@ -342,6 +353,14 @@ pub trait Account<AccountId: Copy> {
     /// Returns whether this account is derived or imported, and the derivation parameters
     /// if applicable.
     fn source(&self) -> AccountSource;
+
+    /// Returns whether the account is a spending account or a view-only account.
+    fn purpose(&self) -> AccountPurpose {
+        match self.source() {
+            AccountSource::Derived { .. } => AccountPurpose::Spending,
+            AccountSource::Imported { purpose } => purpose,
+        }
+    }
 
     /// Returns the UFVK that the wallet backend has stored for the account, if any.
     ///
@@ -364,7 +383,9 @@ impl<A: Copy> Account<A> for (A, UnifiedFullViewingKey) {
     }
 
     fn source(&self) -> AccountSource {
-        AccountSource::Imported
+        AccountSource::Imported {
+            purpose: AccountPurpose::ViewOnly,
+        }
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
@@ -383,7 +404,9 @@ impl<A: Copy> Account<A> for (A, UnifiedIncomingViewingKey) {
     }
 
     fn source(&self) -> AccountSource {
-        AccountSource::Imported
+        AccountSource::Imported {
+            purpose: AccountPurpose::ViewOnly,
+        }
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
@@ -1816,7 +1839,7 @@ pub trait WalletWrite: WalletRead {
         &mut self,
         unified_key: &UnifiedFullViewingKey,
         birthday: &AccountBirthday,
-        spending_key_available: bool,
+        purpose: AccountPurpose,
     ) -> Result<Self::Account, Self::Error>;
 
     /// Generates and persists the next available diversified address, given the current
@@ -2027,10 +2050,10 @@ pub mod testing {
     use super::{
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
-        AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
-        ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes, TransactionDataRequest,
-        TransactionStatus, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
-        SAPLING_SHARD_HEIGHT,
+        AccountBirthday, AccountPurpose, BlockMetadata, DecryptedTransaction, InputSource,
+        NullifierQuery, ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes,
+        TransactionDataRequest, TransactionStatus, WalletCommitmentTrees, WalletRead,
+        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -2319,7 +2342,7 @@ pub mod testing {
             &mut self,
             _unified_key: &UnifiedFullViewingKey,
             _birthday: &AccountBirthday,
-            _spending_key_available: bool,
+            _purpose: AccountPurpose,
         ) -> Result<Self::Account, Self::Error> {
             todo!()
         }

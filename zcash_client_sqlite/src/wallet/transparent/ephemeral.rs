@@ -4,7 +4,8 @@ use std::ops::Range;
 
 use rusqlite::{named_params, OptionalExtension};
 
-use zcash_client_backend::{data_api::Account, wallet::TransparentAddressMetadata};
+use zcash_client_backend::wallet::TransparentAddressMetadata;
+use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_keys::{encoding::AddressCodec, keys::AddressGenerationError};
 use zcash_primitives::{
     legacy::{
@@ -15,11 +16,8 @@ use zcash_primitives::{
 };
 use zcash_protocol::consensus;
 
-use crate::TxRef;
 use crate::{
-    error::SqliteClientError,
-    wallet::{get_account, GAP_LIMIT},
-    AccountId, SqlTransaction, WalletDb,
+    error::SqliteClientError, wallet::GAP_LIMIT, AccountId, SqlTransaction, TxRef, WalletDb,
 };
 
 // Returns `TransparentAddressMetadata` in the ephemeral scope for the
@@ -118,12 +116,29 @@ pub(crate) fn get_ephemeral_ivk<P: consensus::Parameters>(
     params: &P,
     account_id: AccountId,
 ) -> Result<EphemeralIvk, SqliteClientError> {
-    Ok(get_account(conn, params, account_id)?
+    let ufvk = conn
+        .query_row(
+            "SELECT ufvk FROM accounts WHERE id = :account_id",
+            named_params![":account_id": account_id.0],
+            |row| {
+                let ufvk_str: Option<String> = row.get("ufvk")?;
+                Ok(ufvk_str.map(|s| {
+                    UnifiedFullViewingKey::decode(params, &s[..])
+                        .map_err(SqliteClientError::BadAccountData)
+                }))
+            },
+        )
+        .optional()?
         .ok_or(SqliteClientError::AccountUnknown)?
-        .ufvk()
+        .transpose()?;
+
+    let eivk = ufvk
+        .as_ref()
         .and_then(|ufvk| ufvk.transparent())
         .ok_or(SqliteClientError::UnknownZip32Derivation)?
-        .derive_ephemeral_ivk()?)
+        .derive_ephemeral_ivk()?;
+
+    Ok(eivk)
 }
 
 /// Returns a vector of ephemeral transparent addresses associated with the given
