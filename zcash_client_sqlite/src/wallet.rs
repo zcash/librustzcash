@@ -68,6 +68,7 @@ use incrementalmerkletree::{Marking, Retention};
 use rusqlite::{self, named_params, params, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
+use zcash_client_backend::data_api::{TransactionDataRequest, TransactionStatus};
 use zip32::fingerprint::SeedFingerprint;
 
 use std::collections::{HashMap, HashSet};
@@ -114,6 +115,7 @@ use crate::{
     AccountId, SqlTransaction, TransferType, WalletCommitmentTrees, WalletDb, DEFAULT_UA_REQUEST,
     PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
 };
+use crate::{TxRef, VERIFY_LOOKAHEAD};
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::transaction::components::TxOut;
@@ -1759,7 +1761,7 @@ pub(crate) fn get_tx_height(
 ) -> Result<Option<BlockHeight>, rusqlite::Error> {
     conn.query_row(
         "SELECT block FROM transactions WHERE txid = ?",
-        [txid.as_ref().to_vec()],
+        [txid.as_ref()],
         |row| Ok(row.get::<_, Option<u32>>(0)?.map(BlockHeight::from)),
     )
     .optional()
@@ -1855,7 +1857,10 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
         sent_tx.tx(),
         Some(sent_tx.fee_amount()),
         Some(sent_tx.created()),
+        Some(sent_tx.target_height()),
     )?;
+
+    let mut detectable_via_scanning = false;
 
     // Mark notes as spent.
     //
@@ -1866,14 +1871,18 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
     // Assumes that create_spend_to_address() will never be called in parallel, which is a
     // reasonable assumption for a light client such as a mobile phone.
     if let Some(bundle) = sent_tx.tx().sapling_bundle() {
+        detectable_via_scanning = true;
         for spend in bundle.shielded_spends() {
             sapling::mark_sapling_note_spent(wdb.conn.0, tx_ref, spend.nullifier())?;
         }
     }
     if let Some(_bundle) = sent_tx.tx().orchard_bundle() {
         #[cfg(feature = "orchard")]
-        for action in _bundle.actions() {
-            orchard::mark_orchard_note_spent(wdb.conn.0, tx_ref, action.nullifier())?;
+        {
+            detectable_via_scanning = true;
+            for action in _bundle.actions() {
+                orchard::mark_orchard_note_spent(wdb.conn.0, tx_ref, action.nullifier())?;
+            }
         }
 
         #[cfg(not(feature = "orchard"))]
@@ -1953,6 +1962,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                     None,
                     ephemeral_address,
                     *receiving_account,
+                    true,
                 )?;
                 transparent::ephemeral::mark_ephemeral_address_as_used(
                     wdb,
@@ -1961,6 +1971,81 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                 )?;
             }
             _ => {}
+        }
+    }
+
+    // Add the transaction to the set to be queried for transaction status. This is only necessary
+    // at present for fully transparent transactions, because any transaction with a shielded
+    // component will be detected via ordinary chain scanning and/or nullifier checking.
+    if !detectable_via_scanning {
+        queue_tx_retrieval(wdb.conn.0, std::iter::once(sent_tx.tx().txid()), None)?;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn set_transaction_status(
+    conn: &rusqlite::Transaction,
+    txid: TxId,
+    status: TransactionStatus,
+) -> Result<(), SqliteClientError> {
+    // It is safe to unconditionally delete the request from `tx_retrieval_queue` below (both in
+    // the expired case and the case where it has been mined), because we already have all the data
+    // we need about this transaction:
+    // * if the status is being set in response to a `GetStatus` request, we know that we already
+    //   have the transaction data (`GetStatus` requests are only generated if we already have that
+    //   data)
+    // * if it is being set in response to an `Enhancement` request, we know that the status must
+    //   be `TxidNotRecognized` because otherwise the transaction data should have been provided to
+    //   the backend directly instead of calling `set_transaction_status`
+    //
+    // In general `Enhancement` requests are only generated in response to situations where a
+    // transaction has already been mined - either the transaction was detected by scanning the
+    // chain of `CompactBlock` values, or was discovered by walking backward from the inputs of a
+    // transparent transaction; in the case that a transaction was read from the mempool, complete
+    // transaction data will have been available and the only question that we are concerned with
+    // is whether that transaction ends up being mined or expires.
+    match status {
+        TransactionStatus::TxidNotRecognized | TransactionStatus::NotInMainChain => {
+            // If the transaction is now expired, remove it from the retrieval queue.
+            if let Some(chain_tip) = chain_tip_height(conn)? {
+                conn.execute(
+                    "DELETE FROM tx_retrieval_queue WHERE txid IN (
+                        SELECT txid FROM transactions
+                        WHERE txid = :txid AND expiry_height < :chain_tip_minus_lookahead
+                    )",
+                    named_params![
+                        ":txid": txid.as_ref(),
+                        ":chain_tip_minus_lookahead": u32::from(chain_tip).saturating_sub(VERIFY_LOOKAHEAD)
+                    ],
+                )?;
+            }
+        }
+        TransactionStatus::Mined(height) => {
+            // The transaction has been mined, so we can set its mined height, associate it with
+            // the appropriate block, and remove it from the retrieval queue.
+            let sql_args = named_params![
+                ":txid": txid.as_ref(),
+                ":height": u32::from(height)
+            ];
+
+            conn.execute(
+                "UPDATE transactions
+                 SET mined_height = :height
+                 WHERE txid = :txid",
+                sql_args,
+            )?;
+
+            conn.execute(
+                "UPDATE transactions
+                 SET block = blocks.height
+                 FROM blocks
+                 WHERE txid = :txid
+                 AND blocks.height = :height",
+                sql_args,
+            )?;
+
+            notify_tx_retrieved(conn, txid)?;
         }
     }
 
@@ -2199,7 +2284,7 @@ pub(crate) fn put_tx_meta(
     conn: &rusqlite::Connection,
     tx: &WalletTx<AccountId>,
     height: BlockHeight,
-) -> Result<i64, SqliteClientError> {
+) -> Result<TxRef, SqliteClientError> {
     // It isn't there, so insert our transaction into the database.
     let mut stmt_upsert_tx_meta = conn.prepare_cached(
         "INSERT INTO transactions (txid, block, mined_height, tx_index)
@@ -2219,7 +2304,7 @@ pub(crate) fn put_tx_meta(
     ];
 
     stmt_upsert_tx_meta
-        .query_row(tx_params, |row| row.get::<_, i64>(0))
+        .query_row(tx_params, |row| row.get::<_, i64>(0).map(TxRef))
         .map_err(SqliteClientError::from)
 }
 
@@ -2271,10 +2356,11 @@ pub(crate) fn put_tx_data(
     tx: &Transaction,
     fee: Option<NonNegativeAmount>,
     created_at: Option<time::OffsetDateTime>,
-) -> Result<i64, SqliteClientError> {
+    target_height: Option<BlockHeight>,
+) -> Result<TxRef, SqliteClientError> {
     let mut stmt_upsert_tx_data = conn.prepare_cached(
-        "INSERT INTO transactions (txid, created, expiry_height, raw, fee)
-        VALUES (:txid, :created_at, :expiry_height, :raw, :fee)
+        "INSERT INTO transactions (txid, created, expiry_height, raw, fee, target_height)
+        VALUES (:txid, :created_at, :expiry_height, :raw, :fee, :target_height)
         ON CONFLICT (txid) DO UPDATE
         SET expiry_height = :expiry_height,
             raw = :raw,
@@ -2292,11 +2378,112 @@ pub(crate) fn put_tx_data(
         ":expiry_height": u32::from(tx.expiry_height()),
         ":raw": raw_tx,
         ":fee": fee.map(u64::from),
+        ":target_height": target_height.map(u32::from),
     ];
 
     stmt_upsert_tx_data
-        .query_row(tx_params, |row| row.get::<_, i64>(0))
+        .query_row(tx_params, |row| row.get::<_, i64>(0).map(TxRef))
         .map_err(SqliteClientError::from)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TxQueryType {
+    Status,
+    Enhancement,
+}
+
+impl TxQueryType {
+    pub(crate) fn code(&self) -> i64 {
+        match self {
+            TxQueryType::Status => 0,
+            TxQueryType::Enhancement => 1,
+        }
+    }
+
+    pub(crate) fn from_code(code: i64) -> Option<Self> {
+        match code {
+            0 => Some(TxQueryType::Status),
+            1 => Some(TxQueryType::Enhancement),
+            _ => None,
+        }
+    }
+}
+
+pub(crate) fn queue_tx_retrieval(
+    conn: &rusqlite::Transaction<'_>,
+    txids: impl Iterator<Item = TxId>,
+    dependent_tx_ref: Option<TxRef>,
+) -> Result<(), SqliteClientError> {
+    // Add an entry to the transaction retrieval queue if it would not be redundant.
+    let mut stmt_insert_tx = conn.prepare_cached(
+        "INSERT INTO tx_retrieval_queue (txid, query_type, dependent_transaction_id)
+            SELECT
+            :txid,
+            IIF(
+                EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL),
+                :status_type,
+                :enhancement_type
+            ),
+            :dependent_transaction_id
+        ON CONFLICT (txid) DO UPDATE
+        SET query_type =
+            IIF(
+                EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL),
+                :status_type,
+                :enhancement_type
+            ),
+            dependent_transaction_id = IFNULL(:dependent_transaction_id, dependent_transaction_id)",
+    )?;
+
+    for txid in txids {
+        stmt_insert_tx.execute(named_params! {
+            ":txid": txid.as_ref(),
+            ":status_type": TxQueryType::Status.code(),
+            ":enhancement_type": TxQueryType::Enhancement.code(),
+            ":dependent_transaction_id": dependent_tx_ref.map(|r| r.0),
+        })?;
+    }
+
+    Ok(())
+}
+
+/// Returns the vector of [`TransactionDataRequest`]s that represents the information needed by the
+/// wallet backend in order to be able to present a complete view of wallet history and memo data.
+pub(crate) fn transaction_data_requests(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<TransactionDataRequest>, SqliteClientError> {
+    let mut tx_retrieval_stmt =
+        conn.prepare_cached("SELECT txid, query_type FROM tx_retrieval_queue")?;
+
+    let result = tx_retrieval_stmt
+        .query_and_then([], |row| {
+            let txid = row.get(0).map(TxId::from_bytes)?;
+            let query_type = row.get(1).map(TxQueryType::from_code)?.ok_or_else(|| {
+                SqliteClientError::CorruptedData(
+                    "Unrecognized transaction data request type.".to_owned(),
+                )
+            })?;
+
+            Ok::<TransactionDataRequest, SqliteClientError>(match query_type {
+                TxQueryType::Status => TransactionDataRequest::GetStatus(txid),
+                TxQueryType::Enhancement => TransactionDataRequest::Enhancement(txid),
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(result)
+}
+
+pub(crate) fn notify_tx_retrieved(
+    conn: &rusqlite::Transaction<'_>,
+    txid: TxId,
+) -> Result<(), SqliteClientError> {
+    conn.execute(
+        "DELETE FROM tx_retrieval_queue WHERE txid = :txid",
+        named_params![":txid": &txid.as_ref()[..]],
+    )?;
+
+    Ok(())
 }
 
 // A utility function for creation of parameters for use in `insert_sent_output`
@@ -2332,7 +2519,7 @@ fn recipient_params<P: consensus::Parameters>(
 pub(crate) fn insert_sent_output<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    tx_ref: i64,
+    tx_ref: TxRef,
     from_account: AccountId,
     output: &SentTransactionOutput<AccountId>,
 ) -> Result<(), SqliteClientError> {
@@ -2347,7 +2534,7 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
 
     let (to_address, to_account_id, pool_type) = recipient_params(params, output.recipient());
     let sql_args = named_params![
-        ":tx": &tx_ref,
+        ":tx": tx_ref.0,
         ":output_pool": &pool_code(pool_type),
         ":output_index": &i64::try_from(output.output_index()).unwrap(),
         ":from_account_id": from_account.0,
@@ -2378,7 +2565,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     from_account: AccountId,
-    tx_ref: i64,
+    tx_ref: TxRef,
     output_index: usize,
     recipient: &Recipient<AccountId, Note, OutPoint>,
     value: NonNegativeAmount,
@@ -2401,7 +2588,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
 
     let (to_address, to_account_id, pool_type) = recipient_params(params, recipient);
     let sql_args = named_params![
-        ":tx": &tx_ref,
+        ":tx": tx_ref.0,
         ":output_pool": &pool_code(pool_type),
         ":output_index": &i64::try_from(output_index).unwrap(),
         ":from_account_id": from_account.0,
@@ -2515,7 +2702,7 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
     conn: &rusqlite::Transaction<'_>,
     spend_pool: ShieldedProtocol,
     nf: &N,
-) -> Result<Option<i64>, SqliteClientError> {
+) -> Result<Option<TxRef>, SqliteClientError> {
     let mut stmt_select_locator = conn.prepare_cached(
         "SELECT block_height, tx_index, txid
         FROM nullifier_map

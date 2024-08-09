@@ -28,6 +28,8 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   - `chain::BlockCache` trait, behind the `sync` feature flag.
   - `WalletRead::get_spendable_transparent_outputs`
   - `DecryptedTransaction::mined_height`
+  - `TransactionDataRequest`
+  - `TransactionStatus`
 - `zcash_client_backend::fees`:
   - `EphemeralBalance`
   - `ChangeValue::shielded, is_ephemeral`
@@ -61,12 +63,14 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
   have changed as a consequence of this extraction; please see the `zip321`
   CHANGELOG for details.
 - `zcash_client_backend::data_api`:
+  - `WalletRead` has a new `transaction_data_requests` method.
   - `WalletRead` has new `get_known_ephemeral_addresses`,
     `find_account_for_ephemeral_address`, and `get_transparent_address_metadata`
     methods when the "transparent-inputs" feature is enabled.
   - `WalletWrite` has a new `reserve_next_n_ephemeral_addresses` method when
     the "transparent-inputs" feature is enabled.
-  - `WalletWrite` has new methods `import_account_hd` and `import_account_ufvk`.
+  - `WalletWrite` has new methods `import_account_hd`, `import_account_ufvk`,
+    and `set_transaction_status`.
   - `error::Error` has new `Address` and (when the "transparent-inputs" feature
     is enabled) `PaysEphemeralTransparentAddress` variants.
   - The `WalletWrite::store_sent_tx` method has been renamed to
@@ -75,9 +79,15 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
     `zcash_client_sqlite`) to improve transactionality of writes for multi-step
     proposals.
   - `wallet::input_selection::InputSelectorError` has a new `Address` variant.
+  - `wallet::decrypt_and_store_transaction` now takes an additional optional
+    `mined_height` argument that can be used to provide the mined height
+    returned by the light wallet server in a `RawTransaction` value directly to
+    the back end.
   - `DecryptedTransaction::new` takes an additional `mined_height` argument.
   - `SentTransaction` now stores its `outputs` and `utxos_spent` fields as
     references to slices, with a corresponding change to `SentTransaction::new`.
+  - `SentTransaction` takes an additional `target_height` argument, which is used
+    to record the target height used in transaction generation.
 - `zcash_client_backend::data_api::fees`
   - When the "transparent-inputs" feature is enabled, `ChangeValue` can also
     represent an ephemeral transparent output in a proposal. Accordingly, the
