@@ -55,7 +55,7 @@ use super::components::sapling::zip212_enforcement;
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
-const DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
+pub const DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
 
 /// Errors that can occur during fee calculation.
 #[derive(Debug)]

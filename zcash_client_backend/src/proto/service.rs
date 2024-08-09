@@ -38,6 +38,9 @@ pub struct TxFilter {
 /// RawTransaction contains the complete transaction data. It also optionally includes
 /// the block height in which the transaction was included, or, when returned
 /// by GetMempoolStream(), the latest block height.
+///
+/// FIXME: the documentation here about mempool status contradicts the documentation
+/// for the `height` field. See <https://github.com/zcash/librustzcash/issues/1484>
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RawTransaction {

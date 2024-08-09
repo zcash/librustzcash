@@ -307,6 +307,7 @@ mod tests {
             builder::{BuildConfig, BuildResult, Builder},
             components::{amount::NonNegativeAmount, transparent},
             fees::fixed,
+            Transaction,
         },
         zip32::{self, Scope},
     };
@@ -322,7 +323,7 @@ mod tests {
             memo_repr, parse_scope,
             sapling::ReceivedSaplingOutput,
         },
-        AccountId, WalletDb,
+        AccountId, TxRef, WalletDb,
     };
 
     // These must be different.
@@ -471,6 +472,41 @@ mod tests {
         Ok(())
     }
 
+    /// This reproduces [`crate::wallet::put_tx_data`] as it was at the time
+    /// of the creation of this migration.
+    fn put_tx_data(
+        conn: &rusqlite::Connection,
+        tx: &Transaction,
+        fee: Option<NonNegativeAmount>,
+        created_at: Option<time::OffsetDateTime>,
+    ) -> Result<TxRef, SqliteClientError> {
+        let mut stmt_upsert_tx_data = conn.prepare_cached(
+            "INSERT INTO transactions (txid, created, expiry_height, raw, fee)
+            VALUES (:txid, :created_at, :expiry_height, :raw, :fee)
+            ON CONFLICT (txid) DO UPDATE
+            SET expiry_height = :expiry_height,
+                raw = :raw,
+                fee = IFNULL(:fee, fee)
+            RETURNING id_tx",
+        )?;
+
+        let txid = tx.txid();
+        let mut raw_tx = vec![];
+        tx.write(&mut raw_tx)?;
+
+        let tx_params = named_params![
+            ":txid": &txid.as_ref()[..],
+            ":created_at": created_at,
+            ":expiry_height": u32::from(tx.expiry_height()),
+            ":raw": raw_tx,
+            ":fee": fee.map(u64::from),
+        ];
+
+        stmt_upsert_tx_data
+            .query_row(tx_params, |row| row.get::<_, i64>(0).map(TxRef))
+            .map_err(SqliteClientError::from)
+    }
+
     #[test]
     fn receiving_key_scopes_migration_enhanced() {
         let params = Network::TestNetwork;
@@ -504,7 +540,7 @@ mod tests {
 
         db_data
             .transactionally::<_, _, rusqlite::Error>(|wdb| {
-                let tx_ref = crate::wallet::put_tx_data(wdb.conn.0, d_tx.tx(), None, None).unwrap();
+                let tx_ref = put_tx_data(wdb.conn.0, d_tx.tx(), None, None).unwrap();
 
                 let mut spending_account_id: Option<AccountId> = None;
 
@@ -516,7 +552,7 @@ mod tests {
                             // Don't need to bother with sent outputs for this test.
                             if output.transfer_type() != TransferType::Outgoing {
                                 put_received_note_before_migration(
-                                    wdb.conn.0, output, tx_ref, None,
+                                    wdb.conn.0, output, tx_ref.0, None,
                                 )
                                 .unwrap();
                             }
@@ -529,7 +565,7 @@ mod tests {
                                 }
                             }
 
-                            put_received_note_before_migration(wdb.conn.0, output, tx_ref, None)
+                            put_received_note_before_migration(wdb.conn.0, output, tx_ref.0, None)
                                 .unwrap();
                         }
                     }

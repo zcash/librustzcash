@@ -92,6 +92,7 @@ pub fn decrypt_and_store_transaction<ParamsT, DbT>(
     params: &ParamsT,
     data: &mut DbT,
     tx: &Transaction,
+    mined_height: Option<BlockHeight>,
 ) -> Result<(), DbT::Error>
 where
     ParamsT: consensus::Parameters,
@@ -102,11 +103,13 @@ where
 
     // Height is block height for mined transactions, and the "mempool height" (chain height + 1)
     // for mempool transactions.
-    let height = data
-        .get_tx_height(tx.txid())?
-        .or(data.chain_height()?.map(|max_height| max_height + 1))
-        .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
-        .expect("Sapling activation height must be known.");
+    let height = mined_height.map(Ok).unwrap_or_else(|| {
+        Ok(data
+            .get_tx_height(tx.txid())?
+            .or(data.chain_height()?.map(|max_height| max_height + 1))
+            .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
+            .expect("Sapling activation height must be known."))
+    })?;
 
     data.store_decrypted_tx(decrypt_transaction(params, height, tx, &ufvks))?;
 

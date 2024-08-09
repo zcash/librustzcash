@@ -174,6 +174,11 @@ CREATE TABLE blocks (
 ///   foreign key constraint on `block` prevents that column from being populated prior to complete
 ///   scanning of the block. This is constrained to be equal to the `block` column if `block` is
 ///   non-null.
+/// - `target_height`: stores the target height for which the transaction was constructed, if
+///   known. This will ordinarily be null for transactions discovered via chain scanning; it
+///   will only be set for transactions created using this wallet specifically, and not any
+///   other wallet that uses the same seed (including previous installations of the same
+///   wallet application.)
 pub(super) const TABLE_TRANSACTIONS: &str = r#"
 CREATE TABLE "transactions" (
     id_tx INTEGER PRIMARY KEY,
@@ -185,6 +190,7 @@ CREATE TABLE "transactions" (
     expiry_height INTEGER,
     raw BLOB,
     fee INTEGER,
+    target_height INTEGER,
     FOREIGN KEY (block) REFERENCES blocks(height),
     CONSTRAINT height_consistency CHECK (block IS NULL OR mined_height = block)
 )"#;
@@ -389,6 +395,42 @@ pub(super) const INDEX_SENT_NOTES_FROM_ACCOUNT: &str =
 pub(super) const INDEX_SENT_NOTES_TO_ACCOUNT: &str =
     r#"CREATE INDEX sent_notes_to_account ON "sent_notes" (to_account_id)"#;
 pub(super) const INDEX_SENT_NOTES_TX: &str = r#"CREATE INDEX sent_notes_tx ON "sent_notes" (tx)"#;
+
+/// Stores the set of transaction ids for which the backend required additional data.
+///
+/// ### Columns:
+/// - `txid`: The transaction identifier for the transaction to retrieve state information for.
+/// - `query_type`:
+///     - `0` for raw transaction (enhancement) data,
+///     - `1` for transaction mined-ness information.
+/// - `dependent_transaction_id`: If the transaction data request is searching for information
+///   about transparent inputs to a transaction, this is a reference to that transaction record.
+///   NULL for transactions where the request for enhancement data is based on discovery due
+///   to blockchain scanning.
+pub(super) const TABLE_TX_RETRIEVAL_QUEUE: &str = r#"
+CREATE TABLE tx_retrieval_queue (
+    txid BLOB NOT NULL UNIQUE,
+    query_type INTEGER NOT NULL,
+    dependent_transaction_id INTEGER,
+    FOREIGN KEY (dependent_transaction_id) REFERENCES transactions(id_tx)
+)"#;
+
+/// Stores the set of transaction outputs received by the wallet for which spend information
+/// (if any) should be retrieved.
+///
+/// This table is populated in the process of wallet recovery when a deshielding transaction
+/// with transparent outputs belonging to the wallet (e.g., the deshielding half of a ZIP 320
+/// transaction pair) is discovered. It is expected that such a transparent output will be
+/// spent soon after it is received in a purely transparent transaction, which the wallet
+/// currently has no means of detecting otherwise.
+pub(super) const TABLE_TRANSPARENT_SPEND_SEARCH_QUEUE: &str = r#"
+CREATE TABLE transparent_spend_search_queue (
+    address TEXT NOT NULL,
+    transaction_id INTEGER NOT NULL,
+    output_index INTEGER NOT NULL,
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id_tx),
+    CONSTRAINT value_received_height UNIQUE (transaction_id, output_index)
+)"#;
 
 //
 // State for shard trees

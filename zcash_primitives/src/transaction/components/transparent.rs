@@ -142,9 +142,14 @@ impl OutPoint {
         self.n
     }
 
-    /// Returns the txid of the transaction containing this `OutPoint`.
+    /// Returns the byte representation of the txid of the transaction containing this `OutPoint`.
     pub fn hash(&self) -> &[u8; 32] {
         self.hash.as_ref()
+    }
+
+    /// Returns the txid of the transaction containing this `OutPoint`.
+    pub fn txid(&self) -> &TxId {
+        &self.hash
     }
 }
 
