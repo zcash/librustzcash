@@ -733,6 +733,14 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     Ok(utxo_id)
 }
 
+/// Adds a request to retrieve transactions involving the specified address to the transparent
+/// spend search queue. Note that such requests are _not_ for data related to `tx_ref`, but instead
+/// a request to find where the UTXO with the outpoint `(tx_ref, output_index)` is spent.
+///
+/// ### Parameters
+/// - `receiving_address`: The address that received the UTXO.
+/// - `tx_ref`: The transaction in which the UTXO was received.
+/// - `output_index`: The index of the output within `vout` of the specified transaction.
 pub(crate) fn queue_transparent_spend_detection<P: consensus::Parameters>(
     conn: &rusqlite::Transaction<'_>,
     params: &P,
@@ -740,8 +748,6 @@ pub(crate) fn queue_transparent_spend_detection<P: consensus::Parameters>(
     tx_ref: TxRef,
     output_index: u32,
 ) -> Result<(), SqliteClientError> {
-    // Add an entry to the transaction retrieval queue if we don't already have raw transaction
-    // data.
     let mut stmt = conn.prepare_cached(
         "INSERT INTO transparent_spend_search_queue
          (address, transaction_id, output_index)

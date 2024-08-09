@@ -1209,15 +1209,12 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             let mut tx_has_wallet_outputs = false;
 
             #[cfg(feature = "transparent-inputs")]
-            let detectable_via_scanning = {
-                #[allow(unused_mut)]
-                let mut detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
-                #[cfg(feature = "orchard")] {
-                    detectable_via_scanning |= d_tx.tx().orchard_bundle().is_some();
-                }
+            let detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
+            #[cfg(all(feature = "transparent-inputs", feature = "orchard"))]
+            let detectable_via_scanning = detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
 
-                detectable_via_scanning
-            };
+            #[cfg(feature = "transparent-inputs")]
+            let mut queue_status_retrieval = false;
 
             for output in d_tx.sapling_outputs() {
                 #[cfg(feature = "transparent-inputs")]
@@ -1503,12 +1500,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             // components, add it to the queue for status retrieval.
                             #[cfg(feature = "transparent-inputs")]
                             if d_tx.mined_height().is_none() && !detectable_via_scanning {
-                                wallet::queue_tx_retrieval(
-                                    wdb.conn.0,
-                                    std::iter::once(d_tx.tx().txid()),
-                                    TxQueryType::Status,
-                                    None
-                                )?;
+                                queue_status_retrieval = true;
                             }
                         }
                     }
@@ -1533,6 +1525,16 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             }
 
             notify_tx_retrieved(wdb.conn.0, d_tx.tx().txid())?;
+
+            #[cfg(feature = "transparent-inputs")]
+            if queue_status_retrieval {
+                wallet::queue_tx_retrieval(
+                    wdb.conn.0,
+                    std::iter::once(d_tx.tx().txid()),
+                    TxQueryType::Status,
+                    None
+                )?;
+            }
 
             Ok(())
         })

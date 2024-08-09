@@ -2404,15 +2404,14 @@ pub(crate) fn queue_tx_retrieval(
     query_type: TxQueryType,
     dependent_tx_ref: Option<TxRef>,
 ) -> Result<(), SqliteClientError> {
-    // Add an entry to the transaction retrieval queue if we don't already have raw transaction data.
+    // Add an entry to the transaction retrieval queue if it would not be redundant.
     let mut stmt_insert_tx = conn.prepare_cached(
         "INSERT INTO tx_retrieval_queue (txid, query_type, dependent_transaction_id)
         SELECT :txid, :query_type, :dependent_transaction_id
         -- do not queue enhancement requests if we already have the raw transaction
-        WHERE NOT EXISTS (
+        WHERE :query_type <> :enhancement_type OR NOT EXISTS (
             SELECT 1 FROM transactions
             WHERE txid = :txid
-            AND :query_type = :enhancement_type
             AND raw IS NOT NULL
         )
         -- if there is already a status request, we can upgrade it to an enhancement request
@@ -2461,7 +2460,7 @@ pub(crate) fn transaction_data_requests(
 }
 
 pub(crate) fn notify_tx_retrieved(
-    conn: &rusqlite::Connection,
+    conn: &rusqlite::Transaction<'_>,
     txid: TxId,
 ) -> Result<(), SqliteClientError> {
     conn.execute(
