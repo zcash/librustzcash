@@ -1405,6 +1405,16 @@ pub struct SentTransaction<'a, AccountId> {
 
 impl<'a, AccountId> SentTransaction<'a, AccountId> {
     /// Constructs a new [`SentTransaction`] from its constituent parts.
+    ///
+    /// ### Parameters
+    /// - `tx`: the raw transaction data
+    /// - `created`: the system time at which the transaction was created
+    /// - `target_height`: the target height that was used in the construction of the transaction
+    /// - `account`: the account that spent funds in creation of the transaction
+    /// - `outputs`: the outputs created by the transaction, including those sent to external
+    ///   recipients which may not otherwise be recoverable
+    /// - `fee_amount`: the fee value paid by the transaction
+    /// - `utxos_spent`: the UTXOs controlled by the wallet that were spent in this transaction
     pub fn new(
         tx: &'a Transaction,
         created: time::OffsetDateTime,

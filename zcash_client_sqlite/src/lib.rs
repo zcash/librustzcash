@@ -119,7 +119,7 @@ pub mod error;
 pub mod wallet;
 use wallet::{
     commitment_tree::{self, put_shard_roots},
-    notify_tx_retrieved, SubtreeScanProgress, TxQueryType,
+    notify_tx_retrieved, SubtreeScanProgress,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -800,12 +800,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                 for tx in block.transactions() {
                     let tx_row = wallet::put_tx_meta(wdb.conn.0, tx, block.height())?;
-                    wallet::queue_tx_retrieval(
-                        wdb.conn.0,
-                        std::iter::once(tx.txid()),
-                        TxQueryType::Enhancement,
-                        None,
-                    )?;
+                    wallet::queue_tx_retrieval(wdb.conn.0, std::iter::once(tx.txid()), None)?;
 
                     // Mark notes as spent and remove them from the scanning cache
                     for spend in tx.sapling_spends() {
@@ -1518,7 +1513,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     wallet::queue_tx_retrieval(
                         wdb.conn.0,
                         b.vin.iter().map(|txin| *txin.prevout.txid()),
-                        TxQueryType::Enhancement,
                         Some(tx_ref)
                     )?;
                 }
@@ -1531,7 +1525,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 wallet::queue_tx_retrieval(
                     wdb.conn.0,
                     std::iter::once(d_tx.tx().txid()),
-                    TxQueryType::Status,
                     None
                 )?;
             }

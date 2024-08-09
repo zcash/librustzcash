@@ -1978,12 +1978,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
     // at present for fully transparent transactions, because any transaction with a shielded
     // component will be detected via ordinary chain scanning and/or nullifier checking.
     if !detectable_via_scanning {
-        queue_tx_retrieval(
-            wdb.conn.0,
-            std::iter::once(sent_tx.tx().txid()),
-            TxQueryType::Status,
-            None,
-        )?;
+        queue_tx_retrieval(wdb.conn.0, std::iter::once(sent_tx.tx().txid()), None)?;
     }
 
     Ok(())
@@ -2409,31 +2404,35 @@ impl TxQueryType {
 pub(crate) fn queue_tx_retrieval(
     conn: &rusqlite::Transaction<'_>,
     txids: impl Iterator<Item = TxId>,
-    query_type: TxQueryType,
     dependent_tx_ref: Option<TxRef>,
 ) -> Result<(), SqliteClientError> {
     // Add an entry to the transaction retrieval queue if it would not be redundant.
     let mut stmt_insert_tx = conn.prepare_cached(
         "INSERT INTO tx_retrieval_queue (txid, query_type, dependent_transaction_id)
-        SELECT :txid, :query_type, :dependent_transaction_id
-        -- do not queue enhancement requests if we already have the raw transaction
-        WHERE :query_type <> :enhancement_type OR NOT EXISTS (
-            SELECT 1 FROM transactions
-            WHERE txid = :txid
-            AND raw IS NOT NULL
-        )
-        -- if there is already a status request, we can upgrade it to an enhancement request
+            SELECT
+            :txid,
+            IIF(
+                EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL),
+                :status_type,
+                :enhancement_type
+            ),
+            :dependent_transaction_id
         ON CONFLICT (txid) DO UPDATE
-        SET query_type = MAX(:query_type, query_type),
+        SET query_type =
+            IIF(
+                EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL),
+                :status_type,
+                :enhancement_type
+            ),
             dependent_transaction_id = IFNULL(:dependent_transaction_id, dependent_transaction_id)",
     )?;
 
     for txid in txids {
         stmt_insert_tx.execute(named_params! {
             ":txid": txid.as_ref(),
-            ":query_type": query_type.code(),
-            ":dependent_transaction_id": dependent_tx_ref.map(|r| r.0),
+            ":status_type": TxQueryType::Status.code(),
             ":enhancement_type": TxQueryType::Enhancement.code(),
+            ":dependent_transaction_id": dependent_tx_ref.map(|r| r.0),
         })?;
     }
 
