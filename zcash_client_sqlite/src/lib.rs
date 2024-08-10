@@ -2022,15 +2022,19 @@ extern crate assert_matches;
 
 #[cfg(test)]
 mod tests {
-    use secrecy::{Secret, SecretVec};
+    use secrecy::{ExposeSecret, Secret, SecretVec};
     use zcash_client_backend::data_api::{
         chain::ChainState, Account, AccountBirthday, AccountPurpose, AccountSource, WalletRead,
         WalletWrite,
     };
-    use zcash_keys::keys::UnifiedSpendingKey;
+    use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
     use zcash_primitives::block::BlockHash;
 
-    use crate::{error::SqliteClientError, testing::TestBuilder, AccountId, DEFAULT_UA_REQUEST};
+    use crate::{
+        error::SqliteClientError,
+        testing::{TestBuilder, TestState},
+        AccountId, DEFAULT_UA_REQUEST,
+    };
 
     #[cfg(feature = "unstable")]
     use {
@@ -2135,8 +2139,55 @@ mod tests {
             AccountSource::Derived { seed_fingerprint: _, account_index } if account_index == zip32_index_2);
     }
 
+    fn check_collisions<C>(
+        st: &mut TestState<C>,
+        ufvk: &UnifiedFullViewingKey,
+        birthday: &AccountBirthday,
+        existing_id: AccountId,
+    ) {
+        assert_matches!(
+            st.wallet_mut().import_account_ufvk(ufvk, birthday, AccountPurpose::Spending),
+            Err(SqliteClientError::AccountCollision(id)) if id == existing_id);
+
+        // Remove the transparent component so that we don't have a match on the full UFVK.
+        // That should still produce an AccountCollision error.
+        #[cfg(feature = "transparent-inputs")]
+        {
+            assert!(ufvk.transparent().is_some());
+            let subset_ufvk = UnifiedFullViewingKey::new(
+                None,
+                ufvk.sapling().cloned(),
+                #[cfg(feature = "orchard")]
+                ufvk.orchard().cloned(),
+                #[cfg(not(feature = "orchard"))]
+                None, // see zcash/librustzcash#1488
+            )
+            .unwrap();
+            assert_matches!(
+                st.wallet_mut().import_account_ufvk(&subset_ufvk, birthday, AccountPurpose::Spending),
+                Err(SqliteClientError::AccountCollision(id)) if id == existing_id);
+        }
+
+        // Remove the Orchard component so that we don't have a match on the full UFVK.
+        // That should still produce an AccountCollision error.
+        #[cfg(feature = "orchard")]
+        {
+            assert!(ufvk.orchard().is_some());
+            let subset_ufvk = UnifiedFullViewingKey::new(
+                #[cfg(feature = "transparent-inputs")]
+                ufvk.transparent().cloned(),
+                ufvk.sapling().cloned(),
+                None,
+            )
+            .unwrap();
+            assert_matches!(
+                st.wallet_mut().import_account_ufvk(&subset_ufvk, birthday, AccountPurpose::Spending),
+                Err(SqliteClientError::AccountCollision(id)) if id == existing_id);
+        }
+    }
+
     #[test]
-    pub(crate) fn import_account_hd_1_twice() {
+    pub(crate) fn import_account_hd_1_then_conflicts() {
         let mut st = TestBuilder::new().build();
 
         let birthday = AccountBirthday::from_parts(
@@ -2147,18 +2198,21 @@ mod tests {
         let seed = Secret::new(vec![0u8; 32]);
         let zip32_index_1 = zip32::AccountId::ZERO.next().unwrap();
 
-        let first = st
+        let (first_account, _) = st
             .wallet_mut()
             .import_account_hd(&seed, zip32_index_1, &birthday)
             .unwrap();
+        let ufvk = first_account.ufvk().unwrap();
 
         assert_matches!(
             st.wallet_mut().import_account_hd(&seed, zip32_index_1, &birthday),
-            Err(SqliteClientError::AccountCollision(id)) if id == first.0.id());
+            Err(SqliteClientError::AccountCollision(id)) if id == first_account.id());
+
+        check_collisions(&mut st, ufvk, &birthday, first_account.id());
     }
 
     #[test]
-    pub(crate) fn import_account_ufvk() {
+    pub(crate) fn import_account_ufvk_then_conflicts() {
         let mut st = TestBuilder::new().build();
 
         let birthday = AccountBirthday::from_parts(
@@ -2166,9 +2220,11 @@ mod tests {
             None,
         );
 
-        let seed = vec![0u8; 32];
-        let usk = UnifiedSpendingKey::from_seed(&st.wallet().params, &seed, zip32::AccountId::ZERO)
-            .unwrap();
+        let seed = Secret::new(vec![0u8; 32]);
+        let zip32_index_0 = zip32::AccountId::ZERO;
+        let usk =
+            UnifiedSpendingKey::from_seed(&st.wallet().params, seed.expose_secret(), zip32_index_0)
+                .unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
 
         let account = st
@@ -2186,10 +2242,16 @@ mod tests {
                 purpose: AccountPurpose::Spending
             }
         );
+
+        assert_matches!(
+            st.wallet_mut().import_account_hd(&seed, zip32_index_0, &birthday),
+            Err(SqliteClientError::AccountCollision(id)) if id == account.id());
+
+        check_collisions(&mut st, &ufvk, &birthday, account.id());
     }
 
     #[test]
-    pub(crate) fn create_account_then_conflicting_import_account_ufvk() {
+    pub(crate) fn create_account_then_conflicts() {
         let mut st = TestBuilder::new().build();
 
         let birthday = AccountBirthday::from_parts(
@@ -2198,13 +2260,16 @@ mod tests {
         );
 
         let seed = Secret::new(vec![0u8; 32]);
+        let zip32_index_0 = zip32::AccountId::ZERO;
         let seed_based = st.wallet_mut().create_account(&seed, &birthday).unwrap();
         let seed_based_account = st.wallet().get_account(seed_based.0).unwrap().unwrap();
         let ufvk = seed_based_account.ufvk().unwrap();
 
         assert_matches!(
-            st.wallet_mut().import_account_ufvk(ufvk, &birthday, AccountPurpose::Spending),
+            st.wallet_mut().import_account_hd(&seed, zip32_index_0, &birthday),
             Err(SqliteClientError::AccountCollision(id)) if id == seed_based.0);
+
+        check_collisions(&mut st, ufvk, &birthday, seed_based.0);
     }
 
     #[cfg(feature = "transparent-inputs")]

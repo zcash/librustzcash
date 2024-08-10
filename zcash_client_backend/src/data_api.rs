@@ -1704,7 +1704,8 @@ impl AccountBirthday {
 ///   ZIP 32 account indices from the same seed, a call to [`WalletWrite::create_account`]
 ///   will use the ZIP 32 account index just after the highest-numbered existing account.
 /// - If an account is added to the wallet, and then a later call to one of the methods
-///   would produce the same UFVK, an error will be returned.  This can occur in the
+///   would produce a UFVK that collides with that account on any FVK component (i.e.
+///   Sapling, Orchard, or transparent), an error will be returned. This can occur in the
 ///   following cases:
 ///   - An account is created via [`WalletWrite::create_account`] with an auto-selected
 ///     ZIP 32 account index, and that index is later imported explicitly via either
@@ -1715,10 +1716,8 @@ impl AccountBirthday {
 ///     via [`WalletWrite::create_account`], or explicitly via a call to
 ///     [`WalletWrite::import_account_ufvk`] or [`WalletWrite::import_account_hd`].
 ///
-/// Note that accounts having UFVKs that are not identical but have shared
-/// components (for example, two accounts having the same Sapling FVK, one
-/// of which also has an Orchard FVK while the other does not) are currently
-/// allowed. This will not be allowed in future.
+/// Note that an error will be returned on an FVK collision even if the UFVKs do not
+/// match exactly, e.g. if they have different subsets of components.
 ///
 /// A future change to this trait might introduce a method to "upgrade" an imported
 /// account with derivation information. See [zcash/librustzcash#1284] for details.
