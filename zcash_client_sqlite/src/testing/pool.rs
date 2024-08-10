@@ -685,11 +685,12 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     // The above `scan_cached_blocks` does not detect `tx` as interesting to the
     // wallet. If a transaction is in the database with a null `mined_height`,
-    // as in this case, its `mined_height` will remain null unless `put_tx_meta`
-    // is called on it. This happens either via `put_blocks` as a result of
-    // scanning, or via `set_transaction_status` in response to processing the
-    // `transaction_data_requests` queue. For a fully transparent transaction,
-    // the latter is required.
+    // as in this case, its `mined_height` will remain null unless either
+    // `put_tx_meta` or `set_transaction_status` is called on it. The former
+    // is normally called internally via `put_blocks` as a result of scanning,
+    // but not for the case of a fully transparent transaction. The latter is
+    // called by the wallet implementation in response to processing the
+    // `transaction_data_requests` queue.
 
     // The reservation should fail because `tx` is not yet seen as mined.
     reservation_should_fail(&mut st, 1, 22);
