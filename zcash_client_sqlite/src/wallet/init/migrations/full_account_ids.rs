@@ -5,7 +5,10 @@ use rusqlite::{named_params, OptionalExtension, Transaction};
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
-use zcash_client_backend::{data_api::AccountSource, keys::UnifiedSpendingKey};
+use zcash_client_backend::{
+    data_api::{AccountPurpose, AccountSource},
+    keys::UnifiedSpendingKey,
+};
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::consensus;
 use zip32::fingerprint::SeedFingerprint;
@@ -53,7 +56,11 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             seed_fingerprint: SeedFingerprint::from_bytes([0; 32]),
             account_index: zip32::AccountId::ZERO,
         });
-        let account_kind_imported = account_kind_code(AccountSource::Imported);
+        let account_kind_imported = account_kind_code(AccountSource::Imported {
+            // the purpose here is irrelevant; we just use it to get the correct code
+            // for the account kind
+            purpose: AccountPurpose::ViewOnly,
+        });
         transaction.execute_batch(&format!(
             r#"
             CREATE TABLE accounts_new (

@@ -50,10 +50,10 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        Account, AccountBirthday, AccountSource, BlockMetadata, DecryptedTransaction, InputSource,
-        NullifierQuery, ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes,
-        TransactionDataRequest, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
-        SAPLING_SHARD_HEIGHT,
+        Account, AccountBirthday, AccountPurpose, AccountSource, BlockMetadata,
+        DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
+        SentTransaction, SpendableNotes, TransactionDataRequest, WalletCommitmentTrees, WalletRead,
+        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -630,7 +630,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
-            let spending_key_available = true;
             let account = wallet::add_account(
                 wdb.conn.0,
                 &wdb.params,
@@ -640,7 +639,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
                 birthday,
-                spending_key_available,
             )?;
 
             Ok((account.id(), usk))
@@ -666,7 +664,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
-            let spending_key_available = true;
             let account = wallet::add_account(
                 wdb.conn.0,
                 &wdb.params,
@@ -676,7 +673,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
                 birthday,
-                spending_key_available,
             )?;
 
             Ok((account, usk))
@@ -687,16 +683,15 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         &mut self,
         ufvk: &UnifiedFullViewingKey,
         birthday: &AccountBirthday,
-        spending_key_available: bool,
+        purpose: AccountPurpose,
     ) -> Result<Self::Account, Self::Error> {
         self.transactionally(|wdb| {
             wallet::add_account(
                 wdb.conn.0,
                 &wdb.params,
-                AccountSource::Imported,
+                AccountSource::Imported { purpose },
                 wallet::ViewingKey::Full(Box::new(ufvk.to_owned())),
                 birthday,
-                spending_key_available,
             )
         })
     }
@@ -2029,7 +2024,8 @@ extern crate assert_matches;
 mod tests {
     use secrecy::{Secret, SecretVec};
     use zcash_client_backend::data_api::{
-        chain::ChainState, Account, AccountBirthday, AccountSource, WalletRead, WalletWrite,
+        chain::ChainState, Account, AccountBirthday, AccountPurpose, AccountSource, WalletRead,
+        WalletWrite,
     };
     use zcash_keys::keys::UnifiedSpendingKey;
     use zcash_primitives::block::BlockHash;
@@ -2177,14 +2173,19 @@ mod tests {
 
         let account = st
             .wallet_mut()
-            .import_account_ufvk(&ufvk, &birthday, true)
+            .import_account_ufvk(&ufvk, &birthday, AccountPurpose::Spending)
             .unwrap();
         assert_eq!(
             ufvk.encode(&st.wallet().params),
             account.ufvk().unwrap().encode(&st.wallet().params)
         );
 
-        assert_matches!(account.source(), AccountSource::Imported);
+        assert_matches!(
+            account.source(),
+            AccountSource::Imported {
+                purpose: AccountPurpose::Spending
+            }
+        );
     }
 
     #[test]
@@ -2202,7 +2203,7 @@ mod tests {
         let ufvk = seed_based_account.ufvk().unwrap();
 
         assert_matches!(
-            st.wallet_mut().import_account_ufvk(ufvk, &birthday, true),
+            st.wallet_mut().import_account_ufvk(ufvk, &birthday, AccountPurpose::Spending),
             Err(SqliteClientError::AccountCollision(id)) if id == seed_based.0);
     }
 
