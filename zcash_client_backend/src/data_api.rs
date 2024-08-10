@@ -1704,16 +1704,21 @@ impl AccountBirthday {
 ///   ZIP 32 account indices from the same seed, a call to [`WalletWrite::create_account`]
 ///   will use the ZIP 32 account index just after the highest-numbered existing account.
 /// - If an account is added to the wallet, and then a later call to one of the methods
-///   would produce the same UFVK, an error will be returned. While any combination of
-///   method calls can cause this, there are two main ways it can occur that users of the
-///   `WalletWrite` trait should watch out for:
+///   would produce the same UFVK, an error will be returned.  This can occur in the
+///   following cases:
 ///   - An account is created via [`WalletWrite::create_account`] with an auto-selected
 ///     ZIP 32 account index, and that index is later imported explicitly via either
-///     [`WalletWrite::import_account_hd`] or [`WalletWrite::import_account_ufvk`].
-///   - An account is imported via [`WalletWrite::import_account_ufvk`], and the ZIP 32
-///     account index corresponding to that account's UFVK is later imported either
-///     implicitly via [`WalletWrite::create_account`] or explicitly via
-///     [`WalletWrite::import_account_hd`].
+///     [`WalletWrite::import_account_ufvk`] or [`WalletWrite::import_account_hd`].
+///   - An account is imported via [`WalletWrite::import_account_ufvk`] or
+///     [`WalletWrite::import_account_hd`], and then the ZIP 32 account index
+///     corresponding to that account's UFVK is later imported either implicitly
+///     via [`WalletWrite::create_account`], or explicitly via a call to
+///     [`WalletWrite::import_account_ufvk`] or [`WalletWrite::import_account_hd`].
+///
+/// Note that accounts having UFVKs that are not identical but have shared
+/// components (for example, two accounts having the same Sapling FVK, one
+/// of which also has an Orchard FVK while the other does not) are currently
+/// allowed. This will not be allowed in future.
 ///
 /// A future change to this trait might introduce a method to "upgrade" an imported
 /// account with derivation information. See [zcash/librustzcash#1284] for details.
