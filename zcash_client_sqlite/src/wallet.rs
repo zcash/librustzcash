@@ -357,6 +357,14 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     viewing_key: ViewingKey,
     birthday: &AccountBirthday,
 ) -> Result<Account, SqliteClientError> {
+    if let Some(ufvk) = viewing_key.ufvk() {
+        // Check whether any component of this UFVK collides with an existing imported or derived FVK.
+        if let Some(existing_account) = get_account_for_ufvk(conn, params, ufvk)? {
+            return Err(SqliteClientError::AccountCollision(existing_account.id()));
+        }
+    }
+    // TODO(#1490): check for IVK collisions.
+
     let (hd_seed_fingerprint, hd_account_index, spending_key_available) = match kind {
         AccountSource::Derived {
             seed_fingerprint,
@@ -427,8 +435,9 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             rusqlite::Error::SqliteFailure(f, s)
                 if f.code == rusqlite::ErrorCode::ConstraintViolation =>
             {
-                // An account conflict occurred.
-                // Make a best effort to determine the AccountId of the pre-existing row
+                // An account conflict occurred. This should already have been caught by
+                // the check using `get_account_for_ufvk` above, but in case it wasn't,
+                // make a best effort to determine the AccountId of the pre-existing row
                 // and provide that to our caller.
                 if let Ok(id) = conn.query_row(
                     "SELECT id FROM accounts WHERE ufvk = ?",

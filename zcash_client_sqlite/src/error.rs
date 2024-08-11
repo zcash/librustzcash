@@ -74,6 +74,7 @@ pub enum SqliteClientError {
     AccountUnknown,
 
     /// The account being added collides with an existing account in the wallet with the given ID.
+    /// The collision can be on the seed and ZIP-32 account index, or a shared FVK component.
     AccountCollision(AccountId),
 
     /// The account was imported, and ZIP-32 derivation information is not known for it.
