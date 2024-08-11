@@ -172,6 +172,13 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         .to_unified_incoming_viewing_key()
                         .encode(&self.params);
 
+                    #[cfg(feature = "orchard")]
+                    let orchard_item = ufvk_parsed.orchard().map(|k| k.to_bytes());
+                    #[cfg(not(feature = "orchard"))]
+                    let orchard_item: Option<Vec<u8>> = None;
+
+                    let sapling_item = ufvk_parsed.sapling().map(|k| k.to_bytes());
+
                     #[cfg(feature = "transparent-inputs")]
                     let transparent_item = ufvk_parsed.transparent().map(|k| k.serialize());
                     #[cfg(not(feature = "transparent-inputs"))]
@@ -220,8 +227,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             ":account_index": account_index,
                             ":ufvk": ufvk,
                             ":uivk": uivk,
-                            ":orchard_fvk_item_cache": ufvk_parsed.orchard().map(|k| k.to_bytes()),
-                            ":sapling_fvk_item_cache": ufvk_parsed.sapling().map(|k| k.to_bytes()),
+                            ":orchard_fvk_item_cache": orchard_item,
+                            ":sapling_fvk_item_cache": sapling_item,
                             ":p2pkh_fvk_item_cache": transparent_item,
                             ":birthday_height": birthday_height,
                             ":birthday_sapling_tree_size": birthday_sapling_tree_size,

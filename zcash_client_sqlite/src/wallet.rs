@@ -373,12 +373,17 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         AccountSource::Imported { purpose } => (None, None, purpose == AccountPurpose::Spending),
     };
 
+    #[cfg(feature = "orchard")]
     let orchard_item = viewing_key
         .ufvk()
         .and_then(|ufvk| ufvk.orchard().map(|k| k.to_bytes()));
+    #[cfg(not(feature = "orchard"))]
+    let orchard_item: Option<Vec<u8>> = None;
+
     let sapling_item = viewing_key
         .ufvk()
         .and_then(|ufvk| ufvk.sapling().map(|k| k.to_bytes()));
+
     #[cfg(feature = "transparent-inputs")]
     let transparent_item = viewing_key
         .ufvk()
@@ -685,6 +690,13 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     params: &P,
     ufvk: &UnifiedFullViewingKey,
 ) -> Result<Option<Account>, SqliteClientError> {
+    #[cfg(feature = "orchard")]
+    let orchard_item = ufvk.orchard().map(|k| k.to_bytes());
+    #[cfg(not(feature = "orchard"))]
+    let orchard_item: Option<Vec<u8>> = None;
+
+    let sapling_item = ufvk.sapling().map(|k| k.to_bytes());
+
     #[cfg(feature = "transparent-inputs")]
     let transparent_item = ufvk.transparent().map(|k| k.serialize());
     #[cfg(not(feature = "transparent-inputs"))]
@@ -701,8 +713,8 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     let accounts = stmt
         .query_and_then::<_, SqliteClientError, _, _>(
             named_params![
-                ":orchard_fvk_item_cache": ufvk.orchard().map(|k| k.to_bytes()),
-                ":sapling_fvk_item_cache": ufvk.sapling().map(|k| k.to_bytes()),
+                ":orchard_fvk_item_cache": orchard_item,
+                ":sapling_fvk_item_cache": sapling_item,
                 ":p2pkh_fvk_item_cache": transparent_item,
             ],
             |row| {

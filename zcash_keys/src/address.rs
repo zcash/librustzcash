@@ -415,21 +415,9 @@ impl Address {
                 matches!(pool_type, PoolType::Transparent)
             }
             Address::Unified(ua) => match pool_type {
-                PoolType::Transparent => ua.transparent().is_some(),
-                PoolType::Shielded(ShieldedProtocol::Sapling) => {
-                    #[cfg(feature = "sapling")]
-                    return ua.sapling().is_some();
-
-                    #[cfg(not(feature = "sapling"))]
-                    return false;
-                }
-                PoolType::Shielded(ShieldedProtocol::Orchard) => {
-                    #[cfg(feature = "orchard")]
-                    return ua.orchard().is_some();
-
-                    #[cfg(not(feature = "orchard"))]
-                    return false;
-                }
+                PoolType::Transparent => ua.has_transparent(),
+                PoolType::Shielded(ShieldedProtocol::Sapling) => ua.has_sapling(),
+                PoolType::Shielded(ShieldedProtocol::Orchard) => ua.has_orchard(),
             },
         }
     }
@@ -540,15 +528,15 @@ mod tests {
     fn ua_parsing() {
         for tv in test_vectors::UNIFIED {
             match Address::decode(&MAIN_NETWORK, tv.unified_addr) {
-                Some(Address::Unified(_ua)) => {
+                Some(Address::Unified(ua)) => {
                     assert_eq!(
-                        _ua.transparent().is_some(),
+                        ua.has_transparent(),
                         tv.p2pkh_bytes.is_some() || tv.p2sh_bytes.is_some()
                     );
                     #[cfg(feature = "sapling")]
-                    assert_eq!(_ua.sapling().is_some(), tv.sapling_raw_addr.is_some());
+                    assert_eq!(ua.has_sapling(), tv.sapling_raw_addr.is_some());
                     #[cfg(feature = "orchard")]
-                    assert_eq!(_ua.orchard().is_some(), tv.orchard_raw_addr.is_some());
+                    assert_eq!(ua.has_orchard(), tv.orchard_raw_addr.is_some());
                 }
                 Some(_) => {
                     panic!(
