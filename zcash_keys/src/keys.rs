@@ -1477,11 +1477,11 @@ mod tests {
                 Some(Address::Unified(tvua)) => {
                     // We always derive transparent and Sapling receivers, but not
                     // every value in the test vectors has these present.
-                    if tvua.transparent().is_some() {
+                    if tvua.has_transparent() {
                         assert_eq!(tvua.transparent(), ua.transparent());
                     }
                     #[cfg(feature = "sapling")]
-                    if tvua.sapling().is_some() {
+                    if tvua.has_sapling() {
                         assert_eq!(tvua.sapling(), ua.sapling());
                     }
                 }
@@ -1658,11 +1658,11 @@ mod tests {
                 Some(Address::Unified(tvua)) => {
                     // We always derive transparent and Sapling receivers, but not
                     // every value in the test vectors has these present.
-                    if tvua.transparent().is_some() {
+                    if tvua.has_transparent() {
                         assert_eq!(tvua.transparent(), ua.transparent());
                     }
                     #[cfg(feature = "sapling")]
-                    if tvua.sapling().is_some() {
+                    if tvua.has_sapling() {
                         assert_eq!(tvua.sapling(), ua.sapling());
                     }
                 }

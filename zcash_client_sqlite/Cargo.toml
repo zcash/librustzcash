@@ -29,7 +29,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 zcash_address.workspace = true
 zcash_client_backend = { workspace = true, features = ["unstable-serialization", "unstable-spanning-tree"] }
 zcash_encoding.workspace = true
-zcash_keys = { workspace = true, features = ["orchard", "sapling"] }
+zcash_keys = { workspace = true, features = ["sapling"] }
 zcash_primitives.workspace = true
 zcash_protocol.workspace = true
 zip32.workspace = true

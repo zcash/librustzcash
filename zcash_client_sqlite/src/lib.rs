@@ -2159,8 +2159,6 @@ mod tests {
                 ufvk.sapling().cloned(),
                 #[cfg(feature = "orchard")]
                 ufvk.orchard().cloned(),
-                #[cfg(not(feature = "orchard"))]
-                None, // see zcash/librustzcash#1488
             )
             .unwrap();
             assert_matches!(

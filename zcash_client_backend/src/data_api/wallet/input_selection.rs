@@ -441,13 +441,13 @@ where
                 }
                 Address::Unified(addr) => {
                     #[cfg(feature = "orchard")]
-                    if addr.orchard().is_some() {
+                    if addr.has_orchard() {
                         payment_pools.insert(*idx, PoolType::ORCHARD);
                         orchard_outputs.push(OrchardPayment(payment.amount()));
                         continue;
                     }
 
-                    if addr.sapling().is_some() {
+                    if addr.has_sapling() {
                         payment_pools.insert(*idx, PoolType::SAPLING);
                         sapling_outputs.push(SaplingPayment(payment.amount()));
                         continue;

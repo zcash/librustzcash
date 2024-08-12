@@ -133,8 +133,13 @@ mod tests {
                     .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
+            #[cfg(feature = "orchard")]
             let orchard_item = ufvk.orchard().map(|k| k.to_bytes());
+            #[cfg(not(feature = "orchard"))]
+            let orchard_item: Option<Vec<u8>> = None;
+
             let sapling_item = ufvk.sapling().map(|k| k.to_bytes());
+
             #[cfg(feature = "transparent-inputs")]
             let transparent_item = ufvk.transparent().map(|k| k.serialize());
             #[cfg(not(feature = "transparent-inputs"))]
