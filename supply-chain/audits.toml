@@ -524,6 +524,16 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-run"
 delta = "0.2.1 -> 0.2.2"
 
+[[audits.visibility]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = ["safe-to-deploy", "license-reviewed"]
+version = "0.1.1"
+notes = """
+- Crate has no unsafe code, and sets `#![forbid(unsafe_code)]`.
+- Crate has no powerful imports, and exclusively provides a proc macro
+  that safely malleates a visibility modifier.
+"""
+
 [[audits.walkdir]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-run"
@@ -572,13 +582,13 @@ delta = "1.6.0 -> 1.7.0"
 
 [[trusted.equihash]]
 criteria = "safe-to-deploy"
-user-id = 6289 # str4d
+user-id = 6289 # Jack Grigg (str4d)
 start = "2020-06-26"
 end = "2025-04-22"
 
 [[trusted.f4jumble]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
-user-id = 6289 # str4d
+user-id = 6289 # Jack Grigg (str4d)
 start = "2021-09-22"
 end = "2025-04-22"
 
@@ -602,7 +612,7 @@ end = "2025-04-22"
 
 [[trusted.incrementalmerkletree]]
 criteria = "safe-to-deploy"
-user-id = 6289 # str4d
+user-id = 6289 # Jack Grigg (str4d)
 start = "2021-12-17"
 end = "2025-04-22"
 
@@ -620,7 +630,7 @@ end = "2025-04-22"
 
 [[trusted.orchard]]
 criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
-user-id = 6289 # str4d
+user-id = 6289 # Jack Grigg (str4d)
 start = "2021-01-07"
 end = "2025-04-22"
 
@@ -630,11 +640,35 @@ user-id = 1244 # ebfull
 start = "2022-10-19"
 end = "2025-04-22"
 
+[[trusted.orchard]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2024-08-12"
+end = "2025-08-12"
+
+[[trusted.orchard]]
+criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2024-08-12"
+end = "2025-08-12"
+
 [[trusted.sapling-crypto]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
-user-id = 6289 # str4d
+user-id = 6289 # Jack Grigg (str4d)
 start = "2024-01-26"
 end = "2025-04-22"
+
+[[trusted.sapling-crypto]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2024-08-12"
+end = "2025-08-12"
+
+[[trusted.sapling-crypto]]
+criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2024-08-12"
+end = "2025-08-12"
 
 [[trusted.shardtree]]
 criteria = "safe-to-deploy"
@@ -704,7 +738,7 @@ end = "2025-04-22"
 
 [[trusted.zcash]]
 criteria = "safe-to-deploy"
-user-id = 6289 # str4d
+user-id = 6289 # Jack Grigg (str4d)
 start = "2024-07-15"
 end = "2025-07-19"
 
@@ -716,7 +750,7 @@ end = "2025-04-22"
 
 [[trusted.zcash_address]]
 criteria = "safe-to-deploy"
-user-id = 6289 # str4d
+user-id = 6289 # Jack Grigg (str4d)
 start = "2021-03-07"
 end = "2025-04-22"
 
@@ -740,7 +774,7 @@ end = "2025-04-22"
 
 [[trusted.zcash_extensions]]
 criteria = "safe-to-deploy"
-user-id = 6289 # str4d
+user-id = 6289 # Jack Grigg (str4d)
 start = "2020-04-24"
 end = "2025-04-23"
 
@@ -752,7 +786,7 @@ end = "2025-04-22"
 
 [[trusted.zcash_history]]
 criteria = "safe-to-deploy"
-user-id = 6289 # str4d
+user-id = 6289 # Jack Grigg (str4d)
 start = "2024-03-01"
 end = "2025-04-22"
 
@@ -770,7 +804,7 @@ end = "2025-04-22"
 
 [[trusted.zcash_primitives]]
 criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
-user-id = 6289 # str4d
+user-id = 6289 # Jack Grigg (str4d)
 start = "2021-03-26"
 end = "2025-04-22"
 
@@ -782,7 +816,7 @@ end = "2025-04-22"
 
 [[trusted.zcash_proofs]]
 criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
-user-id = 6289 # str4d
+user-id = 6289 # Jack Grigg (str4d)
 start = "2021-03-26"
 end = "2025-04-22"
 
@@ -794,13 +828,13 @@ end = "2025-04-22"
 
 [[trusted.zcash_spec]]
 criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
-user-id = 6289 # str4d
+user-id = 6289 # Jack Grigg (str4d)
 start = "2023-12-07"
 end = "2025-04-22"
 
 [[trusted.zip32]]
 criteria = "safe-to-deploy"
-user-id = 6289 # str4d
+user-id = 6289 # Jack Grigg (str4d)
 start = "2023-12-06"
 end = "2025-04-22"
 

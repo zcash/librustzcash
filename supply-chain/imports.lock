@@ -2,8 +2,8 @@
 # cargo-vet imports lock
 
 [[publisher.bumpalo]]
-version = "3.15.4"
-when = "2024-03-07"
+version = "3.16.0"
+when = "2024-04-08"
 user-id = 696
 user-login = "fitzgen"
 user-name = "Nick Fitzgerald"
@@ -20,12 +20,14 @@ version = "0.2.0"
 when = "2022-06-24"
 user-id = 6289
 user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.f4jumble]]
 version = "0.1.0"
 when = "2022-05-10"
 user-id = 6289
 user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.halo2_gadgets]]
 version = "0.3.0"
@@ -47,27 +49,29 @@ user-id = 1244
 user-login = "ebfull"
 
 [[publisher.incrementalmerkletree]]
-version = "0.5.1"
-when = "2024-03-25"
+version = "0.6.0"
+when = "2024-08-12"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.orchard]]
-version = "0.8.0"
-when = "2024-03-25"
-user-id = 6289
-user-login = "str4d"
+version = "0.9.0"
+when = "2024-08-12"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.sapling-crypto]]
-version = "0.1.3"
-when = "2024-03-25"
-user-id = 6289
-user-login = "str4d"
+version = "0.2.0"
+when = "2024-08-12"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.shardtree]]
-version = "0.3.1"
-when = "2024-04-03"
+version = "0.4.0"
+when = "2024-08-12"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -217,12 +221,14 @@ version = "0.1.0"
 when = "2024-07-15"
 user-id = 6289
 user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_address]]
 version = "0.3.2"
 when = "2024-03-06"
 user-id = 6289
 user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_client_backend]]
 version = "0.12.1"
@@ -249,12 +255,14 @@ version = "0.1.0"
 when = "2024-07-15"
 user-id = 6289
 user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_history]]
 version = "0.4.0"
 when = "2024-03-01"
 user-id = 6289
 user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_keys]]
 version = "0.2.0"
@@ -275,12 +283,14 @@ version = "0.15.1"
 when = "2024-05-24"
 user-id = 6289
 user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_proofs]]
 version = "0.15.0"
 when = "2024-03-25"
 user-id = 6289
 user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_protocol]]
 version = "0.1.1"
@@ -294,12 +304,14 @@ version = "0.1.0"
 when = "2023-12-07"
 user-id = 6289
 user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zip32]]
 version = "0.1.1"
 when = "2024-03-14"
 user-id = 6289
 user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zip321]]
 version = "0.0.0"
@@ -313,7 +325,7 @@ who = "Nick Fitzgerald <fitzgen@gmail.com>"
 criteria = "safe-to-deploy"
 user-id = 696 # Nick Fitzgerald (fitzgen)
 start = "2019-03-16"
-end = "2024-03-10"
+end = "2025-07-30"
 
 [[audits.bytecode-alliance.audits.adler]]
 who = "Alex Crichton <alex@alexcrichton.com>"
@@ -346,6 +358,11 @@ who = "Pat Hickey <phickey@fastly.com>"
 criteria = "safe-to-deploy"
 version = "0.21.0"
 notes = "This crate has no dependencies, no build.rs, and contains no unsafe code."
+
+[[audits.bytecode-alliance.audits.base64]]
+who = "Andrew Brown <andrew.brown@intel.com>"
+criteria = "safe-to-deploy"
+delta = "0.21.3 -> 0.22.1"
 
 [[audits.bytecode-alliance.audits.block-buffer]]
 who = "Benjamin Bouvier <public@benj.me>"
@@ -845,6 +862,22 @@ aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_p
 [[audits.google.audits.bitflags]]
 who = "Lukasz Anforowicz <lukasza@chromium.org>"
 criteria = "safe-to-deploy"
+version = "1.3.2"
+notes = """
+Security review of earlier versions of the crate can be found at
+(Google-internal, sorry): go/image-crate-chromium-security-review
+
+The crate exposes a function marked as `unsafe`, but doesn't use any
+`unsafe` blocks (except for tests of the single `unsafe` function).  I
+think this justifies marking this crate as `ub-risk-1`.
+
+Additional review comments can be found at https://crrev.com/c/4723145/31
+"""
+aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+
+[[audits.google.audits.bitflags]]
+who = "Lukasz Anforowicz <lukasza@chromium.org>"
+criteria = "safe-to-deploy"
 version = "2.4.2"
 notes = """
 Audit notes:
@@ -875,23 +908,13 @@ aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_p
 [[audits.google.audits.bytemuck]]
 who = "Lukasz Anforowicz <lukasza@chromium.org>"
 criteria = "safe-to-deploy"
-version = "1.14.3"
-notes = "Additional review notes may be found in https://crrev.com/c/5362675."
-aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
-
-[[audits.google.audits.bytemuck]]
-who = "Adrian Taylor <adetaylor@chromium.org>"
-criteria = "safe-to-deploy"
-delta = "1.14.3 -> 1.15.0"
-aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
-
-[[audits.google.audits.bytemuck]]
-who = "Lukasz Anforowicz <lukasza@chromium.org>"
-criteria = "safe-to-deploy"
-delta = "1.16.0 -> 1.16.1"
+version = "1.16.3"
 notes = """
-The delta only adds `f16` and `f128` support (with some other minor changes)
-and has no impact on the audit criteria.
+Review notes from the original audit (of 1.14.3) may be found in
+https://crrev.com/c/5362675.  Note that this audit has initially missed UB risk
+that was fixed in 1.16.2 - see https://github.com/Lokathor/bytemuck/pull/258.
+Because of this, the original audit has been edited to certify version `1.16.3`
+instead (see also https://crrev.com/c/5771867).
 """
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
@@ -964,6 +987,18 @@ criteria = "safe-to-run"
 version = "0.4.3"
 aggregated-from = "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
 
+[[audits.google.audits.crc32fast]]
+who = "Lukasz Anforowicz <lukasza@chromium.org>"
+criteria = "safe-to-deploy"
+version = "1.4.2"
+notes = """
+Security review of earlier versions of the crate can be found at
+(Google-internal, sorry): go/image-crate-chromium-security-review
+
+Audit comments for 1.4.2 can be found at https://crrev.com/c/4723145.
+"""
+aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+
 [[audits.google.audits.equivalent]]
 who = "George Burgess IV <gbiv@google.com>"
 criteria = "safe-to-deploy"
@@ -979,6 +1014,41 @@ notes = """
 that the RNG here is not cryptographically secure.
 """
 aggregated-from = "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
+
+[[audits.google.audits.flate2]]
+who = "Lukasz Anforowicz <lukasza@chromium.org>"
+criteria = "safe-to-deploy"
+version = "1.0.30"
+notes = '''
+WARNING: This certification is a result of a **partial** audit.  The
+`any_zlib` code has **not** been audited.  Ability to track partial
+audits is tracked in https://github.com/mozilla/cargo-vet/issues/380
+Chromium does use the `any_zlib` feature(s).  Accidentally depending on
+this feature in the future is prevented using the `ban_features` feature
+of `gnrt` - see:
+https://crrev.com/c/4723145/31/third_party/rust/chromium_crates_io/gnrt_config.toml
+
+Security review of earlier versions of the crate can be found at
+(Google-internal, sorry): go/image-crate-chromium-security-review
+
+I grepped for `-i cipher`, `-i crypto`, `'\bfs\b'`, `'\bnet\b'`, `'\bunsafe\b'`.
+
+All `unsafe` in `flate2` is gated behind `#[cfg(feature = "any_zlib")]`:
+
+* The code under `src/ffi/...` will not be used because the `mod c`
+  declaration in `src/ffi/mod.rs` depends on the `any_zlib` config
+* 7 uses of `unsafe` in `src/mem.rs` also all depend on the
+  `any_zlib` config:
+    - 2 in `fn set_dictionary` (under `impl Compress`)
+    - 2 in `fn set_level` (under `impl Compress`)
+    - 3 in `fn set_dictionary` (under `impl Decompress`)
+
+All hits of `'\bfs\b'` are in comments, or example code, or test code
+(but not in product code).
+
+There were no hits of `-i cipher`, `-i crypto`, `'\bnet\b'`.
+'''
+aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
 [[audits.google.audits.futures]]
 who = "George Burgess IV <gbiv@google.com>"
@@ -2498,12 +2568,6 @@ aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/suppl
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "0.5.0 -> 0.5.1"
-aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
-
-[[audits.zcash.audits.bumpalo]]
-who = "Daira-Emma Hopwood <daira@jacaranda.org>"
-criteria = "safe-to-deploy"
-delta = "3.15.4 -> 3.16.0"
 aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
 [[audits.zcash.audits.bytes]]

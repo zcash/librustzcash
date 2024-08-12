@@ -25,7 +25,8 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.70.0.
-- Bumped dependencies to `secp256k1 0.27`.
+- Bumped dependencies to `secp256k1 0.27`, `incrementalmerkletree 0.6`,
+  `orchard 0.9`, `sapling-crypto 0.2`.
 - `zcash_primitives::legacy::keys`:
   - `AccountPrivKey::{from_bytes, to_bytes}` now use the byte encoding from the
     inside of a `xprv` Base58 string encoding from BIP 32, excluding the prefix
