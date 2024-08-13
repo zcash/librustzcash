@@ -47,7 +47,7 @@ pub struct ExchangeData {
 
 impl ExchangeData {
     /// Returns the mid-point between current best bid and current best ask, to avoid
-    /// manipulation by targeted trade fulfilment.
+    /// manipulation by targeted trade fulfillment.
     fn exchange_rate(&self) -> Decimal {
         (self.bid + self.ask) / Decimal::TWO
     }

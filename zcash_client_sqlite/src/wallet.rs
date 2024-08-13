@@ -749,7 +749,7 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
 
     if accounts.len() > 1 {
         Err(SqliteClientError::CorruptedData(
-            "Mutiple account records matched the provided UFVK".to_owned(),
+            "Multiple account records matched the provided UFVK".to_owned(),
         ))
     } else {
         Ok(accounts.into_iter().next())

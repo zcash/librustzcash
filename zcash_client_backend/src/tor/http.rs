@@ -136,7 +136,7 @@ async fn make_http_request<T, F: Future<Output = Result<T, Error>>>(
     }
 }
 
-/// Errors that can occurr while using HTTP-over-Tor.
+/// Errors that can occur while using HTTP-over-Tor.
 #[derive(Debug)]
 pub enum HttpError {
     /// A non-HTTP URL was encountered.
