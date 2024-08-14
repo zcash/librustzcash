@@ -6,8 +6,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Notable changes
-- `zcash_keys` now supports TEX (transparent-source-only) addresses as specified
+- `zcash_keys`:
+  - Now supports TEX (transparent-source-only) addresses as specified
   in [ZIP 320](https://zips.z.cash/zip-0320).
+  - Has an `unstable-frost` feature for FROST implementors to use when
+  API changes are needed specifically for the FROST threshold signatures 
+  use case. 
 
 ### Added
 - `zcash_keys::address::Address::try_from_zcash_address`

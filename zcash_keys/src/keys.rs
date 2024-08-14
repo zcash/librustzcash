@@ -658,6 +658,22 @@ impl UnifiedFullViewingKey {
         )
     }
 
+    #[cfg(feature = "unstable-frost")]
+    pub fn from_orchard_fvk(
+        orchard: orchard::keys::FullViewingKey,
+    ) -> Result<UnifiedFullViewingKey, DerivationError> {
+        Self::from_checked_parts(
+            #[cfg(feature = "transparent-inputs")]
+            None,
+            #[cfg(feature = "sapling")]
+            None,
+            #[cfg(feature = "orchard")]
+            Some(orchard),
+            // We don't currently allow constructing new UFVKs with unknown items, but we store
+            // this to allow parsing such UFVKs.
+            vec![],
+        )
+    }
     /// Construct a UFVK from its constituent parts, after verifying that UIVK derivation can
     /// succeed.
     fn from_checked_parts(
