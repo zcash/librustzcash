@@ -312,7 +312,7 @@ impl BuildResult {
         &self.orchard_meta
     }
 
-    /// Consumes BuildResult and returns the transaction that was constructed by the builder.
+    /// Creates the transaction that was constructed by the builder.
     pub fn into_transaction(self) -> Transaction {
         self.transaction
     }
@@ -465,28 +465,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
 
     /// Creates IssuanceBundle and adds an Issuance action to the transaction.
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    pub fn init_issuance_bundle<FE>(
-        &mut self,
-        ik: IssuanceAuthorizingKey,
-        asset_desc: String,
-        recipient: Address,
-        value: orchard::value::NoteValue,
-    ) -> Result<(), Error<FE>> {
-        self.init_issuance_bundle_impl(ik, asset_desc, Some(IssueInfo { recipient, value }))
-    }
-
-    /// Creates IssuanceBundle and adds a finalization action to the transaction.
-    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    pub fn init_finalizing_issuance_bundle<FE>(
-        &mut self,
-        ik: IssuanceAuthorizingKey,
-        asset_desc: String,
-    ) -> Result<(), Error<FE>> {
-        self.init_issuance_bundle_impl(ik, asset_desc, None)
-    }
-
-    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    fn init_issuance_bundle_impl<FE>(
+    fn init_issuance_bundle<FE>(
         &mut self,
         ik: IssuanceAuthorizingKey,
         asset_desc: String,

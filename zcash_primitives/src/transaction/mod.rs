@@ -1041,16 +1041,16 @@ impl Transaction {
                 "Sprout components cannot be present when serializing to the V5 transaction format.",
             ));
         }
-        self.write_v5_header(&mut writer)?;
+        self.write_header(&mut writer)?;
         self.write_transparent(&mut writer)?;
-        self.write_v5_sapling(&mut writer)?;
+        self.write_sapling(&mut writer)?;
         orchard_serialization::write_v5_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
         #[cfg(zcash_unstable = "zfuture")]
         self.write_tze(&mut writer)?;
         Ok(())
     }
 
-    pub fn write_v5_header<W: Write>(&self, mut writer: W) -> io::Result<()> {
+    pub fn write_header<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.version.write(&mut writer)?;
         writer.write_u32::<LittleEndian>(u32::from(self.consensus_branch_id))?;
         writer.write_u32::<LittleEndian>(self.lock_time)?;
@@ -1066,7 +1066,7 @@ impl Transaction {
         sapling_serialization::write_v5_bundle(writer, sapling_bundle)
     }
 
-    pub fn write_v5_sapling<W: Write>(&self, writer: W) -> io::Result<()> {
+    pub fn write_sapling<W: Write>(&self, writer: W) -> io::Result<()> {
         sapling_serialization::write_v5_bundle(writer, self.sapling_bundle.as_ref())
     }
 
@@ -1078,9 +1078,9 @@ impl Transaction {
                 "Sprout components cannot be present when serializing to the V7 transaction format.",
             ));
         }
-        self.write_v5_header(&mut writer)?;
+        self.write_header(&mut writer)?;
         self.write_transparent(&mut writer)?;
-        self.write_v5_sapling(&mut writer)?;
+        self.write_sapling(&mut writer)?;
         orchard_serialization::write_v7_bundle(self.orchard_zsa_bundle.as_ref(), &mut writer)?;
         issuance::write_v7_bundle(self.issue_bundle.as_ref(), &mut writer)?;
         #[cfg(zcash_unstable = "zfuture")]
