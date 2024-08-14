@@ -175,10 +175,6 @@ criteria = "safe-to-deploy"
 version = "0.2.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.base64]]
-version = "0.22.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.base64ct]]
 version = "1.6.0"
 criteria = "safe-to-deploy"
@@ -194,10 +190,6 @@ criteria = "safe-to-deploy"
 [[exemptions.bip0039]]
 version = "0.11.0"
 criteria = "safe-to-deploy"
-
-[[exemptions.bitflags]]
-version = "1.3.2"
-criteria = "safe-to-run"
 
 [[exemptions.bitvec]]
 version = "1.0.1"
@@ -293,10 +285,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.cpufeatures]]
 version = "0.2.11"
-criteria = "safe-to-deploy"
-
-[[exemptions.crc32fast]]
-version = "1.4.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.criterion]]
@@ -481,10 +469,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.fixedbitset]]
 version = "0.4.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.flate2]]
-version = "1.0.30"
 criteria = "safe-to-deploy"
 
 [[exemptions.fluid-let]]
