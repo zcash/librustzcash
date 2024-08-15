@@ -48,6 +48,19 @@ impl RusqliteMigration for Migration {
                 output_index INTEGER NOT NULL,
                 FOREIGN KEY (transaction_id) REFERENCES transactions(id_tx),
                 CONSTRAINT value_received_height UNIQUE (transaction_id, output_index)
+            );
+
+            CREATE TABLE transparent_spend_map (
+                spending_transaction_id INTEGER NOT NULL,
+                prevout_txid BLOB NOT NULL,
+                prevout_output_index INTEGER NOT NULL,
+                FOREIGN KEY (spending_transaction_id) REFERENCES transactions(id_tx)
+                -- NOTE: We can't create a unique constraint on just (prevout_txid, prevout_output_index) 
+                -- because the same output may be attempted to be spent in multiple transactions, even 
+                -- though only one will ever be mined.
+                CONSTRAINT transparent_spend_map_unique UNIQUE (
+                    spending_transaction_id, prevout_txid, prevout_output_index
+                )
             );",
         )?;
 
@@ -67,7 +80,8 @@ impl RusqliteMigration for Migration {
 
     fn down(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
         transaction.execute_batch(
-            "DROP TABLE transparent_spend_search_queue;
+            "DROP TABLE transparent_spend_map;
+             DROP TABLE transparent_spend_search_queue;
              ALTER TABLE transactions DROP COLUMN target_height;
              DROP TABLE tx_retrieval_queue;",
         )?;
