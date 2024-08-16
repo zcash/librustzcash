@@ -87,8 +87,8 @@ use {
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    zcash_keys::encoding::AddressCodec,
     zcash_client_backend::wallet::TransparentAddressMetadata,
+    zcash_keys::encoding::AddressCodec,
     zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
 };
 
