@@ -52,18 +52,17 @@ use zcash_client_backend::{
         scanning::{ScanPriority, ScanRange},
         Account, AccountBirthday, AccountPurpose, AccountSource, BlockMetadata,
         DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
-        SentTransaction, SpendableNotes, TransactionDataRequest, TransactionStatus,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        SentTransaction, SpendableNotes, TransactionDataRequest, WalletCommitmentTrees, WalletRead,
+        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
     },
     proto::compact_formats::CompactBlock,
-    wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
-    PoolType, ShieldedProtocol, TransferType,
+    wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
+    ShieldedProtocol, TransferType,
 };
-use zcash_keys::address::Receiver;
-use zcash_keys::encoding::AddressCodec;
+
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -75,6 +74,9 @@ use zip32::fingerprint::SeedFingerprint;
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
+#[cfg(not(feature = "orchard"))]
+use zcash_protocol::PoolType;
+
 #[cfg(feature = "orchard")]
 use {
     incrementalmerkletree::frontier::Frontier,
@@ -85,6 +87,7 @@ use {
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    zcash_keys::encoding::AddressCodec,
     zcash_client_backend::wallet::TransparentAddressMetadata,
     zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
 };
@@ -119,11 +122,8 @@ pub mod error;
 pub mod wallet;
 use wallet::{
     commitment_tree::{self, put_shard_roots},
-    notify_tx_retrieved, SubtreeScanProgress,
+    SubtreeScanProgress,
 };
-
-#[cfg(feature = "transparent-inputs")]
-use wallet::transparent::{find_account_for_transparent_address, put_transparent_output};
 
 #[cfg(test)]
 mod testing;
@@ -1178,375 +1178,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         &mut self,
         d_tx: DecryptedTransaction<AccountId>,
     ) -> Result<(), Self::Error> {
-        self.transactionally(|wdb| {
-            let tx_ref = wallet::put_tx_data(wdb.conn.0, d_tx.tx(), None, None, None)?;
-            if let Some(height) = d_tx.mined_height() {
-                wallet::set_transaction_status(wdb.conn.0, d_tx.tx().txid(), TransactionStatus::Mined(height))?;
-            }
-
-            let funding_accounts = wallet::get_funding_accounts(wdb.conn.0, d_tx.tx())?;
-
-            // TODO(#1305): Correctly track accounts that fund each transaction output.
-            let funding_account = funding_accounts.iter().next().copied();
-            if funding_accounts.len() > 1 {
-                warn!(
-                    "More than one wallet account detected as funding transaction {:?}, selecting {:?}",
-                    d_tx.tx().txid(),
-                    funding_account.unwrap()
-                )
-            }
-
-            // A flag used to determine whether it is necessary to query for transactions that
-            // provided transparent inputs to this transaction, in order to be able to correctly
-            // recover transparent transaction history.
-            #[cfg(feature = "transparent-inputs")]
-            let mut tx_has_wallet_outputs = false;
-
-            for output in d_tx.sapling_outputs() {
-                #[cfg(feature = "transparent-inputs")]
-                {
-                    tx_has_wallet_outputs = true;
-                }
-                match output.transfer_type() {
-                    TransferType::Outgoing => {
-                        let recipient = {
-                            let receiver = Receiver::Sapling(output.note().recipient());
-                            let wallet_address = wallet::select_receiving_address(
-                                &wdb.params,
-                                wdb.conn.0,
-                                *output.account(),
-                                &receiver
-                            )?.unwrap_or_else(||
-                                receiver.to_zcash_address(wdb.params.network_type())
-                            );
-
-                            Recipient::External(wallet_address, PoolType::SAPLING)
-                        };
-
-                        wallet::put_sent_output(
-                            wdb.conn.0,
-                            &wdb.params,
-                            *output.account(),
-                            tx_ref,
-                            output.index(),
-                            &recipient,
-                            output.note_value(),
-                            Some(output.memo()),
-                        )?;
-                    }
-                    TransferType::WalletInternal => {
-                        wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref, None)?;
-
-                        let recipient = Recipient::InternalAccount {
-                            receiving_account: *output.account(),
-                            external_address: None,
-                            note: Note::Sapling(output.note().clone()),
-                        };
-
-                        wallet::put_sent_output(
-                            wdb.conn.0,
-                            &wdb.params,
-                            *output.account(),
-                            tx_ref,
-                            output.index(),
-                            &recipient,
-                            output.note_value(),
-                            Some(output.memo()),
-                        )?;
-                    }
-                    TransferType::Incoming => {
-                        wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref, None)?;
-
-                        if let Some(account_id) = funding_account {
-                            let recipient = Recipient::InternalAccount {
-                                receiving_account: *output.account(),
-                                external_address: {
-                                    let receiver = Receiver::Sapling(output.note().recipient());
-                                    Some(wallet::select_receiving_address(
-                                        &wdb.params,
-                                        wdb.conn.0,
-                                        *output.account(),
-                                        &receiver
-                                    )?.unwrap_or_else(||
-                                        receiver.to_zcash_address(wdb.params.network_type())
-                                    ))
-                                },
-                                note: Note::Sapling(output.note().clone()),
-                            };
-
-                            wallet::put_sent_output(
-                                wdb.conn.0,
-                                &wdb.params,
-                                account_id,
-                                tx_ref,
-                                output.index(),
-                                &recipient,
-                                output.note_value(),
-                                Some(output.memo()),
-                            )?;
-                        }
-                    }
-                }
-            }
-
-            #[cfg(feature = "orchard")]
-            for output in d_tx.orchard_outputs() {
-                #[cfg(feature = "transparent-inputs")]
-                {
-                    tx_has_wallet_outputs = true;
-                }
-                match output.transfer_type() {
-                    TransferType::Outgoing => {
-                        let recipient = {
-                            let receiver = Receiver::Orchard(output.note().recipient());
-                            let wallet_address = wallet::select_receiving_address(
-                                &wdb.params,
-                                wdb.conn.0,
-                                *output.account(),
-                                &receiver
-                            )?.unwrap_or_else(||
-                                receiver.to_zcash_address(wdb.params.network_type())
-                            );
-
-                            Recipient::External(wallet_address, PoolType::ORCHARD)
-                        };
-
-                        wallet::put_sent_output(
-                            wdb.conn.0,
-                            &wdb.params,
-                            *output.account(),
-                            tx_ref,
-                            output.index(),
-                            &recipient,
-                            output.note_value(),
-                            Some(output.memo()),
-                        )?;
-                    }
-                    TransferType::WalletInternal => {
-                        wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
-
-                        let recipient = Recipient::InternalAccount {
-                            receiving_account: *output.account(),
-                            external_address: None,
-                            note: Note::Orchard(*output.note()),
-                        };
-
-                        wallet::put_sent_output(
-                            wdb.conn.0,
-                            &wdb.params,
-                            *output.account(),
-                            tx_ref,
-                            output.index(),
-                            &recipient,
-                            output.note_value(),
-                            Some(output.memo()),
-                        )?;
-                    }
-                    TransferType::Incoming => {
-                        wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
-
-                        if let Some(account_id) = funding_account {
-                            // Even if the recipient address is external, record the send as internal.
-                            let recipient = Recipient::InternalAccount {
-                                receiving_account: *output.account(),
-                                external_address: {
-                                    let receiver = Receiver::Orchard(output.note().recipient());
-                                    Some(wallet::select_receiving_address(
-                                        &wdb.params,
-                                        wdb.conn.0,
-                                        *output.account(),
-                                        &receiver
-                                    )?.unwrap_or_else(||
-                                        receiver.to_zcash_address(wdb.params.network_type())
-                                    ))
-                                },
-                                note: Note::Orchard(*output.note()),
-                            };
-
-                            wallet::put_sent_output(
-                                wdb.conn.0,
-                                &wdb.params,
-                                account_id,
-                                tx_ref,
-                                output.index(),
-                                &recipient,
-                                output.note_value(),
-                                Some(output.memo()),
-                            )?;
-                        }
-                    }
-                }
-            }
-
-            // If any of the utxos spent in the transaction are ours, mark them as spent.
-            #[cfg(feature = "transparent-inputs")]
-            for txin in d_tx
-                .tx()
-                .transparent_bundle()
-                .iter()
-                .flat_map(|b| b.vin.iter())
-            {
-                wallet::transparent::mark_transparent_utxo_spent(wdb.conn.0, tx_ref, &txin.prevout)?;
-            }
-
-            // This `if` is just an optimization for cases where we would do nothing in the loop.
-            if funding_account.is_some() || cfg!(feature = "transparent-inputs") {
-                for (output_index, txout) in d_tx
-                    .tx()
-                    .transparent_bundle()
-                    .iter()
-                    .flat_map(|b| b.vout.iter())
-                    .enumerate()
-                {
-                    if let Some(address) = txout.recipient_address() {
-                        debug!(
-                            "{:?} output {} has recipient {}",
-                            d_tx.tx().txid(),
-                            output_index,
-                            address.encode(&wdb.params)
-                        );
-
-                        // The transaction is not necessarily mined yet, but we want to record
-                        // that an output to the address was seen in this tx anyway. This will
-                        // advance the gap regardless of whether it is mined, but an output in
-                        // an unmined transaction won't advance the range of safe indices.
-                        #[cfg(feature = "transparent-inputs")]
-                        wallet::transparent::ephemeral::mark_ephemeral_address_as_seen(wdb, &address, tx_ref)?;
-
-                        // If the output belongs to the wallet, add it to `transparent_received_outputs`.
-                        #[cfg(feature = "transparent-inputs")]
-                        if let Some(account_id) = find_account_for_transparent_address(
-                            wdb.conn.0,
-                            &wdb.params,
-                            &address
-                        )? {
-                            debug!(
-                                "{:?} output {} belongs to account {:?}",
-                                d_tx.tx().txid(),
-                                output_index,
-                                account_id
-                            );
-                            put_transparent_output(
-                                wdb.conn.0,
-                                &wdb.params,
-                                &OutPoint::new(d_tx.tx().txid().into(), u32::try_from(output_index).unwrap()),
-                                txout,
-                                d_tx.mined_height(),
-                                &address,
-                                account_id,
-                                false
-                            )?;
-
-                            // Since the wallet created the transparent output, we need to ensure
-                            // that any transparent inputs belonging to the wallet will be
-                            // discovered.
-                            tx_has_wallet_outputs = true;
-
-                            // When we receive transparent funds (particularly as ephemeral outputs
-                            // in transaction pairs sending to a ZIP 320 address) it becomes
-                            // possible that the spend of these outputs is not then later detected
-                            // if the transaction that spends them is purely transparent. This is
-                            // especially a problem in wallet recovery.
-                            wallet::transparent::queue_transparent_spend_detection(
-                                wdb.conn.0,
-                                &wdb.params,
-                                address,
-                                tx_ref,
-                                output_index.try_into().unwrap()
-                            )?;
-                        } else {
-                            debug!(
-                                "Address {} is not recognized as belonging to any of our accounts.",
-                                address.encode(&wdb.params)
-                            );
-                        }
-
-                        // If a transaction we observe contains spends from our wallet, we will
-                        // store its transparent outputs in the same way they would be stored by
-                        // create_spend_to_address.
-                        if let Some(account_id) = funding_account {
-                            let receiver = Receiver::Transparent(address);
-
-                            #[cfg(feature = "transparent-inputs")]
-                            let recipient_addr = wallet::select_receiving_address(
-                                &wdb.params,
-                                wdb.conn.0,
-                                account_id,
-                                &receiver
-                            )?.unwrap_or_else(||
-                                receiver.to_zcash_address(wdb.params.network_type())
-                            );
-
-                            #[cfg(not(feature = "transparent-inputs"))]
-                            let recipient_addr = receiver.to_zcash_address(wdb.params.network_type());
-
-                            let recipient = Recipient::External(recipient_addr, PoolType::TRANSPARENT);
-
-                            wallet::put_sent_output(
-                                wdb.conn.0,
-                                &wdb.params,
-                                account_id,
-                                tx_ref,
-                                output_index,
-                                &recipient,
-                                txout.value,
-                                None,
-                            )?;
-
-                            // Even though we know the funding account, we don't know that we have
-                            // information for all of the transparent inputs to the transaction.
-                            #[cfg(feature = "transparent-inputs")]
-                            {
-                                tx_has_wallet_outputs = true;
-                            }
-                        }
-                    } else {
-                        warn!(
-                            "Unable to determine recipient address for tx {:?} output {}",
-                            d_tx.tx().txid(),
-                            output_index
-                        );
-                    }
-                }
-            }
-
-            // If the transaction has outputs that belong to the wallet as well as transparent
-            // inputs, we may need to download the transactions corresponding to the transparent
-            // prevout references to determine whether the transaction was created (at least in
-            // part) by this wallet.
-            #[cfg(feature = "transparent-inputs")]
-            if tx_has_wallet_outputs {
-                if let Some(b) = d_tx.tx().transparent_bundle() {
-                    // queue the transparent inputs for enhancement
-                    wallet::queue_tx_retrieval(
-                        wdb.conn.0,
-                        b.vin.iter().map(|txin| *txin.prevout.txid()),
-                        Some(tx_ref)
-                    )?;
-                }
-            }
-
-            notify_tx_retrieved(wdb.conn.0, d_tx.tx().txid())?;
-
-            // If the decrypted transaction is unmined and has no shielded components, add it to
-            // the queue for status retrieval.
-            #[cfg(feature = "transparent-inputs")]
-            {
-                let detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
-                #[cfg(feature = "orchard")]
-                let detectable_via_scanning = detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
-
-                if d_tx.mined_height().is_none() && !detectable_via_scanning {
-                    wallet::queue_tx_retrieval(
-                        wdb.conn.0,
-                        std::iter::once(d_tx.tx().txid()),
-                        None
-                    )?;
-                }
-            }
-
-            Ok(())
-        })
+        self.transactionally(|wdb| wallet::store_decrypted_tx(wdb.conn.0, &wdb.params, d_tx))
     }
 
     fn store_transactions_to_be_sent(
@@ -1574,7 +1206,12 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         n: usize,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         self.transactionally(|wdb| {
-            wallet::transparent::ephemeral::reserve_next_n_ephemeral_addresses(wdb, account_id, n)
+            wallet::transparent::ephemeral::reserve_next_n_ephemeral_addresses(
+                wdb.conn.0,
+                &wdb.params,
+                account_id,
+                n,
+            )
         })
     }
 
