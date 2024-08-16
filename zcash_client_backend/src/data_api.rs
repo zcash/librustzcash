@@ -566,7 +566,7 @@ pub struct SpendableNotes<NoteRef> {
 
 /// A request for transaction data enhancement, spentness check, or discovery
 /// of spends from a given transparent address within a specific block range.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TransactionDataRequest {
     /// Information about the chain's view of a transaction is requested.
     ///
