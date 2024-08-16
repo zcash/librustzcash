@@ -1202,14 +1202,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             #[cfg(feature = "transparent-inputs")]
             let mut tx_has_wallet_outputs = false;
 
-            #[cfg(feature = "transparent-inputs")]
-            let detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
-            #[cfg(all(feature = "transparent-inputs", feature = "orchard"))]
-            let detectable_via_scanning = detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
-
-            #[cfg(feature = "transparent-inputs")]
-            let mut queue_status_retrieval = false;
-
             for output in d_tx.sapling_outputs() {
                 #[cfg(feature = "transparent-inputs")]
                 {
@@ -1507,13 +1499,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             {
                                 tx_has_wallet_outputs = true;
                             }
-
-                            // If the decrypted transaction is unmined and has no shielded
-                            // components, add it to the queue for status retrieval.
-                            #[cfg(feature = "transparent-inputs")]
-                            if d_tx.mined_height().is_none() && !detectable_via_scanning {
-                                queue_status_retrieval = true;
-                            }
                         }
                     } else {
                         warn!(
@@ -1543,13 +1528,21 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
             notify_tx_retrieved(wdb.conn.0, d_tx.tx().txid())?;
 
+            // If the decrypted transaction is unmined and has no shielded components, add it to
+            // the queue for status retrieval.
             #[cfg(feature = "transparent-inputs")]
-            if queue_status_retrieval {
-                wallet::queue_tx_retrieval(
-                    wdb.conn.0,
-                    std::iter::once(d_tx.tx().txid()),
-                    None
-                )?;
+            {
+                let detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
+                #[cfg(feature = "orchard")]
+                let detectable_via_scanning = detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
+
+                if d_tx.mined_height().is_none() && !detectable_via_scanning {
+                    wallet::queue_tx_retrieval(
+                        wdb.conn.0,
+                        std::iter::once(d_tx.tx().txid()),
+                        None
+                    )?;
+                }
             }
 
             Ok(())
