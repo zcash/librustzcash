@@ -52,8 +52,8 @@ use zcash_client_backend::{
         scanning::{ScanPriority, ScanRange},
         Account, AccountBirthday, AccountPurpose, AccountSource, BlockMetadata,
         DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
-        SentTransaction, SpendableNotes, TransactionDataRequest, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        SentTransaction, SpendableNotes, TransactionDataRequest, TransactionStatus,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -63,6 +63,7 @@ use zcash_client_backend::{
     PoolType, ShieldedProtocol, TransferType,
 };
 use zcash_keys::address::Receiver;
+use zcash_keys::encoding::AddressCodec;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -85,7 +86,6 @@ use {
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::wallet::TransparentAddressMetadata,
-    zcash_keys::encoding::AddressCodec,
     zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
 };
 
@@ -1180,6 +1180,10 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             let tx_ref = wallet::put_tx_data(wdb.conn.0, d_tx.tx(), None, None, None)?;
+            if let Some(height) = d_tx.mined_height() {
+                wallet::set_transaction_status(wdb.conn.0, d_tx.tx().txid(), TransactionStatus::Mined(height))?;
+            }
+
             let funding_accounts = wallet::get_funding_accounts(wdb.conn.0, d_tx.tx())?;
 
             // TODO(#1305): Correctly track accounts that fund each transaction output.
@@ -1403,6 +1407,13 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     .enumerate()
                 {
                     if let Some(address) = txout.recipient_address() {
+                        debug!(
+                            "{:?} output {} has recipient {}",
+                            d_tx.tx().txid(),
+                            output_index,
+                            address.encode(&wdb.params)
+                        );
+
                         // The transaction is not necessarily mined yet, but we want to record
                         // that an output to the address was seen in this tx anyway. This will
                         // advance the gap regardless of whether it is mined, but an output in
@@ -1417,6 +1428,12 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             &wdb.params,
                             &address
                         )? {
+                            debug!(
+                                "{:?} output {} belongs to account {:?}",
+                                d_tx.tx().txid(),
+                                output_index,
+                                account_id
+                            );
                             put_transparent_output(
                                 wdb.conn.0,
                                 &wdb.params,
@@ -1445,6 +1462,11 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                                 tx_ref,
                                 output_index.try_into().unwrap()
                             )?;
+                        } else {
+                            debug!(
+                                "Address {} is not recognized as belonging to any of our accounts.",
+                                address.encode(&wdb.params)
+                            );
                         }
 
                         // If a transaction we observe contains spends from our wallet, we will
@@ -1493,6 +1515,12 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                                 queue_status_retrieval = true;
                             }
                         }
+                    } else {
+                        warn!(
+                            "Unable to determine recipient address for tx {:?} output {}",
+                            d_tx.tx().txid(),
+                            output_index
+                        );
                     }
                 }
             }
