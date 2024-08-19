@@ -293,8 +293,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_protocol]]
-version = "0.1.1"
-when = "2024-03-25"
+version = "0.2.0"
+when = "2024-08-19"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
