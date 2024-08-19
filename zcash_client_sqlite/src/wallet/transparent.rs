@@ -427,11 +427,18 @@ pub(crate) fn add_transparent_account_balances(
 }
 
 /// Marks the given UTXO as having been spent.
+///
+/// Returns `true` if the UTXO was known to the wallet.
 pub(crate) fn mark_transparent_utxo_spent(
     conn: &rusqlite::Connection,
-    tx_ref: TxRef,
+    spent_in_tx: TxRef,
     outpoint: &OutPoint,
-) -> Result<(), SqliteClientError> {
+) -> Result<bool, SqliteClientError> {
+    let spend_params = named_params![
+        ":spent_in_tx": spent_in_tx.0,
+        ":prevout_txid": outpoint.hash().as_ref(),
+        ":prevout_idx": outpoint.n(),
+    ];
     let mut stmt_mark_transparent_utxo_spent = conn.prepare_cached(
         "INSERT INTO transparent_received_output_spends (transparent_received_output_id, transaction_id)
          SELECT txo.id, :spent_in_tx
@@ -439,13 +446,12 @@ pub(crate) fn mark_transparent_utxo_spent(
          JOIN transactions t ON t.id_tx = txo.transaction_id
          WHERE t.txid = :prevout_txid
          AND txo.output_index = :prevout_idx
-         ON CONFLICT (transparent_received_output_id, transaction_id) DO NOTHING",
+         ON CONFLICT (transparent_received_output_id, transaction_id)
+         -- The following UPDATE is effectively a no-op, but we perform it anyway so that the
+         -- number of affected rows can be used to determine whether a record existed.
+         DO UPDATE SET transaction_id = :spent_in_tx",
     )?;
-    stmt_mark_transparent_utxo_spent.execute(named_params![
-        ":spent_in_tx": tx_ref.0,
-        ":prevout_txid": outpoint.hash().as_ref(),
-        ":prevout_idx": outpoint.n(),
-    ])?;
+    let affected_rows = stmt_mark_transparent_utxo_spent.execute(spend_params)?;
 
     // Since we know that the output is spent, we no longer need to search for
     // it to find out if it has been spent.
@@ -461,7 +467,24 @@ pub(crate) fn mark_transparent_utxo_spent(
         ":prevout_idx": outpoint.n(),
     ])?;
 
-    Ok(())
+    // If no rows were affected, we know that we don't actually have the output in
+    // `transparent_received_outputs` yet, so we have to record the output as spent
+    // so that when we eventually detect the output, we can create the spend record.
+    if affected_rows == 0 {
+        conn.execute(
+            "INSERT INTO transparent_spend_map (
+                spending_transaction_id,
+                prevout_txid,
+                prevout_output_index
+            )
+            VALUES (:spent_in_tx, :prevout_txid, :prevout_idx)
+            ON CONFLICT (spending_transaction_id, prevout_txid, prevout_output_index)
+            DO NOTHING",
+            spend_params,
+        )?;
+    }
+
+    Ok(affected_rows > 0)
 }
 
 /// Adds the given received UTXO to the datastore.
@@ -494,6 +517,11 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
 ) -> Result<Vec<TransactionDataRequest>, SqliteClientError> {
+    // `lightwalletd` will return an error for `GetTaddressTxids` requests having an end height
+    // greater than the current chain tip height, so we take the chain tip height into account
+    // here in order to make this pothole easier for clients of the API to avoid.
+    let chain_tip_height = super::chain_tip_height(conn)?;
+
     // We cannot construct address-based transaction data requests for the case where we cannot
     // determine the height at which to begin, so we require that either the target height or mined
     // height be set.
@@ -509,11 +537,16 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
         .query_and_then([], |row| {
             let address = TransparentAddress::decode(params, &row.get::<_, String>(0)?)?;
             let block_range_start = BlockHeight::from(row.get::<_, u32>(1)?);
+            let max_end_height = block_range_start + DEFAULT_TX_EXPIRY_DELTA + 1;
+
             Ok::<TransactionDataRequest, SqliteClientError>(
                 TransactionDataRequest::SpendsFromAddress {
                     address,
                     block_range_start,
-                    block_range_end: Some(block_range_start + DEFAULT_TX_EXPIRY_DELTA + 1),
+                    block_range_end: Some(
+                        chain_tip_height
+                            .map_or(max_end_height, |h| std::cmp::min(h + 1, max_end_height)),
+                    ),
                 },
             )
         })?
@@ -728,6 +761,29 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
 
     let utxo_id = stmt_upsert_transparent_output
         .query_row(sql_args, |row| row.get::<_, i64>(0).map(UtxoId))?;
+
+    // If we have a record of the output already having been spent, then mark it as spent using the
+    // stored reference to the spending transaction.
+    let spending_tx_ref = conn
+        .query_row(
+            "SELECT ts.spending_transaction_id
+             FROM transparent_spend_map ts
+             JOIN transactions t ON t.id_tx = ts.spending_transaction_id
+             WHERE ts.prevout_txid = :prevout_txid
+             AND ts.prevout_output_index = :prevout_idx
+             ORDER BY t.block NULLS LAST LIMIT 1",
+            named_params![
+                ":prevout_txid": outpoint.txid().as_ref(),
+                ":prevout_idx": outpoint.n()
+            ],
+            |row| row.get::<_, i64>(0).map(TxRef),
+        )
+        .optional()?;
+
+    if let Some(spending_transaction_id) = spending_tx_ref {
+        mark_transparent_utxo_spent(conn, spending_transaction_id, outpoint)?;
+    }
+
     Ok(utxo_id)
 }
 

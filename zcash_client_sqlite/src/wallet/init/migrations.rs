@@ -125,7 +125,9 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
             params: params.clone(),
         }),
         Box::new(spend_key_available::Migration),
-        Box::new(tx_retrieval_queue::Migration),
+        Box::new(tx_retrieval_queue::Migration {
+            params: params.clone(),
+        }),
     ]
 }
 

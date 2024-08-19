@@ -365,6 +365,28 @@ CREATE TABLE "transparent_received_output_spends" (
     UNIQUE (transparent_received_output_id, transaction_id)
 )"#;
 
+/// A cache of the relationship between a transaction and the prevout data of its
+/// transparent inputs.
+///
+/// This table is used in out-of-order wallet recovery to cache the information about
+/// what transaction(s) spend each transparent outpoint, so that if an output belonging
+/// to the wallet is detected after the transaction that spends it has been processed,
+/// the spend can also be recorded as part of the process of adding the output to
+/// [`TABLE_TRANSPARENT_RECEIVED_OUTPUTS`].
+pub(super) const TABLE_TRANSPARENT_SPEND_MAP: &str = r#"
+CREATE TABLE transparent_spend_map (
+    spending_transaction_id INTEGER NOT NULL,
+    prevout_txid BLOB NOT NULL,
+    prevout_output_index INTEGER NOT NULL,
+    FOREIGN KEY (spending_transaction_id) REFERENCES transactions(id_tx)
+    -- NOTE: We can't create a unique constraint on just (prevout_txid, prevout_output_index) 
+    -- because the same output may be attempted to be spent in multiple transactions, even 
+    -- though only one will ever be mined.
+    CONSTRAINT transparent_spend_map_unique UNIQUE (
+        spending_transaction_id, prevout_txid, prevout_output_index
+    )
+)"#;
+
 /// Stores the outputs of transactions created by the wallet.
 ///
 /// Unlike with outputs received by the wallet, we store sent outputs for all pools in

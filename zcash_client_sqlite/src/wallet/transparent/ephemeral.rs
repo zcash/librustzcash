@@ -16,9 +16,7 @@ use zcash_primitives::{
 };
 use zcash_protocol::consensus;
 
-use crate::{
-    error::SqliteClientError, wallet::GAP_LIMIT, AccountId, SqlTransaction, TxRef, WalletDb,
-};
+use crate::{error::SqliteClientError, wallet::GAP_LIMIT, AccountId, TxRef};
 
 // Returns `TransparentAddressMetadata` in the ephemeral scope for the
 // given address index.
@@ -228,7 +226,8 @@ pub(crate) fn find_index_for_ephemeral_address_str(
 /// * `SqliteClientError::AddressGeneration(AddressGenerationError::DiversifierSpaceExhausted)`,
 ///   if the limit on transparent address indices has been reached.
 pub(crate) fn reserve_next_n_ephemeral_addresses<P: consensus::Parameters>(
-    wdb: &mut WalletDb<SqlTransaction<'_>, P>,
+    conn: &rusqlite::Transaction,
+    params: &P,
     account_id: AccountId,
     n: usize,
 ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
@@ -236,8 +235,8 @@ pub(crate) fn reserve_next_n_ephemeral_addresses<P: consensus::Parameters>(
         return Ok(vec![]);
     }
 
-    let first_unreserved = first_unreserved_index(wdb.conn.0, account_id)?;
-    let first_unsafe = first_unsafe_index(wdb.conn.0, account_id)?;
+    let first_unreserved = first_unreserved_index(conn, account_id)?;
+    let first_unsafe = first_unsafe_index(conn, account_id)?;
     let allocation = range_from(
         first_unreserved,
         u32::try_from(n).map_err(|_| AddressGenerationError::DiversifierSpaceExhausted)?,
@@ -252,8 +251,8 @@ pub(crate) fn reserve_next_n_ephemeral_addresses<P: consensus::Parameters>(
             max(first_unreserved, first_unsafe),
         ));
     }
-    reserve_until(wdb.conn.0, &wdb.params, account_id, allocation.end)?;
-    get_known_ephemeral_addresses(wdb.conn.0, &wdb.params, account_id, Some(allocation))
+    reserve_until(conn, params, account_id, allocation.end)?;
+    get_known_ephemeral_addresses(conn, params, account_id, Some(allocation))
 }
 
 /// Initialize the `ephemeral_addresses` table. This must be called when
@@ -321,8 +320,8 @@ fn reserve_until<P: consensus::Parameters>(
 
 /// Returns a `SqliteClientError::EphemeralAddressReuse` error if the address was
 /// already used.
-fn ephemeral_address_reuse_check<P: consensus::Parameters>(
-    wdb: &mut WalletDb<SqlTransaction<'_>, P>,
+fn ephemeral_address_reuse_check(
+    conn: &rusqlite::Transaction,
     address_str: &str,
 ) -> Result<(), SqliteClientError> {
     // It is intentional that we don't require `t.mined_height` to be non-null.
@@ -338,9 +337,7 @@ fn ephemeral_address_reuse_check<P: consensus::Parameters>(
     // before calling `mark_ephemeral_address_as_used`, and then we saw the
     // address in another transaction (presumably created by another wallet
     // instance, or as a result of a bug) anyway.
-    let res = wdb
-        .conn
-        .0
+    let res = conn
         .query_row(
             "SELECT t.txid FROM ephemeral_addresses
              LEFT OUTER JOIN transactions t
@@ -374,20 +371,19 @@ fn ephemeral_address_reuse_check<P: consensus::Parameters>(
 /// Returns a `SqliteClientError::EphemeralAddressReuse` error if the address was
 /// already used.
 pub(crate) fn mark_ephemeral_address_as_used<P: consensus::Parameters>(
-    wdb: &mut WalletDb<SqlTransaction<'_>, P>,
+    conn: &rusqlite::Transaction,
+    params: &P,
     ephemeral_address: &TransparentAddress,
     tx_ref: TxRef,
 ) -> Result<(), SqliteClientError> {
-    let address_str = ephemeral_address.encode(&wdb.params);
-    ephemeral_address_reuse_check(wdb, &address_str)?;
+    let address_str = ephemeral_address.encode(params);
+    ephemeral_address_reuse_check(conn, &address_str)?;
 
     // We update both `used_in_tx` and `seen_in_tx` here, because a used address has
     // necessarily been seen in a transaction. We will not treat this as extending the
     // range of addresses that are safe to reserve unless and until the transaction is
     // observed as mined.
-    let update_result = wdb
-        .conn
-        .0
+    let update_result = conn
         .query_row(
             "UPDATE ephemeral_addresses
              SET used_in_tx = :tx_ref, seen_in_tx = :tx_ref
@@ -401,7 +397,7 @@ pub(crate) fn mark_ephemeral_address_as_used<P: consensus::Parameters>(
     // Maintain the invariant that the last `GAP_LIMIT` addresses are unused and unseen.
     if let Some((account_id, address_index)) = update_result {
         let next_to_reserve = address_index.checked_add(1).expect("ensured by constraint");
-        reserve_until(wdb.conn.0, &wdb.params, account_id, next_to_reserve)?;
+        reserve_until(conn, params, account_id, next_to_reserve)?;
     }
     Ok(())
 }
@@ -412,11 +408,12 @@ pub(crate) fn mark_ephemeral_address_as_used<P: consensus::Parameters>(
 /// `tx_ref` must be a valid transaction reference. This call has no effect if
 /// `address` is not one of our ephemeral addresses.
 pub(crate) fn mark_ephemeral_address_as_seen<P: consensus::Parameters>(
-    wdb: &mut WalletDb<SqlTransaction<'_>, P>,
+    conn: &rusqlite::Transaction,
+    params: &P,
     address: &TransparentAddress,
     tx_ref: TxRef,
 ) -> Result<(), SqliteClientError> {
-    let address_str = address.encode(&wdb.params);
+    let address_str = address.encode(params);
 
     // Figure out which transaction was mined earlier: `tx_ref`, or any existing
     // tx referenced by `seen_in_tx` for the given address. Prefer the existing
@@ -426,7 +423,7 @@ pub(crate) fn mark_ephemeral_address_as_seen<P: consensus::Parameters>(
     // likely to be unmined).
     //
     // The query should always return a value if `tx_ref` is valid.
-    let earlier_ref = wdb.conn.0.query_row(
+    let earlier_ref = conn.query_row(
         "SELECT id_tx FROM transactions
          LEFT OUTER JOIN ephemeral_addresses e
          ON id_tx = e.seen_in_tx
@@ -439,9 +436,7 @@ pub(crate) fn mark_ephemeral_address_as_seen<P: consensus::Parameters>(
         |row| row.get::<_, i64>(0),
     )?;
 
-    let update_result = wdb
-        .conn
-        .0
+    let update_result = conn
         .query_row(
             "UPDATE ephemeral_addresses
              SET seen_in_tx = :seen_in_tx
@@ -455,7 +450,7 @@ pub(crate) fn mark_ephemeral_address_as_seen<P: consensus::Parameters>(
     // Maintain the invariant that the last `GAP_LIMIT` addresses are unused and unseen.
     if let Some((account_id, address_index)) = update_result {
         let next_to_reserve = address_index.checked_add(1).expect("ensured by constraint");
-        reserve_until(wdb.conn.0, &wdb.params, account_id, next_to_reserve)?;
+        reserve_until(conn, params, account_id, next_to_reserve)?;
     }
     Ok(())
 }

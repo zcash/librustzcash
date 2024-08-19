@@ -53,6 +53,9 @@ pub enum WalletMigrationError {
 
     /// Reverting the specified migration is not supported.
     CannotRevert(Uuid),
+
+    /// Some other unexpected violation of database business rules occurred
+    Other(SqliteClientError),
 }
 
 impl From<rusqlite::Error> for WalletMigrationError {
@@ -76,6 +79,21 @@ impl From<ShardTreeError<commitment_tree::Error>> for WalletMigrationError {
 impl From<AddressGenerationError> for WalletMigrationError {
     fn from(e: AddressGenerationError) -> Self {
         WalletMigrationError::AddressGeneration(e)
+    }
+}
+
+impl From<SqliteClientError> for WalletMigrationError {
+    fn from(value: SqliteClientError) -> Self {
+        match value {
+            SqliteClientError::CorruptedData(err) => WalletMigrationError::CorruptedData(err),
+            SqliteClientError::DbError(err) => WalletMigrationError::DbError(err),
+            SqliteClientError::CommitmentTree(err) => WalletMigrationError::CommitmentTree(err),
+            SqliteClientError::BalanceError(err) => WalletMigrationError::BalanceError(err),
+            SqliteClientError::AddressGeneration(err) => {
+                WalletMigrationError::AddressGeneration(err)
+            }
+            other => WalletMigrationError::Other(other),
+        }
     }
 }
 
@@ -106,6 +124,13 @@ impl fmt::Display for WalletMigrationError {
             WalletMigrationError::CannotRevert(uuid) => {
                 write!(f, "Reverting migration {} is not supported", uuid)
             }
+            WalletMigrationError::Other(err) => {
+                write!(
+                    f,
+                    "Unexpected violation of database business rules: {}",
+                    err
+                )
+            }
         }
     }
 }
@@ -117,6 +142,7 @@ impl std::error::Error for WalletMigrationError {
             WalletMigrationError::BalanceError(e) => Some(e),
             WalletMigrationError::CommitmentTree(e) => Some(e),
             WalletMigrationError::AddressGeneration(e) => Some(e),
+            WalletMigrationError::Other(e) => Some(e),
             _ => None,
         }
     }
@@ -406,6 +432,7 @@ mod tests {
             db::TABLE_TRANSACTIONS,
             db::TABLE_TRANSPARENT_RECEIVED_OUTPUT_SPENDS,
             db::TABLE_TRANSPARENT_RECEIVED_OUTPUTS,
+            db::TABLE_TRANSPARENT_SPEND_MAP,
             db::TABLE_TRANSPARENT_SPEND_SEARCH_QUEUE,
             db::TABLE_TX_LOCATOR_MAP,
             db::TABLE_TX_RETRIEVAL_QUEUE,

@@ -4,17 +4,21 @@ use rusqlite::{named_params, Transaction};
 use schemer_rusqlite::RusqliteMigration;
 use std::collections::HashSet;
 use uuid::Uuid;
+use zcash_client_backend::data_api::DecryptedTransaction;
 use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
+use zcash_protocol::consensus::{self, BlockHeight, BranchId};
 
-use crate::wallet::init::WalletMigrationError;
+use crate::wallet::{self, init::WalletMigrationError};
 
 use super::utxos_to_txos;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xfec02b61_3988_4b4f_9699_98977fac9e7f);
 
-pub(crate) struct Migration;
+pub(super) struct Migration<P> {
+    pub(super) params: P,
+}
 
-impl schemer::Migration for Migration {
+impl<P> schemer::Migration for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
@@ -28,7 +32,7 @@ impl schemer::Migration for Migration {
     }
 }
 
-impl RusqliteMigration for Migration {
+impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
@@ -48,6 +52,19 @@ impl RusqliteMigration for Migration {
                 output_index INTEGER NOT NULL,
                 FOREIGN KEY (transaction_id) REFERENCES transactions(id_tx),
                 CONSTRAINT value_received_height UNIQUE (transaction_id, output_index)
+            );
+
+            CREATE TABLE transparent_spend_map (
+                spending_transaction_id INTEGER NOT NULL,
+                prevout_txid BLOB NOT NULL,
+                prevout_output_index INTEGER NOT NULL,
+                FOREIGN KEY (spending_transaction_id) REFERENCES transactions(id_tx)
+                -- NOTE: We can't create a unique constraint on just (prevout_txid, prevout_output_index) 
+                -- because the same output may be attempted to be spent in multiple transactions, even 
+                -- though only one will ever be mined.
+                CONSTRAINT transparent_spend_map_unique UNIQUE (
+                    spending_transaction_id, prevout_txid, prevout_output_index
+                )
             );",
         )?;
 
@@ -62,12 +79,50 @@ impl RusqliteMigration for Migration {
             named_params![":default_expiry_delta": DEFAULT_TX_EXPIRY_DELTA],
         )?;
 
+        // Call `decrypt_and_store_transaction` for each transaction known to the wallet to
+        // populate the enhancement queues with any transparent history information that we don't
+        // already have.
+        let mut stmt_transactions =
+            transaction.prepare("SELECT raw, mined_height FROM transactions")?;
+        let mut rows = stmt_transactions.query([])?;
+        while let Some(row) = rows.next()? {
+            let tx_data = row.get::<_, Option<Vec<u8>>>(0)?;
+            let mined_height = row.get::<_, Option<u32>>(1)?.map(BlockHeight::from);
+
+            if let Some(tx_data) = tx_data {
+                let tx = zcash_primitives::transaction::Transaction::read(
+                    &tx_data[..],
+                    // We assume unmined transactions are created with the current consensus branch ID.
+                    mined_height
+                        .map_or(BranchId::Sapling, |h| BranchId::for_height(&self.params, h)),
+                )
+                .map_err(|_| {
+                    WalletMigrationError::CorruptedData(
+                        "Could not read serialized transaction data.".to_owned(),
+                    )
+                })?;
+
+                wallet::store_decrypted_tx(
+                    transaction,
+                    &self.params,
+                    DecryptedTransaction::new(
+                        mined_height,
+                        &tx,
+                        vec![],
+                        #[cfg(feature = "orchard")]
+                        vec![],
+                    ),
+                )?;
+            }
+        }
+
         Ok(())
     }
 
     fn down(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
         transaction.execute_batch(
-            "DROP TABLE transparent_spend_search_queue;
+            "DROP TABLE transparent_spend_map;
+             DROP TABLE transparent_spend_search_queue;
              ALTER TABLE transactions DROP COLUMN target_height;
              DROP TABLE tx_retrieval_queue;",
         )?;
