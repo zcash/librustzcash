@@ -517,6 +517,11 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
 ) -> Result<Vec<TransactionDataRequest>, SqliteClientError> {
+    // `lightwalletd` will return an error for `GetTaddressTxids` requests having an end height
+    // greater than the current chain tip height, so we take the chain tip height into account
+    // here in order to make this pothole easier for clients of the API to avoid.
+    let chain_tip_height = super::chain_tip_height(conn)?;
+
     // We cannot construct address-based transaction data requests for the case where we cannot
     // determine the height at which to begin, so we require that either the target height or mined
     // height be set.
@@ -532,11 +537,16 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
         .query_and_then([], |row| {
             let address = TransparentAddress::decode(params, &row.get::<_, String>(0)?)?;
             let block_range_start = BlockHeight::from(row.get::<_, u32>(1)?);
+            let max_end_height = block_range_start + DEFAULT_TX_EXPIRY_DELTA + 1;
+
             Ok::<TransactionDataRequest, SqliteClientError>(
                 TransactionDataRequest::SpendsFromAddress {
                     address,
                     block_range_start,
-                    block_range_end: Some(block_range_start + DEFAULT_TX_EXPIRY_DELTA + 1),
+                    block_range_end: Some(
+                        chain_tip_height
+                            .map_or(max_end_height, |h| std::cmp::min(h + 1, max_end_height)),
+                    ),
                 },
             )
         })?
