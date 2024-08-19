@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.2.1] - 2024-08-19
 ### Added
 - `zcash_encoding::CompactSize::serialized_size`
 - `zcash_encoding::Vector::serialized_size_of_u8_vec`
