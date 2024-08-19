@@ -6,11 +6,14 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.2.0] - 2024-08-19
 ### Added
 - `zcash_protocol::PoolType::{TRANSPARENT, SAPLING, ORCHARD}`
 
 ### Changed
 - MSRV is now 1.70.0.
+- `consensus::BranchId` now has an additional `Nu6` variant.
 
 ## [0.1.1] - 2024-03-25
 ### Added
