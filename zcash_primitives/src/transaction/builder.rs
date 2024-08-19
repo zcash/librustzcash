@@ -1129,7 +1129,6 @@ mod tests {
     use assert_matches::assert_matches;
     use ff::Field;
     use incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness};
-    use orchard::issuance::IssueInfo;
     use rand_core::OsRng;
 
     use crate::{
@@ -1148,6 +1147,7 @@ mod tests {
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     use {
         crate::transaction::fees::zip317::FeeError,
+        orchard::issuance::IssueInfo,
         orchard::keys::{FullViewingKey, IssuanceAuthorizingKey, SpendingKey},
         orchard::value::NoteValue,
         orchard::Address,
@@ -1474,7 +1474,14 @@ mod tests {
         let asset = "asset_desc".to_string();
 
         builder
-            .init_issuance_bundle::<FeeError>(iak, asset.clone(), Some(IssueInfo { recipient: address, value: NoteValue::from_raw(42) }))
+            .init_issuance_bundle::<FeeError>(
+                iak,
+                asset.clone(),
+                Some(IssueInfo {
+                    recipient: address,
+                    value: NoteValue::from_raw(42),
+                }),
+            )
             .unwrap();
 
         let issuance_builder = builder.issuance_builder.unwrap();
@@ -1505,7 +1512,14 @@ mod tests {
         let asset = "asset_desc".to_string();
 
         builder
-            .init_issuance_bundle::<FeeError>(iak, asset.clone(), Some(IssueInfo{ recipient: address, value: NoteValue::from_raw(42)}))
+            .init_issuance_bundle::<FeeError>(
+                iak,
+                asset.clone(),
+                Some(IssueInfo {
+                    recipient: address,
+                    value: NoteValue::from_raw(42),
+                }),
+            )
             .unwrap();
         builder
             .add_recipient::<FeeError>(asset.clone(), address, NoteValue::from_raw(21))
@@ -1544,7 +1558,14 @@ mod tests {
         let asset2 = "asset_desc_2".to_string();
 
         builder
-            .init_issuance_bundle::<FeeError>(iak, asset1.clone(), Some(IssueInfo{ recipient: address, value: NoteValue::from_raw(42) }))
+            .init_issuance_bundle::<FeeError>(
+                iak,
+                asset1.clone(),
+                Some(IssueInfo {
+                    recipient: address,
+                    value: NoteValue::from_raw(42),
+                }),
+            )
             .unwrap();
         builder
             .add_recipient::<FeeError>(asset2.clone(), address, NoteValue::from_raw(21))

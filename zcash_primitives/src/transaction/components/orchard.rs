@@ -92,7 +92,7 @@ pub fn read_v6_bundle<R: Read>(
     mut reader: R,
 ) -> io::Result<Option<orchard::Bundle<Authorized, Amount, OrchardZSA>>> {
     #[allow(clippy::redundant_closure)]
-    let actions_without_auth = Vector::read(&mut reader, |r| read_zsa_action_without_auth(r))?;
+    let actions_without_auth = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
     if actions_without_auth.is_empty() {
         Ok(None)
     } else {
@@ -182,67 +182,32 @@ pub fn read_cmx<R: Read>(mut reader: R) -> io::Result<ExtractedNoteCommitment> {
     })
 }
 
-pub fn read_note_ciphertext<R: Read>(
+pub fn read_note_ciphertext<R: Read, D: OrchardDomainCommon>(
     mut reader: R,
-) -> io::Result<TransmittedNoteCiphertext<OrchardVanilla>> {
-    let mut tnc = TransmittedNoteCiphertext::<OrchardVanilla> {
-        epk_bytes: [0u8; 32],
-        enc_ciphertext: <OrchardVanilla as OrchardDomainCommon>::NoteCiphertextBytes::from_slice(
-            [0u8; OrchardVanilla::ENC_CIPHERTEXT_SIZE].as_ref(),
-        )
-        .expect("OrchardVanilla note ciphertext is of the correct size"),
-        out_ciphertext: [0u8; 80],
-    };
+) -> io::Result<TransmittedNoteCiphertext<D>> {
+    let mut epk = [0; 32];
+    let mut enc = vec![0u8; D::ENC_CIPHERTEXT_SIZE];
+    let mut out = [0; 80];
 
-    reader.read_exact(&mut tnc.epk_bytes)?;
-    reader.read_exact(&mut tnc.enc_ciphertext.0)?;
-    reader.read_exact(&mut tnc.out_ciphertext)?;
+    reader.read_exact(&mut epk)?;
+    reader.read_exact(&mut enc)?;
+    reader.read_exact(&mut out)?;
 
-    Ok(tnc)
+    Ok(TransmittedNoteCiphertext::<D> {
+        epk_bytes: epk,
+        enc_ciphertext: <D>::NoteCiphertextBytes::from_slice(&enc).unwrap(),
+        out_ciphertext: out,
+    })
 }
 
-pub fn read_zsa_note_ciphertext<R: Read>(
+pub fn read_action_without_auth<R: Read, D: OrchardDomainCommon>(
     mut reader: R,
-) -> io::Result<TransmittedNoteCiphertext<OrchardZSA>> {
-    let mut tnc = TransmittedNoteCiphertext::<OrchardZSA> {
-        epk_bytes: [0u8; 32],
-        enc_ciphertext: <OrchardZSA as OrchardDomainCommon>::NoteCiphertextBytes::from_slice(
-            [0u8; OrchardZSA::ENC_CIPHERTEXT_SIZE].as_ref(),
-        )
-        .expect("OrchardZSA note ciphertext is of the correct size"),
-        out_ciphertext: [0u8; 80],
-    };
-
-    reader.read_exact(&mut tnc.epk_bytes)?;
-    reader.read_exact(&mut tnc.enc_ciphertext.0)?;
-    reader.read_exact(&mut tnc.out_ciphertext)?;
-
-    Ok(tnc)
-}
-
-pub fn read_action_without_auth<R: Read>(mut reader: R) -> io::Result<Action<(), OrchardVanilla>> {
+) -> io::Result<Action<(), D>> {
     let cv_net = read_value_commitment(&mut reader)?;
     let nf_old = read_nullifier(&mut reader)?;
     let rk = read_verification_key(&mut reader)?;
     let cmx = read_cmx(&mut reader)?;
     let encrypted_note = read_note_ciphertext(&mut reader)?;
-
-    Ok(Action::from_parts(
-        nf_old,
-        rk,
-        cmx,
-        encrypted_note,
-        cv_net,
-        (),
-    ))
-}
-
-pub fn read_zsa_action_without_auth<R: Read>(mut reader: R) -> io::Result<Action<(), OrchardZSA>> {
-    let cv_net = read_value_commitment(&mut reader)?;
-    let nf_old = read_nullifier(&mut reader)?;
-    let rk = read_verification_key(&mut reader)?;
-    let cmx = read_cmx(&mut reader)?;
-    let encrypted_note = read_zsa_note_ciphertext(&mut reader)?;
 
     Ok(Action::from_parts(
         nf_old,
