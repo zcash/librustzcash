@@ -494,7 +494,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
 
     /// Adds an Issuance action to the transaction.
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    pub fn add_issuance<FE>(
+    pub fn add_recipient<FE>(
         &mut self,
         asset_desc: String,
         recipient: Address,
@@ -1129,6 +1129,7 @@ mod tests {
     use assert_matches::assert_matches;
     use ff::Field;
     use incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness};
+    use orchard::issuance::IssueInfo;
     use rand_core::OsRng;
 
     use crate::{
@@ -1451,7 +1452,7 @@ mod tests {
         let asset = "asset_desc".to_string();
 
         builder
-            .init_finalizing_issuance_bundle::<FeeError>(iak, asset.clone())
+            .init_issuance_bundle::<FeeError>(iak, asset.clone(), None)
             .unwrap();
 
         let issuance_builder = builder.issuance_builder.clone().unwrap();
@@ -1473,7 +1474,7 @@ mod tests {
         let asset = "asset_desc".to_string();
 
         builder
-            .init_issuance_bundle::<FeeError>(iak, asset.clone(), address, NoteValue::from_raw(42))
+            .init_issuance_bundle::<FeeError>(iak, asset.clone(), Some(IssueInfo { recipient: address, value: NoteValue::from_raw(42) }))
             .unwrap();
 
         let issuance_builder = builder.issuance_builder.unwrap();
@@ -1504,10 +1505,10 @@ mod tests {
         let asset = "asset_desc".to_string();
 
         builder
-            .init_issuance_bundle::<FeeError>(iak, asset.clone(), address, NoteValue::from_raw(42))
+            .init_issuance_bundle::<FeeError>(iak, asset.clone(), Some(IssueInfo{ recipient: address, value: NoteValue::from_raw(42)}))
             .unwrap();
         builder
-            .add_issuance::<FeeError>(asset.clone(), address, NoteValue::from_raw(21))
+            .add_recipient::<FeeError>(asset.clone(), address, NoteValue::from_raw(21))
             .unwrap();
 
         let issuance_builder = builder.issuance_builder.unwrap();
@@ -1543,10 +1544,10 @@ mod tests {
         let asset2 = "asset_desc_2".to_string();
 
         builder
-            .init_issuance_bundle::<FeeError>(iak, asset1.clone(), address, NoteValue::from_raw(42))
+            .init_issuance_bundle::<FeeError>(iak, asset1.clone(), Some(IssueInfo{ recipient: address, value: NoteValue::from_raw(42) }))
             .unwrap();
         builder
-            .add_issuance::<FeeError>(asset2.clone(), address, NoteValue::from_raw(21))
+            .add_recipient::<FeeError>(asset2.clone(), address, NoteValue::from_raw(21))
             .unwrap();
 
         let issuance_builder = builder.issuance_builder.unwrap();

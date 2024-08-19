@@ -6,7 +6,7 @@ use crate::transaction::{
     Authorization, TransactionData, TxDigests,
 };
 
-pub fn v7_signature_hash<
+pub fn v6_signature_hash<
     TA: TransparentAuthorizingContext,
     A: Authorization<TransparentAuth = TA>,
 >(
@@ -14,6 +14,6 @@ pub fn v7_signature_hash<
     signable_input: &SignableInput<'_>,
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> Blake2bHash {
-    // Currently to_hash is designed in a way that it supports both v5 and v7 signature hash
+    // Currently to_hash is designed in a way that it supports both v5 and v6 signature hash
     v5_v6_signature_hash(tx, signable_input, txid_parts)
 }

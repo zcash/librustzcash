@@ -11,7 +11,7 @@ use std::io::{Error, ErrorKind, Read, Write};
 use zcash_encoding::{CompactSize, Vector};
 
 /// Reads an [`orchard::Bundle`] from a v6 transaction format.
-pub fn read_v7_bundle<R: Read>(mut reader: R) -> io::Result<Option<IssueBundle<Signed>>> {
+pub fn read_v6_bundle<R: Read>(mut reader: R) -> io::Result<Option<IssueBundle<Signed>>> {
     let actions = Vector::read(&mut reader, |r| read_action(r))?;
 
     if actions.is_empty() {
@@ -110,7 +110,7 @@ fn read_rseed<R: Read>(mut reader: R, nullifier: &Rho) -> io::Result<RandomSeed>
 }
 
 /// Writes an [`IssueBundle`] in the v5 transaction format.
-pub fn write_v7_bundle<W: Write>(
+pub fn write_v6_bundle<W: Write>(
     bundle: Option<&IssueBundle<Signed>>,
     mut writer: W,
 ) -> io::Result<()> {
