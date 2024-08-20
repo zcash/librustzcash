@@ -314,8 +314,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zip321]]
-version = "0.0.0"
-when = "2024-01-15"
+version = "0.1.0"
+when = "2024-08-20"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
