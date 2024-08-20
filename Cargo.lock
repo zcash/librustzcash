@@ -5998,7 +5998,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.15.1"
+version = "0.16.0"
 dependencies = [
  "aes",
  "assert_matches",

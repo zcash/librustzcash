@@ -6,6 +6,9 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.16.0] - 2024-08-19
+
 ### Added
 - `zcash_primitives::legacy::keys`:
   - `impl From<TransparentKeyScope> for bip32::ChildNumber`
