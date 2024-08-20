@@ -565,6 +565,12 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-run"
 delta = "0.1.6 -> 0.1.8"
 
+[[audits.zcash_address]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+delta = "0.3.2 -> 0.4.0"
+notes = "This release contains no unsafe code and consists soley of added convenience methods."
+
 [[audits.zcash_encoding]]
 who = "Kris Nuttycombe <kris@nutty.land>"
 criteria = "safe-to-deploy"
