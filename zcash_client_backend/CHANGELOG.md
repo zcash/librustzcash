@@ -6,7 +6,9 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-### Notable changes
+
+## [0.13.0] - 2024-08-20
+
 `zcash_client_backend` now supports TEX (transparent-source-only) addresses as specified
 in ZIP 320. Sending to one or more TEX addresses will automatically create a multi-step
 proposal that uses two transactions.
@@ -49,6 +51,13 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
 
 ### Changed
 - MSRV is now 1.70.0.
+- Updated dependencies:
+  - `zcash_address 0.4`
+  - `zcash_encoding 0.2.1`
+  - `zcash_keys 0.3`
+  - `zcash_primitives 0.16`
+  - `zcash_protocol 0.2`
+  - `zip321 0.1`
 - Migrated to `tonic 0.12`.
   - The `lightwalletd-tonic` feature flag no longer works on `wasm32-wasi` due
     to https://github.com/hyperium/tonic/issues/1783.
