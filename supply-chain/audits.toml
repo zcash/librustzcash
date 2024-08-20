@@ -583,6 +583,12 @@ criteria = "safe-to-deploy"
 delta = "0.15.1 -> 0.16.0"
 notes = "The primary change here is the switch from the `hdwallet` dependency to using `bip32`."
 
+[[audits.zcash_proofs]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+delta = "0.15.0 -> 0.16.0"
+notes = "This release involves only updates of previously-vetted dependencies."
+
 [[audits.zerocopy]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
