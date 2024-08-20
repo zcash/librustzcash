@@ -189,12 +189,15 @@ pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>])
         for s_out in shielded_outputs {
             ch.write_all(s_out.cmu().to_bytes().as_ref()).unwrap();
             ch.write_all(s_out.ephemeral_key().as_ref()).unwrap();
-            ch.write_all(&s_out.enc_ciphertext()[..52]).unwrap();
+            ch.write_all(&s_out.enc_ciphertext().as_ref()[..52])
+                .unwrap();
 
-            mh.write_all(&s_out.enc_ciphertext()[52..564]).unwrap();
+            mh.write_all(&s_out.enc_ciphertext().as_ref()[52..564])
+                .unwrap();
 
             nh.write_all(&s_out.cv().to_bytes()).unwrap();
-            nh.write_all(&s_out.enc_ciphertext()[564..]).unwrap();
+            nh.write_all(&s_out.enc_ciphertext().as_ref()[564..])
+                .unwrap();
             nh.write_all(&s_out.out_ciphertext()[..]).unwrap();
         }
 
