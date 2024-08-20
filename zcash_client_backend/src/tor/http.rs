@@ -24,6 +24,24 @@ use super::{Client, Error};
 
 pub mod cryptex;
 
+pub(super) fn url_is_https(url: &Uri) -> Result<bool, HttpError> {
+    Ok(url.scheme().ok_or_else(|| HttpError::NonHttpUrl)? == &Scheme::HTTPS)
+}
+
+pub(super) fn parse_url(url: &Uri) -> Result<(bool, String, u16), Error> {
+    let is_https = url_is_https(url)?;
+
+    let host = url.host().ok_or_else(|| HttpError::NonHttpUrl)?.to_string();
+
+    let port = match url.port_u16() {
+        Some(port) => port,
+        None if is_https => 443,
+        None => 80,
+    };
+
+    Ok((is_https, host, port))
+}
+
 impl Client {
     #[tracing::instrument(skip(self, h, f))]
     async fn get<T, F: Future<Output = Result<T, Error>>>(
@@ -32,15 +50,7 @@ impl Client {
         h: impl FnOnce(Builder) -> Builder,
         f: impl FnOnce(Incoming) -> F,
     ) -> Result<Response<T>, Error> {
-        let is_https = url.scheme().ok_or_else(|| HttpError::NonHttpUrl)? == &Scheme::HTTPS;
-
-        let host = url.host().ok_or_else(|| HttpError::NonHttpUrl)?.to_string();
-
-        let port = match url.port_u16() {
-            Some(port) => port,
-            None if is_https => 443,
-            None => 80,
-        };
+        let (is_https, host, port) = parse_url(&url)?;
 
         // Connect to the server.
         debug!("Connecting through Tor to {}:{}", host, port);
