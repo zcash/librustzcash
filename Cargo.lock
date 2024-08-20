@@ -5815,7 +5815,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "arti-client",
  "assert_matches",
