@@ -52,7 +52,7 @@ use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 mod wallet_commitment_trees;
 mod wallet_read;
 mod wallet_write;
-
+use crate::error::MemoryWalletError;
 struct MemoryWalletBlock {
     height: BlockHeight,
     hash: BlockHash,
@@ -84,7 +84,7 @@ impl Ord for MemoryWalletBlock {
 
 pub struct MemoryWalletDb {
     network: Network,
-    accounts: BTreeMap<u32, Account>,
+    accounts: Vec<Account>,
     blocks: BTreeMap<BlockHeight, MemoryWalletBlock>,
     tx_idx: HashMap<TxId, BlockHeight>,
     sapling_spends: BTreeMap<sapling::Nullifier, (TxId, bool)>,
@@ -107,7 +107,7 @@ impl MemoryWalletDb {
     pub fn new(network: Network, max_checkpoints: usize) -> Self {
         Self {
             network,
-            accounts: BTreeMap::new(),
+            accounts: Vec::new(),
             blocks: BTreeMap::new(),
             tx_idx: HashMap::new(),
             sapling_spends: BTreeMap::new(),
@@ -117,6 +117,29 @@ impl MemoryWalletDb {
             #[cfg(feature = "orchard")]
             orchard_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
         }
+    }
+
+    fn max_zip32_account_index(
+        &self,
+        seed_fingerprint: &SeedFingerprint,
+    ) -> Result<Option<zip32::AccountId>, String> {
+        Ok(self
+            .accounts
+            .iter()
+            .filter_map(|a| match a.source() {
+                AccountSource::Derived {
+                    seed_fingerprint: sf,
+                    account_index,
+                } => {
+                    if &sf == seed_fingerprint {
+                        Some(account_index)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .max())
     }
 }
 

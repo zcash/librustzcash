@@ -39,7 +39,7 @@ use zcash_client_backend::data_api::{
     WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
 };
 
-use super::{Account, AccountId, Error, MemoryWalletBlock, MemoryWalletDb};
+use super::{Account, AccountId, Error, MemoryWalletBlock, MemoryWalletDb, ViewingKey};
 
 impl WalletWrite for MemoryWalletDb {
     type UtxoRef = u32;
@@ -49,27 +49,35 @@ impl WalletWrite for MemoryWalletDb {
         seed: &SecretVec<u8>,
         birthday: &AccountBirthday,
     ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
-        todo!()
-        // let seed_fingerprint =
-        //     SeedFingerprint::from_seed(seed.expose_secret()).expect("Valid seed.");
-        // let account_id = self.accounts.last_key_value().map_or(0, |(id, _)| id + 1);
-        // let account_index = zip32::AccountId::try_from(account_id).unwrap();
-        // let usk =
-        //     UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account_index)?;
-        // let ufvk = usk.to_unified_full_viewing_key();
-        // self.accounts.insert(
-        //     account_id,
-        //     MemoryWalletAccount {
-        //         seed_fingerprint,
-        //         account_id: account_index,
-        //         ufvk,
-        //         birthday: birthday.clone(),
-        //         addresses: BTreeMap::new(),
-        //         notes: HashSet::new(),
-        //     },
-        // );
+        let seed_fingerprint = SeedFingerprint::from_seed(seed.expose_secret())
+            .ok_or_else(|| "Seed must be between 32 and 252 bytes in length.".to_owned())
+            .unwrap();
+        let account_index = self
+            .max_zip32_account_index(&seed_fingerprint)
+            .unwrap()
+            .map(|a| a.next().ok_or_else(|| "Account out of range".to_string()))
+            .transpose()
+            .unwrap()
+            .unwrap_or(zip32::AccountId::ZERO);
 
-        // Ok((AccountId(account_id), usk))
+        let usk = UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account_index)
+            .map_err(|_| "key derivation error".to_string())
+            .unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let account = Account {
+            account_id: AccountId(self.accounts.len() as u32),
+            kind: AccountSource::Derived {
+                seed_fingerprint,
+                account_index,
+            },
+            viewing_key: ViewingKey::Full(Box::new(ufvk)),
+            birthday: birthday.clone(),
+            purpose: AccountPurpose::Spending,
+        };
+        let id = account.id();
+        self.accounts.push(account);
+
+        Ok((id, usk))
     }
 
     fn get_next_available_address(
