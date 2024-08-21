@@ -59,7 +59,8 @@ impl WalletWrite for MemoryWalletDb {
             .transpose()?
             .unwrap_or(zip32::AccountId::ZERO);
 
-        let usk = UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account_index)?;
+        let usk =
+            UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account_index)?;
         let ufvk = usk.to_unified_full_viewing_key();
         let account = Account {
             account_id: AccountId(self.accounts.len() as u32),

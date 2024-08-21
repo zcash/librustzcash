@@ -17,7 +17,7 @@ use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
 use zcash_primitives::{
     block::BlockHash,
     consensus::{BlockHeight, Network},
-    transaction::{Transaction, TxId},
+    transaction::{components::OutPoint, Transaction, TxId},
 };
 use zcash_protocol::{
     memo::{self, Memo, MemoBytes},
@@ -90,6 +90,14 @@ pub struct MemoryWalletDb {
     accounts: Vec<Account>,
     blocks: BTreeMap<BlockHeight, MemoryWalletBlock>,
     tx_idx: HashMap<TxId, BlockHeight>,
+
+    /// Tracks transparent outputs received by this wallet indexed by their OutPoint which defines the
+    /// transaction and index where the output was created
+    transparent_received_outputs: HashMap<OutPoint, TransparentReceivedOutput>,
+
+    /// Tracks spends of received outputs. In thix case the TxId is the spending transaction
+    /// from this wallet.
+    transparent_received_output_spends: HashMap<OutPoint, TxId>,
     sapling_spends: BTreeMap<sapling::Nullifier, (TxId, bool)>,
     #[cfg(feature = "orchard")]
     orchard_spends: BTreeMap<orchard::note::Nullifier, (TxId, bool)>,
@@ -113,6 +121,8 @@ impl MemoryWalletDb {
             accounts: Vec::new(),
             blocks: BTreeMap::new(),
             tx_idx: HashMap::new(),
+            transparent_received_outputs: HashMap::new(),
+            transparent_received_output_spends: HashMap::new(),
             sapling_spends: BTreeMap::new(),
             #[cfg(feature = "orchard")]
             orchard_spends: BTreeMap::new(),
@@ -230,4 +240,11 @@ impl ViewingKey {
             ViewingKey::Incoming(uivk) => uivk.as_ref().clone(),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+struct TransparentReceivedOutput {
+    output: WalletTransparentOutput,
+    account_id: AccountId,
+    tx_id: TxId,
 }
