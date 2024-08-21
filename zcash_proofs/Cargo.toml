@@ -1,7 +1,7 @@
 [package]
 name = "zcash_proofs"
 description = "Zcash zk-SNARK circuits and proving APIs"
-version = "0.15.0"
+version = "0.16.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
 ]
@@ -22,7 +22,7 @@ zcash_primitives.workspace = true
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
-bellman = { version = "0.14", default-features = false, features = ["groth16"] }
+bellman.workspace = true
 bls12_381.workspace = true
 group.workspace = true
 jubjub.workspace = true

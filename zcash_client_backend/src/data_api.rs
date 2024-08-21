@@ -88,15 +88,18 @@ use zcash_primitives::{
     consensus::BlockHeight,
     memo::{Memo, MemoBytes},
     transaction::{
-        components::amount::{BalanceError, NonNegativeAmount},
+        components::{
+            amount::{BalanceError, NonNegativeAmount},
+            OutPoint,
+        },
         Transaction, TxId,
     },
 };
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::wallet::TransparentAddressMetadata,
-    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
+    crate::wallet::TransparentAddressMetadata, std::ops::Range,
+    zcash_primitives::legacy::TransparentAddress,
 };
 
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -321,6 +324,17 @@ impl AccountBalance {
     }
 }
 
+/// An enumeration used to control what information is tracked by the wallet for
+/// notes received by a given account.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AccountPurpose {
+    /// For spending accounts, the wallet will track information needed to spend
+    /// received notes.
+    Spending,
+    /// For view-only accounts, the wallet will not track spend information.
+    ViewOnly,
+}
+
 /// The kinds of accounts supported by `zcash_client_backend`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AccountSource {
@@ -331,7 +345,7 @@ pub enum AccountSource {
     },
 
     /// An account imported from a viewing key.
-    Imported,
+    Imported { purpose: AccountPurpose },
 }
 
 /// A set of capabilities that a client account must provide.
@@ -342,6 +356,14 @@ pub trait Account<AccountId: Copy> {
     /// Returns whether this account is derived or imported, and the derivation parameters
     /// if applicable.
     fn source(&self) -> AccountSource;
+
+    /// Returns whether the account is a spending account or a view-only account.
+    fn purpose(&self) -> AccountPurpose {
+        match self.source() {
+            AccountSource::Derived { .. } => AccountPurpose::Spending,
+            AccountSource::Imported { purpose } => purpose,
+        }
+    }
 
     /// Returns the UFVK that the wallet backend has stored for the account, if any.
     ///
@@ -364,7 +386,9 @@ impl<A: Copy> Account<A> for (A, UnifiedFullViewingKey) {
     }
 
     fn source(&self) -> AccountSource {
-        AccountSource::Imported
+        AccountSource::Imported {
+            purpose: AccountPurpose::ViewOnly,
+        }
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
@@ -383,7 +407,9 @@ impl<A: Copy> Account<A> for (A, UnifiedIncomingViewingKey) {
     }
 
     fn source(&self) -> AccountSource {
-        AccountSource::Imported
+        AccountSource::Imported {
+            purpose: AccountPurpose::ViewOnly,
+        }
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
@@ -541,6 +567,71 @@ pub struct SpendableNotes<NoteRef> {
     orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
 }
 
+/// A request for transaction data enhancement, spentness check, or discovery
+/// of spends from a given transparent address within a specific block range.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TransactionDataRequest {
+    /// Information about the chain's view of a transaction is requested.
+    ///
+    /// The caller evaluating this request on behalf of the wallet backend should respond to this
+    /// request by determining the status of the specified transaction with respect to the main
+    /// chain; if using `lightwalletd` for access to chain data, this may be obtained by
+    /// interpreting the results of the [`GetTransaction`] RPC method. It should then call
+    /// [`WalletWrite::set_transaction_status`] to provide the resulting transaction status
+    /// information to the wallet backend.
+    ///
+    /// [`GetTransaction`]: crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient::get_transaction
+    GetStatus(TxId),
+    /// Transaction enhancement (download of complete raw transaction data) is requested.
+    ///
+    /// The caller evaluating this request on behalf of the wallet backend should respond to this
+    /// request by providing complete data for the specified transaction to
+    /// [`wallet::decrypt_and_store_transaction`]; if using `lightwalletd` for access to chain
+    /// state, this may be obtained via the [`GetTransaction`] RPC method. If no data is available
+    /// for the specified transaction, this should be reported to the backend using
+    /// [`WalletWrite::set_transaction_status`]. A [`TransactionDataRequest::Enhancement`] request
+    /// subsumes any previously existing [`TransactionDataRequest::GetStatus`] request.
+    ///
+    /// [`GetTransaction`]: crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient::get_transaction
+    Enhancement(TxId),
+    /// Information about transactions that receive or spend funds belonging to the specified
+    /// transparent address is requested.
+    ///
+    /// Fully transparent transactions, and transactions that do not contain either shielded inputs
+    /// or shielded outputs belonging to the wallet, may not be discovered by the process of chain
+    /// scanning; as a consequence, the wallet must actively query to find transactions that spend
+    /// such funds. Ideally we'd be able to query by [`OutPoint`] but this is not currently
+    /// functionality that is supported by the light wallet server.
+    ///
+    /// The caller evaluating this request on behalf of the wallet backend should respond to this
+    /// request by detecting transactions involving the specified address within the provided block
+    /// range; if using `lightwalletd` for access to chain data, this may be performed using the
+    /// [`GetTaddressTxids`] RPC method. It should then call [`wallet::decrypt_and_store_transaction`]
+    /// for each transaction so detected.
+    ///
+    /// [`GetTaddressTxids`]: crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient::get_taddress_txids
+    #[cfg(feature = "transparent-inputs")]
+    SpendsFromAddress {
+        address: TransparentAddress,
+        block_range_start: BlockHeight,
+        block_range_end: Option<BlockHeight>,
+    },
+}
+
+/// Metadata about the status of a transaction obtained by inspecting the chain state.
+#[derive(Clone, Copy, Debug)]
+pub enum TransactionStatus {
+    /// The requested transaction ID was not recognized by the node.
+    TxidNotRecognized,
+    /// The requested transaction ID corresponds to a transaction that is recognized by the node,
+    /// but is in the mempool or is otherwise not mined in the main chain (but may have been mined
+    /// on a fork that was reorged away).
+    NotInMainChain,
+    /// The requested transaction ID corresponds to a transaction that has been included in the
+    /// block at the provided height.
+    Mined(BlockHeight),
+}
+
 impl<NoteRef> SpendableNotes<NoteRef> {
     /// Construct a new empty [`SpendableNotes`].
     pub fn empty() -> Self {
@@ -668,10 +759,10 @@ pub trait InputSource {
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
 
-    /// Fetches a spendable transparent output.
+    /// Fetches the transparent output corresponding to the provided `outpoint`.
     ///
     /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or is not
-    /// spendable.
+    /// spendable as of the chain tip height.
     #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_output(
         &self,
@@ -680,14 +771,20 @@ pub trait InputSource {
         Ok(None)
     }
 
-    /// Returns a list of unspent transparent UTXOs that appear in the chain at heights up to and
-    /// including `max_height`.
+    /// Returns the list of spendable transparent outputs received by this wallet at `address`
+    /// such that, at height `target_height`:
+    /// * the transaction that produced the output had or will have at least `min_confirmations`
+    ///   confirmations; and
+    /// * the output is unspent as of the current chain tip.
+    ///
+    /// An output that is potentially spent by an unmined transaction in the mempool is excluded
+    /// iff the spending transaction will not be expired at `target_height`.
     #[cfg(feature = "transparent-inputs")]
-    fn get_unspent_transparent_outputs(
+    fn get_spendable_transparent_outputs(
         &self,
         _address: &TransparentAddress,
-        _max_height: BlockHeight,
-        _exclude: &[OutPoint],
+        _target_height: BlockHeight,
+        _min_confirmations: u32,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         Ok(vec![])
     }
@@ -889,10 +986,14 @@ pub trait WalletRead {
         query: NullifierQuery,
     ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error>;
 
-    /// Returns the set of all transparent receivers associated with the given account.
+    /// Returns the set of non-ephemeral transparent receivers associated with the given
+    /// account controlled by this wallet.
     ///
-    /// The set contains all transparent receivers that are known to have been derived
-    /// under this account. Wallets should scan the chain for UTXOs sent to these
+    /// The set contains all non-ephemeral transparent receivers that are known to have
+    /// been derived under this account. Wallets should scan the chain for UTXOs sent to
+    /// these receivers.
+    ///
+    /// Use [`Self::get_known_ephemeral_addresses`] to obtain the ephemeral transparent
     /// receivers.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
@@ -902,8 +1003,11 @@ pub trait WalletRead {
         Ok(HashMap::new())
     }
 
-    /// Returns a mapping from transparent receiver to not-yet-shielded UTXO balance,
-    /// for each address associated with a nonzero balance.
+    /// Returns a mapping from each transparent receiver associated with the specified account
+    /// to its not-yet-shielded UTXO balance as of the end of the block at the provided
+    /// `max_height`, when that balance is non-zero.
+    ///
+    /// Balances of ephemeral transparent addresses will not be included.
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
         &self,
@@ -912,6 +1016,134 @@ pub trait WalletRead {
     ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
         Ok(HashMap::new())
     }
+
+    /// Returns the metadata associated with a given transparent receiver in an account
+    /// controlled by this wallet, if available.
+    ///
+    /// This is equivalent to (but may be implemented more efficiently than):
+    /// ```compile_fail
+    /// Ok(
+    ///     if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
+    ///         result.clone()
+    ///     } else {
+    ///         self.get_known_ephemeral_addresses(account, None)?
+    ///             .into_iter()
+    ///             .find(|(known_addr, _)| known_addr == address)
+    ///             .map(|(_, metadata)| metadata)
+    ///     },
+    /// )
+    /// ```
+    ///
+    /// Returns `Ok(None)` if the address is not recognized, or we do not have metadata for it.
+    /// Returns `Ok(Some(metadata))` if we have the metadata.
+    #[cfg(feature = "transparent-inputs")]
+    fn get_transparent_address_metadata(
+        &self,
+        account: Self::AccountId,
+        address: &TransparentAddress,
+    ) -> Result<Option<TransparentAddressMetadata>, Self::Error> {
+        // This should be overridden.
+        Ok(
+            if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
+                result.clone()
+            } else {
+                self.get_known_ephemeral_addresses(account, None)?
+                    .into_iter()
+                    .find(|(known_addr, _)| known_addr == address)
+                    .map(|(_, metadata)| metadata)
+            },
+        )
+    }
+
+    /// Returns a vector of ephemeral transparent addresses associated with the given
+    /// account controlled by this wallet, along with their metadata. The result includes
+    /// reserved addresses, and addresses for `GAP_LIMIT` additional indices (capped to
+    /// the maximum index).
+    ///
+    /// If `index_range` is some `Range`, it limits the result to addresses with indices
+    /// in that range.
+    ///
+    /// Wallets should scan the chain for UTXOs sent to these ephemeral transparent
+    /// receivers, but do not need to do so regularly. Under expected usage, outputs
+    /// would only be detected with these receivers in the following situations:
+    ///
+    /// - This wallet created a payment to a ZIP 320 (TEX) address, but the second
+    ///   transaction (that spent the output sent to the ephemeral address) did not get
+    ///   mined before it expired.
+    ///   - In this case the output will already be known to the wallet (because it
+    ///     stores the transactions that it creates).
+    ///
+    /// - Another wallet app using the same seed phrase created a payment to a ZIP 320
+    ///   address, and this wallet queried for the ephemeral UTXOs after the first
+    ///   transaction was mined but before the second transaction was mined.
+    ///   - In this case, the output should not be considered unspent until the expiry
+    ///     height of the transaction it was received in has passed. Wallets creating
+    ///     payments to TEX addresses generally set the same expiry height for the first
+    ///     and second transactions, meaning that this wallet does not need to observe
+    ///     the second transaction to determine when it would have expired.
+    ///
+    /// - A TEX address recipient decided to return funds that the wallet had sent to
+    ///   them.
+    ///
+    /// In all cases, the wallet should re-shield the unspent outputs, in a separate
+    /// transaction per ephemeral address, before re-spending the funds.
+    #[cfg(feature = "transparent-inputs")]
+    fn get_known_ephemeral_addresses(
+        &self,
+        _account: Self::AccountId,
+        _index_range: Option<Range<u32>>,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        Ok(vec![])
+    }
+
+    /// If a given ephemeral address might have been reserved, i.e. would be included in
+    /// the map returned by `get_known_ephemeral_addresses(account_id, false)` for any
+    /// of the wallet's accounts, then return `Ok(Some(account_id))`. Otherwise return
+    /// `Ok(None)`.
+    ///
+    /// This is equivalent to (but may be implemented more efficiently than):
+    /// ```compile_fail
+    /// for account_id in self.get_account_ids()? {
+    ///     if self
+    ///         .get_known_ephemeral_addresses(account_id, None)?
+    ///         .into_iter()
+    ///         .any(|(known_addr, _)| &known_addr == address)
+    ///     {
+    ///         return Ok(Some(account_id));
+    ///     }
+    /// }
+    /// Ok(None)
+    /// ```
+    #[cfg(feature = "transparent-inputs")]
+    fn find_account_for_ephemeral_address(
+        &self,
+        address: &TransparentAddress,
+    ) -> Result<Option<Self::AccountId>, Self::Error> {
+        for account_id in self.get_account_ids()? {
+            if self
+                .get_known_ephemeral_addresses(account_id, None)?
+                .into_iter()
+                .any(|(known_addr, _)| &known_addr == address)
+            {
+                return Ok(Some(account_id));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Returns a vector of [`TransactionDataRequest`] values that describe information needed by
+    /// the wallet to complete its view of transaction history.
+    ///
+    /// Requests for the same transaction data may be returned repeatedly by successive data
+    /// requests. The caller of this method should consider the latest set of requests returned
+    /// by this method to be authoritative and to subsume that returned by previous calls.
+    ///
+    /// Callers should poll this method on a regular interval, not as part of ordinary chain
+    /// scanning, which already produces requests for transaction data enhancement. Note that
+    /// responding to a set of transaction data requests may result in the creation of new
+    /// transaction data requests, such as when it is necessary to fill in purely-transparent
+    /// transaction history by walking the chain backwards via transparent inputs.
+    fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error>;
 }
 
 /// The relevance of a seed to a given wallet.
@@ -1136,6 +1368,7 @@ impl<A> ScannedBlock<A> {
 /// The purpose of this struct is to permit atomic updates of the
 /// wallet database when transactions are successfully decrypted.
 pub struct DecryptedTransaction<'a, AccountId> {
+    mined_height: Option<BlockHeight>,
     tx: &'a Transaction,
     sapling_outputs: Vec<DecryptedOutput<sapling::Note, AccountId>>,
     #[cfg(feature = "orchard")]
@@ -1145,6 +1378,7 @@ pub struct DecryptedTransaction<'a, AccountId> {
 impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
     /// Constructs a new [`DecryptedTransaction`] from its constituent parts.
     pub fn new(
+        mined_height: Option<BlockHeight>,
         tx: &'a Transaction,
         sapling_outputs: Vec<DecryptedOutput<sapling::Note, AccountId>>,
         #[cfg(feature = "orchard")] orchard_outputs: Vec<
@@ -1152,6 +1386,7 @@ impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
         >,
     ) -> Self {
         Self {
+            mined_height,
             tx,
             sapling_outputs,
             #[cfg(feature = "orchard")]
@@ -1159,6 +1394,10 @@ impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
         }
     }
 
+    /// Returns the height at which the transaction was mined, if known.
+    pub fn mined_height(&self) -> Option<BlockHeight> {
+        self.mined_height
+    }
     /// Returns the raw transaction data.
     pub fn tx(&self) -> &Transaction {
         self.tx
@@ -1182,26 +1421,39 @@ impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
 pub struct SentTransaction<'a, AccountId> {
     tx: &'a Transaction,
     created: time::OffsetDateTime,
+    target_height: BlockHeight,
     account: AccountId,
-    outputs: Vec<SentTransactionOutput<AccountId>>,
+    outputs: &'a [SentTransactionOutput<AccountId>],
     fee_amount: NonNegativeAmount,
     #[cfg(feature = "transparent-inputs")]
-    utxos_spent: Vec<OutPoint>,
+    utxos_spent: &'a [OutPoint],
 }
 
 impl<'a, AccountId> SentTransaction<'a, AccountId> {
     /// Constructs a new [`SentTransaction`] from its constituent parts.
+    ///
+    /// ### Parameters
+    /// - `tx`: the raw transaction data
+    /// - `created`: the system time at which the transaction was created
+    /// - `target_height`: the target height that was used in the construction of the transaction
+    /// - `account`: the account that spent funds in creation of the transaction
+    /// - `outputs`: the outputs created by the transaction, including those sent to external
+    ///   recipients which may not otherwise be recoverable
+    /// - `fee_amount`: the fee value paid by the transaction
+    /// - `utxos_spent`: the UTXOs controlled by the wallet that were spent in this transaction
     pub fn new(
         tx: &'a Transaction,
         created: time::OffsetDateTime,
+        target_height: BlockHeight,
         account: AccountId,
-        outputs: Vec<SentTransactionOutput<AccountId>>,
+        outputs: &'a [SentTransactionOutput<AccountId>],
         fee_amount: NonNegativeAmount,
-        #[cfg(feature = "transparent-inputs")] utxos_spent: Vec<OutPoint>,
+        #[cfg(feature = "transparent-inputs")] utxos_spent: &'a [OutPoint],
     ) -> Self {
         Self {
             tx,
             created,
+            target_height,
             account,
             outputs,
             fee_amount,
@@ -1224,7 +1476,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
     }
     /// Returns the outputs of the transaction.
     pub fn outputs(&self) -> &[SentTransactionOutput<AccountId>] {
-        self.outputs.as_ref()
+        self.outputs
     }
     /// Returns the fee paid by the transaction.
     pub fn fee_amount(&self) -> NonNegativeAmount {
@@ -1233,7 +1485,12 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
     /// Returns the list of UTXOs spent in the created transaction.
     #[cfg(feature = "transparent-inputs")]
     pub fn utxos_spent(&self) -> &[OutPoint] {
-        self.utxos_spent.as_ref()
+        self.utxos_spent
+    }
+
+    /// Returns the block height that this transaction was created to target.
+    pub fn target_height(&self) -> BlockHeight {
+        self.target_height
     }
 }
 
@@ -1242,7 +1499,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
 /// This type is capable of representing both shielded and transparent outputs.
 pub struct SentTransactionOutput<AccountId> {
     output_index: usize,
-    recipient: Recipient<AccountId, Note>,
+    recipient: Recipient<AccountId, Note, OutPoint>,
     value: NonNegativeAmount,
     memo: Option<MemoBytes>,
 }
@@ -1259,7 +1516,7 @@ impl<AccountId> SentTransactionOutput<AccountId> {
     /// * `memo` - the memo that was sent with this output
     pub fn from_parts(
         output_index: usize,
-        recipient: Recipient<AccountId, Note>,
+        recipient: Recipient<AccountId, Note, OutPoint>,
         value: NonNegativeAmount,
         memo: Option<MemoBytes>,
     ) -> Self {
@@ -1281,8 +1538,8 @@ impl<AccountId> SentTransactionOutput<AccountId> {
         self.output_index
     }
     /// Returns the recipient address of the transaction, or the account id and
-    /// resulting note for wallet-internal outputs.
-    pub fn recipient(&self) -> &Recipient<AccountId, Note> {
+    /// resulting note/outpoint for wallet-internal outputs.
+    pub fn recipient(&self) -> &Recipient<AccountId, Note, OutPoint> {
         &self.recipient
     }
     /// Returns the value of the newly created output.
@@ -1326,7 +1583,7 @@ impl AccountBirthday {
     /// Constructs a new [`AccountBirthday`] from its constituent parts.
     ///
     /// * `prior_chain_state`: The chain state prior to the birthday height of the account. The
-    ///    birthday height  is defined as the height of the first block to be scanned in wallet
+    ///    birthday height is defined as the height of the first block to be scanned in wallet
     ///    recovery.
     /// * `recover_until`: An optional height at which the wallet should exit "recovery mode". In
     ///    order to avoid confusing shifts in wallet balance and spendability that may temporarily be
@@ -1429,8 +1686,90 @@ impl AccountBirthday {
     }
 }
 
-/// This trait encapsulates the write capabilities required to update stored
-/// wallet data.
+/// This trait encapsulates the write capabilities required to update stored wallet data.
+///
+/// # Adding accounts
+///
+/// This trait provides several methods for adding accounts to the wallet data:
+/// - [`WalletWrite::create_account`]
+/// - [`WalletWrite::import_account_hd`]
+/// - [`WalletWrite::import_account_ufvk`]
+///
+/// All of these methods take an [`AccountBirthday`]. The birthday height is defined as
+/// the minimum block height that will be scanned for funds belonging to the wallet. If
+/// `birthday.height()` is below the current chain tip, the account addition operation
+/// will trigger a re-scan of the blocks at and above the provided height.
+///
+/// The order in which you call these methods will affect the resulting wallet structure:
+/// - If only [`WalletWrite::create_account`] is used, the resulting accounts will have
+///   sequential [ZIP 32] account indices within each given seed.
+/// - If [`WalletWrite::import_account_hd`] is used to import accounts with non-sequential
+///   ZIP 32 account indices from the same seed, a call to [`WalletWrite::create_account`]
+///   will use the ZIP 32 account index just after the highest-numbered existing account.
+/// - If an account is added to the wallet, and then a later call to one of the methods
+///   would produce a UFVK that collides with that account on any FVK component (i.e.
+///   Sapling, Orchard, or transparent), an error will be returned. This can occur in the
+///   following cases:
+///   - An account is created via [`WalletWrite::create_account`] with an auto-selected
+///     ZIP 32 account index, and that index is later imported explicitly via either
+///     [`WalletWrite::import_account_ufvk`] or [`WalletWrite::import_account_hd`].
+///   - An account is imported via [`WalletWrite::import_account_ufvk`] or
+///     [`WalletWrite::import_account_hd`], and then the ZIP 32 account index
+///     corresponding to that account's UFVK is later imported either implicitly
+///     via [`WalletWrite::create_account`], or explicitly via a call to
+///     [`WalletWrite::import_account_ufvk`] or [`WalletWrite::import_account_hd`].
+///
+/// Note that an error will be returned on an FVK collision even if the UFVKs do not
+/// match exactly, e.g. if they have different subsets of components.
+///
+/// A future change to this trait might introduce a method to "upgrade" an imported
+/// account with derivation information. See [zcash/librustzcash#1284] for details.
+///
+/// Users of the `WalletWrite` trait should generally distinguish in their APIs and wallet
+/// UIs between creating a new account, and importing an account that previously existed.
+/// By convention, wallets should only allow a new account to be generated after confirmed
+/// funds have been received by the newest existing account; this allows automated account
+/// recovery to discover and recover all funds within a particular seed.
+///
+/// # Creating a new wallet
+///
+/// To create a new wallet:
+/// - Generate a new [BIP 39] mnemonic phrase, using a crate like [`bip0039`].
+/// - Derive the corresponding seed from the mnemonic phrase.
+/// - Use [`WalletWrite::create_account`] with the resulting seed.
+///
+/// Callers should construct the [`AccountBirthday`] using [`AccountBirthday::from_treestate`] for
+/// the block at height `chain_tip_height - 100`. Setting the birthday height to a tree state below
+/// the pruning depth ensures that reorgs cannot cause funds intended for the wallet to be missed;
+/// otherwise, if the chain tip height were used for the wallet birthday, a transaction targeted at
+/// a height greater than the chain tip could be mined at a height below that tip as part of a
+/// reorg.
+///
+/// # Restoring a wallet from backup
+///
+/// To restore a backed-up wallet:
+/// - Derive the seed from its BIP 39 mnemonic phrase.
+/// - Use [`WalletWrite::import_account_hd`] once for each ZIP 32 account index that the
+///   user wants to restore.
+/// - If the highest previously-used ZIP 32 account index was _not_ restored by the user,
+///   remember this index separately as `index_max`. The first time the user wants to
+///   generate a new account, use [`WalletWrite::import_account_hd`] to create the account
+///   `index_max + 1`.
+/// - [`WalletWrite::create_account`] can be used to generate subsequent new accounts in
+///   the restored wallet.
+///
+/// Automated account recovery has not yet been implemented by this crate. A wallet app
+/// that supports multiple accounts can implement it manually by tracking account balances
+/// relative to [`WalletSummary::fully_scanned_height`], and creating new accounts as
+/// funds appear in existing accounts.
+///
+/// If the number of accounts is known in advance, the wallet should create all accounts before
+/// scanning the chain so that the scan can be done in a single pass for all accounts.
+///
+/// [ZIP 32]: https://zips.z.cash/zip-0032
+/// [zcash/librustzcash#1284]: https://github.com/zcash/librustzcash/issues/1284
+/// [BIP 39]: https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki
+/// [`bip0039`]: https://crates.io/crates/bip0039
 pub trait WalletWrite: WalletRead {
     /// The type of identifiers used to look up transparent UTXOs.
     type UtxoRef;
@@ -1438,29 +1777,28 @@ pub trait WalletWrite: WalletRead {
     /// Tells the wallet to track the next available account-level spend authority, given the
     /// current set of [ZIP 316] account identifiers known to the wallet database.
     ///
+    /// The "next available account" is defined as the ZIP-32 account index immediately following
+    /// the highest existing account index among all accounts in the wallet that share the given
+    /// seed. Users of the [`WalletWrite`] trait that only call this method are guaranteed to have
+    /// accounts with sequential indices.
+    ///
     /// Returns the account identifier for the newly-created wallet database entry, along with the
     /// associated [`UnifiedSpendingKey`]. Note that the unique account identifier should *not* be
     /// assumed equivalent to the ZIP 32 account index. It is an opaque identifier for a pool of
     /// funds or set of outputs controlled by a single spending authority.
     ///
-    /// If `birthday.height()` is below the current chain tip, this operation will
-    /// trigger a re-scan of the blocks at and above the provided height. The birthday height is
-    /// defined as the minimum block height that will be scanned for funds belonging to the wallet.
+    /// The ZIP-32 account index may be obtained by calling [`WalletRead::get_account`]
+    /// with the returned account identifier.
     ///
-    /// For new wallets, callers should construct the [`AccountBirthday`] using
-    /// [`AccountBirthday::from_treestate`] for the block at height `chain_tip_height - 100`.
-    /// Setting the birthday height to a tree state below the pruning depth ensures that reorgs
-    /// cannot cause funds intended for the wallet to be missed; otherwise, if the chain tip height
-    /// were used for the wallet birthday, a transaction targeted at a height greater than the
-    /// chain tip could be mined at a height below that tip as part of a reorg.
+    /// The [`WalletWrite`] trait documentation has more details about account creation and import.
     ///
-    /// If `seed` was imported from a backup and this method is being used to restore a previous
-    /// wallet state, you should use this method to add all of the desired accounts before scanning
-    /// the chain from the seed's birthday height.
+    /// # Implementation notes
     ///
-    /// By convention, wallets should only allow a new account to be generated after confirmed
-    /// funds have been received by the currently-available account (in order to enable automated
-    /// account recovery).
+    /// Implementations of this method **MUST NOT** "fill in gaps" by selecting an account index
+    /// that is lower than any existing account index among all accounts in the wallet that share
+    /// the given seed.
+    ///
+    /// # Panics
     ///
     /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
     ///
@@ -1470,6 +1808,55 @@ pub trait WalletWrite: WalletRead {
         seed: &SecretVec<u8>,
         birthday: &AccountBirthday,
     ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error>;
+
+    /// Tells the wallet to track a specific account index for a given seed.
+    ///
+    /// Returns details about the imported account, including the unique account identifier for
+    /// the newly-created wallet database entry, along with the associated [`UnifiedSpendingKey`].
+    /// Note that the unique account identifier should *not* be assumed equivalent to the ZIP 32
+    /// account index. It is an opaque identifier for a pool of funds or set of outputs controlled
+    /// by a single spending authority.
+    ///
+    /// Import accounts with indices that are exactly one greater than the highest existing account
+    /// index to ensure account indices are contiguous, thereby facilitating automated account
+    /// recovery.
+    ///
+    /// The [`WalletWrite`] trait documentation has more details about account creation and import.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    fn import_account_hd(
+        &mut self,
+        seed: &SecretVec<u8>,
+        account_index: zip32::AccountId,
+        birthday: &AccountBirthday,
+    ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error>;
+
+    /// Tells the wallet to track an account using a unified full viewing key.
+    ///
+    /// Returns details about the imported account, including the unique account identifier for
+    /// the newly-created wallet database entry. Unlike the other account creation APIs
+    /// ([`Self::create_account`] and [`Self::import_account_hd`]), no spending key is returned
+    /// because the wallet has no information about how the UFVK was derived.
+    ///
+    /// Certain optimizations are possible for accounts which will never be used to spend funds. If
+    /// `spending_key_available` is `false`, the wallet may choose to optimize for this case, in
+    /// which case any attempt to spend funds from the account will result in an error.
+    ///
+    /// The [`WalletWrite`] trait documentation has more details about account creation and import.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
+    fn import_account_ufvk(
+        &mut self,
+        unified_key: &UnifiedFullViewingKey,
+        birthday: &AccountBirthday,
+        purpose: AccountPurpose,
+    ) -> Result<Self::Account, Self::Error>;
 
     /// Generates and persists the next available diversified address, given the current
     /// addresses known to the wallet.
@@ -1517,11 +1904,16 @@ pub trait WalletWrite: WalletRead {
         received_tx: DecryptedTransaction<Self::AccountId>,
     ) -> Result<(), Self::Error>;
 
-    /// Saves information about a transaction that was constructed and sent by the wallet to the
-    /// persistent wallet store.
-    fn store_sent_tx(
+    /// Saves information about transactions constructed by the wallet to the persistent
+    /// wallet store.
+    ///
+    /// This must be called before the transactions are sent to the network.
+    ///
+    /// Transactions that have been stored by this method should be retransmitted while it
+    /// is still possible that they could be mined.
+    fn store_transactions_to_be_sent(
         &mut self,
-        sent_tx: &SentTransaction<Self::AccountId>,
+        transactions: &[SentTransaction<Self::AccountId>],
     ) -> Result<(), Self::Error>;
 
     /// Truncates the wallet database to the specified height.
@@ -1538,6 +1930,44 @@ pub trait WalletWrite: WalletRead {
     ///
     /// There may be restrictions on heights to which it is possible to truncate.
     fn truncate_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error>;
+
+    /// Reserves the next `n` available ephemeral addresses for the given account.
+    /// This cannot be undone, so as far as possible, errors associated with transaction
+    /// construction should have been reported before calling this method.
+    ///
+    /// To ensure that sufficient information is stored on-chain to allow recovering
+    /// funds sent back to any of the used addresses, a "gap limit" of 20 addresses
+    /// should be observed as described in [BIP 44].
+    ///
+    /// Returns an error if there is insufficient space within the gap limit to allocate
+    /// the given number of addresses, or if the account identifier does not correspond
+    /// to a known account.
+    ///
+    /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki#user-content-Address_gap_limit
+    #[cfg(feature = "transparent-inputs")]
+    fn reserve_next_n_ephemeral_addresses(
+        &mut self,
+        _account_id: Self::AccountId,
+        _n: usize,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        // Default impl is required for feature-flagged trait methods to prevent
+        // breakage due to inadvertent activation of features by transitive dependencies
+        // of the implementing crate.
+        Ok(vec![])
+    }
+
+    /// Updates the wallet backend with respect to the status of a specific transaction, from the
+    /// perspective of the main chain.
+    ///
+    /// Fully transparent transactions, and transactions that do not contain either shielded inputs
+    /// or shielded outputs belonging to the wallet, may not be discovered by the process of chain
+    /// scanning; as a consequence, the wallet must actively query to determine whether such
+    /// transactions have been mined.
+    fn set_transaction_status(
+        &mut self,
+        _txid: TxId,
+        _status: TransactionStatus,
+    ) -> Result<(), Self::Error>;
 }
 
 /// This trait describes a capability for manipulating wallet note commitment trees.
@@ -1636,13 +2066,17 @@ pub mod testing {
     use super::{
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
-        AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
-        ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes, WalletCommitmentTrees,
-        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        AccountBirthday, AccountPurpose, BlockMetadata, DecryptedTransaction, InputSource,
+        NullifierQuery, ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes,
+        TransactionDataRequest, TransactionStatus, WalletCommitmentTrees, WalletRead,
+        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     #[cfg(feature = "transparent-inputs")]
-    use {crate::wallet::TransparentAddressMetadata, zcash_primitives::legacy::TransparentAddress};
+    use {
+        crate::wallet::TransparentAddressMetadata, std::ops::Range,
+        zcash_primitives::legacy::TransparentAddress,
+    };
 
     #[cfg(feature = "orchard")]
     use super::ORCHARD_SHARD_HEIGHT;
@@ -1865,6 +2299,36 @@ pub mod testing {
         ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
             Ok(HashMap::new())
         }
+
+        #[cfg(feature = "transparent-inputs")]
+        fn get_transparent_address_metadata(
+            &self,
+            _account: Self::AccountId,
+            _address: &TransparentAddress,
+        ) -> Result<Option<TransparentAddressMetadata>, Self::Error> {
+            Ok(None)
+        }
+
+        #[cfg(feature = "transparent-inputs")]
+        fn get_known_ephemeral_addresses(
+            &self,
+            _account: Self::AccountId,
+            _index_range: Option<Range<u32>>,
+        ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+            Ok(vec![])
+        }
+
+        #[cfg(feature = "transparent-inputs")]
+        fn find_account_for_ephemeral_address(
+            &self,
+            _address: &TransparentAddress,
+        ) -> Result<Option<Self::AccountId>, Self::Error> {
+            Ok(None)
+        }
+
+        fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {
+            Ok(vec![])
+        }
     }
 
     impl WalletWrite for MockWalletDb {
@@ -1879,6 +2343,24 @@ pub mod testing {
             UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account)
                 .map(|k| (u32::from(account), k))
                 .map_err(|_| ())
+        }
+
+        fn import_account_hd(
+            &mut self,
+            _seed: &SecretVec<u8>,
+            _account_index: zip32::AccountId,
+            _birthday: &AccountBirthday,
+        ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error> {
+            todo!()
+        }
+
+        fn import_account_ufvk(
+            &mut self,
+            _unified_key: &UnifiedFullViewingKey,
+            _birthday: &AccountBirthday,
+            _purpose: AccountPurpose,
+        ) -> Result<Self::Account, Self::Error> {
+            todo!()
         }
 
         fn get_next_available_address(
@@ -1909,9 +2391,9 @@ pub mod testing {
             Ok(())
         }
 
-        fn store_sent_tx(
+        fn store_transactions_to_be_sent(
             &mut self,
-            _sent_tx: &SentTransaction<Self::AccountId>,
+            _transactions: &[SentTransaction<Self::AccountId>],
         ) -> Result<(), Self::Error> {
             Ok(())
         }
@@ -1926,6 +2408,23 @@ pub mod testing {
             _output: &WalletTransparentOutput,
         ) -> Result<Self::UtxoRef, Self::Error> {
             Ok(0)
+        }
+
+        #[cfg(feature = "transparent-inputs")]
+        fn reserve_next_n_ephemeral_addresses(
+            &mut self,
+            _account_id: Self::AccountId,
+            _n: usize,
+        ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+            Err(())
+        }
+
+        fn set_transaction_status(
+            &mut self,
+            _txid: TxId,
+            _status: TransactionStatus,
+        ) -> Result<(), Self::Error> {
+            Ok(())
         }
     }
 

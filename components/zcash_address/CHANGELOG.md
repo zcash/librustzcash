@@ -7,12 +7,16 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.4.0] - 2024-08-19
 ### Added
 - `zcash_address::ZcashAddress::{can_receive_memo, can_receive_as, matches_receiver}`
 - `zcash_address::unified::Address::{can_receive_memo, has_receiver_of_type, contains_receiver}`
 - Module `zcash_address::testing` under the `test-dependencies` feature.
-- Module `zcash_address::unified::address::testing` under the 
+- Module `zcash_address::unified::address::testing` under the
   `test-dependencies` feature.
+
+### Changed
+- Updated `zcash_protocol` dependency to version `0.2`
 
 ## [0.3.2] - 2024-03-06
 ### Added

@@ -3,10 +3,10 @@ use std::num::NonZeroU32;
 use std::{collections::BTreeMap, convert::Infallible};
 
 #[cfg(feature = "unstable")]
-use std::fs::File;
+use std::{ffi::OsStr, fs::File};
 
 use group::ff::Field;
-use incrementalmerkletree::{Position, Retention};
+use incrementalmerkletree::{Marking, Position, Retention};
 use nonempty::NonEmpty;
 use prost::Message;
 use rand_chacha::ChaChaRng;
@@ -26,6 +26,7 @@ use sapling::{
     zip32::DiversifiableFullViewingKey,
     Note, Nullifier,
 };
+use zcash_client_backend::data_api::Account as AccountTrait;
 #[allow(deprecated)]
 use zcash_client_backend::{
     address::Address,
@@ -74,7 +75,7 @@ use crate::{
     error::SqliteClientError,
     wallet::{
         commitment_tree, get_wallet_summary, init::init_wallet_db, sapling::tests::test_prover,
-        SubtreeScanProgress,
+        Account, SubtreeScanProgress,
     },
     AccountId, ReceivedNoteId, WalletDb,
 };
@@ -117,6 +118,7 @@ pub(crate) struct TestBuilder<Cache> {
     cache: Cache,
     initial_chain_state: Option<InitialChainState>,
     account_birthday: Option<AccountBirthday>,
+    account_index: Option<zip32::AccountId>,
 }
 
 impl TestBuilder<()> {
@@ -127,7 +129,6 @@ impl TestBuilder<()> {
         heartwood: Some(BlockHeight::from_u32(100_000)),
         canopy: Some(BlockHeight::from_u32(100_000)),
         nu5: Some(BlockHeight::from_u32(100_000)),
-        #[cfg(zcash_unstable = "nu6")]
         nu6: None,
         #[cfg(zcash_unstable = "zfuture")]
         z_future: None,
@@ -143,6 +144,7 @@ impl TestBuilder<()> {
             cache: (),
             initial_chain_state: None,
             account_birthday: None,
+            account_index: None,
         }
     }
 
@@ -154,6 +156,7 @@ impl TestBuilder<()> {
             cache: BlockCache::new(),
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
+            account_index: self.account_index,
         }
     }
 
@@ -166,6 +169,7 @@ impl TestBuilder<()> {
             cache: FsBlockCache::new(),
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
+            account_index: self.account_index,
         }
     }
 }
@@ -178,23 +182,6 @@ impl<Cache> TestBuilder<Cache> {
         assert!(self.initial_chain_state.is_none());
         assert!(self.account_birthday.is_none());
         self.initial_chain_state = Some(chain_state(&mut self.rng, &self.network));
-        self
-    }
-
-    pub(crate) fn with_account_birthday(
-        mut self,
-        birthday: impl FnOnce(
-            &mut ChaChaRng,
-            &LocalNetwork,
-            Option<&InitialChainState>,
-        ) -> AccountBirthday,
-    ) -> Self {
-        assert!(self.account_birthday.is_none());
-        self.account_birthday = Some(birthday(
-            &mut self.rng,
-            &self.network,
-            self.initial_chain_state.as_ref(),
-        ));
         self
     }
 
@@ -227,6 +214,15 @@ impl<Cache> TestBuilder<Cache> {
         self
     }
 
+    /// Sets the [`account_index`] field for the test account
+    ///
+    /// Call either [`with_account_from_sapling_activation`] or [`with_account_having_current_birthday`] before calling this method.
+    pub(crate) fn set_account_index(mut self, index: zip32::AccountId) -> Self {
+        assert!(self.account_index.is_none());
+        self.account_index = Some(index);
+        self
+    }
+
     /// Builds the state for this test.
     pub(crate) fn build(self) -> TestState<Cache> {
         let data_file = NamedTempFile::new().unwrap();
@@ -245,7 +241,7 @@ impl<Cache> TestBuilder<Cache> {
                         initial_state.chain_state.final_sapling_tree().clone(),
                         Retention::Checkpoint {
                             id: initial_state.chain_state.block_height(),
-                            is_marked: false,
+                            marking: Marking::Reference,
                         },
                     )
                 })
@@ -262,7 +258,7 @@ impl<Cache> TestBuilder<Cache> {
                             initial_state.chain_state.final_orchard_tree().clone(),
                             Retention::Checkpoint {
                                 id: initial_state.chain_state.block_height(),
-                                is_marked: false,
+                                marking: Marking::Reference,
                             },
                         )
                     })
@@ -288,11 +284,17 @@ impl<Cache> TestBuilder<Cache> {
 
         let test_account = self.account_birthday.map(|birthday| {
             let seed = Secret::new(vec![0u8; 32]);
-            let (account_id, usk) = db_data.create_account(&seed, &birthday).unwrap();
+            let (account, usk) = match self.account_index {
+                Some(index) => db_data.import_account_hd(&seed, index, &birthday).unwrap(),
+                None => {
+                    let result = db_data.create_account(&seed, &birthday).unwrap();
+                    (db_data.get_account(result.0).unwrap().unwrap(), result.1)
+                }
+            };
             (
                 seed,
                 TestAccount {
-                    account_id,
+                    account,
                     usk,
                     birthday,
                 },
@@ -394,14 +396,18 @@ impl CachedBlock {
 
 #[derive(Clone)]
 pub(crate) struct TestAccount {
-    account_id: AccountId,
+    account: Account,
     usk: UnifiedSpendingKey,
     birthday: AccountBirthday,
 }
 
 impl TestAccount {
+    pub(crate) fn account(&self) -> &Account {
+        &self.account
+    }
+
     pub(crate) fn account_id(&self) -> AccountId {
-        self.account_id
+        self.account.id()
     }
 
     pub(crate) fn usk(&self) -> &UnifiedSpendingKey {
@@ -461,25 +467,46 @@ where
     pub(crate) fn generate_next_block<Fvk: TestFvk>(
         &mut self,
         fvk: &Fvk,
-        req: AddressType,
+        address_type: AddressType,
         value: NonNegativeAmount,
     ) -> (BlockHeight, Cache::InsertResult, Fvk::Nullifier) {
         let pre_activation_block = CachedBlock::none(self.sapling_activation_height() - 1);
         let prior_cached_block = self.latest_cached_block().unwrap_or(&pre_activation_block);
         let height = prior_cached_block.height() + 1;
 
-        let (res, nf) = self.generate_block_at(
+        let (res, nfs) = self.generate_block_at(
             height,
             prior_cached_block.chain_state.block_hash(),
-            fvk,
-            req,
-            value,
+            &[FakeCompactOutput::new(fvk, address_type, value)],
             prior_cached_block.sapling_end_size,
             prior_cached_block.orchard_end_size,
             false,
         );
 
-        (height, res, nf)
+        (height, res, nfs[0])
+    }
+
+    /// Creates a fake block at the expected next height containing multiple outputs
+    /// and inserts it into the cache.
+    #[allow(dead_code)]
+    pub(crate) fn generate_next_block_multi<Fvk: TestFvk>(
+        &mut self,
+        outputs: &[FakeCompactOutput<Fvk>],
+    ) -> (BlockHeight, Cache::InsertResult, Vec<Fvk::Nullifier>) {
+        let pre_activation_block = CachedBlock::none(self.sapling_activation_height() - 1);
+        let prior_cached_block = self.latest_cached_block().unwrap_or(&pre_activation_block);
+        let height = prior_cached_block.height() + 1;
+
+        let (res, nfs) = self.generate_block_at(
+            height,
+            prior_cached_block.chain_state.block_hash(),
+            outputs,
+            prior_cached_block.sapling_end_size,
+            prior_cached_block.orchard_end_size,
+            false,
+        );
+
+        (height, res, nfs)
     }
 
     /// Adds an empty block to the cache, advancing the simulated chain height.
@@ -517,8 +544,8 @@ where
         (new_height, res)
     }
 
-    /// Creates a fake block with the given height and hash containing a single output of
-    /// the given value, and inserts it into the cache.
+    /// Creates a fake block with the given height and hash containing the requested outputs, and
+    /// inserts it into the cache.
     ///
     /// This generated block will be treated as the latest block, and subsequent calls to
     /// [`Self::generate_next_block`] will build on it.
@@ -527,13 +554,11 @@ where
         &mut self,
         height: BlockHeight,
         prev_hash: BlockHash,
-        fvk: &Fvk,
-        req: AddressType,
-        value: NonNegativeAmount,
+        outputs: &[FakeCompactOutput<Fvk>],
         initial_sapling_tree_size: u32,
         initial_orchard_tree_size: u32,
         allow_broken_hash_chain: bool,
-    ) -> (Cache::InsertResult, Fvk::Nullifier) {
+    ) -> (Cache::InsertResult, Vec<Fvk::Nullifier>) {
         let mut prior_cached_block = self
             .latest_cached_block_below_height(height)
             .cloned()
@@ -587,13 +612,11 @@ where
                 .insert(height - 1, prior_cached_block.clone());
         }
 
-        let (cb, nf) = fake_compact_block(
+        let (cb, nfs) = fake_compact_block(
             &self.network(),
             height,
             prev_hash,
-            fvk,
-            req,
-            value,
+            outputs,
             initial_sapling_tree_size,
             initial_orchard_tree_size,
             &mut self.rng,
@@ -603,7 +626,7 @@ where
         let res = self.cache_block(&prior_cached_block, cb);
         self.latest_block_height = Some(height);
 
-        (res, nf)
+        (res, nfs)
     }
 
     /// Creates a fake block at the expected next height spending the given note, and
@@ -796,6 +819,15 @@ impl<Cache> TestState<Cache> {
             .params
             .activation_height(NetworkUpgrade::Sapling)
             .expect("Sapling activation height must be known.")
+    }
+
+    /// Convenience method for obtaining the NU5 activation height for the network under test.
+    #[allow(dead_code)]
+    pub(crate) fn nu5_activation_height(&self) -> BlockHeight {
+        self.db_data
+            .params
+            .activation_height(NetworkUpgrade::Nu5)
+            .expect("NU5 activation height must be known.")
     }
 
     /// Exposes the test seed, if enabled via [`TestBuilder::with_test_account`].
@@ -1153,13 +1185,23 @@ impl<Cache> TestState<Cache> {
         .unwrap()
     }
 
+    /// Returns a transaction from the history.
+    #[allow(dead_code)]
+    pub(crate) fn get_tx_from_history(
+        &self,
+        txid: TxId,
+    ) -> Result<Option<TransactionSummary<AccountId>>, SqliteClientError> {
+        let history = self.get_tx_history()?;
+        Ok(history.into_iter().find(|tx| tx.txid() == txid))
+    }
+
     /// Returns a vector of transaction summaries
     pub(crate) fn get_tx_history(
         &self,
     ) -> Result<Vec<TransactionSummary<AccountId>>, SqliteClientError> {
         let mut stmt = self.wallet().conn.prepare_cached(
-            "SELECT * 
-             FROM v_transactions 
+            "SELECT *
+             FROM v_transactions
              ORDER BY mined_height DESC, tx_index DESC",
         )?;
 
@@ -1179,11 +1221,13 @@ impl<Cache> TestState<Cache> {
                         .get::<_, Option<i64>>("fee_paid")?
                         .map(Zatoshis::from_nonnegative_i64)
                         .transpose()?,
+                    spent_note_count: row.get("spent_note_count")?,
                     has_change: row.get("has_change")?,
                     sent_note_count: row.get("sent_note_count")?,
                     received_note_count: row.get("received_note_count")?,
                     memo_count: row.get("memo_count")?,
                     expired_unmined: row.get("expired_unmined")?,
+                    is_shielding: row.get("is_shielding")?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -1218,6 +1262,66 @@ impl<Cache> TestState<Cache> {
 
         Ok(results)
     }
+
+    /// Dump the schema and contents of the given database table, in
+    /// sqlite3 ".dump" format. The name of the table must be a static
+    /// string. This assumes that `sqlite3` is on your path and that it
+    /// invokes a compatible version of sqlite3.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `name` contains characters outside `[a-zA-Z_]`.
+    #[allow(dead_code)]
+    #[cfg(feature = "unstable")]
+    pub(crate) fn dump_table(&self, name: &'static str) {
+        assert!(name.chars().all(|c| c.is_ascii_alphabetic() || c == '_'));
+        unsafe {
+            run_sqlite3(self._data_file.path(), &format!(r#".dump "{name}""#));
+        }
+    }
+
+    /// Print the results of an arbitrary sqlite3 command (with "-safe"
+    /// and "-readonly" flags) to stderr. This is completely insecure and
+    /// should not be exposed in production. Use of the "-safe" and
+    /// "-readonly" flags is intended only to limit *accidental* misuse.
+    /// The output is unfiltered, and control codes could mess up your
+    /// terminal. This assumes that `sqlite3` is on your path and that it
+    /// invokes a compatible version of sqlite3.
+    #[allow(dead_code)]
+    #[cfg(feature = "unstable")]
+    pub(crate) unsafe fn run_sqlite3(&self, command: &str) {
+        run_sqlite3(self._data_file.path(), command)
+    }
+}
+
+// See the doc comment for `TestState::run_sqlite3` above.
+//
+// - `db_path` is the path to the database file.
+// - `command` may contain newlines.
+#[allow(dead_code)]
+#[cfg(feature = "unstable")]
+unsafe fn run_sqlite3<S: AsRef<OsStr>>(db_path: S, command: &str) {
+    use std::process::Command;
+    let output = Command::new("sqlite3")
+        .arg(db_path)
+        .arg("-safe")
+        .arg("-readonly")
+        .arg(command)
+        .output()
+        .expect("failed to execute sqlite3 process");
+
+    eprintln!(
+        "{}\n------\n{}",
+        command,
+        String::from_utf8_lossy(&output.stdout)
+    );
+    if !output.stderr.is_empty() {
+        eprintln!(
+            "------ stderr:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    eprintln!("------");
 }
 
 pub(crate) struct TransactionSummary<AccountId> {
@@ -1227,11 +1331,13 @@ pub(crate) struct TransactionSummary<AccountId> {
     mined_height: Option<BlockHeight>,
     account_value_delta: ZatBalance,
     fee_paid: Option<Zatoshis>,
+    spent_note_count: usize,
     has_change: bool,
     sent_note_count: usize,
     received_note_count: usize,
     memo_count: usize,
     expired_unmined: bool,
+    is_shielding: bool,
 }
 
 #[allow(dead_code)]
@@ -1260,6 +1366,10 @@ impl<AccountId> TransactionSummary<AccountId> {
         self.fee_paid
     }
 
+    pub(crate) fn spent_note_count(&self) -> usize {
+        self.spent_note_count
+    }
+
     pub(crate) fn has_change(&self) -> bool {
         self.has_change
     }
@@ -1279,11 +1389,15 @@ impl<AccountId> TransactionSummary<AccountId> {
     pub(crate) fn memo_count(&self) -> usize {
         self.memo_count
     }
+
+    pub(crate) fn is_shielding(&self) -> bool {
+        self.is_shielding
+    }
 }
 
 /// Trait used by tests that require a full viewing key.
 pub(crate) trait TestFvk {
-    type Nullifier;
+    type Nullifier: Copy;
 
     fn sapling_ovk(&self) -> Option<sapling::keys::OutgoingViewingKey>;
 
@@ -1306,6 +1420,8 @@ pub(crate) trait TestFvk {
         req: AddressType,
         value: NonNegativeAmount,
         initial_sapling_tree_size: u32,
+        // we don't require an initial Orchard tree size because we don't need it to compute
+        // the nullifier.
         rng: &mut R,
     ) -> Self::Nullifier;
 
@@ -1319,13 +1435,74 @@ pub(crate) trait TestFvk {
         req: AddressType,
         value: NonNegativeAmount,
         initial_sapling_tree_size: u32,
+        // we don't require an initial Orchard tree size because we don't need it to compute
+        // the nullifier.
+        rng: &mut R,
+    ) -> Self::Nullifier;
+}
+
+impl<'a, A: TestFvk> TestFvk for &'a A {
+    type Nullifier = A::Nullifier;
+
+    fn sapling_ovk(&self) -> Option<sapling::keys::OutgoingViewingKey> {
+        (*self).sapling_ovk()
+    }
+
+    #[cfg(feature = "orchard")]
+    fn orchard_ovk(&self, scope: zip32::Scope) -> Option<orchard::keys::OutgoingViewingKey> {
+        (*self).orchard_ovk(scope)
+    }
+
+    fn add_spend<R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        nf: Self::Nullifier,
+        rng: &mut R,
+    ) {
+        (*self).add_spend(ctx, nf, rng)
+    }
+
+    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        params: &P,
+        height: BlockHeight,
+        req: AddressType,
+        value: Zatoshis,
+        initial_sapling_tree_size: u32,
+        // we don't require an initial Orchard tree size because we don't need it to compute
+        // the nullifier.
         rng: &mut R,
     ) -> Self::Nullifier {
-        self.add_spend(ctx, nf, rng);
-        self.add_output(
+        (*self).add_output(
             ctx,
             params,
             height,
+            req,
+            value,
+            initial_sapling_tree_size,
+            rng,
+        )
+    }
+
+    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        params: &P,
+        height: BlockHeight,
+        nf: Self::Nullifier,
+        req: AddressType,
+        value: Zatoshis,
+        initial_sapling_tree_size: u32,
+        // we don't require an initial Orchard tree size because we don't need it to compute
+        // the nullifier.
+        rng: &mut R,
+    ) -> Self::Nullifier {
+        (*self).add_logical_action(
+            ctx,
+            params,
+            height,
+            nf,
             req,
             value,
             initial_sapling_tree_size,
@@ -1380,6 +1557,30 @@ impl TestFvk for DiversifiableFullViewingKey {
 
         note.nf(&self.fvk().vk.nk, position as u64)
     }
+
+    #[allow(clippy::too_many_arguments)]
+    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        params: &P,
+        height: BlockHeight,
+        nf: Self::Nullifier,
+        req: AddressType,
+        value: NonNegativeAmount,
+        initial_sapling_tree_size: u32,
+        rng: &mut R,
+    ) -> Self::Nullifier {
+        self.add_spend(ctx, nf, rng);
+        self.add_output(
+            ctx,
+            params,
+            height,
+            req,
+            value,
+            initial_sapling_tree_size,
+            rng,
+        )
+    }
 }
 
 #[cfg(feature = "orchard")]
@@ -1428,10 +1629,10 @@ impl TestFvk for orchard::keys::FullViewingKey {
         _: BlockHeight,
         req: AddressType,
         value: NonNegativeAmount,
-        _: u32,
+        _: u32, // the position is not required for computing the Orchard nullifier
         mut rng: &mut R,
     ) -> Self::Nullifier {
-        // Generate a dummy nullifier
+        // Generate a dummy nullifier for the spend
         let revealed_spent_note_nullifier =
             orchard::note::Nullifier::from_bytes(&pallas::Base::random(&mut rng).to_repr())
                 .unwrap();
@@ -1461,12 +1662,12 @@ impl TestFvk for orchard::keys::FullViewingKey {
         _: &P,
         _: BlockHeight,
         revealed_spent_note_nullifier: Self::Nullifier,
-        req: AddressType,
+        address_type: AddressType,
         value: NonNegativeAmount,
-        _: u32,
+        _: u32, // the position is not required for computing the Orchard nullifier
         rng: &mut R,
     ) -> Self::Nullifier {
-        let (j, scope) = match req {
+        let (j, scope) = match address_type {
             AddressType::DefaultExternal => (0u32.into(), zip32::Scope::External),
             AddressType::DiversifiedExternal(idx) => (idx, zip32::Scope::External),
             AddressType::Internal => (0u32.into(), zip32::Scope::Internal),
@@ -1486,9 +1687,10 @@ impl TestFvk for orchard::keys::FullViewingKey {
     }
 }
 
-#[allow(dead_code)]
+#[derive(Clone, Copy)]
 pub(crate) enum AddressType {
     DefaultExternal,
+    #[allow(dead_code)]
     DiversifiedExternal(DiversifierIndex),
     Internal,
 }
@@ -1567,31 +1769,52 @@ fn fake_compact_tx<R: RngCore + CryptoRng>(rng: &mut R) -> CompactTx {
     ctx
 }
 
-/// Create a fake CompactBlock at the given height, containing a single output paying
-/// an address. Returns the CompactBlock and the nullifier for the new note.
+#[derive(Clone)]
+pub(crate) struct FakeCompactOutput<Fvk> {
+    fvk: Fvk,
+    address_type: AddressType,
+    value: NonNegativeAmount,
+}
+
+impl<Fvk> FakeCompactOutput<Fvk> {
+    pub(crate) fn new(fvk: Fvk, address_type: AddressType, value: NonNegativeAmount) -> Self {
+        Self {
+            fvk,
+            address_type,
+            value,
+        }
+    }
+}
+
+/// Create a fake CompactBlock at the given height, containing the specified fake compact outputs.
+///
+/// Returns the newly created compact block, along with the nullifier for each note created in that
+/// block.
 #[allow(clippy::too_many_arguments)]
 fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
     params: &P,
     height: BlockHeight,
     prev_hash: BlockHash,
-    fvk: &Fvk,
-    req: AddressType,
-    value: NonNegativeAmount,
+    outputs: &[FakeCompactOutput<Fvk>],
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
     mut rng: impl RngCore + CryptoRng,
-) -> (CompactBlock, Fvk::Nullifier) {
+) -> (CompactBlock, Vec<Fvk::Nullifier>) {
     // Create a fake CompactBlock containing the note
     let mut ctx = fake_compact_tx(&mut rng);
-    let nf = fvk.add_output(
-        &mut ctx,
-        params,
-        height,
-        req,
-        value,
-        initial_sapling_tree_size,
-        &mut rng,
-    );
+    let mut nfs = vec![];
+    for output in outputs {
+        let nf = output.fvk.add_output(
+            &mut ctx,
+            params,
+            height,
+            output.address_type,
+            output.value,
+            initial_sapling_tree_size,
+            &mut rng,
+        );
+        nfs.push(nf);
+    }
 
     let cb = fake_compact_block_from_compact_tx(
         ctx,
@@ -1601,7 +1824,7 @@ fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
         initial_orchard_tree_size,
         rng,
     );
-    (cb, nf)
+    (cb, nfs)
 }
 
 /// Create a fake CompactBlock at the given height containing only the given transaction.
@@ -1689,7 +1912,9 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
             )
             .0,
         ),
-        Address::Transparent(_) => panic!("transparent addresses not supported in compact blocks"),
+        Address::Transparent(_) | Address::Tex(_) => {
+            panic!("transparent addresses not supported in compact blocks")
+        }
         Address::Unified(ua) => {
             // This is annoying to implement, because the protocol-aware UA type has no
             // concept of ZIP 316 preference order.
@@ -1805,22 +2030,66 @@ impl BlockCache {
     }
 }
 
+pub(crate) struct NoteCommitments {
+    sapling: Vec<sapling::Node>,
+    #[cfg(feature = "orchard")]
+    orchard: Vec<MerkleHashOrchard>,
+}
+
+impl NoteCommitments {
+    pub(crate) fn from_compact_block(cb: &CompactBlock) -> Self {
+        NoteCommitments {
+            sapling: cb
+                .vtx
+                .iter()
+                .flat_map(|tx| {
+                    tx.outputs
+                        .iter()
+                        .map(|out| sapling::Node::from_cmu(&out.cmu().unwrap()))
+                })
+                .collect(),
+            #[cfg(feature = "orchard")]
+            orchard: cb
+                .vtx
+                .iter()
+                .flat_map(|tx| {
+                    tx.actions
+                        .iter()
+                        .map(|act| MerkleHashOrchard::from_cmx(&act.cmx().unwrap()))
+                })
+                .collect(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn sapling(&self) -> &[sapling::Node] {
+        self.sapling.as_ref()
+    }
+
+    #[cfg(feature = "orchard")]
+    pub(crate) fn orchard(&self) -> &[MerkleHashOrchard] {
+        self.orchard.as_ref()
+    }
+}
+
 impl TestCache for BlockCache {
     type BlockSource = BlockDb;
-    type InsertResult = ();
+    type InsertResult = NoteCommitments;
 
     fn block_source(&self) -> &Self::BlockSource {
         &self.db_cache
     }
 
-    fn insert(&self, cb: &CompactBlock) {
+    fn insert(&self, cb: &CompactBlock) -> Self::InsertResult {
         let cb_bytes = cb.encode_to_vec();
+        let res = NoteCommitments::from_compact_block(cb);
         self.db_cache
             .0
             .prepare("INSERT INTO compactblocks (height, data) VALUES (?, ?)")
             .unwrap()
             .execute(params![u32::from(cb.height()), cb_bytes,])
             .unwrap();
+        res
     }
 }
 

@@ -20,7 +20,7 @@ use zcash_protocol::{
 };
 use zip32::Scope;
 
-use crate::{error::SqliteClientError, AccountId, ReceivedNoteId};
+use crate::{error::SqliteClientError, AccountId, ReceivedNoteId, TxRef};
 
 use super::{memo_repr, parse_scope, scope_code};
 
@@ -300,7 +300,7 @@ pub(crate) fn detect_spending_accounts<'a>(
 /// spending transaction has been mined.
 pub(crate) fn mark_sapling_note_spent(
     conn: &Connection,
-    tx_ref: i64,
+    tx_ref: TxRef,
     nf: &sapling::Nullifier,
 ) -> Result<bool, SqliteClientError> {
     let mut stmt_mark_sapling_note_spent = conn.prepare_cached(
@@ -311,7 +311,7 @@ pub(crate) fn mark_sapling_note_spent(
 
     match stmt_mark_sapling_note_spent.execute(named_params![
        ":nf": &nf.0[..],
-       ":transaction_id": tx_ref
+       ":transaction_id": tx_ref.0
     ])? {
         0 => Ok(false),
         1 => Ok(true),
@@ -327,8 +327,8 @@ pub(crate) fn mark_sapling_note_spent(
 pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
     conn: &Transaction,
     output: &T,
-    tx_ref: i64,
-    spent_in: Option<i64>,
+    tx_ref: TxRef,
+    spent_in: Option<TxRef>,
 ) -> Result<(), SqliteClientError> {
     let mut stmt_upsert_received_note = conn.prepare_cached(
         "INSERT INTO sapling_received_notes
@@ -366,7 +366,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
     let diversifier = to.diversifier();
 
     let sql_args = named_params![
-        ":tx": &tx_ref,
+        ":tx": tx_ref.0,
         ":output_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
         ":account_id": output.account_id().0,
         ":diversifier": &diversifier.0.as_ref(),
@@ -390,7 +390,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
              ON CONFLICT (sapling_received_note_id, transaction_id) DO NOTHING",
             named_params![
                 ":sapling_received_note_id": received_note_id,
-                ":transaction_id": spent_in
+                ":transaction_id": spent_in.0
             ],
         )?;
     }
@@ -582,6 +582,12 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn proposal_fails_if_not_all_ephemeral_outputs_consumed() {
+        testing::pool::proposal_fails_if_not_all_ephemeral_outputs_consumed::<SaplingPoolTester>()
+    }
+
+    #[test]
     #[allow(deprecated)]
     fn create_to_address_fails_on_incorrect_usk() {
         testing::pool::create_to_address_fails_on_incorrect_usk::<SaplingPoolTester>()
@@ -670,7 +676,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[cfg(feature = "orchard")]
+    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
     fn fully_funded_send_to_t() {
         use crate::wallet::orchard::tests::OrchardPoolTester;
 

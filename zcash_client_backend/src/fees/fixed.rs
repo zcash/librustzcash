@@ -4,7 +4,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     transaction::{
-        components::amount::BalanceError,
+        components::amount::{BalanceError, NonNegativeAmount},
         fees::{fixed::FeeRule as FixedFeeRule, transparent},
     },
 };
@@ -13,7 +13,7 @@ use crate::ShieldedProtocol;
 
 use super::{
     common::single_change_output_balance, sapling as sapling_fees, ChangeError, ChangeStrategy,
-    DustOutputPolicy, TransactionBalance,
+    DustOutputPolicy, EphemeralBalance, TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
@@ -63,6 +63,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
+        ephemeral_balance: Option<&EphemeralBalance>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         single_change_output_balance(
             params,
@@ -74,18 +75,18 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             #[cfg(feature = "orchard")]
             orchard,
             dust_output_policy,
-            self.fee_rule().fixed_fee(),
-            self.change_memo.clone(),
+            self.fee_rule.fixed_fee(),
+            self.change_memo.as_ref(),
             self.fallback_change_pool,
+            NonNegativeAmount::ZERO,
+            0,
+            ephemeral_balance,
         )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "orchard")]
-    use std::convert::Infallible;
-
     use zcash_primitives::{
         consensus::{Network, NetworkUpgrade, Parameters},
         transaction::{
@@ -104,6 +105,9 @@ mod tests {
         ShieldedProtocol,
     };
 
+    #[cfg(feature = "orchard")]
+    use crate::fees::orchard as orchard_fees;
+
     #[test]
     fn change_without_dust() {
         #[allow(deprecated)]
@@ -117,8 +121,8 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
@@ -130,12 +134,9 @@ mod tests {
                 ))][..],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &[] as &[Infallible],
-                &[] as &[Infallible],
-            ),
+            &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
+            None,
         );
 
         assert_matches!(
@@ -159,8 +160,8 @@ mod tests {
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap(),
-            &Vec::<TestTransparentInput>::new(),
-            &Vec::<TxOut>::new(),
+            &[] as &[TestTransparentInput],
+            &[] as &[TxOut],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[
@@ -179,12 +180,9 @@ mod tests {
                 ))][..],
             ),
             #[cfg(feature = "orchard")]
-            &(
-                orchard::builder::BundleType::DEFAULT,
-                &[] as &[Infallible],
-                &[] as &[Infallible],
-            ),
+            &orchard_fees::EmptyBundleView,
             &DustOutputPolicy::default(),
+            None,
         );
 
         assert_matches!(

@@ -5,9 +5,36 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.3.0] - 2024-08-19
+### Notable changes
+- `zcash_keys`:
+  - Now supports TEX (transparent-source-only) addresses as specified
+    in [ZIP 320](https://zips.z.cash/zip-0320).
+  - An `unstable-frost` feature has been added in order to be able to
+    temporarily expose API features that are needed specifically when creating
+    FROST threshold signatures. The features under this flag will be removed
+    once key derivation for FROST has been fully specified and implemented.
+
 ### Added
 - `zcash_keys::address::Address::try_from_zcash_address`
 - `zcash_keys::address::Receiver`
+- `zcash_keys::keys::UnifiedAddressRequest`
+  - `intersect`
+  - `to_address_request`
+
+### Changed
+- MSRV is now 1.70.0.
+- Updated dependencies:
+  - `zcash_address-0.4`
+  - `zcash_encoding-0.2.1`
+  - `zcash_primitives-0.16`
+  - `zcash_protocol-0.2`
+- `zcash_keys::Address` has a new variant `Tex`.
+- `zcash_keys::address::Address::has_receiver` has been renamed to `can_receive_as`.
+- `zcash_keys::keys`:
+  - The (unstable) encoding of `UnifiedSpendingKey` has changed.
+  - `DerivationError::Transparent` now contains `bip32::Error`.
 
 ## [0.2.0] - 2024-03-25
 

@@ -186,12 +186,12 @@ fn get_transparent_receivers<P: consensus::Parameters>(
         }
     }
 
-    if let Some((taddr, child_index)) = get_legacy_transparent_address(params, conn, account)? {
+    if let Some((taddr, address_index)) = get_legacy_transparent_address(params, conn, account)? {
         ret.insert(
             taddr,
             Some(TransparentAddressMetadata::new(
                 Scope::External.into(),
-                child_index,
+                address_index,
             )),
         );
     }
@@ -223,10 +223,20 @@ fn get_legacy_transparent_address<P: consensus::Parameters>(
             .map(|tfvk| {
                 tfvk.derive_external_ivk()
                     .map(|tivk| tivk.default_address())
-                    .map_err(SqliteClientError::HdwalletError)
+                    .map_err(SqliteClientError::TransparentDerivation)
             })
             .transpose()
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::wallet::init::migrations::tests::test_migrate;
+
+    #[test]
+    fn migrate() {
+        test_migrate(&[super::MIGRATION_ID]);
     }
 }

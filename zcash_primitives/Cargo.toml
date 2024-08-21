@@ -1,7 +1,7 @@
 [package]
 name = "zcash_primitives"
 description = "Rust implementations of the Zcash primitives"
-version = "0.15.0"
+version = "0.16.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -59,12 +59,9 @@ proptest = { workspace = true, optional = true }
 
 # - Transparent inputs
 #   - `Error` type exposed
-hdwallet = { workspace = true, optional = true }
+bip32 = { workspace = true, optional = true }
 #   - `SecretKey` and `PublicKey` types exposed
 secp256k1 = { workspace = true, optional = true }
-
-# - ZIP 339
-bip0039 = { version = "0.10", features = ["std", "all-languages"] }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
@@ -72,6 +69,7 @@ bip0039 = { version = "0.10", features = ["std", "all-languages"] }
 document-features.workspace = true
 
 # - Encodings
+bs58.workspace = true
 byteorder.workspace = true
 hex.workspace = true
 
@@ -99,8 +97,11 @@ rand_xorshift.workspace = true
 sapling = { workspace = true, features = ["test-dependencies"] }
 orchard = { workspace = true, features = ["test-dependencies"] }
 
+# MSRV pins for transitive dev-dependencies:
+clap = ">=4, <4.5" # clap 4.5 has MSRV 1.74
+
 [target.'cfg(unix)'.dev-dependencies]
-pprof = { version = "0.11", features = ["criterion", "flamegraph"] } # MSRV 1.56
+pprof = { version = "0.13", features = ["criterion", "flamegraph"] }
 
 [features]
 default = ["multicore"]
@@ -109,7 +110,7 @@ default = ["multicore"]
 multicore = ["orchard/multicore", "sapling/multicore"]
 
 ## Enables spending transparent notes with the transaction builder.
-transparent-inputs = ["dep:hdwallet", "dep:ripemd", "dep:secp256k1"]
+transparent-inputs = ["dep:bip32", "dep:ripemd", "dep:secp256k1"]
 
 ### A temporary feature flag that exposes granular APIs needed by `zcashd`. These APIs
 ### should not be relied upon and will be removed in a future release.

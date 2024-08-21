@@ -293,10 +293,22 @@ impl Receiver {
 /// An address that funds can be sent to.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Address {
+    /// A Sapling payment address.
     #[cfg(feature = "sapling")]
     Sapling(PaymentAddress),
+
+    /// A transparent address corresponding to either a public key hash or a script hash.
     Transparent(TransparentAddress),
+
+    /// A [ZIP 316] Unified Address.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
     Unified(UnifiedAddress),
+
+    /// A [ZIP 320] transparent-source-only P2PKH address, or "TEX address".
+    ///
+    /// [ZIP 320]: https://zips.z.cash/zip-0320
+    Tex([u8; 20]),
 }
 
 #[cfg(feature = "sapling")]
@@ -344,6 +356,10 @@ impl TryFromRawAddress for Address {
     fn try_from_raw_transparent_p2sh(data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
         Ok(TransparentAddress::ScriptHash(data).into())
     }
+
+    fn try_from_raw_tex(data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
+        Ok(Address::Tex(data))
+    }
 }
 
 impl Address {
@@ -379,6 +395,7 @@ impl Address {
                 }
             },
             Address::Unified(ua) => ua.to_address(net),
+            Address::Tex(data) => ZcashAddress::from_tex(net, *data),
         }
     }
 
@@ -387,30 +404,20 @@ impl Address {
         self.to_zcash_address(params).to_string()
     }
 
-    /// Returns whether or not this [`Address`] can send funds to the specified pool.
-    pub fn has_receiver(&self, pool_type: PoolType) -> bool {
+    /// Returns whether or not this [`Address`] can receive funds in the specified pool.
+    pub fn can_receive_as(&self, pool_type: PoolType) -> bool {
         match self {
             #[cfg(feature = "sapling")]
             Address::Sapling(_) => {
                 matches!(pool_type, PoolType::Shielded(ShieldedProtocol::Sapling))
             }
-            Address::Transparent(_) => matches!(pool_type, PoolType::Transparent),
+            Address::Transparent(_) | Address::Tex(_) => {
+                matches!(pool_type, PoolType::Transparent)
+            }
             Address::Unified(ua) => match pool_type {
-                PoolType::Transparent => ua.transparent().is_some(),
-                PoolType::Shielded(ShieldedProtocol::Sapling) => {
-                    #[cfg(feature = "sapling")]
-                    return ua.sapling().is_some();
-
-                    #[cfg(not(feature = "sapling"))]
-                    return false;
-                }
-                PoolType::Shielded(ShieldedProtocol::Orchard) => {
-                    #[cfg(feature = "orchard")]
-                    return ua.orchard().is_some();
-
-                    #[cfg(not(feature = "orchard"))]
-                    return false;
-                }
+                PoolType::Transparent => ua.has_transparent(),
+                PoolType::Shielded(ShieldedProtocol::Sapling) => ua.has_sapling(),
+                PoolType::Shielded(ShieldedProtocol::Orchard) => ua.has_orchard(),
             },
         }
     }
@@ -449,6 +456,7 @@ pub mod testing {
             arb_payment_address().prop_map(Address::Sapling),
             arb_transparent_addr().prop_map(Address::Transparent),
             arb_unified_addr(Network::TestNetwork, request).prop_map(Address::Unified),
+            proptest::array::uniform20(any::<u8>()).prop_map(Address::Tex),
         ]
     }
 
@@ -457,6 +465,7 @@ pub mod testing {
         return prop_oneof![
             arb_transparent_addr().prop_map(Address::Transparent),
             arb_unified_addr(Network::TestNetwork, request).prop_map(Address::Unified),
+            proptest::array::uniform20(any::<u8>()).prop_map(Address::Tex),
         ];
     }
 }
@@ -519,15 +528,15 @@ mod tests {
     fn ua_parsing() {
         for tv in test_vectors::UNIFIED {
             match Address::decode(&MAIN_NETWORK, tv.unified_addr) {
-                Some(Address::Unified(_ua)) => {
+                Some(Address::Unified(ua)) => {
                     assert_eq!(
-                        _ua.transparent().is_some(),
+                        ua.has_transparent(),
                         tv.p2pkh_bytes.is_some() || tv.p2sh_bytes.is_some()
                     );
                     #[cfg(feature = "sapling")]
-                    assert_eq!(_ua.sapling().is_some(), tv.sapling_raw_addr.is_some());
+                    assert_eq!(ua.has_sapling(), tv.sapling_raw_addr.is_some());
                     #[cfg(feature = "orchard")]
-                    assert_eq!(_ua.orchard().is_some(), tv.orchard_raw_addr.is_some());
+                    assert_eq!(ua.has_orchard(), tv.orchard_raw_addr.is_some());
                 }
                 Some(_) => {
                     panic!(

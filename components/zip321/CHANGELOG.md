@@ -6,8 +6,13 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-The entries below are relative to the `zcash_client_backend` crate as of
-`zcash_client_backend-0.10.0`.
+
+## [0.1.0] 2024-08-20
+
+The contents of this crate were factored out from `zcash_client_backend` to
+provide a better separation of concerns and simpler integration with WASM
+builds. The entries below are relative to the `zcash_client_backend` crate as
+of `zcash_client_backend-0.10.0`.
 
 ### Added
 - `zip321::Payment::new`
@@ -32,3 +37,4 @@ The entries below are relative to the `zcash_client_backend` crate as of
   - `zip321::parse::{lead_addr, zcashparam}`
 - `zip321::Param::Memo` now boxes its argument.
 - `zip321::Param::Addr` now wraps a `zcash_address::ZcashAddress`
+- MSRV is now 1.70.0.

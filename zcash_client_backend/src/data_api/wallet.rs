@@ -51,16 +51,19 @@ use crate::{
     decrypt_transaction,
     fees::{self, DustOutputPolicy},
     keys::UnifiedSpendingKey,
-    proposal::{self, Proposal, ProposalError},
+    proposal::{Proposal, ProposalError, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
     zip321::{self, Payment},
     PoolType, ShieldedProtocol,
 };
-use zcash_primitives::transaction::{
-    builder::{BuildConfig, BuildResult, Builder},
-    components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
-    fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
-    Transaction, TxId,
+use zcash_primitives::{
+    legacy::TransparentAddress,
+    transaction::{
+        builder::{BuildConfig, BuildResult, Builder},
+        components::{amount::NonNegativeAmount, sapling::zip212_enforcement, OutPoint},
+        fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
+        Transaction, TxId,
+    },
 };
 use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade},
@@ -70,11 +73,12 @@ use zip32::Scope;
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    crate::{fees::ChangeValue, proposal::StepOutput, wallet::TransparentAddressMetadata},
+    core::convert::Infallible,
     input_selection::ShieldingSelector,
-    std::convert::Infallible,
+    std::collections::HashMap,
     zcash_keys::encoding::AddressCodec,
-    zcash_primitives::legacy::TransparentAddress,
-    zcash_primitives::transaction::components::{OutPoint, TxOut},
+    zcash_primitives::transaction::components::TxOut,
 };
 
 pub mod input_selection;
@@ -88,6 +92,7 @@ pub fn decrypt_and_store_transaction<ParamsT, DbT>(
     params: &ParamsT,
     data: &mut DbT,
     tx: &Transaction,
+    mined_height: Option<BlockHeight>,
 ) -> Result<(), DbT::Error>
 where
     ParamsT: consensus::Parameters,
@@ -98,11 +103,13 @@ where
 
     // Height is block height for mined transactions, and the "mempool height" (chain height + 1)
     // for mempool transactions.
-    let height = data
-        .get_tx_height(tx.txid())?
-        .or(data.chain_height()?.map(|max_height| max_height + 1))
-        .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
-        .expect("Sapling activation height must be known.");
+    let height = mined_height.map(Ok).unwrap_or_else(|| {
+        Ok(data
+            .get_tx_height(tx.txid())?
+            .or(data.chain_height()?.map(|max_height| max_height + 1))
+            .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
+            .expect("Sapling activation height must be known."))
+    })?;
 
     data.store_decrypted_tx(decrypt_transaction(params, height, tx, &ufvks))?;
 
@@ -289,6 +296,13 @@ where
     )
 }
 
+type ErrorT<DbT, InputsErrT, FeeRuleT> = Error<
+    <DbT as WalletRead>::Error,
+    <DbT as WalletCommitmentTrees>::Error,
+    InputsErrT,
+    <FeeRuleT as FeeRule>::Error,
+>;
+
 /// Constructs a transaction or series of transactions that send funds as specified
 /// by the `request` argument, stores them to the wallet's "sent transactions" data
 /// store, and returns the [`TxId`] for each transaction constructed.
@@ -353,15 +367,7 @@ pub fn spend<DbT, ParamsT, InputsT>(
     request: zip321::TransactionRequest,
     ovk_policy: OvkPolicy,
     min_confirmations: NonZeroU32,
-) -> Result<
-    NonEmpty<TxId>,
-    Error<
-        <DbT as WalletRead>::Error,
-        <DbT as WalletCommitmentTrees>::Error,
-        InputsT::Error,
-        <InputsT::FeeRule as FeeRule>::Error,
-    >,
->
+) -> Result<NonEmpty<TxId>, ErrorT<DbT, InputsT::Error, InputsT::FeeRule>>
 where
     DbT: InputSource,
     DbT: WalletWrite<
@@ -571,6 +577,14 @@ where
         .map_err(Error::from)
 }
 
+struct StepResult<AccountId> {
+    build_result: BuildResult,
+    outputs: Vec<SentTransactionOutput<AccountId>>,
+    fee_amount: NonNegativeAmount,
+    #[cfg(feature = "transparent-inputs")]
+    utxos_spent: Vec<OutPoint>,
+}
+
 /// Construct, prove, and sign a transaction or series of transactions using the inputs supplied by
 /// the given proposal, and persist it to the wallet database.
 ///
@@ -592,46 +606,88 @@ pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     usk: &UnifiedSpendingKey,
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, N>,
-) -> Result<
-    NonEmpty<TxId>,
-    Error<
-        <DbT as WalletRead>::Error,
-        <DbT as WalletCommitmentTrees>::Error,
-        InputsErrT,
-        FeeRuleT::Error,
-    >,
->
+) -> Result<NonEmpty<TxId>, ErrorT<DbT, InputsErrT, FeeRuleT>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
+    // The set of transparent `StepOutput`s available and unused from prior steps.
+    // When a transparent `StepOutput` is created, it is added to the map. When it
+    // is consumed, it is removed from the map.
+    #[cfg(feature = "transparent-inputs")]
+    let mut unused_transparent_outputs = HashMap::new();
+
+    let account_id = wallet_db
+        .get_account_for_ufvk(&usk.to_unified_full_viewing_key())
+        .map_err(Error::DataSource)?
+        .ok_or(Error::KeyNotRecognized)?
+        .id();
+
     let mut step_results = Vec::with_capacity(proposal.steps().len());
     for step in proposal.steps() {
-        let step_result = create_proposed_transaction(
+        let step_result: StepResult<_> = create_proposed_transaction(
             wallet_db,
             params,
             spend_prover,
             output_prover,
             usk,
+            account_id,
             ovk_policy.clone(),
             proposal.fee_rule(),
             proposal.min_target_height(),
             &step_results,
             step,
+            #[cfg(feature = "transparent-inputs")]
+            &mut unused_transparent_outputs,
         )?;
         step_results.push((step, step_result));
     }
 
-    Ok(NonEmpty::from_vec(
-        step_results
-            .iter()
-            .map(|(_, r)| r.transaction().txid())
-            .collect(),
-    )
-    .expect("proposal.steps is NonEmpty"))
+    // Ephemeral outputs must be referenced exactly once.
+    #[cfg(feature = "transparent-inputs")]
+    for so in unused_transparent_outputs.into_keys() {
+        if let StepOutputIndex::Change(i) = so.output_index() {
+            // references have already been checked
+            if step_results[so.step_index()].0.balance().proposed_change()[i].is_ephemeral() {
+                return Err(ProposalError::EphemeralOutputLeftUnspent(so).into());
+            }
+        }
+    }
+
+    let created = time::OffsetDateTime::now_utc();
+
+    // Store the transactions only after creating all of them. This avoids undesired
+    // retransmissions in case a transaction is stored and the creation of a subsequent
+    // transaction fails.
+    let mut transactions = Vec::with_capacity(proposal.steps().len());
+    let mut txids = Vec::with_capacity(proposal.steps().len());
+    #[allow(unused_variables)]
+    for (_, step_result) in step_results.iter() {
+        let tx = step_result.build_result.transaction();
+        transactions.push(SentTransaction::new(
+            tx,
+            created,
+            proposal.min_target_height(),
+            account_id,
+            &step_result.outputs,
+            step_result.fee_amount,
+            #[cfg(feature = "transparent-inputs")]
+            &step_result.utxos_spent,
+        ));
+        txids.push(tx.txid());
+    }
+
+    wallet_db
+        .store_transactions_to_be_sent(&transactions)
+        .map_err(Error::DataSource)?;
+
+    Ok(NonEmpty::from_vec(txids).expect("proposal.steps is NonEmpty"))
 }
 
+// `unused_transparent_outputs` maps `StepOutput`s for transparent outputs
+// that have not been consumed so far, to the corresponding pair of
+// `TransparentAddress` and `Outpoint`.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
@@ -640,63 +696,57 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     spend_prover: &impl SpendProver,
     output_prover: &impl OutputProver,
     usk: &UnifiedSpendingKey,
+    account_id: <DbT as WalletRead>::AccountId,
     ovk_policy: OvkPolicy,
     fee_rule: &FeeRuleT,
     min_target_height: BlockHeight,
-    prior_step_results: &[(&proposal::Step<N>, BuildResult)],
-    proposal_step: &proposal::Step<N>,
-) -> Result<
-    BuildResult,
-    Error<
-        <DbT as WalletRead>::Error,
-        <DbT as WalletCommitmentTrees>::Error,
-        InputsErrT,
-        FeeRuleT::Error,
+    prior_step_results: &[(&Step<N>, StepResult<<DbT as WalletRead>::AccountId>)],
+    proposal_step: &Step<N>,
+    #[cfg(feature = "transparent-inputs")] unused_transparent_outputs: &mut HashMap<
+        StepOutput,
+        (TransparentAddress, OutPoint),
     >,
->
+) -> Result<StepResult<<DbT as WalletRead>::AccountId>, ErrorT<DbT, InputsErrT, FeeRuleT>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
-    // TODO: Spending shielded outputs of prior multi-step transaction steps is not yet
-    // supported. Maybe support this at some point? Doing so would require a higher-level
-    // approach in the wallet that waits for transactions with shielded outputs to be
-    // mined and only then attempts to perform the next step.
-    for s_ref in proposal_step.prior_step_inputs() {
-        prior_step_results.get(s_ref.step_index()).map_or_else(
-            || {
-                // Return an error in case the step index doesn't match up with a step
-                Err(Error::Proposal(ProposalError::ReferenceError(*s_ref)))
-            },
-            |step| match s_ref.output_index() {
-                proposal::StepOutputIndex::Payment(i) => {
-                    let prior_pool = step
-                        .0
-                        .payment_pools()
-                        .get(&i)
-                        .ok_or(Error::Proposal(ProposalError::ReferenceError(*s_ref)))?;
+    #[cfg(feature = "transparent-inputs")]
+    let step_index = prior_step_results.len();
 
-                    if matches!(prior_pool, PoolType::Shielded(_)) {
-                        Err(Error::ProposalNotSupported)
-                    } else {
-                        Ok(())
-                    }
+    // We only support spending transparent payments or transparent ephemeral outputs from a
+    // prior step (when "transparent-inputs" is enabled).
+    //
+    // TODO: Maybe support spending prior shielded outputs at some point? Doing so would require
+    // a higher-level approach in the wallet that waits for transactions with shielded outputs to
+    // be mined and only then attempts to perform the next step.
+    #[allow(clippy::never_loop)]
+    for input_ref in proposal_step.prior_step_inputs() {
+        let (prior_step, _) = prior_step_results
+            .get(input_ref.step_index())
+            .ok_or(ProposalError::ReferenceError(*input_ref))?;
+
+        #[allow(unused_variables)]
+        let output_pool = match input_ref.output_index() {
+            StepOutputIndex::Payment(i) => prior_step.payment_pools().get(&i).cloned(),
+            StepOutputIndex::Change(i) => match prior_step.balance().proposed_change().get(i) {
+                Some(change) if !change.is_ephemeral() => {
+                    return Err(ProposalError::SpendsChange(*input_ref).into());
                 }
-                proposal::StepOutputIndex::Change(_) => {
-                    // Only shielded change is supported by zcash_client_backend, so multi-step
-                    // transactions cannot yet spend prior transactions' change outputs.
-                    Err(Error::ProposalNotSupported)
-                }
+                other => other.map(|change| change.output_pool()),
             },
-        )?;
+        }
+        .ok_or(ProposalError::ReferenceError(*input_ref))?;
+
+        // Return an error on trying to spend a prior output that is not supported.
+        #[cfg(feature = "transparent-inputs")]
+        if output_pool != PoolType::TRANSPARENT {
+            return Err(Error::ProposalNotSupported);
+        }
+        #[cfg(not(feature = "transparent-inputs"))]
+        return Err(Error::ProposalNotSupported);
     }
-
-    let account = wallet_db
-        .get_account_for_ufvk(&usk.to_unified_full_viewing_key())
-        .map_err(Error::DataSource)?
-        .ok_or(Error::KeyNotRecognized)?
-        .id();
 
     let (sapling_anchor, sapling_inputs) =
         if proposal_step.involves(PoolType::Shielded(ShieldedProtocol::Sapling)) {
@@ -779,7 +829,7 @@ where
     let orchard_anchor = None;
 
     // Create the transaction. The type of the proposal ensures that there
-    // are no possible transparent inputs, so we ignore those
+    // are no possible transparent inputs, so we ignore those here.
     let mut builder = Builder::new(
         params.clone(),
         min_target_height,
@@ -788,6 +838,11 @@ where
             orchard_anchor,
         },
     );
+
+    #[cfg(all(feature = "transparent-inputs", not(feature = "orchard")))]
+    let has_shielded_inputs = !sapling_inputs.is_empty();
+    #[cfg(all(feature = "transparent-inputs", feature = "orchard"))]
+    let has_shielded_inputs = !(sapling_inputs.is_empty() && orchard_inputs.is_empty());
 
     for (sapling_key, sapling_note, merkle_path) in sapling_inputs.into_iter() {
         builder.add_sapling_spend(&sapling_key, sapling_note.clone(), merkle_path)?;
@@ -799,94 +854,87 @@ where
     }
 
     #[cfg(feature = "transparent-inputs")]
+    let mut cache = HashMap::<TransparentAddress, TransparentAddressMetadata>::new();
+
+    #[cfg(feature = "transparent-inputs")]
+    let mut metadata_from_address = |addr: TransparentAddress| -> Result<
+        TransparentAddressMetadata,
+        ErrorT<DbT, InputsErrT, FeeRuleT>,
+    > {
+        match cache.get(&addr) {
+            Some(result) => Ok(result.clone()),
+            None => {
+                // `wallet_db.get_transparent_address_metadata` includes reserved ephemeral
+                // addresses in its lookup. We don't need to include these in order to be
+                // able to construct ZIP 320 transactions, because in that case the ephemeral
+                // output is represented via a "change" reference to a previous step. However,
+                // we do need them in order to create a transaction from a proposal that
+                // explicitly spends an output from an ephemeral address (only for outputs
+                // already detected by this wallet instance).
+
+                let result = wallet_db
+                    .get_transparent_address_metadata(account_id, &addr)
+                    .map_err(InputSelectorError::DataSource)?
+                    .ok_or(Error::AddressNotRecognized(addr))?;
+                cache.insert(addr, result.clone());
+                Ok(result)
+            }
+        }
+    };
+
+    #[cfg(feature = "transparent-inputs")]
     let utxos_spent = {
-        let known_addrs = wallet_db
-            .get_transparent_receivers(account)
-            .map_err(Error::DataSource)?;
-
         let mut utxos_spent: Vec<OutPoint> = vec![];
-        let mut add_transparent_input = |addr: &TransparentAddress,
-                                         outpoint: OutPoint,
-                                         utxo: TxOut|
-         -> Result<
-            (),
-            Error<
-                <DbT as WalletRead>::Error,
-                <DbT as WalletCommitmentTrees>::Error,
-                InputsErrT,
-                FeeRuleT::Error,
-            >,
-        > {
-            let address_metadata = known_addrs
-                .get(addr)
-                .ok_or(Error::AddressNotRecognized(*addr))?
-                .clone()
-                .ok_or_else(|| Error::NoSpendingKey(addr.encode(params)))?;
-
+        let add_transparent_input = |builder: &mut Builder<_, _>,
+                                     utxos_spent: &mut Vec<_>,
+                                     address_metadata: &TransparentAddressMetadata,
+                                     outpoint: OutPoint,
+                                     txout: TxOut|
+         -> Result<(), ErrorT<DbT, InputsErrT, FeeRuleT>> {
             let secret_key = usk
                 .transparent()
                 .derive_secret_key(address_metadata.scope(), address_metadata.address_index())
-                .unwrap();
+                .expect("spending key derivation should not fail");
 
             utxos_spent.push(outpoint.clone());
-            builder.add_transparent_input(secret_key, outpoint, utxo)?;
+            builder.add_transparent_input(secret_key, outpoint, txout)?;
 
             Ok(())
         };
 
         for utxo in proposal_step.transparent_inputs() {
             add_transparent_input(
-                utxo.recipient_address(),
+                &mut builder,
+                &mut utxos_spent,
+                &metadata_from_address(*utxo.recipient_address())?,
                 utxo.outpoint().clone(),
                 utxo.txout().clone(),
             )?;
         }
         for input_ref in proposal_step.prior_step_inputs() {
-            match input_ref.output_index() {
-                proposal::StepOutputIndex::Payment(i) => {
-                    // We know based upon the earlier check that this must be a transparent input,
-                    // We also know that transparent outputs for that previous step were added to
-                    // the transaction in payment index order, so we can use dead reckoning to
-                    // figure out which output it ended up being.
-                    let (prior_step, result) = &prior_step_results[input_ref.step_index()];
-                    let recipient_address = &prior_step
-                        .transaction_request()
-                        .payments()
-                        .get(&i)
-                        .expect("Payment step references are checked at construction")
-                        .recipient_address()
-                        .clone()
-                        .convert_if_network(params.network_type())?;
+            // A referenced transparent step output must exist and be referenced *at most* once.
+            // (Exactly once in the case of ephemeral outputs.)
+            let (address, outpoint) = unused_transparent_outputs
+                .remove(input_ref)
+                .ok_or(Error::Proposal(ProposalError::ReferenceError(*input_ref)))?;
 
-                    let recipient_taddr = match recipient_address {
-                        Address::Transparent(t) => Some(t),
-                        Address::Unified(uaddr) => uaddr.transparent(),
-                        _ => None,
-                    }
-                    .ok_or(Error::ProposalNotSupported)?;
-                    let outpoint = OutPoint::new(
-                        result.transaction().txid().into(),
-                        u32::try_from(
-                            prior_step
-                                .payment_pools()
-                                .iter()
-                                .filter(|(_, pool)| pool == &&PoolType::Transparent)
-                                .take_while(|(j, _)| j <= &&i)
-                                .count()
-                                - 1,
-                        )
-                        .expect("Transparent output index fits into a u32"),
-                    );
-                    let utxo = &result
-                        .transaction()
-                        .transparent_bundle()
-                        .ok_or(Error::Proposal(ProposalError::ReferenceError(*input_ref)))?
-                        .vout[outpoint.n() as usize];
+            let address_metadata = metadata_from_address(address)?;
 
-                    add_transparent_input(recipient_taddr, outpoint, utxo.clone())?;
-                }
-                proposal::StepOutputIndex::Change(_) => unreachable!(),
-            }
+            let txout = &prior_step_results[input_ref.step_index()]
+                .1
+                .build_result
+                .transaction()
+                .transparent_bundle()
+                .ok_or(ProposalError::ReferenceError(*input_ref))?
+                .vout[outpoint.n() as usize];
+
+            add_transparent_input(
+                &mut builder,
+                &mut utxos_spent,
+                &address_metadata,
+                outpoint,
+                txout.clone(),
+            )?;
         }
         utxos_spent
     };
@@ -940,109 +988,133 @@ where
     };
 
     #[cfg(feature = "orchard")]
-    let mut orchard_output_meta = vec![];
-    let mut sapling_output_meta = vec![];
-    let mut transparent_output_meta = vec![];
-    for (payment, output_pool) in proposal_step
-        .payment_pools()
-        .iter()
-        .map(|(idx, output_pool)| {
-            let payment = proposal_step
-                .transaction_request()
-                .payments()
-                .get(idx)
-                .expect(
-                    "The mapping between payment index and payment is checked in step construction",
-                );
-            (payment, output_pool)
-        })
-    {
-        let recipient_address: Address = payment
-            .recipient_address()
-            .clone()
-            .convert_if_network(params.network_type())?;
+    let mut orchard_output_meta: Vec<(
+        Recipient<_, PoolType, _>,
+        NonNegativeAmount,
+        Option<MemoBytes>,
+    )> = vec![];
+    let mut sapling_output_meta: Vec<(
+        Recipient<_, PoolType, _>,
+        NonNegativeAmount,
+        Option<MemoBytes>,
+    )> = vec![];
+    let mut transparent_output_meta: Vec<(
+        Recipient<_, _, ()>,
+        TransparentAddress,
+        NonNegativeAmount,
+        StepOutputIndex,
+    )> = vec![];
 
-        match recipient_address {
-            Address::Unified(ua) => {
-                let memo = payment.memo().map_or_else(MemoBytes::empty, |m| m.clone());
+    for (&payment_index, output_pool) in proposal_step.payment_pools() {
+        let payment = proposal_step
+            .transaction_request()
+            .payments()
+            .get(&payment_index)
+            .expect(
+                "The mapping between payment index and payment is checked in step construction",
+            );
+        let recipient_address = payment.recipient_address();
 
-                match output_pool {
-                    #[cfg(not(feature = "orchard"))]
-                    PoolType::Shielded(ShieldedProtocol::Orchard) => {
-                        return Err(Error::ProposalNotSupported);
-                    }
-                    #[cfg(feature = "orchard")]
-                    PoolType::Shielded(ShieldedProtocol::Orchard) => {
-                        builder.add_orchard_output(
-                            orchard_external_ovk.clone(),
-                            *ua.orchard().expect("The mapping between payment pool and receiver is checked in step construction"),
-                            payment.amount().into(),
-                            memo.clone(),
-                        )?;
-                        orchard_output_meta.push((
-                            Recipient::External(
-                                payment.recipient_address().clone(),
-                                PoolType::Shielded(ShieldedProtocol::Orchard),
-                            ),
-                            payment.amount(),
-                            Some(memo),
-                        ));
-                    }
+        let add_sapling_output = |builder: &mut Builder<_, _>,
+                                  sapling_output_meta: &mut Vec<_>,
+                                  to: sapling::PaymentAddress|
+         -> Result<(), ErrorT<DbT, InputsErrT, FeeRuleT>> {
+            let memo = payment.memo().map_or_else(MemoBytes::empty, |m| m.clone());
+            builder.add_sapling_output(sapling_external_ovk, to, payment.amount(), memo.clone())?;
+            sapling_output_meta.push((
+                Recipient::External(recipient_address.clone(), PoolType::SAPLING),
+                payment.amount(),
+                Some(memo),
+            ));
+            Ok(())
+        };
 
-                    PoolType::Shielded(ShieldedProtocol::Sapling) => {
-                        builder.add_sapling_output(
-                            sapling_external_ovk,
-                            *ua.sapling().expect("The mapping between payment pool and receiver is checked in step construction"),
-                            payment.amount(),
-                            memo.clone(),
-                        )?;
-                        sapling_output_meta.push((
-                            Recipient::External(
-                                payment.recipient_address().clone(),
-                                PoolType::Shielded(ShieldedProtocol::Sapling),
-                            ),
-                            payment.amount(),
-                            Some(memo),
-                        ));
-                    }
+        #[cfg(feature = "orchard")]
+        let add_orchard_output = |builder: &mut Builder<_, _>,
+                                  orchard_output_meta: &mut Vec<_>,
+                                  to: orchard::Address|
+         -> Result<(), ErrorT<DbT, InputsErrT, FeeRuleT>> {
+            let memo = payment.memo().map_or_else(MemoBytes::empty, |m| m.clone());
+            builder.add_orchard_output(
+                orchard_external_ovk.clone(),
+                to,
+                payment.amount().into(),
+                memo.clone(),
+            )?;
+            orchard_output_meta.push((
+                Recipient::External(recipient_address.clone(), PoolType::ORCHARD),
+                payment.amount(),
+                Some(memo),
+            ));
+            Ok(())
+        };
 
-                    PoolType::Transparent => {
-                        if payment.memo().is_some() {
-                            return Err(Error::MemoForbidden);
-                        } else {
-                            builder.add_transparent_output(
-                                ua.transparent().expect("The mapping between payment pool and receiver is checked in step construction."),
-                                payment.amount()
-                            )?;
-                        }
-                    }
-                }
+        let add_transparent_output = |builder: &mut Builder<_, _>,
+                                      transparent_output_meta: &mut Vec<_>,
+                                      to: TransparentAddress|
+         -> Result<(), ErrorT<DbT, InputsErrT, FeeRuleT>> {
+            // Always reject sending to one of our known ephemeral addresses.
+            #[cfg(feature = "transparent-inputs")]
+            if wallet_db
+                .find_account_for_ephemeral_address(&to)
+                .map_err(Error::DataSource)?
+                .is_some()
+            {
+                return Err(Error::PaysEphemeralTransparentAddress(to.encode(params)));
             }
-            Address::Sapling(addr) => {
-                let memo = payment.memo().map_or_else(MemoBytes::empty, |m| m.clone());
-                builder.add_sapling_output(
-                    sapling_external_ovk,
-                    addr,
-                    payment.amount(),
-                    memo.clone(),
-                )?;
-                sapling_output_meta.push((
-                    Recipient::External(payment.recipient_address().clone(), PoolType::SAPLING),
-                    payment.amount(),
-                    Some(memo),
-                ));
+            if payment.memo().is_some() {
+                return Err(Error::MemoForbidden);
+            }
+            builder.add_transparent_output(&to, payment.amount())?;
+            transparent_output_meta.push((
+                Recipient::External(recipient_address.clone(), PoolType::TRANSPARENT),
+                to,
+                payment.amount(),
+                StepOutputIndex::Payment(payment_index),
+            ));
+            Ok(())
+        };
+
+        match recipient_address
+            .clone()
+            .convert_if_network(params.network_type())?
+        {
+            Address::Unified(ua) => match output_pool {
+                #[cfg(not(feature = "orchard"))]
+                PoolType::Shielded(ShieldedProtocol::Orchard) => {
+                    return Err(Error::ProposalNotSupported);
+                }
+                #[cfg(feature = "orchard")]
+                PoolType::Shielded(ShieldedProtocol::Orchard) => {
+                    let to = *ua.orchard().expect("The mapping between payment pool and receiver is checked in step construction");
+                    add_orchard_output(&mut builder, &mut orchard_output_meta, to)?;
+                }
+                PoolType::Shielded(ShieldedProtocol::Sapling) => {
+                    let to = *ua.sapling().expect("The mapping between payment pool and receiver is checked in step construction");
+                    add_sapling_output(&mut builder, &mut sapling_output_meta, to)?;
+                }
+                PoolType::Transparent => {
+                    let to = *ua.transparent().expect("The mapping between payment pool and receiver is checked in step construction");
+                    add_transparent_output(&mut builder, &mut transparent_output_meta, to)?;
+                }
+            },
+            Address::Sapling(to) => {
+                add_sapling_output(&mut builder, &mut sapling_output_meta, to)?;
             }
             Address::Transparent(to) => {
-                if payment.memo().is_some() {
-                    return Err(Error::MemoForbidden);
-                } else {
-                    builder.add_transparent_output(&to, payment.amount())?;
+                add_transparent_output(&mut builder, &mut transparent_output_meta, to)?;
+            }
+            #[cfg(not(feature = "transparent-inputs"))]
+            Address::Tex(_) => {
+                return Err(Error::ProposalNotSupported);
+            }
+            #[cfg(feature = "transparent-inputs")]
+            Address::Tex(data) => {
+                if has_shielded_inputs {
+                    return Err(ProposalError::PaysTexFromShielded.into());
                 }
-                transparent_output_meta.push((
-                    Recipient::External(payment.recipient_address().clone(), PoolType::TRANSPARENT),
-                    to,
-                    payment.amount(),
-                ));
+                let to = TransparentAddress::PublicKeyHash(data);
+                add_transparent_output(&mut builder, &mut transparent_output_meta, to)?;
             }
         }
     }
@@ -1051,8 +1123,9 @@ where
         let memo = change_value
             .memo()
             .map_or_else(MemoBytes::empty, |m| m.clone());
-        match change_value.output_pool() {
-            ShieldedProtocol::Sapling => {
+        let output_pool = change_value.output_pool();
+        match output_pool {
+            PoolType::Shielded(ShieldedProtocol::Sapling) => {
                 builder.add_sapling_output(
                     sapling_internal_ovk(),
                     sapling_dfvk.change_address().1,
@@ -1061,19 +1134,17 @@ where
                 )?;
                 sapling_output_meta.push((
                     Recipient::InternalAccount {
-                        receiving_account: account,
+                        receiving_account: account_id,
                         external_address: None,
-                        note: PoolType::Shielded(ShieldedProtocol::Sapling),
+                        note: output_pool,
                     },
                     change_value.value(),
                     Some(memo),
                 ))
             }
-            ShieldedProtocol::Orchard => {
+            PoolType::Shielded(ShieldedProtocol::Orchard) => {
                 #[cfg(not(feature = "orchard"))]
-                return Err(Error::UnsupportedChangeType(PoolType::Shielded(
-                    ShieldedProtocol::Orchard,
-                )));
+                return Err(Error::UnsupportedChangeType(output_pool));
 
                 #[cfg(feature = "orchard")]
                 {
@@ -1085,15 +1156,59 @@ where
                     )?;
                     orchard_output_meta.push((
                         Recipient::InternalAccount {
-                            receiving_account: account,
+                            receiving_account: account_id,
                             external_address: None,
-                            note: PoolType::Shielded(ShieldedProtocol::Orchard),
+                            note: output_pool,
                         },
                         change_value.value(),
                         Some(memo),
                     ))
                 }
             }
+            PoolType::Transparent => {
+                #[cfg(not(feature = "transparent-inputs"))]
+                return Err(Error::UnsupportedChangeType(output_pool));
+            }
+        }
+    }
+
+    // This reserves the ephemeral addresses even if transaction construction fails.
+    // It is not worth the complexity of being able to unreserve them, because there
+    // are few failure modes after this point that would allow us to do so.
+    #[cfg(feature = "transparent-inputs")]
+    {
+        let ephemeral_outputs: Vec<(usize, &ChangeValue)> = proposal_step
+            .balance()
+            .proposed_change()
+            .iter()
+            .enumerate()
+            .filter(|(_, change_value)| {
+                change_value.is_ephemeral() && change_value.output_pool() == PoolType::Transparent
+            })
+            .collect();
+
+        let addresses_and_metadata = wallet_db
+            .reserve_next_n_ephemeral_addresses(account_id, ephemeral_outputs.len())
+            .map_err(Error::DataSource)?;
+        assert_eq!(addresses_and_metadata.len(), ephemeral_outputs.len());
+
+        // We don't need the TransparentAddressMetadata here; we can look it up from the data source later.
+        for ((change_index, change_value), (ephemeral_address, _)) in
+            ephemeral_outputs.iter().zip(addresses_and_metadata)
+        {
+            // This output is ephemeral; we will report an error in `create_proposed_transactions`
+            // if a later step does not consume it.
+            builder.add_transparent_output(&ephemeral_address, change_value.value())?;
+            transparent_output_meta.push((
+                Recipient::EphemeralTransparent {
+                    receiving_account: account_id,
+                    ephemeral_address,
+                    outpoint_metadata: (),
+                },
+                ephemeral_address,
+                change_value.value(),
+                StepOutputIndex::Change(*change_index),
+            ))
         }
     }
 
@@ -1115,7 +1230,7 @@ where
 
                 let recipient = recipient
                     .map_internal_account_note(|pool| {
-                        assert!(pool == PoolType::Shielded(ShieldedProtocol::Orchard));
+                        assert!(pool == PoolType::ORCHARD);
                         build_result
                             .transaction()
                             .orchard_bundle()
@@ -1145,7 +1260,7 @@ where
 
                 let recipient = recipient
                     .map_internal_account_note(|pool| {
-                        assert!(pool == PoolType::Shielded(ShieldedProtocol::Sapling));
+                        assert!(pool == PoolType::SAPLING);
                         build_result
                             .transaction()
                             .sapling_bundle()
@@ -1164,47 +1279,47 @@ where
                 SentTransactionOutput::from_parts(output_index, recipient, value, memo)
             });
 
-    let transparent_outputs =
-        transparent_output_meta
-            .into_iter()
-            .map(|(recipient, addr, value)| {
-                let script = addr.script();
-                let output_index = build_result
-                    .transaction()
-                    .transparent_bundle()
-                    .and_then(|b| {
-                        b.vout
-                            .iter()
-                            .enumerate()
-                            .find(|(_, tx_out)| tx_out.script_pubkey == script)
-                    })
-                    .map(|(index, _)| index)
-                    .expect(
-                        "An output should exist in the transaction for each transparent payment.",
-                    );
+    let txid: [u8; 32] = build_result.transaction().txid().into();
+    assert_eq!(
+        transparent_output_meta.len(),
+        build_result
+            .transaction()
+            .transparent_bundle()
+            .map_or(0, |b| b.vout.len()),
+    );
 
-                SentTransactionOutput::from_parts(output_index, recipient, value, None)
-            });
+    #[allow(unused_variables)]
+    let transparent_outputs = transparent_output_meta.into_iter().enumerate().map(
+        |(n, (recipient, address, value, step_output_index))| {
+            // This assumes that transparent outputs are pushed onto `transparent_output_meta`
+            // with the same indices they have in the transaction's transparent outputs.
+            // We do not reorder transparent outputs; there is no reason to do so because it
+            // would not usefully improve privacy.
+            let outpoint = OutPoint::new(txid, n as u32);
 
-    let mut outputs = vec![];
+            let recipient = recipient.map_ephemeral_transparent_outpoint(|()| outpoint.clone());
+            #[cfg(feature = "transparent-inputs")]
+            unused_transparent_outputs.insert(
+                StepOutput::new(step_index, step_output_index),
+                (address, outpoint),
+            );
+            SentTransactionOutput::from_parts(n, recipient, value, None)
+        },
+    );
+
+    let mut outputs: Vec<SentTransactionOutput<_>> = vec![];
     #[cfg(feature = "orchard")]
     outputs.extend(orchard_outputs);
     outputs.extend(sapling_outputs);
     outputs.extend(transparent_outputs);
 
-    wallet_db
-        .store_sent_tx(&SentTransaction {
-            tx: build_result.transaction(),
-            created: time::OffsetDateTime::now_utc(),
-            account,
-            outputs,
-            fee_amount: proposal_step.balance().fee_required(),
-            #[cfg(feature = "transparent-inputs")]
-            utxos_spent,
-        })
-        .map_err(Error::DataSource)?;
-
-    Ok(build_result)
+    Ok(StepResult {
+        build_result,
+        outputs,
+        fee_amount: proposal_step.balance().fee_required(),
+        #[cfg(feature = "transparent-inputs")]
+        utxos_spent,
+    })
 }
 
 /// Constructs a transaction that consumes available transparent UTXOs belonging to the specified

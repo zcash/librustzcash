@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.2.1] - 2024-08-19
+### Added
+- `zcash_encoding::CompactSize::serialized_size`
+- `zcash_encoding::Vector::serialized_size_of_u8_vec`
+
 ## [0.2.0] - 2022-10-19
 ### Changed
 - MSRV is now 1.56.1

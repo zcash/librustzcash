@@ -62,13 +62,19 @@ impl NoteId {
     }
 }
 
-/// A type that represents the recipient of a transaction output: a recipient address (and, for
-/// unified addresses, the pool to which the payment is sent) in the case of an outgoing output, or an
-/// internal account ID and the pool to which funds were sent in the case of a wallet-internal
-/// output.
+/// A type that represents the recipient of a transaction output:
+/// * a recipient address;
+/// * for external unified addresses, the pool to which the payment is sent;
+/// * for ephemeral transparent addresses, the internal account ID and metadata about the outpoint;
+/// * for wallet-internal outputs, the internal account ID and metadata about the note.
 #[derive(Debug, Clone)]
-pub enum Recipient<AccountId, N> {
+pub enum Recipient<AccountId, N, O> {
     External(ZcashAddress, PoolType),
+    EphemeralTransparent {
+        receiving_account: AccountId,
+        ephemeral_address: TransparentAddress,
+        outpoint_metadata: O,
+    },
     InternalAccount {
         receiving_account: AccountId,
         external_address: Option<ZcashAddress>,
@@ -76,10 +82,23 @@ pub enum Recipient<AccountId, N> {
     },
 }
 
-impl<AccountId, N> Recipient<AccountId, N> {
-    pub fn map_internal_account_note<B, F: FnOnce(N) -> B>(self, f: F) -> Recipient<AccountId, B> {
+impl<AccountId, N, O> Recipient<AccountId, N, O> {
+    /// Return a copy of this `Recipient` with `f` applied to the note metadata, if any.
+    pub fn map_internal_account_note<B, F: FnOnce(N) -> B>(
+        self,
+        f: F,
+    ) -> Recipient<AccountId, B, O> {
         match self {
             Recipient::External(addr, pool) => Recipient::External(addr, pool),
+            Recipient::EphemeralTransparent {
+                receiving_account,
+                ephemeral_address,
+                outpoint_metadata,
+            } => Recipient::EphemeralTransparent {
+                receiving_account,
+                ephemeral_address,
+                outpoint_metadata,
+            },
             Recipient::InternalAccount {
                 receiving_account,
                 external_address,
@@ -91,12 +110,51 @@ impl<AccountId, N> Recipient<AccountId, N> {
             },
         }
     }
+
+    /// Return a copy of this `Recipient` with `f` applied to the output metadata, if any.
+    pub fn map_ephemeral_transparent_outpoint<B, F: FnOnce(O) -> B>(
+        self,
+        f: F,
+    ) -> Recipient<AccountId, N, B> {
+        match self {
+            Recipient::External(addr, pool) => Recipient::External(addr, pool),
+            Recipient::EphemeralTransparent {
+                receiving_account,
+                ephemeral_address,
+                outpoint_metadata,
+            } => Recipient::EphemeralTransparent {
+                receiving_account,
+                ephemeral_address,
+                outpoint_metadata: f(outpoint_metadata),
+            },
+            Recipient::InternalAccount {
+                receiving_account,
+                external_address,
+                note,
+            } => Recipient::InternalAccount {
+                receiving_account,
+                external_address,
+                note,
+            },
+        }
+    }
 }
 
-impl<AccountId, N> Recipient<AccountId, Option<N>> {
-    pub fn internal_account_note_transpose_option(self) -> Option<Recipient<AccountId, N>> {
+impl<AccountId, N, O> Recipient<AccountId, Option<N>, O> {
+    /// Return a copy of this `Recipient` with optional note metadata transposed to
+    /// an optional result.
+    pub fn internal_account_note_transpose_option(self) -> Option<Recipient<AccountId, N, O>> {
         match self {
             Recipient::External(addr, pool) => Some(Recipient::External(addr, pool)),
+            Recipient::EphemeralTransparent {
+                receiving_account,
+                ephemeral_address,
+                outpoint_metadata,
+            } => Some(Recipient::EphemeralTransparent {
+                receiving_account,
+                ephemeral_address,
+                outpoint_metadata,
+            }),
             Recipient::InternalAccount {
                 receiving_account,
                 external_address,
@@ -192,7 +250,7 @@ impl<AccountId> WalletTx<AccountId> {
 pub struct WalletTransparentOutput {
     outpoint: OutPoint,
     txout: TxOut,
-    height: BlockHeight,
+    mined_height: Option<BlockHeight>,
     recipient_address: TransparentAddress,
 }
 
@@ -200,14 +258,14 @@ impl WalletTransparentOutput {
     pub fn from_parts(
         outpoint: OutPoint,
         txout: TxOut,
-        height: BlockHeight,
+        mined_height: Option<BlockHeight>,
     ) -> Option<WalletTransparentOutput> {
         txout
             .recipient_address()
             .map(|recipient_address| WalletTransparentOutput {
                 outpoint,
                 txout,
-                height,
+                mined_height,
                 recipient_address,
             })
     }
@@ -220,8 +278,8 @@ impl WalletTransparentOutput {
         &self.txout
     }
 
-    pub fn height(&self) -> BlockHeight {
-        self.height
+    pub fn mined_height(&self) -> Option<BlockHeight> {
+        self.mined_height
     }
 
     pub fn recipient_address(&self) -> &TransparentAddress {
@@ -582,6 +640,7 @@ impl OvkPolicy {
 }
 
 /// Metadata related to the ZIP 32 derivation of a transparent address.
+/// This is implicitly scoped to an account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg(feature = "transparent-inputs")]
 pub struct TransparentAddressMetadata {
@@ -591,6 +650,8 @@ pub struct TransparentAddressMetadata {
 
 #[cfg(feature = "transparent-inputs")]
 impl TransparentAddressMetadata {
+    /// Returns a `TransparentAddressMetadata` in the given scope for the
+    /// given address index.
     pub fn new(scope: TransparentKeyScope, address_index: NonHardenedChildIndex) -> Self {
         Self {
             scope,

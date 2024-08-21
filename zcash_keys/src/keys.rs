@@ -93,7 +93,7 @@ pub enum DerivationError {
     #[cfg(feature = "orchard")]
     Orchard(orchard::zip32::Error),
     #[cfg(feature = "transparent-inputs")]
-    Transparent(hdwallet::error::Error),
+    Transparent(bip32::Error),
 }
 
 impl Display for DerivationError {
@@ -398,11 +398,11 @@ impl UnifiedSpendingKey {
                     }
                 }
                 Typecode::P2pkh => {
-                    if len != 64 {
+                    if len != 74 {
                         return Err(DecodingError::LengthMismatch(Typecode::P2pkh, len));
                     }
 
-                    let mut key = [0u8; 64];
+                    let mut key = [0u8; 74];
                     source
                         .read_exact(&mut key)
                         .map_err(|_| DecodingError::InsufficientData(Typecode::P2pkh))?;
@@ -587,6 +587,16 @@ impl UnifiedAddressRequest {
         Self::new(_has_orchard, _has_sapling, _has_p2pkh)
     }
 
+    /// Constructs a new unified address request that includes only the receivers
+    /// that appear both in itself and a given other request.
+    pub fn intersect(&self, other: &UnifiedAddressRequest) -> Option<UnifiedAddressRequest> {
+        Self::new(
+            self.has_orchard && other.has_orchard,
+            self.has_sapling && other.has_sapling,
+            self.has_p2pkh && other.has_p2pkh,
+        )
+    }
+
     /// Construct a new unified address request from its constituent parts.
     ///
     /// Panics: at least one of `has_orchard` or `has_sapling` must be `true`.
@@ -604,8 +614,8 @@ impl UnifiedAddressRequest {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl From<hdwallet::error::Error> for DerivationError {
-    fn from(e: hdwallet::error::Error) -> Self {
+impl From<bip32::Error> for DerivationError {
+    fn from(e: bip32::Error) -> Self {
         DerivationError::Transparent(e)
     }
 }
@@ -648,6 +658,22 @@ impl UnifiedFullViewingKey {
         )
     }
 
+    #[cfg(feature = "unstable-frost")]
+    pub fn from_orchard_fvk(
+        orchard: orchard::keys::FullViewingKey,
+    ) -> Result<UnifiedFullViewingKey, DerivationError> {
+        Self::from_checked_parts(
+            #[cfg(feature = "transparent-inputs")]
+            None,
+            #[cfg(feature = "sapling")]
+            None,
+            #[cfg(feature = "orchard")]
+            Some(orchard),
+            // We don't currently allow constructing new UFVKs with unknown items, but we store
+            // this to allow parsing such UFVKs.
+            vec![],
+        )
+    }
     /// Construct a UFVK from its constituent parts, after verifying that UIVK derivation can
     /// succeed.
     fn from_checked_parts(
@@ -1201,6 +1227,26 @@ impl UnifiedIncomingViewingKey {
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.find_address(DiversifierIndex::new(), request)
     }
+
+    /// Constructs a [`UnifiedAddressRequest`] that includes the components of this UIVK.
+    pub fn to_address_request(&self) -> Option<UnifiedAddressRequest> {
+        #[cfg(feature = "orchard")]
+        let has_orchard = self.orchard.is_some();
+        #[cfg(not(feature = "orchard"))]
+        let has_orchard = false;
+
+        #[cfg(feature = "sapling")]
+        let has_sapling = self.sapling.is_some();
+        #[cfg(not(feature = "sapling"))]
+        let has_sapling = false;
+
+        #[cfg(feature = "transparent-inputs")]
+        let has_p2pkh = self.transparent.is_some();
+        #[cfg(not(feature = "transparent-inputs"))]
+        let has_p2pkh = false;
+
+        UnifiedAddressRequest::new(has_orchard, has_sapling, has_p2pkh)
+    }
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -1447,11 +1493,11 @@ mod tests {
                 Some(Address::Unified(tvua)) => {
                     // We always derive transparent and Sapling receivers, but not
                     // every value in the test vectors has these present.
-                    if tvua.transparent().is_some() {
+                    if tvua.has_transparent() {
                         assert_eq!(tvua.transparent(), ua.transparent());
                     }
                     #[cfg(feature = "sapling")]
-                    if tvua.sapling().is_some() {
+                    if tvua.has_sapling() {
                         assert_eq!(tvua.sapling(), ua.sapling());
                     }
                 }
@@ -1628,11 +1674,11 @@ mod tests {
                 Some(Address::Unified(tvua)) => {
                     // We always derive transparent and Sapling receivers, but not
                     // every value in the test vectors has these present.
-                    if tvua.transparent().is_some() {
+                    if tvua.has_transparent() {
                         assert_eq!(tvua.transparent(), ua.transparent());
                     }
                     #[cfg(feature = "sapling")]
-                    if tvua.sapling().is_some() {
+                    if tvua.has_sapling() {
                         assert_eq!(tvua.sapling(), ua.sapling());
                     }
                 }
@@ -1660,8 +1706,10 @@ mod tests {
 
                 let len = len + 2 + 169;
 
+                // Transparent part is an `xprv` transparent extended key deserialized
+                // into bytes from Base58, minus the 4 prefix bytes.
                 #[cfg(feature = "transparent-inputs")]
-                let len = len + 2 + 64;
+                let len = len + 2 + 74;
 
                 len
             };

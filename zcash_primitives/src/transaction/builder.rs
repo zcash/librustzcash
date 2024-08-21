@@ -22,7 +22,10 @@ use crate::{
             amount::{Amount, BalanceError},
             transparent::{self, builder::TransparentBuilder, TxOut},
         },
-        fees::FeeRule,
+        fees::{
+            transparent::{InputView, OutputView},
+            FeeRule,
+        },
         sighash::{signature_hash, SignableInput},
         txid::TxIdDigester,
         Transaction, TransactionData, TxVersion, Unauthorized,
@@ -52,7 +55,7 @@ use super::components::sapling::zip212_enforcement;
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
-const DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
+pub const DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
 
 /// Errors that can occur during fee calculation.
 #[derive(Debug)]
@@ -554,8 +557,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             .fee_required(
                 &self.params,
                 self.target_height,
-                transparent_inputs,
-                self.transparent_builder.outputs(),
+                transparent_inputs.iter().map(|i| i.serialized_size()),
+                self.transparent_builder
+                    .outputs()
+                    .iter()
+                    .map(|i| i.serialized_size()),
                 sapling_spends,
                 self.sapling_builder
                     .as_ref()
@@ -597,8 +603,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             .fee_required_zfuture(
                 &self.params,
                 self.target_height,
-                transparent_inputs,
-                self.transparent_builder.outputs(),
+                transparent_inputs.iter().map(|i| i.serialized_size()),
+                self.transparent_builder
+                    .outputs()
+                    .iter()
+                    .map(|i| i.serialized_size()),
                 sapling_spends,
                 self.sapling_builder
                     .as_ref()
@@ -994,7 +1003,7 @@ mod tests {
             .add_transparent_input(
                 tsk.derive_external_secret_key(NonHardenedChildIndex::ZERO)
                     .unwrap(),
-                OutPoint::new([0u8; 32], 1),
+                OutPoint::fake(),
                 prev_coin,
             )
             .unwrap();

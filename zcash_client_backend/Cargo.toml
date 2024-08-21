@@ -1,7 +1,7 @@
 [package]
 name = "zcash_client_backend"
 description = "APIs for creating shielded Zcash light clients"
-version = "0.12.1"
+version = "0.13.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -27,6 +27,7 @@ features = [
     "lightwalletd-tonic",
     "transparent-inputs",
     "test-dependencies",
+    "tor",
     "unstable",
     "unstable-serialization",
     "unstable-spanning-tree",
@@ -58,7 +59,7 @@ bech32.workspace = true
 bs58.workspace = true
 
 # - Errors
-hdwallet = { workspace = true, optional = true }
+bip32 = { workspace = true, optional = true }
 
 # - Logging and metrics
 memuse.workspace = true
@@ -94,6 +95,17 @@ jubjub = { workspace = true, optional = true }
 # - ZIP 321
 nom = "7"
 
+# - Tor
+# -- Exposed error types: `arti_client::Error`, `arti_client::config::ConfigBuildError`,
+#    `hyper::Error`, `hyper::http::Error`, `serde_json::Error`. We could avoid this with
+#    changes to error handling.
+arti-client = { workspace = true, optional = true }
+hyper = { workspace = true, optional = true, features = ["client", "http1"] }
+serde_json = { workspace = true, optional = true }
+
+# - Currency conversion
+rust_decimal = { workspace = true, optional = true }
+
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 # - Documentation
@@ -106,6 +118,19 @@ percent-encoding.workspace = true
 # - Scanning
 crossbeam-channel.workspace = true
 rayon.workspace = true
+
+# - Tor
+tokio = { workspace = true, optional = true, features = ["fs"] }
+tor-rtcompat = { workspace = true, optional = true }
+tower = { workspace = true, optional = true }
+
+# - HTTP through Tor
+http-body-util = { workspace = true, optional = true }
+hyper-util = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+tokio-rustls = { workspace = true, optional = true }
+webpki-roots = { workspace = true, optional = true }
 
 [build-dependencies]
 tonic-build = { workspace = true, features = ["prost"] }
@@ -124,18 +149,16 @@ zcash_address = { workspace = true, features = ["test-dependencies"] }
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
 tokio = { version = "1.21.0", features = ["rt-multi-thread"] }
 
-time = ">=0.3.22, <0.3.24" # time 0.3.24 has MSRV 1.67
-
 [features]
 ## Enables the `tonic` gRPC client bindings for connecting to a `lightwalletd` server.
-lightwalletd-tonic = ["dep:tonic"]
+lightwalletd-tonic = ["dep:tonic", "hyper-util?/tokio"]
 
 ## Enables the `transport` feature of `tonic` producing a fully-featured client and server implementation
 lightwalletd-tonic-transport = ["lightwalletd-tonic", "tonic?/transport"]
 
 ## Enables receiving transparent funds and shielding them.
 transparent-inputs = [
-    "dep:hdwallet",
+    "dep:bip32",
     "zcash_keys/transparent-inputs",
     "zcash_primitives/transparent-inputs",
 ]
@@ -148,6 +171,26 @@ sync = [
     "lightwalletd-tonic",
     "dep:async-trait",
     "dep:futures-util",
+]
+
+## Exposes a Tor client for hiding a wallet's IP address while performing certain wallet
+## operations.
+tor = [
+    "dep:arti-client",
+    "dep:async-trait",
+    "dep:futures-util",
+    "dep:http-body-util",
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:rand",
+    "dep:rust_decimal",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:tokio",
+    "dep:tokio-rustls",
+    "dep:tor-rtcompat",
+    "dep:tower",
+    "dep:webpki-roots",
 ]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.

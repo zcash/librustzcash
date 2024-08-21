@@ -1,7 +1,7 @@
 [package]
 name = "zcash_keys"
 description = "Zcash key and address management"
-version = "0.2.0"
+version = "0.3.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -36,7 +36,7 @@ bech32.workspace = true
 bs58.workspace = true
 
 # - Transparent protocols
-hdwallet = { workspace = true, optional = true }
+bip32 = { workspace = true, optional = true }
 
 # - Logging and metrics
 memuse.workspace = true
@@ -76,7 +76,7 @@ zcash_primitives = { workspace = true, features = ["test-dependencies"] }
 
 [features]
 ## Enables use of transparent key parts and addresses
-transparent-inputs = ["dep:hdwallet", "zcash_primitives/transparent-inputs"]
+transparent-inputs = ["dep:bip32", "zcash_primitives/transparent-inputs"]
 
 ## Enables use of Orchard key parts and addresses
 orchard = ["dep:orchard"]
@@ -92,6 +92,9 @@ test-dependencies = [
 ]
 
 #! ### Experimental features
+
+## Exposes unstable APIs that are compatible with FROST key management
+unstable-frost = ["orchard"]
 
 ## Exposes unstable APIs. Their behaviour may change at any time.
 unstable = ["dep:byteorder"]

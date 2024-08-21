@@ -37,19 +37,13 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &rusqlite::Transaction<'_>) -> Result<(), Self::Error> {
-        let mut get_accounts = transaction.prepare(
-            r#"
-            SELECT id, ufvk, uivk
-            FROM accounts
-            "#,
-        )?;
+        let mut get_accounts = transaction.prepare("SELECT id, ufvk, uivk FROM accounts")?;
 
         let mut update_address = transaction.prepare(
             r#"UPDATE "addresses"
                SET address = :address
                WHERE account_id = :account_id
-               AND diversifier_index_be = :j
-            "#,
+               AND diversifier_index_be = :j"#,
         )?;
 
         let mut accounts = get_accounts.query([])?;
@@ -172,9 +166,9 @@ mod tests {
                 Ok(Address::decode(&db_data.params, &row.get::<_, String>(0)?).unwrap())
             }) {
             Ok(Address::Unified(ua)) => {
-                assert!(ua.orchard().is_none());
-                assert!(ua.sapling().is_some());
-                assert_eq!(ua.transparent().is_some(), UA_TRANSPARENT);
+                assert!(!ua.has_orchard());
+                assert!(ua.has_sapling());
+                assert_eq!(ua.has_transparent(), UA_TRANSPARENT);
             }
             other => panic!("Unexpected result from address decoding: {:?}", other),
         }
@@ -190,9 +184,9 @@ mod tests {
                 Ok(Address::decode(&db_data.params, &row.get::<_, String>(0)?).unwrap())
             }) {
             Ok(Address::Unified(ua)) => {
-                assert_eq!(ua.orchard().is_some(), UA_ORCHARD);
-                assert!(ua.sapling().is_some());
-                assert_eq!(ua.transparent().is_some(), UA_TRANSPARENT);
+                assert_eq!(ua.has_orchard(), UA_ORCHARD);
+                assert!(ua.has_sapling());
+                assert_eq!(ua.has_transparent(), UA_TRANSPARENT);
             }
             other => panic!("Unexpected result from address decoding: {:?}", other),
         }

@@ -7,6 +7,41 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.11.0] - 2024-08-20
+
+`zcash_client_sqlite` now provides capabilities for the management of ephemeral
+transparent addresses in support of the creation of ZIP 320 transaction pairs.
+
+In addition, `zcash_client_sqlite` now provides improved tracking of transparent 
+wallet history in support of the API changes in `zcash_client_backend 0.13`,
+and the `v_transactions` view has been modified to provide additional metadata
+about the relationship of each transaction to the wallet, in particular whether
+or not the transaction represents a wallet-internal shielding operation.
+
+### Changed
+- MSRV is now 1.70.0.
+- Updated dependencies:
+  - `zcash_address 0.4`
+  - `zcash_client_backend 0.13`
+  - `zcash_encoding 0.2.1`
+  - `zcash_keys 0.3`
+  - `zcash_primitives 0.16`
+  - `zcash_protocol 0.2`
+- `zcash_client_sqlite::error::SqliteClientError` has a new `ReachedGapLimit` and
+  `EphemeralAddressReuse` variants when the "transparent-inputs" feature is enabled.
+- The result of the `v_tx_outputs` SQL query could now include transparent outputs
+  with unknown height.
+- `zcash_client_sqlite::error::SqliteClientError` has changed variants:
+  - Removed `HdwalletError`.
+  - Added `AccountCollision`.
+  - Added `TransparentDerivation`.
+- The `v_transactions` view has been modified:
+  - The `block` column has been renamed to `mined_height`.
+  - A `spent_note_count` column has been added.
+  - An `is_shielding` column has been added, which is true for transactions where the
+    spends from the wallet are all transparent, and the outputs to the wallet are all
+    shielded.
+
 ## [0.10.3] - 2024-04-08
 
 ### Added

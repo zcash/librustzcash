@@ -1,5 +1,5 @@
 #![allow(unused)]
-use incrementalmerkletree::{Address, Retention};
+use incrementalmerkletree::{Address, Marking, Retention};
 use sapling::NullifierDerivingKey;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
@@ -336,6 +336,10 @@ impl WalletRead for MemoryWalletDb {
     ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
         Ok(HashMap::new())
     }
+
+    fn transaction_data_requests(&self) -> Result<Vec<super::TransactionDataRequest>, Self::Error> {
+        todo!()
+    }
 }
 
 impl WalletWrite for MemoryWalletDb {
@@ -454,7 +458,7 @@ impl WalletWrite for MemoryWalletDb {
                         from_state.final_sapling_tree().clone(),
                         Retention::Checkpoint {
                             id: from_state.block_height(),
-                            is_marked: false,
+                            marking: Marking::Reference,
                         },
                     );
 
@@ -464,7 +468,7 @@ impl WalletWrite for MemoryWalletDb {
                         from_state.final_orchard_tree().clone(),
                         Retention::Checkpoint {
                             id: from_state.block_height(),
-                            is_marked: false,
+                            marking: Marking::Reference,
                         },
                     );
 
@@ -539,14 +543,47 @@ impl WalletWrite for MemoryWalletDb {
         todo!()
     }
 
-    fn store_sent_tx(
+    // fn store_sent_tx(
+    //     &mut self,
+    //     _sent_tx: &SentTransaction<Self::AccountId>,
+    // ) -> Result<(), Self::Error> {
+    //     todo!()
+    // }
+
+    fn truncate_to_height(&mut self, _block_height: BlockHeight) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    fn import_account_hd(
         &mut self,
-        _sent_tx: &SentTransaction<Self::AccountId>,
+        seed: &SecretVec<u8>,
+        account_index: zip32::AccountId,
+        birthday: &AccountBirthday,
+    ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error> {
+        todo!()
+    }
+
+    fn import_account_ufvk(
+        &mut self,
+        unified_key: &UnifiedFullViewingKey,
+        birthday: &AccountBirthday,
+        purpose: super::AccountPurpose,
+    ) -> Result<Self::Account, Self::Error> {
+        todo!()
+    }
+
+    fn store_transactions_to_be_sent(
+        &mut self,
+        transactions: &[SentTransaction<Self::AccountId>],
     ) -> Result<(), Self::Error> {
         todo!()
     }
 
-    fn truncate_to_height(&mut self, _block_height: BlockHeight) -> Result<(), Self::Error> {
+    fn set_transaction_status(
+        &mut self,
+        _txid: TxId,
+        _status: super::TransactionStatus,
+    ) -> Result<(), Self::Error> {
         todo!()
     }
 }

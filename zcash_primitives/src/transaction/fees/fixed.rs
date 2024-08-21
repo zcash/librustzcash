@@ -39,7 +39,7 @@ impl FeeRule {
         }
     }
 
-    /// Returns the fixed fee amount which which this rule was configured.
+    /// Returns the fixed fee amount which this rule was configured.
     pub fn fixed_fee(&self) -> NonNegativeAmount {
         self.fixed_fee
     }
@@ -52,8 +52,8 @@ impl super::FeeRule for FeeRule {
         &self,
         _params: &P,
         _target_height: BlockHeight,
-        _transparent_inputs: &[impl transparent::InputView],
-        _transparent_outputs: &[impl transparent::OutputView],
+        _transparent_input_sizes: impl IntoIterator<Item = transparent::InputSize>,
+        _transparent_output_sizes: impl IntoIterator<Item = usize>,
         _sapling_input_count: usize,
         _sapling_output_count: usize,
         _orchard_action_count: usize,
@@ -68,8 +68,8 @@ impl super::FutureFeeRule for FeeRule {
         &self,
         _params: &P,
         _target_height: BlockHeight,
-        _transparent_inputs: &[impl transparent::InputView],
-        _transparent_outputs: &[impl transparent::OutputView],
+        _transparent_input_sizes: impl IntoIterator<Item = transparent::InputSize>,
+        _transparent_output_sizes: impl IntoIterator<Item = usize>,
         _sapling_input_count: usize,
         _sapling_output_count: usize,
         _orchard_action_count: usize,

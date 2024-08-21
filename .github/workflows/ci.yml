@@ -195,7 +195,7 @@ jobs:
         run: cargo add --no-default-features --path ../crates/zcash_proofs
       - name: Add zcash_client_backend as a dependency of the synthetic crate
         working-directory: ./ci-build
-        run: cargo add --features lightwalletd-tonic --path ../crates/zcash_client_backend
+        run: cargo add --path ../crates/zcash_client_backend
       - name: Copy pinned dependencies into synthetic crate
         run: cp crates/Cargo.lock ci-build/
       - name: Add target
@@ -284,7 +284,9 @@ jobs:
           --timeout 600
           --out xml
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3.1.5
+        uses: codecov/codecov-action@v4.5.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   doc-links:
     name: Intra-doc links

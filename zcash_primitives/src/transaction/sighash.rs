@@ -81,7 +81,7 @@ pub fn signature_hash<
     A: Authorization<SaplingAuth = SA, TransparentAuth = TA>,
 >(
     tx: &TransactionData<A>,
-    signable_input: &SignableInput<'_>,
+    signable_input: &SignableInput,
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> SignatureHash {
     SignatureHash(match tx.version {
