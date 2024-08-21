@@ -244,6 +244,13 @@ user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
+[[publisher.zcash_client_sqlite]]
+version = "0.11.1"
+when = "2024-08-21"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
+
 [[publisher.zcash_encoding]]
 version = "0.2.0"
 when = "2022-10-19"
