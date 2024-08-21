@@ -108,20 +108,20 @@ impl WalletRead for MemoryWalletDb {
         &self,
         account: Self::AccountId,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        todo!()
-        // self.accounts
-        //     .get(*account as usize)
-        //     .map(|account| {
-        //         account
-        //             .ufvk()
-        //             .default_address(
-        //                 UnifiedAddressRequest::all()
-        //                     .expect("At least one protocol should be enabled."),
-        //             )
-        //             .map(|(addr, _)| addr)
-        //     })
-        //     .transpose()
-        //     .map_err(|e| e.into())
+        self.accounts
+            .get(*account as usize)
+            .map(|account| {
+                account
+                    .ufvk()
+                    .unwrap()
+                    .default_address(
+                        UnifiedAddressRequest::all()
+                            .expect("At least one protocol should be enabled."),
+                    )
+                    .map(|(addr, _)| addr)
+            })
+            .transpose()
+            .map_err(|e| e.into())
     }
 
     fn get_account_birthday(&self, _account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
