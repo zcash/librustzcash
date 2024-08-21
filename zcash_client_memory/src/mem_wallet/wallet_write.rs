@@ -39,7 +39,8 @@ use zcash_client_backend::data_api::{
     WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
 };
 
-use super::{Account, AccountId, Error, MemoryWalletBlock, MemoryWalletDb, ViewingKey};
+use super::{Account, AccountId, MemoryWalletBlock, MemoryWalletDb, ViewingKey};
+use crate::error::Error;
 
 impl WalletWrite for MemoryWalletDb {
     type UtxoRef = u32;
@@ -50,19 +51,15 @@ impl WalletWrite for MemoryWalletDb {
         birthday: &AccountBirthday,
     ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
         let seed_fingerprint = SeedFingerprint::from_seed(seed.expose_secret())
-            .ok_or_else(|| "Seed must be between 32 and 252 bytes in length.".to_owned())
-            .unwrap();
+            .ok_or_else(|| Self::Error::InvalidSeedLength)?;
         let account_index = self
             .max_zip32_account_index(&seed_fingerprint)
             .unwrap()
-            .map(|a| a.next().ok_or_else(|| "Account out of range".to_string()))
-            .transpose()
-            .unwrap()
+            .map(|a| a.next().ok_or_else(|| Self::Error::AccountOutOfRange))
+            .transpose()?
             .unwrap_or(zip32::AccountId::ZERO);
 
-        let usk = UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account_index)
-            .map_err(|_| "key derivation error".to_string())
-            .unwrap();
+        let usk = UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account_index)?;
         let ufvk = usk.to_unified_full_viewing_key();
         let account = Account {
             account_id: AccountId(self.accounts.len() as u32),

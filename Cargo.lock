@@ -5893,6 +5893,7 @@ dependencies = [
  "shardtree",
  "static_assertions",
  "subtle",
+ "thiserror",
  "tracing",
  "zcash_address",
  "zcash_client_backend",

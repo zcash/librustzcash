@@ -49,10 +49,12 @@ use {
 #[cfg(feature = "orchard")]
 use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
+use crate::error::Error;
+
 mod wallet_commitment_trees;
 mod wallet_read;
 mod wallet_write;
-use crate::error::MemoryWalletError;
+
 struct MemoryWalletBlock {
     height: BlockHeight,
     hash: BlockHash,
@@ -140,33 +142,6 @@ impl MemoryWalletDb {
                 _ => None,
             })
             .max())
-    }
-}
-
-#[derive(Debug)]
-pub enum Error {
-    AccountUnknown(AccountId),
-    ViewingKeyNotFound(AccountId),
-    MemoDecryption(memo::Error),
-    KeyDerivation(DerivationError),
-    AddressGeneration(AddressGenerationError),
-}
-
-impl From<DerivationError> for Error {
-    fn from(value: DerivationError) -> Self {
-        Error::KeyDerivation(value)
-    }
-}
-
-impl From<AddressGenerationError> for Error {
-    fn from(value: AddressGenerationError) -> Self {
-        Error::AddressGeneration(value)
-    }
-}
-
-impl From<memo::Error> for Error {
-    fn from(value: memo::Error) -> Self {
-        Error::MemoDecryption(value)
     }
 }
 

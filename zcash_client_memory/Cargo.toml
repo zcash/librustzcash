@@ -48,6 +48,7 @@ sapling.workspace = true
 # - Note commitment trees
 incrementalmerkletree.workspace = true
 shardtree = { workspace = true, features = ["legacy-api"] }
+thiserror = "1.0.63"
 
 
 
@@ -62,19 +63,10 @@ multicore = ["zcash_primitives/multicore"]
 orchard = ["dep:orchard", "zcash_client_backend/orchard", "zcash_keys/orchard"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
-test-dependencies = [
-    "incrementalmerkletree/test-dependencies",
-    "zcash_primitives/test-dependencies",
-    "zcash_client_backend/test-dependencies",
-    "incrementalmerkletree/test-dependencies",
-]
+test-dependencies = ["incrementalmerkletree/test-dependencies", "zcash_primitives/test-dependencies", "zcash_client_backend/test-dependencies", "incrementalmerkletree/test-dependencies"]
 
 ## Enables receiving transparent funds and sending to transparent recipients
-transparent-inputs = [
-  "dep:bip32",
-  "zcash_keys/transparent-inputs",
-  "zcash_client_backend/transparent-inputs"
-]
+transparent-inputs = ["dep:bip32", "zcash_keys/transparent-inputs", "zcash_client_backend/transparent-inputs"]
 
 #! ### Experimental features
 

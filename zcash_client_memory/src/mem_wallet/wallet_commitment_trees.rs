@@ -43,7 +43,8 @@ use zcash_client_backend::data_api::{
 #[cfg(feature = "orchard")]
 use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
-use super::{Account, Error, MemoryWalletBlock, MemoryWalletDb};
+use super::{Account, MemoryWalletBlock, MemoryWalletDb};
+use crate::error::Error;
 
 impl WalletCommitmentTrees for MemoryWalletDb {
     type Error = Infallible;

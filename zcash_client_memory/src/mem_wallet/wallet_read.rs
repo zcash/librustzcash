@@ -45,7 +45,8 @@ use {
     zcash_primitives::legacy::TransparentAddress,
 };
 
-use super::{Account, AccountId, Error, MemoryWalletDb};
+use super::{Account, AccountId, MemoryWalletDb};
+use crate::error::Error;
 
 impl WalletRead for MemoryWalletDb {
     type Error = Error;
