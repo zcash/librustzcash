@@ -10,7 +10,7 @@ use std::{
     hash::Hash,
     num::NonZeroU32,
 };
-use zcash_keys::keys::{AddressGenerationError, DerivationError};
+use zcash_keys::keys::{AddressGenerationError, DerivationError, UnifiedIncomingViewingKey};
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
 
 use zcash_primitives::{
@@ -28,7 +28,8 @@ use zcash_protocol::{
 use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{
-        chain::ChainState, AccountPurpose, SeedRelevance, TransactionDataRequest, TransactionStatus,
+        chain::ChainState, AccountPurpose, AccountSource, SeedRelevance, TransactionDataRequest,
+        TransactionStatus,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     wallet::{NoteId, WalletSpend, WalletTransparentOutput, WalletTx},
@@ -152,10 +153,35 @@ impl From<memo::Error> for Error {
     }
 }
 
+pub struct MemAccount {
+    id: u32,
+    ufvk: UnifiedFullViewingKey,
+}
+
+impl Account<u32> for MemAccount {
+    fn id(&self) -> u32 {
+        self.id
+    }
+
+    fn source(&self) -> AccountSource {
+        AccountSource::Imported {
+            purpose: AccountPurpose::ViewOnly,
+        }
+    }
+
+    fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
+        Some(&self.ufvk)
+    }
+
+    fn uivk(&self) -> UnifiedIncomingViewingKey {
+        self.ufvk.to_unified_incoming_viewing_key()
+    }
+}
+
 impl WalletRead for MemoryWalletDb {
     type Error = Error;
     type AccountId = u32;
-    type Account = (u32, UnifiedFullViewingKey);
+    type Account = MemAccount;
 
     fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error> {
         Ok(Vec::new())
@@ -201,7 +227,10 @@ impl WalletRead for MemoryWalletDb {
             if acct.ufvk.default_address(ufvk_req).unwrap()
                 == ufvk.default_address(ufvk_req).unwrap()
             {
-                Some((*id, acct.ufvk.clone()))
+                Some(MemAccount {
+                    id: *id,
+                    ufvk: acct.ufvk.clone(),
+                })
             } else {
                 None
             }
