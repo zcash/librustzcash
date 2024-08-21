@@ -1,0 +1,50 @@
+[package]
+name = "zcash_client_memory"
+version = "0.1.0"
+repository.workspace = true
+# readme = "README.md"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+zcash_address.workspace = true
+zcash_client_backend = { workspace = true, features = ["unstable-serialization", "unstable-spanning-tree"] }
+zcash_encoding.workspace = true
+zcash_keys = { workspace = true, features = ["sapling"] }
+zcash_primitives.workspace = true
+zcash_protocol.workspace = true
+zip32.workspace = true
+
+# Dependencies exposed in a public API:
+# (Breaking upgrades to these require a breaking upgrade to this crate.)
+# - Errors
+bip32 = { workspace = true, optional = true }
+bs58.workspace = true
+
+# - Logging and metrics
+tracing.workspace = true
+
+# - Serialization
+byteorder.workspace = true
+nonempty.workspace = true
+prost.workspace = true
+group.workspace = true
+jubjub.workspace = true
+
+# - Secret management
+secrecy.workspace = true
+subtle.workspace = true
+
+# - Static assertions
+static_assertions.workspace = true
+
+# - Shielded protocols
+orchard = { workspace = true, optional = true }
+sapling.workspace = true
+
+# - Note commitment trees
+incrementalmerkletree.workspace = true
+shardtree = { workspace = true, features = ["legacy-api"] }

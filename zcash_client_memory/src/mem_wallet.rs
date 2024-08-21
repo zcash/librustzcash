@@ -25,23 +25,29 @@ use zcash_protocol::{
     ShieldedProtocol::{Orchard, Sapling},
 };
 
-use crate::{
+use zcash_client_backend::{
     address::UnifiedAddress,
+    data_api::{
+        chain::ChainState, AccountPurpose, SeedRelevance, TransactionDataRequest, TransactionStatus,
+    },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     wallet::{NoteId, WalletSpend, WalletTransparentOutput, WalletTx},
 };
 
-use super::{
+use zcash_client_backend::data_api::{
     chain::CommitmentTreeRoot, scanning::ScanRange, Account, AccountBirthday, BlockMetadata,
     DecryptedTransaction, NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees,
     WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
 };
 
 #[cfg(feature = "transparent-inputs")]
-use {crate::wallet::TransparentAddressMetadata, zcash_primitives::legacy::TransparentAddress};
+use {
+    zcash_client_backend::wallet::TransparentAddressMetadata,
+    zcash_primitives::legacy::TransparentAddress,
+};
 
 #[cfg(feature = "orchard")]
-use super::ORCHARD_SHARD_HEIGHT;
+use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 struct MemoryWalletBlock {
     height: BlockHeight,
@@ -181,7 +187,7 @@ impl WalletRead for MemoryWalletDb {
     fn seed_relevance_to_derived_accounts(
         &self,
         seed: &SecretVec<u8>,
-    ) -> Result<super::SeedRelevance<Self::AccountId>, Self::Error> {
+    ) -> Result<SeedRelevance<Self::AccountId>, Self::Error> {
         todo!()
     }
 
@@ -337,7 +343,7 @@ impl WalletRead for MemoryWalletDb {
         Ok(HashMap::new())
     }
 
-    fn transaction_data_requests(&self) -> Result<Vec<super::TransactionDataRequest>, Self::Error> {
+    fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {
         todo!()
     }
 }
@@ -389,7 +395,7 @@ impl WalletWrite for MemoryWalletDb {
     /// Assumes blocks will be here in order.
     fn put_blocks(
         &mut self,
-        from_state: &super::chain::ChainState,
+        from_state: &ChainState,
         blocks: Vec<ScannedBlock<Self::AccountId>>,
     ) -> Result<(), Self::Error> {
         // TODO:
@@ -489,20 +495,20 @@ impl WalletWrite for MemoryWalletDb {
                         }
                     });
 
-                    self.tx_idx.insert(txid, block.block_height);
+                    self.tx_idx.insert(txid, block.height());
                     transactions.insert(txid, transaction.clone());
                 }
             }
 
             let memory_block = MemoryWalletBlock {
-                height: block.block_height,
-                hash: block.block_hash,
-                block_time: block.block_time,
+                height: block.height(),
+                hash: block.block_hash(),
+                block_time: block.block_time(),
                 transactions,
                 memos,
             };
 
-            self.blocks.insert(block.block_height, memory_block);
+            self.blocks.insert(block.height(), memory_block);
 
             // Add the Sapling commitments to the sapling tree.
             let block_commitments = block.into_commitments();
@@ -567,7 +573,7 @@ impl WalletWrite for MemoryWalletDb {
         &mut self,
         unified_key: &UnifiedFullViewingKey,
         birthday: &AccountBirthday,
-        purpose: super::AccountPurpose,
+        purpose: AccountPurpose,
     ) -> Result<Self::Account, Self::Error> {
         todo!()
     }
@@ -582,7 +588,7 @@ impl WalletWrite for MemoryWalletDb {
     fn set_transaction_status(
         &mut self,
         _txid: TxId,
-        _status: super::TransactionStatus,
+        _status: TransactionStatus,
     ) -> Result<(), Self::Error> {
         todo!()
     }

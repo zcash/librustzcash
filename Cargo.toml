@@ -10,6 +10,7 @@ members = [
     "zcash",
     "zcash_client_backend",
     "zcash_client_sqlite",
+    "zcash_client_memory",
     "zcash_extensions",
     "zcash_history",
     "zcash_keys",

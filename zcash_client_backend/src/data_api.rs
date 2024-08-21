@@ -110,8 +110,8 @@ pub mod error;
 pub mod scanning;
 pub mod wallet;
 
-#[cfg(any(test, feature = "test-dependencies"))]
-pub mod mem_wallet;
+// #[cfg(any(test, feature = "test-dependencies"))]
+// pub mod mem_wallet;
 
 /// The height of subtree roots in the Sapling note commitment tree.
 ///

@@ -5876,6 +5876,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcash_client_memory"
+version = "0.1.0"
+dependencies = [
+ "bip32",
+ "bs58",
+ "byteorder",
+ "group",
+ "incrementalmerkletree",
+ "jubjub",
+ "nonempty",
+ "orchard",
+ "prost",
+ "sapling-crypto",
+ "secrecy",
+ "shardtree",
+ "static_assertions",
+ "subtle",
+ "tracing",
+ "zcash_address",
+ "zcash_client_backend",
+ "zcash_encoding",
+ "zcash_keys",
+ "zcash_primitives",
+ "zcash_protocol",
+ "zip32",
+]
+
+[[package]]
 name = "zcash_client_sqlite"
 version = "0.11.0"
 dependencies = [
