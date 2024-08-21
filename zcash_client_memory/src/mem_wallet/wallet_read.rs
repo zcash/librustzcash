@@ -12,6 +12,16 @@ use std::{
 use zcash_keys::keys::{AddressGenerationError, DerivationError, UnifiedIncomingViewingKey};
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
 
+use std::ops::Add;
+use zcash_client_backend::{
+    address::UnifiedAddress,
+    data_api::{
+        chain::ChainState, Account as _, AccountPurpose, AccountSource, SeedRelevance,
+        TransactionDataRequest, TransactionStatus,
+    },
+    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+    wallet::{NoteId, WalletSpend, WalletTransparentOutput, WalletTx},
+};
 use zcash_primitives::{
     block::BlockHash,
     consensus::{BlockHeight, Network},
@@ -23,21 +33,12 @@ use zcash_protocol::{
     ShieldedProtocol::{Orchard, Sapling},
 };
 
-use zcash_client_backend::{
-    address::UnifiedAddress,
-    data_api::{
-        chain::ChainState, Account as _, AccountPurpose, AccountSource, SeedRelevance,
-        TransactionDataRequest, TransactionStatus,
-    },
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    wallet::{NoteId, WalletSpend, WalletTransparentOutput, WalletTx},
-};
-
 use zcash_client_backend::data_api::{
     chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
     DecryptedTransaction, NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees,
     WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
 };
+use zcash_primitives::transaction::components::OutPoint;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -45,7 +46,7 @@ use {
     zcash_primitives::legacy::TransparentAddress,
 };
 
-use super::{Account, AccountId, MemoryWalletDb};
+use super::{Account, AccountId, MemoryWalletDb, TransparentReceivedOutput};
 use crate::error::Error;
 
 impl WalletRead for MemoryWalletDb {
@@ -234,10 +235,42 @@ impl WalletRead for MemoryWalletDb {
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
         &self,
-        _account: Self::AccountId,
-        _max_height: BlockHeight,
+        account: Self::AccountId,
+        max_height: BlockHeight,
     ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
-        Ok(HashMap::new())
+        // scan all transparent outputs and return those in a tx belonging to this account
+        // as a map between the address and the total value received
+        Ok(self
+            .transparent_received_outputs
+            .iter()
+            .filter(|(_, output)| output.account_id == account) // that belong to this account
+            .filter(|(outpoint, output)| {
+                // where the tx creating the output is mined
+                if let Some(height) = self.tx_idx.get(&output.tx_id) {
+                    height <= &max_height
+                } else {
+                    false
+                }
+            })
+            .filter(|(outpoint, _)| {
+                // that are unspent
+                !self
+                    .transparent_received_output_spends
+                    .contains_key(&outpoint)
+            })
+            .fold(
+                HashMap::new(),
+                |mut res, (_, TransparentReceivedOutput { output, .. })| {
+                    let addr = output.recipient_address().clone();
+                    let zats = res
+                        .get(&addr)
+                        .unwrap_or(&Zatoshis::ZERO)
+                        .add(output.value())
+                        .expect("Can always add a non-negative value to zero");
+                    res.insert(addr, zats);
+                    res
+                },
+            ))
     }
 
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {

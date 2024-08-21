@@ -3,7 +3,6 @@ use zcash_protocol::memo;
 
 use crate::mem_wallet::AccountId;
 
-
 type Type = AddressGenerationError;
 
 #[derive(Debug, thiserror::Error)]
