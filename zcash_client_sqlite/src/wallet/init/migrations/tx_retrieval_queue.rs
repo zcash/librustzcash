@@ -10,11 +10,11 @@ use zcash_protocol::consensus::{self, BlockHeight, BranchId};
 
 use crate::wallet::{self, init::WalletMigrationError};
 
-use super::utxos_to_txos;
+use super::ephemeral_addresses;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xfec02b61_3988_4b4f_9699_98977fac9e7f);
 
-const DEPENDENCIES: [Uuid; 1] = [utxos_to_txos::MIGRATION_ID];
+const DEPENDENCIES: [Uuid; 1] = [ephemeral_addresses::MIGRATION_ID];
 
 pub(super) struct Migration<P> {
     pub(super) params: P,

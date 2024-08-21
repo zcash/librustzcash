@@ -70,8 +70,10 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                                  orchard_received_notes        spend_key_available
     //                                       /         \
     //                ensure_orchard_ua_receiver     utxos_to_txos
-    //                                                  /      \
-    //                                 ephemeral_addresses    tx_retrieval_queue
+    //                                                     |
+    //                                             ephemeral_addresses
+    //                                                     |
+    //                                             tx_retrieval_queue
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -139,7 +141,7 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
 /// included.
 #[allow(dead_code)]
 const PUBLIC_MIGRATION_STATES: &[&[Uuid]] = &[
-    V_0_4_0, V_0_6_0, V_0_8_0, V_0_9_0, V_0_10_0, V_0_10_3, V_0_11_0,
+    V_0_4_0, V_0_6_0, V_0_8_0, V_0_9_0, V_0_10_0, V_0_10_3, V_0_11_0, V_0_11_1,
 ];
 
 /// Leaf migrations in the 0.4.0 release.
@@ -181,6 +183,15 @@ const V_0_10_3: &[Uuid] = &[
 const V_0_11_0: &[Uuid] = &[
     ensure_orchard_ua_receiver::MIGRATION_ID,
     ephemeral_addresses::MIGRATION_ID,
+    nullifier_map::MIGRATION_ID,
+    orchard_shardtree::MIGRATION_ID,
+    spend_key_available::MIGRATION_ID,
+    tx_retrieval_queue::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.11.1 release.
+const V_0_11_1: &[Uuid] = &[
+    ensure_orchard_ua_receiver::MIGRATION_ID,
     nullifier_map::MIGRATION_ID,
     orchard_shardtree::MIGRATION_ID,
     spend_key_available::MIGRATION_ID,
@@ -237,6 +248,7 @@ mod tests {
             prev_state = new_state;
         };
 
+        let mut prev_leaves: &[Uuid] = &[];
         for migrations in super::PUBLIC_MIGRATION_STATES {
             assert_matches!(
                 init_wallet_db_internal(
@@ -247,7 +259,15 @@ mod tests {
                 ),
                 Ok(_)
             );
-            ensure_migration_state_changed(&db_data.conn);
+
+            // If we have any new leaves, ensure the migration state changed. This lets us
+            // represent releases that changed the graph edges without introducing any new
+            // migrations.
+            if migrations.iter().any(|m| !prev_leaves.contains(m)) {
+                ensure_migration_state_changed(&db_data.conn);
+            }
+
+            prev_leaves = *migrations;
         }
 
         // Now check that we can migrate from the last public release to the current
