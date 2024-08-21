@@ -82,18 +82,9 @@ impl Ord for MemoryWalletBlock {
     }
 }
 
-pub struct MemoryWalletAccount {
-    seed_fingerprint: SeedFingerprint,
-    account_id: AccountId,
-    ufvk: UnifiedFullViewingKey,
-    birthday: AccountBirthday,
-    addresses: BTreeMap<DiversifierIndex, UnifiedAddressRequest>,
-    notes: HashSet<NoteId>,
-}
-
 pub struct MemoryWalletDb {
     network: Network,
-    accounts: BTreeMap<u32, MemoryWalletAccount>,
+    accounts: BTreeMap<u32, Account>,
     blocks: BTreeMap<BlockHeight, MemoryWalletBlock>,
     tx_idx: HashMap<TxId, BlockHeight>,
     sapling_spends: BTreeMap<sapling::Nullifier, (TxId, bool)>,
@@ -182,6 +173,8 @@ pub struct Account {
     account_id: AccountId,
     kind: AccountSource,
     viewing_key: ViewingKey,
+    birthday: AccountBirthday,
+    purpose: AccountPurpose,
 }
 
 impl Account {
