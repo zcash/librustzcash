@@ -16,7 +16,6 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{BlockHeight, Network},
     transaction::{Transaction, TxId},
-    zip32::AccountId,
 };
 use zcash_protocol::{
     memo::{self, Memo, MemoBytes},
@@ -35,12 +34,12 @@ use zcash_client_backend::{
 };
 
 use zcash_client_backend::data_api::{
-    chain::CommitmentTreeRoot, scanning::ScanRange, Account, AccountBirthday, BlockMetadata,
+    chain::CommitmentTreeRoot, scanning::ScanRange, Account as _, AccountBirthday, BlockMetadata,
     DecryptedTransaction, NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees,
     WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
 };
 
-use super::{Error, MemAccount, MemoryWalletAccount, MemoryWalletBlock, MemoryWalletDb};
+use super::{Account, AccountId, Error, MemoryWalletAccount, MemoryWalletBlock, MemoryWalletDb};
 
 impl WalletWrite for MemoryWalletDb {
     type UtxoRef = u32;
@@ -50,26 +49,27 @@ impl WalletWrite for MemoryWalletDb {
         seed: &SecretVec<u8>,
         birthday: &AccountBirthday,
     ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
-        let seed_fingerprint =
-            SeedFingerprint::from_seed(seed.expose_secret()).expect("Valid seed.");
-        let account_id = self.accounts.last_key_value().map_or(0, |(id, _)| id + 1);
-        let account_index = AccountId::try_from(account_id).unwrap();
-        let usk =
-            UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account_index)?;
-        let ufvk = usk.to_unified_full_viewing_key();
-        self.accounts.insert(
-            account_id,
-            MemoryWalletAccount {
-                seed_fingerprint,
-                account_id: account_index,
-                ufvk,
-                birthday: birthday.clone(),
-                addresses: BTreeMap::new(),
-                notes: HashSet::new(),
-            },
-        );
+        todo!()
+        // let seed_fingerprint =
+        //     SeedFingerprint::from_seed(seed.expose_secret()).expect("Valid seed.");
+        // let account_id = self.accounts.last_key_value().map_or(0, |(id, _)| id + 1);
+        // let account_index = zip32::AccountId::try_from(account_id).unwrap();
+        // let usk =
+        //     UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account_index)?;
+        // let ufvk = usk.to_unified_full_viewing_key();
+        // self.accounts.insert(
+        //     account_id,
+        //     MemoryWalletAccount {
+        //         seed_fingerprint,
+        //         account_id: account_index,
+        //         ufvk,
+        //         birthday: birthday.clone(),
+        //         addresses: BTreeMap::new(),
+        //         notes: HashSet::new(),
+        //     },
+        // );
 
-        Ok((account_id, usk))
+        // Ok((AccountId(account_id), usk))
     }
 
     fn get_next_available_address(

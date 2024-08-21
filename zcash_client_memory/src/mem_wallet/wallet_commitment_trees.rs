@@ -35,7 +35,7 @@ use zcash_client_backend::{
 };
 
 use zcash_client_backend::data_api::{
-    chain::CommitmentTreeRoot, scanning::ScanRange, Account, AccountBirthday, BlockMetadata,
+    chain::CommitmentTreeRoot, scanning::ScanRange, Account as _, AccountBirthday, BlockMetadata,
     DecryptedTransaction, NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees,
     WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
 };
@@ -43,7 +43,7 @@ use zcash_client_backend::data_api::{
 #[cfg(feature = "orchard")]
 use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
-use super::{Error, MemAccount, MemoryWalletAccount, MemoryWalletBlock, MemoryWalletDb};
+use super::{Account, Error, MemoryWalletAccount, MemoryWalletBlock, MemoryWalletDb};
 
 impl WalletCommitmentTrees for MemoryWalletDb {
     type Error = Infallible;

@@ -16,7 +16,6 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{BlockHeight, Network},
     transaction::{Transaction, TxId},
-    zip32::AccountId,
 };
 use zcash_protocol::{
     memo::{self, Memo, MemoBytes},
@@ -35,7 +34,7 @@ use zcash_client_backend::{
 };
 
 use zcash_client_backend::data_api::{
-    chain::CommitmentTreeRoot, scanning::ScanRange, Account, AccountBirthday, BlockMetadata,
+    chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
     DecryptedTransaction, NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees,
     WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
 };
@@ -46,12 +45,12 @@ use {
     zcash_primitives::legacy::TransparentAddress,
 };
 
-use super::{Error, MemAccount, MemoryWalletDb};
+use super::{Account, AccountId, Error, MemoryWalletDb};
 
 impl WalletRead for MemoryWalletDb {
     type Error = Error;
-    type AccountId = u32;
-    type Account = MemAccount;
+    type AccountId = AccountId;
+    type Account = Account;
 
     fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error> {
         Ok(Vec::new())
@@ -91,39 +90,41 @@ impl WalletRead for MemoryWalletDb {
         &self,
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<Self::Account>, Self::Error> {
-        let ufvk_req =
-            UnifiedAddressRequest::all().expect("At least one protocol should be enabled");
-        Ok(self.accounts.iter().find_map(|(id, acct)| {
-            if acct.ufvk.default_address(ufvk_req).unwrap()
-                == ufvk.default_address(ufvk_req).unwrap()
-            {
-                Some(MemAccount {
-                    id: *id,
-                    ufvk: acct.ufvk.clone(),
-                })
-            } else {
-                None
-            }
-        }))
+        todo!()
+        // let ufvk_req =
+        //     UnifiedAddressRequest::all().expect("At least one protocol should be enabled");
+        // Ok(self.accounts.iter().find_map(|(id, acct)| {
+        //     if acct.ufvk.default_address(ufvk_req).unwrap()
+        //         == ufvk.default_address(ufvk_req).unwrap()
+        //     {
+        //         Some(Account {
+        //             id: *id,
+        //             ufvk: acct.ufvk.clone(),
+        //         })
+        //     } else {
+        //         None
+        //     }
+        // }))
     }
 
     fn get_current_address(
         &self,
         account: Self::AccountId,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        self.accounts
-            .get(&account)
-            .map(|account| {
-                account
-                    .ufvk
-                    .default_address(
-                        UnifiedAddressRequest::all()
-                            .expect("At least one protocol should be enabled."),
-                    )
-                    .map(|(addr, _)| addr)
-            })
-            .transpose()
-            .map_err(|e| e.into())
+        todo!()
+        // self.accounts
+        //     .get(&account)
+        //     .map(|account| {
+        //         account
+        //             .ufvk
+        //             .default_address(
+        //                 UnifiedAddressRequest::all()
+        //                     .expect("At least one protocol should be enabled."),
+        //             )
+        //             .map(|(addr, _)| addr)
+        //     })
+        //     .transpose()
+        //     .map_err(|e| e.into())
     }
 
     fn get_account_birthday(&self, _account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
