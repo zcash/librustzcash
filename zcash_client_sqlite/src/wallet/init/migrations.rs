@@ -31,6 +31,7 @@ use std::rc::Rc;
 
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::SecretVec;
+use uuid::Uuid;
 use zcash_protocol::consensus;
 
 use super::WalletMigrationError;
@@ -131,8 +132,66 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     ]
 }
 
+/// All states of the migration DAG that have been exposed in a public crate release, in
+/// the order that crate users would have encountered them.
+///
+/// Omitted versions had the same migration state as the first prior version that is
+/// included.
+#[allow(dead_code)]
+const PUBLIC_MIGRATION_STATES: &[&[Uuid]] = &[
+    V_0_4_0, V_0_6_0, V_0_8_0, V_0_9_0, V_0_10_0, V_0_10_3, V_0_11_0,
+];
+
+/// Leaf migrations in the 0.4.0 release.
+const V_0_4_0: &[Uuid] = &[add_transaction_views::MIGRATION_ID];
+
+/// Leaf migrations in the 0.6.0 release.
+const V_0_6_0: &[Uuid] = &[v_transactions_net::MIGRATION_ID];
+
+/// Leaf migrations in the 0.8.0 release.
+const V_0_8_0: &[Uuid] = &[
+    nullifier_map::MIGRATION_ID,
+    v_transactions_note_uniqueness::MIGRATION_ID,
+    wallet_summaries::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.9.0 release.
+const V_0_9_0: &[Uuid] = &[
+    nullifier_map::MIGRATION_ID,
+    receiving_key_scopes::MIGRATION_ID,
+    v_transactions_note_uniqueness::MIGRATION_ID,
+    wallet_summaries::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.10.0 release.
+const V_0_10_0: &[Uuid] = &[
+    nullifier_map::MIGRATION_ID,
+    orchard_received_notes::MIGRATION_ID,
+    orchard_shardtree::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.10.3 release.
+const V_0_10_3: &[Uuid] = &[
+    ensure_orchard_ua_receiver::MIGRATION_ID,
+    nullifier_map::MIGRATION_ID,
+    orchard_shardtree::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.11.0 release.
+const V_0_11_0: &[Uuid] = &[
+    ensure_orchard_ua_receiver::MIGRATION_ID,
+    ephemeral_addresses::MIGRATION_ID,
+    nullifier_map::MIGRATION_ID,
+    orchard_shardtree::MIGRATION_ID,
+    spend_key_available::MIGRATION_ID,
+    tx_retrieval_queue::MIGRATION_ID,
+];
+
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
+    use rusqlite::Connection;
     use secrecy::Secret;
     use tempfile::NamedTempFile;
     use uuid::Uuid;
@@ -156,5 +215,47 @@ mod tests {
             ),
             Ok(_)
         );
+    }
+
+    #[test]
+    fn migrate_between_releases_without_data() {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+
+        let seed = [0xab; 32].to_vec();
+
+        let mut prev_state = HashSet::new();
+        let mut ensure_migration_state_changed = |conn: &Connection| {
+            let new_state = conn
+                .prepare_cached("SELECT * FROM schemer_migrations")
+                .unwrap()
+                .query_map([], |row| row.get::<_, [u8; 16]>(0).map(Uuid::from_bytes))
+                .unwrap()
+                .collect::<Result<HashSet<Uuid>, _>>()
+                .unwrap();
+            assert!(prev_state != new_state);
+            prev_state = new_state;
+        };
+
+        for migrations in super::PUBLIC_MIGRATION_STATES {
+            assert_matches!(
+                init_wallet_db_internal(
+                    &mut db_data,
+                    Some(Secret::new(seed.clone())),
+                    migrations,
+                    false
+                ),
+                Ok(_)
+            );
+            ensure_migration_state_changed(&db_data.conn);
+        }
+
+        // Now check that we can migrate from the last public release to the current
+        // migration state in this branch.
+        assert_matches!(
+            init_wallet_db_internal(&mut db_data, Some(Secret::new(seed.clone())), &[], false),
+            Ok(_)
+        );
+        // We don't ensure that the migration state changed, because it may not have.
     }
 }
