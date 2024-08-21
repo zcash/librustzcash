@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.11.1] - 2024-08-21
+
 ### Fixed
 - The dependencies of the `tx_retrieval_queue` migration have been fixed to
   enable migrating wallets containing certain kinds of transactions.
