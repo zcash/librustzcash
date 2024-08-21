@@ -268,7 +268,27 @@ impl WalletWrite for MemoryWalletDb {
         account_index: zip32::AccountId,
         birthday: &AccountBirthday,
     ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error> {
-        todo!()
+        let seed_fingerprint = SeedFingerprint::from_seed(seed.expose_secret())
+            .ok_or_else(|| "Seed must be between 32 and 252 bytes in length.".to_owned())
+            .unwrap();
+
+        let usk = UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account_index)
+            .map_err(|_| "key derivation error".to_string())
+            .unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let account = Account {
+            account_id: AccountId(self.accounts.len() as u32),
+            kind: AccountSource::Derived {
+                seed_fingerprint,
+                account_index,
+            },
+            viewing_key: ViewingKey::Full(Box::new(ufvk)),
+            birthday: birthday.clone(),
+            purpose: AccountPurpose::Spending,
+        };
+        // TODO: Do we need to check if duplicate?
+        self.accounts.push(account.clone());
+        Ok((account, usk))
     }
 
     fn import_account_ufvk(
@@ -277,7 +297,14 @@ impl WalletWrite for MemoryWalletDb {
         birthday: &AccountBirthday,
         purpose: AccountPurpose,
     ) -> Result<Self::Account, Self::Error> {
-        todo!()
+        let account = Account {
+            account_id: AccountId(self.accounts.len() as u32),
+            kind: AccountSource::Imported { purpose },
+            viewing_key: ViewingKey::Full(Box::new(unified_key.to_owned())),
+            birthday: birthday.clone(),
+            purpose,
+        };
+        Ok(account)
     }
 
     fn store_transactions_to_be_sent(
