@@ -273,7 +273,7 @@ mod tests {
         // Now check that we can migrate from the last public release to the current
         // migration state in this branch.
         assert_matches!(
-            init_wallet_db_internal(&mut db_data, Some(Secret::new(seed.clone())), &[], false),
+            init_wallet_db_internal(&mut db_data, Some(Secret::new(seed)), &[], false),
             Ok(_)
         );
         // We don't ensure that the migration state changed, because it may not have.
