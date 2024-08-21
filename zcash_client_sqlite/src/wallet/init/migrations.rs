@@ -52,28 +52,28 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                                               |
     //                                       v_transactions_net
     //                                               |
-    //                                            received_notes_nullable_nf------
-    //                                            /           |                   \
-    //                                           /            |                    \
-    //           --------------- shardtree_support    sapling_memo_consistency   nullifier_map
-    //          /                     /           \                       \
-    // orchard_shardtree   add_account_birthdays   receiving_key_scopes   v_transactions_transparent_history
-    //                        |                 \            |                     |
-    //       v_sapling_shard_unscanned_ranges    \           |       v_tx_outputs_use_legacy_false
-    //                        |                   \          |                     |
-    //                wallet_summaries             \         |      v_transactions_shielding_balance
-    //                        \                     \        |                     |
-    //                         \                     \       |       v_transactions_note_uniqueness
-    //                          \                     \      |        /
-    //                           -------------------- full_account_ids
-    //                                               |                \
-    //                                  orchard_received_notes        spend_key_available
-    //                                       /         \
-    //                ensure_orchard_ua_receiver     utxos_to_txos
-    //                                                     |
-    //                                             ephemeral_addresses
-    //                                                     |
-    //                                             tx_retrieval_queue
+    //                                            received_notes_nullable_nf----------------------
+    //                                            /           |                                   \
+    //                                           /            |                                    \
+    //           --------------- shardtree_support    sapling_memo_consistency                    nullifier_map
+    //          /                     /           \                       \                                  |
+    // orchard_shardtree   add_account_birthdays   receiving_key_scopes   v_transactions_transparent_history |
+    //   |                    |                 \            |                     |                         |
+    //   |   v_sapling_shard_unscanned_ranges    \           |       v_tx_outputs_use_legacy_false           |
+    //   |                    |                   \          |                     |                         |
+    //   |            wallet_summaries             \         |      v_transactions_shielding_balance         |
+    //   |                    \                     \        |                     |                        /
+    //    \                    \                     \       |      v_transactions_note_uniqueness         /
+    //     \                    \                     \      |        /                                   /
+    //      \                    -------------------- full_account_ids                                   /
+    //       \                                        /               \                                 /
+    //        \                         orchard_received_notes        spend_key_available              /
+    //         \                             /         \                      /                       /
+    //          \     ensure_orchard_ua_receiver     utxos_to_txos           /                       /
+    //           \                          \              |                /                       /
+    //            \                          \     ephemeral_addresses     /                       /
+    //             \                          \            |              /                       /
+    //              ------------------------------ tx_retrieval_queue ----------------------------
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -190,13 +190,7 @@ const V_0_11_0: &[Uuid] = &[
 ];
 
 /// Leaf migrations in the 0.11.1 release.
-const V_0_11_1: &[Uuid] = &[
-    ensure_orchard_ua_receiver::MIGRATION_ID,
-    nullifier_map::MIGRATION_ID,
-    orchard_shardtree::MIGRATION_ID,
-    spend_key_available::MIGRATION_ID,
-    tx_retrieval_queue::MIGRATION_ID,
-];
+const V_0_11_1: &[Uuid] = &[tx_retrieval_queue::MIGRATION_ID];
 
 #[cfg(test)]
 mod tests {

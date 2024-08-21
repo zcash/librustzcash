@@ -10,11 +10,20 @@ use zcash_protocol::consensus::{self, BlockHeight, BranchId};
 
 use crate::wallet::{self, init::WalletMigrationError};
 
-use super::ephemeral_addresses;
+use super::{
+    ensure_orchard_ua_receiver, ephemeral_addresses, nullifier_map, orchard_shardtree,
+    spend_key_available,
+};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xfec02b61_3988_4b4f_9699_98977fac9e7f);
 
-const DEPENDENCIES: &[Uuid] = &[ephemeral_addresses::MIGRATION_ID];
+const DEPENDENCIES: &[Uuid] = &[
+    orchard_shardtree::MIGRATION_ID,
+    ensure_orchard_ua_receiver::MIGRATION_ID,
+    ephemeral_addresses::MIGRATION_ID,
+    spend_key_available::MIGRATION_ID,
+    nullifier_map::MIGRATION_ID,
+];
 
 pub(super) struct Migration<P> {
     pub(super) params: P,
