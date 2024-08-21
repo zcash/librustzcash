@@ -26,8 +26,8 @@ use zcash_protocol::{
 use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{
-        chain::ChainState, AccountPurpose, AccountSource, SeedRelevance, TransactionDataRequest,
-        TransactionStatus,
+        chain::ChainState, Account as _, AccountPurpose, AccountSource, SeedRelevance,
+        TransactionDataRequest, TransactionStatus,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     wallet::{NoteId, WalletSpend, WalletTransparentOutput, WalletTx},
@@ -91,21 +91,17 @@ impl WalletRead for MemoryWalletDb {
         &self,
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<Self::Account>, Self::Error> {
-        todo!()
-        // let ufvk_req =
-        //     UnifiedAddressRequest::all().expect("At least one protocol should be enabled");
-        // Ok(self.accounts.iter().find_map(|(id, acct)| {
-        //     if acct.ufvk.default_address(ufvk_req).unwrap()
-        //         == ufvk.default_address(ufvk_req).unwrap()
-        //     {
-        //         Some(Account {
-        //             id: *id,
-        //             ufvk: acct.ufvk.clone(),
-        //         })
-        //     } else {
-        //         None
-        //     }
-        // }))
+        let ufvk_req =
+            UnifiedAddressRequest::all().expect("At least one protocol should be enabled");
+        Ok(self.accounts.iter().find_map(|acct| {
+            if acct.ufvk()?.default_address(ufvk_req).unwrap()
+                == ufvk.default_address(ufvk_req).unwrap()
+            {
+                Some(acct.clone())
+            } else {
+                None
+            }
+        }))
     }
 
     fn get_current_address(
@@ -114,10 +110,10 @@ impl WalletRead for MemoryWalletDb {
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         todo!()
         // self.accounts
-        //     .get(&account)
+        //     .get(*account as usize)
         //     .map(|account| {
         //         account
-        //             .ufvk
+        //             .ufvk()
         //             .default_address(
         //                 UnifiedAddressRequest::all()
         //                     .expect("At least one protocol should be enabled."),

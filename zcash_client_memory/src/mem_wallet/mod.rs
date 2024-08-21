@@ -9,6 +9,7 @@ use std::{
     convert::Infallible,
     hash::Hash,
     num::NonZeroU32,
+    ops::Deref,
 };
 use zcash_keys::keys::{AddressGenerationError, DerivationError, UnifiedIncomingViewingKey};
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
@@ -124,7 +125,7 @@ impl MemoryWalletDb {
     fn max_zip32_account_index(
         &self,
         seed_fingerprint: &SeedFingerprint,
-    ) -> Result<Option<zip32::AccountId>, String> {
+    ) -> Result<Option<zip32::AccountId>, Error> {
         Ok(self
             .accounts
             .iter()
@@ -164,6 +165,14 @@ pub(crate) enum ViewingKey {
 /// The ID type for accounts.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
 pub struct AccountId(u32);
+
+impl Deref for AccountId {
+    type Target = u32;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// An account stored in a `zcash_client_sqlite` database.
 #[derive(Debug, Clone)]
