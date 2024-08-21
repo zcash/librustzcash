@@ -219,9 +219,40 @@ impl WalletRead for MemoryWalletDb {
     #[cfg(feature = "orchard")]
     fn get_orchard_nullifiers(
         &self,
-        _query: NullifierQuery,
+        query: NullifierQuery,
     ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error> {
-        Ok(Vec::new())
+        Ok(self
+            .orchard_spends
+            .iter()
+            .filter_map(|(nf, (txid, spent))| match query {
+                NullifierQuery::Unspent => {
+                    if !spent {
+                        Some((txid, self.tx_idx.get(txid).unwrap(), *nf))
+                    } else {
+                        None
+                    }
+                }
+                NullifierQuery::All => Some((txid, self.tx_idx.get(txid).unwrap(), *nf)),
+            })
+            .map(|(txid, height, nf)| {
+                self.blocks
+                    .get(height)
+                    .and_then(|block| block.transactions.get(txid))
+                    .and_then(|tx| {
+                        tx.orchard_outputs()
+                            .iter()
+                            .find(|o| o.nf() == Some(&nf))
+                            .map(|o| (*o.account_id(), *o.nf().unwrap()))
+                            .or_else(|| {
+                                tx.orchard_spends()
+                                    .iter()
+                                    .find(|s| s.nf() == &nf)
+                                    .map(|s| (*s.account_id(), *s.nf()))
+                            })
+                    })
+            })
+            .flatten()
+            .collect())
     }
 
     #[cfg(feature = "transparent-inputs")]

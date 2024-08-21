@@ -101,6 +101,7 @@ pub struct MemoryWalletDb {
     sapling_spends: BTreeMap<sapling::Nullifier, (TxId, bool)>,
     #[cfg(feature = "orchard")]
     orchard_spends: BTreeMap<orchard::note::Nullifier, (TxId, bool)>,
+
     sapling_tree: ShardTree<
         MemoryShardStore<sapling::Node, BlockHeight>,
         { SAPLING_SHARD_HEIGHT * 2 },
@@ -192,6 +193,7 @@ pub struct Account {
     viewing_key: ViewingKey,
     birthday: AccountBirthday,
     purpose: AccountPurpose,
+    notes: HashSet<NoteId>,
 }
 
 impl Account {

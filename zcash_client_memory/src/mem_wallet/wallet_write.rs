@@ -71,6 +71,7 @@ impl WalletWrite for MemoryWalletDb {
             viewing_key: ViewingKey::Full(Box::new(ufvk)),
             birthday: birthday.clone(),
             purpose: AccountPurpose::Spending,
+            notes: HashSet::new(),
         };
         let id = account.id();
         self.accounts.push(account);
@@ -107,97 +108,83 @@ impl WalletWrite for MemoryWalletDb {
             let mut memos = HashMap::new();
             for transaction in block.transactions().iter() {
                 let txid = transaction.txid();
-                for account_id in self.get_account_ids()? {
-                    let ufvk = self
-                        .get_account(account_id)?
-                        .ok_or(Error::AccountUnknown(account_id))?
-                        .ufvk()
-                        .ok_or(Error::ViewingKeyNotFound(account_id))?
-                        .clone();
-                    let dfvk = ufvk
-                        .sapling()
-                        .ok_or(Error::ViewingKeyNotFound(account_id))?;
-                    let nk = dfvk.to_nk(Scope::External);
-
-                    transaction.sapling_outputs().iter().map(|o| {
-                        // Insert the Sapling nullifiers of the spent notes into the `sapling_spends` map.
-                        let nullifier = o.note().nf(&nk, o.note_commitment_tree_position().into());
+                transaction.sapling_outputs().iter().map(|o| {
+                    // Insert the Sapling nullifiers of the spent notes into the `sapling_spends` map.
+                    if let Some(nullifier) = o.nf() {
                         self.sapling_spends
-                            .entry(nullifier)
+                            .entry(*nullifier)
                             .or_insert((txid, false));
+                    }
 
-                        // Insert the memo into the `memos` map.
-                        let note_id = NoteId::new(
-                            txid,
-                            Sapling,
-                            u16::try_from(o.index())
-                                .expect("output indices are representable as u16"),
-                        );
-                        if let Ok(Some(memo)) = self.get_memo(note_id) {
-                            memos.insert(note_id, memo.encode());
-                        }
-                    });
-
-                    #[cfg(feature = "orchard")]
-                    transaction.orchard_outputs().iter().map(|o| {
-                        // Insert the Orchard nullifiers of the spent notes into the `orchard_spends` map.
-                        if let Some(nullifier) = o.nf() {
-                            self.orchard_spends
-                                .entry(*nullifier)
-                                .or_insert((txid, false));
-                        }
-
-                        // Insert the memo into the `memos` map.
-                        let note_id = NoteId::new(
-                            txid,
-                            Orchard,
-                            u16::try_from(o.index())
-                                .expect("output indices are representable as u16"),
-                        );
-                        if let Ok(Some(memo)) = self.get_memo(note_id) {
-                            memos.insert(note_id, memo.encode());
-                        }
-                    });
-
-                    // Add frontier to the sapling tree
-                    self.sapling_tree.insert_frontier(
-                        from_state.final_sapling_tree().clone(),
-                        Retention::Checkpoint {
-                            id: from_state.block_height(),
-                            marking: Marking::Reference,
-                        },
+                    // Insert the memo into the `memos` map.
+                    let note_id = NoteId::new(
+                        txid,
+                        Sapling,
+                        u16::try_from(o.index()).expect("output indices are representable as u16"),
                     );
+                    if let Ok(Some(memo)) = self.get_memo(note_id) {
+                        memos.insert(note_id, memo.encode());
+                    }
+                });
 
-                    #[cfg(feature = "orchard")]
-                    // Add frontier to the orchard tree
-                    self.orchard_tree.insert_frontier(
-                        from_state.final_orchard_tree().clone(),
-                        Retention::Checkpoint {
-                            id: from_state.block_height(),
-                            marking: Marking::Reference,
-                        },
+                #[cfg(feature = "orchard")]
+                transaction.orchard_outputs().iter().map(|o| {
+                    // Insert the Orchard nullifiers of the spent notes into the `orchard_spends` map.
+                    if let Some(nullifier) = o.nf() {
+                        self.orchard_spends
+                            .entry(*nullifier)
+                            .or_insert((txid, false));
+                    }
+
+                    // Insert the memo into the `memos` map.
+                    let note_id = NoteId::new(
+                        txid,
+                        Orchard,
+                        u16::try_from(o.index()).expect("output indices are representable as u16"),
                     );
+                    if let Ok(Some(memo)) = self.get_memo(note_id) {
+                        memos.insert(note_id, memo.encode());
+                    }
+                });
 
-                    // Mark the Sapling nullifiers of the spent notes as spent in the `sapling_spends` map.
-                    transaction.sapling_spends().iter().map(|s| {
-                        let nullifier = s.nf();
-                        if let Some((txid, spent)) = self.sapling_spends.get_mut(nullifier) {
-                            *spent = true;
-                        }
-                    });
+                // Add frontier to the sapling tree
+                self.sapling_tree.insert_frontier(
+                    from_state.final_sapling_tree().clone(),
+                    Retention::Checkpoint {
+                        id: from_state.block_height(),
+                        marking: Marking::Reference,
+                    },
+                );
 
-                    #[cfg(feature = "orchard")]
-                    // Mark the Orchard nullifiers of the spent notes as spent in the `orchard_spends` map.
-                    transaction.orchard_spends().iter().map(|s| {
-                        let nullifier = s.nf();
-                        if let Some((txid, spent)) = self.orchard_spends.get_mut(nullifier) {
-                            *spent = true;
-                        }
-                    });
+                #[cfg(feature = "orchard")]
+                // Add frontier to the orchard tree
+                self.orchard_tree.insert_frontier(
+                    from_state.final_orchard_tree().clone(),
+                    Retention::Checkpoint {
+                        id: from_state.block_height(),
+                        marking: Marking::Reference,
+                    },
+                );
 
-                    self.tx_idx.insert(txid, block.height());
-                    transactions.insert(txid, transaction.clone());
-                }
+                // Mark the Sapling nullifiers of the spent notes as spent in the `sapling_spends` map.
+                transaction.sapling_spends().iter().map(|s| {
+                    let nullifier = s.nf();
+                    if let Some((txid, spent)) = self.sapling_spends.get_mut(nullifier) {
+                        *spent = true;
+                    }
+                });
+
+                #[cfg(feature = "orchard")]
+                // Mark the Orchard nullifiers of the spent notes as spent in the `orchard_spends` map.
+                transaction.orchard_spends().iter().map(|s| {
+                    let nullifier = s.nf();
+                    if let Some((txid, spent)) = self.orchard_spends.get_mut(nullifier) {
+                        *spent = true;
+                    }
+                });
+
+                self.tx_idx.insert(txid, block.height());
+                transactions.insert(txid, transaction.clone());
             }
 
             let memory_block = MemoryWalletBlock {
@@ -283,6 +270,7 @@ impl WalletWrite for MemoryWalletDb {
             viewing_key: ViewingKey::Full(Box::new(ufvk)),
             birthday: birthday.clone(),
             purpose: AccountPurpose::Spending,
+            notes: HashSet::new(),
         };
         // TODO: Do we need to check if duplicate?
         self.accounts.push(account.clone());
@@ -301,6 +289,7 @@ impl WalletWrite for MemoryWalletDb {
             viewing_key: ViewingKey::Full(Box::new(unified_key.to_owned())),
             birthday: birthday.clone(),
             purpose,
+            notes: HashSet::new(),
         };
         Ok(account)
     }
