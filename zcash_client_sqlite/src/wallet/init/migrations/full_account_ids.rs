@@ -26,20 +26,20 @@ pub(crate) struct Migration<P: consensus::Parameters> {
     pub(super) params: P,
 }
 
+const DEPENDENCIES: &[Uuid] = &[
+    receiving_key_scopes::MIGRATION_ID,
+    add_account_birthdays::MIGRATION_ID,
+    v_transactions_note_uniqueness::MIGRATION_ID,
+    wallet_summaries::MIGRATION_ID,
+];
+
 impl<P: consensus::Parameters> schemer::Migration for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [
-            receiving_key_scopes::MIGRATION_ID,
-            add_account_birthdays::MIGRATION_ID,
-            v_transactions_note_uniqueness::MIGRATION_ID,
-            wallet_summaries::MIGRATION_ID,
-        ]
-        .into_iter()
-        .collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {

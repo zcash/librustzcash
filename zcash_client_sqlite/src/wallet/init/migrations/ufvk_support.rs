@@ -27,6 +27,8 @@ use crate::{
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xbe57ef3b_388e_42ea_97e2_678dafcf9754);
 
+const DEPENDENCIES: &[Uuid] = &[initial_setup::MIGRATION_ID];
+
 pub(super) struct Migration<P> {
     pub(super) params: P,
     pub(super) seed: Option<Rc<SecretVec<u8>>>,
@@ -38,7 +40,7 @@ impl<P> schemer::Migration for Migration<P> {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [initial_setup::MIGRATION_ID].into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
