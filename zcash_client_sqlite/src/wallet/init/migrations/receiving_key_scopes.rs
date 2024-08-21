@@ -38,6 +38,8 @@ use crate::{
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xee89ed2b_c1c2_421e_9e98_c1e3e54a7fc2);
 
+const DEPENDENCIES: &[Uuid] = &[shardtree_support::MIGRATION_ID];
+
 pub(super) struct Migration<P> {
     pub(super) params: P,
 }
@@ -48,7 +50,7 @@ impl<P> schemer::Migration for Migration<P> {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [shardtree_support::MIGRATION_ID].into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {

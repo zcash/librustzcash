@@ -12,6 +12,8 @@ use super::v_transactions_shielding_balance;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xdba47c86_13b5_4601_94b2_0cde0abe1e45);
 
+const DEPENDENCIES: &[Uuid] = &[v_transactions_shielding_balance::MIGRATION_ID];
+
 pub(super) struct Migration;
 
 impl schemer::Migration for Migration {
@@ -20,9 +22,7 @@ impl schemer::Migration for Migration {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [v_transactions_shielding_balance::MIGRATION_ID]
-            .into_iter()
-            .collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {

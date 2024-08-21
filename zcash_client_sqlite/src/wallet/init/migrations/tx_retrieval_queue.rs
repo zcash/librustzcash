@@ -14,7 +14,7 @@ use super::ephemeral_addresses;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xfec02b61_3988_4b4f_9699_98977fac9e7f);
 
-const DEPENDENCIES: [Uuid; 1] = [ephemeral_addresses::MIGRATION_ID];
+const DEPENDENCIES: &[Uuid] = &[ephemeral_addresses::MIGRATION_ID];
 
 pub(super) struct Migration<P> {
     pub(super) params: P,
@@ -26,7 +26,7 @@ impl<P> schemer::Migration for Migration<P> {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        DEPENDENCIES.into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -170,7 +170,7 @@ mod tests {
         init_wallet_db_internal(
             &mut db_data,
             Some(Secret::new(seed_bytes.clone())),
-            &DEPENDENCIES,
+            DEPENDENCIES,
             false,
         )
         .unwrap();

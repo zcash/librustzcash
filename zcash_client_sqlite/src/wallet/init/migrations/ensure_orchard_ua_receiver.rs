@@ -15,6 +15,8 @@ use crate::{wallet::init::WalletMigrationError, UA_ORCHARD, UA_TRANSPARENT};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x604349c7_5ce5_4768_bea6_12d106ccda93);
 
+const DEPENDENCIES: &[Uuid] = &[orchard_received_notes::MIGRATION_ID];
+
 pub(super) struct Migration<P> {
     pub(super) params: P,
 }
@@ -25,7 +27,7 @@ impl<P> schemer::Migration for Migration<P> {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [orchard_received_notes::MIGRATION_ID].into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
