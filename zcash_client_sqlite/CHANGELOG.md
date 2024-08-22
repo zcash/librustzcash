@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- The `v_tx_outputs` view was modified slightly to support older versions of
+  `sqlite`.
+  
+
 ## [0.11.1] - 2024-08-21
 
 ### Fixed

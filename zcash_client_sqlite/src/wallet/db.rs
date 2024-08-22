@@ -883,7 +883,7 @@ SELECT transactions.txid            AS txid,
        NULL                         AS to_account_id,
        sent_notes.to_address        AS to_address,
        sent_notes.value             AS value,
-       FALSE                        AS is_change,
+       0                            AS is_change,
        sent_notes.memo              AS memo
 FROM sent_notes
 JOIN transactions
