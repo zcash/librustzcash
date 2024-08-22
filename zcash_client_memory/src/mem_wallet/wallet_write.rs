@@ -186,12 +186,13 @@ impl WalletWrite for MemoryWalletDb {
                 self.tx_idx.insert(txid, block.height());
                 transactions.insert(txid, transaction.clone());
             }
+            self.tx_meta.extend(transactions);
 
             let memory_block = MemoryWalletBlock {
                 height: block.height(),
                 hash: block.block_hash(),
                 block_time: block.block_time(),
-                transactions,
+                transactions: self.tx_meta.keys().cloned().collect(),
                 memos,
             };
 
