@@ -91,9 +91,9 @@ pub struct MemoryWalletDb {
     blocks: BTreeMap<BlockHeight, MemoryWalletBlock>,
     tx_idx: HashMap<TxId, BlockHeight>,
 
+    tx_status: HashMap<TxId, TransactionStatus>,
     /// Tracks transactions relevant to this wallet indexed by their TxId
     tx_meta: HashMap<TxId, WalletTx<AccountId>>,
-
     /// Tracks transparent outputs received by this wallet indexed by their OutPoint which defines the
     /// transaction and index where the output was created
     transparent_received_outputs: HashMap<OutPoint, TransparentReceivedOutput>,
@@ -135,6 +135,7 @@ impl MemoryWalletDb {
             sapling_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
             #[cfg(feature = "orchard")]
             orchard_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
+            tx_status: HashMap::new(),
         }
     }
 
@@ -212,6 +213,10 @@ impl Account {
         request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.uivk().default_address(request)
+    }
+
+    fn birthday(&self) -> &AccountBirthday {
+        &self.birthday
     }
 }
 

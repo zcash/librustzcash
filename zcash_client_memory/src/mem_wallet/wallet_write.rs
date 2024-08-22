@@ -184,6 +184,8 @@ impl WalletWrite for MemoryWalletDb {
                 });
 
                 self.tx_idx.insert(txid, block.height());
+                self.tx_status
+                    .insert(txid, TransactionStatus::Mined(block.height()));
                 transactions.insert(txid, transaction.clone());
             }
             self.tx_meta.extend(transactions);
@@ -236,13 +238,6 @@ impl WalletWrite for MemoryWalletDb {
     ) -> Result<(), Self::Error> {
         todo!()
     }
-
-    // fn store_sent_tx(
-    //     &mut self,
-    //     _sent_tx: &SentTransaction<Self::AccountId>,
-    // ) -> Result<(), Self::Error> {
-    //     todo!()
-    // }
 
     fn truncate_to_height(&mut self, _block_height: BlockHeight) -> Result<(), Self::Error> {
         todo!()

@@ -125,12 +125,19 @@ impl WalletRead for MemoryWalletDb {
             .map_err(|e| e.into())
     }
 
-    fn get_account_birthday(&self, _account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
-        Err(Error::AccountUnknown(_account))
+    fn get_account_birthday(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
+        self.accounts
+            .get(*account as usize)
+            .map(|account| account.birthday().height())
+            .ok_or(Error::AccountUnknown(account))
     }
 
     fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        todo!()
+        Ok(self
+            .accounts
+            .iter()
+            .map(|account| account.birthday().height())
+            .min())
     }
 
     fn get_wallet_summary(
@@ -185,14 +192,25 @@ impl WalletRead for MemoryWalletDb {
         todo!()
     }
 
-    fn get_tx_height(&self, _txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        todo!()
+    fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+        if let Some(TransactionStatus::Mined(height)) = self.tx_status.get(&txid) {
+            Ok(Some(*height))
+        } else {
+            Ok(None)
+        }
     }
 
     fn get_unified_full_viewing_keys(
         &self,
     ) -> Result<HashMap<Self::AccountId, UnifiedFullViewingKey>, Self::Error> {
-        Ok(HashMap::new())
+        Ok(self
+            .accounts
+            .iter()
+            .filter_map(|account| match account.ufvk() {
+                Some(ufvk) => Some((account.id(), ufvk.clone())),
+                None => None,
+            })
+            .collect())
     }
 
     fn get_memo(&self, id_note: NoteId) -> Result<Option<Memo>, Self::Error> {
@@ -211,9 +229,37 @@ impl WalletRead for MemoryWalletDb {
 
     fn get_sapling_nullifiers(
         &self,
-        _query: NullifierQuery,
+        query: NullifierQuery,
     ) -> Result<Vec<(Self::AccountId, sapling::Nullifier)>, Self::Error> {
-        Ok(Vec::new())
+        Ok(self
+            .sapling_spends
+            .iter()
+            .filter_map(|(nf, (txid, spent))| match query {
+                NullifierQuery::Unspent => {
+                    if !spent {
+                        Some((txid, self.tx_idx.get(txid).unwrap(), *nf))
+                    } else {
+                        None
+                    }
+                }
+                NullifierQuery::All => Some((txid, self.tx_idx.get(txid).unwrap(), *nf)),
+            })
+            .map(|(txid, height, nf)| {
+                self.tx_meta.get(txid).and_then(|tx| {
+                    tx.sapling_outputs()
+                        .iter()
+                        .find(|o| o.nf() == Some(&nf))
+                        .map(|o| (*o.account_id(), *o.nf().unwrap()))
+                        .or_else(|| {
+                            tx.sapling_spends()
+                                .iter()
+                                .find(|s| s.nf() == &nf)
+                                .map(|s| (*s.account_id(), *s.nf()))
+                        })
+                })
+            })
+            .flatten()
+            .collect())
     }
 
     #[cfg(feature = "orchard")]
