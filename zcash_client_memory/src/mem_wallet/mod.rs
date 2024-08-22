@@ -61,7 +61,7 @@ struct MemoryWalletBlock {
     hash: BlockHash,
     block_time: u32,
     // Just the transactions that involve an account in this wallet
-    transactions: HashMap<TxId, WalletTx<AccountId>>,
+    transactions: HashSet<TxId>,
     memos: HashMap<NoteId, MemoBytes>,
 }
 
@@ -91,6 +91,9 @@ pub struct MemoryWalletDb {
     blocks: BTreeMap<BlockHeight, MemoryWalletBlock>,
     tx_idx: HashMap<TxId, BlockHeight>,
 
+    /// Tracks transactions relevant to this wallet indexed by their TxId
+    tx_meta: HashMap<TxId, WalletTx<AccountId>>,
+
     /// Tracks transparent outputs received by this wallet indexed by their OutPoint which defines the
     /// transaction and index where the output was created
     transparent_received_outputs: HashMap<OutPoint, TransparentReceivedOutput>,
@@ -98,6 +101,7 @@ pub struct MemoryWalletDb {
     /// Tracks spends of received outputs. In thix case the TxId is the spending transaction
     /// from this wallet.
     transparent_received_output_spends: HashMap<OutPoint, TxId>,
+
     sapling_spends: BTreeMap<sapling::Nullifier, (TxId, bool)>,
     #[cfg(feature = "orchard")]
     orchard_spends: BTreeMap<orchard::note::Nullifier, (TxId, bool)>,
@@ -122,6 +126,7 @@ impl MemoryWalletDb {
             accounts: Vec::new(),
             blocks: BTreeMap::new(),
             tx_idx: HashMap::new(),
+            tx_meta: HashMap::new(),
             transparent_received_outputs: HashMap::new(),
             transparent_received_output_spends: HashMap::new(),
             sapling_spends: BTreeMap::new(),

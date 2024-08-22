@@ -235,21 +235,18 @@ impl WalletRead for MemoryWalletDb {
                 NullifierQuery::All => Some((txid, self.tx_idx.get(txid).unwrap(), *nf)),
             })
             .map(|(txid, height, nf)| {
-                self.blocks
-                    .get(height)
-                    .and_then(|block| block.transactions.get(txid))
-                    .and_then(|tx| {
-                        tx.orchard_outputs()
-                            .iter()
-                            .find(|o| o.nf() == Some(&nf))
-                            .map(|o| (*o.account_id(), *o.nf().unwrap()))
-                            .or_else(|| {
-                                tx.orchard_spends()
-                                    .iter()
-                                    .find(|s| s.nf() == &nf)
-                                    .map(|s| (*s.account_id(), *s.nf()))
-                            })
-                    })
+                self.tx_meta.get(txid).and_then(|tx| {
+                    tx.orchard_outputs()
+                        .iter()
+                        .find(|o| o.nf() == Some(&nf))
+                        .map(|o| (*o.account_id(), *o.nf().unwrap()))
+                        .or_else(|| {
+                            tx.orchard_spends()
+                                .iter()
+                                .find(|s| s.nf() == &nf)
+                                .map(|s| (*s.account_id(), *s.nf()))
+                        })
+                })
             })
             .flatten()
             .collect())
