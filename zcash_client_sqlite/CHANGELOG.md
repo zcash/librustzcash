@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.11.2] - 2024-08-21
+
 ### Changed
 - The `v_tx_outputs` view was modified slightly to support older versions of
   `sqlite`. Queries to the exposed `v_tx_outputs` and `v_transactions` views
