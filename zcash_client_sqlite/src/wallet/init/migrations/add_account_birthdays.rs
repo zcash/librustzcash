@@ -12,7 +12,7 @@ use super::shardtree_support;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xeeec0d0d_fee0_4231_8c68_5f3a7c7c2245);
 
-const DEPENDENCIES: [Uuid; 1] = [shardtree_support::MIGRATION_ID];
+const DEPENDENCIES: &[Uuid] = &[shardtree_support::MIGRATION_ID];
 
 pub(super) struct Migration<P> {
     pub(super) params: P,
@@ -24,7 +24,7 @@ impl<P> schemer::Migration for Migration<P> {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        DEPENDENCIES.into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -91,7 +91,7 @@ mod tests {
         init_wallet_db_internal(
             &mut db_data,
             Some(Secret::new(seed_bytes.clone())),
-            &DEPENDENCIES,
+            DEPENDENCIES,
             false,
         )
         .unwrap();

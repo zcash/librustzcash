@@ -10,9 +10,20 @@ use zcash_protocol::consensus::{self, BlockHeight, BranchId};
 
 use crate::wallet::{self, init::WalletMigrationError};
 
-use super::utxos_to_txos;
+use super::{
+    ensure_orchard_ua_receiver, ephemeral_addresses, nullifier_map, orchard_shardtree,
+    spend_key_available,
+};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xfec02b61_3988_4b4f_9699_98977fac9e7f);
+
+const DEPENDENCIES: &[Uuid] = &[
+    orchard_shardtree::MIGRATION_ID,
+    ensure_orchard_ua_receiver::MIGRATION_ID,
+    ephemeral_addresses::MIGRATION_ID,
+    spend_key_available::MIGRATION_ID,
+    nullifier_map::MIGRATION_ID,
+];
 
 pub(super) struct Migration<P> {
     pub(super) params: P,
@@ -24,7 +35,7 @@ impl<P> schemer::Migration for Migration<P> {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [utxos_to_txos::MIGRATION_ID].into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -133,10 +144,89 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
 #[cfg(test)]
 mod tests {
-    use crate::wallet::init::migrations::tests::test_migrate;
+    use rusqlite::named_params;
+    use secrecy::Secret;
+    use tempfile::NamedTempFile;
+    use zcash_primitives::{
+        legacy::{Script, TransparentAddress},
+        transaction::{components::transparent, Authorized, TransactionData, TxVersion},
+    };
+    use zcash_protocol::{
+        consensus::{BranchId, Network},
+        value::Zatoshis,
+    };
+
+    use crate::{
+        wallet::init::{init_wallet_db_internal, migrations::tests::test_migrate},
+        WalletDb,
+    };
+
+    use super::{DEPENDENCIES, MIGRATION_ID};
 
     #[test]
     fn migrate() {
-        test_migrate(&[super::MIGRATION_ID]);
+        test_migrate(&[MIGRATION_ID]);
+    }
+
+    #[test]
+    fn migrate_with_data() {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+
+        let seed_bytes = vec![0xab; 32];
+
+        // Migrate to database state just prior to this migration.
+        init_wallet_db_internal(
+            &mut db_data,
+            Some(Secret::new(seed_bytes.clone())),
+            DEPENDENCIES,
+            false,
+        )
+        .unwrap();
+
+        // Add transactions to the wallet that exercise the data migration.
+        let add_tx_to_wallet = |tx: TransactionData<Authorized>| {
+            let tx = tx.freeze().unwrap();
+            let txid = tx.txid();
+            let mut raw_tx = vec![];
+            tx.write(&mut raw_tx).unwrap();
+            db_data
+                .conn
+                .execute(
+                    r#"INSERT INTO transactions (txid, raw) VALUES (:txid, :raw);"#,
+                    named_params! {":txid": txid.as_ref(), ":raw": raw_tx},
+                )
+                .unwrap();
+        };
+        add_tx_to_wallet(TransactionData::from_parts(
+            TxVersion::Zip225,
+            BranchId::Nu5,
+            0,
+            12345678.into(),
+            Some(transparent::Bundle {
+                vin: vec![transparent::TxIn {
+                    prevout: transparent::OutPoint::fake(),
+                    script_sig: Script(vec![]),
+                    sequence: 0,
+                }],
+                vout: vec![transparent::TxOut {
+                    value: Zatoshis::const_from_u64(10_000),
+                    script_pubkey: TransparentAddress::PublicKeyHash([7; 20]).script(),
+                }],
+                authorization: transparent::Authorized,
+            }),
+            None,
+            None,
+            None,
+        ));
+
+        // Check that we can apply this migration.
+        init_wallet_db_internal(
+            &mut db_data,
+            Some(Secret::new(seed_bytes)),
+            &[MIGRATION_ID],
+            false,
+        )
+        .unwrap();
     }
 }

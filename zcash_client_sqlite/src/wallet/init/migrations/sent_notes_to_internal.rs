@@ -13,6 +13,8 @@ use crate::wallet::init::WalletMigrationError;
 /// This migration adds the `to_account` field to the `sent_notes` table.
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x0ddbe561_8259_4212_9ab7_66fdc4a74e1d);
 
+const DEPENDENCIES: &[Uuid] = &[ufvk_support::MIGRATION_ID];
+
 pub(super) struct Migration;
 
 impl schemer::Migration for Migration {
@@ -21,7 +23,7 @@ impl schemer::Migration for Migration {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [ufvk_support::MIGRATION_ID].into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {

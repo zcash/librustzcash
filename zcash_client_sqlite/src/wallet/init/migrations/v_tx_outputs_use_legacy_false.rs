@@ -13,6 +13,8 @@ use super::v_transactions_transparent_history;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xb3e21434_286f_41f3_8d71_44cce968ab2b);
 
+const DEPENDENCIES: &[Uuid] = &[v_transactions_transparent_history::MIGRATION_ID];
+
 pub(super) struct Migration;
 
 impl schemer::Migration for Migration {
@@ -21,9 +23,7 @@ impl schemer::Migration for Migration {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [v_transactions_transparent_history::MIGRATION_ID]
-            .into_iter()
-            .collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {

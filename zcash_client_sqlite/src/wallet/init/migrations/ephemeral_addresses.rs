@@ -16,7 +16,7 @@ use super::utxos_to_txos;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x0e1d4274_1f8e_44e2_909d_689a4bc2967b);
 
-const DEPENDENCIES: [Uuid; 1] = [utxos_to_txos::MIGRATION_ID];
+const DEPENDENCIES: &[Uuid] = &[utxos_to_txos::MIGRATION_ID];
 
 #[allow(dead_code)]
 pub(super) struct Migration<P> {
@@ -29,7 +29,7 @@ impl<P> schemer::Migration for Migration<P> {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        DEPENDENCIES.into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -210,7 +210,7 @@ mod tests {
         init_wallet_db_internal(
             &mut db_data,
             Some(Secret::new(seed0.clone())),
-            &super::DEPENDENCIES,
+            super::DEPENDENCIES,
             false,
         )
         .unwrap();
