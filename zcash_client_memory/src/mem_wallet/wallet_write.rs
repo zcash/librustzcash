@@ -9,7 +9,10 @@ use std::{
     hash::Hash,
     num::NonZeroU32,
 };
-use zcash_keys::keys::{AddressGenerationError, DerivationError, UnifiedIncomingViewingKey};
+use zcash_keys::{
+    address::Receiver,
+    keys::{AddressGenerationError, DerivationError, UnifiedIncomingViewingKey},
+};
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
 
 use zcash_primitives::{
@@ -20,6 +23,7 @@ use zcash_primitives::{
 use zcash_protocol::{
     memo::{self, Memo, MemoBytes},
     value::Zatoshis,
+    PoolType,
     ShieldedProtocol::{Orchard, Sapling},
 };
 
@@ -30,7 +34,8 @@ use zcash_client_backend::{
         TransactionStatus,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    wallet::{NoteId, WalletSpend, WalletTransparentOutput, WalletTx},
+    wallet::{Note, NoteId, Recipient, WalletSpend, WalletTransparentOutput, WalletTx},
+    TransferType,
 };
 
 use zcash_client_backend::data_api::{
@@ -183,20 +188,20 @@ impl WalletWrite for MemoryWalletDb {
                     }
                 });
 
-                self.tx_idx.insert(txid, block.height());
-                self.tx_status
-                    .insert(txid, TransactionStatus::Mined(block.height()));
                 transactions.insert(txid, transaction.clone());
             }
-            self.tx_meta.extend(transactions);
 
             let memory_block = MemoryWalletBlock {
                 height: block.height(),
                 hash: block.block_hash(),
                 block_time: block.block_time(),
-                transactions: self.tx_meta.keys().cloned().collect(),
+                transactions: transactions.keys().cloned().collect(),
                 memos,
             };
+
+            transactions
+                .into_iter()
+                .for_each(|(_id, tx)| self.put_tx_meta(tx, block.height()));
 
             self.blocks.insert(block.height(), memory_block);
 
@@ -234,9 +239,14 @@ impl WalletWrite for MemoryWalletDb {
 
     fn store_decrypted_tx(
         &mut self,
-        _received_tx: DecryptedTransaction<Self::AccountId>,
+        d_tx: DecryptedTransaction<Self::AccountId>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        self.put_tx_data(d_tx.tx(), None, None);
+        if let Some(height) = d_tx.mined_height() {
+            self.set_transaction_status(d_tx.tx().txid(), TransactionStatus::Mined(height))?
+        }
+
+        Ok(())
     }
 
     fn truncate_to_height(&mut self, _block_height: BlockHeight) -> Result<(), Self::Error> {
@@ -294,14 +304,82 @@ impl WalletWrite for MemoryWalletDb {
         &mut self,
         transactions: &[SentTransaction<Self::AccountId>],
     ) -> Result<(), Self::Error> {
-        todo!()
+        for sent_tx in transactions {
+            self.put_tx_data(
+                sent_tx.tx(),
+                Some(sent_tx.fee_amount()),
+                Some(sent_tx.target_height()),
+            );
+            // Mark sapling notes as spent
+            if let Some(bundle) = sent_tx.tx().sapling_bundle() {
+                for spend in bundle.shielded_spends() {
+                    self.mark_sapling_note_spent(*spend.nullifier(), sent_tx.tx().txid());
+                }
+            }
+            // Mark orchard notes as spent
+            if let Some(_bundle) = sent_tx.tx().orchard_bundle() {
+                #[cfg(feature = "orchard")]
+                {
+                    for action in _bundle.actions() {
+                        self.mark_orchard_note_spent(*action.nullifier(), sent_tx.tx().txid());
+                    }
+                }
+
+                #[cfg(not(feature = "orchard"))]
+                panic!("Sent a transaction with Orchard Actions without `orchard` enabled?");
+            }
+            // Mark transparent UTXOs as spent
+            #[cfg(feature = "transparent-inputs")]
+            for utxo_outpoint in sent_tx.utxos_spent() {
+                // self.mark_transparent_utxo_spent(wdb.conn.0, tx_ref, utxo_outpoint)?;
+                todo!()
+            }
+
+            for output in sent_tx.outputs() {
+                // insert sent output
+
+                // TODO: Do we actually have to store these notes and outputs?
+                // Presumebly we dont actually care about these until theyre mined anyways
+                // in which case they will be populated in put_block
+                match output.recipient() {
+                    Recipient::InternalAccount {
+                        receiving_account,
+                        note: Note::Sapling(note),
+                        ..
+                    } => {
+                        // insert note
+                    }
+                    #[cfg(feature = "orchard")]
+                    Recipient::InternalAccount {
+                        receiving_account,
+                        note: Note::Orchard(note),
+                        ..
+                    } => {}
+                    Recipient::EphemeralTransparent {
+                        receiving_account,
+                        ephemeral_address,
+                        outpoint_metadata,
+                    } => {
+                        // mark ephemeral address as used
+                    }
+                    Recipient::External(_, _) => {}
+                }
+            }
+            // in sqlite they que
+        }
+        Ok(())
     }
 
     fn set_transaction_status(
         &mut self,
-        _txid: TxId,
-        _status: TransactionStatus,
+        txid: TxId,
+        status: TransactionStatus,
     ) -> Result<(), Self::Error> {
-        todo!()
+        if let Some(entry) = self.tx_table.get_mut(&txid) {
+            entry.tx_status = status;
+            Ok(())
+        } else {
+            Err(Error::TransactionNotFound(txid))
+        }
     }
 }

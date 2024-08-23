@@ -1,4 +1,5 @@
 use zcash_keys::keys::{AddressGenerationError, DerivationError};
+use zcash_primitives::transaction::TxId;
 use zcash_protocol::memo;
 
 use crate::mem_wallet::AccountId;
@@ -21,6 +22,8 @@ pub enum Error {
     InvalidSeedLength,
     #[error("Account out of range.")]
     AccountOutOfRange,
+    #[error("Transaction not in table: {0}")]
+    TransactionNotFound(TxId),
 }
 
 impl From<DerivationError> for Error {

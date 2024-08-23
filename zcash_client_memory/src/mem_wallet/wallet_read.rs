@@ -193,8 +193,12 @@ impl WalletRead for MemoryWalletDb {
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        if let Some(TransactionStatus::Mined(height)) = self.tx_status.get(&txid) {
-            Ok(Some(*height))
+        if let Some(TransactionStatus::Mined(height)) = self
+            .tx_table
+            .get(&txid)
+            .and_then(|entry| Some(entry.tx_status))
+        {
+            Ok(Some(height))
         } else {
             Ok(None)
         }
@@ -214,9 +218,10 @@ impl WalletRead for MemoryWalletDb {
     }
 
     fn get_memo(&self, id_note: NoteId) -> Result<Option<Memo>, Self::Error> {
-        self.tx_idx
+        self.tx_table
             .get(id_note.txid())
-            .and_then(|height| self.blocks.get(height))
+            .and_then(|entry| entry.height())
+            .and_then(|height| self.blocks.get(&height))
             .and_then(|block| block.memos.get(&id_note))
             .map(Memo::try_from)
             .transpose()
@@ -237,26 +242,37 @@ impl WalletRead for MemoryWalletDb {
             .filter_map(|(nf, (txid, spent))| match query {
                 NullifierQuery::Unspent => {
                     if !spent {
-                        Some((txid, self.tx_idx.get(txid).unwrap(), *nf))
+                        Some((
+                            txid,
+                            self.tx_table.get(txid).and_then(|entry| entry.height()),
+                            *nf,
+                        ))
                     } else {
                         None
                     }
                 }
-                NullifierQuery::All => Some((txid, self.tx_idx.get(txid).unwrap(), *nf)),
+                NullifierQuery::All => Some((
+                    txid,
+                    self.tx_table.get(txid).and_then(|entry| entry.height()),
+                    *nf,
+                )),
             })
             .map(|(txid, height, nf)| {
-                self.tx_meta.get(txid).and_then(|tx| {
-                    tx.sapling_outputs()
-                        .iter()
-                        .find(|o| o.nf() == Some(&nf))
-                        .map(|o| (*o.account_id(), *o.nf().unwrap()))
-                        .or_else(|| {
-                            tx.sapling_spends()
-                                .iter()
-                                .find(|s| s.nf() == &nf)
-                                .map(|s| (*s.account_id(), *s.nf()))
-                        })
-                })
+                self.tx_table
+                    .get(txid)
+                    .and_then(|entry| entry.tx_meta.as_ref())
+                    .and_then(|tx| {
+                        tx.sapling_outputs()
+                            .iter()
+                            .find(|o| o.nf() == Some(&nf))
+                            .map(|o| (*o.account_id(), *o.nf().unwrap()))
+                            .or_else(|| {
+                                tx.sapling_spends()
+                                    .iter()
+                                    .find(|s| s.nf() == &nf)
+                                    .map(|s| (*s.account_id(), *s.nf()))
+                            })
+                    })
             })
             .flatten()
             .collect())
@@ -273,26 +289,37 @@ impl WalletRead for MemoryWalletDb {
             .filter_map(|(nf, (txid, spent))| match query {
                 NullifierQuery::Unspent => {
                     if !spent {
-                        Some((txid, self.tx_idx.get(txid).unwrap(), *nf))
+                        Some((
+                            txid,
+                            self.tx_table.get(txid).and_then(|entry| entry.height()),
+                            *nf,
+                        ))
                     } else {
                         None
                     }
                 }
-                NullifierQuery::All => Some((txid, self.tx_idx.get(txid).unwrap(), *nf)),
+                NullifierQuery::All => Some((
+                    txid,
+                    self.tx_table.get(txid).and_then(|entry| entry.height()),
+                    *nf,
+                )),
             })
             .map(|(txid, height, nf)| {
-                self.tx_meta.get(txid).and_then(|tx| {
-                    tx.orchard_outputs()
-                        .iter()
-                        .find(|o| o.nf() == Some(&nf))
-                        .map(|o| (*o.account_id(), *o.nf().unwrap()))
-                        .or_else(|| {
-                            tx.orchard_spends()
-                                .iter()
-                                .find(|s| s.nf() == &nf)
-                                .map(|s| (*s.account_id(), *s.nf()))
-                        })
-                })
+                self.tx_table
+                    .get(txid)
+                    .and_then(|entry| entry.tx_meta.as_ref())
+                    .and_then(|tx| {
+                        tx.orchard_outputs()
+                            .iter()
+                            .find(|o| o.nf() == Some(&nf))
+                            .map(|o| (*o.account_id(), *o.nf().unwrap()))
+                            .or_else(|| {
+                                tx.orchard_spends()
+                                    .iter()
+                                    .find(|s| s.nf() == &nf)
+                                    .map(|s| (*s.account_id(), *s.nf()))
+                            })
+                    })
             })
             .flatten()
             .collect())
@@ -320,8 +347,12 @@ impl WalletRead for MemoryWalletDb {
             .filter(|(_, output)| output.account_id == account) // that belong to this account
             .filter(|(outpoint, output)| {
                 // where the tx creating the output is mined
-                if let Some(height) = self.tx_idx.get(&output.tx_id) {
-                    height <= &max_height
+                if let Some(TransactionStatus::Mined(height)) = self
+                    .tx_table
+                    .get(&output.tx_id)
+                    .and_then(|entry| Some(entry.tx_status))
+                {
+                    height <= max_height
                 } else {
                     false
                 }

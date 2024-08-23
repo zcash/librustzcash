@@ -1,11 +1,12 @@
 #![allow(unused)]
+use core::time;
 use incrementalmerkletree::{Address, Marking, Retention};
 use sapling::NullifierDerivingKey;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{hash_map::Entry, BTreeMap, HashMap, HashSet},
     convert::Infallible,
     hash::Hash,
     num::NonZeroU32,
@@ -17,11 +18,11 @@ use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
 use zcash_primitives::{
     block::BlockHash,
     consensus::{BlockHeight, Network},
-    transaction::{components::OutPoint, Transaction, TxId},
+    transaction::{components::OutPoint, txid, Transaction, TxId},
 };
 use zcash_protocol::{
     memo::{self, Memo, MemoBytes},
-    value::Zatoshis,
+    value::{ZatBalance, Zatoshis},
     ShieldedProtocol::{Orchard, Sapling},
 };
 
@@ -32,7 +33,7 @@ use zcash_client_backend::{
         TransactionDataRequest, TransactionStatus,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    wallet::{NoteId, WalletSpend, WalletTransparentOutput, WalletTx},
+    wallet::{Note, NoteId, WalletSpend, WalletTransparentOutput, WalletTx},
 };
 
 use zcash_client_backend::data_api::{
@@ -85,19 +86,126 @@ impl Ord for MemoryWalletBlock {
     }
 }
 
+pub(super) const TABLE_TRANSACTIONS: &str = r#"
+CREATE TABLE "transactions" (
+    id_tx INTEGER PRIMARY KEY,
+    txid BLOB NOT NULL UNIQUE,
+    created TEXT,
+    block INTEGER,
+    mined_height INTEGER,
+    tx_index INTEGER,
+    expiry_height INTEGER,
+    raw BLOB,
+    fee INTEGER,
+    target_height INTEGER,
+    FOREIGN KEY (block) REFERENCES blocks(height),
+    CONSTRAINT height_consistency CHECK (block IS NULL OR mined_height = block)
+)"#;
+
+struct TransactionEntry {
+    txid: TxId,
+    // created: String,
+    /// Combines block height and mined_height into a txn status
+    tx_status: TransactionStatus,
+    expiry_height: Option<BlockHeight>,
+    raw: Vec<u8>,
+    fee: Option<Zatoshis>,
+    tx_meta: Option<WalletTx<AccountId>>,
+    /// - `target_height`: stores the target height for which the transaction was constructed, if
+    ///   known. This will ordinarily be null for transactions discovered via chain scanning; it
+    ///   will only be set for transactions created using this wallet specifically, and not any
+    ///   other wallet that uses the same seed (including previous installations of the same
+    ///   wallet application.)
+    target_height: Option<BlockHeight>,
+}
+impl TransactionEntry {
+    fn new_from_tx_meta(tx_meta: WalletTx<AccountId>, height: BlockHeight) -> Self {
+        Self {
+            txid: tx_meta.txid(),
+            tx_status: TransactionStatus::Mined(height),
+            expiry_height: None,
+            raw: Vec::new(),
+            fee: None,
+            tx_meta: Some(tx_meta),
+            target_height: None,
+        }
+    }
+
+    /// Returns the height at which this transaction was mined. None if the transaction is not mined yet.
+    fn height(&self) -> Option<BlockHeight> {
+        match self.tx_status {
+            TransactionStatus::Mined(height) => Some(height),
+            _ => None,
+        }
+    }
+}
+
+impl MemoryWalletDb {
+    /// Inserts information about a MINED transaction that was observed to
+    /// contain a note related to this wallet
+    fn put_tx_meta(&mut self, tx_meta: WalletTx<AccountId>, height: BlockHeight) {
+        match self.tx_table.entry(tx_meta.txid()) {
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().tx_meta = Some(tx_meta);
+                entry.get_mut().tx_status = TransactionStatus::Mined(height);
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(TransactionEntry::new_from_tx_meta(tx_meta, height));
+            }
+        }
+    }
+    /// Inserts full transaction data
+    fn put_tx_data(
+        &mut self,
+        tx: &Transaction,
+        fee: Option<Zatoshis>,
+        target_height: Option<BlockHeight>,
+    ) {
+        match self.tx_table.entry(tx.txid()) {
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().fee = fee;
+                entry.get_mut().expiry_height = Some(tx.expiry_height());
+                entry.get_mut().raw = Vec::new();
+                tx.write(&mut entry.get_mut().raw).unwrap();
+            }
+            Entry::Vacant(entry) => {
+                let mut raw = Vec::new();
+                tx.write(&mut raw).unwrap();
+                entry.insert(TransactionEntry {
+                    txid: tx.txid(),
+                    tx_status: TransactionStatus::NotInMainChain,
+                    expiry_height: Some(tx.expiry_height()),
+                    raw,
+                    fee,
+                    target_height,
+                    tx_meta: None,
+                });
+            }
+        }
+    }
+
+    fn mark_sapling_note_spent(&mut self, nf: sapling::Nullifier, txid: TxId) {
+        self.sapling_spends.insert(nf, (txid, true));
+    }
+
+    #[cfg(feature = "orchard")]
+    fn mark_orchard_note_spent(&mut self, nf: orchard::note::Nullifier, txid: TxId) {
+        self.orchard_spends.insert(nf, (txid, true));
+    }
+
+    fn put_received_note(receiving_account: AccountId, note: Note) {}
+}
+
 pub struct MemoryWalletDb {
     network: Network,
     accounts: Vec<Account>,
     blocks: BTreeMap<BlockHeight, MemoryWalletBlock>,
-    tx_idx: HashMap<TxId, BlockHeight>,
 
-    tx_status: HashMap<TxId, TransactionStatus>,
-    /// Tracks transactions relevant to this wallet indexed by their TxId
-    tx_meta: HashMap<TxId, WalletTx<AccountId>>,
+    tx_table: HashMap<TxId, TransactionEntry>,
+
     /// Tracks transparent outputs received by this wallet indexed by their OutPoint which defines the
     /// transaction and index where the output was created
     transparent_received_outputs: HashMap<OutPoint, TransparentReceivedOutput>,
-
     /// Tracks spends of received outputs. In thix case the TxId is the spending transaction
     /// from this wallet.
     transparent_received_output_spends: HashMap<OutPoint, TxId>,
@@ -125,8 +233,6 @@ impl MemoryWalletDb {
             network,
             accounts: Vec::new(),
             blocks: BTreeMap::new(),
-            tx_idx: HashMap::new(),
-            tx_meta: HashMap::new(),
             transparent_received_outputs: HashMap::new(),
             transparent_received_output_spends: HashMap::new(),
             sapling_spends: BTreeMap::new(),
@@ -135,7 +241,7 @@ impl MemoryWalletDb {
             sapling_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
             #[cfg(feature = "orchard")]
             orchard_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
-            tx_status: HashMap::new(),
+            tx_table: HashMap::new(),
         }
     }
 
