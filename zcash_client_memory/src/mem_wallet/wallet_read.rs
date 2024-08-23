@@ -195,6 +195,7 @@ impl WalletRead for MemoryWalletDb {
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
         if let Some(TransactionStatus::Mined(height)) = self
             .tx_table
+            .0
             .get(&txid)
             .and_then(|entry| Some(entry.tx_status))
         {
@@ -219,6 +220,7 @@ impl WalletRead for MemoryWalletDb {
 
     fn get_memo(&self, id_note: NoteId) -> Result<Option<Memo>, Self::Error> {
         self.tx_table
+            .0
             .get(id_note.txid())
             .and_then(|entry| entry.height())
             .and_then(|height| self.blocks.get(&height))
@@ -244,7 +246,7 @@ impl WalletRead for MemoryWalletDb {
                     if !spent {
                         Some((
                             txid,
-                            self.tx_table.get(txid).and_then(|entry| entry.height()),
+                            self.tx_table.0.get(txid).and_then(|entry| entry.height()),
                             *nf,
                         ))
                     } else {
@@ -253,12 +255,13 @@ impl WalletRead for MemoryWalletDb {
                 }
                 NullifierQuery::All => Some((
                     txid,
-                    self.tx_table.get(txid).and_then(|entry| entry.height()),
+                    self.tx_table.0.get(txid).and_then(|entry| entry.height()),
                     *nf,
                 )),
             })
             .map(|(txid, height, nf)| {
                 self.tx_table
+                    .0
                     .get(txid)
                     .and_then(|entry| entry.tx_meta.as_ref())
                     .and_then(|tx| {
@@ -291,7 +294,7 @@ impl WalletRead for MemoryWalletDb {
                     if !spent {
                         Some((
                             txid,
-                            self.tx_table.get(txid).and_then(|entry| entry.height()),
+                            self.tx_table.0.get(txid).and_then(|entry| entry.height()),
                             *nf,
                         ))
                     } else {
@@ -300,12 +303,13 @@ impl WalletRead for MemoryWalletDb {
                 }
                 NullifierQuery::All => Some((
                     txid,
-                    self.tx_table.get(txid).and_then(|entry| entry.height()),
+                    self.tx_table.0.get(txid).and_then(|entry| entry.height()),
                     *nf,
                 )),
             })
             .map(|(txid, height, nf)| {
                 self.tx_table
+                    .0
                     .get(txid)
                     .and_then(|entry| entry.tx_meta.as_ref())
                     .and_then(|tx| {
@@ -349,6 +353,7 @@ impl WalletRead for MemoryWalletDb {
                 // where the tx creating the output is mined
                 if let Some(TransactionStatus::Mined(height)) = self
                     .tx_table
+                    .0
                     .get(&output.tx_id)
                     .and_then(|entry| Some(entry.tx_status))
                 {

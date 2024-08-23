@@ -128,7 +128,7 @@ impl MemoryWalletDb {
     /// Inserts information about a MINED transaction that was observed to
     /// contain a note related to this wallet
     fn put_tx_meta(&mut self, tx_meta: WalletTx<AccountId>, height: BlockHeight) {
-        match self.tx_table.entry(tx_meta.txid()) {
+        match self.tx_table.0.entry(tx_meta.txid()) {
             Entry::Occupied(mut entry) => {
                 entry.get_mut().tx_meta = Some(tx_meta);
                 entry.get_mut().tx_status = TransactionStatus::Mined(height);
@@ -145,7 +145,7 @@ impl MemoryWalletDb {
         fee: Option<Zatoshis>,
         target_height: Option<BlockHeight>,
     ) {
-        match self.tx_table.entry(tx.txid()) {
+        match self.tx_table.0.entry(tx.txid()) {
             Entry::Occupied(mut entry) => {
                 entry.get_mut().fee = fee;
                 entry.get_mut().expiry_height = Some(tx.expiry_height());
@@ -185,7 +185,7 @@ pub struct MemoryWalletDb {
     accounts: Vec<Account>,
     blocks: BTreeMap<BlockHeight, MemoryWalletBlock>,
 
-    tx_table: HashMap<TxId, TransactionEntry>,
+    tx_table: TransactionTable,
 
     /// Tracks transparent outputs received by this wallet indexed by their OutPoint which defines the
     /// transaction and index where the output was created
@@ -211,6 +211,13 @@ pub struct MemoryWalletDb {
     >,
 }
 
+struct TransactionTable(pub HashMap<TxId, TransactionEntry>);
+impl TransactionTable {
+    fn new() -> Self {
+        Self(HashMap::new())
+    }
+}
+
 impl MemoryWalletDb {
     pub fn new(network: Network, max_checkpoints: usize) -> Self {
         Self {
@@ -225,7 +232,7 @@ impl MemoryWalletDb {
             sapling_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
             #[cfg(feature = "orchard")]
             orchard_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
-            tx_table: HashMap::new(),
+            tx_table: TransactionTable::new(),
         }
     }
 

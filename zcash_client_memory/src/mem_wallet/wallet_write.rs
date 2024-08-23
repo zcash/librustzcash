@@ -375,7 +375,7 @@ impl WalletWrite for MemoryWalletDb {
         txid: TxId,
         status: TransactionStatus,
     ) -> Result<(), Self::Error> {
-        if let Some(entry) = self.tx_table.get_mut(&txid) {
+        if let Some(entry) = self.tx_table.0.get_mut(&txid) {
             entry.tx_status = status;
             Ok(())
         } else {
