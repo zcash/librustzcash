@@ -86,22 +86,6 @@ impl Ord for MemoryWalletBlock {
     }
 }
 
-pub(super) const TABLE_TRANSACTIONS: &str = r#"
-CREATE TABLE "transactions" (
-    id_tx INTEGER PRIMARY KEY,
-    txid BLOB NOT NULL UNIQUE,
-    created TEXT,
-    block INTEGER,
-    mined_height INTEGER,
-    tx_index INTEGER,
-    expiry_height INTEGER,
-    raw BLOB,
-    fee INTEGER,
-    target_height INTEGER,
-    FOREIGN KEY (block) REFERENCES blocks(height),
-    CONSTRAINT height_consistency CHECK (block IS NULL OR mined_height = block)
-)"#;
-
 struct TransactionEntry {
     txid: TxId,
     // created: String,
