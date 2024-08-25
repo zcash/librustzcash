@@ -107,14 +107,6 @@ impl Add<u32> for BlockHeight {
     }
 }
 
-impl Add for BlockHeight {
-    type Output = Self;
-
-    fn add(self, other: Self) -> Self {
-        self + other.0
-    }
-}
-
 impl Sub<u32> for BlockHeight {
     type Output = Self;
 
@@ -124,14 +116,6 @@ impl Sub<u32> for BlockHeight {
         }
 
         BlockHeight(self.0 - other)
-    }
-}
-
-impl Sub for BlockHeight {
-    type Output = Self;
-
-    fn sub(self, other: Self) -> Self {
-        self - other.0
     }
 }
 
