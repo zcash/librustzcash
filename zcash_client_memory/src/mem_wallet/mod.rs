@@ -18,11 +18,12 @@ use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
 use zcash_primitives::{
     block::BlockHash,
     consensus::{BlockHeight, Network},
-    transaction::{components::OutPoint, txid, Transaction, TxId},
+    transaction::{components::OutPoint, txid, Authorized, Transaction, TransactionData, TxId},
 };
 use zcash_protocol::{
     memo::{self, Memo, MemoBytes},
     value::{ZatBalance, Zatoshis},
+    PoolType,
     ShieldedProtocol::{Orchard, Sapling},
 };
 
@@ -33,7 +34,8 @@ use zcash_client_backend::{
         TransactionDataRequest, TransactionStatus,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    wallet::{Note, NoteId, WalletSpend, WalletTransparentOutput, WalletTx},
+    proto::service::ShieldedProtocol,
+    wallet::{Note, NoteId, WalletSaplingOutput, WalletSpend, WalletTransparentOutput, WalletTx},
 };
 
 use zcash_client_backend::data_api::{
@@ -53,9 +55,11 @@ use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 use crate::error::Error;
 
+mod tables;
 mod wallet_commitment_trees;
 mod wallet_read;
 mod wallet_write;
+use tables::*;
 
 struct MemoryWalletBlock {
     height: BlockHeight,
@@ -66,120 +70,6 @@ struct MemoryWalletBlock {
     memos: HashMap<NoteId, MemoBytes>,
 }
 
-impl PartialEq for MemoryWalletBlock {
-    fn eq(&self, other: &Self) -> bool {
-        (self.height, self.block_time) == (other.height, other.block_time)
-    }
-}
-
-impl Eq for MemoryWalletBlock {}
-
-impl PartialOrd for MemoryWalletBlock {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some((self.height, self.block_time).cmp(&(other.height, other.block_time)))
-    }
-}
-
-impl Ord for MemoryWalletBlock {
-    fn cmp(&self, other: &Self) -> Ordering {
-        (self.height, self.block_time).cmp(&(other.height, other.block_time))
-    }
-}
-
-struct TransactionEntry {
-    txid: TxId,
-    // created: String,
-    /// Combines block height and mined_height into a txn status
-    tx_status: TransactionStatus,
-    expiry_height: Option<BlockHeight>,
-    raw: Vec<u8>,
-    fee: Option<Zatoshis>,
-    tx_meta: Option<WalletTx<AccountId>>,
-    /// - `target_height`: stores the target height for which the transaction was constructed, if
-    ///   known. This will ordinarily be null for transactions discovered via chain scanning; it
-    ///   will only be set for transactions created using this wallet specifically, and not any
-    ///   other wallet that uses the same seed (including previous installations of the same
-    ///   wallet application.)
-    target_height: Option<BlockHeight>,
-}
-impl TransactionEntry {
-    fn new_from_tx_meta(tx_meta: WalletTx<AccountId>, height: BlockHeight) -> Self {
-        Self {
-            txid: tx_meta.txid(),
-            tx_status: TransactionStatus::Mined(height),
-            expiry_height: None,
-            raw: Vec::new(),
-            fee: None,
-            tx_meta: Some(tx_meta),
-            target_height: None,
-        }
-    }
-
-    /// Returns the height at which this transaction was mined. None if the transaction is not mined yet.
-    fn height(&self) -> Option<BlockHeight> {
-        match self.tx_status {
-            TransactionStatus::Mined(height) => Some(height),
-            _ => None,
-        }
-    }
-}
-
-impl MemoryWalletDb {
-    /// Inserts information about a MINED transaction that was observed to
-    /// contain a note related to this wallet
-    fn put_tx_meta(&mut self, tx_meta: WalletTx<AccountId>, height: BlockHeight) {
-        match self.tx_table.0.entry(tx_meta.txid()) {
-            Entry::Occupied(mut entry) => {
-                entry.get_mut().tx_meta = Some(tx_meta);
-                entry.get_mut().tx_status = TransactionStatus::Mined(height);
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(TransactionEntry::new_from_tx_meta(tx_meta, height));
-            }
-        }
-    }
-    /// Inserts full transaction data
-    fn put_tx_data(
-        &mut self,
-        tx: &Transaction,
-        fee: Option<Zatoshis>,
-        target_height: Option<BlockHeight>,
-    ) {
-        match self.tx_table.0.entry(tx.txid()) {
-            Entry::Occupied(mut entry) => {
-                entry.get_mut().fee = fee;
-                entry.get_mut().expiry_height = Some(tx.expiry_height());
-                entry.get_mut().raw = Vec::new();
-                tx.write(&mut entry.get_mut().raw).unwrap();
-            }
-            Entry::Vacant(entry) => {
-                let mut raw = Vec::new();
-                tx.write(&mut raw).unwrap();
-                entry.insert(TransactionEntry {
-                    txid: tx.txid(),
-                    tx_status: TransactionStatus::NotInMainChain,
-                    expiry_height: Some(tx.expiry_height()),
-                    raw,
-                    fee,
-                    target_height,
-                    tx_meta: None,
-                });
-            }
-        }
-    }
-
-    fn mark_sapling_note_spent(&mut self, nf: sapling::Nullifier, txid: TxId) {
-        self.sapling_spends.insert(nf, (txid, true));
-    }
-
-    #[cfg(feature = "orchard")]
-    fn mark_orchard_note_spent(&mut self, nf: orchard::note::Nullifier, txid: TxId) {
-        self.orchard_spends.insert(nf, (txid, true));
-    }
-
-    fn put_received_note(receiving_account: AccountId, note: Note) {}
-}
-
 pub struct MemoryWalletDb {
     network: Network,
     accounts: Vec<Account>,
@@ -187,16 +77,11 @@ pub struct MemoryWalletDb {
 
     tx_table: TransactionTable,
 
-    /// Tracks transparent outputs received by this wallet indexed by their OutPoint which defines the
-    /// transaction and index where the output was created
-    transparent_received_outputs: HashMap<OutPoint, TransparentReceivedOutput>,
-    /// Tracks spends of received outputs. In thix case the TxId is the spending transaction
-    /// from this wallet.
-    transparent_received_output_spends: HashMap<OutPoint, TxId>,
+    received_notes: ReceivedNoteTable,
+    receieved_note_spends: ReceievdNoteSpends,
+    nullifiers: NullifierMap,
 
-    sapling_spends: BTreeMap<sapling::Nullifier, (TxId, bool)>,
-    #[cfg(feature = "orchard")]
-    orchard_spends: BTreeMap<orchard::note::Nullifier, (TxId, bool)>,
+    tx_locator: TxLocatorMap,
 
     sapling_tree: ShardTree<
         MemoryShardStore<sapling::Node, BlockHeight>,
@@ -210,30 +95,51 @@ pub struct MemoryWalletDb {
         ORCHARD_SHARD_HEIGHT,
     >,
 }
-
-struct TransactionTable(pub HashMap<TxId, TransactionEntry>);
-impl TransactionTable {
-    fn new() -> Self {
-        Self(HashMap::new())
-    }
-}
-
 impl MemoryWalletDb {
     pub fn new(network: Network, max_checkpoints: usize) -> Self {
         Self {
             network,
             accounts: Vec::new(),
             blocks: BTreeMap::new(),
-            transparent_received_outputs: HashMap::new(),
-            transparent_received_output_spends: HashMap::new(),
-            sapling_spends: BTreeMap::new(),
-            #[cfg(feature = "orchard")]
-            orchard_spends: BTreeMap::new(),
             sapling_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
             #[cfg(feature = "orchard")]
             orchard_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
             tx_table: TransactionTable::new(),
+            received_notes: ReceivedNoteTable::new(),
+            nullifiers: NullifierMap::new(),
+            tx_locator: TxLocatorMap::new(),
+            receieved_note_spends: ReceievdNoteSpends::new(),
         }
+    }
+    fn mark_sapling_note_spent(&mut self, nf: sapling::Nullifier, txid: TxId) -> Result<(), Error> {
+        let note_id = self
+            .received_notes
+            .0
+            .iter()
+            .filter(|v| v.nullifier() == Some(&Nullifier::Sapling(nf)))
+            .map(|v| v.note_id())
+            .next()
+            .ok_or_else(|| Error::NoteNotFound)?;
+        self.receieved_note_spends.insert_spend(note_id, txid);
+        Ok(())
+    }
+
+    #[cfg(feature = "orchard")]
+    fn mark_orchard_note_spent(
+        &mut self,
+        nf: orchard::note::Nullifier,
+        txid: TxId,
+    ) -> Result<(), Error> {
+        let note_id = self
+            .received_notes
+            .0
+            .iter()
+            .filter(|v| v.nullifier() == Some(&Nullifier::Orchard(nf)))
+            .map(|v| v.note_id())
+            .next()
+            .ok_or_else(|| Error::NoteNotFound)?;
+        self.receieved_note_spends.insert_spend(note_id, txid);
+        Ok(())
     }
 
     fn max_zip32_account_index(
@@ -257,6 +163,73 @@ impl MemoryWalletDb {
                 _ => None,
             })
             .max())
+    }
+    pub fn insert_received_sapling_note(
+        &mut self,
+        note_id: NoteId,
+        output: &WalletSaplingOutput<AccountId>,
+        spent_in: Option<TxId>,
+    ) {
+        self.received_notes
+            .insert_received_sapling_note(note_id, output);
+        if let Some(spent_in) = spent_in {
+            self.receieved_note_spends.insert_spend(note_id, spent_in);
+        }
+    }
+
+    fn insert_sapling_nullifier_map(
+        &mut self,
+        block_height: BlockHeight,
+        new_entries: &[(TxId, u16, Vec<sapling::Nullifier>)],
+    ) -> Result<(), Error> {
+        for (txid, tx_index, nullifiers) in new_entries {
+            match self.tx_locator.entry((block_height, *tx_index as u32)) {
+                Entry::Occupied(x) => {
+                    if txid == x.get() {
+                        // This is a duplicate entry
+                        continue;
+                    } else {
+                        return Err(Error::ConflictingTxLocator);
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(*txid);
+                }
+            }
+            for nf in nullifiers.iter() {
+                self.nullifiers
+                    .insert(block_height, *tx_index as u32, Nullifier::Sapling(*nf));
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "orchard")]
+    fn insert_orchard_nullifier_map(
+        &mut self,
+        block_height: BlockHeight,
+        new_entries: &[(TxId, u16, Vec<orchard::note::Nullifier>)],
+    ) -> Result<(), Error> {
+        for (txid, tx_index, nullifiers) in new_entries {
+            match self.tx_locator.entry((block_height, *tx_index as u32)) {
+                Entry::Occupied(x) => {
+                    if txid == x.get() {
+                        // This is a duplicate entry
+                        continue;
+                    } else {
+                        return Err(Error::ConflictingTxLocator);
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(*txid);
+                }
+            }
+            for nf in nullifiers.iter() {
+                self.nullifiers
+                    .insert(block_height, *tx_index as u32, Nullifier::Orchard(*nf));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -351,9 +324,22 @@ impl ViewingKey {
     }
 }
 
-#[derive(Debug, Clone)]
-struct TransparentReceivedOutput {
-    output: WalletTransparentOutput,
-    account_id: AccountId,
-    tx_id: TxId,
+impl PartialEq for MemoryWalletBlock {
+    fn eq(&self, other: &Self) -> bool {
+        (self.height, self.block_time) == (other.height, other.block_time)
+    }
+}
+
+impl Eq for MemoryWalletBlock {}
+
+impl PartialOrd for MemoryWalletBlock {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some((self.height, self.block_time).cmp(&(other.height, other.block_time)))
+    }
+}
+
+impl Ord for MemoryWalletBlock {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (self.height, self.block_time).cmp(&(other.height, other.block_time))
+    }
 }

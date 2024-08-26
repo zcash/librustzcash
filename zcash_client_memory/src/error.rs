@@ -24,6 +24,10 @@ pub enum Error {
     AccountOutOfRange,
     #[error("Transaction not in table: {0}")]
     TransactionNotFound(TxId),
+    #[error("Note not found")]
+    NoteNotFound,
+    #[error("Conflicting Tx Locator map entry")]
+    ConflictingTxLocator,
 }
 
 impl From<DerivationError> for Error {

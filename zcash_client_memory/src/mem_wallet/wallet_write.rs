@@ -44,7 +44,7 @@ use zcash_client_backend::data_api::{
     WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
 };
 
-use super::{Account, AccountId, MemoryWalletBlock, MemoryWalletDb, ViewingKey};
+use super::{Account, AccountId, MemoryWalletBlock, MemoryWalletDb, Nullifier, ViewingKey};
 use crate::error::Error;
 
 impl WalletWrite for MemoryWalletDb {
@@ -113,14 +113,21 @@ impl WalletWrite for MemoryWalletDb {
             let mut memos = HashMap::new();
             for transaction in block.transactions().iter() {
                 let txid = transaction.txid();
-                transaction.sapling_outputs().iter().map(|o| {
-                    // Insert the Sapling nullifiers of the spent notes into the `sapling_spends` map.
-                    if let Some(nullifier) = o.nf() {
-                        self.sapling_spends
-                            .entry(*nullifier)
-                            .or_insert((txid, false));
-                    }
 
+                // Mark the Sapling nullifiers of the spent notes as spent in the `sapling_spends` map.
+                transaction
+                    .sapling_spends()
+                    .iter()
+                    .map(|s| self.mark_sapling_note_spent(*s.nf(), txid));
+
+                #[cfg(feature = "orchard")]
+                // Mark the Orchard nullifiers of the spent notes as spent in the `orchard_spends` map.
+                transaction
+                    .orchard_spends()
+                    .iter()
+                    .map(|s| self.mark_orchard_note_spent(*s.nf(), txid));
+
+                transaction.sapling_outputs().iter().map(|o| {
                     // Insert the memo into the `memos` map.
                     let note_id = NoteId::new(
                         txid,
@@ -130,17 +137,19 @@ impl WalletWrite for MemoryWalletDb {
                     if let Ok(Some(memo)) = self.get_memo(note_id) {
                         memos.insert(note_id, memo.encode());
                     }
+                    // Check whether this note was spent in a later block range that
+                    // we previously scanned.
+                    let spent_in = o
+                        .nf()
+                        .and_then(|nf| self.nullifiers.get(&Nullifier::Sapling(*nf)))
+                        .and_then(|(height, tx_idx)| self.tx_locator.get(*height, *tx_idx))
+                        .map(|x| *x);
+
+                    self.insert_received_sapling_note(note_id, &o, spent_in);
                 });
 
                 #[cfg(feature = "orchard")]
                 transaction.orchard_outputs().iter().map(|o| {
-                    // Insert the Orchard nullifiers of the spent notes into the `orchard_spends` map.
-                    if let Some(nullifier) = o.nf() {
-                        self.orchard_spends
-                            .entry(*nullifier)
-                            .or_insert((txid, false));
-                    }
-
                     // Insert the memo into the `memos` map.
                     let note_id = NoteId::new(
                         txid,
@@ -150,6 +159,14 @@ impl WalletWrite for MemoryWalletDb {
                     if let Ok(Some(memo)) = self.get_memo(note_id) {
                         memos.insert(note_id, memo.encode());
                     }
+                    // Check whether this note was spent in a later block range that
+                    // we previously scanned.
+                    let spent_in = o
+                        .nf()
+                        .and_then(|nf| self.nullifiers.get(&&Nullifier::Orchard(*nf)))
+                        .and_then(|(height, tx_idx)| self.tx_locator.get(*height, *tx_idx));
+                    self.received_notes
+                        .insert_received_orchard_note(note_id, &o)
                 });
 
                 // Add frontier to the sapling tree
@@ -171,25 +188,13 @@ impl WalletWrite for MemoryWalletDb {
                     },
                 );
 
-                // Mark the Sapling nullifiers of the spent notes as spent in the `sapling_spends` map.
-                transaction.sapling_spends().iter().map(|s| {
-                    let nullifier = s.nf();
-                    if let Some((txid, spent)) = self.sapling_spends.get_mut(nullifier) {
-                        *spent = true;
-                    }
-                });
-
-                #[cfg(feature = "orchard")]
-                // Mark the Orchard nullifiers of the spent notes as spent in the `orchard_spends` map.
-                transaction.orchard_spends().iter().map(|s| {
-                    let nullifier = s.nf();
-                    if let Some((txid, spent)) = self.orchard_spends.get_mut(nullifier) {
-                        *spent = true;
-                    }
-                });
-
                 transactions.insert(txid, transaction.clone());
             }
+
+            // Insert the new nullifiers from this block into the nullifier map
+            self.insert_sapling_nullifier_map(block.height(), block.sapling().nullifier_map())?;
+            #[cfg(feature = "orchard")]
+            self.insert_orchard_nullifier_map(block.height(), block.orchard().nullifier_map())?;
 
             let memory_block = MemoryWalletBlock {
                 height: block.height(),
@@ -201,7 +206,7 @@ impl WalletWrite for MemoryWalletDb {
 
             transactions
                 .into_iter()
-                .for_each(|(_id, tx)| self.put_tx_meta(tx, block.height()));
+                .for_each(|(_id, tx)| self.tx_table.put_tx_meta(tx, block.height()));
 
             self.blocks.insert(block.height(), memory_block);
 
@@ -241,11 +246,10 @@ impl WalletWrite for MemoryWalletDb {
         &mut self,
         d_tx: DecryptedTransaction<Self::AccountId>,
     ) -> Result<(), Self::Error> {
-        self.put_tx_data(d_tx.tx(), None, None);
+        self.tx_table.put_tx_data(d_tx.tx(), None, None);
         if let Some(height) = d_tx.mined_height() {
             self.set_transaction_status(d_tx.tx().txid(), TransactionStatus::Mined(height))?
         }
-
         Ok(())
     }
 
@@ -305,7 +309,7 @@ impl WalletWrite for MemoryWalletDb {
         transactions: &[SentTransaction<Self::AccountId>],
     ) -> Result<(), Self::Error> {
         for sent_tx in transactions {
-            self.put_tx_data(
+            self.tx_table.put_tx_data(
                 sent_tx.tx(),
                 Some(sent_tx.fee_amount()),
                 Some(sent_tx.target_height()),
@@ -375,11 +379,6 @@ impl WalletWrite for MemoryWalletDb {
         txid: TxId,
         status: TransactionStatus,
     ) -> Result<(), Self::Error> {
-        if let Some(entry) = self.tx_table.0.get_mut(&txid) {
-            entry.tx_status = status;
-            Ok(())
-        } else {
-            Err(Error::TransactionNotFound(txid))
-        }
+        self.tx_table.set_transaction_status(&txid, status)
     }
 }

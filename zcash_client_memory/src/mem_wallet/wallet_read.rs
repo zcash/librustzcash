@@ -46,7 +46,7 @@ use {
     zcash_primitives::legacy::TransparentAddress,
 };
 
-use super::{Account, AccountId, MemoryWalletDb, TransparentReceivedOutput};
+use super::{Account, AccountId, MemoryWalletDb};
 use crate::error::Error;
 
 impl WalletRead for MemoryWalletDb {
@@ -193,12 +193,7 @@ impl WalletRead for MemoryWalletDb {
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        if let Some(TransactionStatus::Mined(height)) = self
-            .tx_table
-            .0
-            .get(&txid)
-            .and_then(|entry| Some(entry.tx_status))
-        {
+        if let Some(TransactionStatus::Mined(height)) = self.tx_table.tx_status(&txid) {
             Ok(Some(height))
         } else {
             Ok(None)
@@ -219,15 +214,7 @@ impl WalletRead for MemoryWalletDb {
     }
 
     fn get_memo(&self, id_note: NoteId) -> Result<Option<Memo>, Self::Error> {
-        self.tx_table
-            .0
-            .get(id_note.txid())
-            .and_then(|entry| entry.height())
-            .and_then(|height| self.blocks.get(&height))
-            .and_then(|block| block.memos.get(&id_note))
-            .map(Memo::try_from)
-            .transpose()
-            .map_err(Error::from)
+        todo!()
     }
 
     fn get_transaction(&self, _id_tx: TxId) -> Result<Option<Transaction>, Self::Error> {
@@ -238,47 +225,25 @@ impl WalletRead for MemoryWalletDb {
         &self,
         query: NullifierQuery,
     ) -> Result<Vec<(Self::AccountId, sapling::Nullifier)>, Self::Error> {
-        Ok(self
-            .sapling_spends
-            .iter()
-            .filter_map(|(nf, (txid, spent))| match query {
-                NullifierQuery::Unspent => {
-                    if !spent {
-                        Some((
-                            txid,
-                            self.tx_table.0.get(txid).and_then(|entry| entry.height()),
-                            *nf,
-                        ))
-                    } else {
+        let nullifiers = self.received_notes.get_sapling_nullifiers();
+        Ok(match query {
+            NullifierQuery::All => nullifiers
+                .map(|(account_id, _, nf)| (account_id, nf))
+                .collect(),
+            NullifierQuery::Unspent => nullifiers
+                .filter_map(|(account_id, txid, nf)| {
+                    let tx_status = self.tx_table.tx_status(&txid);
+                    let expiry_height = self.tx_table.expiry_height(&txid);
+                    if matches!(tx_status, Some(TransactionStatus::Mined(_)))
+                        || expiry_height.is_none()
+                    {
                         None
+                    } else {
+                        Some((account_id, nf))
                     }
-                }
-                NullifierQuery::All => Some((
-                    txid,
-                    self.tx_table.0.get(txid).and_then(|entry| entry.height()),
-                    *nf,
-                )),
-            })
-            .map(|(txid, height, nf)| {
-                self.tx_table
-                    .0
-                    .get(txid)
-                    .and_then(|entry| entry.tx_meta.as_ref())
-                    .and_then(|tx| {
-                        tx.sapling_outputs()
-                            .iter()
-                            .find(|o| o.nf() == Some(&nf))
-                            .map(|o| (*o.account_id(), *o.nf().unwrap()))
-                            .or_else(|| {
-                                tx.sapling_spends()
-                                    .iter()
-                                    .find(|s| s.nf() == &nf)
-                                    .map(|s| (*s.account_id(), *s.nf()))
-                            })
-                    })
-            })
-            .flatten()
-            .collect())
+                })
+                .collect(),
+        })
     }
 
     #[cfg(feature = "orchard")]
@@ -286,47 +251,25 @@ impl WalletRead for MemoryWalletDb {
         &self,
         query: NullifierQuery,
     ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error> {
-        Ok(self
-            .orchard_spends
-            .iter()
-            .filter_map(|(nf, (txid, spent))| match query {
-                NullifierQuery::Unspent => {
-                    if !spent {
-                        Some((
-                            txid,
-                            self.tx_table.0.get(txid).and_then(|entry| entry.height()),
-                            *nf,
-                        ))
-                    } else {
+        let nullifiers = self.received_notes.get_orchard_nullifiers();
+        Ok(match query {
+            NullifierQuery::All => nullifiers
+                .map(|(account_id, _, nf)| (account_id, nf))
+                .collect(),
+            NullifierQuery::Unspent => nullifiers
+                .filter_map(|(account_id, txid, nf)| {
+                    let tx_status = self.tx_table.tx_status(&txid);
+                    let expiry_height = self.tx_table.expiry_height(&txid);
+                    if matches!(tx_status, Some(TransactionStatus::Mined(_)))
+                        || expiry_height.is_none()
+                    {
                         None
+                    } else {
+                        Some((account_id, nf))
                     }
-                }
-                NullifierQuery::All => Some((
-                    txid,
-                    self.tx_table.0.get(txid).and_then(|entry| entry.height()),
-                    *nf,
-                )),
-            })
-            .map(|(txid, height, nf)| {
-                self.tx_table
-                    .0
-                    .get(txid)
-                    .and_then(|entry| entry.tx_meta.as_ref())
-                    .and_then(|tx| {
-                        tx.orchard_outputs()
-                            .iter()
-                            .find(|o| o.nf() == Some(&nf))
-                            .map(|o| (*o.account_id(), *o.nf().unwrap()))
-                            .or_else(|| {
-                                tx.orchard_spends()
-                                    .iter()
-                                    .find(|s| s.nf() == &nf)
-                                    .map(|s| (*s.account_id(), *s.nf()))
-                            })
-                    })
-            })
-            .flatten()
-            .collect())
+                })
+                .collect(),
+        })
     }
 
     #[cfg(feature = "transparent-inputs")]
