@@ -28,6 +28,10 @@ pub enum Error {
     NoteNotFound,
     #[error("Conflicting Tx Locator map entry")]
     ConflictingTxLocator,
+    #[error("Io Error: {0}")]
+    IoError(std::io::Error),
+    #[error("Corrupted Data: {0}")]
+    CorruptedData(String),
     #[error("Other error: {0}")]
     Other(String),
 }
@@ -47,5 +51,11 @@ impl From<AddressGenerationError> for Error {
 impl From<memo::Error> for Error {
     fn from(value: memo::Error) -> Self {
         Error::MemoDecryption(value)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(value: std::io::Error) -> Self {
+        Error::IoError(value)
     }
 }

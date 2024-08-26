@@ -118,6 +118,24 @@ impl TransactionEntry {
             target_height: None,
         }
     }
+    pub fn expiry_height(&self) -> Option<BlockHeight> {
+        self.expiry_height
+    }
+    pub fn status(&self) -> TransactionStatus {
+        self.tx_status
+    }
+    pub fn tx_index(&self) -> Option<u32> {
+        self.tx_index
+    }
+    pub fn fee(&self) -> Option<Zatoshis> {
+        self.fee
+    }
+    pub fn target_height(&self) -> Option<BlockHeight> {
+        self.target_height
+    }
+    pub fn raw(&self) -> &[u8] {
+        self.raw.as_slice()
+    }
 }
 pub struct TransactionTable(HashMap<TxId, TransactionEntry>);
 impl TransactionTable {
@@ -130,6 +148,9 @@ impl TransactionTable {
     }
     pub fn expiry_height(&self, txid: &TxId) -> Option<BlockHeight> {
         self.0.get(txid).and_then(|entry| entry.expiry_height)
+    }
+    pub fn get_transaction(&self, txid: TxId) -> Option<&TransactionEntry> {
+        self.0.get(&txid)
     }
     /// Inserts information about a MINED transaction that was observed to
     /// contain a note related to this wallet
@@ -183,6 +204,9 @@ impl TransactionTable {
         } else {
             return Err(Error::TransactionNotFound(*txid));
         }
+    }
+    pub fn get_tx_raw(&self, txid: &TxId) -> Option<&[u8]> {
+        self.0.get(txid).map(|entry| entry.raw.as_slice())
     }
 }
 

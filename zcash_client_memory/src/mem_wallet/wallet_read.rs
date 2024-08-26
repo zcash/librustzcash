@@ -25,9 +25,10 @@ use zcash_client_backend::{
 use zcash_primitives::{
     block::BlockHash,
     consensus::{BlockHeight, Network},
-    transaction::{Transaction, TxId},
+    transaction::{Transaction, TransactionData, TxId},
 };
 use zcash_protocol::{
+    consensus::BranchId,
     memo::{self, Memo, MemoBytes},
     value::Zatoshis,
     ShieldedProtocol::{Orchard, Sapling},
@@ -60,9 +61,9 @@ impl WalletRead for MemoryWalletDb {
 
     fn get_account(
         &self,
-        _account_id: Self::AccountId,
+        account_id: Self::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error> {
-        todo!()
+        Ok(self.accounts.get(*account_id as usize).map(|a| a.clone()))
     }
 
     fn get_derived_account(
@@ -217,7 +218,63 @@ impl WalletRead for MemoryWalletDb {
         todo!()
     }
 
-    fn get_transaction(&self, _id_tx: TxId) -> Result<Option<Transaction>, Self::Error> {
+    fn get_transaction(&self, txid: TxId) -> Result<Option<Transaction>, Self::Error> {
+        let raw = self.tx_table.get_tx_raw(&txid);
+        let status = self.tx_table.tx_status(&txid);
+        let expiry_height = self.tx_table.expiry_height(&txid);
+        self.tx_table
+            .get(&txid)
+            .and_then(|tx| Some((tx.status(), tx.expiry_height(), tx.raw())))
+            .map(|(status, expiry_height, raw)| {
+                // We need to provide a consensus branch ID so that pre-v5 `Transaction` structs
+                // (which don't commit directly to one) can store it internally.
+                // - If the transaction is mined, we use the block height to get the correct one.
+                // - If the transaction is unmined and has a cached non-zero expiry height, we use
+                //   that (relying on the invariant that a transaction can't be mined across a network
+                //   upgrade boundary, so the expiry height must be in the same epoch).
+                // - Otherwise, we use a placeholder for the initial transaction parse (as the
+                //   consensus branch ID is not used there), and then either use its non-zero expiry
+                //   height or return an error.
+                if let TransactionStatus::Mined(height) = status {
+                    return Ok(Some(
+                        Transaction::read(&raw[..], BranchId::for_height(&self.network, height))
+                            .map(|t| (height, t)),
+                    ));
+                }
+                if let Some(height) = expiry_height.filter(|h| h > &BlockHeight::from(0)) {
+                    return Ok(Some(
+                        Transaction::read(&raw[..], BranchId::for_height(&self.network, height))
+                            .map(|t| (height, t)),
+                    ));
+                }
+
+                let tx_data = Transaction::read(&raw[..], BranchId::Sprout)
+                    .map_err(Self::Error::from)?
+                    .into_data();
+
+                let expiry_height = tx_data.expiry_height();
+                if expiry_height > BlockHeight::from(0) {
+                    Ok(Some(
+                        TransactionData::from_parts(
+                            tx_data.version(),
+                            BranchId::for_height(&self.network, expiry_height),
+                            tx_data.lock_time(),
+                            expiry_height,
+                            tx_data.transparent_bundle().cloned(),
+                            tx_data.sprout_bundle().cloned(),
+                            tx_data.sapling_bundle().cloned(),
+                            tx_data.orchard_bundle().cloned(),
+                        )
+                        .freeze()
+                        .map(|t| (expiry_height, t)),
+                    ))
+                } else {
+                    Err(Self::Error::CorruptedData(
+                    "Consensus branch ID not known, cannot parse this transaction until it is mined"
+                        .to_string(),
+                ))
+                }
+            });
         todo!()
     }
 
