@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Removed
+- `impl {Add, Sub} for BlockHeight` - these operations were unused, and block
+  heights are a vector space, not a monoid.
+
 ## [0.2.0] - 2024-08-19
 ### Added
 - `zcash_protocol::PoolType::{TRANSPARENT, SAPLING, ORCHARD}`
