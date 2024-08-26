@@ -346,11 +346,8 @@ impl WalletWrite for MemoryWalletDb {
             }
 
             for output in sent_tx.outputs() {
-                // insert sent output
+                // TODO: insert sent output
 
-                // TODO: Do we actually have to store these notes and outputs?
-                // Presumebly we dont actually care about these until theyre mined anyways
-                // in which case they will be populated in put_block
                 match output.recipient() {
                     Recipient::InternalAccount { .. } => {
                         self.received_notes.insert_received_note(
