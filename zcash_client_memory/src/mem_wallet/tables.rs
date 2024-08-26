@@ -5,12 +5,14 @@ use sapling::NullifierDerivingKey;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 use std::{
+    cell::RefCell,
     cmp::Ordering,
     collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap, HashSet},
     convert::Infallible,
     hash::Hash,
     num::NonZeroU32,
     ops::Deref,
+    rc::Rc,
 };
 use zcash_keys::keys::{AddressGenerationError, DerivationError, UnifiedIncomingViewingKey};
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
@@ -31,10 +33,13 @@ use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{
         chain::ChainState, Account as _, AccountPurpose, AccountSource, SeedRelevance,
-        TransactionDataRequest, TransactionStatus,
+        SentTransactionOutput, TransactionDataRequest, TransactionStatus,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    wallet::{Note, NoteId, WalletSaplingOutput, WalletSpend, WalletTransparentOutput, WalletTx},
+    wallet::{
+        Note, NoteId, Recipient, WalletSaplingOutput, WalletSpend, WalletTransparentOutput,
+        WalletTx,
+    },
 };
 
 use zcash_client_backend::data_api::{
@@ -72,18 +77,18 @@ pub struct ReceivedNoteTable(pub Vec<ReceivedNote>);
 
 pub struct ReceivedNote {
     // Uniquely identifies this note
-    note_id: NoteId,
-    txid: TxId,
+    pub note_id: NoteId,
+    pub txid: TxId,
     // output_index: sapling, action_index: orchard
-    output_index: u32,
-    account_id: AccountId,
+    pub output_index: u32,
+    pub account_id: AccountId,
     //sapling: (diversifier, value, rcm) orchard: (diversifier, value, rho, rseed)
-    note: Note,
-    nf: Option<Nullifier>,
-    is_change: bool,
-    memo: Memo,
-    commitment_tree_position: Option<Position>,
-    recipient_key_scope: Option<Scope>,
+    pub note: Note,
+    pub nf: Option<Nullifier>,
+    pub is_change: bool,
+    pub memo: Memo,
+    pub commitment_tree_position: Option<Position>,
+    pub recipient_key_scope: Option<Scope>,
 }
 
 /// A table of received notes. Corresponds to sapling_received_notes and orchard_received_notes tables.
@@ -201,6 +206,84 @@ impl ReceivedNote {
     pub fn note_id(&self) -> NoteId {
         self.note_id
     }
+    pub fn from_sent_tx_output(
+        txid: TxId,
+        output: &SentTransactionOutput<AccountId>,
+    ) -> Result<Self, Error> {
+        match output.recipient() {
+            Recipient::InternalAccount {
+                receiving_account,
+                note: Note::Sapling(note),
+                ..
+            } => Ok(ReceivedNote {
+                note_id: NoteId::new(txid, Sapling, output.output_index() as u16),
+                txid: txid,
+                output_index: output.output_index() as u32,
+                account_id: *receiving_account,
+                note: Note::Sapling(note.clone()),
+                nf: None,
+                is_change: true,
+                memo: output.memo().map(|m| Memo::try_from(m).unwrap()).unwrap(),
+                commitment_tree_position: None,
+                recipient_key_scope: Some(Scope::Internal),
+            }),
+            #[cfg(feature = "orchard")]
+            Recipient::InternalAccount {
+                receiving_account,
+                note: Note::Orchard(note),
+                ..
+            } => Ok(ReceivedNote {
+                note_id: NoteId::new(txid, Orchard, output.output_index() as u16),
+                txid: txid,
+                output_index: output.output_index() as u32,
+                account_id: *receiving_account,
+                note: Note::Orchard(note.clone()),
+                nf: None,
+                is_change: true,
+                memo: output.memo().map(|m| Memo::try_from(m).unwrap()).unwrap(),
+                commitment_tree_position: None,
+                recipient_key_scope: Some(Scope::Internal),
+            }),
+            _ => Err(Error::Other(
+                "Recipient is not an internal shielded account".to_owned(),
+            )),
+        }
+    }
+    pub fn from_wallet_sapling_output(
+        note_id: NoteId,
+        output: &WalletSaplingOutput<AccountId>,
+    ) -> Self {
+        ReceivedNote {
+            note_id,
+            txid: *note_id.txid(),
+            output_index: output.index() as u32,
+            account_id: *output.account_id(),
+            note: Note::Sapling(output.note().clone()),
+            nf: output.nf().map(|nf| Nullifier::Sapling(*nf)),
+            is_change: output.is_change(),
+            memo: Memo::Empty,
+            commitment_tree_position: Some(output.note_commitment_tree_position()),
+            recipient_key_scope: output.recipient_key_scope(),
+        }
+    }
+    #[cfg(feature = "orchard")]
+    pub fn from_wallet_orchard_output(
+        note_id: NoteId,
+        output: &WalletOrchardOutput<AccountId>,
+    ) -> Self {
+        ReceivedNote {
+            note_id,
+            txid: *note_id.txid(),
+            output_index: output.index() as u32,
+            account_id: *output.account_id(),
+            note: Note::Orchard(output.note().clone()),
+            nf: output.nf().map(|nf| Nullifier::Orchard(*nf)),
+            is_change: output.is_change(),
+            memo: Memo::Empty,
+            commitment_tree_position: Some(output.note_commitment_tree_position()),
+            recipient_key_scope: output.recipient_key_scope(),
+        }
+    }
 }
 
 impl ReceivedNoteTable {
@@ -232,46 +315,7 @@ impl ReceivedNoteTable {
         })
     }
 
-    pub fn insert_received_sapling_note(
-        &mut self,
-        note_id: NoteId,
-        output: &WalletSaplingOutput<AccountId>,
-    ) {
-        // let note_id = NoteId::new(txid, ShieldedProtocol::Sapling, output.index() as u16);
-
-        let note = ReceivedNote {
-            note_id,
-            txid: *note_id.txid(),
-            output_index: output.index() as u32,
-            account_id: *output.account_id(),
-            note: Note::Sapling(output.note().clone()),
-            nf: output.nf().map(|nf| Nullifier::Sapling(*nf)),
-            is_change: output.is_change(),
-            memo: Memo::Empty,
-            commitment_tree_position: Some(output.note_commitment_tree_position()),
-            recipient_key_scope: output.recipient_key_scope(),
-        };
-        self.0.push(note);
-    }
-    #[cfg(feature = "orchard")]
-    pub fn insert_received_orchard_note(
-        &mut self,
-        note_id: NoteId,
-        output: &WalletOrchardOutput<AccountId>,
-    ) {
-        // let note_id = NoteId::new(txid, ShieldedProtocol::Orchard, output.index() as u16);
-        let note = ReceivedNote {
-            note_id,
-            txid: *note_id.txid(),
-            output_index: output.index() as u32,
-            account_id: *output.account_id(),
-            note: Note::Orchard(output.note().clone()),
-            nf: output.nf().map(|nf| Nullifier::Orchard(*nf)),
-            is_change: output.is_change(),
-            memo: Memo::Empty,
-            commitment_tree_position: Some(output.note_commitment_tree_position()),
-            recipient_key_scope: output.recipient_key_scope(),
-        };
+    pub fn insert_received_note(&mut self, note: ReceivedNote) {
         self.0.push(note);
     }
 }

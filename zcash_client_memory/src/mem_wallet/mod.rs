@@ -51,7 +51,7 @@ use {
 };
 
 #[cfg(feature = "orchard")]
-use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
+use zcash_client_backend::{data_api::ORCHARD_SHARD_HEIGHT, wallet::WalletOrchardOutput};
 
 use crate::error::Error;
 
@@ -171,12 +171,24 @@ impl MemoryWalletDb {
         spent_in: Option<TxId>,
     ) {
         self.received_notes
-            .insert_received_sapling_note(note_id, output);
+            .insert_received_note(ReceivedNote::from_wallet_sapling_output(note_id, output));
         if let Some(spent_in) = spent_in {
             self.receieved_note_spends.insert_spend(note_id, spent_in);
         }
     }
-
+    #[cfg(feature = "orchard")]
+    pub fn insert_received_orchard_note(
+        &mut self,
+        note_id: NoteId,
+        output: &WalletOrchardOutput<AccountId>,
+        spent_in: Option<TxId>,
+    ) {
+        self.received_notes
+            .insert_received_note(ReceivedNote::from_wallet_orchard_output(note_id, output));
+        if let Some(spent_in) = spent_in {
+            self.receieved_note_spends.insert_spend(note_id, spent_in);
+        }
+    }
     fn insert_sapling_nullifier_map(
         &mut self,
         block_height: BlockHeight,

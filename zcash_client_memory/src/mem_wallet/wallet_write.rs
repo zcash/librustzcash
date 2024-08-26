@@ -34,7 +34,10 @@ use zcash_client_backend::{
         TransactionStatus,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    wallet::{Note, NoteId, Recipient, WalletSpend, WalletTransparentOutput, WalletTx},
+    wallet::{
+        Note, NoteId, Recipient, WalletSaplingOutput, WalletSpend, WalletTransparentOutput,
+        WalletTx,
+    },
     TransferType,
 };
 
@@ -44,7 +47,9 @@ use zcash_client_backend::data_api::{
     WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
 };
 
-use super::{Account, AccountId, MemoryWalletBlock, MemoryWalletDb, Nullifier, ViewingKey};
+use super::{
+    Account, AccountId, MemoryWalletBlock, MemoryWalletDb, Nullifier, ReceivedNote, ViewingKey,
+};
 use crate::error::Error;
 
 impl WalletWrite for MemoryWalletDb {
@@ -164,9 +169,10 @@ impl WalletWrite for MemoryWalletDb {
                     let spent_in = o
                         .nf()
                         .and_then(|nf| self.nullifiers.get(&&Nullifier::Orchard(*nf)))
-                        .and_then(|(height, tx_idx)| self.tx_locator.get(*height, *tx_idx));
-                    self.received_notes
-                        .insert_received_orchard_note(note_id, &o)
+                        .and_then(|(height, tx_idx)| self.tx_locator.get(*height, *tx_idx))
+                        .map(|x| *x);
+
+                    self.insert_received_orchard_note(note_id, &o, spent_in)
                 });
 
                 // Add frontier to the sapling tree
@@ -346,19 +352,17 @@ impl WalletWrite for MemoryWalletDb {
                 // Presumebly we dont actually care about these until theyre mined anyways
                 // in which case they will be populated in put_block
                 match output.recipient() {
-                    Recipient::InternalAccount {
-                        receiving_account,
-                        note: Note::Sapling(note),
-                        ..
-                    } => {
-                        // insert note
+                    Recipient::InternalAccount { .. } => {
+                        self.received_notes.insert_received_note(
+                            ReceivedNote::from_sent_tx_output(sent_tx.tx().txid(), output)?,
+                        );
                     }
                     #[cfg(feature = "orchard")]
-                    Recipient::InternalAccount {
-                        receiving_account,
-                        note: Note::Orchard(note),
-                        ..
-                    } => {}
+                    Recipient::InternalAccount { .. } => {
+                        self.received_notes.insert_received_note(
+                            ReceivedNote::from_sent_tx_output(sent_tx.tx().txid(), output)?,
+                        );
+                    }
                     Recipient::EphemeralTransparent {
                         receiving_account,
                         ephemeral_address,

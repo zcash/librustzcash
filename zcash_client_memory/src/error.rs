@@ -28,6 +28,8 @@ pub enum Error {
     NoteNotFound,
     #[error("Conflicting Tx Locator map entry")]
     ConflictingTxLocator,
+    #[error("Other error: {0}")]
+    Other(String),
 }
 
 impl From<DerivationError> for Error {
