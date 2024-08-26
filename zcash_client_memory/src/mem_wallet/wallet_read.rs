@@ -286,44 +286,7 @@ impl WalletRead for MemoryWalletDb {
         account: Self::AccountId,
         max_height: BlockHeight,
     ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
-        // scan all transparent outputs and return those in a tx belonging to this account
-        // as a map between the address and the total value received
-        Ok(self
-            .transparent_received_outputs
-            .iter()
-            .filter(|(_, output)| output.account_id == account) // that belong to this account
-            .filter(|(outpoint, output)| {
-                // where the tx creating the output is mined
-                if let Some(TransactionStatus::Mined(height)) = self
-                    .tx_table
-                    .0
-                    .get(&output.tx_id)
-                    .and_then(|entry| Some(entry.tx_status))
-                {
-                    height <= max_height
-                } else {
-                    false
-                }
-            })
-            .filter(|(outpoint, _)| {
-                // that are unspent
-                !self
-                    .transparent_received_output_spends
-                    .contains_key(&outpoint)
-            })
-            .fold(
-                HashMap::new(),
-                |mut res, (_, TransparentReceivedOutput { output, .. })| {
-                    let addr = output.recipient_address().clone();
-                    let zats = res
-                        .get(&addr)
-                        .unwrap_or(&Zatoshis::ZERO)
-                        .add(output.value())
-                        .expect("Can always add a non-negative value to zero");
-                    res.insert(addr, zats);
-                    res
-                },
-            ))
+        todo!()
     }
 
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {

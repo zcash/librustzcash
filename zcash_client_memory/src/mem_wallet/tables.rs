@@ -274,22 +274,6 @@ impl ReceivedNoteTable {
         };
         self.0.push(note);
     }
-
-    pub fn mark_sapling_note_spent(&mut self, nf: sapling::Nullifier, txid: TxId) {
-        // let note = ReceivedNote {
-        //     txid,
-        //     output_index: todo!(),
-        //     account_id: todo!(),
-        //     note: todo!(),
-        //     nf: todo!(),
-        //     is_change: todo!(),
-        //     memo: todo!(),
-        //     commitment_tree_position: todo!(),
-        //     recipient_key_scope: todo!(),
-        // };
-        // self.sapling_spends.insert(nf, (txid, true));
-        todo!()
-    }
 }
 
 impl TransactionTable {
