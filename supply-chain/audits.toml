@@ -849,6 +849,12 @@ user-id = 1244 # ebfull
 start = "2019-10-08"
 end = "2025-04-22"
 
+[[trusted.zcash_primitives]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2024-08-20"
+end = "2025-08-26"
+
 [[trusted.zcash_proofs]]
 criteria = ["safe-to-deploy", "crypto-reviewed", "license-reviewed"]
 user-id = 6289 # Jack Grigg (str4d)
