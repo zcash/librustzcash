@@ -50,7 +50,7 @@ use {
 };
 
 use super::{Account, AccountId, MemoryWalletDb};
-use crate::error::Error;
+use crate::{error::Error, mem_wallet::MemoryWalletBlock};
 
 impl WalletRead for MemoryWalletDb {
     type Error = Error;
@@ -237,8 +237,25 @@ impl WalletRead for MemoryWalletDb {
         }))
     }
 
-    fn block_metadata(&self, _height: BlockHeight) -> Result<Option<BlockMetadata>, Self::Error> {
-        todo!()
+    fn block_metadata(&self, height: BlockHeight) -> Result<Option<BlockMetadata>, Self::Error> {
+        Ok(self.blocks.get(&height).map(|block| {
+            let MemoryWalletBlock {
+                height,
+                hash,
+                sapling_commitment_tree_size,
+                #[cfg(feature = "orchard")]
+                orchard_commitment_tree_size,
+                ..
+            } = block;
+            // TODO: Deal with legacy sapling trees
+            BlockMetadata::from_parts(
+                *height,
+                *hash,
+                *sapling_commitment_tree_size,
+                #[cfg(feature = "orchard")]
+                *orchard_commitment_tree_size,
+            )
+        }))
     }
 
     fn block_fully_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
@@ -295,11 +312,16 @@ impl WalletRead for MemoryWalletDb {
     }
 
     fn block_max_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
-        todo!()
+        Ok(self
+            .blocks
+            .last_key_value()
+            .map(|(height, _)| self.block_metadata(*height))
+            .transpose()?
+            .flatten())
     }
 
     fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error> {
-        Ok(vec![])
+        Ok(self.scan_queue.suggest_scan_ranges(ScanPriority::Historic))
     }
 
     fn get_target_and_anchor_heights(

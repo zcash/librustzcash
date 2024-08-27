@@ -70,6 +70,12 @@ struct MemoryWalletBlock {
     // Just the transactions that involve an account in this wallet
     transactions: HashSet<TxId>,
     memos: HashMap<NoteId, MemoBytes>,
+    sapling_commitment_tree_size: Option<u32>,
+    sapling_output_count: Option<u32>,
+    #[cfg(feature = "orchard")]
+    orchard_commitment_tree_size: Option<u32>,
+    #[cfg(feature = "orchard")]
+    orchard_action_count: Option<u32>,
 }
 
 pub struct MemoryWalletDb {
@@ -129,9 +135,6 @@ impl MemoryWalletDb {
         Ok(())
     }
 
-    // fn get_account(&self, account_id: AccountId) -> Option<&Account> {
-    //     self.accounts.get(*account_id as usize)
-    // }
     fn get_account_mut(&mut self, account_id: AccountId) -> Option<&mut Account> {
         self.accounts.get_mut(*account_id as usize)
     }

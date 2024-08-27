@@ -221,6 +221,12 @@ impl WalletWrite for MemoryWalletDb {
                 block_time: block.block_time(),
                 transactions: transactions.keys().cloned().collect(),
                 memos,
+                sapling_commitment_tree_size: Some(block.sapling().final_tree_size()),
+                sapling_output_count: Some(block.sapling().commitments().len().try_into().unwrap()),
+                #[cfg(feature = "orchard")]
+                orchard_commitment_tree_size: Some(block.orchard().final_tree_size()),
+                #[cfg(feature = "orchard")]
+                orchard_action_count: Some(block.orchard().commitments().len().try_into().unwrap()),
             };
 
             // Insert transaction metadata into the transaction table
