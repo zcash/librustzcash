@@ -1,8 +1,10 @@
 use incrementalmerkletree::{Address, Marking, Retention};
+use nonempty::NonEmpty;
 use sapling::NullifierDerivingKey;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 use std::{
+    clone,
     cmp::Ordering,
     collections::{BTreeMap, HashMap, HashSet},
     convert::Infallible,
@@ -28,7 +30,7 @@ use zcash_primitives::{
     transaction::{Transaction, TransactionData, TxId},
 };
 use zcash_protocol::{
-    consensus::BranchId,
+    consensus::{self, BranchId},
     memo::{self, Memo, MemoBytes},
     value::Zatoshis,
     ShieldedProtocol::{Orchard, Sapling},
@@ -56,7 +58,7 @@ impl WalletRead for MemoryWalletDb {
     type Account = Account;
 
     fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error> {
-        Ok(Vec::new())
+        Ok(self.accounts.iter().map(|a| a.id()).collect())
     }
 
     fn get_account(
@@ -68,25 +70,98 @@ impl WalletRead for MemoryWalletDb {
 
     fn get_derived_account(
         &self,
-        _seed: &SeedFingerprint,
-        _account_id: zip32::AccountId,
+        seed: &SeedFingerprint,
+        account_id: zip32::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error> {
-        todo!()
+        Ok(self.accounts.iter().find_map(|acct| match acct.kind() {
+            AccountSource::Derived {
+                seed_fingerprint,
+                account_index,
+            } => {
+                if seed_fingerprint == seed && account_index == &account_id {
+                    Some(acct.clone())
+                } else {
+                    None
+                }
+            }
+            AccountSource::Imported { purpose } => None,
+        }))
     }
 
     fn validate_seed(
         &self,
-        _account_id: Self::AccountId,
-        _seed: &SecretVec<u8>,
+        account_id: Self::AccountId,
+        seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error> {
-        todo!()
+        if let Some(account) = self.get_account(account_id)? {
+            if let AccountSource::Derived {
+                seed_fingerprint,
+                account_index,
+            } = account.source()
+            {
+                seed_matches_derived_account(
+                    &self.network,
+                    seed,
+                    &seed_fingerprint,
+                    account_index,
+                    &account.uivk(),
+                )
+            } else {
+                Err(Error::UnknownZip32Derivation)
+            }
+        } else {
+            // Missing account is documented to return false.
+            Ok(false)
+        }
     }
 
     fn seed_relevance_to_derived_accounts(
         &self,
         seed: &SecretVec<u8>,
     ) -> Result<SeedRelevance<Self::AccountId>, Self::Error> {
-        todo!()
+        let mut has_accounts = false;
+        let mut has_derived = false;
+        let mut relevant_account_ids = vec![];
+
+        for account_id in self.get_account_ids()? {
+            has_accounts = true;
+            let account = self.get_account(account_id)?.expect("account ID exists");
+
+            // If the account is imported, the seed _might_ be relevant, but the only
+            // way we could determine that is by brute-forcing the ZIP 32 account
+            // index space, which we're not going to do. The method name indicates to
+            // the caller that we only check derived accounts.
+            if let AccountSource::Derived {
+                seed_fingerprint,
+                account_index,
+            } = account.source()
+            {
+                has_derived = true;
+
+                if seed_matches_derived_account(
+                    &self.network,
+                    seed,
+                    &seed_fingerprint,
+                    account_index,
+                    &account.uivk(),
+                )? {
+                    // The seed is relevant to this account.
+                    relevant_account_ids.push(account_id);
+                }
+            }
+        }
+
+        Ok(
+            if let Some(account_ids) = NonEmpty::from_vec(relevant_account_ids) {
+                SeedRelevance::Relevant { account_ids }
+            } else if has_derived {
+                SeedRelevance::NotRelevant
+            } else if has_accounts {
+                SeedRelevance::NoDerivedAccounts
+            } else {
+                SeedRelevance::NoAccounts
+            },
+        )
     }
 
     fn get_account_for_ufvk(
@@ -110,20 +185,10 @@ impl WalletRead for MemoryWalletDb {
         &self,
         account: Self::AccountId,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        self.accounts
-            .get(*account as usize)
-            .map(|account| {
-                account
-                    .ufvk()
-                    .unwrap()
-                    .default_address(
-                        UnifiedAddressRequest::all()
-                            .expect("At least one protocol should be enabled."),
-                    )
-                    .map(|(addr, _)| addr)
-            })
-            .transpose()
-            .map_err(|e| e.into())
+        Ok(self
+            .get_account(account)?
+            .and_then(|account| Account::current_address(&account))
+            .map(|(_, a)| a.clone()))
     }
 
     fn get_account_birthday(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
@@ -348,5 +413,46 @@ impl WalletRead for MemoryWalletDb {
 
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {
         todo!()
+    }
+}
+
+/// Copied from zcash_client_sqlite::wallet::seed_matches_derived_account
+fn seed_matches_derived_account<P: consensus::Parameters>(
+    params: &P,
+    seed: &SecretVec<u8>,
+    seed_fingerprint: &SeedFingerprint,
+    account_index: zip32::AccountId,
+    uivk: &UnifiedIncomingViewingKey,
+) -> Result<bool, Error> {
+    let seed_fingerprint_match =
+        &SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
+            Error::BadAccountData("Seed must be between 32 and 252 bytes in length.".to_owned())
+        })? == seed_fingerprint;
+
+    // Keys are not comparable with `Eq`, but addresses are, so we derive what should
+    // be equivalent addresses for each key and use those to check for key equality.
+    let uivk_match =
+        match UnifiedSpendingKey::from_seed(params, &seed.expose_secret()[..], account_index) {
+            // If we can't derive a USK from the given seed with the account's ZIP 32
+            // account index, then we immediately know the UIVK won't match because wallet
+            // accounts are required to have a known UIVK.
+            Err(_) => false,
+            Ok(usk) => {
+                UnifiedAddressRequest::all().map_or(Ok::<_, Error>(false), |ua_request| {
+                    Ok(usk
+                        .to_unified_full_viewing_key()
+                        .default_address(ua_request)?
+                        == uivk.default_address(ua_request)?)
+                })?
+            }
+        };
+
+    if seed_fingerprint_match != uivk_match {
+        // If these mismatch, it suggests database corruption.
+        Err(Error::CorruptedData(format!(
+            "Seed fingerprint match: {seed_fingerprint_match}, uivk match: {uivk_match}"
+        )))
+    } else {
+        Ok(seed_fingerprint_match && uivk_match)
     }
 }

@@ -157,3 +157,6 @@ zip32 = "0.1.1"
 lto = true
 panic = 'abort'
 codegen-units = 1
+
+[patch.crates-io]
+zip32 = { git = "https://github.com/zcash/zip32.git", branch = "diversifier_index_ord"}
