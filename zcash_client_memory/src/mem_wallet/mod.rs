@@ -2,6 +2,7 @@
 use core::time;
 use incrementalmerkletree::{Address, Marking, Retention};
 use sapling::NullifierDerivingKey;
+use scanning::ScanQueue;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 use std::{
@@ -84,6 +85,8 @@ pub struct MemoryWalletDb {
 
     tx_locator: TxLocatorMap,
 
+    scan_queue: ScanQueue,
+
     sapling_tree: ShardTree<
         MemoryShardStore<sapling::Node, BlockHeight>,
         { SAPLING_SHARD_HEIGHT * 2 },
@@ -110,6 +113,7 @@ impl MemoryWalletDb {
             nullifiers: NullifierMap::new(),
             tx_locator: TxLocatorMap::new(),
             receieved_note_spends: ReceievdNoteSpends::new(),
+            scan_queue: ScanQueue::new(),
         }
     }
     fn mark_sapling_note_spent(&mut self, nf: sapling::Nullifier, txid: TxId) -> Result<(), Error> {

@@ -11,7 +11,7 @@ use std::{
     convert::Infallible,
     hash::Hash,
     num::NonZeroU32,
-    ops::{Deref, Range},
+    ops::{Deref, DerefMut, Range},
     path::Iter,
     rc::Rc,
 };
@@ -83,6 +83,10 @@ CREATE TABLE scan_queue (
 pub struct ScanQueue(Vec<(BlockHeight, BlockHeight, ScanPriority)>);
 
 impl ScanQueue {
+    pub fn new() -> Self {
+        ScanQueue(Vec::new())
+    }
+
     pub fn suggest_scan_ranges(&self, min_priority: ScanPriority) -> Vec<ScanRange> {
         let mut priorities: Vec<_> = self
             .0
@@ -140,7 +144,7 @@ impl ScanQueue {
         force_rescans: bool,
     ) -> Result<(), Error> {
         let (to_create, to_delete_ends) = {
-            let mut rows: Vec<_> = self
+            let mut q_ranges: Vec<_> = self
                 .0
                 .iter()
                 .filter(|(start, end, _)| {
@@ -148,7 +152,7 @@ impl ScanQueue {
                     !(start > &query_range.end || &query_range.start > end)
                 })
                 .collect();
-            rows.sort_by(|(_, end_a, _), (_, end_b, _)| end_a.cmp(end_b));
+            q_ranges.sort_by(|(_, end_a, _), (_, end_b, _)| end_a.cmp(end_b));
 
             // Iterate over the ranges in the scan queue that overlap the range that we have
             // identified as needing to be fully scanned. For each such range add it to the
@@ -156,7 +160,9 @@ impl ScanQueue {
             // some in the process).
             let mut to_create: Option<SpanningTree> = None;
             let mut to_delete_ends: Vec<BlockHeight> = vec![];
-            while let Some((start, end, priority)) = rows.into_iter().next() {
+
+            let mut q_ranges = q_ranges.into_iter();
+            while let Some((start, end, priority)) = q_ranges.next() {
                 let entry = ScanRange::from_parts(
                     Range {
                         start: *start,
@@ -193,5 +199,28 @@ impl ScanQueue {
             self.insert_queue_entries(scan_ranges.iter());
         }
         Ok(())
+    }
+}
+
+impl IntoIterator for ScanQueue {
+    type Item = (BlockHeight, BlockHeight, ScanPriority);
+    type IntoIter = <Vec<Self::Item> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+// We deref to slice so that we can reuse the slice impls
+impl Deref for ScanQueue {
+    type Target = [(BlockHeight, BlockHeight, ScanPriority)];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0[..]
+    }
+}
+impl DerefMut for ScanQueue {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0[..]
     }
 }
