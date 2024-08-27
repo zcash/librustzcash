@@ -15,6 +15,8 @@ use crate::wallet::{chain_tip_height, init::WalletMigrationError, scanning::prio
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x3a6487f7_e068_42bb_9d12_6bb8dbe6da00);
 
+const DEPENDENCIES: &[Uuid] = &[shardtree_support::MIGRATION_ID];
+
 pub(super) struct Migration<P> {
     pub(super) params: P,
 }
@@ -25,7 +27,7 @@ impl<P> schemer::Migration for Migration<P> {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [shardtree_support::MIGRATION_ID].into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
