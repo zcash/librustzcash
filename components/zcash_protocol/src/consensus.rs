@@ -103,7 +103,7 @@ impl Add<u32> for BlockHeight {
     type Output = Self;
 
     fn add(self, other: u32) -> Self {
-        BlockHeight(self.0 + other)
+        BlockHeight(self.0.saturating_add(other))
     }
 }
 
@@ -111,11 +111,15 @@ impl Sub<u32> for BlockHeight {
     type Output = Self;
 
     fn sub(self, other: u32) -> Self {
-        if other > self.0 {
-            panic!("Subtraction resulted in negative block height.");
-        }
+        BlockHeight(self.0.saturating_sub(other))
+    }
+}
 
-        BlockHeight(self.0 - other)
+impl Sub<BlockHeight> for BlockHeight {
+    type Output = u32;
+
+    fn sub(self, other: BlockHeight) -> u32 {
+        self.0.saturating_sub(other.0)
     }
 }
 
