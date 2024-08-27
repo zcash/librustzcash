@@ -3,6 +3,7 @@ use sapling::NullifierDerivingKey;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 use std::{
+    clone,
     cmp::Ordering,
     collections::{BTreeMap, HashMap, HashSet},
     convert::Infallible,
@@ -110,20 +111,10 @@ impl WalletRead for MemoryWalletDb {
         &self,
         account: Self::AccountId,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        self.accounts
-            .get(*account as usize)
-            .map(|account| {
-                account
-                    .ufvk()
-                    .unwrap()
-                    .default_address(
-                        UnifiedAddressRequest::all()
-                            .expect("At least one protocol should be enabled."),
-                    )
-                    .map(|(addr, _)| addr)
-            })
-            .transpose()
-            .map_err(|e| e.into())
+        Ok(self
+            .get_account(account)
+            .and_then(Account::current_address)
+            .map(|(_, a)| a.clone()))
     }
 
     fn get_account_birthday(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error> {

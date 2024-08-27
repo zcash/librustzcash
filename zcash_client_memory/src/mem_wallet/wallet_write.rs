@@ -72,17 +72,18 @@ impl WalletWrite for MemoryWalletDb {
         let usk =
             UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account_index)?;
         let ufvk = usk.to_unified_full_viewing_key();
-        let account = Account {
-            account_id: AccountId(self.accounts.len() as u32),
-            kind: AccountSource::Derived {
+
+        let account = Account::new(
+            AccountId(self.accounts.len() as u32),
+            AccountSource::Derived {
                 seed_fingerprint,
                 account_index,
             },
-            viewing_key: ViewingKey::Full(Box::new(ufvk)),
-            birthday: birthday.clone(),
-            purpose: AccountPurpose::Spending,
-            notes: HashSet::new(),
-        };
+            ViewingKey::Full(Box::new(ufvk)),
+            birthday.clone(),
+            AccountPurpose::Spending,
+        )?;
+
         let id = account.id();
         self.accounts.push(account);
 
@@ -91,10 +92,13 @@ impl WalletWrite for MemoryWalletDb {
 
     fn get_next_available_address(
         &mut self,
-        _account: Self::AccountId,
-        _request: UnifiedAddressRequest,
+        account: Self::AccountId,
+        request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        todo!()
+        self.get_account_mut(account)
+            .map(|account| account.next_available_address(request))
+            .transpose()
+            .map(|a| a.flatten())
     }
 
     fn update_chain_tip(&mut self, _tip_height: BlockHeight) -> Result<(), Self::Error> {
@@ -277,17 +281,17 @@ impl WalletWrite for MemoryWalletDb {
             .map_err(|_| "key derivation error".to_string())
             .unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
-        let account = Account {
-            account_id: AccountId(self.accounts.len() as u32),
-            kind: AccountSource::Derived {
+
+        let account = Account::new(
+            AccountId(self.accounts.len() as u32),
+            AccountSource::Derived {
                 seed_fingerprint,
                 account_index,
             },
-            viewing_key: ViewingKey::Full(Box::new(ufvk)),
-            birthday: birthday.clone(),
-            purpose: AccountPurpose::Spending,
-            notes: HashSet::new(),
-        };
+            ViewingKey::Full(Box::new(ufvk)),
+            birthday.clone(),
+            AccountPurpose::Spending,
+        )?;
         // TODO: Do we need to check if duplicate?
         self.accounts.push(account.clone());
         Ok((account, usk))
@@ -299,14 +303,14 @@ impl WalletWrite for MemoryWalletDb {
         birthday: &AccountBirthday,
         purpose: AccountPurpose,
     ) -> Result<Self::Account, Self::Error> {
-        let account = Account {
-            account_id: AccountId(self.accounts.len() as u32),
-            kind: AccountSource::Imported { purpose },
-            viewing_key: ViewingKey::Full(Box::new(unified_key.to_owned())),
-            birthday: birthday.clone(),
+        let account = Account::new(
+            AccountId(self.accounts.len() as u32),
+            AccountSource::Imported { purpose },
+            ViewingKey::Full(Box::new(unified_key.to_owned())),
+            birthday.clone(),
             purpose,
-            notes: HashSet::new(),
-        };
+        )?;
+        self.accounts.push(account.clone());
         Ok(account)
     }
 

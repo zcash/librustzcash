@@ -124,6 +124,13 @@ impl MemoryWalletDb {
         Ok(())
     }
 
+    fn get_account(&self, account_id: AccountId) -> Option<&Account> {
+        self.accounts.get(*account_id as usize)
+    }
+    fn get_account_mut(&mut self, account_id: AccountId) -> Option<&mut Account> {
+        self.accounts.get_mut(*account_id as usize)
+    }
+
     #[cfg(feature = "orchard")]
     fn mark_orchard_note_spent(
         &mut self,
@@ -280,11 +287,41 @@ pub struct Account {
     kind: AccountSource,
     viewing_key: ViewingKey,
     birthday: AccountBirthday,
-    purpose: AccountPurpose,
+    purpose: AccountPurpose, // TODO: Remove this. AccountSource should be sufficient.
+    addresses: BTreeMap<DiversifierIndex, UnifiedAddress>,
     notes: HashSet<NoteId>,
 }
 
 impl Account {
+    fn new(
+        account_id: AccountId,
+        kind: AccountSource,
+        viewing_key: ViewingKey,
+        birthday: AccountBirthday,
+        purpose: AccountPurpose,
+    ) -> Result<Self, Error> {
+        let mut acc = Self {
+            account_id,
+            kind,
+            viewing_key,
+            birthday,
+            purpose,
+            addresses: BTreeMap::new(),
+            notes: HashSet::new(),
+        };
+        let ua_request = acc
+            .viewing_key
+            .uivk()
+            .to_address_request()
+            .and_then(|ua_request| ua_request.intersect(&UnifiedAddressRequest::all().unwrap()))
+            .ok_or_else(|| {
+                Error::AddressGeneration(AddressGenerationError::ShieldedReceiverRequired)
+            })?;
+
+        let (addr, diversifier_index) = acc.default_address(ua_request)?;
+        acc.addresses.insert(diversifier_index, addr);
+        Ok(acc)
+    }
     /// Returns the default Unified Address for the account,
     /// along with the diversifier index that generated it.
     ///
@@ -299,6 +336,39 @@ impl Account {
 
     fn birthday(&self) -> &AccountBirthday {
         &self.birthday
+    }
+
+    fn addresses(&self) -> &BTreeMap<DiversifierIndex, UnifiedAddress> {
+        &self.addresses
+    }
+
+    fn current_address(&self) -> Option<(DiversifierIndex, UnifiedAddress)> {
+        self.addresses
+            .last_key_value()
+            .map(|(diversifier_index, address)| (*diversifier_index, address.clone()))
+    }
+
+    fn next_available_address(
+        &mut self,
+        request: UnifiedAddressRequest,
+    ) -> Result<Option<UnifiedAddress>, Error> {
+        match self.ufvk() {
+            Some(ufvk) => {
+                let search_from = match self.current_address() {
+                    Some((mut last_diversifier_index, _)) => {
+                        last_diversifier_index
+                            .increment()
+                            .map_err(|_| AddressGenerationError::DiversifierSpaceExhausted)?;
+                        last_diversifier_index
+                    }
+                    None => DiversifierIndex::default(),
+                };
+                let (addr, diversifier_index) = ufvk.find_address(search_from, request)?;
+                self.addresses.insert(diversifier_index, addr.clone());
+                Ok(Some(addr))
+            }
+            None => Ok(None),
+        }
     }
 }
 
