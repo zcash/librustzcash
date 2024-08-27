@@ -55,6 +55,7 @@ use zcash_client_backend::{data_api::ORCHARD_SHARD_HEIGHT, wallet::WalletOrchard
 
 use crate::error::Error;
 
+mod scanning;
 mod tables;
 mod wallet_commitment_trees;
 mod wallet_read;

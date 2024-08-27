@@ -117,68 +117,77 @@ impl WalletWrite for MemoryWalletDb {
         // - Make sure blocks are coming in order.
         // - Make sure the first block in the sequence is tip + 1?
         // - Add a check to make sure the blocks are not already in the data store.
+        let start_height = blocks.first().map(|b| b.height());
+        let mut last_scanned_height = None;
+
         for block in blocks.into_iter() {
             let mut transactions = HashMap::new();
             let mut memos = HashMap::new();
+            if last_scanned_height
+                .iter()
+                .any(|prev| block.height() != *prev + 1)
+            {
+                return Err(Error::NonSequentialBlocks);
+            }
+
             for transaction in block.transactions().iter() {
                 let txid = transaction.txid();
 
                 // Mark the Sapling nullifiers of the spent notes as spent in the `sapling_spends` map.
-                transaction
-                    .sapling_spends()
-                    .iter()
-                    .map(|s| self.mark_sapling_note_spent(*s.nf(), txid));
+                for spend in transaction.sapling_spends() {
+                    self.mark_sapling_note_spent(*spend.nf(), txid);
+                }
 
-                #[cfg(feature = "orchard")]
                 // Mark the Orchard nullifiers of the spent notes as spent in the `orchard_spends` map.
-                transaction
-                    .orchard_spends()
-                    .iter()
-                    .map(|s| self.mark_orchard_note_spent(*s.nf(), txid));
+                #[cfg(feature = "orchard")]
+                for spend in transaction.orchard_spends() {
+                    self.mark_orchard_note_spent(*spend.nf(), txid);
+                }
 
-                transaction.sapling_outputs().iter().map(|o| {
+                for output in transaction.sapling_outputs() {
                     // Insert the memo into the `memos` map.
                     let note_id = NoteId::new(
                         txid,
                         Sapling,
-                        u16::try_from(o.index()).expect("output indices are representable as u16"),
+                        u16::try_from(output.index())
+                            .expect("output indices are representable as u16"),
                     );
                     if let Ok(Some(memo)) = self.get_memo(note_id) {
                         memos.insert(note_id, memo.encode());
                     }
                     // Check whether this note was spent in a later block range that
                     // we previously scanned.
-                    let spent_in = o
+                    let spent_in = output
                         .nf()
                         .and_then(|nf| self.nullifiers.get(&Nullifier::Sapling(*nf)))
                         .and_then(|(height, tx_idx)| self.tx_locator.get(*height, *tx_idx))
                         .map(|x| *x);
 
-                    self.insert_received_sapling_note(note_id, &o, spent_in);
-                });
+                    self.insert_received_sapling_note(note_id, &output, spent_in);
+                }
 
                 #[cfg(feature = "orchard")]
-                transaction.orchard_outputs().iter().map(|o| {
+                for output in transaction.orchard_outputs().iter() {
                     // Insert the memo into the `memos` map.
                     let note_id = NoteId::new(
                         txid,
                         Orchard,
-                        u16::try_from(o.index()).expect("output indices are representable as u16"),
+                        u16::try_from(output.index())
+                            .expect("output indices are representable as u16"),
                     );
                     if let Ok(Some(memo)) = self.get_memo(note_id) {
                         memos.insert(note_id, memo.encode());
                     }
                     // Check whether this note was spent in a later block range that
                     // we previously scanned.
-                    let spent_in = o
+                    let spent_in = output
                         .nf()
                         .and_then(|nf| self.nullifiers.get(&&Nullifier::Orchard(*nf)))
                         .and_then(|(height, tx_idx)| self.tx_locator.get(*height, *tx_idx))
                         .map(|x| *x);
 
-                    self.insert_received_orchard_note(note_id, &o, spent_in)
-                });
-
+                    self.insert_received_orchard_note(note_id, &output, spent_in)
+                }
                 // Add frontier to the sapling tree
                 self.sapling_tree.insert_frontier(
                     from_state.final_sapling_tree().clone(),
@@ -197,7 +206,7 @@ impl WalletWrite for MemoryWalletDb {
                         marking: Marking::Reference,
                     },
                 );
-
+                last_scanned_height = Some(block.height());
                 transactions.insert(txid, transaction.clone());
             }
 
@@ -214,10 +223,12 @@ impl WalletWrite for MemoryWalletDb {
                 memos,
             };
 
+            // Insert transaction metadata into the transaction table
             transactions
                 .into_iter()
                 .for_each(|(_id, tx)| self.tx_table.put_tx_meta(tx, block.height()));
 
+            // Insert the block into the block map
             self.blocks.insert(block.height(), memory_block);
 
             // Add the Sapling commitments to the sapling tree.
@@ -240,6 +251,7 @@ impl WalletWrite for MemoryWalletDb {
                     .batch_insert(start_position, block_commitments.orchard.into_iter());
             }
         }
+        // We can do some pruning of the tx_locator_map here
 
         Ok(())
     }

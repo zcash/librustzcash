@@ -210,6 +210,16 @@ impl WalletRead for MemoryWalletDb {
         &self,
         _min_confirmations: u32,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
+        // let summary = WalletSummary::new(
+        //     account_balances,
+        //     chain_tip_height,
+        //     fully_scanned_height,
+        //     None,
+        //     next_sapling_subtree_index,
+        //     #[cfg(feature = "orchard")]
+        //     next_orchard_subtree_index,
+        // );
+        // Ok(Some(summary))
         todo!()
     }
 
