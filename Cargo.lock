@@ -6158,8 +6158,7 @@ dependencies = [
 [[package]]
 name = "zip32"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4226d0aee9c9407c27064dfeec9d7b281c917de3374e1e5a2e2cfad9e09de19e"
+source = "git+https://github.com/zcash/zip32.git?branch=diversifier_index_ord#38e39b7086bbd5747dc61a84faf54ec9a58fa535"
 dependencies = [
  "blake2b_simd",
  "memuse",
