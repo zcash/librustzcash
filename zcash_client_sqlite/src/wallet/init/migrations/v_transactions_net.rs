@@ -13,6 +13,8 @@ use crate::wallet::{init::WalletMigrationError, pool_code};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x2aa4d24f_51aa_4a4c_8d9b_e5b8a762865f);
 
+const DEPENDENCIES: &[Uuid] = &[add_transaction_views::MIGRATION_ID];
+
 pub(crate) struct Migration;
 
 impl schemer::Migration for Migration {
@@ -21,7 +23,7 @@ impl schemer::Migration for Migration {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [add_transaction_views::MIGRATION_ID].into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {

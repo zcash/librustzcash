@@ -12,7 +12,7 @@ use super::full_account_ids;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x07610aac_b0e3_4ba8_aaa6_cda606f0fd7b);
 
-const DEPENDENCIES: [Uuid; 1] = [full_account_ids::MIGRATION_ID];
+const DEPENDENCIES: &[Uuid] = &[full_account_ids::MIGRATION_ID];
 
 #[allow(dead_code)]
 pub(super) struct Migration;
@@ -23,7 +23,7 @@ impl schemer::Migration for Migration {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        DEPENDENCIES.into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {

@@ -19,6 +19,8 @@ use super::received_notes_nullable_nf;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x7029b904_6557_4aa1_9da5_6904b65d2ba5);
 
+const DEPENDENCIES: &[Uuid] = &[received_notes_nullable_nf::MIGRATION_ID];
+
 pub(super) struct Migration<P> {
     pub(super) params: P,
 }
@@ -29,9 +31,7 @@ impl<P> schemer::Migration for Migration<P> {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [received_notes_nullable_nf::MIGRATION_ID]
-            .into_iter()
-            .collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
