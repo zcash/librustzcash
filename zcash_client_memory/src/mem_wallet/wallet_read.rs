@@ -57,7 +57,7 @@ impl WalletRead for MemoryWalletDb {
     type Account = Account;
 
     fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error> {
-        Ok(Vec::new())
+        Ok(self.accounts.iter().map(|a| a.id()).collect())
     }
 
     fn get_account(
@@ -69,10 +69,22 @@ impl WalletRead for MemoryWalletDb {
 
     fn get_derived_account(
         &self,
-        _seed: &SeedFingerprint,
-        _account_id: zip32::AccountId,
+        seed: &SeedFingerprint,
+        account_id: zip32::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error> {
-        todo!()
+        Ok(self.accounts.iter().find_map(|acct| match acct.kind() {
+            AccountSource::Derived {
+                seed_fingerprint,
+                account_index,
+            } => {
+                if seed_fingerprint == seed && account_index == &account_id {
+                    Some(acct.clone())
+                } else {
+                    None
+                }
+            }
+            AccountSource::Imported { purpose } => None,
+        }))
     }
 
     fn validate_seed(

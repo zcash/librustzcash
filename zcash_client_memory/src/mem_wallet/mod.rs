@@ -347,7 +347,12 @@ impl Account {
             .last_key_value()
             .map(|(diversifier_index, address)| (*diversifier_index, address.clone()))
     }
-
+    fn kind(&self) -> &AccountSource {
+        &self.kind
+    }
+    fn viewing_key(&self) -> &ViewingKey {
+        &self.viewing_key
+    }
     fn next_available_address(
         &mut self,
         request: UnifiedAddressRequest,
