@@ -66,17 +66,6 @@ use {
 };
 
 use crate::error::Error;
-pub(super) const TABLE_SCAN_QUEUE: &str = "
-CREATE TABLE scan_queue (
-    block_range_start INTEGER NOT NULL,
-    block_range_end INTEGER NOT NULL,
-    priority INTEGER NOT NULL,
-    CONSTRAINT range_start_uniq UNIQUE (block_range_start),
-    CONSTRAINT range_end_uniq UNIQUE (block_range_end),
-    CONSTRAINT range_bounds_order CHECK (
-        block_range_start < block_range_end
-    )
-)";
 
 /// A queue of scanning ranges. Contains the start and end heights of each range, along with the
 /// priority of scanning that range.
