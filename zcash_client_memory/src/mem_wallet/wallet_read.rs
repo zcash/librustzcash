@@ -224,7 +224,13 @@ impl WalletRead for MemoryWalletDb {
     }
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        todo!()
+        Ok(self
+            .scan_queue
+            .iter()
+            .max_by(|(_, end_a, _), (_, end_b, _)| end_a.cmp(end_b))
+            // Scan ranges are end-exclusive, so we subtract 1 from `max_height` to obtain the
+            // height of the last known chain tip;
+            .and_then(|(_, end, _)| Some(end.saturating_sub(1))))
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
