@@ -18,8 +18,8 @@ use std::ops::Add;
 use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{
-        chain::ChainState, Account as _, AccountPurpose, AccountSource, SeedRelevance,
-        TransactionDataRequest, TransactionStatus,
+        chain::ChainState, scanning::ScanPriority, Account as _, AccountPurpose, AccountSource,
+        SeedRelevance, TransactionDataRequest, TransactionStatus,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     wallet::{NoteId, WalletSpend, WalletTransparentOutput, WalletTx},
@@ -50,7 +50,7 @@ use {
 };
 
 use super::{Account, AccountId, MemoryWalletDb};
-use crate::error::Error;
+use crate::{error::Error, mem_wallet::MemoryWalletBlock};
 
 impl WalletRead for MemoryWalletDb {
     type Error = Error;
@@ -214,7 +214,13 @@ impl WalletRead for MemoryWalletDb {
     }
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        todo!()
+        Ok(self
+            .scan_queue
+            .iter()
+            .max_by(|(_, end_a, _), (_, end_b, _)| end_a.cmp(end_b))
+            // Scan ranges are end-exclusive, so we subtract 1 from `max_height` to obtain the
+            // height of the last known chain tip;
+            .and_then(|(_, end, _)| Some(end.saturating_sub(1))))
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
@@ -227,24 +233,94 @@ impl WalletRead for MemoryWalletDb {
         }))
     }
 
-    fn block_metadata(&self, _height: BlockHeight) -> Result<Option<BlockMetadata>, Self::Error> {
-        todo!()
+    fn block_metadata(&self, height: BlockHeight) -> Result<Option<BlockMetadata>, Self::Error> {
+        Ok(self.blocks.get(&height).map(|block| {
+            let MemoryWalletBlock {
+                height,
+                hash,
+                sapling_commitment_tree_size,
+                #[cfg(feature = "orchard")]
+                orchard_commitment_tree_size,
+                ..
+            } = block;
+            // TODO: Deal with legacy sapling trees
+            BlockMetadata::from_parts(
+                *height,
+                *hash,
+                *sapling_commitment_tree_size,
+                #[cfg(feature = "orchard")]
+                *orchard_commitment_tree_size,
+            )
+        }))
     }
 
     fn block_fully_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
-        todo!()
+        if let Some(birthday_height) = self.get_wallet_birthday()? {
+            // We assume that the only way we get a contiguous range of block heights in the `blocks` table
+            // starting with the birthday block, is if all scanning operations have been performed on those
+            // blocks. This holds because the `blocks` table is only altered by `WalletDb::put_blocks` via
+            // `put_block`, and the effective combination of intra-range linear scanning and the nullifier
+            // map ensures that we discover all wallet-related information within the contiguous range.
+            //
+            // We also assume that every contiguous range of block heights in the `blocks` table has a
+            // single matching entry in the `scan_queue` table with priority "Scanned". This requires no
+            // bugs in the scan queue update logic, which we have had before. However, a bug here would
+            // mean that we return a more conservative fully-scanned height, which likely just causes a
+            // performance regression.
+            //
+            // The fully-scanned height is therefore the last height that falls within the first range in
+            // the scan queue with priority "Scanned".
+            // SQL query problems.
+
+            let mut scanned_ranges: Vec<_> = self
+                .scan_queue
+                .iter()
+                .filter(|(_, _, p)| p == &ScanPriority::Scanned)
+                .collect();
+            scanned_ranges.sort_by(|(start_a, _, _), (start_b, _, _)| start_a.cmp(start_b));
+            if let Some(fully_scanned_height) =
+                scanned_ranges
+                    .first()
+                    .and_then(|(block_range_start, block_range_end, priority)| {
+                        // If the start of the earliest scanned range is greater than
+                        // the birthday height, then there is an unscanned range between
+                        // the wallet birthday and that range, so there is no fully
+                        // scanned height.
+                        if *block_range_start <= birthday_height {
+                            // Scan ranges are end-exclusive.
+                            Some(*block_range_end - 1)
+                        } else {
+                            None
+                        }
+                    })
+            {
+                self.block_metadata(fully_scanned_height)
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
-        todo!()
+        Ok(self
+            .blocks
+            .last_key_value()
+            .map(|(height, block)| (*height, block.hash)))
     }
 
     fn block_max_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
-        todo!()
+        Ok(self
+            .blocks
+            .last_key_value()
+            .map(|(height, _)| self.block_metadata(*height))
+            .transpose()?
+            .flatten())
     }
 
     fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error> {
-        Ok(vec![])
+        Ok(self.scan_queue.suggest_scan_ranges(ScanPriority::Historic))
     }
 
     fn get_target_and_anchor_heights(

@@ -2,6 +2,7 @@
 use core::time;
 use incrementalmerkletree::{Address, Marking, Retention};
 use sapling::NullifierDerivingKey;
+use scanning::ScanQueue;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 use std::{
@@ -55,6 +56,7 @@ use zcash_client_backend::{data_api::ORCHARD_SHARD_HEIGHT, wallet::WalletOrchard
 
 use crate::error::Error;
 
+mod scanning;
 mod tables;
 mod wallet_commitment_trees;
 mod wallet_read;
@@ -68,6 +70,12 @@ struct MemoryWalletBlock {
     // Just the transactions that involve an account in this wallet
     transactions: HashSet<TxId>,
     memos: HashMap<NoteId, MemoBytes>,
+    sapling_commitment_tree_size: Option<u32>,
+    sapling_output_count: Option<u32>,
+    #[cfg(feature = "orchard")]
+    orchard_commitment_tree_size: Option<u32>,
+    #[cfg(feature = "orchard")]
+    orchard_action_count: Option<u32>,
 }
 
 pub struct MemoryWalletDb {
@@ -82,6 +90,8 @@ pub struct MemoryWalletDb {
     nullifiers: NullifierMap,
 
     tx_locator: TxLocatorMap,
+
+    scan_queue: ScanQueue,
 
     sapling_tree: ShardTree<
         MemoryShardStore<sapling::Node, BlockHeight>,
@@ -109,6 +119,7 @@ impl MemoryWalletDb {
             nullifiers: NullifierMap::new(),
             tx_locator: TxLocatorMap::new(),
             receieved_note_spends: ReceievdNoteSpends::new(),
+            scan_queue: ScanQueue::new(),
         }
     }
     fn mark_sapling_note_spent(&mut self, nf: sapling::Nullifier, txid: TxId) -> Result<(), Error> {
@@ -124,9 +135,6 @@ impl MemoryWalletDb {
         Ok(())
     }
 
-    // fn get_account(&self, account_id: AccountId) -> Option<&Account> {
-    //     self.accounts.get(*account_id as usize)
-    // }
     fn get_account_mut(&mut self, account_id: AccountId) -> Option<&mut Account> {
         self.accounts.get_mut(*account_id as usize)
     }

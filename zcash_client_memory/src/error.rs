@@ -1,6 +1,6 @@
 use zcash_keys::keys::{AddressGenerationError, DerivationError};
 use zcash_primitives::transaction::TxId;
-use zcash_protocol::memo;
+use zcash_protocol::{consensus::BlockHeight, memo};
 
 use crate::mem_wallet::AccountId;
 
@@ -36,6 +36,10 @@ pub enum Error {
     CorruptedData(String),
     #[error("An error occurred while processing an account due to a failure in deriving the account's keys: {0}")]
     BadAccountData(String),
+    #[error("Blocks are non sequental")]
+    NonSequentialBlocks,
+    #[error("Invalid scan range start {0}, end {1}: {2}")]
+    InvalidScanRange(BlockHeight, BlockHeight, String),
     #[error("Other error: {0}")]
     Other(String),
 }
