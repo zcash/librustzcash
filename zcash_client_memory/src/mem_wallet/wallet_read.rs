@@ -308,7 +308,10 @@ impl WalletRead for MemoryWalletDb {
     }
 
     fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
-        todo!()
+        Ok(self
+            .blocks
+            .last_key_value()
+            .map(|(height, block)| (*height, block.hash)))
     }
 
     fn block_max_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
