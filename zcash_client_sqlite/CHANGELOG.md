@@ -9,8 +9,14 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - The `v_tx_outputs` view was modified slightly to support older versions of
-  `sqlite`.
-  
+  `sqlite`. Queries to the exposed `v_tx_outputs` and `v_transactions` views
+  are supported for SQLite versions back to `3.19.x`. 
+- `zcash_client_sqlite::wallet::init::WalletMigrationError` has an additional
+  variant, `DatabaseNotSupported`. The `init_wallet_db` function now checks
+  that the sqlite version in use is compatible with the features required by
+  the wallet and returns this error if not. SQLite version `3.35` or higher
+  is required for use with `zcash_client_sqlite`.
+
 
 ## [0.11.1] - 2024-08-21
 
@@ -23,7 +29,7 @@ and this library adheres to Rust's notion of
 `zcash_client_sqlite` now provides capabilities for the management of ephemeral
 transparent addresses in support of the creation of ZIP 320 transaction pairs.
 
-In addition, `zcash_client_sqlite` now provides improved tracking of transparent 
+In addition, `zcash_client_sqlite` now provides improved tracking of transparent
 wallet history in support of the API changes in `zcash_client_backend 0.13`,
 and the `v_transactions` view has been modified to provide additional metadata
 about the relationship of each transaction to the wallet, in particular whether
@@ -70,11 +76,11 @@ or not the transaction represents a wallet-internal shielding operation.
 ## [0.10.1] - 2024-03-25
 
 ### Fixed
-- The `sent_notes` table's `received_note` constraint was excessively restrictive 
- after zcash/librustzcash#1306. Any databases that have migrations from 
+- The `sent_notes` table's `received_note` constraint was excessively restrictive
+ after zcash/librustzcash#1306. Any databases that have migrations from
  zcash_client_sqlite 0.10.0 applied should be wiped and restored from seed.
  In order to ensure that the incorrect migration is not used, the migration
- id for the `full_account_ids` migration has been changed from 
+ id for the `full_account_ids` migration has been changed from
  `0x1b104345_f27e_42da_a9e3_1de22694da43` to `0x6d02ec76_8720_4cc6_b646_c4e2ce69221c`
 
 ## [0.10.0] - 2024-03-25
