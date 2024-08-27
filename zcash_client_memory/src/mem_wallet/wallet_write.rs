@@ -259,6 +259,8 @@ impl WalletWrite for MemoryWalletDb {
         }
         // We can do some pruning of the tx_locator_map here
 
+        // TODO: See: scan_complete() in sqlite.
+        // Related to missing subtrees
         Ok(())
     }
 
