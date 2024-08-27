@@ -25,9 +25,10 @@ use zcash_client_backend::{
 use zcash_primitives::{
     block::BlockHash,
     consensus::{BlockHeight, Network},
-    transaction::{Transaction, TxId},
+    transaction::{Transaction, TransactionData, TxId},
 };
 use zcash_protocol::{
+    consensus::BranchId,
     memo::{self, Memo, MemoBytes},
     value::Zatoshis,
     ShieldedProtocol::{Orchard, Sapling},
@@ -46,7 +47,7 @@ use {
     zcash_primitives::legacy::TransparentAddress,
 };
 
-use super::{Account, AccountId, MemoryWalletDb, TransparentReceivedOutput};
+use super::{Account, AccountId, MemoryWalletDb};
 use crate::error::Error;
 
 impl WalletRead for MemoryWalletDb {
@@ -60,9 +61,9 @@ impl WalletRead for MemoryWalletDb {
 
     fn get_account(
         &self,
-        _account_id: Self::AccountId,
+        account_id: Self::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error> {
-        todo!()
+        Ok(self.accounts.get(*account_id as usize).map(|a| a.clone()))
     }
 
     fn get_derived_account(
@@ -125,12 +126,19 @@ impl WalletRead for MemoryWalletDb {
             .map_err(|e| e.into())
     }
 
-    fn get_account_birthday(&self, _account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
-        Err(Error::AccountUnknown(_account))
+    fn get_account_birthday(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
+        self.accounts
+            .get(*account as usize)
+            .map(|account| account.birthday().height())
+            .ok_or(Error::AccountUnknown(account))
     }
 
     fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        todo!()
+        Ok(self
+            .accounts
+            .iter()
+            .map(|account| account.birthday().height())
+            .min())
     }
 
     fn get_wallet_summary(
@@ -185,35 +193,114 @@ impl WalletRead for MemoryWalletDb {
         todo!()
     }
 
-    fn get_tx_height(&self, _txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        todo!()
+    fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+        if let Some(TransactionStatus::Mined(height)) = self.tx_table.tx_status(&txid) {
+            Ok(Some(height))
+        } else {
+            Ok(None)
+        }
     }
 
     fn get_unified_full_viewing_keys(
         &self,
     ) -> Result<HashMap<Self::AccountId, UnifiedFullViewingKey>, Self::Error> {
-        Ok(HashMap::new())
+        Ok(self
+            .accounts
+            .iter()
+            .filter_map(|account| match account.ufvk() {
+                Some(ufvk) => Some((account.id(), ufvk.clone())),
+                None => None,
+            })
+            .collect())
     }
 
     fn get_memo(&self, id_note: NoteId) -> Result<Option<Memo>, Self::Error> {
-        self.tx_idx
-            .get(id_note.txid())
-            .and_then(|height| self.blocks.get(height))
-            .and_then(|block| block.memos.get(&id_note))
-            .map(Memo::try_from)
-            .transpose()
-            .map_err(Error::from)
+        todo!()
     }
 
-    fn get_transaction(&self, _id_tx: TxId) -> Result<Option<Transaction>, Self::Error> {
+    fn get_transaction(&self, txid: TxId) -> Result<Option<Transaction>, Self::Error> {
+        let raw = self.tx_table.get_tx_raw(&txid);
+        let status = self.tx_table.tx_status(&txid);
+        let expiry_height = self.tx_table.expiry_height(&txid);
+        self.tx_table
+            .get(&txid)
+            .and_then(|tx| Some((tx.status(), tx.expiry_height(), tx.raw())))
+            .map(|(status, expiry_height, raw)| {
+                // We need to provide a consensus branch ID so that pre-v5 `Transaction` structs
+                // (which don't commit directly to one) can store it internally.
+                // - If the transaction is mined, we use the block height to get the correct one.
+                // - If the transaction is unmined and has a cached non-zero expiry height, we use
+                //   that (relying on the invariant that a transaction can't be mined across a network
+                //   upgrade boundary, so the expiry height must be in the same epoch).
+                // - Otherwise, we use a placeholder for the initial transaction parse (as the
+                //   consensus branch ID is not used there), and then either use its non-zero expiry
+                //   height or return an error.
+                if let TransactionStatus::Mined(height) = status {
+                    return Ok(Some(
+                        Transaction::read(&raw[..], BranchId::for_height(&self.network, height))
+                            .map(|t| (height, t)),
+                    ));
+                }
+                if let Some(height) = expiry_height.filter(|h| h > &BlockHeight::from(0)) {
+                    return Ok(Some(
+                        Transaction::read(&raw[..], BranchId::for_height(&self.network, height))
+                            .map(|t| (height, t)),
+                    ));
+                }
+
+                let tx_data = Transaction::read(&raw[..], BranchId::Sprout)
+                    .map_err(Self::Error::from)?
+                    .into_data();
+
+                let expiry_height = tx_data.expiry_height();
+                if expiry_height > BlockHeight::from(0) {
+                    Ok(Some(
+                        TransactionData::from_parts(
+                            tx_data.version(),
+                            BranchId::for_height(&self.network, expiry_height),
+                            tx_data.lock_time(),
+                            expiry_height,
+                            tx_data.transparent_bundle().cloned(),
+                            tx_data.sprout_bundle().cloned(),
+                            tx_data.sapling_bundle().cloned(),
+                            tx_data.orchard_bundle().cloned(),
+                        )
+                        .freeze()
+                        .map(|t| (expiry_height, t)),
+                    ))
+                } else {
+                    Err(Self::Error::CorruptedData(
+                    "Consensus branch ID not known, cannot parse this transaction until it is mined"
+                        .to_string(),
+                ))
+                }
+            });
         todo!()
     }
 
     fn get_sapling_nullifiers(
         &self,
-        _query: NullifierQuery,
+        query: NullifierQuery,
     ) -> Result<Vec<(Self::AccountId, sapling::Nullifier)>, Self::Error> {
-        Ok(Vec::new())
+        let nullifiers = self.received_notes.get_sapling_nullifiers();
+        Ok(match query {
+            NullifierQuery::All => nullifiers
+                .map(|(account_id, _, nf)| (account_id, nf))
+                .collect(),
+            NullifierQuery::Unspent => nullifiers
+                .filter_map(|(account_id, txid, nf)| {
+                    let tx_status = self.tx_table.tx_status(&txid);
+                    let expiry_height = self.tx_table.expiry_height(&txid);
+                    if matches!(tx_status, Some(TransactionStatus::Mined(_)))
+                        || expiry_height.is_none()
+                    {
+                        None
+                    } else {
+                        Some((account_id, nf))
+                    }
+                })
+                .collect(),
+        })
     }
 
     #[cfg(feature = "orchard")]
@@ -221,35 +308,25 @@ impl WalletRead for MemoryWalletDb {
         &self,
         query: NullifierQuery,
     ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error> {
-        Ok(self
-            .orchard_spends
-            .iter()
-            .filter_map(|(nf, (txid, spent))| match query {
-                NullifierQuery::Unspent => {
-                    if !spent {
-                        Some((txid, self.tx_idx.get(txid).unwrap(), *nf))
-                    } else {
+        let nullifiers = self.received_notes.get_orchard_nullifiers();
+        Ok(match query {
+            NullifierQuery::All => nullifiers
+                .map(|(account_id, _, nf)| (account_id, nf))
+                .collect(),
+            NullifierQuery::Unspent => nullifiers
+                .filter_map(|(account_id, txid, nf)| {
+                    let tx_status = self.tx_table.tx_status(&txid);
+                    let expiry_height = self.tx_table.expiry_height(&txid);
+                    if matches!(tx_status, Some(TransactionStatus::Mined(_)))
+                        || expiry_height.is_none()
+                    {
                         None
+                    } else {
+                        Some((account_id, nf))
                     }
-                }
-                NullifierQuery::All => Some((txid, self.tx_idx.get(txid).unwrap(), *nf)),
-            })
-            .map(|(txid, height, nf)| {
-                self.tx_meta.get(txid).and_then(|tx| {
-                    tx.orchard_outputs()
-                        .iter()
-                        .find(|o| o.nf() == Some(&nf))
-                        .map(|o| (*o.account_id(), *o.nf().unwrap()))
-                        .or_else(|| {
-                            tx.orchard_spends()
-                                .iter()
-                                .find(|s| s.nf() == &nf)
-                                .map(|s| (*s.account_id(), *s.nf()))
-                        })
                 })
-            })
-            .flatten()
-            .collect())
+                .collect(),
+        })
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -266,39 +343,7 @@ impl WalletRead for MemoryWalletDb {
         account: Self::AccountId,
         max_height: BlockHeight,
     ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
-        // scan all transparent outputs and return those in a tx belonging to this account
-        // as a map between the address and the total value received
-        Ok(self
-            .transparent_received_outputs
-            .iter()
-            .filter(|(_, output)| output.account_id == account) // that belong to this account
-            .filter(|(outpoint, output)| {
-                // where the tx creating the output is mined
-                if let Some(height) = self.tx_idx.get(&output.tx_id) {
-                    height <= &max_height
-                } else {
-                    false
-                }
-            })
-            .filter(|(outpoint, _)| {
-                // that are unspent
-                !self
-                    .transparent_received_output_spends
-                    .contains_key(&outpoint)
-            })
-            .fold(
-                HashMap::new(),
-                |mut res, (_, TransparentReceivedOutput { output, .. })| {
-                    let addr = output.recipient_address().clone();
-                    let zats = res
-                        .get(&addr)
-                        .unwrap_or(&Zatoshis::ZERO)
-                        .add(output.value())
-                        .expect("Can always add a non-negative value to zero");
-                    res.insert(addr, zats);
-                    res
-                },
-            ))
+        todo!()
     }
 
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {
