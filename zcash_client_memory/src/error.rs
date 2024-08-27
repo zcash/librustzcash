@@ -16,6 +16,8 @@ pub enum Error {
     MemoDecryption(memo::Error),
     #[error("Error deriving key: {0}")]
     KeyDerivation(DerivationError),
+    #[error("Unknown ZIP32 derivation ")]
+    UnknownZip32Derivation,
     #[error("Error generating address: {0}")]
     AddressGeneration(Type),
     #[error("Seed must be between 32 and 252 bytes in length.")]
@@ -32,6 +34,8 @@ pub enum Error {
     IoError(std::io::Error),
     #[error("Corrupted Data: {0}")]
     CorruptedData(String),
+    #[error("An error occurred while processing an account due to a failure in deriving the account's keys: {0}")]
+    BadAccountData(String),
     #[error("Other error: {0}")]
     Other(String),
 }

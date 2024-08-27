@@ -124,9 +124,9 @@ impl MemoryWalletDb {
         Ok(())
     }
 
-    fn get_account(&self, account_id: AccountId) -> Option<&Account> {
-        self.accounts.get(*account_id as usize)
-    }
+    // fn get_account(&self, account_id: AccountId) -> Option<&Account> {
+    //     self.accounts.get(*account_id as usize)
+    // }
     fn get_account_mut(&mut self, account_id: AccountId) -> Option<&mut Account> {
         self.accounts.get_mut(*account_id as usize)
     }
