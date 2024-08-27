@@ -18,8 +18,8 @@ use std::ops::Add;
 use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{
-        chain::ChainState, scanning::ScanPriority, Account as _, AccountPurpose, AccountSource,
-        SeedRelevance, TransactionDataRequest, TransactionStatus,
+        chain::ChainState, scanning::ScanPriority, Account as _, AccountBalance, AccountPurpose,
+        AccountSource, SeedRelevance, TransactionDataRequest, TransactionStatus,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     wallet::{NoteId, WalletSpend, WalletTransparentOutput, WalletTx},
@@ -208,8 +208,40 @@ impl WalletRead for MemoryWalletDb {
 
     fn get_wallet_summary(
         &self,
-        _min_confirmations: u32,
+        min_confirmations: u32,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
+        let chain_tip_height = match self.chain_height()? {
+            Some(height) => height,
+            None => return Ok(None),
+        };
+        let birthday_height = self
+            .get_wallet_birthday()?
+            .expect("If a scan range exists, we know the wallet birthday.");
+
+        let fully_scanned_height = self
+            .block_fully_scanned()?
+            .map_or(birthday_height - 1, |m| m.block_height());
+        let summary_height =
+            (chain_tip_height + 1).saturating_sub(std::cmp::max(min_confirmations, 1));
+
+        let mut account_balances = self
+            .accounts
+            .iter()
+            .map(|account| (account.account_id, AccountBalance::ZERO))
+            .collect::<HashMap<AccountId, AccountBalance>>();
+
+        // TODO: Deal with scan progress (I dont believe thats actually a hard requirement)
+
+        // let summary = WalletSummary::new(
+        //     account_balances,
+        //     chain_tip_height,
+        //     fully_scanned_height,
+        //     None,
+        //     next_sapling_subtree_index,
+        //     #[cfg(feature = "orchard")]
+        //     next_orchard_subtree_index,
+        // );
+        // Ok(Some(summary))
         todo!()
     }
 

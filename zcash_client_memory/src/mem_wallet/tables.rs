@@ -258,7 +258,7 @@ impl ReceivedNote {
                 ..
             } => Ok(ReceivedNote {
                 note_id: NoteId::new(txid, Orchard, output.output_index() as u16),
-                txid: txid,
+                txid,
                 output_index: output.output_index() as u32,
                 account_id: *receiving_account,
                 note: Note::Orchard(note.clone()),
