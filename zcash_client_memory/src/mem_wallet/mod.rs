@@ -12,6 +12,7 @@ use std::{
     num::NonZeroU32,
     ops::Deref,
 };
+use subtle::ConditionallySelectable;
 use zcash_keys::keys::{AddressGenerationError, DerivationError, UnifiedIncomingViewingKey};
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
 
@@ -55,6 +56,7 @@ use zcash_client_backend::{data_api::ORCHARD_SHARD_HEIGHT, wallet::WalletOrchard
 
 use crate::error::Error;
 
+mod input_source;
 mod tables;
 mod wallet_commitment_trees;
 mod wallet_read;
@@ -277,6 +279,14 @@ impl Deref for AccountId {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl ConditionallySelectable for AccountId {
+    fn conditional_select(a: &Self, b: &Self, choice: subtle::Choice) -> Self {
+        AccountId(ConditionallySelectable::conditional_select(
+            &a.0, &b.0, choice,
+        ))
     }
 }
 
