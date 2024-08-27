@@ -48,7 +48,7 @@ sapling.workspace = true
 # - Note commitment trees
 incrementalmerkletree.workspace = true
 shardtree = { workspace = true, features = ["legacy-api"] }
-thiserror = "1.0.63"
+thiserror = "1.0.61"
 
 
 
