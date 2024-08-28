@@ -50,7 +50,7 @@ use {
 };
 
 use super::{Account, AccountId, MemoryWalletDb};
-use crate::{error::Error, mem_wallet::MemoryWalletBlock};
+use crate::{error::Error, MemoryWalletBlock};
 
 impl WalletRead for MemoryWalletDb {
     type Error = Error;

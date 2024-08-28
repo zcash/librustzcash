@@ -1,4 +1,3 @@
-#![allow(unused)]
 use core::time;
 use incrementalmerkletree::{Address, Marking, Position, Retention};
 use sapling::NullifierDerivingKey;
@@ -51,7 +50,7 @@ use zcash_client_backend::data_api::{
     WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
 };
 
-use super::AccountId;
+use crate::AccountId;
 
 #[cfg(feature = "transparent-inputs")]
 use {

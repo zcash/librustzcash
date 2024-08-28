@@ -2,7 +2,7 @@ use zcash_keys::keys::{AddressGenerationError, DerivationError};
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{consensus::BlockHeight, memo};
 
-use crate::mem_wallet::AccountId;
+use crate::AccountId;
 
 type Type = AddressGenerationError;
 
@@ -16,7 +16,7 @@ pub enum Error {
     MemoDecryption(memo::Error),
     #[error("Error deriving key: {0}")]
     KeyDerivation(DerivationError),
-    #[error("Unknown ZIP32 derivation ")]
+    #[error("Unknown ZIP32 derivation")]
     UnknownZip32Derivation,
     #[error("Error generating address: {0}")]
     AddressGeneration(Type),

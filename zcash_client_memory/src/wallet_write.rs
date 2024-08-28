@@ -47,10 +47,10 @@ use zcash_client_backend::data_api::{
     WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
 };
 
-use super::{
+use crate::error::Error;
+use crate::{
     Account, AccountId, MemoryWalletBlock, MemoryWalletDb, Nullifier, ReceivedNote, ViewingKey,
 };
-use crate::error::Error;
 
 impl WalletWrite for MemoryWalletDb {
     type UtxoRef = u32;
