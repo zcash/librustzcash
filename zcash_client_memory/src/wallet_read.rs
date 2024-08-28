@@ -1,6 +1,7 @@
 use nonempty::NonEmpty;
 
 use secrecy::{ExposeSecret, SecretVec};
+use shardtree::{error::ShardTreeError, store::ShardStore as _};
 
 use std::{collections::HashMap, num::NonZeroU32};
 use zcash_keys::keys::UnifiedIncomingViewingKey;
@@ -218,17 +219,19 @@ impl WalletRead for MemoryWalletDb {
 
         // TODO: Deal with scan progress (I dont believe thats actually a hard requirement)
 
-        // let summary = WalletSummary::new(
-        //     account_balances,
-        //     chain_tip_height,
-        //     fully_scanned_height,
-        //     None,
-        //     next_sapling_subtree_index,
-        //     #[cfg(feature = "orchard")]
-        //     next_orchard_subtree_index,
-        // );
-        // Ok(Some(summary))
-        todo!()
+        let next_sapling_subtree_index = self.sapling_tree.store().last_shard().unwrap().map(|s|s.root_addr().index()).unwrap_or(0);
+        let next_orchard_subtree_index = self.orchard_tree.store().last_shard().unwrap().map(|s|s.root_addr().index()).unwrap_or(0);
+
+        let summary = WalletSummary::new(
+            account_balances,
+            chain_tip_height,
+            fully_scanned_height,
+            None,
+            next_sapling_subtree_index,
+            #[cfg(feature = "orchard")]
+            next_orchard_subtree_index,
+        );
+        Ok(Some(summary))
     }
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
