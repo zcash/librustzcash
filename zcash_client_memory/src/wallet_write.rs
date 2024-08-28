@@ -1,56 +1,33 @@
-use incrementalmerkletree::{Address, Marking, Retention};
-use sapling::NullifierDerivingKey;
-use secrecy::{ExposeSecret, SecretVec};
-use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
-use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, HashMap, HashSet},
-    convert::Infallible,
-    hash::Hash,
-    num::NonZeroU32,
-};
-use zcash_keys::{
-    address::Receiver,
-    keys::{AddressGenerationError, DerivationError, UnifiedIncomingViewingKey},
-};
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
+use incrementalmerkletree::{Marking, Retention};
 
-use zcash_primitives::{
-    block::BlockHash,
-    consensus::{BlockHeight, Network},
-    transaction::{Transaction, TxId},
-};
-use zcash_protocol::{
-    memo::{self, Memo, MemoBytes},
-    value::Zatoshis,
-    PoolType,
-    ShieldedProtocol::{Orchard, Sapling},
-};
+use secrecy::{ExposeSecret, SecretVec};
+
+use std::collections::HashMap;
+
+use zip32::fingerprint::SeedFingerprint;
+
+use zcash_primitives::{consensus::BlockHeight, transaction::TxId};
+use zcash_protocol::ShieldedProtocol::Sapling;
 
 use zcash_client_backend::{
     address::UnifiedAddress,
-    data_api::{
-        chain::ChainState, AccountPurpose, AccountSource, SeedRelevance, TransactionDataRequest,
-        TransactionStatus,
-    },
+    data_api::{chain::ChainState, AccountPurpose, AccountSource, TransactionStatus},
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    wallet::{
-        Note, NoteId, Recipient, WalletSaplingOutput, WalletSpend, WalletTransparentOutput,
-        WalletTx,
-    },
-    TransferType,
+    wallet::{NoteId, Recipient, WalletTransparentOutput},
 };
 
 use zcash_client_backend::data_api::{
-    chain::CommitmentTreeRoot, scanning::ScanRange, Account as _, AccountBirthday, BlockMetadata,
-    DecryptedTransaction, NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees,
-    WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+    Account as _, AccountBirthday, DecryptedTransaction, ScannedBlock, SentTransaction, WalletRead,
+    WalletWrite,
 };
 
-use super::{
+use crate::error::Error;
+use crate::{
     Account, AccountId, MemoryWalletBlock, MemoryWalletDb, Nullifier, ReceivedNote, ViewingKey,
 };
-use crate::error::Error;
+
+#[cfg(feature = "orchard")]
+use zcash_protocol::ShieldedProtocol::Orchard;
 
 impl WalletWrite for MemoryWalletDb {
     type UtxoRef = u32;
@@ -117,7 +94,7 @@ impl WalletWrite for MemoryWalletDb {
         // - Make sure blocks are coming in order.
         // - Make sure the first block in the sequence is tip + 1?
         // - Add a check to make sure the blocks are not already in the data store.
-        let start_height = blocks.first().map(|b| b.height());
+        let _start_height = blocks.first().map(|b| b.height());
         let mut last_scanned_height = None;
 
         for block in blocks.into_iter() {
@@ -135,13 +112,13 @@ impl WalletWrite for MemoryWalletDb {
 
                 // Mark the Sapling nullifiers of the spent notes as spent in the `sapling_spends` map.
                 for spend in transaction.sapling_spends() {
-                    self.mark_sapling_note_spent(*spend.nf(), txid);
+                    self.mark_sapling_note_spent(*spend.nf(), txid)?;
                 }
 
                 // Mark the Orchard nullifiers of the spent notes as spent in the `orchard_spends` map.
                 #[cfg(feature = "orchard")]
                 for spend in transaction.orchard_spends() {
-                    self.mark_orchard_note_spent(*spend.nf(), txid);
+                    self.mark_orchard_note_spent(*spend.nf(), txid)?;
                 }
 
                 for output in transaction.sapling_outputs() {
@@ -161,9 +138,9 @@ impl WalletWrite for MemoryWalletDb {
                         .nf()
                         .and_then(|nf| self.nullifiers.get(&Nullifier::Sapling(*nf)))
                         .and_then(|(height, tx_idx)| self.tx_locator.get(*height, *tx_idx))
-                        .map(|x| *x);
+                        .copied();
 
-                    self.insert_received_sapling_note(note_id, &output, spent_in);
+                    self.insert_received_sapling_note(note_id, output, spent_in);
                 }
 
                 #[cfg(feature = "orchard")]
@@ -182,11 +159,11 @@ impl WalletWrite for MemoryWalletDb {
                     // we previously scanned.
                     let spent_in = output
                         .nf()
-                        .and_then(|nf| self.nullifiers.get(&&Nullifier::Orchard(*nf)))
+                        .and_then(|nf| self.nullifiers.get(&Nullifier::Orchard(*nf)))
                         .and_then(|(height, tx_idx)| self.tx_locator.get(*height, *tx_idx))
-                        .map(|x| *x);
+                        .copied();
 
-                    self.insert_received_orchard_note(note_id, &output, spent_in)
+                    self.insert_received_orchard_note(note_id, output, spent_in)
                 }
                 // Add frontier to the sapling tree
                 self.sapling_tree.insert_frontier(
@@ -195,7 +172,7 @@ impl WalletWrite for MemoryWalletDb {
                         id: from_state.block_height(),
                         marking: Marking::Reference,
                     },
-                );
+                )?;
 
                 #[cfg(feature = "orchard")]
                 // Add frontier to the orchard tree
@@ -205,7 +182,7 @@ impl WalletWrite for MemoryWalletDb {
                         id: from_state.block_height(),
                         marking: Marking::Reference,
                     },
-                );
+                )?;
                 last_scanned_height = Some(block.height());
                 transactions.insert(txid, transaction.clone());
             }
@@ -219,14 +196,18 @@ impl WalletWrite for MemoryWalletDb {
                 height: block.height(),
                 hash: block.block_hash(),
                 block_time: block.block_time(),
-                transactions: transactions.keys().cloned().collect(),
-                memos,
+                _transactions: transactions.keys().cloned().collect(),
+                _memos: memos,
                 sapling_commitment_tree_size: Some(block.sapling().final_tree_size()),
-                sapling_output_count: Some(block.sapling().commitments().len().try_into().unwrap()),
+                _sapling_output_count: Some(
+                    block.sapling().commitments().len().try_into().unwrap(),
+                ),
                 #[cfg(feature = "orchard")]
                 orchard_commitment_tree_size: Some(block.orchard().final_tree_size()),
                 #[cfg(feature = "orchard")]
-                orchard_action_count: Some(block.orchard().commitments().len().try_into().unwrap()),
+                _orchard_action_count: Some(
+                    block.orchard().commitments().len().try_into().unwrap(),
+                ),
             };
 
             // Insert transaction metadata into the transaction table
@@ -244,7 +225,7 @@ impl WalletWrite for MemoryWalletDb {
                 .value()
                 .map_or(0.into(), |t| t.position() + 1);
             self.sapling_tree
-                .batch_insert(start_position, block_commitments.sapling.into_iter());
+                .batch_insert(start_position, block_commitments.sapling.into_iter())?;
 
             #[cfg(feature = "orchard")]
             {
@@ -254,7 +235,7 @@ impl WalletWrite for MemoryWalletDb {
                     .value()
                     .map_or(0.into(), |t| t.position() + 1);
                 self.orchard_tree
-                    .batch_insert(start_position, block_commitments.orchard.into_iter());
+                    .batch_insert(start_position, block_commitments.orchard.into_iter())?;
             }
         }
         // We can do some pruning of the tx_locator_map here
@@ -347,7 +328,7 @@ impl WalletWrite for MemoryWalletDb {
             // Mark sapling notes as spent
             if let Some(bundle) = sent_tx.tx().sapling_bundle() {
                 for spend in bundle.shielded_spends() {
-                    self.mark_sapling_note_spent(*spend.nullifier(), sent_tx.tx().txid());
+                    self.mark_sapling_note_spent(*spend.nullifier(), sent_tx.tx().txid())?;
                 }
             }
             // Mark orchard notes as spent
@@ -355,7 +336,7 @@ impl WalletWrite for MemoryWalletDb {
                 #[cfg(feature = "orchard")]
                 {
                     for action in _bundle.actions() {
-                        self.mark_orchard_note_spent(*action.nullifier(), sent_tx.tx().txid());
+                        self.mark_orchard_note_spent(*action.nullifier(), sent_tx.tx().txid())?;
                     }
                 }
 
@@ -364,7 +345,7 @@ impl WalletWrite for MemoryWalletDb {
             }
             // Mark transparent UTXOs as spent
             #[cfg(feature = "transparent-inputs")]
-            for utxo_outpoint in sent_tx.utxos_spent() {
+            for _utxo_outpoint in sent_tx.utxos_spent() {
                 // self.mark_transparent_utxo_spent(wdb.conn.0, tx_ref, utxo_outpoint)?;
                 todo!()
             }
@@ -378,16 +359,10 @@ impl WalletWrite for MemoryWalletDb {
                             ReceivedNote::from_sent_tx_output(sent_tx.tx().txid(), output)?,
                         );
                     }
-                    #[cfg(feature = "orchard")]
-                    Recipient::InternalAccount { .. } => {
-                        self.received_notes.insert_received_note(
-                            ReceivedNote::from_sent_tx_output(sent_tx.tx().txid(), output)?,
-                        );
-                    }
                     Recipient::EphemeralTransparent {
-                        receiving_account,
-                        ephemeral_address,
-                        outpoint_metadata,
+                        receiving_account: _,
+                        ephemeral_address: _,
+                        outpoint_metadata: _,
                     } => {
                         // mark ephemeral address as used
                     }

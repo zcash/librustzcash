@@ -1,8 +1,11 @@
+use std::convert::Infallible;
+
+use shardtree::error::ShardTreeError;
 use zcash_keys::keys::{AddressGenerationError, DerivationError};
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{consensus::BlockHeight, memo};
 
-use crate::mem_wallet::AccountId;
+use crate::AccountId;
 
 type Type = AddressGenerationError;
 
@@ -16,7 +19,7 @@ pub enum Error {
     MemoDecryption(memo::Error),
     #[error("Error deriving key: {0}")]
     KeyDerivation(DerivationError),
-    #[error("Unknown ZIP32 derivation ")]
+    #[error("Unknown ZIP32 derivation")]
     UnknownZip32Derivation,
     #[error("Error generating address: {0}")]
     AddressGeneration(Type),
@@ -31,7 +34,7 @@ pub enum Error {
     #[error("Conflicting Tx Locator map entry")]
     ConflictingTxLocator,
     #[error("Io Error: {0}")]
-    IoError(std::io::Error),
+    Io(std::io::Error),
     #[error("Corrupted Data: {0}")]
     CorruptedData(String),
     #[error("An error occurred while processing an account due to a failure in deriving the account's keys: {0}")]
@@ -40,6 +43,8 @@ pub enum Error {
     NonSequentialBlocks,
     #[error("Invalid scan range start {0}, end {1}: {2}")]
     InvalidScanRange(BlockHeight, BlockHeight, String),
+    #[error("ShardTree error: {0}")]
+    ShardTree(ShardTreeError<Infallible>),
     #[error("Other error: {0}")]
     Other(String),
 }
@@ -64,6 +69,12 @@ impl From<memo::Error> for Error {
 
 impl From<std::io::Error> for Error {
     fn from(value: std::io::Error) -> Self {
-        Error::IoError(value)
+        Error::Io(value)
+    }
+}
+
+impl From<ShardTreeError<Infallible>> for Error {
+    fn from(value: ShardTreeError<Infallible>) -> Self {
+        Error::ShardTree(value)
     }
 }

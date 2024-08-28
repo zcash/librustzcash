@@ -1,82 +1,23 @@
-#![allow(unused)]
-use core::time;
-use incrementalmerkletree::{Address, Marking, Position, Retention};
-use sapling::NullifierDerivingKey;
-use secrecy::{ExposeSecret, SecretVec};
-use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
-use std::{
-    cell::RefCell,
-    cmp::Ordering,
-    collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap, HashSet},
-    convert::Infallible,
-    hash::Hash,
-    num::NonZeroU32,
-    ops::{Deref, DerefMut, Range},
-    path::Iter,
-    rc::Rc,
-};
-use zcash_keys::keys::{AddressGenerationError, DerivationError, UnifiedIncomingViewingKey};
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
+use std::ops::{Deref, DerefMut, Range};
 
-use zcash_primitives::{
-    block::{self, BlockHash},
-    consensus::{BlockHeight, Network},
-    transaction::{components::OutPoint, txid, Authorized, Transaction, TransactionData, TxId},
-};
-use zcash_protocol::{
-    memo::{self, Memo, MemoBytes},
-    value::{ZatBalance, Zatoshis},
-    PoolType,
-    ShieldedProtocol::{self, Orchard, Sapling},
-};
+use zcash_primitives::consensus::BlockHeight;
 
-use zcash_client_backend::{
-    address::UnifiedAddress,
-    data_api::{
-        chain::ChainState,
-        scanning::{spanning_tree::SpanningTree, ScanPriority},
-        Account as _, AccountPurpose, AccountSource, SeedRelevance, SentTransactionOutput,
-        TransactionDataRequest, TransactionStatus,
-    },
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    wallet::{
-        Note, NoteId, Recipient, WalletSaplingOutput, WalletSpend, WalletTransparentOutput,
-        WalletTx,
-    },
-};
+use zcash_client_backend::data_api::scanning::{spanning_tree::SpanningTree, ScanPriority};
 
-use zcash_client_backend::data_api::{
-    chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
-    DecryptedTransaction, NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees,
-    WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
-};
-
-use super::AccountId;
-
-#[cfg(feature = "transparent-inputs")]
-use {
-    zcash_client_backend::wallet::TransparentAddressMetadata,
-    zcash_primitives::legacy::TransparentAddress,
-};
-
-#[cfg(feature = "orchard")]
-use {
-    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
-    zcash_client_backend::wallet::WalletOrchardOutput,
-};
+use zcash_client_backend::data_api::scanning::ScanRange;
 
 use crate::error::Error;
 
 /// A queue of scanning ranges. Contains the start and end heights of each range, along with the
 /// priority of scanning that range.
-pub struct ScanQueue(Vec<(BlockHeight, BlockHeight, ScanPriority)>);
+pub(crate) struct ScanQueue(Vec<(BlockHeight, BlockHeight, ScanPriority)>);
 
 impl ScanQueue {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         ScanQueue(Vec::new())
     }
 
-    pub fn suggest_scan_ranges(&self, min_priority: ScanPriority) -> Vec<ScanRange> {
+    pub(crate) fn suggest_scan_ranges(&self, min_priority: ScanPriority) -> Vec<ScanRange> {
         let mut priorities: Vec<_> = self
             .0
             .iter()
@@ -95,7 +36,7 @@ impl ScanQueue {
             })
             .collect()
     }
-    pub fn insert_queue_entries<'a>(
+    fn _insert_queue_entries<'a>(
         &mut self,
         entries: impl Iterator<Item = &'a ScanRange>,
     ) -> Result<(), Error> {
@@ -126,7 +67,7 @@ impl ScanQueue {
         }
         Ok(())
     }
-    pub fn replace_queue_entries(
+    pub(crate) fn _replace_queue_entries(
         &mut self,
         query_range: &Range<BlockHeight>,
         entries: impl Iterator<Item = ScanRange>,
@@ -150,8 +91,8 @@ impl ScanQueue {
             let mut to_create: Option<SpanningTree> = None;
             let mut to_delete_ends: Vec<BlockHeight> = vec![];
 
-            let mut q_ranges = q_ranges.into_iter();
-            while let Some((start, end, priority)) = q_ranges.next() {
+            let q_ranges = q_ranges.into_iter();
+            for (start, end, priority) in q_ranges {
                 let entry = ScanRange::from_parts(
                     Range {
                         start: *start,
@@ -185,7 +126,7 @@ impl ScanQueue {
                 !to_delete_ends.contains(block_range_end)
             });
             let scan_ranges = tree.into_vec();
-            self.insert_queue_entries(scan_ranges.iter());
+            self._insert_queue_entries(scan_ranges.iter())?;
         }
         Ok(())
     }
