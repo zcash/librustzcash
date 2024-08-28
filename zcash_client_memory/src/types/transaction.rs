@@ -1,51 +1,32 @@
-use core::time;
-use incrementalmerkletree::{Address, Marking, Position, Retention};
-use sapling::NullifierDerivingKey;
-use secrecy::{ExposeSecret, SecretVec};
-use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
+
+
+
+
+
 use std::{
-    cell::RefCell,
-    cmp::Ordering,
-    collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap, HashSet},
-    convert::Infallible,
-    hash::Hash,
-    num::NonZeroU32,
-    ops::Deref,
-    rc::Rc,
+    collections::{hash_map::Entry, HashMap},
 };
-use zcash_keys::keys::{AddressGenerationError, DerivationError, UnifiedIncomingViewingKey};
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
+
+
 
 use zcash_primitives::{
-    block::BlockHash,
-    consensus::{BlockHeight, Network},
-    transaction::{components::OutPoint, txid, Authorized, Transaction, TransactionData, TxId},
+    consensus::{BlockHeight},
+    transaction::{Transaction, TxId},
 };
 use zcash_protocol::{
-    memo::{self, Memo, MemoBytes},
-    value::{ZatBalance, Zatoshis},
-    PoolType,
-    ShieldedProtocol::{self, Orchard, Sapling},
+    value::{Zatoshis},
 };
 
 use zcash_client_backend::{
-    address::UnifiedAddress,
     data_api::{
-        chain::ChainState, Account as _, AccountPurpose, AccountSource, SeedRelevance,
-        SentTransactionOutput, TransactionDataRequest, TransactionStatus,
+        TransactionStatus,
     },
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     wallet::{
-        Note, NoteId, Recipient, WalletSaplingOutput, WalletSpend, WalletTransparentOutput,
         WalletTx,
     },
 };
 
-use zcash_client_backend::data_api::{
-    chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
-    DecryptedTransaction, NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees,
-    WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
-};
+
 
 use crate::AccountId;
 
@@ -61,7 +42,7 @@ use {
     zcash_client_backend::wallet::WalletOrchardOutput,
 };
 
-use crate::{error::Error, nullifier::Nullifier};
+use crate::{error::Error};
 
 /// Maps a block height and transaction index to a transaction ID.
 pub struct TxLocatorMap(HashMap<(BlockHeight, u32), TxId>);
@@ -177,7 +158,7 @@ impl TransactionTable {
             entry.tx_status = status;
             Ok(())
         } else {
-            return Err(Error::TransactionNotFound(*txid));
+            Err(Error::TransactionNotFound(*txid))
         }
     }
     pub fn get_tx_raw(&self, txid: &TxId) -> Option<&[u8]> {

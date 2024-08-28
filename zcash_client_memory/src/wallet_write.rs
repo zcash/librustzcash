@@ -1,50 +1,37 @@
-use incrementalmerkletree::{Address, Marking, Retention};
-use sapling::NullifierDerivingKey;
+use incrementalmerkletree::{Marking, Retention};
+
 use secrecy::{ExposeSecret, SecretVec};
-use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
+
 use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, HashMap, HashSet},
-    convert::Infallible,
-    hash::Hash,
-    num::NonZeroU32,
+    collections::{HashMap},
 };
-use zcash_keys::{
-    address::Receiver,
-    keys::{AddressGenerationError, DerivationError, UnifiedIncomingViewingKey},
-};
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
+
+use zip32::{fingerprint::SeedFingerprint};
 
 use zcash_primitives::{
-    block::BlockHash,
-    consensus::{BlockHeight, Network},
-    transaction::{Transaction, TxId},
+    consensus::{BlockHeight},
+    transaction::{TxId},
 };
 use zcash_protocol::{
-    memo::{self, Memo, MemoBytes},
-    value::Zatoshis,
-    PoolType,
-    ShieldedProtocol::{Orchard, Sapling},
+    ShieldedProtocol::{Sapling},
 };
 
 use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{
-        chain::ChainState, AccountPurpose, AccountSource, SeedRelevance, TransactionDataRequest,
+        chain::ChainState, AccountPurpose, AccountSource,
         TransactionStatus,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     wallet::{
-        Note, NoteId, Recipient, WalletSaplingOutput, WalletSpend, WalletTransparentOutput,
-        WalletTx,
+        NoteId, Recipient, WalletTransparentOutput,
     },
-    TransferType,
 };
 
 use zcash_client_backend::data_api::{
-    chain::CommitmentTreeRoot, scanning::ScanRange, Account as _, AccountBirthday, BlockMetadata,
-    DecryptedTransaction, NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees,
-    WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+    Account as _, AccountBirthday,
+    DecryptedTransaction, ScannedBlock, SentTransaction,
+    WalletRead, WalletWrite,
 };
 
 use crate::error::Error;
@@ -117,7 +104,7 @@ impl WalletWrite for MemoryWalletDb {
         // - Make sure blocks are coming in order.
         // - Make sure the first block in the sequence is tip + 1?
         // - Add a check to make sure the blocks are not already in the data store.
-        let start_height = blocks.first().map(|b| b.height());
+        let _start_height = blocks.first().map(|b| b.height());
         let mut last_scanned_height = None;
 
         for block in blocks.into_iter() {
@@ -160,10 +147,9 @@ impl WalletWrite for MemoryWalletDb {
                     let spent_in = output
                         .nf()
                         .and_then(|nf| self.nullifiers.get(&Nullifier::Sapling(*nf)))
-                        .and_then(|(height, tx_idx)| self.tx_locator.get(*height, *tx_idx))
-                        .map(|x| *x);
+                        .and_then(|(height, tx_idx)| self.tx_locator.get(*height, *tx_idx)).copied();
 
-                    self.insert_received_sapling_note(note_id, &output, spent_in);
+                    self.insert_received_sapling_note(note_id, output, spent_in);
                 }
 
                 #[cfg(feature = "orchard")]
@@ -383,9 +369,9 @@ impl WalletWrite for MemoryWalletDb {
                         );
                     }
                     Recipient::EphemeralTransparent {
-                        receiving_account,
-                        ephemeral_address,
-                        outpoint_metadata,
+                        receiving_account: _,
+                        ephemeral_address: _,
+                        outpoint_metadata: _,
                     } => {
                         // mark ephemeral address as used
                     }

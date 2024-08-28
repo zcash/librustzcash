@@ -9,5 +9,5 @@ pub(crate) use account::*;
 pub(crate) use block::*;
 pub(crate) use notes::*;
 pub(crate) use nullifier::*;
-pub(crate) use scanning::*;
+
 pub(crate) use transaction::*;

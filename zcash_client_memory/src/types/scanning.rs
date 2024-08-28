@@ -1,56 +1,30 @@
-use core::time;
-use incrementalmerkletree::{Address, Marking, Position, Retention};
-use sapling::NullifierDerivingKey;
-use secrecy::{ExposeSecret, SecretVec};
-use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
+
+
+
+
+
 use std::{
-    cell::RefCell,
-    cmp::Ordering,
-    collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap, HashSet},
-    convert::Infallible,
-    hash::Hash,
-    num::NonZeroU32,
     ops::{Deref, DerefMut, Range},
-    path::Iter,
-    rc::Rc,
 };
-use zcash_keys::keys::{AddressGenerationError, DerivationError, UnifiedIncomingViewingKey};
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
+
+
 
 use zcash_primitives::{
-    block::{self, BlockHash},
-    consensus::{BlockHeight, Network},
-    transaction::{components::OutPoint, txid, Authorized, Transaction, TransactionData, TxId},
-};
-use zcash_protocol::{
-    memo::{self, Memo, MemoBytes},
-    value::{ZatBalance, Zatoshis},
-    PoolType,
-    ShieldedProtocol::{self, Orchard, Sapling},
+    consensus::{BlockHeight},
 };
 
+
 use zcash_client_backend::{
-    address::UnifiedAddress,
     data_api::{
-        chain::ChainState,
         scanning::{spanning_tree::SpanningTree, ScanPriority},
-        Account as _, AccountPurpose, AccountSource, SeedRelevance, SentTransactionOutput,
-        TransactionDataRequest, TransactionStatus,
-    },
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    wallet::{
-        Note, NoteId, Recipient, WalletSaplingOutput, WalletSpend, WalletTransparentOutput,
-        WalletTx,
     },
 };
 
 use zcash_client_backend::data_api::{
-    chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
-    DecryptedTransaction, NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees,
-    WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+    scanning::ScanRange,
 };
 
-use crate::AccountId;
+
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -149,8 +123,8 @@ impl ScanQueue {
             let mut to_create: Option<SpanningTree> = None;
             let mut to_delete_ends: Vec<BlockHeight> = vec![];
 
-            let mut q_ranges = q_ranges.into_iter();
-            while let Some((start, end, priority)) = q_ranges.next() {
+            let q_ranges = q_ranges.into_iter();
+            for (start, end, priority) in q_ranges {
                 let entry = ScanRange::from_parts(
                     Range {
                         start: *start,

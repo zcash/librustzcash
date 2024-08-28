@@ -1,47 +1,29 @@
-use crate::{AccountId, ScanQueue};
-use core::time;
-use incrementalmerkletree::{Address, Marking, Retention};
-use sapling::NullifierDerivingKey;
-use secrecy::{ExposeSecret, SecretVec};
-use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
-use std::{
-    cmp::Ordering,
-    collections::{hash_map::Entry, BTreeMap, HashMap, HashSet},
-    convert::Infallible,
-    hash::Hash,
-    num::NonZeroU32,
-    ops::Deref,
-};
-use zcash_keys::keys::{AddressGenerationError, DerivationError, UnifiedIncomingViewingKey};
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
+use crate::{AccountId};
 
-use zcash_primitives::{
-    block::BlockHash,
-    consensus::{BlockHeight, Network},
-    transaction::{components::OutPoint, txid, Authorized, Transaction, TransactionData, TxId},
+
+
+
+
+use std::{
+    collections::{BTreeMap, HashSet},
 };
-use zcash_protocol::{
-    memo::{self, Memo, MemoBytes},
-    value::{ZatBalance, Zatoshis},
-    PoolType,
-    ShieldedProtocol::{Orchard, Sapling},
-};
+use zcash_keys::keys::{AddressGenerationError, UnifiedIncomingViewingKey};
+use zip32::{DiversifierIndex};
+
+
+
 
 use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{
-        chain::ChainState, Account as _, AccountPurpose, AccountSource, SeedRelevance,
-        TransactionDataRequest, TransactionStatus,
+        Account as _, AccountPurpose, AccountSource,
     },
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    proto::service::ShieldedProtocol,
-    wallet::{Note, NoteId, WalletSaplingOutput, WalletSpend, WalletTransparentOutput, WalletTx},
+    keys::{UnifiedAddressRequest, UnifiedFullViewingKey},
+    wallet::{NoteId},
 };
 
 use zcash_client_backend::data_api::{
-    chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
-    DecryptedTransaction, NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees,
-    WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+    AccountBirthday,
 };
 
 #[cfg(feature = "transparent-inputs")]

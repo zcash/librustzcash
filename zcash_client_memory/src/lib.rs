@@ -1,47 +1,32 @@
-use core::time;
-use incrementalmerkletree::{Address, Marking, Retention};
-use sapling::NullifierDerivingKey;
+
+
+
 use scanning::ScanQueue;
-use secrecy::{ExposeSecret, SecretVec};
-use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
+
+use shardtree::{store::memory::MemoryShardStore, ShardTree};
 use std::{
-    cmp::Ordering,
-    collections::{hash_map::Entry, BTreeMap, HashMap, HashSet},
-    convert::Infallible,
+    collections::{hash_map::Entry, BTreeMap},
     hash::Hash,
-    num::NonZeroU32,
     ops::Deref,
 };
-use zcash_keys::keys::{AddressGenerationError, DerivationError, UnifiedIncomingViewingKey};
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
+
+use zip32::{fingerprint::SeedFingerprint};
 
 use zcash_primitives::{
-    block::BlockHash,
     consensus::{BlockHeight, Network},
-    transaction::{components::OutPoint, txid, Authorized, Transaction, TransactionData, TxId},
-};
-use zcash_protocol::{
-    memo::{self, Memo, MemoBytes},
-    value::{ZatBalance, Zatoshis},
-    PoolType,
-    ShieldedProtocol::{Orchard, Sapling},
+    transaction::{TxId},
 };
 
+
 use zcash_client_backend::{
-    address::UnifiedAddress,
     data_api::{
-        chain::ChainState, Account as _, AccountPurpose, AccountSource, SeedRelevance,
-        TransactionDataRequest, TransactionStatus,
+        Account as _, AccountSource,
     },
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    proto::service::ShieldedProtocol,
-    wallet::{Note, NoteId, WalletSaplingOutput, WalletSpend, WalletTransparentOutput, WalletTx},
+    wallet::{NoteId, WalletSaplingOutput},
 };
 
 use zcash_client_backend::data_api::{
-    chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
-    DecryptedTransaction, NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees,
-    WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+    SAPLING_SHARD_HEIGHT,
 };
 
 #[cfg(feature = "transparent-inputs")]
