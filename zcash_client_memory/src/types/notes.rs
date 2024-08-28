@@ -1,33 +1,16 @@
+use incrementalmerkletree::Position;
 
-use incrementalmerkletree::{Position};
+use std::collections::HashMap;
 
+use zip32::Scope;
 
-
-use std::{
-    collections::{HashMap},
-};
-
-use zip32::{Scope};
-
-use zcash_primitives::{
-    transaction::{TxId},
-};
-use zcash_protocol::{
-    memo::{Memo},
-    PoolType,
-    ShieldedProtocol::{Sapling},
-};
+use zcash_primitives::transaction::TxId;
+use zcash_protocol::{memo::Memo, PoolType, ShieldedProtocol::Sapling};
 
 use zcash_client_backend::{
-    data_api::{
-        SentTransactionOutput,
-    },
-    wallet::{
-        Note, NoteId, Recipient, WalletSaplingOutput,
-    },
+    data_api::SentTransactionOutput,
+    wallet::{Note, NoteId, Recipient, WalletSaplingOutput},
 };
-
-
 
 use crate::AccountId;
 

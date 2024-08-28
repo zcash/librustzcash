@@ -1,6 +1,3 @@
-
-
-
 use scanning::ScanQueue;
 
 use shardtree::{store::memory::MemoryShardStore, ShardTree};
@@ -10,24 +7,19 @@ use std::{
     ops::Deref,
 };
 
-use zip32::{fingerprint::SeedFingerprint};
+use zip32::fingerprint::SeedFingerprint;
 
 use zcash_primitives::{
     consensus::{BlockHeight, Network},
-    transaction::{TxId},
+    transaction::TxId,
 };
 
-
 use zcash_client_backend::{
-    data_api::{
-        Account as _, AccountSource,
-    },
+    data_api::{Account as _, AccountSource},
     wallet::{NoteId, WalletSaplingOutput},
 };
 
-use zcash_client_backend::data_api::{
-    SAPLING_SHARD_HEIGHT,
-};
+use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
 
 #[cfg(feature = "transparent-inputs")]
 use {

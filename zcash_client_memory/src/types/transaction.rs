@@ -1,32 +1,12 @@
-
-
-
-
-
-use std::{
-    collections::{hash_map::Entry, HashMap},
-};
-
-
+use std::collections::{hash_map::Entry, HashMap};
 
 use zcash_primitives::{
-    consensus::{BlockHeight},
+    consensus::BlockHeight,
     transaction::{Transaction, TxId},
 };
-use zcash_protocol::{
-    value::{Zatoshis},
-};
+use zcash_protocol::value::Zatoshis;
 
-use zcash_client_backend::{
-    data_api::{
-        TransactionStatus,
-    },
-    wallet::{
-        WalletTx,
-    },
-};
-
-
+use zcash_client_backend::{data_api::TransactionStatus, wallet::WalletTx};
 
 use crate::AccountId;
 
@@ -42,7 +22,7 @@ use {
     zcash_client_backend::wallet::WalletOrchardOutput,
 };
 
-use crate::{error::Error};
+use crate::error::Error;
 
 /// Maps a block height and transaction index to a transaction ID.
 pub struct TxLocatorMap(HashMap<(BlockHeight, u32), TxId>);

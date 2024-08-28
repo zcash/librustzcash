@@ -1,30 +1,17 @@
-use crate::{AccountId};
+use crate::AccountId;
 
-
-
-
-
-use std::{
-    collections::{BTreeMap, HashSet},
-};
+use std::collections::{BTreeMap, HashSet};
 use zcash_keys::keys::{AddressGenerationError, UnifiedIncomingViewingKey};
-use zip32::{DiversifierIndex};
-
-
-
+use zip32::DiversifierIndex;
 
 use zcash_client_backend::{
     address::UnifiedAddress,
-    data_api::{
-        Account as _, AccountPurpose, AccountSource,
-    },
+    data_api::{Account as _, AccountPurpose, AccountSource},
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey},
-    wallet::{NoteId},
+    wallet::NoteId,
 };
 
-use zcash_client_backend::data_api::{
-    AccountBirthday,
-};
+use zcash_client_backend::data_api::AccountBirthday;
 
 #[cfg(feature = "transparent-inputs")]
 use {

@@ -1,41 +1,33 @@
-
 use nonempty::NonEmpty;
 
 use secrecy::{ExposeSecret, SecretVec};
 
-use std::{
-    collections::{HashMap},
-    hash::Hash,
-    num::NonZeroU32,
-};
-use zcash_keys::keys::{UnifiedIncomingViewingKey};
-use zip32::{fingerprint::SeedFingerprint};
-
+use std::{collections::HashMap, hash::Hash, num::NonZeroU32};
+use zcash_keys::keys::UnifiedIncomingViewingKey;
+use zip32::fingerprint::SeedFingerprint;
 
 use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{
-        scanning::ScanPriority, Account as _, AccountSource,
-        SeedRelevance, TransactionDataRequest, TransactionStatus,
+        scanning::ScanPriority, Account as _, AccountSource, SeedRelevance, TransactionDataRequest,
+        TransactionStatus,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    wallet::{NoteId},
+    wallet::NoteId,
 };
 use zcash_primitives::{
     block::BlockHash,
-    consensus::{BlockHeight},
+    consensus::BlockHeight,
     transaction::{Transaction, TransactionData, TxId},
 };
 use zcash_protocol::{
     consensus::{self, BranchId},
-    memo::{Memo},
+    memo::Memo,
 };
 
 use zcash_client_backend::data_api::{
-    scanning::ScanRange, BlockMetadata, NullifierQuery,
-    WalletRead, WalletSummary,
+    scanning::ScanRange, BlockMetadata, NullifierQuery, WalletRead, WalletSummary,
 };
-
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -211,7 +203,8 @@ impl WalletRead for MemoryWalletDb {
         Ok(self
             .scan_queue
             .iter()
-            .max_by(|(_, end_a, _), (_, end_b, _)| end_a.cmp(end_b)).map(|(_, end, _)| end.saturating_sub(1)))
+            .max_by(|(_, end_a, _), (_, end_b, _)| end_a.cmp(end_b))
+            .map(|(_, end, _)| end.saturating_sub(1)))
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
@@ -269,22 +262,20 @@ impl WalletRead for MemoryWalletDb {
                 .filter(|(_, _, p)| p == &ScanPriority::Scanned)
                 .collect();
             scanned_ranges.sort_by(|(start_a, _, _), (start_b, _, _)| start_a.cmp(start_b));
-            if let Some(fully_scanned_height) =
-                scanned_ranges
-                    .first()
-                    .and_then(|(block_range_start, block_range_end, _priority)| {
-                        // If the start of the earliest scanned range is greater than
-                        // the birthday height, then there is an unscanned range between
-                        // the wallet birthday and that range, so there is no fully
-                        // scanned height.
-                        if *block_range_start <= birthday_height {
-                            // Scan ranges are end-exclusive.
-                            Some(*block_range_end - 1)
-                        } else {
-                            None
-                        }
-                    })
-            {
+            if let Some(fully_scanned_height) = scanned_ranges.first().and_then(
+                |(block_range_start, block_range_end, _priority)| {
+                    // If the start of the earliest scanned range is greater than
+                    // the birthday height, then there is an unscanned range between
+                    // the wallet birthday and that range, so there is no fully
+                    // scanned height.
+                    if *block_range_start <= birthday_height {
+                        // Scan ranges are end-exclusive.
+                        Some(*block_range_end - 1)
+                    } else {
+                        None
+                    }
+                },
+            ) {
                 self.block_metadata(fully_scanned_height)
             } else {
                 Ok(None)
@@ -352,7 +343,8 @@ impl WalletRead for MemoryWalletDb {
         let _status = self.tx_table.tx_status(&txid);
         let _expiry_height = self.tx_table.expiry_height(&txid);
         self.tx_table
-            .get(&txid).map(|tx| (tx.status(), tx.expiry_height(), tx.raw()))
+            .get(&txid)
+            .map(|tx| (tx.status(), tx.expiry_height(), tx.raw()))
             .map(|(status, expiry_height, raw)| {
                 // We need to provide a consensus branch ID so that pre-v5 `Transaction` structs
                 // (which don't commit directly to one) can store it internally.

@@ -1,30 +1,10 @@
+use std::ops::{Deref, DerefMut, Range};
 
+use zcash_primitives::consensus::BlockHeight;
 
+use zcash_client_backend::data_api::scanning::{spanning_tree::SpanningTree, ScanPriority};
 
-
-
-use std::{
-    ops::{Deref, DerefMut, Range},
-};
-
-
-
-use zcash_primitives::{
-    consensus::{BlockHeight},
-};
-
-
-use zcash_client_backend::{
-    data_api::{
-        scanning::{spanning_tree::SpanningTree, ScanPriority},
-    },
-};
-
-use zcash_client_backend::data_api::{
-    scanning::ScanRange,
-};
-
-
+use zcash_client_backend::data_api::scanning::ScanRange;
 
 #[cfg(feature = "transparent-inputs")]
 use {

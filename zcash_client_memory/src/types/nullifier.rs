@@ -1,24 +1,7 @@
+use std::collections::BTreeMap;
 
-
-
-
-
-use std::{
-    collections::{BTreeMap},
-};
-
-
-
-use zcash_primitives::{
-    consensus::{BlockHeight},
-};
-use zcash_protocol::{
-    PoolType,
-};
-
-
-
-
+use zcash_primitives::consensus::BlockHeight;
+use zcash_protocol::PoolType;
 
 /// Maps a block height and transaction (i.e. transaction locator) index to a nullifier.
 pub(crate) struct NullifierMap(BTreeMap<Nullifier, (BlockHeight, u32)>);

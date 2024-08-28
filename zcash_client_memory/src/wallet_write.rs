@@ -2,36 +2,23 @@ use incrementalmerkletree::{Marking, Retention};
 
 use secrecy::{ExposeSecret, SecretVec};
 
-use std::{
-    collections::{HashMap},
-};
+use std::collections::HashMap;
 
-use zip32::{fingerprint::SeedFingerprint};
+use zip32::fingerprint::SeedFingerprint;
 
-use zcash_primitives::{
-    consensus::{BlockHeight},
-    transaction::{TxId},
-};
-use zcash_protocol::{
-    ShieldedProtocol::{Sapling},
-};
+use zcash_primitives::{consensus::BlockHeight, transaction::TxId};
+use zcash_protocol::ShieldedProtocol::Sapling;
 
 use zcash_client_backend::{
     address::UnifiedAddress,
-    data_api::{
-        chain::ChainState, AccountPurpose, AccountSource,
-        TransactionStatus,
-    },
+    data_api::{chain::ChainState, AccountPurpose, AccountSource, TransactionStatus},
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    wallet::{
-        NoteId, Recipient, WalletTransparentOutput,
-    },
+    wallet::{NoteId, Recipient, WalletTransparentOutput},
 };
 
 use zcash_client_backend::data_api::{
-    Account as _, AccountBirthday,
-    DecryptedTransaction, ScannedBlock, SentTransaction,
-    WalletRead, WalletWrite,
+    Account as _, AccountBirthday, DecryptedTransaction, ScannedBlock, SentTransaction, WalletRead,
+    WalletWrite,
 };
 
 use crate::error::Error;
@@ -147,7 +134,8 @@ impl WalletWrite for MemoryWalletDb {
                     let spent_in = output
                         .nf()
                         .and_then(|nf| self.nullifiers.get(&Nullifier::Sapling(*nf)))
-                        .and_then(|(height, tx_idx)| self.tx_locator.get(*height, *tx_idx)).copied();
+                        .and_then(|(height, tx_idx)| self.tx_locator.get(*height, *tx_idx))
+                        .copied();
 
                     self.insert_received_sapling_note(note_id, output, spent_in);
                 }

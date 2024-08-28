@@ -1,29 +1,12 @@
-
-
-
-
-
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
 };
 
+use zcash_primitives::{block::BlockHash, consensus::BlockHeight, transaction::TxId};
+use zcash_protocol::memo::MemoBytes;
 
-
-use zcash_primitives::{
-    block::BlockHash,
-    consensus::{BlockHeight},
-    transaction::{TxId},
-};
-use zcash_protocol::{
-    memo::{MemoBytes},
-};
-
-use zcash_client_backend::{
-    wallet::{NoteId},
-};
-
-
+use zcash_client_backend::wallet::NoteId;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -33,8 +16,6 @@ use {
 
 #[cfg(feature = "orchard")]
 use zcash_client_backend::{data_api::ORCHARD_SHARD_HEIGHT, wallet::WalletOrchardOutput};
-
-
 
 /// Internal wallet representation of a Block.
 pub(crate) struct MemoryWalletBlock {
