@@ -100,10 +100,10 @@ impl ReceivedNote {
                 ..
             } => Ok(ReceivedNote {
                 note_id: NoteId::new(txid, Orchard, output.output_index() as u16),
-                txid: txid,
+                txid,
                 _output_index: output.output_index() as u32,
                 account_id: *receiving_account,
-                _note: Note::Orchard(note.clone()),
+                _note: Note::Orchard(*note),
                 nf: None,
                 _is_change: true,
                 _memo: output.memo().map(|m| Memo::try_from(m).unwrap()).unwrap(),
@@ -142,7 +142,7 @@ impl ReceivedNote {
             txid: *note_id.txid(),
             _output_index: output.index() as u32,
             account_id: *output.account_id(),
-            _note: Note::Orchard(output.note().clone()),
+            _note: Note::Orchard(*output.note()),
             nf: output.nf().map(|nf| Nullifier::Orchard(*nf)),
             _is_change: output.is_change(),
             _memo: Memo::Empty,

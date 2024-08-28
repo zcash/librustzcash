@@ -159,11 +159,11 @@ impl WalletWrite for MemoryWalletDb {
                     // we previously scanned.
                     let spent_in = output
                         .nf()
-                        .and_then(|nf| self.nullifiers.get(&&Nullifier::Orchard(*nf)))
+                        .and_then(|nf| self.nullifiers.get(&Nullifier::Orchard(*nf)))
                         .and_then(|(height, tx_idx)| self.tx_locator.get(*height, *tx_idx))
-                        .map(|x| *x);
+                        .copied();
 
-                    self.insert_received_orchard_note(note_id, &output, spent_in)
+                    self.insert_received_orchard_note(note_id, output, spent_in)
                 }
                 // Add frontier to the sapling tree
                 self.sapling_tree.insert_frontier(
@@ -182,7 +182,7 @@ impl WalletWrite for MemoryWalletDb {
                         id: from_state.block_height(),
                         marking: Marking::Reference,
                     },
-                );
+                )?;
                 last_scanned_height = Some(block.height());
                 transactions.insert(txid, transaction.clone());
             }
