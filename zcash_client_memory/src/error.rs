@@ -1,3 +1,6 @@
+use std::convert::Infallible;
+
+use shardtree::error::ShardTreeError;
 use zcash_keys::keys::{AddressGenerationError, DerivationError};
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{consensus::BlockHeight, memo};
@@ -40,6 +43,8 @@ pub enum Error {
     NonSequentialBlocks,
     #[error("Invalid scan range start {0}, end {1}: {2}")]
     InvalidScanRange(BlockHeight, BlockHeight, String),
+    #[error("ShardTree error: {0}")]
+    ShardTree(ShardTreeError<Infallible>),
     #[error("Other error: {0}")]
     Other(String),
 }
@@ -65,5 +70,11 @@ impl From<memo::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(value: std::io::Error) -> Self {
         Error::Io(value)
+    }
+}
+
+impl From<ShardTreeError<Infallible>> for Error {
+    fn from(value: ShardTreeError<Infallible>) -> Self {
+        Error::ShardTree(value)
     }
 }

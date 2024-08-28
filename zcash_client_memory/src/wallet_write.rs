@@ -172,7 +172,7 @@ impl WalletWrite for MemoryWalletDb {
                         id: from_state.block_height(),
                         marking: Marking::Reference,
                     },
-                );
+                )?;
 
                 #[cfg(feature = "orchard")]
                 // Add frontier to the orchard tree
@@ -225,7 +225,7 @@ impl WalletWrite for MemoryWalletDb {
                 .value()
                 .map_or(0.into(), |t| t.position() + 1);
             self.sapling_tree
-                .batch_insert(start_position, block_commitments.sapling.into_iter());
+                .batch_insert(start_position, block_commitments.sapling.into_iter())?;
 
             #[cfg(feature = "orchard")]
             {
@@ -235,7 +235,7 @@ impl WalletWrite for MemoryWalletDb {
                     .value()
                     .map_or(0.into(), |t| t.position() + 1);
                 self.orchard_tree
-                    .batch_insert(start_position, block_commitments.orchard.into_iter());
+                    .batch_insert(start_position, block_commitments.orchard.into_iter())?;
             }
         }
         // We can do some pruning of the tx_locator_map here
