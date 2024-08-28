@@ -1,47 +1,33 @@
-use incrementalmerkletree::{Address, Marking, Retention};
 use nonempty::NonEmpty;
-use sapling::NullifierDerivingKey;
-use secrecy::{ExposeSecret, SecretVec};
-use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
-use std::{
-    clone,
-    cmp::Ordering,
-    collections::{BTreeMap, HashMap, HashSet},
-    convert::Infallible,
-    hash::Hash,
-    num::NonZeroU32,
-};
-use zcash_keys::keys::{AddressGenerationError, DerivationError, UnifiedIncomingViewingKey};
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
 
-use std::ops::Add;
+use secrecy::{ExposeSecret, SecretVec};
+
+use std::{collections::HashMap, num::NonZeroU32};
+use zcash_keys::keys::UnifiedIncomingViewingKey;
+use zip32::fingerprint::SeedFingerprint;
+
 use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{
-        chain::ChainState, Account as _, AccountPurpose, AccountSource, SeedRelevance,
-        TransactionDataRequest, TransactionStatus,
+        scanning::ScanPriority, Account as _, AccountSource, SeedRelevance, TransactionDataRequest,
+        TransactionStatus,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    wallet::{NoteId, WalletSpend, WalletTransparentOutput, WalletTx},
+    wallet::NoteId,
 };
 use zcash_primitives::{
     block::BlockHash,
-    consensus::{BlockHeight, Network},
+    consensus::BlockHeight,
     transaction::{Transaction, TransactionData, TxId},
 };
 use zcash_protocol::{
     consensus::{self, BranchId},
-    memo::{self, Memo, MemoBytes},
-    value::Zatoshis,
-    ShieldedProtocol::{Orchard, Sapling},
+    memo::Memo,
 };
 
 use zcash_client_backend::data_api::{
-    chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
-    DecryptedTransaction, NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees,
-    WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+    scanning::ScanRange, BlockMetadata, NullifierQuery, WalletRead, WalletSummary,
 };
-use zcash_primitives::transaction::components::OutPoint;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -50,7 +36,7 @@ use {
 };
 
 use super::{Account, AccountId, MemoryWalletDb};
-use crate::error::Error;
+use crate::{error::Error, MemoryWalletBlock};
 
 impl WalletRead for MemoryWalletDb {
     type Error = Error;
@@ -65,7 +51,7 @@ impl WalletRead for MemoryWalletDb {
         &self,
         account_id: Self::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error> {
-        Ok(self.accounts.get(*account_id as usize).map(|a| a.clone()))
+        Ok(self.accounts.get(*account_id as usize).cloned())
     }
 
     fn get_derived_account(
@@ -84,7 +70,7 @@ impl WalletRead for MemoryWalletDb {
                     None
                 }
             }
-            AccountSource::Imported { purpose } => None,
+            AccountSource::Imported { purpose: _ } => None,
         }))
     }
 
@@ -214,7 +200,11 @@ impl WalletRead for MemoryWalletDb {
     }
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        todo!()
+        Ok(self
+            .scan_queue
+            .iter()
+            .max_by(|(_, end_a, _), (_, end_b, _)| end_a.cmp(end_b))
+            .map(|(_, end, _)| end.saturating_sub(1)))
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
@@ -227,24 +217,92 @@ impl WalletRead for MemoryWalletDb {
         }))
     }
 
-    fn block_metadata(&self, _height: BlockHeight) -> Result<Option<BlockMetadata>, Self::Error> {
-        todo!()
+    fn block_metadata(&self, height: BlockHeight) -> Result<Option<BlockMetadata>, Self::Error> {
+        Ok(self.blocks.get(&height).map(|block| {
+            let MemoryWalletBlock {
+                height,
+                hash,
+                sapling_commitment_tree_size,
+                #[cfg(feature = "orchard")]
+                orchard_commitment_tree_size,
+                ..
+            } = block;
+            // TODO: Deal with legacy sapling trees
+            BlockMetadata::from_parts(
+                *height,
+                *hash,
+                *sapling_commitment_tree_size,
+                #[cfg(feature = "orchard")]
+                *orchard_commitment_tree_size,
+            )
+        }))
     }
 
     fn block_fully_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
-        todo!()
+        if let Some(birthday_height) = self.get_wallet_birthday()? {
+            // We assume that the only way we get a contiguous range of block heights in the `blocks` table
+            // starting with the birthday block, is if all scanning operations have been performed on those
+            // blocks. This holds because the `blocks` table is only altered by `WalletDb::put_blocks` via
+            // `put_block`, and the effective combination of intra-range linear scanning and the nullifier
+            // map ensures that we discover all wallet-related information within the contiguous range.
+            //
+            // We also assume that every contiguous range of block heights in the `blocks` table has a
+            // single matching entry in the `scan_queue` table with priority "Scanned". This requires no
+            // bugs in the scan queue update logic, which we have had before. However, a bug here would
+            // mean that we return a more conservative fully-scanned height, which likely just causes a
+            // performance regression.
+            //
+            // The fully-scanned height is therefore the last height that falls within the first range in
+            // the scan queue with priority "Scanned".
+            // SQL query problems.
+
+            let mut scanned_ranges: Vec<_> = self
+                .scan_queue
+                .iter()
+                .filter(|(_, _, p)| p == &ScanPriority::Scanned)
+                .collect();
+            scanned_ranges.sort_by(|(start_a, _, _), (start_b, _, _)| start_a.cmp(start_b));
+            if let Some(fully_scanned_height) = scanned_ranges.first().and_then(
+                |(block_range_start, block_range_end, _priority)| {
+                    // If the start of the earliest scanned range is greater than
+                    // the birthday height, then there is an unscanned range between
+                    // the wallet birthday and that range, so there is no fully
+                    // scanned height.
+                    if *block_range_start <= birthday_height {
+                        // Scan ranges are end-exclusive.
+                        Some(*block_range_end - 1)
+                    } else {
+                        None
+                    }
+                },
+            ) {
+                self.block_metadata(fully_scanned_height)
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
-        todo!()
+        Ok(self
+            .blocks
+            .last_key_value()
+            .map(|(height, block)| (*height, block.hash)))
     }
 
     fn block_max_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
-        todo!()
+        Ok(self
+            .blocks
+            .last_key_value()
+            .map(|(height, _)| self.block_metadata(*height))
+            .transpose()?
+            .flatten())
     }
 
     fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error> {
-        Ok(vec![])
+        Ok(self.scan_queue.suggest_scan_ranges(ScanPriority::Historic))
     }
 
     fn get_target_and_anchor_heights(
@@ -272,24 +330,21 @@ impl WalletRead for MemoryWalletDb {
         Ok(self
             .accounts
             .iter()
-            .filter_map(|account| match account.ufvk() {
-                Some(ufvk) => Some((account.id(), ufvk.clone())),
-                None => None,
-            })
+            .filter_map(|account| account.ufvk().map(|ufvk| (account.id(), ufvk.clone())))
             .collect())
     }
 
-    fn get_memo(&self, id_note: NoteId) -> Result<Option<Memo>, Self::Error> {
+    fn get_memo(&self, _id_note: NoteId) -> Result<Option<Memo>, Self::Error> {
         todo!()
     }
 
     fn get_transaction(&self, txid: TxId) -> Result<Option<Transaction>, Self::Error> {
-        let raw = self.tx_table.get_tx_raw(&txid);
-        let status = self.tx_table.tx_status(&txid);
-        let expiry_height = self.tx_table.expiry_height(&txid);
+        let _raw = self.tx_table.get_tx_raw(&txid);
+        let _status = self.tx_table.tx_status(&txid);
+        let _expiry_height = self.tx_table.expiry_height(&txid);
         self.tx_table
             .get(&txid)
-            .and_then(|tx| Some((tx.status(), tx.expiry_height(), tx.raw())))
+            .map(|tx| (tx.status(), tx.expiry_height(), tx.raw()))
             .map(|(status, expiry_height, raw)| {
                 // We need to provide a consensus branch ID so that pre-v5 `Transaction` structs
                 // (which don't commit directly to one) can store it internally.
@@ -302,18 +357,18 @@ impl WalletRead for MemoryWalletDb {
                 //   height or return an error.
                 if let TransactionStatus::Mined(height) = status {
                     return Ok(Some(
-                        Transaction::read(&raw[..], BranchId::for_height(&self.network, height))
+                        Transaction::read(raw, BranchId::for_height(&self.network, height))
                             .map(|t| (height, t)),
                     ));
                 }
                 if let Some(height) = expiry_height.filter(|h| h > &BlockHeight::from(0)) {
                     return Ok(Some(
-                        Transaction::read(&raw[..], BranchId::for_height(&self.network, height))
+                        Transaction::read(raw, BranchId::for_height(&self.network, height))
                             .map(|t| (height, t)),
                     ));
                 }
 
-                let tx_data = Transaction::read(&raw[..], BranchId::Sprout)
+                let tx_data = Transaction::read(raw, BranchId::Sprout)
                     .map_err(Self::Error::from)?
                     .into_data();
 
@@ -405,9 +460,9 @@ impl WalletRead for MemoryWalletDb {
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
         &self,
-        account: Self::AccountId,
-        max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
+        _account: Self::AccountId,
+        _max_height: BlockHeight,
+    ) -> Result<HashMap<TransparentAddress, zcash_protocol::value::Zatoshis>, Self::Error> {
         todo!()
     }
 
