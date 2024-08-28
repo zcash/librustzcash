@@ -1,6 +1,7 @@
-use incrementalmerkletree::{Marking, Retention};
+use incrementalmerkletree::{Marking, Position, Retention};
 
 use secrecy::{ExposeSecret, SecretVec};
+use shardtree::{error::ShardTreeError, store::ShardStore as _};
 
 use std::collections::HashMap;
 
@@ -11,7 +12,10 @@ use zcash_protocol::ShieldedProtocol::Sapling;
 
 use zcash_client_backend::{
     address::UnifiedAddress,
-    data_api::{chain::ChainState, AccountPurpose, AccountSource, TransactionStatus},
+    data_api::{
+        chain::ChainState, AccountPurpose, AccountSource, TransactionStatus,
+        WalletCommitmentTrees as _, SAPLING_SHARD_HEIGHT,
+    },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     wallet::{NoteId, Recipient, WalletTransparentOutput},
 };
@@ -25,6 +29,7 @@ use crate::error::Error;
 use crate::{
     Account, AccountId, MemoryWalletBlock, MemoryWalletDb, Nullifier, ReceivedNote, ViewingKey,
 };
+use maybe_rayon::prelude::*;
 
 #[cfg(feature = "orchard")]
 use zcash_protocol::ShieldedProtocol::Orchard;
@@ -94,9 +99,16 @@ impl WalletWrite for MemoryWalletDb {
         // - Make sure blocks are coming in order.
         // - Make sure the first block in the sequence is tip + 1?
         // - Add a check to make sure the blocks are not already in the data store.
-        let _start_height = blocks.first().map(|b| b.height());
+        // let _start_height = blocks.first().map(|b| b.height());
         let mut last_scanned_height = None;
+        let sapling_start_leaf_position = blocks.first().map(|block| {
+            Position::from(
+                u64::from(block.sapling().final_tree_size())
+                    - u64::try_from(block.sapling().commitments().len()).unwrap(),
+            )
+        });
 
+        let mut sapling_commitments = vec![];
         for block in blocks.into_iter() {
             let mut transactions = HashMap::new();
             let mut memos = HashMap::new();
@@ -165,24 +177,7 @@ impl WalletWrite for MemoryWalletDb {
 
                     self.insert_received_orchard_note(note_id, output, spent_in)
                 }
-                // Add frontier to the sapling tree
-                self.sapling_tree.insert_frontier(
-                    from_state.final_sapling_tree().clone(),
-                    Retention::Checkpoint {
-                        id: from_state.block_height(),
-                        marking: Marking::Reference,
-                    },
-                )?;
 
-                #[cfg(feature = "orchard")]
-                // Add frontier to the orchard tree
-                self.orchard_tree.insert_frontier(
-                    from_state.final_orchard_tree().clone(),
-                    Retention::Checkpoint {
-                        id: from_state.block_height(),
-                        marking: Marking::Reference,
-                    },
-                )?;
                 last_scanned_height = Some(block.height());
                 transactions.insert(txid, transaction.clone());
             }
@@ -218,24 +213,47 @@ impl WalletWrite for MemoryWalletDb {
             // Insert the block into the block map
             self.blocks.insert(block.height(), memory_block);
 
-            // Add the Sapling commitments to the sapling tree.
             let block_commitments = block.into_commitments();
-            let start_position = from_state
-                .final_sapling_tree()
-                .value()
-                .map_or(0.into(), |t| t.position() + 1);
-            self.sapling_tree
-                .batch_insert(start_position, block_commitments.sapling.into_iter())?;
+            sapling_commitments.extend(block_commitments.sapling.into_iter().map(Some));
+        }
 
-            #[cfg(feature = "orchard")]
+        if let Some(sapling_start_leaf_position) = sapling_start_leaf_position {
+            // Create subtrees from the note commitments in parallel.
+            const CHUNK_SIZE: usize = 1024;
+            let sapling_subtrees = sapling_commitments
+                .par_chunks_mut(CHUNK_SIZE)
+                .enumerate()
+                .filter_map(|(i, chunk)| {
+                    let start = sapling_start_leaf_position + (i * CHUNK_SIZE) as u64;
+                    let end = start + chunk.len() as u64;
+
+                    shardtree::LocatedTree::from_iter(
+                        start..end,
+                        SAPLING_SHARD_HEIGHT.into(),
+                        chunk.iter_mut().map(|n| n.take().expect("always Some")),
+                    )
+                })
+                .map(|res| (res.subtree, res.checkpoints))
+                .collect::<Vec<_>>();
+
+            // Update the Sapling note commitment tree with all newly read note commitments
             {
-                // Add the Orchard commitments to the orchard tree.
-                let start_position = from_state
-                    .final_orchard_tree()
-                    .value()
-                    .map_or(0.into(), |t| t.position() + 1);
-                self.orchard_tree
-                    .batch_insert(start_position, block_commitments.orchard.into_iter())?;
+                let mut sapling_subtrees_iter = sapling_subtrees.into_iter();
+                self.with_sapling_tree_mut::<_, _, Self::Error>(|sapling_tree| {
+                    sapling_tree.insert_frontier(
+                        from_state.final_sapling_tree().clone(),
+                        Retention::Checkpoint {
+                            id: from_state.block_height(),
+                            marking: Marking::Reference,
+                        },
+                    )?;
+
+                    for (tree, checkpoints) in &mut sapling_subtrees_iter {
+                        sapling_tree.insert_tree(tree, checkpoints)?;
+                    }
+
+                    Ok(())
+                })?;
             }
         }
         // We can do some pruning of the tx_locator_map here
