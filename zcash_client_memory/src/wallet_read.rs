@@ -3,7 +3,10 @@ use nonempty::NonEmpty;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore as _};
 
-use std::{collections::HashMap, num::NonZeroU32};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    num::NonZeroU32,
+};
 use zcash_keys::keys::UnifiedIncomingViewingKey;
 use zip32::fingerprint::SeedFingerprint;
 
@@ -24,6 +27,7 @@ use zcash_primitives::{
 use zcash_protocol::{
     consensus::{self, BranchId},
     memo::Memo,
+    PoolType,
 };
 
 use zcash_client_backend::data_api::{
@@ -208,6 +212,7 @@ impl WalletRead for MemoryWalletDb {
         let fully_scanned_height = self
             .block_fully_scanned()?
             .map_or(birthday_height - 1, |m| m.block_height());
+
         let summary_height =
             (chain_tip_height + 1).saturating_sub(std::cmp::max(min_confirmations, 1));
 
@@ -217,10 +222,43 @@ impl WalletRead for MemoryWalletDb {
             .map(|account| (account.account_id(), AccountBalance::ZERO))
             .collect::<HashMap<AccountId, AccountBalance>>();
 
+        for note in self.get_received_notes().iter() {
+            // TOOD: Do all the checks if this note is spendable right now
+
+            match note.pool() {
+                PoolType::SAPLING => {
+                    let account_id = note.account_id();
+                    match account_balances.entry(account_id) {
+                        Entry::Occupied(mut entry) => {
+                            entry.get_mut().with_sapling_balance_mut(|b| {
+                                b.add_spendable_value(note.note.value())
+                            })?;
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(AccountBalance::ZERO);
+                        }
+                    };
+                }
+                _ => todo!(),
+            }
+        }
+
         // TODO: Deal with scan progress (I dont believe thats actually a hard requirement)
 
-        let next_sapling_subtree_index = self.sapling_tree.store().last_shard().unwrap().map(|s|s.root_addr().index()).unwrap_or(0);
-        let next_orchard_subtree_index = self.orchard_tree.store().last_shard().unwrap().map(|s|s.root_addr().index()).unwrap_or(0);
+        let next_sapling_subtree_index = self
+            .sapling_tree
+            .store()
+            .last_shard()
+            .unwrap()
+            .map(|s| s.root_addr().index())
+            .unwrap_or(0);
+        let next_orchard_subtree_index = self
+            .orchard_tree
+            .store()
+            .last_shard()
+            .unwrap()
+            .map(|s| s.root_addr().index())
+            .unwrap_or(0);
 
         let summary = WalletSummary::new(
             account_balances,

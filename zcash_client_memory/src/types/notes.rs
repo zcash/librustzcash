@@ -1,6 +1,6 @@
 use incrementalmerkletree::Position;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::{Deref, DerefMut}};
 
 use zip32::Scope;
 
@@ -45,7 +45,7 @@ pub(crate) struct ReceivedNote {
     pub(crate) _output_index: u32,
     pub(crate) account_id: AccountId,
     //sapling: (diversifier, value, rcm) orchard: (diversifier, value, rho, rseed)
-    pub(crate) _note: Note,
+    pub(crate) note: Note,
     pub(crate) nf: Option<Nullifier>,
     pub(crate) _is_change: bool,
     pub(crate) _memo: Memo,
@@ -53,8 +53,8 @@ pub(crate) struct ReceivedNote {
     pub(crate) _recipient_key_scope: Option<Scope>,
 }
 impl ReceivedNote {
-    pub fn _pool(&self) -> PoolType {
-        match self._note {
+    pub fn pool(&self) -> PoolType {
+        match self.note {
             Note::Sapling { .. } => PoolType::SAPLING,
             #[cfg(feature = "orchard")]
             Note::Orchard { .. } => PoolType::ORCHARD,
@@ -86,7 +86,7 @@ impl ReceivedNote {
                 txid,
                 _output_index: output.output_index() as u32,
                 account_id: *receiving_account,
-                _note: Note::Sapling(note.clone()),
+                note: Note::Sapling(note.clone()),
                 nf: None,
                 _is_change: true,
                 _memo: output.memo().map(|m| Memo::try_from(m).unwrap()).unwrap(),
@@ -103,7 +103,7 @@ impl ReceivedNote {
                 txid,
                 _output_index: output.output_index() as u32,
                 account_id: *receiving_account,
-                _note: Note::Orchard(*note),
+                note: Note::Orchard(*note),
                 nf: None,
                 _is_change: true,
                 _memo: output.memo().map(|m| Memo::try_from(m).unwrap()).unwrap(),
@@ -124,7 +124,7 @@ impl ReceivedNote {
             txid: *note_id.txid(),
             _output_index: output.index() as u32,
             account_id: *output.account_id(),
-            _note: Note::Sapling(output.note().clone()),
+            note: Note::Sapling(output.note().clone()),
             nf: output.nf().map(|nf| Nullifier::Sapling(*nf)),
             _is_change: output.is_change(),
             _memo: Memo::Empty,
@@ -142,7 +142,7 @@ impl ReceivedNote {
             txid: *note_id.txid(),
             _output_index: output.index() as u32,
             account_id: *output.account_id(),
-            _note: Note::Orchard(*output.note()),
+            note: Note::Orchard(*output.note()),
             nf: output.nf().map(|nf| Nullifier::Orchard(*nf)),
             _is_change: output.is_change(),
             _memo: Memo::Empty,
@@ -180,8 +180,31 @@ impl ReceivedNoteTable {
             }
         })
     }
-
+    
     pub fn insert_received_note(&mut self, note: ReceivedNote) {
         self.0.push(note);
+    }
+}
+
+impl IntoIterator for ReceivedNoteTable {
+    type Item = ReceivedNote;
+    type IntoIter = <Vec<Self::Item> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+// We deref to slice so that we can reuse the slice impls
+impl Deref for ReceivedNoteTable {
+    type Target = [ReceivedNote];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0[..]
+    }
+}
+impl DerefMut for ReceivedNoteTable {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0[..]
     }
 }

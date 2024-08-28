@@ -90,6 +90,11 @@ impl MemoryWalletDb {
             scan_queue: ScanQueue::new(),
         }
     }
+
+    pub(crate) fn get_received_notes(&self) -> &ReceivedNoteTable {
+        &self.received_notes
+    }
+
     pub(crate) fn mark_sapling_note_spent(
         &mut self,
         nf: sapling::Nullifier,
