@@ -13,15 +13,6 @@ use zcash_client_backend::{
 
 use zcash_client_backend::data_api::AccountBirthday;
 
-#[cfg(feature = "transparent-inputs")]
-use {
-    zcash_client_backend::wallet::TransparentAddressMetadata,
-    zcash_primitives::legacy::TransparentAddress,
-};
-
-#[cfg(feature = "orchard")]
-use zcash_client_backend::{data_api::ORCHARD_SHARD_HEIGHT, wallet::WalletOrchardOutput};
-
 use crate::error::Error;
 
 /// An account stored in a `zcash_client_sqlite` database.

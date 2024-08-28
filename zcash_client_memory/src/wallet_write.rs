@@ -26,6 +26,9 @@ use crate::{
     Account, AccountId, MemoryWalletBlock, MemoryWalletDb, Nullifier, ReceivedNote, ViewingKey,
 };
 
+#[cfg(feature = "orchard")]
+use zcash_protocol::ShieldedProtocol::Orchard;
+
 impl WalletWrite for MemoryWalletDb {
     type UtxoRef = u32;
 

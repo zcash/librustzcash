@@ -21,12 +21,6 @@ use zcash_client_backend::{
 
 use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
 
-#[cfg(feature = "transparent-inputs")]
-use {
-    zcash_client_backend::wallet::TransparentAddressMetadata,
-    zcash_primitives::legacy::TransparentAddress,
-};
-
 #[cfg(feature = "orchard")]
 use zcash_client_backend::{data_api::ORCHARD_SHARD_HEIGHT, wallet::WalletOrchardOutput};
 

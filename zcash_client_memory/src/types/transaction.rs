@@ -10,18 +10,6 @@ use zcash_client_backend::{data_api::TransactionStatus, wallet::WalletTx};
 
 use crate::AccountId;
 
-#[cfg(feature = "transparent-inputs")]
-use {
-    zcash_client_backend::wallet::TransparentAddressMetadata,
-    zcash_primitives::legacy::TransparentAddress,
-};
-
-#[cfg(feature = "orchard")]
-use {
-    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
-    zcash_client_backend::wallet::WalletOrchardOutput,
-};
-
 use crate::error::Error;
 
 /// Maps a block height and transaction index to a transaction ID.

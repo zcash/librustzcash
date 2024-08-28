@@ -6,30 +6,18 @@ use zcash_client_backend::data_api::scanning::{spanning_tree::SpanningTree, Scan
 
 use zcash_client_backend::data_api::scanning::ScanRange;
 
-#[cfg(feature = "transparent-inputs")]
-use {
-    zcash_client_backend::wallet::TransparentAddressMetadata,
-    zcash_primitives::legacy::TransparentAddress,
-};
-
-#[cfg(feature = "orchard")]
-use {
-    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
-    zcash_client_backend::wallet::WalletOrchardOutput,
-};
-
 use crate::error::Error;
 
 /// A queue of scanning ranges. Contains the start and end heights of each range, along with the
 /// priority of scanning that range.
-pub struct ScanQueue(Vec<(BlockHeight, BlockHeight, ScanPriority)>);
+pub(crate) struct ScanQueue(Vec<(BlockHeight, BlockHeight, ScanPriority)>);
 
 impl ScanQueue {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         ScanQueue(Vec::new())
     }
 
-    pub fn suggest_scan_ranges(&self, min_priority: ScanPriority) -> Vec<ScanRange> {
+    pub(crate) fn suggest_scan_ranges(&self, min_priority: ScanPriority) -> Vec<ScanRange> {
         let mut priorities: Vec<_> = self
             .0
             .iter()
@@ -48,7 +36,7 @@ impl ScanQueue {
             })
             .collect()
     }
-    pub fn insert_queue_entries<'a>(
+    pub(crate) fn insert_queue_entries<'a>(
         &mut self,
         entries: impl Iterator<Item = &'a ScanRange>,
     ) -> Result<(), Error> {
@@ -79,7 +67,7 @@ impl ScanQueue {
         }
         Ok(())
     }
-    pub fn replace_queue_entries(
+    pub(crate) fn replace_queue_entries(
         &mut self,
         query_range: &Range<BlockHeight>,
         entries: impl Iterator<Item = ScanRange>,
@@ -138,7 +126,7 @@ impl ScanQueue {
                 !to_delete_ends.contains(block_range_end)
             });
             let scan_ranges = tree.into_vec();
-            self.insert_queue_entries(scan_ranges.iter());
+            self.insert_queue_entries(scan_ranges.iter())?;
         }
         Ok(())
     }

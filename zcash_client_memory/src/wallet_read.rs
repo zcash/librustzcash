@@ -2,7 +2,7 @@ use nonempty::NonEmpty;
 
 use secrecy::{ExposeSecret, SecretVec};
 
-use std::{collections::HashMap, hash::Hash, num::NonZeroU32};
+use std::{collections::HashMap, num::NonZeroU32};
 use zcash_keys::keys::UnifiedIncomingViewingKey;
 use zip32::fingerprint::SeedFingerprint;
 
@@ -460,9 +460,9 @@ impl WalletRead for MemoryWalletDb {
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
         &self,
-        account: Self::AccountId,
-        max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
+        _account: Self::AccountId,
+        _max_height: BlockHeight,
+    ) -> Result<HashMap<TransparentAddress, zcash_protocol::value::Zatoshis>, Self::Error> {
         todo!()
     }
 

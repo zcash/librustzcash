@@ -14,16 +14,9 @@ use zcash_client_backend::{
 
 use crate::AccountId;
 
-#[cfg(feature = "transparent-inputs")]
-use {
-    zcash_client_backend::wallet::TransparentAddressMetadata,
-    zcash_primitives::legacy::TransparentAddress,
-};
-
 #[cfg(feature = "orchard")]
 use {
-    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
-    zcash_client_backend::wallet::WalletOrchardOutput,
+    zcash_client_backend::wallet::WalletOrchardOutput, zcash_protocol::ShieldedProtocol::Orchard,
 };
 
 use crate::{error::Error, Nullifier};
