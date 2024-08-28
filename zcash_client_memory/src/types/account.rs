@@ -22,9 +22,9 @@ pub struct Account {
     kind: AccountSource,
     viewing_key: ViewingKey,
     birthday: AccountBirthday,
-    purpose: AccountPurpose, // TODO: Remove this. AccountSource should be sufficient.
+    _purpose: AccountPurpose, // TODO: Remove this. AccountSource should be sufficient.
     addresses: BTreeMap<DiversifierIndex, UnifiedAddress>,
-    notes: HashSet<NoteId>,
+    _notes: HashSet<NoteId>,
 }
 
 /// The viewing key that an [`Account`] has available to it.
@@ -40,7 +40,7 @@ pub(crate) enum ViewingKey {
     ///
     /// Accounts that have this kind of viewing key cannot be used in wallet contexts,
     /// because they are unable to maintain an accurate balance.
-    Incoming(Box<UnifiedIncomingViewingKey>),
+    _Incoming(Box<UnifiedIncomingViewingKey>),
 }
 
 impl Account {
@@ -56,9 +56,9 @@ impl Account {
             kind,
             viewing_key,
             birthday,
-            purpose,
+            _purpose: purpose,
             addresses: BTreeMap::new(),
-            notes: HashSet::new(),
+            _notes: HashSet::new(),
         };
         let ua_request = acc
             .viewing_key
@@ -89,7 +89,7 @@ impl Account {
         &self.birthday
     }
 
-    pub(crate) fn addresses(&self) -> &BTreeMap<DiversifierIndex, UnifiedAddress> {
+    pub(crate) fn _addresses(&self) -> &BTreeMap<DiversifierIndex, UnifiedAddress> {
         &self.addresses
     }
 
@@ -101,7 +101,7 @@ impl Account {
     pub(crate) fn kind(&self) -> &AccountSource {
         &self.kind
     }
-    pub(crate) fn viewing_key(&self) -> &ViewingKey {
+    pub(crate) fn _viewing_key(&self) -> &ViewingKey {
         &self.viewing_key
     }
     pub(crate) fn next_available_address(
@@ -150,14 +150,14 @@ impl ViewingKey {
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
         match self {
             ViewingKey::Full(ufvk) => Some(ufvk),
-            ViewingKey::Incoming(_) => None,
+            ViewingKey::_Incoming(_) => None,
         }
     }
 
     fn uivk(&self) -> UnifiedIncomingViewingKey {
         match self {
             ViewingKey::Full(ufvk) => ufvk.as_ref().to_unified_incoming_viewing_key(),
-            ViewingKey::Incoming(uivk) => uivk.as_ref().clone(),
+            ViewingKey::_Incoming(uivk) => uivk.as_ref().clone(),
         }
     }
 }

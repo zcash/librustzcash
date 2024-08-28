@@ -42,19 +42,19 @@ pub(crate) struct ReceivedNote {
     pub(crate) note_id: NoteId,
     pub(crate) txid: TxId,
     // output_index: sapling, action_index: orchard
-    pub(crate) output_index: u32,
+    pub(crate) _output_index: u32,
     pub(crate) account_id: AccountId,
     //sapling: (diversifier, value, rcm) orchard: (diversifier, value, rho, rseed)
-    pub(crate) note: Note,
+    pub(crate) _note: Note,
     pub(crate) nf: Option<Nullifier>,
-    pub(crate) is_change: bool,
-    pub(crate) memo: Memo,
-    pub(crate) commitment_tree_position: Option<Position>,
-    pub(crate) recipient_key_scope: Option<Scope>,
+    pub(crate) _is_change: bool,
+    pub(crate) _memo: Memo,
+    pub(crate) _commitment_tree_position: Option<Position>,
+    pub(crate) _recipient_key_scope: Option<Scope>,
 }
 impl ReceivedNote {
-    pub fn pool(&self) -> PoolType {
-        match self.note {
+    pub fn _pool(&self) -> PoolType {
+        match self._note {
             Note::Sapling { .. } => PoolType::SAPLING,
             #[cfg(feature = "orchard")]
             Note::Orchard { .. } => PoolType::ORCHARD,
@@ -84,14 +84,14 @@ impl ReceivedNote {
             } => Ok(ReceivedNote {
                 note_id: NoteId::new(txid, Sapling, output.output_index() as u16),
                 txid,
-                output_index: output.output_index() as u32,
+                _output_index: output.output_index() as u32,
                 account_id: *receiving_account,
-                note: Note::Sapling(note.clone()),
+                _note: Note::Sapling(note.clone()),
                 nf: None,
-                is_change: true,
-                memo: output.memo().map(|m| Memo::try_from(m).unwrap()).unwrap(),
-                commitment_tree_position: None,
-                recipient_key_scope: Some(Scope::Internal),
+                _is_change: true,
+                _memo: output.memo().map(|m| Memo::try_from(m).unwrap()).unwrap(),
+                _commitment_tree_position: None,
+                _recipient_key_scope: Some(Scope::Internal),
             }),
             #[cfg(feature = "orchard")]
             Recipient::InternalAccount {
@@ -101,14 +101,14 @@ impl ReceivedNote {
             } => Ok(ReceivedNote {
                 note_id: NoteId::new(txid, Orchard, output.output_index() as u16),
                 txid: txid,
-                output_index: output.output_index() as u32,
+                _output_index: output.output_index() as u32,
                 account_id: *receiving_account,
-                note: Note::Orchard(note.clone()),
+                _note: Note::Orchard(note.clone()),
                 nf: None,
-                is_change: true,
-                memo: output.memo().map(|m| Memo::try_from(m).unwrap()).unwrap(),
-                commitment_tree_position: None,
-                recipient_key_scope: Some(Scope::Internal),
+                _is_change: true,
+                _memo: output.memo().map(|m| Memo::try_from(m).unwrap()).unwrap(),
+                _commitment_tree_position: None,
+                _recipient_key_scope: Some(Scope::Internal),
             }),
             _ => Err(Error::Other(
                 "Recipient is not an internal shielded account".to_owned(),
@@ -122,14 +122,14 @@ impl ReceivedNote {
         ReceivedNote {
             note_id,
             txid: *note_id.txid(),
-            output_index: output.index() as u32,
+            _output_index: output.index() as u32,
             account_id: *output.account_id(),
-            note: Note::Sapling(output.note().clone()),
+            _note: Note::Sapling(output.note().clone()),
             nf: output.nf().map(|nf| Nullifier::Sapling(*nf)),
-            is_change: output.is_change(),
-            memo: Memo::Empty,
-            commitment_tree_position: Some(output.note_commitment_tree_position()),
-            recipient_key_scope: output.recipient_key_scope(),
+            _is_change: output.is_change(),
+            _memo: Memo::Empty,
+            _commitment_tree_position: Some(output.note_commitment_tree_position()),
+            _recipient_key_scope: output.recipient_key_scope(),
         }
     }
     #[cfg(feature = "orchard")]
@@ -140,14 +140,14 @@ impl ReceivedNote {
         ReceivedNote {
             note_id,
             txid: *note_id.txid(),
-            output_index: output.index() as u32,
+            _output_index: output.index() as u32,
             account_id: *output.account_id(),
-            note: Note::Orchard(output.note().clone()),
+            _note: Note::Orchard(output.note().clone()),
             nf: output.nf().map(|nf| Nullifier::Orchard(*nf)),
-            is_change: output.is_change(),
-            memo: Memo::Empty,
-            commitment_tree_position: Some(output.note_commitment_tree_position()),
-            recipient_key_scope: output.recipient_key_scope(),
+            _is_change: output.is_change(),
+            _memo: Memo::Empty,
+            _commitment_tree_position: Some(output.note_commitment_tree_position()),
+            _recipient_key_scope: output.recipient_key_scope(),
         }
     }
 }

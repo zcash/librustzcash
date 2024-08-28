@@ -27,7 +27,7 @@ pub(crate) enum Nullifier {
 }
 
 impl Nullifier {
-    pub(crate) fn pool(&self) -> PoolType {
+    pub(crate) fn _pool(&self) -> PoolType {
         match self {
             #[cfg(feature = "orchard")]
             Nullifier::Orchard(_) => PoolType::ORCHARD,

@@ -31,7 +31,7 @@ pub enum Error {
     #[error("Conflicting Tx Locator map entry")]
     ConflictingTxLocator,
     #[error("Io Error: {0}")]
-    IoError(std::io::Error),
+    Io(std::io::Error),
     #[error("Corrupted Data: {0}")]
     CorruptedData(String),
     #[error("An error occurred while processing an account due to a failure in deriving the account's keys: {0}")]
@@ -64,6 +64,6 @@ impl From<memo::Error> for Error {
 
 impl From<std::io::Error> for Error {
     fn from(value: std::io::Error) -> Self {
-        Error::IoError(value)
+        Error::Io(value)
     }
 }

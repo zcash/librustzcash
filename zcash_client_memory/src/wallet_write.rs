@@ -112,13 +112,13 @@ impl WalletWrite for MemoryWalletDb {
 
                 // Mark the Sapling nullifiers of the spent notes as spent in the `sapling_spends` map.
                 for spend in transaction.sapling_spends() {
-                    self.mark_sapling_note_spent(*spend.nf(), txid);
+                    self.mark_sapling_note_spent(*spend.nf(), txid)?;
                 }
 
                 // Mark the Orchard nullifiers of the spent notes as spent in the `orchard_spends` map.
                 #[cfg(feature = "orchard")]
                 for spend in transaction.orchard_spends() {
-                    self.mark_orchard_note_spent(*spend.nf(), txid);
+                    self.mark_orchard_note_spent(*spend.nf(), txid)?;
                 }
 
                 for output in transaction.sapling_outputs() {
@@ -196,14 +196,18 @@ impl WalletWrite for MemoryWalletDb {
                 height: block.height(),
                 hash: block.block_hash(),
                 block_time: block.block_time(),
-                transactions: transactions.keys().cloned().collect(),
-                memos,
+                _transactions: transactions.keys().cloned().collect(),
+                _memos: memos,
                 sapling_commitment_tree_size: Some(block.sapling().final_tree_size()),
-                sapling_output_count: Some(block.sapling().commitments().len().try_into().unwrap()),
+                _sapling_output_count: Some(
+                    block.sapling().commitments().len().try_into().unwrap(),
+                ),
                 #[cfg(feature = "orchard")]
                 orchard_commitment_tree_size: Some(block.orchard().final_tree_size()),
                 #[cfg(feature = "orchard")]
-                orchard_action_count: Some(block.orchard().commitments().len().try_into().unwrap()),
+                _orchard_action_count: Some(
+                    block.orchard().commitments().len().try_into().unwrap(),
+                ),
             };
 
             // Insert transaction metadata into the transaction table
@@ -322,7 +326,7 @@ impl WalletWrite for MemoryWalletDb {
             // Mark sapling notes as spent
             if let Some(bundle) = sent_tx.tx().sapling_bundle() {
                 for spend in bundle.shielded_spends() {
-                    self.mark_sapling_note_spent(*spend.nullifier(), sent_tx.tx().txid());
+                    self.mark_sapling_note_spent(*spend.nullifier(), sent_tx.tx().txid())?;
                 }
             }
             // Mark orchard notes as spent
@@ -330,7 +334,7 @@ impl WalletWrite for MemoryWalletDb {
                 #[cfg(feature = "orchard")]
                 {
                     for action in _bundle.actions() {
-                        self.mark_orchard_note_spent(*action.nullifier(), sent_tx.tx().txid());
+                        self.mark_orchard_note_spent(*action.nullifier(), sent_tx.tx().txid())?;
                     }
                 }
 
@@ -339,7 +343,7 @@ impl WalletWrite for MemoryWalletDb {
             }
             // Mark transparent UTXOs as spent
             #[cfg(feature = "transparent-inputs")]
-            for utxo_outpoint in sent_tx.utxos_spent() {
+            for _utxo_outpoint in sent_tx.utxos_spent() {
                 // self.mark_transparent_utxo_spent(wdb.conn.0, tx_ref, utxo_outpoint)?;
                 todo!()
             }
@@ -348,12 +352,6 @@ impl WalletWrite for MemoryWalletDb {
                 // TODO: insert sent output
 
                 match output.recipient() {
-                    Recipient::InternalAccount { .. } => {
-                        self.received_notes.insert_received_note(
-                            ReceivedNote::from_sent_tx_output(sent_tx.tx().txid(), output)?,
-                        );
-                    }
-                    #[cfg(feature = "orchard")]
                     Recipient::InternalAccount { .. } => {
                         self.received_notes.insert_received_note(
                             ReceivedNote::from_sent_tx_output(sent_tx.tx().txid(), output)?,

@@ -36,7 +36,7 @@ impl ScanQueue {
             })
             .collect()
     }
-    pub(crate) fn insert_queue_entries<'a>(
+    fn _insert_queue_entries<'a>(
         &mut self,
         entries: impl Iterator<Item = &'a ScanRange>,
     ) -> Result<(), Error> {
@@ -67,7 +67,7 @@ impl ScanQueue {
         }
         Ok(())
     }
-    pub(crate) fn replace_queue_entries(
+    pub(crate) fn _replace_queue_entries(
         &mut self,
         query_range: &Range<BlockHeight>,
         entries: impl Iterator<Item = ScanRange>,
@@ -126,7 +126,7 @@ impl ScanQueue {
                 !to_delete_ends.contains(block_range_end)
             });
             let scan_ranges = tree.into_vec();
-            self.insert_queue_entries(scan_ranges.iter())?;
+            self._insert_queue_entries(scan_ranges.iter())?;
         }
         Ok(())
     }

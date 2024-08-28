@@ -14,14 +14,14 @@ pub(crate) struct MemoryWalletBlock {
     pub(crate) hash: BlockHash,
     pub(crate) block_time: u32,
     // Just the transactions that involve an account in this wallet
-    pub(crate) transactions: HashSet<TxId>,
-    pub(crate) memos: HashMap<NoteId, MemoBytes>,
+    pub(crate) _transactions: HashSet<TxId>,
+    pub(crate) _memos: HashMap<NoteId, MemoBytes>,
     pub(crate) sapling_commitment_tree_size: Option<u32>,
-    pub(crate) sapling_output_count: Option<u32>,
+    pub(crate) _sapling_output_count: Option<u32>,
     #[cfg(feature = "orchard")]
     pub(crate) orchard_commitment_tree_size: Option<u32>,
     #[cfg(feature = "orchard")]
-    pub(crate) orchard_action_count: Option<u32>,
+    pub(crate) _orchard_action_count: Option<u32>,
 }
 
 impl PartialEq for MemoryWalletBlock {
