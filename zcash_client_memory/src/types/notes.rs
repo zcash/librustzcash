@@ -1,6 +1,9 @@
 use incrementalmerkletree::Position;
 
-use std::{collections::HashMap, ops::{Deref, DerefMut}};
+use std::{
+    collections::HashMap,
+    ops::{Deref, DerefMut},
+};
 
 use zip32::Scope;
 
@@ -30,6 +33,13 @@ impl ReceievdNoteSpends {
     }
     pub fn insert_spend(&mut self, note_id: NoteId, txid: TxId) -> Option<TxId> {
         self.0.insert(note_id, txid)
+    }
+    pub fn contains(&self, note_id: &NoteId) -> bool {
+        self.0.contains_key(note_id)
+    }
+
+    pub fn get(&self, note_id: &NoteId) -> Option<&TxId> {
+        self.0.get(note_id)
     }
 }
 
@@ -180,9 +190,13 @@ impl ReceivedNoteTable {
             }
         })
     }
-    
+
     pub fn insert_received_note(&mut self, note: ReceivedNote) {
         self.0.push(note);
+    }
+
+    pub fn get_note(&self, note_id: &NoteId) -> Option<&ReceivedNote> {
+        self.0.iter().find(|note| note.note_id == *note_id)
     }
 }
 

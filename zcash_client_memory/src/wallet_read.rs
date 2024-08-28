@@ -213,9 +213,6 @@ impl WalletRead for MemoryWalletDb {
             .block_fully_scanned()?
             .map_or(birthday_height - 1, |m| m.block_height());
 
-        let summary_height =
-            (chain_tip_height + 1).saturating_sub(std::cmp::max(min_confirmations, 1));
-
         let mut account_balances = self
             .accounts
             .iter()
@@ -223,7 +220,12 @@ impl WalletRead for MemoryWalletDb {
             .collect::<HashMap<AccountId, AccountBalance>>();
 
         for note in self.get_received_notes().iter() {
-            // TOOD: Do all the checks if this note is spendable right now
+            // don't count spent notes
+            if self.note_is_spent(note, min_confirmations)? {
+                continue;
+            }
+            // TODO: We need to receiving transaction to be mined
+            // TODO: We require a witness in the shard tree to spend the note
 
             match note.pool() {
                 PoolType::SAPLING => {

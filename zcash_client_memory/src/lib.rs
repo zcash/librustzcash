@@ -15,7 +15,7 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    data_api::{Account as _, AccountSource},
+    data_api::{Account as _, AccountSource, TransactionStatus, WalletRead},
     wallet::{NoteId, WalletSaplingOutput},
 };
 
@@ -53,7 +53,7 @@ pub struct MemoryWalletDb {
     tx_table: TransactionTable,
 
     received_notes: ReceivedNoteTable,
-    receieved_note_spends: ReceievdNoteSpends,
+    received_note_spends: ReceievdNoteSpends,
     nullifiers: NullifierMap,
 
     tx_locator: TxLocatorMap,
@@ -86,7 +86,7 @@ impl MemoryWalletDb {
             received_notes: ReceivedNoteTable::new(),
             nullifiers: NullifierMap::new(),
             tx_locator: TxLocatorMap::new(),
-            receieved_note_spends: ReceievdNoteSpends::new(),
+            received_note_spends: ReceievdNoteSpends::new(),
             scan_queue: ScanQueue::new(),
         }
     }
@@ -108,12 +108,54 @@ impl MemoryWalletDb {
             .map(|v| v.note_id())
             .next()
             .ok_or_else(|| Error::NoteNotFound)?;
-        self.receieved_note_spends.insert_spend(note_id, txid);
+        self.received_note_spends.insert_spend(note_id, txid);
         Ok(())
     }
 
     pub(crate) fn get_account_mut(&mut self, account_id: AccountId) -> Option<&mut Account> {
         self.accounts.get_mut(*account_id as usize)
+    }
+
+    /// Returns true if the note is in the spent notes table and the transaction that spent it is
+    /// in the transaction table and has either been mined or can be mined in the future
+    /// (i.e. it hasn't or will not expire)
+    pub(crate) fn note_is_spent(
+        &self,
+        note: &ReceivedNote,
+        min_confirmations: u32,
+    ) -> Result<bool, Error> {
+        let spend = self.received_note_spends.get(&note.note_id());
+
+        let spent = match spend {
+            Some(txid) => {
+                let spending_tx = self
+                    .tx_table
+                    .get(txid)
+                    .ok_or_else(|| Error::TransactionNotFound(*txid))?;
+                match spending_tx.status() {
+                    TransactionStatus::Mined(_height) => true,
+                    TransactionStatus::TxidNotRecognized => unreachable!(),
+                    TransactionStatus::NotInMainChain => {
+                        // check the expiry
+                        spending_tx.expiry_height().is_none() // no expiry, tx could be mined any time so we consider it spent
+                            // expiry is in the future so it could still be mined
+                            || spending_tx.expiry_height() > self.summary_height(min_confirmations)?
+                    }
+                }
+            }
+            None => false,
+        };
+        Ok(spent)
+    }
+
+    pub fn summary_height(&self, min_confirmations: u32) -> Result<Option<BlockHeight>, Error> {
+        let chain_tip_height = match self.chain_height()? {
+            Some(height) => height,
+            None => return Ok(None),
+        };
+        let summary_height =
+            (chain_tip_height + 1).saturating_sub(std::cmp::max(min_confirmations, 1));
+        Ok(Some(summary_height))
     }
 
     #[cfg(feature = "orchard")]
@@ -130,7 +172,7 @@ impl MemoryWalletDb {
             .map(|v| v.note_id())
             .next()
             .ok_or_else(|| Error::NoteNotFound)?;
-        self.receieved_note_spends.insert_spend(note_id, txid);
+        self.received_note_spends.insert_spend(note_id, txid);
         Ok(())
     }
 
@@ -165,7 +207,7 @@ impl MemoryWalletDb {
         self.received_notes
             .insert_received_note(ReceivedNote::from_wallet_sapling_output(note_id, output));
         if let Some(spent_in) = spent_in {
-            self.receieved_note_spends.insert_spend(note_id, spent_in);
+            self.received_note_spends.insert_spend(note_id, spent_in);
         }
     }
     #[cfg(feature = "orchard")]
@@ -178,7 +220,7 @@ impl MemoryWalletDb {
         self.received_notes
             .insert_received_note(ReceivedNote::from_wallet_orchard_output(note_id, output));
         if let Some(spent_in) = spent_in {
-            self.receieved_note_spends.insert_spend(note_id, spent_in);
+            self.received_note_spends.insert_spend(note_id, spent_in);
         }
     }
     pub(crate) fn insert_sapling_nullifier_map(
