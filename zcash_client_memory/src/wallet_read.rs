@@ -245,8 +245,6 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             }
         }
 
-        // TODO: Deal with scan progress (I dont believe thats actually a hard requirement)
-
         let next_sapling_subtree_index = self
             .sapling_tree
             .store()
@@ -266,7 +264,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             account_balances,
             chain_tip_height,
             fully_scanned_height,
-            None,
+            None, // TODO: Deal with scan progress (I dont believe thats actually a hard requirement)
             next_sapling_subtree_index,
             #[cfg(feature = "orchard")]
             next_orchard_subtree_index,

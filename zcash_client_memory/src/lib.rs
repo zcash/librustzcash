@@ -1,11 +1,16 @@
 use incrementalmerkletree::Address;
 use scanning::ScanQueue;
 
-use shardtree::{store::memory::MemoryShardStore, ShardTree};
+use shardtree::{
+    store::{memory::MemoryShardStore, ShardStore},
+    ShardTree,
+};
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
     hash::Hash,
+    num::NonZeroU32,
     ops::{Deref, RangeInclusive},
+    usize,
 };
 use subtle::ConditionallySelectable;
 use zcash_protocol::consensus;
@@ -326,5 +331,40 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
     #[cfg(feature = "orchard")]
     pub(crate) fn orchard_tip_shard_end_height(&self) -> Option<BlockHeight> {
         self.orchard_tree_shard_end_heights.values().max().copied()
+    }
+
+    pub(crate) fn get_sapling_max_checkpointed_height(
+        &self,
+        chain_tip_height: BlockHeight,
+        min_confirmations: NonZeroU32,
+    ) -> Result<Option<BlockHeight>, Error> {
+        let max_checkpoint_height =
+            u32::from(chain_tip_height).saturating_sub(u32::from(min_confirmations) - 1);
+        // scan backward and find the first checkpoint that matches a blockheight prior to max_checkpoint_height
+        for height in max_checkpoint_height..0 {
+            let height = BlockHeight::from_u32(height);
+            if let Some(_) = self.sapling_tree.store().get_checkpoint(&height)? {
+                return Ok(Some(height));
+            }
+        }
+        Ok(None)
+    }
+
+    #[cfg(feature = "orchard")]
+    pub(crate) fn get_orchard_max_checkpointed_height(
+        &self,
+        chain_tip_height: BlockHeight,
+        min_confirmations: NonZeroU32,
+    ) -> Result<Option<BlockHeight>, Error> {
+        let max_checkpoint_height =
+            u32::from(chain_tip_height).saturating_sub(u32::from(min_confirmations) - 1);
+        // scan backward and find the first checkpoint that matches a blockheight prior to max_checkpoint_height
+        for height in max_checkpoint_height..0 {
+            let height = BlockHeight::from_u32(height);
+            if let Some(_) = self.sapling_tree.store().get_checkpoint(&height)? {
+                return Ok(Some(height));
+            }
+        }
+        Ok(None)
     }
 }
