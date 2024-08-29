@@ -251,7 +251,20 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                         }
                     };
                 }
-                _ => todo!(),
+                PoolType::ORCHARD => {
+                    let account_id = note.account_id();
+                    match account_balances.entry(account_id) {
+                        Entry::Occupied(mut entry) => {
+                            entry.get_mut().with_orchard_balance_mut(|b| {
+                                b.add_spendable_value(note.note.value())
+                            })?;
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(AccountBalance::ZERO);
+                        }
+                    };
+                },
+                _ => unimplemented!("Unknown pool type")
             }
         }
 
