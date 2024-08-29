@@ -45,6 +45,12 @@ impl WalletCommitmentTrees for MemoryWalletDb {
             Ok::<_, ShardTreeError<Self::Error>>(())
         })?;
 
+        // store the end block heights for each shard as well
+        for (root, i) in roots.iter().zip(0u64..) {
+            let root_addr = Address::from_parts(SAPLING_SHARD_HEIGHT.into(), start_index + i);
+            self.sapling_tree_shard_end_heights.insert(root_addr, root.subtree_end_height());
+        }
+
         Ok(())
     }
 

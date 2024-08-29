@@ -1,8 +1,9 @@
+use incrementalmerkletree::Address;
 use scanning::ScanQueue;
 
 use shardtree::{store::memory::MemoryShardStore, ShardTree};
 use std::{
-    collections::{hash_map::Entry, BTreeMap},
+    collections::{hash_map::Entry, BTreeMap, HashMap},
     hash::Hash,
     ops::Deref,
 };
@@ -58,7 +59,6 @@ pub struct MemoryWalletDb {
     network: Network,
     accounts: Vec<Account>,
     blocks: BTreeMap<BlockHeight, MemoryWalletBlock>,
-
     tx_table: TransactionTable,
 
     received_notes: ReceivedNoteTable,
@@ -74,6 +74,9 @@ pub struct MemoryWalletDb {
         { SAPLING_SHARD_HEIGHT * 2 },
         SAPLING_SHARD_HEIGHT,
     >,
+    /// Stores the block height corresponding to the last note commitment in a shard
+    sapling_tree_shard_end_heights: BTreeMap<Address, BlockHeight>,
+
     #[cfg(feature = "orchard")]
     orchard_tree: ShardTree<
         MemoryShardStore<orchard::tree::MerkleHashOrchard, BlockHeight>,
@@ -89,6 +92,7 @@ impl MemoryWalletDb {
             accounts: Vec::new(),
             blocks: BTreeMap::new(),
             sapling_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
+            sapling_tree_shard_end_heights: BTreeMap::new(),
             #[cfg(feature = "orchard")]
             orchard_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
             tx_table: TransactionTable::new(),
