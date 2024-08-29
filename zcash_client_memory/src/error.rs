@@ -49,6 +49,8 @@ pub enum Error {
     BalanceError(#[from] zcash_protocol::value::BalanceError),
     #[error("Other error: {0}")]
     Other(String),
+    #[error("Infallible")]
+    Infallible(#[from] Infallible),
 }
 
 impl From<DerivationError> for Error {

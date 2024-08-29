@@ -250,8 +250,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         let next_sapling_subtree_index = self
             .sapling_tree
             .store()
-            .last_shard()
-            .unwrap()
+            .last_shard()?
             .map(|s| s.root_addr().index())
             .unwrap_or(0);
 
@@ -259,8 +258,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         let next_orchard_subtree_index = self
             .orchard_tree
             .store()
-            .last_shard()
-            .unwrap()
+            .last_shard()?
             .map(|s| s.root_addr().index())
             .unwrap_or(0);
 
