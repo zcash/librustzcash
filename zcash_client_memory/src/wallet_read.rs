@@ -404,6 +404,8 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         }
     }
 
+    /// Gets the height to which the database must be truncated if any truncation that would remove a
+    /// number of blocks greater than the pruning height is attempted
     fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
         todo!()
     }
@@ -448,16 +450,16 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                 //   consensus branch ID is not used there), and then either use its non-zero expiry
                 //   height or return an error.
                 if let TransactionStatus::Mined(height) = status {
-                    return Ok(Some(
-                        Transaction::read(raw, BranchId::for_height(&self.params, height))
-                            .map(|t| (height, t)),
-                    ));
+                    return Ok(Transaction::read(
+                        raw,
+                        BranchId::for_height(&self.params, height),
+                    )?);
                 }
                 if let Some(height) = expiry_height.filter(|h| h > &BlockHeight::from(0)) {
-                    return Ok(Some(
-                        Transaction::read(raw, BranchId::for_height(&self.params, height))
-                            .map(|t| (height, t)),
-                    ));
+                    return Ok(Transaction::read(
+                        raw,
+                        BranchId::for_height(&self.params, height),
+                    )?);
                 }
 
                 let tx_data = Transaction::read(raw, BranchId::Sprout)
@@ -466,28 +468,25 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
 
                 let expiry_height = tx_data.expiry_height();
                 if expiry_height > BlockHeight::from(0) {
-                    Ok(Some(
-                        TransactionData::from_parts(
-                            tx_data.version(),
-                            BranchId::for_height(&self.params, expiry_height),
-                            tx_data.lock_time(),
-                            expiry_height,
-                            tx_data.transparent_bundle().cloned(),
-                            tx_data.sprout_bundle().cloned(),
-                            tx_data.sapling_bundle().cloned(),
-                            tx_data.orchard_bundle().cloned(),
-                        )
-                        .freeze()
-                        .map(|t| (expiry_height, t)),
-                    ))
+                    Ok(TransactionData::from_parts(
+                        tx_data.version(),
+                        BranchId::for_height(&self.params, expiry_height),
+                        tx_data.lock_time(),
+                        expiry_height,
+                        tx_data.transparent_bundle().cloned(),
+                        tx_data.sprout_bundle().cloned(),
+                        tx_data.sapling_bundle().cloned(),
+                        tx_data.orchard_bundle().cloned(),
+                    )
+                    .freeze()?)
                 } else {
                     Err(Self::Error::CorruptedData(
                     "Consensus branch ID not known, cannot parse this transaction until it is mined"
                         .to_string(),
                 ))
                 }
-            });
-        todo!()
+            })
+            .transpose()
     }
 
     fn get_sapling_nullifiers(
