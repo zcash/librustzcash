@@ -127,10 +127,13 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
         &self.received_notes
     }
 
-    // TODO: Update this if we switch from using a vec to store received notes to 
+    // TODO: Update this if we switch from using a vec to store received notes to
     // someething with more efficient lookups
     pub(crate) fn get_received_note(&self, note_id: NoteId) -> Option<&ReceivedNote> {
-        self.received_notes.0.iter().find(|v| v.note_id() == note_id)
+        self.received_notes
+            .0
+            .iter()
+            .find(|v| v.note_id() == note_id)
     }
 
     pub(crate) fn mark_sapling_note_spent(

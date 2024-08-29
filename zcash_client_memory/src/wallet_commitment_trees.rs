@@ -30,6 +30,7 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for MemoryWalletDb<P> {
         ) -> Result<A, E>,
         E: From<ShardTreeError<Infallible>>,
     {
+        tracing::debug!("with_sapling_tree_mut");
         callback(&mut self.sapling_tree)
     }
 
@@ -38,6 +39,7 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for MemoryWalletDb<P> {
         start_index: u64,
         roots: &[CommitmentTreeRoot<sapling::Node>],
     ) -> Result<(), ShardTreeError<Self::Error>> {
+        tracing::debug!("put_sapling_subtree_roots");
         self.with_sapling_tree_mut(|t| {
             for (root, i) in roots.iter().zip(0u64..) {
                 let root_addr = Address::from_parts(SAPLING_SHARD_HEIGHT.into(), start_index + i);
@@ -71,6 +73,7 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for MemoryWalletDb<P> {
         ) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>,
     {
+        tracing::debug!("with_orchard_tree_mut");
         callback(&mut self.orchard_tree)
     }
 
@@ -81,6 +84,7 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for MemoryWalletDb<P> {
         start_index: u64,
         roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
     ) -> Result<(), ShardTreeError<Self::Error>> {
+        tracing::debug!("put_orchard_subtree_roots");
         self.with_orchard_tree_mut(|t| {
             for (root, i) in roots.iter().zip(0u64..) {
                 let root_addr = Address::from_parts(ORCHARD_SHARD_HEIGHT.into(), start_index + i);

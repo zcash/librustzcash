@@ -46,6 +46,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         seed: &SecretVec<u8>,
         birthday: &AccountBirthday,
     ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
+        tracing::debug!("create_account");
         let seed_fingerprint = SeedFingerprint::from_seed(seed.expose_secret())
             .ok_or_else(|| Self::Error::InvalidSeedLength)?;
         let account_index = self
@@ -80,6 +81,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         account: Self::AccountId,
         request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
+        tracing::debug!("get_next_available_address");
         self.get_account_mut(account)
             .map(|account| account.next_available_address(request))
             .transpose()
@@ -87,6 +89,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
     }
 
     fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error> {
+        tracing::debug!("update_chain_tip");
         // If the caller provided a chain tip that is before Sapling activation, do nothing.
         let sapling_activation = match self.params.activation_height(NetworkUpgrade::Sapling) {
             Some(h) if h <= tip_height => h,
@@ -248,6 +251,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         from_state: &ChainState,
         blocks: Vec<ScannedBlock<Self::AccountId>>,
     ) -> Result<(), Self::Error> {
+        tracing::debug!("put_blocks");
         // TODO:
         // - Make sure blocks are coming in order.
         // - Make sure the first block in the sequence is tip + 1?
@@ -421,6 +425,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         &mut self,
         _output: &WalletTransparentOutput,
     ) -> Result<Self::UtxoRef, Self::Error> {
+        tracing::debug!("put_received_transparent_utxo");
         Ok(0)
     }
 
@@ -428,6 +433,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         &mut self,
         d_tx: DecryptedTransaction<Self::AccountId>,
     ) -> Result<(), Self::Error> {
+        tracing::debug!("store_decrypted_tx");
         self.tx_table.put_tx_data(d_tx.tx(), None, None);
         if let Some(height) = d_tx.mined_height() {
             self.set_transaction_status(d_tx.tx().txid(), TransactionStatus::Mined(height))?
@@ -451,6 +457,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         account_index: zip32::AccountId,
         birthday: &AccountBirthday,
     ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error> {
+        tracing::debug!("import_account_hd");
         let seed_fingerprint = SeedFingerprint::from_seed(seed.expose_secret())
             .ok_or_else(|| "Seed must be between 32 and 252 bytes in length.".to_owned())
             .unwrap();
@@ -481,6 +488,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         birthday: &AccountBirthday,
         purpose: AccountPurpose,
     ) -> Result<Self::Account, Self::Error> {
+        tracing::debug!("import_account_ufvk");
         let account = Account::new(
             AccountId(self.accounts.len() as u32),
             AccountSource::Imported { purpose },
@@ -496,6 +504,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         &mut self,
         transactions: &[SentTransaction<Self::AccountId>],
     ) -> Result<(), Self::Error> {
+        tracing::debug!("store_transactions_to_be_sent");
         for sent_tx in transactions {
             self.tx_table.put_tx_data(
                 sent_tx.tx(),
@@ -556,6 +565,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         txid: TxId,
         status: TransactionStatus,
     ) -> Result<(), Self::Error> {
+        tracing::debug!("set_transaction_status");
         self.tx_table.set_transaction_status(&txid, status)
     }
 }
