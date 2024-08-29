@@ -436,6 +436,12 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
         Ok(())
     }
 
+    /// Truncates the database to the given height.
+    ///
+    /// If the requested height is greater than or equal to the height of the last scanned
+    /// block, this function does nothing.
+    ///
+    /// This should only be executed inside a transactional context.
     fn truncate_to_height(&mut self, _block_height: BlockHeight) -> Result<(), Self::Error> {
         todo!()
     }
