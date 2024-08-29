@@ -336,7 +336,6 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                     self.insert_received_orchard_note(note_id, output, spent_in)
                 }
 
-                last_scanned_height = Some(block.height());
                 transactions.insert(txid, transaction.clone());
             }
 
@@ -370,6 +369,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
 
             // Insert the block into the block map
             self.blocks.insert(block.height(), memory_block);
+            last_scanned_height = Some(block.height());
 
             let block_commitments = block.into_commitments();
             sapling_commitments.extend(block_commitments.sapling.into_iter().map(Some));
