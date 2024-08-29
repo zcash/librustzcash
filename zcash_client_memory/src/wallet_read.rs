@@ -443,8 +443,8 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             .collect())
     }
 
-    fn get_memo(&self, _id_note: NoteId) -> Result<Option<Memo>, Self::Error> {
-        todo!()
+    fn get_memo(&self, id_note: NoteId) -> Result<Option<Memo>, Self::Error> {
+        Ok(self.get_received_note(id_note).map(|note| note.memo.clone()))
     }
 
     fn get_transaction(&self, txid: TxId) -> Result<Option<Transaction>, Self::Error> {
