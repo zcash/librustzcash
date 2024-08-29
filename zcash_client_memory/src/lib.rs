@@ -5,7 +5,7 @@ use shardtree::{store::memory::MemoryShardStore, ShardTree};
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
     hash::Hash,
-    ops::Deref,
+    ops::{Deref, RangeInclusive},
 };
 use subtle::ConditionallySelectable;
 use zip32::fingerprint::SeedFingerprint;
@@ -294,5 +294,19 @@ impl MemoryWalletDb {
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn block_height_extrema(&self) -> Option<RangeInclusive<BlockHeight>> {
+        let (min, max) = self.blocks.keys().fold((None, None), |(min, max), height| {
+            (
+                Some(min.map_or(height, |min| std::cmp::min(min, height))),
+                Some(max.map_or(height, |max| std::cmp::max(max, height))),
+            )
+        });
+        if let (Some(min), Some(max)) = (min, max) {
+            Some(*min..=*max)
+        } else {
+            None
+        }
     }
 }
