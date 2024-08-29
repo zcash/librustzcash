@@ -43,7 +43,7 @@ use {
 use super::{Account, AccountId, MemoryWalletDb};
 use crate::{error::Error, MemoryWalletBlock};
 
-impl WalletRead for MemoryWalletDb {
+impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     type Error = Error;
     type AccountId = AccountId;
     type Account = Account;
@@ -91,7 +91,7 @@ impl WalletRead for MemoryWalletDb {
             } = account.source()
             {
                 seed_matches_derived_account(
-                    &self.network,
+                    &self.params,
                     seed,
                     &seed_fingerprint,
                     account_index,
@@ -130,7 +130,7 @@ impl WalletRead for MemoryWalletDb {
                 has_derived = true;
 
                 if seed_matches_derived_account(
-                    &self.network,
+                    &self.params,
                     seed,
                     &seed_fingerprint,
                     account_index,
@@ -254,6 +254,8 @@ impl WalletRead for MemoryWalletDb {
             .unwrap()
             .map(|s| s.root_addr().index())
             .unwrap_or(0);
+
+        #[cfg(feature = "orchard")]
         let next_orchard_subtree_index = self
             .orchard_tree
             .store()
@@ -432,13 +434,13 @@ impl WalletRead for MemoryWalletDb {
                 //   height or return an error.
                 if let TransactionStatus::Mined(height) = status {
                     return Ok(Some(
-                        Transaction::read(raw, BranchId::for_height(&self.network, height))
+                        Transaction::read(raw, BranchId::for_height(&self.params, height))
                             .map(|t| (height, t)),
                     ));
                 }
                 if let Some(height) = expiry_height.filter(|h| h > &BlockHeight::from(0)) {
                     return Ok(Some(
-                        Transaction::read(raw, BranchId::for_height(&self.network, height))
+                        Transaction::read(raw, BranchId::for_height(&self.params, height))
                             .map(|t| (height, t)),
                     ));
                 }
@@ -452,7 +454,7 @@ impl WalletRead for MemoryWalletDb {
                     Ok(Some(
                         TransactionData::from_parts(
                             tx_data.version(),
-                            BranchId::for_height(&self.network, expiry_height),
+                            BranchId::for_height(&self.params, expiry_height),
                             tx_data.lock_time(),
                             expiry_height,
                             tx_data.transparent_bundle().cloned(),

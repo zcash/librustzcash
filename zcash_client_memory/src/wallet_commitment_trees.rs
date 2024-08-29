@@ -2,6 +2,7 @@ use incrementalmerkletree::Address;
 
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 use std::convert::Infallible;
+use zcash_protocol::consensus;
 
 use zcash_primitives::consensus::BlockHeight;
 
@@ -14,7 +15,7 @@ use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 use super::MemoryWalletDb;
 
-impl WalletCommitmentTrees for MemoryWalletDb {
+impl<P: consensus::Parameters> WalletCommitmentTrees for MemoryWalletDb<P> {
     type Error = Infallible;
     type SaplingShardStore<'a> = MemoryShardStore<sapling::Node, BlockHeight>;
 

@@ -1,8 +1,9 @@
 use zcash_client_backend::data_api::InputSource;
+use zcash_protocol::consensus;
 
 use crate::{AccountId, MemoryWalletDb, NoteId};
 
-impl InputSource for MemoryWalletDb {
+impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
     type Error = crate::error::Error;
     type AccountId = AccountId;
     type NoteRef = NoteId;

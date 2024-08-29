@@ -67,7 +67,7 @@ impl ScanQueue {
         }
         Ok(())
     }
-    pub(crate) fn _replace_queue_entries(
+    pub(crate) fn replace_queue_entries(
         &mut self,
         query_range: &Range<BlockHeight>,
         entries: impl Iterator<Item = ScanRange>,

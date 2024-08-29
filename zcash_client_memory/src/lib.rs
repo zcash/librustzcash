@@ -8,6 +8,7 @@ use std::{
     ops::{Deref, RangeInclusive},
 };
 use subtle::ConditionallySelectable;
+use zcash_protocol::consensus;
 use zip32::fingerprint::SeedFingerprint;
 
 use zcash_primitives::{
@@ -34,6 +35,14 @@ pub mod wallet_read;
 pub mod wallet_write;
 pub(crate) use types::*;
 
+/// The maximum number of blocks the wallet is allowed to rewind. This is
+/// consistent with the bound in zcashd, and allows block data deeper than
+/// this delta from the chain tip to be pruned.
+pub(crate) const PRUNING_DEPTH: u32 = 100;
+
+/// The number of blocks to verify ahead when the chain tip is updated.
+pub(crate) const VERIFY_LOOKAHEAD: u32 = 10;
+
 /// The ID type for accounts.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
 pub struct AccountId(u32);
@@ -55,8 +64,8 @@ impl ConditionallySelectable for AccountId {
 }
 
 /// The main in-memory wallet database. Implements all the traits needed to be used as a backend.
-pub struct MemoryWalletDb {
-    network: Network,
+pub struct MemoryWalletDb<P: consensus::Parameters> {
+    params: P,
     accounts: Vec<Account>,
     blocks: BTreeMap<BlockHeight, MemoryWalletBlock>,
     tx_table: TransactionTable,
@@ -88,10 +97,10 @@ pub struct MemoryWalletDb {
     orchard_tree_shard_end_heights: BTreeMap<Address, BlockHeight>,
 }
 
-impl MemoryWalletDb {
-    pub fn new(network: Network, max_checkpoints: usize) -> Self {
+impl<P: consensus::Parameters> MemoryWalletDb<P> {
+    pub fn new(network: Network, params: P, max_checkpoints: usize) -> Self {
         Self {
-            network,
+            params,
             accounts: Vec::new(),
             blocks: BTreeMap::new(),
             sapling_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
@@ -308,5 +317,14 @@ impl MemoryWalletDb {
         } else {
             None
         }
+    }
+
+    pub(crate) fn sapling_tip_shard_end_height(&self) -> Option<BlockHeight> {
+        self.sapling_tree_shard_end_heights.values().max().copied()
+    }
+
+    #[cfg(feature = "orchard")]
+    pub(crate) fn orchard_tip_shard_end_height(&self) -> Option<BlockHeight> {
+        self.orchard_tree_shard_end_heights.values().max().copied()
     }
 }
