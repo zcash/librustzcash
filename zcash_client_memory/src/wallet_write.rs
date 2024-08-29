@@ -1,7 +1,6 @@
 use incrementalmerkletree::{Marking, Position, Retention};
 
 use secrecy::{ExposeSecret, SecretVec};
-use shardtree::{error::ShardTreeError, store::ShardStore as _};
 
 use std::{collections::HashMap, ops::Range};
 

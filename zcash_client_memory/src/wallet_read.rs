@@ -1,7 +1,7 @@
 use nonempty::NonEmpty;
 
 use secrecy::{ExposeSecret, SecretVec};
-use shardtree::{error::ShardTreeError, store::ShardStore as _};
+use shardtree::store::ShardStore as _;
 
 use std::{
     collections::{hash_map::Entry, HashMap},

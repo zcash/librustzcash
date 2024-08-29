@@ -6,7 +6,7 @@ use shardtree::{
     ShardTree,
 };
 use std::{
-    collections::{hash_map::Entry, BTreeMap, HashMap},
+    collections::{hash_map::Entry, BTreeMap},
     hash::Hash,
     num::NonZeroU32,
     ops::{Deref, RangeInclusive},
@@ -17,7 +17,7 @@ use zcash_protocol::consensus;
 use zip32::fingerprint::SeedFingerprint;
 
 use zcash_primitives::{
-    consensus::{BlockHeight, Network},
+    consensus::BlockHeight,
     transaction::TxId,
 };
 
