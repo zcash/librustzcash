@@ -380,9 +380,28 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
 
     fn get_target_and_anchor_heights(
         &self,
-        _min_confirmations: NonZeroU32,
+        min_confirmations: NonZeroU32,
     ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
-        todo!()
+        if let Some(chain_tip_height) = self.chain_height()? {
+            let sapling_anchor_height =
+                self.get_sapling_max_checkpointed_height(chain_tip_height, min_confirmations)?;
+
+            #[cfg(feature = "orchard")]
+            let orchard_anchor_height =
+                self.get_orchard_max_checkpointed_height(chain_tip_height, min_confirmations)?;
+            #[cfg(not(feature = "orchard"))]
+            let orchard_anchor_height: Option<BlockHeight> = None;
+
+            let anchor_height = sapling_anchor_height
+                .zip(orchard_anchor_height)
+                .map(|(s, o)| std::cmp::min(s, o))
+                .or(sapling_anchor_height)
+                .or(orchard_anchor_height);
+
+            Ok(anchor_height.map(|h| (chain_tip_height + 1, h)))
+        } else {
+            Ok(None)
+        }
     }
 
     fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
