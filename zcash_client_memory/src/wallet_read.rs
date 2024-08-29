@@ -49,6 +49,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     type Account = Account;
 
     fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error> {
+        tracing::debug!("get_account_ids");
         Ok(self.accounts.iter().map(|a| a.id()).collect())
     }
 
@@ -56,6 +57,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         &self,
         account_id: Self::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error> {
+        tracing::debug!("get_account: {:?}", account_id);
         Ok(self.accounts.get(*account_id as usize).cloned())
     }
 
@@ -64,6 +66,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         seed: &SeedFingerprint,
         account_id: zip32::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error> {
+        tracing::debug!("get_derived_account: {:?}, {:?}", seed, account_id);
         Ok(self.accounts.iter().find_map(|acct| match acct.kind() {
             AccountSource::Derived {
                 seed_fingerprint,
@@ -84,6 +87,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         account_id: Self::AccountId,
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error> {
+        tracing::debug!("validate_seed: {:?}", account_id);
         if let Some(account) = self.get_account(account_id)? {
             if let AccountSource::Derived {
                 seed_fingerprint,
@@ -110,6 +114,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         &self,
         seed: &SecretVec<u8>,
     ) -> Result<SeedRelevance<Self::AccountId>, Self::Error> {
+        tracing::debug!("seed_relevance_to_derived_accounts");
         let mut has_accounts = false;
         let mut has_derived = false;
         let mut relevant_account_ids = vec![];
@@ -159,6 +164,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         &self,
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<Self::Account>, Self::Error> {
+        tracing::debug!("get_account_for_ufvk");
         let ufvk_req =
             UnifiedAddressRequest::all().expect("At least one protocol should be enabled");
         Ok(self.accounts.iter().find_map(|acct| {
@@ -176,6 +182,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         &self,
         account: Self::AccountId,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
+        tracing::debug!("get_current_address: {:?}", account);
         Ok(self
             .get_account(account)?
             .and_then(|account| Account::current_address(&account))
@@ -183,6 +190,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     }
 
     fn get_account_birthday(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
+        tracing::debug!("get_account_birthday: {:?}", account);
         self.accounts
             .get(*account as usize)
             .map(|account| account.birthday().height())
@@ -190,6 +198,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     }
 
     fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        tracing::debug!("get_wallet_birthday");
         Ok(self
             .accounts
             .iter()
@@ -201,6 +210,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         &self,
         min_confirmations: u32,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
+        tracing::debug!("get_wallet_summary");
         let chain_tip_height = match self.chain_height()? {
             Some(height) => height,
             None => return Ok(None),
@@ -273,6 +283,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     }
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        tracing::debug!("chain_height");
         Ok(self
             .scan_queue
             .iter()
@@ -281,6 +292,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
+        tracing::debug!("get_block_hash: {:?}", block_height);
         Ok(self.blocks.iter().find_map(|b| {
             if b.0 == &block_height {
                 Some(b.1.hash)
@@ -291,6 +303,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     }
 
     fn block_metadata(&self, height: BlockHeight) -> Result<Option<BlockMetadata>, Self::Error> {
+        tracing::debug!("block_metadata: {:?}", height);
         Ok(self.blocks.get(&height).map(|block| {
             let MemoryWalletBlock {
                 height,
@@ -312,6 +325,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     }
 
     fn block_fully_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
+        tracing::debug!("block_fully_scanned");
         if let Some(birthday_height) = self.get_wallet_birthday()? {
             // We assume that the only way we get a contiguous range of block heights in the `blocks` table
             // starting with the birthday block, is if all scanning operations have been performed on those
@@ -359,6 +373,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     }
 
     fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
+        tracing::debug!("get_max_height_hash");
         Ok(self
             .blocks
             .last_key_value()
@@ -366,6 +381,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     }
 
     fn block_max_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
+        tracing::debug!("block_max_scanned");
         Ok(self
             .blocks
             .last_key_value()
@@ -375,6 +391,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     }
 
     fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error> {
+        tracing::debug!("suggest_scan_ranges");
         Ok(self.scan_queue.suggest_scan_ranges(ScanPriority::Historic))
     }
 
@@ -426,6 +443,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+        tracing::debug!("get_tx_height: {:?}", txid);
         if let Some(TransactionStatus::Mined(height)) = self.tx_table.tx_status(&txid) {
             Ok(Some(height))
         } else {
@@ -436,6 +454,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     fn get_unified_full_viewing_keys(
         &self,
     ) -> Result<HashMap<Self::AccountId, UnifiedFullViewingKey>, Self::Error> {
+        tracing::debug!("get_unified_full_viewing_keys");
         Ok(self
             .accounts
             .iter()
@@ -444,10 +463,14 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     }
 
     fn get_memo(&self, id_note: NoteId) -> Result<Option<Memo>, Self::Error> {
-        Ok(self.get_received_note(id_note).map(|note| note.memo.clone()))
+        tracing::debug!("get_memo: {:?}", id_note);
+        Ok(self
+            .get_received_note(id_note)
+            .map(|note| note.memo.clone()))
     }
 
     fn get_transaction(&self, txid: TxId) -> Result<Option<Transaction>, Self::Error> {
+        tracing::debug!("get_transaction: {:?}", txid);
         let _raw = self.tx_table.get_tx_raw(&txid);
         let _status = self.tx_table.tx_status(&txid);
         let _expiry_height = self.tx_table.expiry_height(&txid);
@@ -508,6 +531,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         &self,
         query: NullifierQuery,
     ) -> Result<Vec<(Self::AccountId, sapling::Nullifier)>, Self::Error> {
+        tracing::debug!("get_sapling_nullifiers");
         let nullifiers = self.received_notes.get_sapling_nullifiers();
         Ok(match query {
             NullifierQuery::All => nullifiers
@@ -534,6 +558,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         &self,
         query: NullifierQuery,
     ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error> {
+        tracing::debug!("get_orchard_nullifiers");
         let nullifiers = self.received_notes.get_orchard_nullifiers();
         Ok(match query {
             NullifierQuery::All => nullifiers
@@ -560,6 +585,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         &self,
         _account: Self::AccountId,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+        tracing::debug!("get_transparent_receivers");
         Ok(HashMap::new())
     }
 
@@ -569,10 +595,12 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         _account: Self::AccountId,
         _max_height: BlockHeight,
     ) -> Result<HashMap<TransparentAddress, zcash_protocol::value::Zatoshis>, Self::Error> {
+        tracing::debug!("get_transparent_balances");
         todo!()
     }
 
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error> {
+        tracing::debug!("transaction_data_requests");
         todo!()
     }
 }
