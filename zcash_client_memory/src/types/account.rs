@@ -17,6 +17,7 @@ use crate::error::Error;
 
 /// An account stored in a `zcash_client_sqlite` database.
 #[derive(Debug, Clone)]
+
 pub struct Account {
     account_id: AccountId,
     kind: AccountSource,
@@ -125,6 +126,10 @@ impl Account {
             }
             None => Ok(None),
         }
+    }
+
+    pub(crate) fn account_id(&self) -> AccountId {
+        self.account_id
     }
 }
 

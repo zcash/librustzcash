@@ -45,8 +45,12 @@ pub enum Error {
     InvalidScanRange(BlockHeight, BlockHeight, String),
     #[error("ShardTree error: {0}")]
     ShardTree(ShardTreeError<Infallible>),
+    #[error("Balance error: {0}")]
+    BalanceError(#[from] zcash_protocol::value::BalanceError),
     #[error("Other error: {0}")]
     Other(String),
+    #[error("Infallible")]
+    Infallible(#[from] Infallible),
 }
 
 impl From<DerivationError> for Error {

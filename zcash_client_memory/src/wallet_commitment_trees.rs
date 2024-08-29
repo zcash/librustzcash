@@ -2,6 +2,7 @@ use incrementalmerkletree::Address;
 
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 use std::convert::Infallible;
+use zcash_protocol::consensus;
 
 use zcash_primitives::consensus::BlockHeight;
 
@@ -14,7 +15,7 @@ use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 use super::MemoryWalletDb;
 
-impl WalletCommitmentTrees for MemoryWalletDb {
+impl<P: consensus::Parameters> WalletCommitmentTrees for MemoryWalletDb<P> {
     type Error = Infallible;
     type SaplingShardStore<'a> = MemoryShardStore<sapling::Node, BlockHeight>;
 
@@ -29,6 +30,7 @@ impl WalletCommitmentTrees for MemoryWalletDb {
         ) -> Result<A, E>,
         E: From<ShardTreeError<Infallible>>,
     {
+        tracing::debug!("with_sapling_tree_mut");
         callback(&mut self.sapling_tree)
     }
 
@@ -37,6 +39,7 @@ impl WalletCommitmentTrees for MemoryWalletDb {
         start_index: u64,
         roots: &[CommitmentTreeRoot<sapling::Node>],
     ) -> Result<(), ShardTreeError<Self::Error>> {
+        tracing::debug!("put_sapling_subtree_roots");
         self.with_sapling_tree_mut(|t| {
             for (root, i) in roots.iter().zip(0u64..) {
                 let root_addr = Address::from_parts(SAPLING_SHARD_HEIGHT.into(), start_index + i);
@@ -44,6 +47,13 @@ impl WalletCommitmentTrees for MemoryWalletDb {
             }
             Ok::<_, ShardTreeError<Self::Error>>(())
         })?;
+
+        // store the end block heights for each shard as well
+        for (root, i) in roots.iter().zip(0u64..) {
+            let root_addr = Address::from_parts(SAPLING_SHARD_HEIGHT.into(), start_index + i);
+            self.sapling_tree_shard_end_heights
+                .insert(root_addr, root.subtree_end_height());
+        }
 
         Ok(())
     }
@@ -63,6 +73,7 @@ impl WalletCommitmentTrees for MemoryWalletDb {
         ) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>,
     {
+        tracing::debug!("with_orchard_tree_mut");
         callback(&mut self.orchard_tree)
     }
 
@@ -73,6 +84,7 @@ impl WalletCommitmentTrees for MemoryWalletDb {
         start_index: u64,
         roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
     ) -> Result<(), ShardTreeError<Self::Error>> {
+        tracing::debug!("put_orchard_subtree_roots");
         self.with_orchard_tree_mut(|t| {
             for (root, i) in roots.iter().zip(0u64..) {
                 let root_addr = Address::from_parts(ORCHARD_SHARD_HEIGHT.into(), start_index + i);
@@ -80,6 +92,13 @@ impl WalletCommitmentTrees for MemoryWalletDb {
             }
             Ok::<_, ShardTreeError<Self::Error>>(())
         })?;
+
+        // store the end block heights for each shard as well
+        for (root, i) in roots.iter().zip(0u64..) {
+            let root_addr = Address::from_parts(SAPLING_SHARD_HEIGHT.into(), start_index + i);
+            self.orchard_tree_shard_end_heights
+                .insert(root_addr, root.subtree_end_height());
+        }
 
         Ok(())
     }
