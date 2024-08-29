@@ -83,6 +83,9 @@ pub struct MemoryWalletDb {
         { ORCHARD_SHARD_HEIGHT * 2 },
         ORCHARD_SHARD_HEIGHT,
     >,
+    #[cfg(feature = "orchard")]
+    /// Stores the block height corresponding to the last note commitment in a shard
+    orchard_tree_shard_end_heights: BTreeMap<Address, BlockHeight>,
 }
 
 impl MemoryWalletDb {
@@ -95,6 +98,8 @@ impl MemoryWalletDb {
             sapling_tree_shard_end_heights: BTreeMap::new(),
             #[cfg(feature = "orchard")]
             orchard_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
+            #[cfg(feature = "orchard")]
+            orchard_tree_shard_end_heights: BTreeMap::new(),
             tx_table: TransactionTable::new(),
             received_notes: ReceivedNoteTable::new(),
             nullifiers: NullifierMap::new(),
