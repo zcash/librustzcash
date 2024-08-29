@@ -407,7 +407,22 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     /// Gets the height to which the database must be truncated if any truncation that would remove a
     /// number of blocks greater than the pruning height is attempted
     fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        todo!()
+        Ok(self
+            .received_notes
+            .iter()
+            .filter(|note| !self.note_is_spent(note, 0).unwrap())
+            .map(|note| note.txid)
+            .filter_map(|txid| {
+                self.tx_table.tx_status(&txid).map(|status| {
+                    if let TransactionStatus::Mined(height) = status {
+                        Some(height)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .flatten()
+            .min())
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {

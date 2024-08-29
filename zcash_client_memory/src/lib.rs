@@ -103,7 +103,7 @@ pub struct MemoryWalletDb<P: consensus::Parameters> {
 }
 
 impl<P: consensus::Parameters> MemoryWalletDb<P> {
-    pub fn new(network: Network, params: P, max_checkpoints: usize) -> Self {
+    pub fn new(params: P, max_checkpoints: usize) -> Self {
         Self {
             params,
             accounts: Vec::new(),
