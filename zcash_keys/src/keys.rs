@@ -37,6 +37,9 @@ use {
 #[cfg(feature = "orchard")]
 use orchard::{self, keys::Scope};
 
+#[cfg(all(feature = "sapling", feature = "unstable"))]
+use ::sapling::zip32::ExtendedFullViewingKey;
+
 #[cfg(feature = "sapling")]
 pub mod sapling {
     pub use sapling::zip32::{
@@ -674,6 +677,24 @@ impl UnifiedFullViewingKey {
             vec![],
         )
     }
+
+    #[cfg(all(feature = "sapling", feature = "unstable"))]
+    pub fn from_sapling_extended_full_viewing_key(
+        sapling: ExtendedFullViewingKey,
+    ) -> Result<UnifiedFullViewingKey, DerivationError> {
+        Self::from_checked_parts(
+            #[cfg(feature = "transparent-inputs")]
+            None,
+            #[cfg(feature = "sapling")]
+            Some(sapling.to_diversifiable_full_viewing_key()),
+            #[cfg(feature = "orchard")]
+            None,
+            // We don't currently allow constructing new UFVKs with unknown items, but we store
+            // this to allow parsing such UFVKs.
+            vec![],
+        )
+    }
+
     /// Construct a UFVK from its constituent parts, after verifying that UIVK derivation can
     /// succeed.
     fn from_checked_parts(
