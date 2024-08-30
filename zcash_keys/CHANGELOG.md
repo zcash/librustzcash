@@ -6,6 +6,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::encoding::decode_extfvk_with_network`
+
 ## [0.3.0] - 2024-08-19
 ### Notable changes
 - `zcash_keys`:
