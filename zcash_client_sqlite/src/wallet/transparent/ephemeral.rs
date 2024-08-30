@@ -113,7 +113,7 @@ pub(crate) fn get_ephemeral_ivk<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account_id: AccountId,
-) -> Result<EphemeralIvk, SqliteClientError> {
+) -> Result<Option<EphemeralIvk>, SqliteClientError> {
     let ufvk = conn
         .query_row(
             "SELECT ufvk FROM accounts WHERE id = :account_id",
@@ -133,8 +133,8 @@ pub(crate) fn get_ephemeral_ivk<P: consensus::Parameters>(
     let eivk = ufvk
         .as_ref()
         .and_then(|ufvk| ufvk.transparent())
-        .ok_or(SqliteClientError::UnknownZip32Derivation)?
-        .derive_ephemeral_ivk()?;
+        .map(|t| t.derive_ephemeral_ivk())
+        .transpose()?;
 
     Ok(eivk)
 }
@@ -265,11 +265,11 @@ pub(crate) fn init_account<P: consensus::Parameters>(
     reserve_until(conn, params, account_id, 0)
 }
 
-/// Extend the range of stored addresses in an account if necessary so that the
-/// index of the next address to reserve will be *at least* `next_to_reserve`.
-/// If it would already have been at least `next_to_reserve`, then do nothing.
+/// Extend the range of stored addresses in an account if necessary so that the index of the next
+/// address to reserve will be *at least* `next_to_reserve`. If no transparent key exists for the
+/// given account or it would already have been at least `next_to_reserve`, then do nothing.
 ///
-/// Note that this is called from db migration code.
+/// Note that this is called from database migration code.
 ///
 /// # Panics
 ///
@@ -282,39 +282,40 @@ fn reserve_until<P: consensus::Parameters>(
 ) -> Result<(), SqliteClientError> {
     assert!(next_to_reserve <= 1 << 31);
 
-    let first_unstored = first_unstored_index(conn, account_id)?;
-    let range_to_store = first_unstored..(next_to_reserve.checked_add(GAP_LIMIT).unwrap());
-    if range_to_store.is_empty() {
-        return Ok(());
+    if let Some(ephemeral_ivk) = get_ephemeral_ivk(conn, params, account_id)? {
+        let first_unstored = first_unstored_index(conn, account_id)?;
+        let range_to_store = first_unstored..(next_to_reserve.checked_add(GAP_LIMIT).unwrap());
+        if range_to_store.is_empty() {
+            return Ok(());
+        }
+
+        // used_in_tx and seen_in_tx are initially NULL
+        let mut stmt_insert_ephemeral_address = conn.prepare_cached(
+            "INSERT INTO ephemeral_addresses (account_id, address_index, address)
+             VALUES (:account_id, :address_index, :address)",
+        )?;
+
+        for raw_index in range_to_store {
+            // The range to store may contain indicies that are out of the valid range of non hardened
+            // child indices; we still store explicit rows in the ephemeral_addresses table for these
+            // so that it's possible to find the first unused address using dead reckoning with the gap
+            // limit.
+            let address_str_opt = NonHardenedChildIndex::from_index(raw_index)
+                .map(|address_index| {
+                    ephemeral_ivk
+                        .derive_ephemeral_address(address_index)
+                        .map(|addr| addr.encode(params))
+                })
+                .transpose()?;
+
+            stmt_insert_ephemeral_address.execute(named_params![
+                ":account_id": account_id.0,
+                ":address_index": raw_index,
+                ":address": address_str_opt,
+            ])?;
+        }
     }
 
-    let ephemeral_ivk = get_ephemeral_ivk(conn, params, account_id)?;
-
-    // used_in_tx and seen_in_tx are initially NULL
-    let mut stmt_insert_ephemeral_address = conn.prepare_cached(
-        "INSERT INTO ephemeral_addresses (account_id, address_index, address)
-         VALUES (:account_id, :address_index, :address)",
-    )?;
-
-    for raw_index in range_to_store {
-        // The range to store may contain indicies that are out of the valid range of non hardened
-        // child indices; we still store explicit rows in the ephemeral_addresses table for these
-        // so that it's possible to find the first unused address using dead reckoning with the gap
-        // limit.
-        let address_str_opt = NonHardenedChildIndex::from_index(raw_index)
-            .map(|address_index| {
-                ephemeral_ivk
-                    .derive_ephemeral_address(address_index)
-                    .map(|addr| addr.encode(params))
-            })
-            .transpose()?;
-
-        stmt_insert_ephemeral_address.execute(named_params![
-            ":account_id": account_id.0,
-            ":address_index": raw_index,
-            ":address": address_str_opt,
-        ])?;
-    }
     Ok(())
 }
 
