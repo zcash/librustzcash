@@ -8,6 +8,9 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `zcash_keys::encoding::decode_extfvk_with_network`
+- `impl std::error::Error for Bech32DecodeError`
+- `impl std::error::Error for DecodingError`
+- `impl std::error::Error for DerivationError`
 
 ## [0.3.0] - 2024-08-19
 ### Notable changes

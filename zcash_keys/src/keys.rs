@@ -114,6 +114,8 @@ impl Display for DerivationError {
     }
 }
 
+impl std::error::Error for DerivationError {}
+
 /// A version identifier for the encoding of unified spending keys.
 ///
 /// Each era corresponds to a range of block heights. During an era, the unified spending key
@@ -178,6 +180,8 @@ impl std::fmt::Display for DecodingError {
         }
     }
 }
+
+impl std::error::Error for DecodingError {}
 
 #[cfg(feature = "unstable")]
 impl Era {

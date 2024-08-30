@@ -67,6 +67,16 @@ impl fmt::Display for Bech32DecodeError {
 }
 
 #[cfg(feature = "sapling")]
+impl std::error::Error for Bech32DecodeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self {
+            Bech32DecodeError::Bech32Error(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "sapling")]
 fn bech32_decode<T, F>(hrp: &str, s: &str, read: F) -> Result<T, Bech32DecodeError>
 where
     F: Fn(Vec<u8>) -> Option<T>,
