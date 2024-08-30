@@ -97,14 +97,18 @@ mod tests {
     use zcash_primitives::consensus::Network;
 
     use crate::{
+        testing::Backend,
         wallet::init::{init_wallet_db, init_wallet_db_internal, migrations::addresses_table},
-        WalletDb, UA_ORCHARD, UA_TRANSPARENT,
+        UA_ORCHARD, UA_TRANSPARENT,
     };
 
     #[test]
     fn init_migrate_add_orchard_receiver() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut backend =
+            Backend::new_wallet_db_consensus_network(data_file.path(), Network::TestNetwork)
+                .unwrap();
+        let mut db_data = backend.db_mut();
 
         let seed = vec![0x10; 32];
         let account_id = 0u32;

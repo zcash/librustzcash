@@ -1086,22 +1086,27 @@ mod tests {
 
     use super::SqliteShardStore;
     use crate::{
-        testing::pool::ShieldedPoolTester,
+        testing::{pool::ShieldedPoolTester, Backend},
         wallet::{init::init_wallet_db, sapling::tests::SaplingPoolTester},
-        WalletDb,
     };
 
     fn new_tree<T: ShieldedPoolTester>(
         m: usize,
     ) -> ShardTree<SqliteShardStore<rusqlite::Connection, String, 3>, 4, 3> {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut backend =
+            Backend::new_wallet_db_consensus_network(data_file.path(), Network::TestNetwork)
+                .unwrap();
+        let mut db_data = backend.db_mut();
+
         data_file.keep().unwrap();
 
         init_wallet_db(&mut db_data, None).unwrap();
-        let store =
-            SqliteShardStore::<_, String, 3>::from_connection(db_data.conn, T::TABLES_PREFIX)
-                .unwrap();
+        let store = SqliteShardStore::<_, String, 3>::from_connection(
+            backend.connection(),
+            T::TABLES_PREFIX,
+        )
+        .unwrap();
         ShardTree::new(store, m)
     }
 
@@ -1193,7 +1198,10 @@ mod tests {
 
     fn put_shard_roots<T: ShieldedPoolTester>() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut backend =
+            Backend::new_wallet_db_consensus_network(data_file.path(), Network::TestNetwork)
+                .unwrap();
+        let mut db_data = backend.db_mut();
         data_file.keep().unwrap();
 
         init_wallet_db(&mut db_data, None).unwrap();

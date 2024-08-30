@@ -26,6 +26,7 @@ use sapling::{
     zip32::DiversifiableFullViewingKey,
     Note, Nullifier,
 };
+use zcash_client_backend::data_api::testing::MockWalletDb;
 use zcash_client_backend::data_api::Account as AccountTrait;
 #[allow(deprecated)]
 use zcash_client_backend::{
@@ -67,6 +68,7 @@ use zcash_primitives::{
     },
     zip32::DiversifierIndex,
 };
+use zcash_protocol::consensus::Network;
 use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::value::{ZatBalance, Zatoshis};
 
@@ -226,7 +228,9 @@ impl<Cache> TestBuilder<Cache> {
     /// Builds the state for this test.
     pub(crate) fn build(self) -> TestState<Cache> {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), self.network).unwrap();
+        let mut backend =
+            Backend::new_wallet_db_local_network(data_file.path(), self.network).unwrap();
+        let mut db_data = backend.db_mut();
         init_wallet_db(&mut db_data, None).unwrap();
 
         let mut cached_blocks = BTreeMap::new();
@@ -308,7 +312,7 @@ impl<Cache> TestBuilder<Cache> {
                 .initial_chain_state
                 .map(|s| s.chain_state.block_height()),
             _data_file: data_file,
-            db_data,
+            backend,
             test_account,
             rng: self.rng,
         }
@@ -425,9 +429,79 @@ pub(crate) struct TestState<Cache> {
     cached_blocks: BTreeMap<BlockHeight, CachedBlock>,
     latest_block_height: Option<BlockHeight>,
     _data_file: NamedTempFile,
-    db_data: WalletDb<Connection, LocalNetwork>,
+    backend: Backend<Connection, LocalNetwork>,
     test_account: Option<(SecretVec<u8>, TestAccount)>,
     rng: ChaChaRng,
+}
+
+/// A backend to be used in a test.
+pub enum Backend<Conn, Net> {
+    /// A backend for tests that use sqlite (`zcash_client_lite` tests).
+    Sqlite(WalletDb<Conn, Net>),
+    /// A backend for tests that use a mock wallet. (`zcash_client_backend` tests).
+    #[allow(dead_code)]
+    MockWallet(MockWalletDb),
+}
+
+impl Backend<Connection, LocalNetwork> {
+    /// Creates a new `Backend` with a `WalletDb` for the given network.
+    pub fn new_wallet_db_local_network(
+        path: &std::path::Path,
+        params: LocalNetwork,
+    ) -> Result<Self, SqliteClientError> {
+        Ok(WalletDb::for_path(path, params).map(Backend::Sqlite)?)
+    }
+
+    /// Get an unmutable database for this backend.
+    pub fn db(&self) -> &WalletDb<Connection, LocalNetwork> {
+        match self {
+            Backend::Sqlite(db) => db,
+            _ => panic!("Backend is not a WalletDb"),
+        }
+    }
+
+    /// Get a mutable database for this backend.
+    pub fn db_mut(&mut self) -> &mut WalletDb<Connection, LocalNetwork> {
+        match self {
+            Backend::Sqlite(db) => db,
+            _ => panic!("Backend is not a WalletDb"),
+        }
+    }
+}
+
+impl Backend<Connection, Network> {
+    /// Creates a new `Backend` with a `WalletDb` for the given network.
+    pub fn new_wallet_db_consensus_network(
+        path: &std::path::Path,
+        network: Network,
+    ) -> Result<Self, SqliteClientError> {
+        Ok(WalletDb::for_path(path, network).map(Backend::Sqlite)?)
+    }
+
+    /// Get a mutable database for this backend.
+    pub fn db_mut(&mut self) -> &mut WalletDb<Connection, Network> {
+        match self {
+            Backend::Sqlite(db) => db,
+            _ => panic!("Backend is not a WalletDb"),
+        }
+    }
+
+    /// Get the connection for this backend.
+    pub fn connection(self) -> Connection {
+        match self {
+            Backend::Sqlite(db) => db.conn,
+            _ => panic!("Backend is not a WalletDb"),
+        }
+    }
+}
+
+impl Backend<(), Network> {
+    #[allow(dead_code)]
+    pub fn new_mock_wallet_db(network: Network) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Backend::<(), Network>::MockWallet(MockWalletDb::new(
+            network,
+        )))
+    }
 }
 
 impl<Cache: TestCache> TestState<Cache>
@@ -749,7 +823,7 @@ where
         let result = scan_cached_blocks(
             &self.network(),
             self.cache.block_source(),
-            &mut self.db_data,
+            self.backend.db_mut(),
             from_height,
             &prior_cached_block.chain_state,
             limit,
@@ -767,9 +841,10 @@ where
         let network = self.network();
         self.latest_block_height = None;
         let tf = std::mem::replace(&mut self._data_file, NamedTempFile::new().unwrap());
-        self.db_data = WalletDb::for_path(self._data_file.path(), network).unwrap();
+        self.backend =
+            Backend::new_wallet_db_local_network(self._data_file.path(), network).unwrap();
         self.test_account = None;
-        init_wallet_db(&mut self.db_data, None).unwrap();
+        init_wallet_db(&mut self.backend.db_mut(), None).unwrap();
         tf
     }
 
@@ -795,12 +870,12 @@ where
 impl<Cache> TestState<Cache> {
     /// Exposes an immutable reference to the test's [`WalletDb`].
     pub(crate) fn wallet(&self) -> &WalletDb<Connection, LocalNetwork> {
-        &self.db_data
+        self.backend.db()
     }
 
     /// Exposes a mutable reference to the test's [`WalletDb`].
     pub(crate) fn wallet_mut(&mut self) -> &mut WalletDb<Connection, LocalNetwork> {
-        &mut self.db_data
+        self.backend.db_mut()
     }
 
     /// Exposes the test framework's source of randomness.
@@ -810,12 +885,13 @@ impl<Cache> TestState<Cache> {
 
     /// Exposes the network in use.
     pub(crate) fn network(&self) -> LocalNetwork {
-        self.db_data.params
+        self.backend.db().params
     }
 
     /// Convenience method for obtaining the Sapling activation height for the network under test.
     pub(crate) fn sapling_activation_height(&self) -> BlockHeight {
-        self.db_data
+        self.backend
+            .db()
             .params
             .activation_height(NetworkUpgrade::Sapling)
             .expect("Sapling activation height must be known.")
@@ -824,7 +900,8 @@ impl<Cache> TestState<Cache> {
     /// Convenience method for obtaining the NU5 activation height for the network under test.
     #[allow(dead_code)]
     pub(crate) fn nu5_activation_height(&self) -> BlockHeight {
-        self.db_data
+        self.backend
+            .db()
             .params
             .activation_height(NetworkUpgrade::Nu5)
             .expect("NU5 activation height must be known.")
@@ -899,7 +976,7 @@ impl<Cache> TestState<Cache> {
         let params = self.network();
         let prover = test_prover();
         create_spend_to_address(
-            &mut self.db_data,
+            self.backend.db_mut(),
             &params,
             &prover,
             &prover,
@@ -939,7 +1016,7 @@ impl<Cache> TestState<Cache> {
         let params = self.network();
         let prover = test_prover();
         spend(
-            &mut self.db_data,
+            self.backend.db_mut(),
             &params,
             &prover,
             &prover,
@@ -973,7 +1050,7 @@ impl<Cache> TestState<Cache> {
     {
         let params = self.network();
         propose_transfer::<_, _, _, Infallible>(
-            &mut self.db_data,
+            self.backend.db_mut(),
             &params,
             spend_from_account,
             input_selector,
@@ -1006,7 +1083,7 @@ impl<Cache> TestState<Cache> {
     > {
         let params = self.network();
         let result = propose_standard_transfer_to_address::<_, _, CommitmentTreeErrT>(
-            &mut self.db_data,
+            self.backend.db_mut(),
             &params,
             fee_rule,
             spend_from_account,
@@ -1049,7 +1126,7 @@ impl<Cache> TestState<Cache> {
     {
         let params = self.network();
         propose_shielding::<_, _, _, Infallible>(
-            &mut self.db_data,
+            self.backend.db_mut(),
             &params,
             input_selector,
             shielding_threshold,
@@ -1079,7 +1156,7 @@ impl<Cache> TestState<Cache> {
         let params = self.network();
         let prover = test_prover();
         create_proposed_transactions(
-            &mut self.db_data,
+            self.backend.db_mut(),
             &params,
             &prover,
             &prover,
@@ -1114,7 +1191,7 @@ impl<Cache> TestState<Cache> {
         let params = self.network();
         let prover = test_prover();
         shield_transparent_funds(
-            &mut self.db_data,
+            self.backend.db_mut(),
             &params,
             &prover,
             &prover,

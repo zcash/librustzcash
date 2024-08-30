@@ -80,12 +80,15 @@ mod tests {
     use zcash_protocol::consensus::Network;
 
     use super::{DEPENDENCIES, MIGRATION_ID};
-    use crate::{wallet::init::init_wallet_db_internal, WalletDb};
+    use crate::{testing::Backend, wallet::init::init_wallet_db_internal};
 
     #[test]
     fn migrate() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut backend =
+            Backend::new_wallet_db_consensus_network(data_file.path(), Network::TestNetwork)
+                .unwrap();
+        let mut db_data = backend.db_mut();
 
         let seed_bytes = vec![0xab; 32];
         init_wallet_db_internal(

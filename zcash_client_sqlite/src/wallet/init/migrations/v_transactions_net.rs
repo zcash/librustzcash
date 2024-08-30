@@ -211,14 +211,17 @@ mod tests {
     use zcash_primitives::{consensus::Network, zip32::AccountId};
 
     use crate::{
+        testing::Backend,
         wallet::init::{init_wallet_db_internal, migrations::add_transaction_views},
-        WalletDb,
     };
 
     #[test]
     fn v_transactions_net() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut backend =
+            Backend::new_wallet_db_consensus_network(data_file.path(), Network::TestNetwork)
+                .unwrap();
+        let mut db_data = backend.db_mut();
         init_wallet_db_internal(
             &mut db_data,
             None,

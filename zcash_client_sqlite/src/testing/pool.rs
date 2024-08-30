@@ -613,9 +613,12 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     // We call get_wallet_transparent_output with `allow_unspendable = true` to verify
     // storage because the decrypted transaction has not yet been mined.
-    let utxo =
-        get_wallet_transparent_output(&st.db_data.conn, &OutPoint::new(txid.into(), 0), true)
-            .unwrap();
+    let utxo = get_wallet_transparent_output(
+        &st.backend.connection(),
+        &OutPoint::new(txid.into(), 0),
+        true,
+    )
+    .unwrap();
     assert_matches!(utxo, Some(v) if v.value() == utxo_value);
 
     // That should have advanced the start of the gap to index 11.

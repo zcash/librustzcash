@@ -167,6 +167,7 @@ mod tests {
     use zcash_primitives::{consensus::Network, zip32::AccountId};
 
     use crate::{
+        testing::Backend,
         wallet::init::{init_wallet_db_internal, migrations::v_transactions_net},
         WalletDb,
     };
@@ -174,7 +175,10 @@ mod tests {
     #[test]
     fn v_transactions_note_uniqueness_migration() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut backend =
+            Backend::new_wallet_db_consensus_network(data_file.path(), Network::TestNetwork)
+                .unwrap();
+        let mut db_data = backend.db_mut();
         init_wallet_db_internal(
             &mut db_data,
             None,

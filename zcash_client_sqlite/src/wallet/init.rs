@@ -378,7 +378,11 @@ mod tests {
         zip32::AccountId,
     };
 
-    use crate::{testing::TestBuilder, wallet::db, WalletDb, UA_TRANSPARENT};
+    use crate::{
+        testing::{Backend, TestBuilder},
+        wallet::db,
+        WalletDb, UA_TRANSPARENT,
+    };
 
     use super::init_wallet_db;
 
@@ -615,7 +619,10 @@ mod tests {
         }
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut backend =
+            Backend::new_wallet_db_consensus_network(data_file.path(), Network::TestNetwork)
+                .unwrap();
+        let mut db_data = backend.db_mut();
 
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
@@ -786,7 +793,10 @@ mod tests {
         }
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut backend =
+            Backend::new_wallet_db_consensus_network(data_file.path(), Network::TestNetwork)
+                .unwrap();
+        let mut db_data = backend.db_mut();
 
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
@@ -953,7 +963,10 @@ mod tests {
         }
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut backend =
+            Backend::new_wallet_db_consensus_network(data_file.path(), Network::TestNetwork)
+                .unwrap();
+        let mut db_data = backend.db_mut();
 
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
@@ -979,7 +992,9 @@ mod tests {
 
         let network = Network::MainNetwork;
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
+        let mut backend =
+            Backend::new_wallet_db_consensus_network(data_file.path(), network).unwrap();
+        let mut db_data = backend.db_mut();
         assert_matches!(init_wallet_db(&mut db_data, None), Ok(_));
 
         // Prior to adding any accounts, every seed phrase is relevant to the wallet.

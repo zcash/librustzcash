@@ -101,6 +101,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     use crate::{
         error::SqliteClientError,
+        testing::Backend,
         wallet::{
             self, account_kind_code, init::init_wallet_db_internal, transparent::ephemeral,
             GAP_LIMIT,
@@ -204,7 +205,9 @@ mod tests {
     fn initialize_table() {
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
+        let mut backend =
+            Backend::new_wallet_db_consensus_network(data_file.path(), network).unwrap();
+        let mut db_data = backend.db_mut();
 
         let seed0 = vec![0x00; 32];
         init_wallet_db_internal(
