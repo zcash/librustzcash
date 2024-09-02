@@ -467,6 +467,15 @@ impl Backend<Connection, LocalNetwork> {
             _ => panic!("Backend is not a WalletDb"),
         }
     }
+
+    #[cfg(feature = "transparent-inputs")]
+    /// Get the connection for this backend.
+    pub fn connection(&self) -> &Connection {
+        match self {
+            Backend::Sqlite(db) => &db.conn,
+            _ => panic!("Backend is not a WalletDb"),
+        }
+    }
 }
 
 impl Backend<Connection, Network> {
