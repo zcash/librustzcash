@@ -51,6 +51,8 @@ pub enum Error {
     Other(String),
     #[error("Infallible")]
     Infallible(#[from] Infallible),
+    #[error("Expected field missing: {0}")]
+    Missing(String),
 }
 
 impl From<DerivationError> for Error {

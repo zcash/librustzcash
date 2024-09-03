@@ -48,6 +48,14 @@ impl TransactionEntry {
     pub(crate) fn status(&self) -> TransactionStatus {
         self.tx_status
     }
+
+    pub(crate) fn mined_height(&self) -> Option<BlockHeight> {
+        match self.tx_status {
+            TransactionStatus::Mined(height) => Some(height),
+            _ => None,
+        }
+    }
+
     pub(crate) fn raw(&self) -> &[u8] {
         self.raw.as_slice()
     }

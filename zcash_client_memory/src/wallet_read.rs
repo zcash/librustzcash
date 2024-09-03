@@ -263,8 +263,8 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
                             entry.insert(AccountBalance::ZERO);
                         }
                     };
-                },
-                _ => unimplemented!("Unknown pool type")
+                }
+                _ => unimplemented!("Unknown pool type"),
             }
         }
 

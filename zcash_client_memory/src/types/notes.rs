@@ -1,4 +1,5 @@
 use incrementalmerkletree::Position;
+use sapling::circuit::Spend;
 
 use std::{
     collections::HashMap,
@@ -11,7 +12,7 @@ use zcash_primitives::transaction::TxId;
 use zcash_protocol::{memo::Memo, PoolType, ShieldedProtocol::Sapling};
 
 use zcash_client_backend::{
-    data_api::SentTransactionOutput,
+    data_api::{SentTransactionOutput, SpendableNotes},
     wallet::{Note, NoteId, Recipient, WalletSaplingOutput},
 };
 
@@ -52,15 +53,15 @@ pub(crate) struct ReceivedNote {
     pub(crate) note_id: NoteId,
     pub(crate) txid: TxId,
     // output_index: sapling, action_index: orchard
-    pub(crate) _output_index: u32,
+    pub(crate) output_index: u32,
     pub(crate) account_id: AccountId,
     //sapling: (diversifier, value, rcm) orchard: (diversifier, value, rho, rseed)
     pub(crate) note: Note,
     pub(crate) nf: Option<Nullifier>,
     pub(crate) _is_change: bool,
     pub(crate) memo: Memo,
-    pub(crate) _commitment_tree_position: Option<Position>,
-    pub(crate) _recipient_key_scope: Option<Scope>,
+    pub(crate) commitment_tree_position: Option<Position>,
+    pub(crate) recipient_key_scope: Option<Scope>,
 }
 impl ReceivedNote {
     pub fn pool(&self) -> PoolType {
@@ -94,14 +95,14 @@ impl ReceivedNote {
             } => Ok(ReceivedNote {
                 note_id: NoteId::new(txid, Sapling, output.output_index() as u16),
                 txid,
-                _output_index: output.output_index() as u32,
+                output_index: output.output_index() as u32,
                 account_id: *receiving_account,
                 note: Note::Sapling(note.clone()),
                 nf: None,
                 _is_change: true,
                 memo: output.memo().map(|m| Memo::try_from(m).unwrap()).unwrap(),
-                _commitment_tree_position: None,
-                _recipient_key_scope: Some(Scope::Internal),
+                commitment_tree_position: None,
+                recipient_key_scope: Some(Scope::Internal),
             }),
             #[cfg(feature = "orchard")]
             Recipient::InternalAccount {
@@ -111,14 +112,14 @@ impl ReceivedNote {
             } => Ok(ReceivedNote {
                 note_id: NoteId::new(txid, Orchard, output.output_index() as u16),
                 txid,
-                _output_index: output.output_index() as u32,
+                output_index: output.output_index() as u32,
                 account_id: *receiving_account,
                 note: Note::Orchard(*note),
                 nf: None,
                 _is_change: true,
                 memo: output.memo().map(|m| Memo::try_from(m).unwrap()).unwrap(),
-                _commitment_tree_position: None,
-                _recipient_key_scope: Some(Scope::Internal),
+                commitment_tree_position: None,
+                recipient_key_scope: Some(Scope::Internal),
             }),
             _ => Err(Error::Other(
                 "Recipient is not an internal shielded account".to_owned(),
@@ -132,14 +133,14 @@ impl ReceivedNote {
         ReceivedNote {
             note_id,
             txid: *note_id.txid(),
-            _output_index: output.index() as u32,
+            output_index: output.index() as u32,
             account_id: *output.account_id(),
             note: Note::Sapling(output.note().clone()),
             nf: output.nf().map(|nf| Nullifier::Sapling(*nf)),
             _is_change: output.is_change(),
             memo: Memo::Empty,
-            _commitment_tree_position: Some(output.note_commitment_tree_position()),
-            _recipient_key_scope: output.recipient_key_scope(),
+            commitment_tree_position: Some(output.note_commitment_tree_position()),
+            recipient_key_scope: output.recipient_key_scope(),
         }
     }
     #[cfg(feature = "orchard")]
@@ -150,14 +151,14 @@ impl ReceivedNote {
         ReceivedNote {
             note_id,
             txid: *note_id.txid(),
-            _output_index: output.index() as u32,
+            output_index: output.index() as u32,
             account_id: *output.account_id(),
             note: Note::Orchard(*output.note()),
             nf: output.nf().map(|nf| Nullifier::Orchard(*nf)),
             _is_change: output.is_change(),
             memo: Memo::Empty,
-            _commitment_tree_position: Some(output.note_commitment_tree_position()),
-            _recipient_key_scope: output.recipient_key_scope(),
+            commitment_tree_position: Some(output.note_commitment_tree_position()),
+            recipient_key_scope: output.recipient_key_scope(),
         }
     }
 }
@@ -221,4 +222,48 @@ impl DerefMut for ReceivedNoteTable {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0[..]
     }
+}
+
+pub(crate) fn to_spendable_notes(
+    received_notes: &[&ReceivedNote],
+) -> Result<SpendableNotes<NoteId>, Error> {
+    let mut sapling = Vec::new();
+    #[cfg(feature = "orchard")]
+    let mut orchard = Vec::new();
+
+    for note in received_notes {
+        match note.note.clone() {
+            Note::Sapling(inner) => {
+                sapling.push(zcash_client_backend::wallet::ReceivedNote::from_parts(
+                    note.note_id,
+                    note.txid(),
+                    note.output_index.try_into().unwrap(), // this overflow can never happen or else the chain is broken
+                    inner,
+                    note.recipient_key_scope
+                        .ok_or(Error::Missing("recipient key scope".into()))?,
+                    note.commitment_tree_position
+                        .ok_or(Error::Missing("commitment tree position".into()))?,
+                ));
+            }
+            #[cfg(feature = "orchard")]
+            Note::Orchard(inner) => {
+                orchard.push(zcash_client_backend::wallet::ReceivedNote::from_parts(
+                    note.note_id,
+                    note.txid(),
+                    note.output_index.try_into().unwrap(), // this overflow can never happen or else the chain is broken
+                    inner,
+                    note.recipient_key_scope
+                        .ok_or(Error::Missing("recipient key scope".into()))?,
+                    note.commitment_tree_position
+                        .ok_or(Error::Missing("commitment tree position".into()))?,
+                ));
+            }
+        }
+    }
+
+    Ok(SpendableNotes::new(
+        sapling,
+        #[cfg(feature = "orchard")]
+        orchard,
+    ))
 }
