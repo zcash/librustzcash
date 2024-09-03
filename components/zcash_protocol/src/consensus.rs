@@ -356,7 +356,7 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Nu5 => Some(BlockHeight(1_687_104)),
             NetworkUpgrade::Nu6 => None,
             #[cfg(zcash_unstable = "zfuture")]
-            NetworkUpgrade::ZFuture => Some(BlockHeight(3_000_000)),
+            NetworkUpgrade::ZFuture => None,
         }
     }
 }
@@ -385,7 +385,7 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Nu5 => Some(BlockHeight(1_842_420)),
             NetworkUpgrade::Nu6 => None,
             #[cfg(zcash_unstable = "zfuture")]
-            NetworkUpgrade::ZFuture => Some(BlockHeight(3_000_000)),
+            NetworkUpgrade::ZFuture => None,
         }
     }
 }
