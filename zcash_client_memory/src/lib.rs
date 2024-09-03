@@ -195,9 +195,14 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
     /// - We know the commitment tree position
     /// - be in a block less than or equal to the anchor height
     /// - not be in the given exclude list
+    ///
+    /// Additionally the tree shard containing the node must not be in an unscanned range
+    /// excluding ranges that start above the anchor height or end below the wallet birthday.
+    /// This is determined by looking at the scan queue
     pub(crate) fn note_is_spendable(
         &self,
         note: &ReceivedNote,
+        birthday_height: zcash_protocol::consensus::BlockHeight,
         anchor_height: zcash_protocol::consensus::BlockHeight,
         exclude: &[<MemoryWalletDb<P> as InputSource>::NoteRef],
     ) -> Result<bool, Error> {
@@ -208,6 +213,9 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
             .tx_table
             .get(&note.txid())
             .ok_or_else(|| Error::TransactionNotFound(note.txid()))?;
+
+        // TODO: Add the unscanned range check
+
         Ok(!self.note_is_spent(note, 0)?
             && note.note.value().into_u64() > 5000
             && note_account.ufvk().is_some()

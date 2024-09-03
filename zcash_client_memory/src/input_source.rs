@@ -66,23 +66,22 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
 
         // This uses the greedy approach to building a transaction that spends oldest notes first
         //
-        // First grab all eligible (unspent, spendable) notes into a vec.
-        // Sort them oldest to newest
-        // Take from this vec until the first note is taken that meets or exceeds the target value
+        // First grab all eligible (unspent, spendable, fully scanned) notes into a vec.
         let mut eligible_notes = self
             .received_notes
             .iter()
             .filter(|note| note.account_id == account)
             .filter(|note| sources.contains(&note.note.protocol()))
             .filter(|note| {
-                self.note_is_spendable(note, anchor_height, exclude)
+                self.note_is_spendable(note, birthday_height, anchor_height, exclude)
                     .unwrap()
             })
             .collect::<Vec<_>>();
 
-        // sort by oldest first (block height then index)
-        eligible_notes.sort_by(|a, b| a.txid.cmp(&b.txid));
+        // sort by oldest first (use location in commitment tree since this gives a total order)
+        eligible_notes.sort_by(|a, b| a.commitment_tree_position.cmp(&b.commitment_tree_position));
 
+        // now take notes until we have enough to cover the target value
         let mut value_acc = Zatoshis::ZERO;
         let selection: Vec<_> = eligible_notes
             .into_iter()
