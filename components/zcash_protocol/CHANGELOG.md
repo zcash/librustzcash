@@ -7,6 +7,24 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `impl Sub<BlockHeight> for BlockHeight` unlike the implementation that was
+  removed in version `0.3.0`, a saturating subtraction for block heights having
+  a return type of `u32` makes sense for `BlockHeight`. Subtracting one block
+  height from another yields the delta between them.
+
+### Changed
+- Adding a delta to a `BlockHeight` now uses saturating addition.
+- Subtracting a delta to a `BlockHeight` now uses saturating subtraction.
+
+## [0.3.0] - 2024-08-26
+### Changed
+- Testnet activation height has been set for `consensus::BranchId::Nu6`.
+
+### Removed
+- `impl {Add, Sub} for BlockHeight` - these operations were unused, and it
+  does not make sense to add block heights (it is not a monoid.)
+
 ## [0.2.0] - 2024-08-19
 ### Added
 - `zcash_protocol::PoolType::{TRANSPARENT, SAPLING, ORCHARD}`

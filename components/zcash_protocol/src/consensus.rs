@@ -103,15 +103,7 @@ impl Add<u32> for BlockHeight {
     type Output = Self;
 
     fn add(self, other: u32) -> Self {
-        BlockHeight(self.0 + other)
-    }
-}
-
-impl Add for BlockHeight {
-    type Output = Self;
-
-    fn add(self, other: Self) -> Self {
-        self + other.0
+        BlockHeight(self.0.saturating_add(other))
     }
 }
 
@@ -119,19 +111,15 @@ impl Sub<u32> for BlockHeight {
     type Output = Self;
 
     fn sub(self, other: u32) -> Self {
-        if other > self.0 {
-            panic!("Subtraction resulted in negative block height.");
-        }
-
-        BlockHeight(self.0 - other)
+        BlockHeight(self.0.saturating_sub(other))
     }
 }
 
-impl Sub for BlockHeight {
-    type Output = Self;
+impl Sub<BlockHeight> for BlockHeight {
+    type Output = u32;
 
-    fn sub(self, other: Self) -> Self {
-        self - other.0
+    fn sub(self, other: BlockHeight) -> u32 {
+        self.0.saturating_sub(other.0)
     }
 }
 
@@ -383,7 +371,7 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Heartwood => Some(BlockHeight(903_800)),
             NetworkUpgrade::Canopy => Some(BlockHeight(1_028_500)),
             NetworkUpgrade::Nu5 => Some(BlockHeight(1_842_420)),
-            NetworkUpgrade::Nu6 => None,
+            NetworkUpgrade::Nu6 => Some(BlockHeight(2_976_000)),
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => None,
         }
