@@ -383,23 +383,23 @@ fn verify_sqlite_version_compatibility(
     let sqlite_version =
         conn.query_row("SELECT sqlite_version()", [], |row| row.get::<_, String>(0))?;
 
-    let version_re = Regex::new(r"^(?<major>[0-9]+)\.(?<minor>[0-9]+).+$").unwrap();
+    let version_re = Regex::new(r"^(?<major>[0-9]+)\.(?<minor>[0-9]+).*$").unwrap();
     let captures =
         version_re
             .captures(&sqlite_version)
             .ok_or(WalletMigrationError::DatabaseNotSupported(
                 "Unknown".to_owned(),
             ))?;
-    let parse_int = |value: &str| {
-        value.parse::<u32>().map_err(|_| {
+    let parse_version_part = |part: &str| {
+        captures[part].parse::<u32>().map_err(|_| {
             WalletMigrationError::CorruptedData(format!(
-                "Cannot decode SQLite major version {}",
-                &captures["major"]
+                "Cannot decode SQLite {} version component {}",
+                part, &captures[part]
             ))
         })
     };
-    let major = parse_int(&captures["major"])?;
-    let minor = parse_int(&captures["minor"])?;
+    let major = parse_version_part("major")?;
+    let minor = parse_version_part("minor")?;
 
     if major != SQLITE_MAJOR_VERSION || minor < MIN_SQLITE_MINOR_VERSION {
         Err(WalletMigrationError::DatabaseNotSupported(sqlite_version))
