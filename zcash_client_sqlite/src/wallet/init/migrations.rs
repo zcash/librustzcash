@@ -15,6 +15,7 @@ mod sapling_memo_consistency;
 mod sent_notes_to_internal;
 mod shardtree_support;
 mod spend_key_available;
+mod support_legacy_sqlite;
 mod tx_retrieval_queue;
 mod ufvk_support;
 mod utxos_table;
@@ -74,6 +75,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //            \                          \     ephemeral_addresses     /                       /
     //             \                          \            |              /                       /
     //              ------------------------------ tx_retrieval_queue ----------------------------
+    //                                                     |
+    //                                            support_legacy_sqlite
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -131,6 +134,7 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(tx_retrieval_queue::Migration {
             params: params.clone(),
         }),
+        Box::new(support_legacy_sqlite::Migration),
     ]
 }
 
