@@ -1,6 +1,5 @@
 use incrementalmerkletree::{Address, Position};
 use rusqlite::{self, named_params, types::Value, OptionalExtension};
-use shardtree::error::ShardTreeError;
 use std::cmp::{max, min};
 use std::collections::BTreeSet;
 use std::ops::Range;
@@ -18,7 +17,7 @@ use zcash_primitives::consensus::{self, BlockHeight, NetworkUpgrade};
 
 use crate::{
     error::SqliteClientError,
-    wallet::{block_height_extrema, commitment_tree, init::WalletMigrationError},
+    wallet::{block_height_extrema, init::WalletMigrationError},
     PRUNING_DEPTH, SAPLING_TABLES_PREFIX, VERIFY_LOOKAHEAD,
 };
 
@@ -119,8 +118,6 @@ pub(crate) fn insert_queue_entries<'a>(
 pub(crate) trait WalletError {
     fn db_error(err: rusqlite::Error) -> Self;
     fn corrupt(message: String) -> Self;
-    fn chain_height_unknown() -> Self;
-    fn commitment_tree(err: ShardTreeError<commitment_tree::Error>) -> Self;
 }
 
 impl WalletError for SqliteClientError {
@@ -131,14 +128,6 @@ impl WalletError for SqliteClientError {
     fn corrupt(message: String) -> Self {
         SqliteClientError::CorruptedData(message)
     }
-
-    fn chain_height_unknown() -> Self {
-        SqliteClientError::ChainHeightUnknown
-    }
-
-    fn commitment_tree(err: ShardTreeError<commitment_tree::Error>) -> Self {
-        SqliteClientError::CommitmentTree(err)
-    }
 }
 
 impl WalletError for WalletMigrationError {
@@ -148,16 +137,6 @@ impl WalletError for WalletMigrationError {
 
     fn corrupt(message: String) -> Self {
         WalletMigrationError::CorruptedData(message)
-    }
-
-    fn chain_height_unknown() -> Self {
-        WalletMigrationError::CorruptedData(
-            "Wallet migration requires a valid account birthday.".to_owned(),
-        )
-    }
-
-    fn commitment_tree(err: ShardTreeError<commitment_tree::Error>) -> Self {
-        WalletMigrationError::CommitmentTree(err)
     }
 }
 
