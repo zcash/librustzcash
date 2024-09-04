@@ -627,8 +627,7 @@ impl<A: Authorization> TransactionData<A> {
         f_transparent: impl transparent::MapAuth<A::TransparentAuth, B::TransparentAuth>,
         mut f_sapling: impl sapling_serialization::MapAuth<A::SaplingAuth, B::SaplingAuth>,
         mut f_orchard: impl orchard_serialization::MapAuth<A::OrchardAuth, B::OrchardAuth>,
-        #[cfg(zcash_unstable = "nu6")]
-        /* TODO nu7 */
+        #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
         mut f_orchard_zsa: impl orchard_serialization::MapAuth<
             A::OrchardZsaAuth,
             B::OrchardZsaAuth,

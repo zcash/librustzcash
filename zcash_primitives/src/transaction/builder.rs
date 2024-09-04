@@ -112,9 +112,13 @@ pub enum Error<FE> {
     /// The builder was constructed without support for the Sapling pool, but a Sapling
     /// spend or output was added.
     SaplingBuilderNotAvailable,
+    /// The Orchard support is disabled.
+    OrchardIsDisabled,
     /// The builder was constructed with a target height before NU5 activation, but an Orchard
     /// spend or output was added.
     OrchardBuilderNotAvailable,
+    /// The builder was constructed without support for the Orchard
+    OrchardBuilderConfigNotAvailable,
     ///  The issuance bundle not initialized.
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     IssuanceBuilderNotAvailable,
@@ -156,6 +160,11 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
             Error::OrchardBuilderNotAvailable => write!(
                 f,
                 "Cannot create Orchard transactions without an Orchard anchor, or before NU5 activation"
+            ),
+            Error::OrchardIsDisabled =>  write!(f, "Orchard support is disabled"),
+            Error::OrchardBuilderConfigNotAvailable => write!(
+                f,
+                "Orchard builder configuration not available"
             ),
             #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             Error::IssuanceBuilderNotAvailable => write!(
@@ -281,6 +290,13 @@ impl BuildConfig {
                 .map(|a| (BundleType::DEFAULT_ZSA, *a)),
             BuildConfig::Coinbase => Some((BundleType::Coinbase, orchard::Anchor::empty_tree())),
         }
+    }
+
+    pub fn orchard_bundle_type<FE>(&self) -> Result<BundleType, Error<FE>> {
+        let (bundle_type, _) = self
+            .orchard_builder_config()
+            .ok_or(Error::OrchardBuilderNotAvailable)?;
+        Ok(bundle_type)
     }
 }
 
@@ -465,7 +481,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
 
     /// Creates IssuanceBundle and adds an Issuance action to the transaction.
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    fn init_issuance_bundle<FE>(
+    pub fn init_issuance_bundle<FE>(
         &mut self,
         ik: IssuanceAuthorizingKey,
         asset_desc: String,
@@ -545,10 +561,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         note: orchard::Note,
         merkle_path: orchard::tree::MerklePath,
     ) -> Result<(), Error<FE>> {
-        let (bundle_type, _) = self
-            .build_config
-            .orchard_builder_config()
-            .ok_or(Error::OrchardBuilderNotAvailable)?;
+        let bundle_type = self.build_config.orchard_bundle_type()?;
         if bundle_type == BundleType::DEFAULT_VANILLA {
             assert_eq!(note.asset().is_native().unwrap_u8(), 1);
         }
@@ -573,12 +586,9 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         asset: AssetBase,
         memo: MemoBytes,
     ) -> Result<(), Error<FE>> {
-        let (bundle_type, _) = self
-            .build_config
-            .orchard_builder_config()
-            .ok_or(Error::OrchardBuilderNotAvailable)?;
+        let bundle_type = self.build_config.orchard_bundle_type()?;
         if bundle_type == BundleType::DEFAULT_VANILLA {
-            assert_eq!(asset.is_native().unwrap_u8(), 1);
+            assert_eq!(asset, AssetBase::native());
         }
         self.orchard_builder
             .as_mut()
@@ -869,23 +879,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
 
         let mut unproven_orchard_bundle = None;
         #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-        let mut unproven_orchard_zsa_bundle: Option<
-            orchard::Bundle<
-                orchard::builder::InProgress<
-                    orchard::builder::Unproven<OrchardZSA>,
-                    orchard::builder::Unauthorized,
-                >,
-                Amount,
-                OrchardZSA,
-            >,
-        > = None;
+        let mut unproven_orchard_zsa_bundle = None;
         let mut orchard_meta = orchard::builder::BundleMetadata::empty();
 
         if let Some(builder) = self.orchard_builder {
-            let (bundle_type, _) = self
-                .build_config
-                .orchard_builder_config()
-                .ok_or(Error::OrchardBuilderNotAvailable)?;
+            let bundle_type = self.build_config.orchard_bundle_type()?;
             if bundle_type == BundleType::DEFAULT_ZSA {
                 #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
                 {
