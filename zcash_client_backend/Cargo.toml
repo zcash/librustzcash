@@ -214,6 +214,14 @@ unstable-serialization = ["dep:byteorder"]
 ## Exposes the [`data_api::scanning::spanning_tree`] module.
 unstable-spanning-tree = []
 
+## Exposes access to the lightwalletd server via TOR
+tor-lightwalletd-tonic = [
+  "tor",
+  "lightwalletd-tonic",
+  "tonic?/tls",
+  "tonic?/tls-webpki-roots"
+]
+
 [lib]
 bench = false
 
