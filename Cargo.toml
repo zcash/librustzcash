@@ -156,3 +156,6 @@ zip32 = "0.1.1"
 lto = true
 panic = 'abort'
 codegen-units = 1
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
