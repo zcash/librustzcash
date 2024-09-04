@@ -220,7 +220,9 @@ impl Account {
     }
 }
 
-impl zcash_client_backend::data_api::Account<AccountId> for Account {
+impl zcash_client_backend::data_api::Account for Account {
+    type AccountId = AccountId;
+
     fn id(&self) -> AccountId {
         self.account_id
     }

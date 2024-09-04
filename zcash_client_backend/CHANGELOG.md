@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- The `Account` trait now uses an associated type for its `AccountId`
+  type instead of a type parameter. This change allows for the simplification
+  of some type signatures.
+
 ## [0.13.0] - 2024-08-20
 
 `zcash_client_backend` now supports TEX (transparent-source-only) addresses as specified

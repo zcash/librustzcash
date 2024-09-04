@@ -346,9 +346,11 @@ pub enum AccountSource {
 }
 
 /// A set of capabilities that a client account must provide.
-pub trait Account<AccountId: Copy> {
+pub trait Account {
+    type AccountId: Copy;
+
     /// Returns the unique identifier for the account.
-    fn id(&self) -> AccountId;
+    fn id(&self) -> Self::AccountId;
 
     /// Returns whether this account is derived or imported, and the derivation parameters
     /// if applicable.
@@ -377,7 +379,9 @@ pub trait Account<AccountId: Copy> {
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
-impl<A: Copy> Account<A> for (A, UnifiedFullViewingKey) {
+impl<A: Copy> Account for (A, UnifiedFullViewingKey) {
+    type AccountId = A;
+
     fn id(&self) -> A {
         self.0
     }
@@ -398,7 +402,9 @@ impl<A: Copy> Account<A> for (A, UnifiedFullViewingKey) {
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
-impl<A: Copy> Account<A> for (A, UnifiedIncomingViewingKey) {
+impl<A: Copy> Account for (A, UnifiedIncomingViewingKey) {
+    type AccountId = A;
+
     fn id(&self) -> A {
         self.0
     }
@@ -804,7 +810,7 @@ pub trait WalletRead {
     type AccountId: Copy + Debug + Eq + Hash;
 
     /// The concrete account type used by this wallet backend.
-    type Account: Account<Self::AccountId>;
+    type Account: Account<AccountId = Self::AccountId>;
 
     /// Returns a vector with the IDs of all accounts known to this wallet.
     fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error>;
