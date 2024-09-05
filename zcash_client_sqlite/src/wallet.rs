@@ -3172,11 +3172,13 @@ pub(crate) fn prune_nullifier_map(
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
+    use incrementalmerkletree::Position;
     use zcash_client_backend::data_api::testing::TransactionSummary;
     use zcash_primitives::transaction::TxId;
     use zcash_protocol::{
         consensus::BlockHeight,
         value::{ZatBalance, Zatoshis},
+        ShieldedProtocol,
     };
 
     use crate::{error::SqliteClientError, AccountId};
@@ -3210,6 +3212,35 @@ pub mod testing {
                     row.get("memo_count")?,
                     row.get("expired_unmined")?,
                     row.get("is_shielding")?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(results)
+    }
+
+    /// Returns a vector of transaction summaries
+    #[allow(dead_code)] // used only for tests that are flagged off by default
+    pub(crate) fn get_checkpoint_history(
+        conn: &rusqlite::Connection,
+    ) -> Result<Vec<(BlockHeight, ShieldedProtocol, Option<Position>)>, SqliteClientError> {
+        let mut stmt = conn.prepare_cached(
+            "SELECT checkpoint_id, 2 AS pool, position FROM sapling_tree_checkpoints
+             UNION
+             SELECT checkpoint_id, 3 AS pool, position FROM orchard_tree_checkpoints
+             ORDER BY checkpoint_id",
+        )?;
+
+        let results = stmt
+            .query_and_then::<_, SqliteClientError, _, _>([], |row| {
+                Ok((
+                    BlockHeight::from(row.get::<_, u32>(0)?),
+                    match row.get::<_, i64>(1)? {
+                        2 => ShieldedProtocol::Sapling,
+                        3 => ShieldedProtocol::Orchard,
+                        _ => unreachable!(),
+                    },
+                    row.get::<_, Option<u64>>(2)?.map(Position::from),
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;

@@ -2,11 +2,8 @@ use std::fmt;
 use std::num::NonZeroU32;
 use std::{collections::BTreeMap, convert::Infallible};
 
-#[cfg(feature = "unstable")]
-use std::{ffi::OsStr, fs::File};
-
 use group::ff::Field;
-use incrementalmerkletree::{Marking, Position, Retention};
+use incrementalmerkletree::{Marking, Retention};
 use nonempty::NonEmpty;
 use prost::Message;
 use rand_chacha::ChaChaRng;
@@ -19,7 +16,7 @@ use subtle::ConditionallySelectable;
 use tempfile::NamedTempFile;
 
 #[cfg(feature = "unstable")]
-use tempfile::TempDir;
+use {std::fs::File, tempfile::TempDir};
 
 use sapling::{
     note_encryption::{sapling_note_encryption, SaplingDomain},
@@ -72,12 +69,8 @@ use zcash_primitives::{
 use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::value::Zatoshis;
 
-use crate::{
-    chain::init::init_cache_database, error::SqliteClientError,
-    wallet::sapling::tests::test_prover, AccountId, ReceivedNoteId,
-};
-
-use self::db::TestDb;
+use crate::chain::init::init_cache_database;
+use crate::{wallet::sapling::tests::test_prover, ReceivedNoteId};
 
 use super::BlockDb;
 
@@ -1238,79 +1231,15 @@ where
     ) -> Option<WalletSummary<AccountIdT>> {
         self.wallet().get_wallet_summary(min_confirmations).unwrap()
     }
-}
 
-impl<Cache> TestState<Cache, TestDb, LocalNetwork> {
     /// Returns a transaction from the history.
     #[allow(dead_code)]
     pub(crate) fn get_tx_from_history(
         &self,
         txid: TxId,
-    ) -> Result<Option<TransactionSummary<AccountId>>, SqliteClientError> {
+    ) -> Result<Option<TransactionSummary<AccountIdT>>, ErrT> {
         let history = self.wallet().get_tx_history()?;
         Ok(history.into_iter().find(|tx| tx.txid() == txid))
-    }
-
-    /// Returns a vector of transaction summaries
-    #[allow(dead_code)] // used only for tests that are flagged off by default
-    pub(crate) fn get_checkpoint_history(
-        &self,
-    ) -> Result<Vec<(BlockHeight, ShieldedProtocol, Option<Position>)>, SqliteClientError> {
-        let mut stmt = self.wallet().conn().prepare_cached(
-            "SELECT checkpoint_id, 2 AS pool, position FROM sapling_tree_checkpoints
-             UNION
-             SELECT checkpoint_id, 3 AS pool, position FROM orchard_tree_checkpoints
-             ORDER BY checkpoint_id",
-        )?;
-
-        let results = stmt
-            .query_and_then::<_, SqliteClientError, _, _>([], |row| {
-                Ok((
-                    BlockHeight::from(row.get::<_, u32>(0)?),
-                    match row.get::<_, i64>(1)? {
-                        2 => ShieldedProtocol::Sapling,
-                        3 => ShieldedProtocol::Orchard,
-                        _ => unreachable!(),
-                    },
-                    row.get::<_, Option<u64>>(2)?.map(Position::from),
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(results)
-    }
-
-    /// Dump the schema and contents of the given database table, in
-    /// sqlite3 ".dump" format. The name of the table must be a static
-    /// string. This assumes that `sqlite3` is on your path and that it
-    /// invokes a compatible version of sqlite3.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `name` contains characters outside `[a-zA-Z_]`.
-    #[allow(dead_code)]
-    #[cfg(feature = "unstable")]
-    pub(crate) fn dump_table(&self, name: &'static str) {
-        assert!(name.chars().all(|c| c.is_ascii_alphabetic() || c == '_'));
-        unsafe {
-            run_sqlite3(
-                self.wallet_data.data_file().path(),
-                &format!(r#".dump "{name}""#),
-            );
-        }
-    }
-
-    /// Print the results of an arbitrary sqlite3 command (with "-safe"
-    /// and "-readonly" flags) to stderr. This is completely insecure and
-    /// should not be exposed in production. Use of the "-safe" and
-    /// "-readonly" flags is intended only to limit *accidental* misuse.
-    /// The output is unfiltered, and control codes could mess up your
-    /// terminal. This assumes that `sqlite3` is on your path and that it
-    /// invokes a compatible version of sqlite3.
-    #[allow(dead_code)]
-    #[cfg(feature = "unstable")]
-    pub(crate) unsafe fn run_sqlite3(&self, command: &str) {
-        run_sqlite3(self.wallet_data.data_file().path(), command)
     }
 }
 
@@ -1344,36 +1273,6 @@ impl<Cache, DbT: WalletRead + Reset> TestState<Cache, DbT, LocalNetwork> {
     //            })
     //            .unwrap();
     //    }
-}
-
-// See the doc comment for `TestState::run_sqlite3` above.
-//
-// - `db_path` is the path to the database file.
-// - `command` may contain newlines.
-#[allow(dead_code)]
-#[cfg(feature = "unstable")]
-unsafe fn run_sqlite3<S: AsRef<OsStr>>(db_path: S, command: &str) {
-    use std::process::Command;
-    let output = Command::new("sqlite3")
-        .arg(db_path)
-        .arg("-safe")
-        .arg("-readonly")
-        .arg(command)
-        .output()
-        .expect("failed to execute sqlite3 process");
-
-    eprintln!(
-        "{}\n------\n{}",
-        command,
-        String::from_utf8_lossy(&output.stdout)
-    );
-    if !output.stderr.is_empty() {
-        eprintln!(
-            "------ stderr:\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    eprintln!("------");
 }
 
 /// Trait used by tests that require a full viewing key.

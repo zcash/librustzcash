@@ -2173,6 +2173,8 @@ pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTest
     assert_eq!(st.get_total_balance(acct_id), expected_final);
 
     use incrementalmerkletree::Position;
+
+    use crate::wallet::testing::get_checkpoint_history;
     let expected_checkpoints_p0: Vec<(BlockHeight, ShieldedProtocol, Option<Position>)> = [
         (99999, None),
         (100000, Some(0)),
@@ -2213,7 +2215,7 @@ pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTest
     })
     .collect();
 
-    let actual_checkpoints = st.get_checkpoint_history().unwrap();
+    let actual_checkpoints = get_checkpoint_history(st.wallet().conn()).unwrap();
 
     assert_eq!(
         actual_checkpoints
