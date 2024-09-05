@@ -55,6 +55,7 @@ pub struct TransactionSummary<AccountId> {
 }
 
 impl<AccountId> TransactionSummary<AccountId> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         account_id: AccountId,
         txid: TxId,

@@ -615,7 +615,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         Ok(iter.collect())
     }
 
-    #[cfg(feature = "test-dependencies")]
+    #[cfg(any(test, feature = "test-dependencies"))]
     fn get_tx_history(&self) -> Result<Vec<TransactionSummary<Self::AccountId>>, Self::Error> {
         wallet::testing::get_tx_history(self.conn.borrow())
     }
