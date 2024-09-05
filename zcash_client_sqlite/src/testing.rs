@@ -73,10 +73,8 @@ use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::value::Zatoshis;
 
 use crate::{
-    chain::init::init_cache_database,
-    error::SqliteClientError,
-    wallet::{get_wallet_summary, sapling::tests::test_prover, SubtreeScanProgress},
-    AccountId, ReceivedNoteId,
+    chain::init::init_cache_database, error::SqliteClientError,
+    wallet::sapling::tests::test_prover, AccountId, ReceivedNoteId,
 };
 
 use self::db::TestDb;
@@ -1233,22 +1231,16 @@ where
             balance.change_pending_confirmation()
         })
     }
-}
 
-impl<Cache> TestState<Cache, TestDb, LocalNetwork> {
     pub(crate) fn get_wallet_summary(
         &self,
         min_confirmations: u32,
-    ) -> Option<WalletSummary<AccountId>> {
-        get_wallet_summary(
-            &self.wallet().conn().unchecked_transaction().unwrap(),
-            &self.network,
-            min_confirmations,
-            &SubtreeScanProgress,
-        )
-        .unwrap()
+    ) -> Option<WalletSummary<AccountIdT>> {
+        self.wallet().get_wallet_summary(min_confirmations).unwrap()
     }
+}
 
+impl<Cache> TestState<Cache, TestDb, LocalNetwork> {
     /// Returns a transaction from the history.
     #[allow(dead_code)]
     pub(crate) fn get_tx_from_history(
