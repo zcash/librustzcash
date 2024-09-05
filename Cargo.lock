@@ -68,6 +68,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c6cb57a04249c6480766f7f7cef5467412af1490f8d1e243141daddada3264f"
 
 [[package]]
+name = "ambassador"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b27ba24e4d8a188489d5a03c7fabc167a60809a383cdb4d15feb37479cd2a48"
+dependencies = [
+ "itertools 0.10.5",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "amplify"
 version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5817,6 +5829,7 @@ dependencies = [
 name = "zcash_client_backend"
 version = "0.13.0"
 dependencies = [
+ "ambassador",
  "arti-client",
  "assert_matches",
  "async-trait",
@@ -5879,6 +5892,7 @@ dependencies = [
 name = "zcash_client_sqlite"
 version = "0.11.2"
 dependencies = [
+ "ambassador",
  "assert_matches",
  "bip32",
  "bls12_381",

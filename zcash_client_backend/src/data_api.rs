@@ -103,7 +103,7 @@ use {
 };
 
 #[cfg(any(test, feature = "test-dependencies"))]
-use zcash_primitives::consensus::NetworkUpgrade;
+use {ambassador::delegatable_trait, zcash_primitives::consensus::NetworkUpgrade};
 
 pub mod chain;
 pub mod error;
@@ -662,10 +662,20 @@ impl<NoteRef> SpendableNotes<NoteRef> {
         self.sapling.as_ref()
     }
 
+    /// Consumes this value and returns the Sapling notes contained within it.
+    pub fn take_sapling(self) -> Vec<ReceivedNote<NoteRef, sapling::Note>> {
+        self.sapling
+    }
+
     /// Returns the set of spendable Orchard notes.
     #[cfg(feature = "orchard")]
     pub fn orchard(&self) -> &[ReceivedNote<NoteRef, orchard::note::Note>] {
         self.orchard.as_ref()
+    }
+
+    /// Consumes this value and returns the Orchard notes contained within it.
+    pub fn take_orchard(self) -> Vec<ReceivedNote<NoteRef, orchard::note::Note>> {
+        self.orchard
     }
 
     /// Computes the total value of Sapling notes.
@@ -721,6 +731,7 @@ impl<NoteRef> SpendableNotes<NoteRef> {
 
 /// A trait representing the capability to query a data store for unspent transaction outputs
 /// belonging to a wallet.
+#[cfg_attr(feature = "test-dependencies", delegatable_trait)]
 pub trait InputSource {
     /// The type of errors produced by a wallet backend.
     type Error: Debug;
@@ -798,6 +809,7 @@ pub trait InputSource {
 /// This trait defines the read-only portion of the storage interface atop which
 /// higher-level wallet operations are implemented. It serves to allow wallet functions to
 /// be abstracted away from any particular data storage substrate.
+#[cfg_attr(feature = "test-dependencies", delegatable_trait)]
 pub trait WalletRead {
     /// The type of errors that may be generated when querying a wallet data store.
     type Error: Debug;
@@ -1773,6 +1785,7 @@ impl AccountBirthday {
 /// [zcash/librustzcash#1284]: https://github.com/zcash/librustzcash/issues/1284
 /// [BIP 39]: https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki
 /// [`bip0039`]: https://crates.io/crates/bip0039
+#[cfg_attr(feature = "test-dependencies", delegatable_trait)]
 pub trait WalletWrite: WalletRead {
     /// The type of identifiers used to look up transparent UTXOs.
     type UtxoRef;
@@ -1974,9 +1987,7 @@ pub trait WalletWrite: WalletRead {
 }
 
 /// This trait describes a capability for manipulating wallet note commitment trees.
-///
-/// At present, this only serves the Sapling protocol, but it will be modified to
-/// also provide operations related to Orchard note commitment trees in the future.
+#[cfg_attr(feature = "test-dependencies", delegatable_trait)]
 pub trait WalletCommitmentTrees {
     type Error: Debug;
 

@@ -91,6 +91,7 @@ shardtree.workspace = true
 # - Test dependencies
 proptest = { workspace = true, optional = true }
 jubjub = { workspace = true, optional = true }
+ambassador = { workspace = true, optional = true }
 
 # - ZIP 321
 nom = "7"
@@ -195,6 +196,7 @@ tor = [
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
+    "dep:ambassador",
     "dep:proptest",
     "dep:jubjub",
     "orchard?/test-dependencies",
