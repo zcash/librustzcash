@@ -674,6 +674,7 @@ impl<NoteRef> SpendableNotes<NoteRef> {
     }
 
     /// Consumes this value and returns the Orchard notes contained within it.
+    #[cfg(feature = "orchard")]
     pub fn take_orchard(self) -> Vec<ReceivedNote<NoteRef, orchard::note::Note>> {
         self.orchard
     }

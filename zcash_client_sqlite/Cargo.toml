@@ -79,6 +79,7 @@ document-features.workspace = true
 maybe-rayon.workspace = true
 
 [dev-dependencies]
+ambassador.workspace = true
 assert_matches.workspace = true
 bls12_381.workspace = true
 incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }

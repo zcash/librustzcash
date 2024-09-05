@@ -3176,11 +3176,14 @@ mod tests {
 
     use sapling::zip32::ExtendedSpendingKey;
     use secrecy::{ExposeSecret, SecretVec};
-    use zcash_client_backend::data_api::{AccountSource, WalletRead};
+    use zcash_client_backend::data_api::{Account as _, AccountSource, WalletRead, WalletWrite};
     use zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
 
     use crate::{
-        testing::{AddressType, BlockCache, FakeCompactOutput, TestBuilder, TestState},
+        testing::{
+            db::TestDbFactory, AddressType, DataStoreFactory, FakeCompactOutput, TestBuilder,
+            TestState,
+        },
         AccountId,
     };
 
@@ -3189,6 +3192,7 @@ mod tests {
     #[test]
     fn empty_database_has_no_balance() {
         let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().unwrap();
@@ -3205,27 +3209,23 @@ mod tests {
         );
 
         // The default address is set for the test account
-        assert_matches!(
-            st.wallet().get_current_address(account.account_id()),
-            Ok(Some(_))
-        );
+        assert_matches!(st.wallet().get_current_address(account.id()), Ok(Some(_)));
 
         // No default address is set for an un-initialized account
         assert_matches!(
             st.wallet()
-                .get_current_address(AccountId(account.account_id().0 + 1)),
+                .get_current_address(AccountId(account.id().0 + 1)),
             Ok(None)
         );
     }
 
     #[test]
     fn get_default_account_index() {
-        use crate::testing::TestBuilder;
-
         let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
-        let account_id = st.test_account().unwrap().account_id();
+        let account_id = st.test_account().unwrap().id();
         let account_parameters = st.wallet().get_account(account_id).unwrap().unwrap();
 
         let expected_account_index = zip32::AccountId::try_from(0).unwrap();
@@ -3237,10 +3237,8 @@ mod tests {
 
     #[test]
     fn get_account_ids() {
-        use crate::testing::TestBuilder;
-        use zcash_client_backend::data_api::WalletWrite;
-
         let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
@@ -3256,12 +3254,17 @@ mod tests {
 
     #[test]
     fn block_fully_scanned() {
+        check_block_fully_scanned(TestDbFactory)
+    }
+
+    fn check_block_fully_scanned<DsF: DataStoreFactory>(dsf: DsF) {
         let mut st = TestBuilder::new()
+            .with_data_store_factory(dsf)
             .with_block_cache()
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
-        let block_fully_scanned = |st: &TestState<BlockCache>| {
+        let block_fully_scanned = |st: &TestState<_, DsF::DataStore, _>| {
             st.wallet()
                 .block_fully_scanned()
                 .unwrap()
@@ -3316,13 +3319,14 @@ mod tests {
     #[test]
     fn test_account_birthday() {
         let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
             .with_block_cache()
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
-        let account_id = st.test_account().unwrap().account_id();
+        let account_id = st.test_account().unwrap().id();
         assert_matches!(
-            account_birthday(&st.wallet().conn, account_id),
+            account_birthday(st.wallet().conn(), account_id),
             Ok(birthday) if birthday == st.sapling_activation_height()
         )
     }

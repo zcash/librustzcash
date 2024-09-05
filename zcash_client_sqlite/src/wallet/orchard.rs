@@ -393,10 +393,12 @@ pub(crate) mod tests {
         note_encryption::OrchardDomain,
         tree::MerkleHashOrchard,
     };
+
     use shardtree::error::ShardTreeError;
     use zcash_client_backend::{
         data_api::{
-            chain::CommitmentTreeRoot, DecryptedTransaction, WalletCommitmentTrees, WalletSummary,
+            chain::CommitmentTreeRoot, DecryptedTransaction, InputSource, WalletCommitmentTrees,
+            WalletRead, WalletSummary,
         },
         wallet::{Note, ReceivedNote},
     };
@@ -406,17 +408,20 @@ pub(crate) mod tests {
     };
     use zcash_note_encryption::try_output_recovery_with_ovk;
     use zcash_primitives::transaction::Transaction;
-    use zcash_protocol::{consensus::BlockHeight, memo::MemoBytes, ShieldedProtocol};
+    use zcash_protocol::{
+        consensus::{self, BlockHeight},
+        memo::MemoBytes,
+        value::Zatoshis,
+        ShieldedProtocol,
+    };
 
-    use super::select_spendable_orchard_notes;
     use crate::{
-        error::SqliteClientError,
         testing::{
             self,
             pool::{OutputRecoveryError, ShieldedPoolTester},
             TestState,
         },
-        wallet::{commitment_tree, sapling::tests::SaplingPoolTester},
+        wallet::sapling::tests::SaplingPoolTester,
         ORCHARD_TABLES_PREFIX,
     };
 
@@ -431,8 +436,10 @@ pub(crate) mod tests {
         type MerkleTreeHash = MerkleHashOrchard;
         type Note = orchard::note::Note;
 
-        fn test_account_fvk<Cache>(st: &TestState<Cache>) -> Self::Fvk {
-            st.test_account_orchard().unwrap()
+        fn test_account_fvk<Cache, DbT: WalletRead, P: consensus::Parameters>(
+            st: &TestState<Cache, DbT, P>,
+        ) -> Self::Fvk {
+            st.test_account_orchard().unwrap().clone()
         }
 
         fn usk_to_sk(usk: &UnifiedSpendingKey) -> &Self::Sk {
@@ -479,11 +486,11 @@ pub(crate) mod tests {
             MerkleHashOrchard::empty_root(level)
         }
 
-        fn put_subtree_roots<Cache>(
-            st: &mut TestState<Cache>,
+        fn put_subtree_roots<Cache, DbT: WalletRead + WalletCommitmentTrees, P>(
+            st: &mut TestState<Cache, DbT, P>,
             start_index: u64,
             roots: &[CommitmentTreeRoot<Self::MerkleTreeHash>],
-        ) -> Result<(), ShardTreeError<commitment_tree::Error>> {
+        ) -> Result<(), ShardTreeError<<DbT as WalletCommitmentTrees>::Error>> {
             st.wallet_mut()
                 .put_orchard_subtree_roots(start_index, roots)
         }
@@ -492,22 +499,23 @@ pub(crate) mod tests {
             s.next_orchard_subtree_index()
         }
 
-        fn select_spendable_notes<Cache>(
-            st: &TestState<Cache>,
-            account: crate::AccountId,
-            target_value: zcash_protocol::value::Zatoshis,
+        fn select_spendable_notes<Cache, DbT: InputSource + WalletRead, P>(
+            st: &TestState<Cache, DbT, P>,
+            account: <DbT as InputSource>::AccountId,
+            target_value: Zatoshis,
             anchor_height: BlockHeight,
-            exclude: &[crate::ReceivedNoteId],
-        ) -> Result<Vec<ReceivedNote<crate::ReceivedNoteId, orchard::note::Note>>, SqliteClientError>
+            exclude: &[DbT::NoteRef],
+        ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error>
         {
-            select_spendable_orchard_notes(
-                &st.wallet().conn,
-                &st.wallet().params,
-                account,
-                target_value,
-                anchor_height,
-                exclude,
-            )
+            st.wallet()
+                .select_spendable_notes(
+                    account,
+                    target_value,
+                    &[ShieldedProtocol::Orchard],
+                    anchor_height,
+                    exclude,
+                )
+                .map(|n| n.take_orchard())
         }
 
         fn decrypted_pool_outputs_count(
@@ -525,8 +533,8 @@ pub(crate) mod tests {
             }
         }
 
-        fn try_output_recovery<Cache>(
-            _: &TestState<Cache>,
+        fn try_output_recovery<P: consensus::Parameters>(
+            _params: &P,
             _: BlockHeight,
             tx: &Transaction,
             fvk: &Self::Fvk,

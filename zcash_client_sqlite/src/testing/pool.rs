@@ -37,7 +37,8 @@ use zcash_client_backend::{
             decrypt_and_store_transaction,
             input_selection::{GreedyInputSelector, GreedyInputSelectorError},
         },
-        AccountBirthday, DecryptedTransaction, Ratio, WalletRead, WalletSummary, WalletWrite,
+        Account as _, AccountBirthday, DecryptedTransaction, InputSource, Ratio,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
     },
     decrypt_transaction,
     fees::{fixed, standard, DustOutputPolicy},
@@ -47,16 +48,16 @@ use zcash_client_backend::{
     zip321::{self, Payment, TransactionRequest},
     ShieldedProtocol,
 };
-use zcash_protocol::consensus::BlockHeight;
+use zcash_protocol::consensus::{self, BlockHeight};
 
 use super::TestFvk;
 use crate::{
     error::SqliteClientError,
     testing::{
-        input_selector, AddressType, BlockCache, FakeCompactOutput, InitialChainState, TestBuilder,
-        TestState,
+        db::{TestDb, TestDbFactory},
+        input_selector, AddressType, FakeCompactOutput, InitialChainState, TestBuilder, TestState,
     },
-    wallet::{block_max_scanned, commitment_tree, parse_scope, truncate_to_height},
+    wallet::{commitment_tree, parse_scope, truncate_to_height},
     AccountId, NoteId, ReceivedNoteId,
 };
 
@@ -90,7 +91,9 @@ pub(crate) trait ShieldedPoolTester {
     type MerkleTreeHash;
     type Note;
 
-    fn test_account_fvk<Cache>(st: &TestState<Cache>) -> Self::Fvk;
+    fn test_account_fvk<Cache, DbT: WalletRead, P: consensus::Parameters>(
+        st: &TestState<Cache, DbT, P>,
+    ) -> Self::Fvk;
     fn usk_to_sk(usk: &UnifiedSpendingKey) -> &Self::Sk;
     fn sk(seed: &[u8]) -> Self::Sk;
     fn sk_to_fvk(sk: &Self::Sk) -> Self::Fvk;
@@ -114,21 +117,22 @@ pub(crate) trait ShieldedPoolTester {
     fn empty_tree_leaf() -> Self::MerkleTreeHash;
     fn empty_tree_root(level: Level) -> Self::MerkleTreeHash;
 
-    fn put_subtree_roots<Cache>(
-        st: &mut TestState<Cache>,
+    fn put_subtree_roots<Cache, DbT: WalletRead + WalletCommitmentTrees, P>(
+        st: &mut TestState<Cache, DbT, P>,
         start_index: u64,
         roots: &[CommitmentTreeRoot<Self::MerkleTreeHash>],
-    ) -> Result<(), ShardTreeError<commitment_tree::Error>>;
+    ) -> Result<(), ShardTreeError<<DbT as WalletCommitmentTrees>::Error>>;
 
     fn next_subtree_index(s: &WalletSummary<AccountId>) -> u64;
 
-    fn select_spendable_notes<Cache>(
-        st: &TestState<Cache>,
-        account: AccountId,
+    #[allow(clippy::type_complexity)]
+    fn select_spendable_notes<Cache, DbT: InputSource + WalletRead, P>(
+        st: &TestState<Cache, DbT, P>,
+        account: <DbT as InputSource>::AccountId,
         target_value: NonNegativeAmount,
         anchor_height: BlockHeight,
-        exclude: &[ReceivedNoteId],
-    ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Self::Note>>, SqliteClientError>;
+        exclude: &[DbT::NoteRef],
+    ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error>;
 
     fn decrypted_pool_outputs_count(d_tx: &DecryptedTransaction<'_, AccountId>) -> usize;
 
@@ -137,8 +141,8 @@ pub(crate) trait ShieldedPoolTester {
         f: impl FnMut(&MemoBytes),
     );
 
-    fn try_output_recovery<Cache>(
-        st: &TestState<Cache>,
+    fn try_output_recovery<P: consensus::Parameters>(
+        params: &P,
         height: BlockHeight,
         tx: &Transaction,
         fvk: &Self::Fvk,
@@ -149,6 +153,7 @@ pub(crate) trait ShieldedPoolTester {
 
 pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
@@ -162,11 +167,12 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     st.scan_cached_blocks(h, 1);
 
     // Spendable balance matches total balance
-    assert_eq!(st.get_total_balance(account.account_id()), value);
-    assert_eq!(st.get_spendable_balance(account.account_id(), 1), value);
+    assert_eq!(st.get_total_balance(account.id()), value);
+    assert_eq!(st.get_spendable_balance(account.id(), 1), value);
 
     assert_eq!(
-        block_max_scanned(&st.wallet().conn, &st.wallet().params)
+        st.wallet()
+            .block_max_scanned()
             .unwrap()
             .unwrap()
             .block_height(),
@@ -176,7 +182,7 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     let to_extsk = T::sk(&[0xf5; 32]);
     let to: Address = T::sk_default_address(&to_extsk);
     let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        to.to_zcash_address(&st.network()),
+        to.to_zcash_address(st.network()),
         NonNegativeAmount::const_from_u64(10000),
     )])
     .unwrap();
@@ -193,7 +199,7 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     let proposal = st
         .propose_transfer(
-            account.account_id(),
+            account.id(),
             input_selector,
             request,
             NonZeroU32::new(1).unwrap(),
@@ -215,13 +221,10 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
         .get_transaction(sent_tx_id)
         .unwrap()
         .expect("Created transaction was stored.");
-    let ufvks = [(
-        account.account_id(),
-        account.usk().to_unified_full_viewing_key(),
-    )]
-    .into_iter()
-    .collect();
-    let d_tx = decrypt_transaction(&st.network(), h + 1, &tx, &ufvks);
+    let ufvks = [(account.id(), account.usk().to_unified_full_viewing_key())]
+        .into_iter()
+        .collect();
+    let d_tx = decrypt_transaction(st.network(), h + 1, &tx, &ufvks);
     assert_eq!(T::decrypted_pool_outputs_count(&d_tx), 2);
 
     let mut found_tx_change_memo = false;
@@ -241,7 +244,7 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     let sent_note_ids = {
         let mut stmt_sent_notes = st
             .wallet()
-            .conn
+            .conn()
             .prepare(
                 "SELECT output_index
                 FROM sent_notes
@@ -294,8 +297,9 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     let tx_history = st.get_tx_history().unwrap();
     assert_eq!(tx_history.len(), 2);
 
+    let network = *st.network();
     assert_matches!(
-        decrypt_and_store_transaction(&st.network(), st.wallet_mut(), &tx, None),
+        decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, None),
         Ok(_)
     );
 }
@@ -321,21 +325,23 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     };
 
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
-    let account_id = account.account_id();
+    let account_id = account.id();
     let (default_addr, default_index) = account.usk().default_transparent_address();
     let dfvk = T::test_account_fvk(&st);
 
-    let add_funds = |st: &mut TestState<_>, value| {
+    let add_funds = |st: &mut TestState<_, TestDb, _>, value| {
         let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h, 1);
 
         assert_eq!(
-            block_max_scanned(&st.wallet().conn, &st.wallet().params)
+            st.wallet()
+                .block_max_scanned()
                 .unwrap()
                 .unwrap()
                 .block_height(),
@@ -348,7 +354,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     let value = NonNegativeAmount::const_from_u64(100000);
     let transfer_amount = NonNegativeAmount::const_from_u64(50000);
 
-    let run_test = |st: &mut TestState<_>, expected_index| {
+    let run_test = |st: &mut TestState<_, TestDb, _>, expected_index| {
         // Add funds to the wallet.
         add_funds(st, value);
 
@@ -407,7 +413,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         // Verify that the stored sent outputs match what we're expecting.
         let mut stmt_sent = st
             .wallet()
-            .conn
+            .conn()
             .prepare(
                 "SELECT value, to_address, ephemeral_addresses.address, ephemeral_addresses.address_index
                  FROM sent_notes
@@ -459,7 +465,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         assert_matches!(
             confirmed_sent[1][0].clone(),
             (sent_v, sent_to_addr, None, None)
-            if sent_v == u64::try_from(transfer_amount).unwrap() && sent_to_addr == Some(tex_addr.encode(&st.wallet().params)));
+            if sent_v == u64::try_from(transfer_amount).unwrap() && sent_to_addr == Some(tex_addr.encode(st.network())));
 
         // Check that the transaction history matches what we expect.
         let tx_history = st.get_tx_history().unwrap();
@@ -501,7 +507,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     let height = add_funds(&mut st, value);
 
-    let ephemeral_taddr = Address::decode(&st.wallet().params, &ephemeral0).expect("valid address");
+    let ephemeral_taddr = Address::decode(st.network(), &ephemeral0).expect("valid address");
     assert_matches!(
         ephemeral_taddr,
         Address::Transparent(TransparentAddress::PublicKeyHash(_))
@@ -555,7 +561,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     }
 
     let mut builder = Builder::new(
-        st.wallet().params,
+        *st.network(),
         height + 1,
         BuildConfig::Standard {
             sapling_anchor: None,
@@ -614,7 +620,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     // We call get_wallet_transparent_output with `allow_unspendable = true` to verify
     // storage because the decrypted transaction has not yet been mined.
     let utxo =
-        get_wallet_transparent_output(&st.db_data.conn, &OutPoint::new(txid.into(), 0), true)
+        get_wallet_transparent_output(st.wallet().conn(), &OutPoint::new(txid.into(), 0), true)
             .unwrap();
     assert_matches!(utxo, Some(v) if v.value() == utxo_value);
 
@@ -626,7 +632,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     assert_eq!(new_known_addrs.len(), (GAP_LIMIT as usize) + 11);
     assert!(new_known_addrs.starts_with(&known_addrs));
 
-    let reservation_should_succeed = |st: &mut TestState<_>, n| {
+    let reservation_should_succeed = |st: &mut TestState<_, TestDb, _>, n| {
         let reserved = st
             .wallet_mut()
             .reserve_next_n_ephemeral_addresses(account_id, n)
@@ -634,7 +640,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         assert_eq!(reserved.len(), n);
         reserved
     };
-    let reservation_should_fail = |st: &mut TestState<_>, n, expected_bad_index| {
+    let reservation_should_fail = |st: &mut TestState<_, TestDb, _>, n, expected_bad_index| {
         assert_matches!(st
             .wallet_mut()
             .reserve_next_n_ephemeral_addresses(account_id, n),
@@ -724,20 +730,22 @@ pub(crate) fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPo
     use zcash_client_backend::proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex};
 
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
-    let account_id = account.account_id();
+    let account_id = account.id();
     let dfvk = T::test_account_fvk(&st);
 
-    let add_funds = |st: &mut TestState<_>, value| {
+    let add_funds = |st: &mut TestState<_, TestDb, _>, value| {
         let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h, 1);
 
         assert_eq!(
-            block_max_scanned(&st.wallet().conn, &st.wallet().params)
+            st.wallet()
+                .block_max_scanned()
                 .unwrap()
                 .unwrap()
                 .block_height(),
@@ -806,6 +814,7 @@ pub(crate) fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPo
 #[allow(deprecated)]
 pub(crate) fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
     let dfvk = T::test_account_fvk(&st);
@@ -813,7 +822,7 @@ pub(crate) fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester>() 
 
     // Create a USK that doesn't exist in the wallet
     let acct1 = zip32::AccountId::try_from(1).unwrap();
-    let usk1 = UnifiedSpendingKey::from_seed(&st.network(), &[1u8; 32], acct1).unwrap();
+    let usk1 = UnifiedSpendingKey::from_seed(st.network(), &[1u8; 32], acct1).unwrap();
 
     // Attempting to spend with a USK that is not in the wallet results in an error
     assert_matches!(
@@ -834,10 +843,11 @@ pub(crate) fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester>() 
 #[allow(deprecated)]
 pub(crate) fn proposal_fails_with_no_blocks<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
-    let account_id = st.test_account().unwrap().account_id();
+    let account_id = st.test_account().unwrap().id();
     let dfvk = T::test_account_fvk(&st);
     let to = T::fvk_default_address(&dfvk);
 
@@ -862,12 +872,13 @@ pub(crate) fn proposal_fails_with_no_blocks<T: ShieldedPoolTester>() {
 
 pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
-    let account_id = account.account_id();
+    let account_id = account.id();
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note
@@ -1013,12 +1024,13 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
 
 pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
-    let account_id = account.account_id();
+    let account_id = account.id();
     let dfvk = T::test_account_fvk(&st);
 
     let fee_rule = StandardFeeRule::Zip317;
@@ -1148,12 +1160,13 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
 
 pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
-    let account_id = account.account_id();
+    let account_id = account.id();
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note
@@ -1171,7 +1184,7 @@ pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
     let fee_rule = StandardFeeRule::Zip317;
 
     #[allow(clippy::type_complexity)]
-    let send_and_recover_with_policy = |st: &mut TestState<BlockCache>,
+    let send_and_recover_with_policy = |st: &mut TestState<_, TestDb, _>,
                                         ovk_policy|
      -> Result<
         Option<(Note, Address, MemoBytes)>,
@@ -1200,17 +1213,16 @@ pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
         // Fetch the transaction from the database
         let raw_tx: Vec<_> = st
             .wallet()
-            .conn
+            .conn()
             .query_row(
-                "SELECT raw FROM transactions
-                WHERE txid = ?",
+                "SELECT raw FROM transactions WHERE txid = ?",
                 [txid.as_ref()],
                 |row| row.get(0),
             )
             .unwrap();
         let tx = Transaction::read(&raw_tx[..], BranchId::Canopy).unwrap();
 
-        T::try_output_recovery(st, h1, &tx, &dfvk)
+        T::try_output_recovery(st.network(), h1, &tx, &dfvk)
     };
 
     // Send some of the funds to another address, keeping history.
@@ -1241,12 +1253,13 @@ pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
 
 pub(crate) fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
-    let account_id = account.account_id();
+    let account_id = account.id();
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note
@@ -1285,12 +1298,13 @@ pub(crate) fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
 
 pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
-    let account_id = account.account_id();
+    let account_id = account.id();
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note owned by the internal spending key
@@ -1309,7 +1323,7 @@ pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester>() {
         NonNegativeAmount::ZERO
     );
 
-    let change_note_scope = st.wallet().conn.query_row(
+    let change_note_scope = st.wallet().conn().query_row(
         &format!(
             "SELECT recipient_key_scope
              FROM {}_received_notes
@@ -1349,11 +1363,14 @@ pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester>() {
 pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
     T: ShieldedPoolTester,
 >() {
-    let mut st = TestBuilder::new().with_block_cache().build();
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
+        .with_block_cache()
+        .build();
 
     // Add two accounts to the wallet.
     let seed = Secret::new([0u8; 32].to_vec());
-    let birthday = AccountBirthday::from_sapling_activation(&st.network(), BlockHash([0; 32]));
+    let birthday = AccountBirthday::from_sapling_activation(st.network(), BlockHash([0; 32]));
     let (account_id, usk) = st.wallet_mut().create_account(&seed, &birthday).unwrap();
     let dfvk = T::sk_to_fvk(T::usk_to_sk(&usk));
 
@@ -1376,9 +1393,9 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
     let addr2 = T::fvk_default_address(&dfvk2);
     let req = TransactionRequest::new(vec![
         // payment to an external recipient
-        Payment::without_memo(addr2.to_zcash_address(&st.network()), amount_sent),
+        Payment::without_memo(addr2.to_zcash_address(st.network()), amount_sent),
         // payment back to the originating wallet, simulating legacy change
-        Payment::without_memo(addr.to_zcash_address(&st.network()), amount_legacy_change),
+        Payment::without_memo(addr.to_zcash_address(st.network()), amount_legacy_change),
     ])
     .unwrap();
 
@@ -1437,12 +1454,13 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
 #[allow(dead_code)]
 pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
-    let account_id = account.account_id();
+    let account_id = account.id();
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet
@@ -1472,7 +1490,7 @@ pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
 
     // This first request will fail due to insufficient non-dust funds
     let req = TransactionRequest::new(vec![Payment::without_memo(
-        T::fvk_default_address(&dfvk).to_zcash_address(&st.network()),
+        T::fvk_default_address(&dfvk).to_zcash_address(st.network()),
         NonNegativeAmount::const_from_u64(50000),
     )])
     .unwrap();
@@ -1493,7 +1511,7 @@ pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
     // This request will succeed, spending a single dust input to pay the 10000
     // ZAT fee in addition to the 41000 ZAT output to the recipient
     let req = TransactionRequest::new(vec![Payment::without_memo(
-        T::fvk_default_address(&dfvk).to_zcash_address(&st.network()),
+        T::fvk_default_address(&dfvk).to_zcash_address(st.network()),
         NonNegativeAmount::const_from_u64(41000),
     )])
     .unwrap();
@@ -1523,6 +1541,7 @@ pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
@@ -1532,7 +1551,7 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
 
     let uaddr = st
         .wallet()
-        .get_current_address(account.account_id())
+        .get_current_address(account.id())
         .unwrap()
         .unwrap();
     let taddr = uaddr.transparent().unwrap();
@@ -1596,6 +1615,7 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
     // notes beyond the end of the first shard.
     let frontier_tree_size: u32 = (0x1 << 16) + 1234;
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_initial_chain_state(|rng, network| {
             let birthday_height = network.activation_height(NetworkUpgrade::Nu5).unwrap() + 1000;
@@ -1671,7 +1691,7 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
 
     // Verify that the received note is not considered spendable
     let account = st.test_account().unwrap();
-    let account_id = account.account_id();
+    let account_id = account.id();
     let spendable = T::select_spendable_notes(
         &st,
         account_id,
@@ -1701,6 +1721,7 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
 
 pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
@@ -1738,14 +1759,14 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
 
     // Fake that everything has been scanned
     st.wallet()
-        .conn
+        .conn()
         .execute_batch("UPDATE scan_queue SET priority = 10")
         .unwrap();
 
     // Verify that our note is considered spendable
     let spendable = T::select_spendable_notes(
         &st,
-        account.account_id(),
+        account.id(),
         NonNegativeAmount::const_from_u64(300000),
         account.birthday().height() + 5,
         &[],
@@ -1773,6 +1794,7 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
 #[cfg(feature = "orchard")]
 pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
         // activation after Sapling
@@ -1790,15 +1812,12 @@ pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTes
     st.scan_cached_blocks(account.birthday().height(), 2);
 
     let initial_balance = note_value;
-    assert_eq!(st.get_total_balance(account.account_id()), initial_balance);
-    assert_eq!(
-        st.get_spendable_balance(account.account_id(), 1),
-        initial_balance
-    );
+    assert_eq!(st.get_total_balance(account.id()), initial_balance);
+    assert_eq!(st.get_spendable_balance(account.id(), 1), initial_balance);
 
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
     let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        p1_to.to_zcash_address(&st.network()),
+        p1_to.to_zcash_address(st.network()),
         transfer_amount,
     )])
     .unwrap();
@@ -1810,7 +1829,7 @@ pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTes
     );
     let proposal0 = st
         .propose_transfer(
-            account.account_id(),
+            account.id(),
             &input_selector,
             p0_to_p1,
             NonZeroU32::new(1).unwrap(),
@@ -1850,11 +1869,11 @@ pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTes
     st.scan_cached_blocks(h, 1);
 
     assert_eq!(
-        st.get_total_balance(account.account_id()),
+        st.get_total_balance(account.id()),
         (initial_balance - expected_fee).unwrap()
     );
     assert_eq!(
-        st.get_spendable_balance(account.account_id(), 1),
+        st.get_spendable_balance(account.id(), 1),
         (initial_balance - expected_fee).unwrap()
     );
 }
@@ -1862,6 +1881,7 @@ pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTes
 #[cfg(feature = "orchard")]
 pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
         // activation after Sapling
@@ -1880,15 +1900,12 @@ pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoo
     st.scan_cached_blocks(account.birthday().height(), 2);
 
     let initial_balance = (note_value * 2).unwrap();
-    assert_eq!(st.get_total_balance(account.account_id()), initial_balance);
-    assert_eq!(
-        st.get_spendable_balance(account.account_id(), 1),
-        initial_balance
-    );
+    assert_eq!(st.get_total_balance(account.id()), initial_balance);
+    assert_eq!(st.get_spendable_balance(account.id(), 1), initial_balance);
 
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
     let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        p1_to.to_zcash_address(&st.network()),
+        p1_to.to_zcash_address(st.network()),
         transfer_amount,
     )])
     .unwrap();
@@ -1902,7 +1919,7 @@ pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoo
     );
     let proposal0 = st
         .propose_transfer(
-            account.account_id(),
+            account.id(),
             &input_selector,
             p0_to_p1,
             NonZeroU32::new(1).unwrap(),
@@ -1941,11 +1958,11 @@ pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoo
     st.scan_cached_blocks(h, 1);
 
     assert_eq!(
-        st.get_total_balance(account.account_id()),
+        st.get_total_balance(account.id()),
         (initial_balance - expected_fee).unwrap()
     );
     assert_eq!(
-        st.get_spendable_balance(account.account_id(), 1),
+        st.get_spendable_balance(account.id(), 1),
         (initial_balance - expected_fee).unwrap()
     );
 }
@@ -1953,6 +1970,7 @@ pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoo
 #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
 pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
         // activation after Sapling
@@ -1970,15 +1988,12 @@ pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTes
     st.scan_cached_blocks(account.birthday().height(), 2);
 
     let initial_balance = (note_value * 2).unwrap();
-    assert_eq!(st.get_total_balance(account.account_id()), initial_balance);
-    assert_eq!(
-        st.get_spendable_balance(account.account_id(), 1),
-        initial_balance
-    );
+    assert_eq!(st.get_total_balance(account.id()), initial_balance);
+    assert_eq!(st.get_spendable_balance(account.id(), 1), initial_balance);
 
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
     let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        Address::Transparent(p1_to).to_zcash_address(&st.network()),
+        Address::Transparent(p1_to).to_zcash_address(st.network()),
         transfer_amount,
     )])
     .unwrap();
@@ -1992,7 +2007,7 @@ pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTes
     );
     let proposal0 = st
         .propose_transfer(
-            account.account_id(),
+            account.id(),
             &input_selector,
             p0_to_p1,
             NonZeroU32::new(1).unwrap(),
@@ -2028,11 +2043,11 @@ pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTes
     st.scan_cached_blocks(h, 1);
 
     assert_eq!(
-        st.get_total_balance(account.account_id()),
+        st.get_total_balance(account.id()),
         (initial_balance - transfer_amount - expected_fee).unwrap()
     );
     assert_eq!(
-        st.get_spendable_balance(account.account_id(), 1),
+        st.get_spendable_balance(account.id(), 1),
         (initial_balance - transfer_amount - expected_fee).unwrap()
     );
 }
@@ -2040,13 +2055,14 @@ pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTes
 #[cfg(feature = "orchard")]
 pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
         // activation after Sapling
         .build();
 
     let account = st.test_account().cloned().unwrap();
-    let acct_id = account.account_id();
+    let acct_id = account.id();
 
     let p0_fvk = P0::test_account_fvk(&st);
     let p1_fvk = P1::test_account_fvk(&st);
@@ -2089,7 +2105,7 @@ pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTest
     // First, send funds just to P0
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
     let p0_transfer = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        P0::random_address(&mut st.rng).to_zcash_address(&st.network()),
+        P0::random_address(&mut st.rng).to_zcash_address(st.network()),
         transfer_amount,
     )])
     .unwrap();
@@ -2115,11 +2131,11 @@ pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTest
     // In the next block, send funds to both P0 and P1
     let both_transfer = zip321::TransactionRequest::new(vec![
         Payment::without_memo(
-            P0::random_address(&mut st.rng).to_zcash_address(&st.network()),
+            P0::random_address(&mut st.rng).to_zcash_address(st.network()),
             transfer_amount,
         ),
         Payment::without_memo(
-            P1::random_address(&mut st.rng).to_zcash_address(&st.network()),
+            P1::random_address(&mut st.rng).to_zcash_address(st.network()),
             transfer_amount,
         ),
     ])
@@ -2223,6 +2239,7 @@ pub(crate) fn multi_pool_checkpoints_with_pruning<
     P1: ShieldedPoolTester,
 >() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
         // activation after Sapling
@@ -2253,6 +2270,7 @@ pub(crate) fn multi_pool_checkpoints_with_pruning<
 
 pub(crate) fn valid_chain_states<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
@@ -2287,6 +2305,7 @@ pub(crate) fn valid_chain_states<T: ShieldedPoolTester>() {
 #[allow(dead_code)]
 pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
@@ -2341,6 +2360,7 @@ pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
 
 pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
@@ -2362,46 +2382,46 @@ pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
 
     // Spendable balance should reflect both received notes
     assert_eq!(
-        st.get_spendable_balance(account.account_id(), 1),
+        st.get_spendable_balance(account.id(), 1),
         (value + value2).unwrap()
     );
 
     // "Rewind" to height of last scanned block (this is a no-op)
     st.wallet_mut()
+        .db_mut()
         .transactionally(|wdb| truncate_to_height(wdb.conn.0, &wdb.params, h + 1))
         .unwrap();
 
     // Spendable balance should be unaltered
     assert_eq!(
-        st.get_spendable_balance(account.account_id(), 1),
+        st.get_spendable_balance(account.id(), 1),
         (value + value2).unwrap()
     );
 
     // Rewind so that one block is dropped
     st.wallet_mut()
+        .db_mut()
         .transactionally(|wdb| truncate_to_height(wdb.conn.0, &wdb.params, h))
         .unwrap();
 
     // Spendable balance should only contain the first received note;
     // the rest should be pending.
-    assert_eq!(st.get_spendable_balance(account.account_id(), 1), value);
-    assert_eq!(
-        st.get_pending_shielded_balance(account.account_id(), 1),
-        value2
-    );
+    assert_eq!(st.get_spendable_balance(account.id(), 1), value);
+    assert_eq!(st.get_pending_shielded_balance(account.id(), 1), value2);
 
     // Scan the cache again
     st.scan_cached_blocks(h, 2);
 
     // Account balance should again reflect both received notes
     assert_eq!(
-        st.get_spendable_balance(account.account_id(), 1),
+        st.get_spendable_balance(account.id(), 1),
         (value + value2).unwrap()
     );
 }
 
 pub(crate) fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
@@ -2412,7 +2432,7 @@ pub(crate) fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTeste
     let value = NonNegativeAmount::const_from_u64(50000);
     let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h1, 1);
-    assert_eq!(st.get_total_balance(account.account_id()), value);
+    assert_eq!(st.get_total_balance(account.id()), value);
 
     // Create blocks to reach height + 2
     let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
@@ -2424,13 +2444,13 @@ pub(crate) fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTeste
     // Now scan the block of height height + 1
     st.scan_cached_blocks(h2, 1);
     assert_eq!(
-        st.get_total_balance(account.account_id()),
+        st.get_total_balance(account.id()),
         NonNegativeAmount::const_from_u64(150_000)
     );
 
     // We can spend the received notes
     let req = TransactionRequest::new(vec![Payment::without_memo(
-        T::fvk_default_address(&dfvk).to_zcash_address(&st.network()),
+        T::fvk_default_address(&dfvk).to_zcash_address(st.network()),
         NonNegativeAmount::const_from_u64(110_000),
     )])
     .unwrap();
@@ -2458,6 +2478,7 @@ pub(crate) fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTeste
 
 pub(crate) fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
@@ -2479,7 +2500,7 @@ pub(crate) fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
     assert_eq!(T::received_note_count(&summary), 1);
 
     // Account balance should reflect the received note
-    assert_eq!(st.get_total_balance(account.account_id()), value);
+    assert_eq!(st.get_total_balance(account.id()), value);
 
     // Create a second fake CompactBlock sending more value to the address
     let value2 = NonNegativeAmount::const_from_u64(7);
@@ -2493,7 +2514,7 @@ pub(crate) fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
 
     // Account balance should reflect both received notes
     assert_eq!(
-        st.get_total_balance(account.account_id()),
+        st.get_total_balance(account.id()),
         (value + value2).unwrap()
     );
 }
@@ -2501,6 +2522,7 @@ pub(crate) fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
 // TODO: This test can probably be entirely removed, as the following test duplicates it entirely.
 pub(crate) fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
@@ -2520,7 +2542,7 @@ pub(crate) fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester>() {
     st.scan_cached_blocks(received_height, 1);
 
     // Account balance should reflect the received note
-    assert_eq!(st.get_total_balance(account.account_id()), value);
+    assert_eq!(st.get_total_balance(account.id()), value);
 
     // Create a second fake CompactBlock spending value from the address
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
@@ -2533,13 +2555,14 @@ pub(crate) fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester>() {
 
     // Account balance should equal the change
     assert_eq!(
-        st.get_total_balance(account.account_id()),
+        st.get_total_balance(account.id()),
         (value - value2).unwrap()
     );
 }
 
 pub(crate) fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
+        .with_data_store_factory(TestDbFactory)
         .with_block_cache()
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
@@ -2566,7 +2589,7 @@ pub(crate) fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTest
 
     // Account balance should equal the change
     assert_eq!(
-        st.get_total_balance(account.account_id()),
+        st.get_total_balance(account.id()),
         (value - value2).unwrap()
     );
 
@@ -2575,7 +2598,7 @@ pub(crate) fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTest
 
     // Account balance should be the same.
     assert_eq!(
-        st.get_total_balance(account.account_id()),
+        st.get_total_balance(account.id()),
         (value - value2).unwrap()
     );
 }

@@ -822,11 +822,16 @@ pub(crate) fn queue_transparent_spend_detection<P: consensus::Parameters>(
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::{AddressType, TestBuilder, TestState};
+    use crate::testing::{
+        db::{TestDb, TestDbFactory},
+        AddressType, TestBuilder, TestState,
+    };
+
     use sapling::zip32::ExtendedSpendingKey;
     use zcash_client_backend::{
         data_api::{
-            wallet::input_selection::GreedyInputSelector, InputSource, WalletRead, WalletWrite,
+            wallet::input_selection::GreedyInputSelector, Account as _, InputSource, WalletRead,
+            WalletWrite,
         },
         encoding::AddressCodec,
         fees::{fixed, DustOutputPolicy},
@@ -845,11 +850,12 @@ mod tests {
         use crate::testing::TestBuilder;
 
         let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
         let birthday = st.test_account().unwrap().birthday().height();
-        let account_id = st.test_account().unwrap().account_id();
+        let account_id = st.test_account().unwrap().id();
         let uaddr = st
             .wallet()
             .get_current_address(account_id)
@@ -933,10 +939,10 @@ mod tests {
         // Artificially delete the address from the addresses table so that
         // we can ensure the update fails if the join doesn't work.
         st.wallet()
-            .conn
+            .conn()
             .execute(
                 "DELETE FROM addresses WHERE cached_transparent_receiver_address = ?",
-                [Some(taddr.encode(&st.wallet().params))],
+                [Some(taddr.encode(st.network()))],
             )
             .unwrap();
 
@@ -949,6 +955,7 @@ mod tests {
         use zcash_client_backend::ShieldedProtocol;
 
         let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
             .with_block_cache()
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
@@ -956,7 +963,7 @@ mod tests {
         let account = st.test_account().cloned().unwrap();
         let uaddr = st
             .wallet()
-            .get_current_address(account.account_id())
+            .get_current_address(account.id())
             .unwrap()
             .unwrap();
         let taddr = uaddr.transparent().unwrap();
@@ -971,17 +978,14 @@ mod tests {
         }
         st.scan_cached_blocks(start_height, 10);
 
-        let check_balance = |st: &TestState<_>, min_confirmations: u32, expected| {
+        let check_balance = |st: &TestState<_, TestDb, _>, min_confirmations: u32, expected| {
             // Check the wallet summary returns the expected transparent balance.
             let summary = st
                 .wallet()
                 .get_wallet_summary(min_confirmations)
                 .unwrap()
                 .unwrap();
-            let balance = summary
-                .account_balances()
-                .get(&account.account_id())
-                .unwrap();
+            let balance = summary.account_balances().get(&account.id()).unwrap();
             // TODO: in the future, we will distinguish between available and total
             // balance according to `min_confirmations`
             assert_eq!(balance.unshielded(), expected);
@@ -990,7 +994,7 @@ mod tests {
             let mempool_height = st.wallet().chain_height().unwrap().unwrap() + 1;
             assert_eq!(
                 st.wallet()
-                    .get_transparent_balances(account.account_id(), mempool_height)
+                    .get_transparent_balances(account.id(), mempool_height)
                     .unwrap()
                     .get(taddr)
                     .cloned()

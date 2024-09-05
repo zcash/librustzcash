@@ -401,6 +401,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 #[cfg(test)]
 pub(crate) mod tests {
     use incrementalmerkletree::{Hashable, Level};
+
     use shardtree::error::ShardTreeError;
     use zcash_proofs::prover::LocalTxProver;
 
@@ -423,22 +424,22 @@ pub(crate) mod tests {
     use zcash_client_backend::{
         address::Address,
         data_api::{
-            chain::CommitmentTreeRoot, DecryptedTransaction, WalletCommitmentTrees, WalletSummary,
+            chain::CommitmentTreeRoot, DecryptedTransaction, InputSource, WalletCommitmentTrees,
+            WalletRead, WalletSummary,
         },
         keys::UnifiedSpendingKey,
         wallet::{Note, ReceivedNote},
         ShieldedProtocol,
     };
+    use zcash_protocol::consensus;
 
     use crate::{
-        error::SqliteClientError,
         testing::{
             self,
             pool::{OutputRecoveryError, ShieldedPoolTester},
             TestState,
         },
-        wallet::{commitment_tree, sapling::select_spendable_sapling_notes},
-        AccountId, ReceivedNoteId, SAPLING_TABLES_PREFIX,
+        AccountId, SAPLING_TABLES_PREFIX,
     };
 
     pub(crate) struct SaplingPoolTester;
@@ -452,8 +453,10 @@ pub(crate) mod tests {
         type MerkleTreeHash = sapling::Node;
         type Note = sapling::Note;
 
-        fn test_account_fvk<Cache>(st: &TestState<Cache>) -> Self::Fvk {
-            st.test_account_sapling().unwrap()
+        fn test_account_fvk<Cache, DbT: WalletRead, P: consensus::Parameters>(
+            st: &TestState<Cache, DbT, P>,
+        ) -> Self::Fvk {
+            st.test_account_sapling().unwrap().clone()
         }
 
         fn usk_to_sk(usk: &UnifiedSpendingKey) -> &Self::Sk {
@@ -488,11 +491,11 @@ pub(crate) mod tests {
             sapling::Node::empty_root(level)
         }
 
-        fn put_subtree_roots<Cache>(
-            st: &mut TestState<Cache>,
+        fn put_subtree_roots<Cache, DbT: WalletRead + WalletCommitmentTrees, P>(
+            st: &mut TestState<Cache, DbT, P>,
             start_index: u64,
             roots: &[CommitmentTreeRoot<Self::MerkleTreeHash>],
-        ) -> Result<(), ShardTreeError<commitment_tree::Error>> {
+        ) -> Result<(), ShardTreeError<<DbT as WalletCommitmentTrees>::Error>> {
             st.wallet_mut()
                 .put_sapling_subtree_roots(start_index, roots)
         }
@@ -501,21 +504,23 @@ pub(crate) mod tests {
             s.next_sapling_subtree_index()
         }
 
-        fn select_spendable_notes<Cache>(
-            st: &TestState<Cache>,
-            account: AccountId,
+        fn select_spendable_notes<Cache, DbT: InputSource + WalletRead, P>(
+            st: &TestState<Cache, DbT, P>,
+            account: <DbT as InputSource>::AccountId,
             target_value: NonNegativeAmount,
             anchor_height: BlockHeight,
-            exclude: &[ReceivedNoteId],
-        ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Self::Note>>, SqliteClientError> {
-            select_spendable_sapling_notes(
-                &st.wallet().conn,
-                &st.wallet().params,
-                account,
-                target_value,
-                anchor_height,
-                exclude,
-            )
+            exclude: &[DbT::NoteRef],
+        ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error>
+        {
+            st.wallet()
+                .select_spendable_notes(
+                    account,
+                    target_value,
+                    &[ShieldedProtocol::Sapling],
+                    anchor_height,
+                    exclude,
+                )
+                .map(|n| n.take_sapling())
         }
 
         fn decrypted_pool_outputs_count(d_tx: &DecryptedTransaction<'_, AccountId>) -> usize {
@@ -531,8 +536,8 @@ pub(crate) mod tests {
             }
         }
 
-        fn try_output_recovery<Cache>(
-            st: &TestState<Cache>,
+        fn try_output_recovery<P: consensus::Parameters>(
+            params: &P,
             height: BlockHeight,
             tx: &Transaction,
             fvk: &Self::Fvk,
@@ -542,7 +547,7 @@ pub(crate) mod tests {
                 let result = try_sapling_output_recovery(
                     &fvk.to_ovk(Scope::External),
                     output,
-                    zip212_enforcement(&st.network(), height),
+                    zip212_enforcement(params, height),
                 );
 
                 if result.is_some() {

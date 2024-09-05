@@ -429,7 +429,11 @@ mod tests {
         zip32::AccountId,
     };
 
-    use crate::{testing::TestBuilder, wallet::db, WalletDb, UA_TRANSPARENT};
+    use crate::{
+        testing::{db::TestDbFactory, TestBuilder},
+        wallet::db,
+        WalletDb, UA_TRANSPARENT,
+    };
 
     use super::init_wallet_db;
 
@@ -453,7 +457,9 @@ mod tests {
 
     #[test]
     fn verify_schema() {
-        let st = TestBuilder::new().build();
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
+            .build();
 
         use regex::Regex;
         let re = Regex::new(r"\s+").unwrap();
@@ -489,7 +495,7 @@ mod tests {
             db::TABLE_TX_RETRIEVAL_QUEUE,
         ];
 
-        let rows = describe_tables(&st.wallet().conn).unwrap();
+        let rows = describe_tables(&st.wallet().db().conn).unwrap();
         assert_eq!(rows.len(), expected_tables.len());
         for (actual, expected) in rows.iter().zip(expected_tables.iter()) {
             assert_eq!(
@@ -515,6 +521,7 @@ mod tests {
         ];
         let mut indices_query = st
             .wallet()
+            .db()
             .conn
             .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND sql != '' ORDER BY tbl_name, name")
             .unwrap();
@@ -530,12 +537,12 @@ mod tests {
         }
 
         let expected_views = vec![
-            db::view_orchard_shard_scan_ranges(&st.network()),
+            db::view_orchard_shard_scan_ranges(st.network()),
             db::view_orchard_shard_unscanned_ranges(),
             db::VIEW_ORCHARD_SHARDS_SCAN_STATE.to_owned(),
             db::VIEW_RECEIVED_OUTPUT_SPENDS.to_owned(),
             db::VIEW_RECEIVED_OUTPUTS.to_owned(),
-            db::view_sapling_shard_scan_ranges(&st.network()),
+            db::view_sapling_shard_scan_ranges(st.network()),
             db::view_sapling_shard_unscanned_ranges(),
             db::VIEW_SAPLING_SHARDS_SCAN_STATE.to_owned(),
             db::VIEW_TRANSACTIONS.to_owned(),
@@ -544,6 +551,7 @@ mod tests {
 
         let mut views_query = st
             .wallet()
+            .db()
             .conn
             .prepare("SELECT sql FROM sqlite_schema WHERE type = 'view' ORDER BY tbl_name")
             .unwrap();

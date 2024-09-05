@@ -15,6 +15,7 @@ use rusqlite::{params, Connection};
 use secrecy::{Secret, SecretVec};
 
 use shardtree::error::ShardTreeError;
+use subtle::ConditionallySelectable;
 use tempfile::NamedTempFile;
 
 #[cfg(feature = "unstable")]
@@ -26,7 +27,7 @@ use sapling::{
     zip32::DiversifiableFullViewingKey,
     Note, Nullifier,
 };
-use zcash_client_backend::data_api::Account as AccountTrait;
+use zcash_client_backend::data_api::{Account, InputSource};
 #[allow(deprecated)]
 use zcash_client_backend::{
     address::Address,
@@ -74,8 +75,7 @@ use crate::{
     chain::init::init_cache_database,
     error::SqliteClientError,
     wallet::{
-        commitment_tree, get_wallet_summary, init::init_wallet_db, sapling::tests::test_prover,
-        Account, SubtreeScanProgress,
+        commitment_tree, get_wallet_summary, sapling::tests::test_prover, SubtreeScanProgress,
     },
     AccountId, ReceivedNoteId, WalletDb,
 };
@@ -102,6 +102,7 @@ use crate::{
     FsBlockDb,
 };
 
+pub(crate) mod db;
 pub(crate) mod pool;
 
 pub(crate) struct InitialChainState {
@@ -111,17 +112,29 @@ pub(crate) struct InitialChainState {
     pub(crate) prior_orchard_roots: Vec<CommitmentTreeRoot<MerkleHashOrchard>>,
 }
 
+pub(crate) trait DataStoreFactory {
+    type Error: core::fmt::Debug;
+    type AccountId: ConditionallySelectable + Default + Send + 'static;
+    type DataStore: InputSource<AccountId = Self::AccountId>
+        + WalletRead<AccountId = Self::AccountId>
+        + WalletWrite
+        + WalletCommitmentTrees;
+
+    fn new_data_store(&self, network: LocalNetwork) -> Result<Self::DataStore, Self::Error>;
+}
+
 /// A builder for a `zcash_client_sqlite` test.
-pub(crate) struct TestBuilder<Cache> {
+pub(crate) struct TestBuilder<Cache, DataStoreFactory> {
     rng: ChaChaRng,
     network: LocalNetwork,
     cache: Cache,
+    ds_factory: DataStoreFactory,
     initial_chain_state: Option<InitialChainState>,
     account_birthday: Option<AccountBirthday>,
     account_index: Option<zip32::AccountId>,
 }
 
-impl TestBuilder<()> {
+impl TestBuilder<(), ()> {
     pub const DEFAULT_NETWORK: LocalNetwork = LocalNetwork {
         overwinter: Some(BlockHeight::from_u32(1)),
         sapling: Some(BlockHeight::from_u32(100_000)),
@@ -134,7 +147,7 @@ impl TestBuilder<()> {
         z_future: None,
     };
 
-    /// Constructs a new test.
+    /// Constructs a new test environment builder.
     pub(crate) fn new() -> Self {
         TestBuilder {
             rng: ChaChaRng::seed_from_u64(0),
@@ -142,18 +155,22 @@ impl TestBuilder<()> {
             // We pick 100,000 to be large enough to handle any hard-coded test offsets.
             network: Self::DEFAULT_NETWORK,
             cache: (),
+            ds_factory: (),
             initial_chain_state: None,
             account_birthday: None,
             account_index: None,
         }
     }
+}
 
+impl<A> TestBuilder<(), A> {
     /// Adds a [`BlockDb`] cache to the test.
-    pub(crate) fn with_block_cache(self) -> TestBuilder<BlockCache> {
+    pub(crate) fn with_block_cache(self) -> TestBuilder<BlockCache, A> {
         TestBuilder {
             rng: self.rng,
             network: self.network,
             cache: BlockCache::new(),
+            ds_factory: self.ds_factory,
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
             account_index: self.account_index,
@@ -162,11 +179,12 @@ impl TestBuilder<()> {
 
     /// Adds a [`FsBlockDb`] cache to the test.
     #[cfg(feature = "unstable")]
-    pub(crate) fn with_fs_block_cache(self) -> TestBuilder<FsBlockCache> {
+    pub(crate) fn with_fs_block_cache(self) -> TestBuilder<FsBlockCache, A> {
         TestBuilder {
             rng: self.rng,
             network: self.network,
             cache: FsBlockCache::new(),
+            ds_factory: self.ds_factory,
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
             account_index: self.account_index,
@@ -174,7 +192,24 @@ impl TestBuilder<()> {
     }
 }
 
-impl<Cache> TestBuilder<Cache> {
+impl<A> TestBuilder<A, ()> {
+    pub(crate) fn with_data_store_factory<DsFactory>(
+        self,
+        ds_factory: DsFactory,
+    ) -> TestBuilder<A, DsFactory> {
+        TestBuilder {
+            rng: self.rng,
+            network: self.network,
+            cache: self.cache,
+            ds_factory,
+            initial_chain_state: self.initial_chain_state,
+            account_birthday: self.account_birthday,
+            account_index: self.account_index,
+        }
+    }
+}
+
+impl<Cache, DsFactory> TestBuilder<Cache, DsFactory> {
     pub(crate) fn with_initial_chain_state(
         mut self,
         chain_state: impl FnOnce(&mut ChaChaRng, &LocalNetwork) -> InitialChainState,
@@ -222,20 +257,19 @@ impl<Cache> TestBuilder<Cache> {
         self.account_index = Some(index);
         self
     }
+}
 
+impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
     /// Builds the state for this test.
-    pub(crate) fn build(self) -> TestState<Cache> {
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), self.network).unwrap();
-        init_wallet_db(&mut db_data, None).unwrap();
-
+    pub(crate) fn build(self) -> TestState<Cache, DsFactory::DataStore, LocalNetwork> {
         let mut cached_blocks = BTreeMap::new();
+        let mut wallet_data = self.ds_factory.new_data_store(self.network).unwrap();
 
         if let Some(initial_state) = &self.initial_chain_state {
-            db_data
+            wallet_data
                 .put_sapling_subtree_roots(0, &initial_state.prior_sapling_roots)
                 .unwrap();
-            db_data
+            wallet_data
                 .with_sapling_tree_mut(|t| {
                     t.insert_frontier(
                         initial_state.chain_state.final_sapling_tree().clone(),
@@ -249,10 +283,10 @@ impl<Cache> TestBuilder<Cache> {
 
             #[cfg(feature = "orchard")]
             {
-                db_data
+                wallet_data
                     .put_orchard_subtree_roots(0, &initial_state.prior_orchard_roots)
                     .unwrap();
-                db_data
+                wallet_data
                     .with_orchard_tree_mut(|t| {
                         t.insert_frontier(
                             initial_state.chain_state.final_orchard_tree().clone(),
@@ -285,10 +319,15 @@ impl<Cache> TestBuilder<Cache> {
         let test_account = self.account_birthday.map(|birthday| {
             let seed = Secret::new(vec![0u8; 32]);
             let (account, usk) = match self.account_index {
-                Some(index) => db_data.import_account_hd(&seed, index, &birthday).unwrap(),
+                Some(index) => wallet_data
+                    .import_account_hd(&seed, index, &birthday)
+                    .unwrap(),
                 None => {
-                    let result = db_data.create_account(&seed, &birthday).unwrap();
-                    (db_data.get_account(result.0).unwrap().unwrap(), result.1)
+                    let result = wallet_data.create_account(&seed, &birthday).unwrap();
+                    (
+                        wallet_data.get_account(result.0).unwrap().unwrap(),
+                        result.1,
+                    )
                 }
             };
             (
@@ -307,8 +346,8 @@ impl<Cache> TestBuilder<Cache> {
             latest_block_height: self
                 .initial_chain_state
                 .map(|s| s.chain_state.block_height()),
-            _data_file: data_file,
-            db_data,
+            wallet_data,
+            network: self.network,
             test_account,
             rng: self.rng,
         }
@@ -395,19 +434,15 @@ impl CachedBlock {
 }
 
 #[derive(Clone)]
-pub(crate) struct TestAccount {
-    account: Account,
+pub(crate) struct TestAccount<A> {
+    account: A,
     usk: UnifiedSpendingKey,
     birthday: AccountBirthday,
 }
 
-impl TestAccount {
-    pub(crate) fn account(&self) -> &Account {
+impl<A> TestAccount<A> {
+    pub(crate) fn account(&self) -> &A {
         &self.account
-    }
-
-    pub(crate) fn account_id(&self) -> AccountId {
-        self.account.id()
     }
 
     pub(crate) fn usk(&self) -> &UnifiedSpendingKey {
@@ -419,19 +454,119 @@ impl TestAccount {
     }
 }
 
+impl<A: Account> Account for TestAccount<A> {
+    type AccountId = A::AccountId;
+
+    fn id(&self) -> Self::AccountId {
+        self.account.id()
+    }
+
+    fn source(&self) -> data_api::AccountSource {
+        self.account.source()
+    }
+
+    fn ufvk(&self) -> Option<&zcash_keys::keys::UnifiedFullViewingKey> {
+        self.account.ufvk()
+    }
+
+    fn uivk(&self) -> zcash_keys::keys::UnifiedIncomingViewingKey {
+        self.account.uivk()
+    }
+}
+
+pub(crate) trait Reset: WalletRead + Sized {
+    type Handle;
+
+    fn reset<C>(st: &mut TestState<C, Self, LocalNetwork>) -> Self::Handle;
+}
+
 /// The state for a `zcash_client_sqlite` test.
-pub(crate) struct TestState<Cache> {
+pub(crate) struct TestState<Cache, DataStore: WalletRead, Network> {
     cache: Cache,
     cached_blocks: BTreeMap<BlockHeight, CachedBlock>,
     latest_block_height: Option<BlockHeight>,
-    _data_file: NamedTempFile,
-    db_data: WalletDb<Connection, LocalNetwork>,
-    test_account: Option<(SecretVec<u8>, TestAccount)>,
+    wallet_data: DataStore,
+    network: Network,
+    test_account: Option<(SecretVec<u8>, TestAccount<DataStore::Account>)>,
     rng: ChaChaRng,
 }
 
-impl<Cache: TestCache> TestState<Cache>
+impl<Cache, DataStore: WalletRead, Network> TestState<Cache, DataStore, Network> {
+    /// Exposes an immutable reference to the test's `DataStore`.
+    pub(crate) fn wallet(&self) -> &DataStore {
+        &self.wallet_data
+    }
+
+    /// Exposes a mutable reference to the test's `DataStore`.
+    pub(crate) fn wallet_mut(&mut self) -> &mut DataStore {
+        &mut self.wallet_data
+    }
+
+    /// Exposes the test framework's source of randomness.
+    pub(crate) fn rng_mut(&mut self) -> &mut ChaChaRng {
+        &mut self.rng
+    }
+
+    /// Exposes the network in use.
+    pub(crate) fn network(&self) -> &Network {
+        &self.network
+    }
+}
+
+impl<Cache, DataStore: WalletRead, Network: consensus::Parameters>
+    TestState<Cache, DataStore, Network>
+{
+    /// Convenience method for obtaining the Sapling activation height for the network under test.
+    pub(crate) fn sapling_activation_height(&self) -> BlockHeight {
+        self.network
+            .activation_height(NetworkUpgrade::Sapling)
+            .expect("Sapling activation height must be known.")
+    }
+
+    /// Convenience method for obtaining the NU5 activation height for the network under test.
+    #[allow(dead_code)]
+    pub(crate) fn nu5_activation_height(&self) -> BlockHeight {
+        self.network
+            .activation_height(NetworkUpgrade::Nu5)
+            .expect("NU5 activation height must be known.")
+    }
+
+    /// Exposes the test seed, if enabled via [`TestBuilder::with_test_account`].
+    pub(crate) fn test_seed(&self) -> Option<&SecretVec<u8>> {
+        self.test_account.as_ref().map(|(seed, _)| seed)
+    }
+}
+
+impl<Cache, DataStore, Network> TestState<Cache, DataStore, Network>
 where
+    Network: consensus::Parameters,
+    DataStore: WalletRead,
+{
+    /// Exposes the test account, if enabled via [`TestBuilder::with_test_account`].
+    pub(crate) fn test_account(&self) -> Option<&TestAccount<<DataStore as WalletRead>::Account>> {
+        self.test_account.as_ref().map(|(_, acct)| acct)
+    }
+
+    /// Exposes the test account's Sapling DFVK, if enabled via [`TestBuilder::with_test_account`].
+    pub(crate) fn test_account_sapling(&self) -> Option<&DiversifiableFullViewingKey> {
+        let (_, acct) = self.test_account.as_ref()?;
+        let ufvk = acct.ufvk()?;
+        ufvk.sapling()
+    }
+
+    /// Exposes the test account's Sapling DFVK, if enabled via [`TestBuilder::with_test_account`].
+    #[cfg(feature = "orchard")]
+    pub(crate) fn test_account_orchard(&self) -> Option<&orchard::keys::FullViewingKey> {
+        let (_, acct) = self.test_account.as_ref()?;
+        let ufvk = acct.ufvk()?;
+        ufvk.orchard()
+    }
+}
+
+impl<Cache: TestCache, DataStore, Network> TestState<Cache, DataStore, Network>
+where
+    Network: consensus::Parameters,
+    DataStore: WalletWrite,
     <Cache::BlockSource as BlockSource>::Error: fmt::Debug,
 {
     /// Exposes an immutable reference to the test's [`BlockSource`].
@@ -461,7 +596,6 @@ where
         );
         self.cache.insert(&compact_block)
     }
-
     /// Creates a fake block at the expected next height containing a single output of the
     /// given value, and inserts it into the cache.
     pub(crate) fn generate_next_block<Fvk: TestFvk>(
@@ -613,7 +747,7 @@ where
         }
 
         let (cb, nfs) = fake_compact_block(
-            &self.network(),
+            &self.network,
             height,
             prev_hash,
             outputs,
@@ -645,7 +779,7 @@ where
         let height = prior_cached_block.height() + 1;
 
         let cb = fake_compact_block_spending(
-            &self.network(),
+            &self.network,
             height,
             prior_cached_block.chain_state.block_hash(),
             note,
@@ -717,7 +851,16 @@ where
 
         (height, res)
     }
+}
 
+impl<Cache, DbT, ParamsT> TestState<Cache, DbT, ParamsT>
+where
+    Cache: TestCache,
+    <Cache::BlockSource as BlockSource>::Error: fmt::Debug,
+    ParamsT: consensus::Parameters + Send + 'static,
+    DbT: WalletWrite,
+    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
+{
     /// Invokes [`scan_cached_blocks`] with the given arguments, expecting success.
     pub(crate) fn scan_cached_blocks(
         &mut self,
@@ -736,10 +879,7 @@ where
         limit: usize,
     ) -> Result<
         ScanSummary,
-        data_api::chain::error::Error<
-            SqliteClientError,
-            <Cache::BlockSource as BlockSource>::Error,
-        >,
+        data_api::chain::error::Error<DbT::Error, <Cache::BlockSource as BlockSource>::Error>,
     > {
         let prior_cached_block = self
             .latest_cached_block_below_height(from_height)
@@ -747,30 +887,28 @@ where
             .unwrap_or_else(|| CachedBlock::none(from_height - 1));
 
         let result = scan_cached_blocks(
-            &self.network(),
+            &self.network,
             self.cache.block_source(),
-            &mut self.db_data,
+            &mut self.wallet_data,
             from_height,
             &prior_cached_block.chain_state,
             limit,
         );
         result
     }
+}
 
+impl<Cache, DbT: WalletRead + Reset> TestState<Cache, DbT, LocalNetwork> {
     /// Resets the wallet using a new wallet database but with the same cache of blocks,
     /// and returns the old wallet database file.
     ///
     /// This does not recreate accounts, nor does it rescan the cached blocks.
     /// The resulting wallet has no test account.
     /// Before using any `generate_*` method on the reset state, call `reset_latest_cached_block()`.
-    pub(crate) fn reset(&mut self) -> NamedTempFile {
-        let network = self.network();
+    pub(crate) fn reset(&mut self) -> DbT::Handle {
         self.latest_block_height = None;
-        let tf = std::mem::replace(&mut self._data_file, NamedTempFile::new().unwrap());
-        self.db_data = WalletDb::for_path(self._data_file.path(), network).unwrap();
         self.test_account = None;
-        init_wallet_db(&mut self.db_data, None).unwrap();
-        tf
+        DbT::reset(self)
     }
 
     //    /// Reset the latest cached block to the most recent one in the cache database.
@@ -792,69 +930,7 @@ where
     //    }
 }
 
-impl<Cache> TestState<Cache> {
-    /// Exposes an immutable reference to the test's [`WalletDb`].
-    pub(crate) fn wallet(&self) -> &WalletDb<Connection, LocalNetwork> {
-        &self.db_data
-    }
-
-    /// Exposes a mutable reference to the test's [`WalletDb`].
-    pub(crate) fn wallet_mut(&mut self) -> &mut WalletDb<Connection, LocalNetwork> {
-        &mut self.db_data
-    }
-
-    /// Exposes the test framework's source of randomness.
-    pub(crate) fn rng_mut(&mut self) -> &mut ChaChaRng {
-        &mut self.rng
-    }
-
-    /// Exposes the network in use.
-    pub(crate) fn network(&self) -> LocalNetwork {
-        self.db_data.params
-    }
-
-    /// Convenience method for obtaining the Sapling activation height for the network under test.
-    pub(crate) fn sapling_activation_height(&self) -> BlockHeight {
-        self.db_data
-            .params
-            .activation_height(NetworkUpgrade::Sapling)
-            .expect("Sapling activation height must be known.")
-    }
-
-    /// Convenience method for obtaining the NU5 activation height for the network under test.
-    #[allow(dead_code)]
-    pub(crate) fn nu5_activation_height(&self) -> BlockHeight {
-        self.db_data
-            .params
-            .activation_height(NetworkUpgrade::Nu5)
-            .expect("NU5 activation height must be known.")
-    }
-
-    /// Exposes the test seed, if enabled via [`TestBuilder::with_test_account`].
-    pub(crate) fn test_seed(&self) -> Option<&SecretVec<u8>> {
-        self.test_account.as_ref().map(|(seed, _)| seed)
-    }
-
-    /// Exposes the test account, if enabled via [`TestBuilder::with_test_account`].
-    pub(crate) fn test_account(&self) -> Option<&TestAccount> {
-        self.test_account.as_ref().map(|(_, acct)| acct)
-    }
-
-    /// Exposes the test account's Sapling DFVK, if enabled via [`TestBuilder::with_test_account`].
-    pub(crate) fn test_account_sapling(&self) -> Option<DiversifiableFullViewingKey> {
-        self.test_account
-            .as_ref()
-            .and_then(|(_, acct)| acct.usk.to_unified_full_viewing_key().sapling().cloned())
-    }
-
-    /// Exposes the test account's Sapling DFVK, if enabled via [`TestBuilder::with_test_account`].
-    #[cfg(feature = "orchard")]
-    pub(crate) fn test_account_orchard(&self) -> Option<orchard::keys::FullViewingKey> {
-        self.test_account
-            .as_ref()
-            .and_then(|(_, acct)| acct.usk.to_unified_full_viewing_key().orchard().cloned())
-    }
-
+impl<Cache> TestState<Cache, db::TestDb, LocalNetwork> {
     /// Insert shard roots for both trees.
     pub(crate) fn put_subtree_roots(
         &mut self,
@@ -896,11 +972,10 @@ impl<Cache> TestState<Cache> {
             Zip317FeeError,
         >,
     > {
-        let params = self.network();
         let prover = test_prover();
         create_spend_to_address(
-            &mut self.db_data,
-            &params,
+            self.wallet_data.db_mut(),
+            &self.network,
             &prover,
             &prover,
             usk,
@@ -936,11 +1011,10 @@ impl<Cache> TestState<Cache> {
         InputsT: InputSelector<InputSource = WalletDb<Connection, LocalNetwork>>,
     {
         #![allow(deprecated)]
-        let params = self.network();
         let prover = test_prover();
         spend(
-            &mut self.db_data,
-            &params,
+            self.wallet_data.db_mut(),
+            &self.network,
             &prover,
             &prover,
             input_selector,
@@ -971,10 +1045,9 @@ impl<Cache> TestState<Cache> {
     where
         InputsT: InputSelector<InputSource = WalletDb<Connection, LocalNetwork>>,
     {
-        let params = self.network();
         propose_transfer::<_, _, _, Infallible>(
-            &mut self.db_data,
-            &params,
+            self.wallet_data.db_mut(),
+            &self.network,
             spend_from_account,
             input_selector,
             request,
@@ -1004,10 +1077,9 @@ impl<Cache> TestState<Cache> {
             Zip317FeeError,
         >,
     > {
-        let params = self.network();
         let result = propose_standard_transfer_to_address::<_, _, CommitmentTreeErrT>(
-            &mut self.db_data,
-            &params,
+            self.wallet_data.db_mut(),
+            &self.network,
             fee_rule,
             spend_from_account,
             min_confirmations,
@@ -1019,7 +1091,7 @@ impl<Cache> TestState<Cache> {
         );
 
         if let Ok(proposal) = &result {
-            check_proposal_serialization_roundtrip(self.wallet(), proposal);
+            check_proposal_serialization_roundtrip(self.wallet_data.db(), proposal);
         }
 
         result
@@ -1047,10 +1119,9 @@ impl<Cache> TestState<Cache> {
     where
         InputsT: ShieldingSelector<InputSource = WalletDb<Connection, LocalNetwork>>,
     {
-        let params = self.network();
         propose_shielding::<_, _, _, Infallible>(
-            &mut self.db_data,
-            &params,
+            self.wallet_data.db_mut(),
+            &self.network,
             input_selector,
             shielding_threshold,
             from_addrs,
@@ -1076,11 +1147,10 @@ impl<Cache> TestState<Cache> {
     where
         FeeRuleT: FeeRule,
     {
-        let params = self.network();
         let prover = test_prover();
         create_proposed_transactions(
-            &mut self.db_data,
-            &params,
+            self.wallet_data.db_mut(),
+            &self.network,
             &prover,
             &prover,
             usk,
@@ -1111,11 +1181,10 @@ impl<Cache> TestState<Cache> {
     where
         InputsT: ShieldingSelector<InputSource = WalletDb<Connection, LocalNetwork>>,
     {
-        let params = self.network();
         let prover = test_prover();
         shield_transparent_funds(
-            &mut self.db_data,
-            &params,
+            self.wallet_data.db_mut(),
+            &self.network,
             &prover,
             &prover,
             input_selector,
@@ -1177,8 +1246,8 @@ impl<Cache> TestState<Cache> {
         min_confirmations: u32,
     ) -> Option<WalletSummary<AccountId>> {
         get_wallet_summary(
-            &self.wallet().conn.unchecked_transaction().unwrap(),
-            &self.wallet().params,
+            &self.wallet().conn().unchecked_transaction().unwrap(),
+            &self.network,
             min_confirmations,
             &SubtreeScanProgress,
         )
@@ -1199,7 +1268,7 @@ impl<Cache> TestState<Cache> {
     pub(crate) fn get_tx_history(
         &self,
     ) -> Result<Vec<TransactionSummary<AccountId>>, SqliteClientError> {
-        let mut stmt = self.wallet().conn.prepare_cached(
+        let mut stmt = self.wallet().conn().prepare_cached(
             "SELECT *
              FROM v_transactions
              ORDER BY mined_height DESC, tx_index DESC",
@@ -1239,7 +1308,7 @@ impl<Cache> TestState<Cache> {
     pub(crate) fn get_checkpoint_history(
         &self,
     ) -> Result<Vec<(BlockHeight, ShieldedProtocol, Option<Position>)>, SqliteClientError> {
-        let mut stmt = self.wallet().conn.prepare_cached(
+        let mut stmt = self.wallet().conn().prepare_cached(
             "SELECT checkpoint_id, 2 AS pool, position FROM sapling_tree_checkpoints
              UNION
              SELECT checkpoint_id, 3 AS pool, position FROM orchard_tree_checkpoints
@@ -1276,7 +1345,10 @@ impl<Cache> TestState<Cache> {
     pub(crate) fn dump_table(&self, name: &'static str) {
         assert!(name.chars().all(|c| c.is_ascii_alphabetic() || c == '_'));
         unsafe {
-            run_sqlite3(self._data_file.path(), &format!(r#".dump "{name}""#));
+            run_sqlite3(
+                self.wallet_data.data_file().path(),
+                &format!(r#".dump "{name}""#),
+            );
         }
     }
 
@@ -1290,7 +1362,7 @@ impl<Cache> TestState<Cache> {
     #[allow(dead_code)]
     #[cfg(feature = "unstable")]
     pub(crate) unsafe fn run_sqlite3(&self, command: &str) {
-        run_sqlite3(self._data_file.path(), command)
+        run_sqlite3(self.wallet_data.data_file().path(), command)
     }
 }
 
@@ -2145,14 +2217,11 @@ impl TestCache for FsBlockCache {
     }
 }
 
-pub(crate) fn input_selector(
+pub(crate) fn input_selector<P: consensus::Parameters>(
     fee_rule: StandardFeeRule,
     change_memo: Option<&str>,
     fallback_change_pool: ShieldedProtocol,
-) -> GreedyInputSelector<
-    WalletDb<rusqlite::Connection, LocalNetwork>,
-    standard::SingleOutputChangeStrategy,
-> {
+) -> GreedyInputSelector<WalletDb<rusqlite::Connection, P>, standard::SingleOutputChangeStrategy> {
     let change_memo = change_memo.map(|m| MemoBytes::from(m.parse::<Memo>().unwrap()));
     let change_strategy =
         standard::SingleOutputChangeStrategy::new(fee_rule, change_memo, fallback_change_pool);
@@ -2161,11 +2230,11 @@ pub(crate) fn input_selector(
 
 // Checks that a protobuf proposal serialized from the provided proposal value correctly parses to
 // the same proposal value.
-fn check_proposal_serialization_roundtrip(
-    db_data: &WalletDb<rusqlite::Connection, LocalNetwork>,
+fn check_proposal_serialization_roundtrip<P: consensus::Parameters>(
+    wallet_data: &WalletDb<rusqlite::Connection, P>,
     proposal: &Proposal<StandardFeeRule, ReceivedNoteId>,
 ) {
     let proposal_proto = proposal::Proposal::from_standard_proposal(proposal);
-    let deserialized_proposal = proposal_proto.try_into_standard_proposal(db_data);
+    let deserialized_proposal = proposal_proto.try_into_standard_proposal(wallet_data);
     assert_matches!(deserialized_proposal, Ok(r) if &r == proposal);
 }
