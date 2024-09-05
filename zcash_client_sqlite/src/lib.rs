@@ -98,6 +98,9 @@ use maybe_rayon::{
     slice::ParallelSliceMut,
 };
 
+#[cfg(any(test, feature = "test-dependencies"))]
+use zcash_client_backend::data_api::testing::TransactionSummary;
+
 /// `maybe-rayon` doesn't provide this as a fallback, so we have to.
 #[cfg(not(feature = "multicore"))]
 trait ParallelSliceMut<T> {
@@ -610,6 +613,11 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         );
 
         Ok(iter.collect())
+    }
+
+    #[cfg(feature = "test-dependencies")]
+    fn get_tx_history(&self) -> Result<Vec<TransactionSummary<Self::AccountId>>, Self::Error> {
+        wallet::testing::get_tx_history(self.conn.borrow())
     }
 }
 

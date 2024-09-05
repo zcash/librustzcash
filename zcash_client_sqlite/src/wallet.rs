@@ -3170,6 +3170,54 @@ pub(crate) fn prune_nullifier_map(
     Ok(())
 }
 
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use zcash_client_backend::data_api::testing::TransactionSummary;
+    use zcash_primitives::transaction::TxId;
+    use zcash_protocol::{
+        consensus::BlockHeight,
+        value::{ZatBalance, Zatoshis},
+    };
+
+    use crate::{error::SqliteClientError, AccountId};
+
+    pub(crate) fn get_tx_history(
+        conn: &rusqlite::Connection,
+    ) -> Result<Vec<TransactionSummary<AccountId>>, SqliteClientError> {
+        let mut stmt = conn.prepare_cached(
+            "SELECT *
+             FROM v_transactions
+             ORDER BY mined_height DESC, tx_index DESC",
+        )?;
+
+        let results = stmt
+            .query_and_then::<TransactionSummary<AccountId>, SqliteClientError, _, _>([], |row| {
+                Ok(TransactionSummary::new(
+                    AccountId(row.get("account_id")?),
+                    TxId::from_bytes(row.get("txid")?),
+                    row.get::<_, Option<u32>>("expiry_height")?
+                        .map(BlockHeight::from),
+                    row.get::<_, Option<u32>>("mined_height")?
+                        .map(BlockHeight::from),
+                    ZatBalance::from_i64(row.get("account_balance_delta")?)?,
+                    row.get::<_, Option<i64>>("fee_paid")?
+                        .map(Zatoshis::from_nonnegative_i64)
+                        .transpose()?,
+                    row.get("spent_note_count")?,
+                    row.get("has_change")?,
+                    row.get("sent_note_count")?,
+                    row.get("received_note_count")?,
+                    row.get("memo_count")?,
+                    row.get("expired_unmined")?,
+                    row.get("is_shielding")?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(results)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroU32;

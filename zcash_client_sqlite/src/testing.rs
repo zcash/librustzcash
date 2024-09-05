@@ -27,6 +27,7 @@ use sapling::{
     zip32::DiversifiableFullViewingKey,
     Note, Nullifier,
 };
+use zcash_client_backend::data_api::testing::TransactionSummary;
 use zcash_client_backend::data_api::{Account, InputSource};
 #[allow(deprecated)]
 use zcash_client_backend::{
@@ -69,7 +70,7 @@ use zcash_primitives::{
     zip32::DiversifierIndex,
 };
 use zcash_protocol::local_consensus::LocalNetwork;
-use zcash_protocol::value::{ZatBalance, Zatoshis};
+use zcash_protocol::value::Zatoshis;
 
 use crate::{
     chain::init::init_cache_database,
@@ -1260,50 +1261,11 @@ impl<Cache> TestState<Cache, db::TestDb, LocalNetwork> {
         &self,
         txid: TxId,
     ) -> Result<Option<TransactionSummary<AccountId>>, SqliteClientError> {
-        let history = self.get_tx_history()?;
+        let history = self.wallet().get_tx_history()?;
         Ok(history.into_iter().find(|tx| tx.txid() == txid))
     }
 
     /// Returns a vector of transaction summaries
-    pub(crate) fn get_tx_history(
-        &self,
-    ) -> Result<Vec<TransactionSummary<AccountId>>, SqliteClientError> {
-        let mut stmt = self.wallet().conn().prepare_cached(
-            "SELECT *
-             FROM v_transactions
-             ORDER BY mined_height DESC, tx_index DESC",
-        )?;
-
-        let results = stmt
-            .query_and_then::<TransactionSummary<AccountId>, SqliteClientError, _, _>([], |row| {
-                Ok(TransactionSummary {
-                    account_id: AccountId(row.get("account_id")?),
-                    txid: TxId::from_bytes(row.get("txid")?),
-                    expiry_height: row
-                        .get::<_, Option<u32>>("expiry_height")?
-                        .map(BlockHeight::from),
-                    mined_height: row
-                        .get::<_, Option<u32>>("mined_height")?
-                        .map(BlockHeight::from),
-                    account_value_delta: ZatBalance::from_i64(row.get("account_balance_delta")?)?,
-                    fee_paid: row
-                        .get::<_, Option<i64>>("fee_paid")?
-                        .map(Zatoshis::from_nonnegative_i64)
-                        .transpose()?,
-                    spent_note_count: row.get("spent_note_count")?,
-                    has_change: row.get("has_change")?,
-                    sent_note_count: row.get("sent_note_count")?,
-                    received_note_count: row.get("received_note_count")?,
-                    memo_count: row.get("memo_count")?,
-                    expired_unmined: row.get("expired_unmined")?,
-                    is_shielding: row.get("is_shielding")?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(results)
-    }
-
     #[allow(dead_code)] // used only for tests that are flagged off by default
     pub(crate) fn get_checkpoint_history(
         &self,
@@ -1394,77 +1356,6 @@ unsafe fn run_sqlite3<S: AsRef<OsStr>>(db_path: S, command: &str) {
         );
     }
     eprintln!("------");
-}
-
-pub(crate) struct TransactionSummary<AccountId> {
-    account_id: AccountId,
-    txid: TxId,
-    expiry_height: Option<BlockHeight>,
-    mined_height: Option<BlockHeight>,
-    account_value_delta: ZatBalance,
-    fee_paid: Option<Zatoshis>,
-    spent_note_count: usize,
-    has_change: bool,
-    sent_note_count: usize,
-    received_note_count: usize,
-    memo_count: usize,
-    expired_unmined: bool,
-    is_shielding: bool,
-}
-
-#[allow(dead_code)]
-impl<AccountId> TransactionSummary<AccountId> {
-    pub(crate) fn account_id(&self) -> &AccountId {
-        &self.account_id
-    }
-
-    pub(crate) fn txid(&self) -> TxId {
-        self.txid
-    }
-
-    pub(crate) fn expiry_height(&self) -> Option<BlockHeight> {
-        self.expiry_height
-    }
-
-    pub(crate) fn mined_height(&self) -> Option<BlockHeight> {
-        self.mined_height
-    }
-
-    pub(crate) fn account_value_delta(&self) -> ZatBalance {
-        self.account_value_delta
-    }
-
-    pub(crate) fn fee_paid(&self) -> Option<Zatoshis> {
-        self.fee_paid
-    }
-
-    pub(crate) fn spent_note_count(&self) -> usize {
-        self.spent_note_count
-    }
-
-    pub(crate) fn has_change(&self) -> bool {
-        self.has_change
-    }
-
-    pub(crate) fn sent_note_count(&self) -> usize {
-        self.sent_note_count
-    }
-
-    pub(crate) fn received_note_count(&self) -> usize {
-        self.received_note_count
-    }
-
-    pub(crate) fn expired_unmined(&self) -> bool {
-        self.expired_unmined
-    }
-
-    pub(crate) fn memo_count(&self) -> usize {
-        self.memo_count
-    }
-
-    pub(crate) fn is_shielding(&self) -> bool {
-        self.is_shielding
-    }
 }
 
 /// Trait used by tests that require a full viewing key.

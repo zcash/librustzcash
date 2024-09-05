@@ -1163,6 +1163,18 @@ pub trait WalletRead {
     /// transaction data requests, such as when it is necessary to fill in purely-transparent
     /// transaction history by walking the chain backwards via transparent inputs.
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error>;
+
+    /// Returns a vector of transaction summaries.
+    ///
+    /// Currently test-only, as production use could return a very large number of results; either
+    /// pagination or a streaming design will be necessary to stabilize this feature for production
+    /// use.
+    #[cfg(feature = "test-dependencies")]
+    fn get_tx_history(
+        &self,
+    ) -> Result<Vec<testing::TransactionSummary<Self::AccountId>>, Self::Error> {
+        Ok(vec![])
+    }
 }
 
 /// The relevance of a seed to a given wallet.

@@ -3,6 +3,7 @@ use incrementalmerkletree::Address;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 use std::{collections::HashMap, convert::Infallible, num::NonZeroU32};
+use zcash_protocol::value::{ZatBalance, Zatoshis};
 use zip32::fingerprint::SeedFingerprint;
 
 use zcash_primitives::{
@@ -36,6 +37,108 @@ use {
 
 #[cfg(feature = "orchard")]
 use super::ORCHARD_SHARD_HEIGHT;
+
+pub struct TransactionSummary<AccountId> {
+    account_id: AccountId,
+    txid: TxId,
+    expiry_height: Option<BlockHeight>,
+    mined_height: Option<BlockHeight>,
+    account_value_delta: ZatBalance,
+    fee_paid: Option<Zatoshis>,
+    spent_note_count: usize,
+    has_change: bool,
+    sent_note_count: usize,
+    received_note_count: usize,
+    memo_count: usize,
+    expired_unmined: bool,
+    is_shielding: bool,
+}
+
+impl<AccountId> TransactionSummary<AccountId> {
+    pub fn new(
+        account_id: AccountId,
+        txid: TxId,
+        expiry_height: Option<BlockHeight>,
+        mined_height: Option<BlockHeight>,
+        account_value_delta: ZatBalance,
+        fee_paid: Option<Zatoshis>,
+        spent_note_count: usize,
+        has_change: bool,
+        sent_note_count: usize,
+        received_note_count: usize,
+        memo_count: usize,
+        expired_unmined: bool,
+        is_shielding: bool,
+    ) -> Self {
+        Self {
+            account_id,
+            txid,
+            expiry_height,
+            mined_height,
+            account_value_delta,
+            fee_paid,
+            spent_note_count,
+            has_change,
+            sent_note_count,
+            received_note_count,
+            memo_count,
+            expired_unmined,
+            is_shielding,
+        }
+    }
+
+    pub fn account_id(&self) -> &AccountId {
+        &self.account_id
+    }
+
+    pub fn txid(&self) -> TxId {
+        self.txid
+    }
+
+    pub fn expiry_height(&self) -> Option<BlockHeight> {
+        self.expiry_height
+    }
+
+    pub fn mined_height(&self) -> Option<BlockHeight> {
+        self.mined_height
+    }
+
+    pub fn account_value_delta(&self) -> ZatBalance {
+        self.account_value_delta
+    }
+
+    pub fn fee_paid(&self) -> Option<Zatoshis> {
+        self.fee_paid
+    }
+
+    pub fn spent_note_count(&self) -> usize {
+        self.spent_note_count
+    }
+
+    pub fn has_change(&self) -> bool {
+        self.has_change
+    }
+
+    pub fn sent_note_count(&self) -> usize {
+        self.sent_note_count
+    }
+
+    pub fn received_note_count(&self) -> usize {
+        self.received_note_count
+    }
+
+    pub fn expired_unmined(&self) -> bool {
+        self.expired_unmined
+    }
+
+    pub fn memo_count(&self) -> usize {
+        self.memo_count
+    }
+
+    pub fn is_shielding(&self) -> bool {
+        self.is_shielding
+    }
+}
 
 pub struct MockWalletDb {
     pub network: Network,

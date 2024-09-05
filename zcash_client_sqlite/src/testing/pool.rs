@@ -294,7 +294,7 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
         Ok(None)
     );
 
-    let tx_history = st.get_tx_history().unwrap();
+    let tx_history = st.wallet().get_tx_history().unwrap();
     assert_eq!(tx_history.len(), 2);
 
     let network = *st.network();
@@ -468,7 +468,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
             if sent_v == u64::try_from(transfer_amount).unwrap() && sent_to_addr == Some(tex_addr.encode(st.network())));
 
         // Check that the transaction history matches what we expect.
-        let tx_history = st.get_tx_history().unwrap();
+        let tx_history = st.wallet().get_tx_history().unwrap();
 
         let tx_0 = tx_history
             .iter()
