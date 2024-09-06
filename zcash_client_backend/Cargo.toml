@@ -89,9 +89,13 @@ incrementalmerkletree.workspace = true
 shardtree.workspace = true
 
 # - Test dependencies
+ambassador = { workspace = true, optional = true }
+assert_matches = { workspace = true, optional = true }
+pasta_curves = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
 jubjub = { workspace = true, optional = true }
-ambassador = { workspace = true, optional = true }
+rand_chacha = { workspace = true, optional = true }
+zcash_proofs = { workspace = true, optional = true }
 
 # - ZIP 321
 nom = "7"
@@ -138,17 +142,21 @@ tonic-build = { workspace = true, features = ["prost"] }
 which = "4"
 
 [dev-dependencies]
+ambassador.workspace = true
 assert_matches.workspace = true
 gumdrop = "0.8"
 incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
 jubjub.workspace = true
 proptest.workspace = true
-rand_core.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
 shardtree = { workspace = true, features = ["test-dependencies"] }
-zcash_proofs.workspace = true
+tokio = { version = "1.21.0", features = ["rt-multi-thread"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
-tokio = { version = "1.21.0", features = ["rt-multi-thread"] }
+zcash_primitives = { workspace = true, features = ["test-dependencies"] }
+zcash_proofs = { workspace = true, features = ["bundled-prover"] }
+zcash_protocol = { workspace = true, features = ["local-consensus"] }
 
 [features]
 ## Enables the `tonic` gRPC client bindings for connecting to a `lightwalletd` server.
@@ -165,7 +173,7 @@ transparent-inputs = [
 ]
 
 ## Enables receiving and spending Orchard funds.
-orchard = ["dep:orchard", "zcash_keys/orchard"]
+orchard = ["dep:orchard", "dep:pasta_curves", "zcash_keys/orchard"]
 
 ## Exposes a wallet synchronization function that implements the necessary state machine.
 sync = [
@@ -197,11 +205,16 @@ tor = [
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
     "dep:ambassador",
+    "dep:assert_matches",
     "dep:proptest",
     "dep:jubjub",
+    "dep:rand",
+    "dep:rand_chacha",
     "orchard?/test-dependencies",
     "zcash_keys/test-dependencies",
     "zcash_primitives/test-dependencies",
+    "zcash_proofs/bundled-prover",
+    "zcash_protocol/local-consensus",
     "incrementalmerkletree/test-dependencies",
 ]
 

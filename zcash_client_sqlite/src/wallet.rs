@@ -3255,14 +3255,14 @@ mod tests {
 
     use sapling::zip32::ExtendedSpendingKey;
     use secrecy::{ExposeSecret, SecretVec};
-    use zcash_client_backend::data_api::{Account as _, AccountSource, WalletRead, WalletWrite};
+    use zcash_client_backend::data_api::{
+        testing::{AddressType, DataStoreFactory, FakeCompactOutput, TestBuilder, TestState},
+        Account as _, AccountSource, WalletRead, WalletWrite,
+    };
     use zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
 
     use crate::{
-        testing::{
-            db::TestDbFactory, AddressType, BlockCache, DataStoreFactory, FakeCompactOutput,
-            TestBuilder, TestState,
-        },
+        testing::{db::TestDbFactory, BlockCache},
         AccountId,
     };
 

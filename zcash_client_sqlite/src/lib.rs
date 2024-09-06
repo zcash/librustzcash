@@ -1698,22 +1698,21 @@ extern crate assert_matches;
 mod tests {
     use secrecy::{ExposeSecret, Secret, SecretVec};
     use zcash_client_backend::data_api::{
-        chain::ChainState, Account, AccountBirthday, AccountPurpose, AccountSource, WalletRead,
-        WalletWrite,
+        chain::ChainState,
+        testing::{TestBuilder, TestState},
+        Account, AccountBirthday, AccountPurpose, AccountSource, WalletRead, WalletWrite,
     };
     use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::consensus;
 
     use crate::{
-        error::SqliteClientError,
-        testing::{db::TestDbFactory, TestBuilder, TestState},
-        AccountId, DEFAULT_UA_REQUEST,
+        error::SqliteClientError, testing::db::TestDbFactory, AccountId, DEFAULT_UA_REQUEST,
     };
 
     #[cfg(feature = "unstable")]
     use {
-        crate::testing::AddressType, zcash_client_backend::keys::sapling,
+        zcash_client_backend::keys::sapling,
         zcash_primitives::transaction::components::amount::NonNegativeAmount,
     };
 
@@ -1996,8 +1995,9 @@ mod tests {
     #[cfg(feature = "unstable")]
     #[test]
     pub(crate) fn fsblockdb_api() {
-        use zcash_primitives::consensus::NetworkConstants;
+        use zcash_client_backend::data_api::testing::AddressType;
         use zcash_primitives::zip32;
+        use zcash_protocol::consensus::NetworkConstants;
 
         use crate::testing::FsBlockCache;
 

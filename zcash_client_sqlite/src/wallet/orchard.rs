@@ -397,8 +397,8 @@ pub(crate) mod tests {
     use shardtree::error::ShardTreeError;
     use zcash_client_backend::{
         data_api::{
-            chain::CommitmentTreeRoot, DecryptedTransaction, InputSource, WalletCommitmentTrees,
-            WalletRead, WalletSummary,
+            chain::CommitmentTreeRoot, testing::TestState, DecryptedTransaction, InputSource,
+            WalletCommitmentTrees, WalletRead, WalletSummary,
         },
         wallet::{Note, ReceivedNote},
     };
@@ -419,7 +419,6 @@ pub(crate) mod tests {
         testing::{
             self,
             pool::{OutputRecoveryError, ShieldedPoolTester},
-            TestState,
         },
         wallet::sapling::tests::SaplingPoolTester,
         ORCHARD_TABLES_PREFIX,

@@ -418,6 +418,7 @@ mod tests {
 
     use zcash_client_backend::{
         address::Address,
+        data_api::testing::TestBuilder,
         encoding::{encode_extended_full_viewing_key, encode_payment_address},
         keys::{sapling, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     };
@@ -429,11 +430,7 @@ mod tests {
         zip32::AccountId,
     };
 
-    use crate::{
-        testing::{db::TestDbFactory, TestBuilder},
-        wallet::db,
-        WalletDb, UA_TRANSPARENT,
-    };
+    use crate::{testing::db::TestDbFactory, wallet::db, WalletDb, UA_TRANSPARENT};
 
     use super::init_wallet_db;
 

@@ -14,6 +14,7 @@ use zcash_client_backend::{
     data_api::{
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
+        testing::{DataStoreFactory, Reset, TestState},
         *,
     },
     keys::UnifiedFullViewingKey,
@@ -30,13 +31,12 @@ use zcash_primitives::{
 };
 use zcash_protocol::{consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo};
 
-use super::{DataStoreFactory, Reset, TestState};
 use crate::{wallet::init::init_wallet_db, AccountId, WalletDb};
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    core::ops::Range,
     crate::TransparentAddressMetadata,
+    core::ops::Range,
     zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
 };
 
@@ -165,7 +165,7 @@ impl Reset for TestDb {
     fn reset<C>(st: &mut TestState<C, Self, LocalNetwork>) -> NamedTempFile {
         let network = *st.network();
         let old_db = std::mem::replace(
-            &mut st.wallet_data,
+            st.wallet_mut(),
             TestDbFactory.new_data_store(network).unwrap(),
         );
         old_db.take_data_file()

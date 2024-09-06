@@ -33,6 +33,10 @@ use zcash_client_backend::{
         self,
         chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
         error::Error,
+        testing::{
+            input_selector, AddressType, FakeCompactOutput, InitialChainState, TestBuilder,
+            TestFvk, TestState,
+        },
         wallet::{
             decrypt_and_store_transaction,
             input_selection::{GreedyInputSelector, GreedyInputSelectorError},
@@ -50,13 +54,11 @@ use zcash_client_backend::{
 };
 use zcash_protocol::consensus::{self, BlockHeight};
 
-use super::TestFvk;
 use crate::{
     error::SqliteClientError,
     testing::{
         db::{TestDb, TestDbFactory},
-        input_selector, AddressType, BlockCache, FakeCompactOutput, InitialChainState, TestBuilder,
-        TestState,
+        BlockCache,
     },
     wallet::{commitment_tree, parse_scope, truncate_to_height},
     AccountId, NoteId, ReceivedNoteId,
@@ -319,11 +321,10 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         legacy::keys::{NonHardenedChildIndex, TransparentKeyScope},
         transaction::builder::{BuildConfig, Builder},
     };
+    use zcash_proofs::prover::LocalTxProver;
     use zcash_protocol::value::ZatBalance;
 
-    use crate::wallet::{
-        sapling::tests::test_prover, transparent::get_wallet_transparent_output, GAP_LIMIT,
-    };
+    use crate::wallet::{transparent::get_wallet_transparent_output, GAP_LIMIT};
 
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
@@ -593,7 +594,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         .unwrap();
 
     assert_matches!(builder.add_transparent_input(sk, outpoint, txout), Ok(_));
-    let test_prover = test_prover();
+    let test_prover = LocalTxProver::bundled();
     let build_result = builder
         .build(
             OsRng,
@@ -1750,8 +1751,8 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
             AddressType::DefaultExternal,
             not_our_value,
         )],
-        st.latest_cached_block().unwrap().sapling_end_size,
-        st.latest_cached_block().unwrap().orchard_end_size,
+        st.latest_cached_block().unwrap().sapling_end_size(),
+        st.latest_cached_block().unwrap().orchard_end_size(),
         false,
     );
 
@@ -2106,7 +2107,7 @@ pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTest
     // First, send funds just to P0
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
     let p0_transfer = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        P0::random_address(&mut st.rng).to_zcash_address(st.network()),
+        P0::random_address(st.rng_mut()).to_zcash_address(st.network()),
         transfer_amount,
     )])
     .unwrap();
@@ -2132,11 +2133,11 @@ pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTest
     // In the next block, send funds to both P0 and P1
     let both_transfer = zip321::TransactionRequest::new(vec![
         Payment::without_memo(
-            P0::random_address(&mut st.rng).to_zcash_address(st.network()),
+            P0::random_address(st.rng_mut()).to_zcash_address(st.network()),
             transfer_amount,
         ),
         Payment::without_memo(
-            P1::random_address(&mut st.rng).to_zcash_address(st.network()),
+            P1::random_address(st.rng_mut()).to_zcash_address(st.network()),
             transfer_amount,
         ),
     ])
@@ -2250,8 +2251,8 @@ pub(crate) fn multi_pool_checkpoints_with_pruning<
 
     let account = st.test_account().cloned().unwrap();
 
-    let p0_fvk = P0::random_fvk(&mut st.rng);
-    let p1_fvk = P1::random_fvk(&mut st.rng);
+    let p0_fvk = P0::random_fvk(st.rng_mut());
+    let p1_fvk = P1::random_fvk(st.rng_mut());
 
     let note_value = NonNegativeAmount::const_from_u64(10000);
     // Generate 100 P0 blocks, then 100 P1 blocks, then another 100 P0 blocks.

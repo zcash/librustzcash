@@ -1169,7 +1169,7 @@ pub trait WalletRead {
     /// Currently test-only, as production use could return a very large number of results; either
     /// pagination or a streaming design will be necessary to stabilize this feature for production
     /// use.
-    #[cfg(feature = "test-dependencies")]
+    #[cfg(any(test, feature = "test-dependencies"))]
     fn get_tx_history(
         &self,
     ) -> Result<Vec<testing::TransactionSummary<Self::AccountId>>, Self::Error> {

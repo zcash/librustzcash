@@ -403,12 +403,10 @@ pub(crate) mod tests {
     use incrementalmerkletree::{Hashable, Level};
 
     use shardtree::error::ShardTreeError;
-    use zcash_proofs::prover::LocalTxProver;
 
     use sapling::{
         self,
         note_encryption::try_sapling_output_recovery,
-        prover::{OutputProver, SpendProver},
         zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
     };
     use zcash_primitives::{
@@ -424,8 +422,8 @@ pub(crate) mod tests {
     use zcash_client_backend::{
         address::Address,
         data_api::{
-            chain::CommitmentTreeRoot, DecryptedTransaction, InputSource, WalletCommitmentTrees,
-            WalletRead, WalletSummary,
+            chain::CommitmentTreeRoot, testing::TestState, DecryptedTransaction, InputSource,
+            WalletCommitmentTrees, WalletRead, WalletSummary,
         },
         keys::UnifiedSpendingKey,
         wallet::{Note, ReceivedNote},
@@ -437,7 +435,6 @@ pub(crate) mod tests {
         testing::{
             self,
             pool::{OutputRecoveryError, ShieldedPoolTester},
-            TestState,
         },
         AccountId, SAPLING_TABLES_PREFIX,
     };
@@ -569,10 +566,6 @@ pub(crate) mod tests {
         ) -> usize {
             summary.received_sapling_note_count()
         }
-    }
-
-    pub(crate) fn test_prover() -> impl SpendProver + OutputProver {
-        LocalTxProver::bundled()
     }
 
     #[test]

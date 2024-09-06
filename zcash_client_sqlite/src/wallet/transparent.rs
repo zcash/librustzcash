@@ -824,14 +824,15 @@ pub(crate) fn queue_transparent_spend_detection<P: consensus::Parameters>(
 mod tests {
     use crate::testing::{
         db::{TestDb, TestDbFactory},
-        AddressType, BlockCache, TestBuilder, TestState,
+        BlockCache,
     };
 
     use sapling::zip32::ExtendedSpendingKey;
     use zcash_client_backend::{
         data_api::{
-            wallet::input_selection::GreedyInputSelector, Account as _, InputSource, WalletRead,
-            WalletWrite,
+            testing::{AddressType, TestBuilder, TestState},
+            wallet::input_selection::GreedyInputSelector,
+            Account as _, InputSource, WalletRead, WalletWrite,
         },
         encoding::AddressCodec,
         fees::{fixed, DustOutputPolicy},
@@ -847,8 +848,6 @@ mod tests {
 
     #[test]
     fn put_received_transparent_utxo() {
-        use crate::testing::TestBuilder;
-
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory)
             .with_account_from_sapling_activation(BlockHash([0; 32]))
