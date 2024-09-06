@@ -1082,16 +1082,13 @@ mod tests {
     };
     use shardtree::ShardTree;
     use zcash_client_backend::data_api::{
-        chain::CommitmentTreeRoot, testing::pool::ShieldedPoolTester,
+        chain::CommitmentTreeRoot,
+        testing::{pool::ShieldedPoolTester, sapling::SaplingPoolTester},
     };
     use zcash_primitives::consensus::{BlockHeight, Network};
 
     use super::SqliteShardStore;
-    use crate::{
-        testing::pool::ShieldedPoolPersistence,
-        wallet::{init::init_wallet_db, sapling::tests::SaplingPoolTester},
-        WalletDb,
-    };
+    use crate::{testing::pool::ShieldedPoolPersistence, wallet::init::init_wallet_db, WalletDb};
 
     fn new_tree<T: ShieldedPoolTester + ShieldedPoolPersistence>(
         m: usize,

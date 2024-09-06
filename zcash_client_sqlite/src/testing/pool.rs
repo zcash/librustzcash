@@ -34,8 +34,8 @@ use zcash_client_backend::{
         chain::{self, ChainState, CommitmentTreeRoot},
         error::Error,
         testing::{
-            input_selector, pool::ShieldedPoolTester, AddressType, FakeCompactOutput,
-            InitialChainState, TestBuilder, TestState,
+            input_selector, pool::ShieldedPoolTester, sapling::SaplingPoolTester, AddressType,
+            FakeCompactOutput, InitialChainState, TestBuilder, TestState,
         },
         wallet::{
             decrypt_and_store_transaction,
@@ -58,7 +58,7 @@ use crate::{
         BlockCache,
     },
     wallet::{commitment_tree, parse_scope, truncate_to_height},
-    NoteId, ReceivedNoteId,
+    NoteId, ReceivedNoteId, SAPLING_TABLES_PREFIX,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -79,6 +79,10 @@ use {
 
 pub(crate) trait ShieldedPoolPersistence {
     const TABLES_PREFIX: &'static str;
+}
+
+impl ShieldedPoolPersistence for SaplingPoolTester {
+    const TABLES_PREFIX: &'static str = SAPLING_TABLES_PREFIX;
 }
 
 pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {

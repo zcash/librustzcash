@@ -400,7 +400,7 @@ pub(crate) mod tests {
     use zcash_client_backend::{
         data_api::{
             chain::CommitmentTreeRoot,
-            testing::{pool::ShieldedPoolTester, TestState},
+            testing::{pool::ShieldedPoolTester, sapling::SaplingPoolTester, TestState},
             DecryptedTransaction, InputSource, WalletCommitmentTrees, WalletRead, WalletSummary,
         },
         wallet::{Note, ReceivedNote},
@@ -420,7 +420,6 @@ pub(crate) mod tests {
 
     use crate::{
         testing::{self, pool::ShieldedPoolPersistence},
-        wallet::sapling::tests::SaplingPoolTester,
         ORCHARD_TABLES_PREFIX,
     };
 

@@ -588,8 +588,8 @@ pub(crate) mod tests {
         chain::{ChainState, CommitmentTreeRoot},
         scanning::{spanning_tree::testing::scan_range, ScanPriority},
         testing::{
-            pool::ShieldedPoolTester, AddressType, FakeCompactOutput, InitialChainState,
-            TestBuilder, TestState,
+            pool::ShieldedPoolTester, sapling::SaplingPoolTester, AddressType, FakeCompactOutput,
+            InitialChainState, TestBuilder, TestState,
         },
         AccountBirthday, Ratio, WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
@@ -606,10 +606,7 @@ pub(crate) mod tests {
             db::{TestDb, TestDbFactory},
             BlockCache,
         },
-        wallet::{
-            sapling::tests::SaplingPoolTester,
-            scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
-        },
+        wallet::scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
         VERIFY_LOOKAHEAD,
     };
 

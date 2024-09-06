@@ -1,4 +1,9 @@
 //! Utilities for testing wallets based upon the [`crate::data_api`] traits.
+use ::sapling::{
+    note_encryption::{sapling_note_encryption, SaplingDomain},
+    util::generate_random_rseed,
+    zip32::DiversifiableFullViewingKey,
+};
 use assert_matches::assert_matches;
 use core::fmt;
 use group::ff::Field;
@@ -6,11 +11,6 @@ use incrementalmerkletree::{Marking, Retention};
 use nonempty::NonEmpty;
 use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaChaRng;
-use sapling::{
-    note_encryption::{sapling_note_encryption, SaplingDomain},
-    util::generate_random_rseed,
-    zip32::DiversifiableFullViewingKey,
-};
 use secrecy::{ExposeSecret, Secret, SecretVec};
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 use std::{
@@ -81,6 +81,7 @@ use {
 };
 
 pub mod pool;
+pub mod sapling;
 
 pub struct TransactionSummary<AccountId> {
     account_id: AccountId,
@@ -225,7 +226,7 @@ impl CachedBlock {
         let sapling_final_tree = cb.vtx.iter().flat_map(|tx| tx.outputs.iter()).fold(
             self.chain_state.final_sapling_tree().clone(),
             |mut acc, c_out| {
-                acc.append(sapling::Node::from_cmu(&c_out.cmu().unwrap()));
+                acc.append(::sapling::Node::from_cmu(&c_out.cmu().unwrap()));
                 acc
             },
         );
@@ -552,7 +553,7 @@ where
                 (prior_cached_block.sapling_end_size..initial_sapling_tree_size).fold(
                     prior_cached_block.chain_state.final_sapling_tree().clone(),
                     |mut acc, _| {
-                        acc.append(sapling::Node::from_scalar(bls12_381::Scalar::random(
+                        acc.append(::sapling::Node::from_scalar(bls12_381::Scalar::random(
                             &mut self.rng,
                         )));
                         acc
@@ -739,7 +740,7 @@ where
     pub fn put_subtree_roots(
         &mut self,
         sapling_start_index: u64,
-        sapling_roots: &[CommitmentTreeRoot<sapling::Node>],
+        sapling_roots: &[CommitmentTreeRoot<::sapling::Node>],
         #[cfg(feature = "orchard")] orchard_start_index: u64,
         #[cfg(feature = "orchard")] orchard_roots: &[CommitmentTreeRoot<MerkleHashOrchard>],
     ) -> Result<(), ShardTreeError<<DbT as WalletCommitmentTrees>::Error>> {
@@ -1137,7 +1138,7 @@ fn check_proposal_serialization_roundtrip<DbT: InputSource>(
 
 pub struct InitialChainState {
     pub chain_state: ChainState,
-    pub prior_sapling_roots: Vec<CommitmentTreeRoot<sapling::Node>>,
+    pub prior_sapling_roots: Vec<CommitmentTreeRoot<::sapling::Node>>,
     #[cfg(feature = "orchard")]
     pub prior_orchard_roots: Vec<CommitmentTreeRoot<MerkleHashOrchard>>,
 }
@@ -1381,7 +1382,7 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
 pub trait TestFvk {
     type Nullifier: Copy;
 
-    fn sapling_ovk(&self) -> Option<sapling::keys::OutgoingViewingKey>;
+    fn sapling_ovk(&self) -> Option<::sapling::keys::OutgoingViewingKey>;
 
     #[cfg(feature = "orchard")]
     fn orchard_ovk(&self, scope: zip32::Scope) -> Option<orchard::keys::OutgoingViewingKey>;
@@ -1426,7 +1427,7 @@ pub trait TestFvk {
 impl<'a, A: TestFvk> TestFvk for &'a A {
     type Nullifier = A::Nullifier;
 
-    fn sapling_ovk(&self) -> Option<sapling::keys::OutgoingViewingKey> {
+    fn sapling_ovk(&self) -> Option<::sapling::keys::OutgoingViewingKey> {
         (*self).sapling_ovk()
     }
 
@@ -1496,7 +1497,7 @@ impl<'a, A: TestFvk> TestFvk for &'a A {
 impl TestFvk for DiversifiableFullViewingKey {
     type Nullifier = ::sapling::Nullifier;
 
-    fn sapling_ovk(&self) -> Option<sapling::keys::OutgoingViewingKey> {
+    fn sapling_ovk(&self) -> Option<::sapling::keys::OutgoingViewingKey> {
         Some(self.fvk().ovk)
     }
 
@@ -1569,7 +1570,7 @@ impl TestFvk for DiversifiableFullViewingKey {
 impl TestFvk for orchard::keys::FullViewingKey {
     type Nullifier = orchard::note::Nullifier;
 
-    fn sapling_ovk(&self) -> Option<sapling::keys::OutgoingViewingKey> {
+    fn sapling_ovk(&self) -> Option<::sapling::keys::OutgoingViewingKey> {
         None
     }
 
@@ -1683,15 +1684,15 @@ pub enum AddressType {
 fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
     params: &P,
     height: BlockHeight,
-    recipient: sapling::PaymentAddress,
+    recipient: ::sapling::PaymentAddress,
     value: NonNegativeAmount,
-    ovk: Option<sapling::keys::OutgoingViewingKey>,
+    ovk: Option<::sapling::keys::OutgoingViewingKey>,
     rng: &mut R,
-) -> (CompactSaplingOutput, sapling::Note) {
+) -> (CompactSaplingOutput, ::sapling::Note) {
     let rseed = generate_random_rseed(zip212_enforcement(params, height), rng);
     let note = ::sapling::Note::from_parts(
         recipient,
-        sapling::value::NoteValue::from_raw(value.into_u64()),
+        ::sapling::value::NoteValue::from_raw(value.into_u64()),
         rseed,
     );
     let encryptor = sapling_note_encryption(ovk, note.clone(), *MemoBytes::empty().as_array(), rng);
@@ -1995,7 +1996,7 @@ pub trait TestCache {
 }
 
 pub struct NoteCommitments {
-    sapling: Vec<sapling::Node>,
+    sapling: Vec<::sapling::Node>,
     #[cfg(feature = "orchard")]
     orchard: Vec<MerkleHashOrchard>,
 }
@@ -2009,7 +2010,7 @@ impl NoteCommitments {
                 .flat_map(|tx| {
                     tx.outputs
                         .iter()
-                        .map(|out| sapling::Node::from_cmu(&out.cmu().unwrap()))
+                        .map(|out| ::sapling::Node::from_cmu(&out.cmu().unwrap()))
                 })
                 .collect(),
             #[cfg(feature = "orchard")]
@@ -2026,7 +2027,7 @@ impl NoteCommitments {
     }
 
     #[allow(dead_code)]
-    pub fn sapling(&self) -> &[sapling::Node] {
+    pub fn sapling(&self) -> &[::sapling::Node] {
         self.sapling.as_ref()
     }
 
@@ -2039,7 +2040,7 @@ impl NoteCommitments {
 pub struct MockWalletDb {
     pub network: Network,
     pub sapling_tree: ShardTree<
-        MemoryShardStore<sapling::Node, BlockHeight>,
+        MemoryShardStore<::sapling::Node, BlockHeight>,
         { SAPLING_SHARD_HEIGHT * 2 },
         SAPLING_SHARD_HEIGHT,
     >,
@@ -2216,7 +2217,7 @@ impl WalletRead for MockWalletDb {
     fn get_sapling_nullifiers(
         &self,
         _query: NullifierQuery,
-    ) -> Result<Vec<(Self::AccountId, sapling::Nullifier)>, Self::Error> {
+    ) -> Result<Vec<(Self::AccountId, ::sapling::Nullifier)>, Self::Error> {
         Ok(Vec::new())
     }
 
@@ -2375,14 +2376,14 @@ impl WalletWrite for MockWalletDb {
 
 impl WalletCommitmentTrees for MockWalletDb {
     type Error = Infallible;
-    type SaplingShardStore<'a> = MemoryShardStore<sapling::Node, BlockHeight>;
+    type SaplingShardStore<'a> = MemoryShardStore<::sapling::Node, BlockHeight>;
 
     fn with_sapling_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
         for<'a> F: FnMut(
             &'a mut ShardTree<
                 Self::SaplingShardStore<'a>,
-                { sapling::NOTE_COMMITMENT_TREE_DEPTH },
+                { ::sapling::NOTE_COMMITMENT_TREE_DEPTH },
                 SAPLING_SHARD_HEIGHT,
             >,
         ) -> Result<A, E>,
@@ -2394,7 +2395,7 @@ impl WalletCommitmentTrees for MockWalletDb {
     fn put_sapling_subtree_roots(
         &mut self,
         start_index: u64,
-        roots: &[CommitmentTreeRoot<sapling::Node>],
+        roots: &[CommitmentTreeRoot<::sapling::Node>],
     ) -> Result<(), ShardTreeError<Self::Error>> {
         self.with_sapling_tree_mut(|t| {
             for (root, i) in roots.iter().zip(0u64..) {
