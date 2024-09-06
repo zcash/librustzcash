@@ -19,8 +19,10 @@ use super::{
 #[cfg(feature = "orchard")]
 use super::orchard as orchard_fees;
 
-/// A change strategy that proposes change as a single output to the most current supported
-/// shielded pool and delegates fee calculation to the provided fee rule.
+/// A change strategy that proposes change as a single output. The output pool is chosen
+/// as the most current pool that avoids unnecessary pool-crossing (with a specified
+/// fallback when the transaction has no shielded inputs). Fee calculation is delegated
+/// to the provided fee rule.
 pub struct SingleOutputChangeStrategy {
     fee_rule: FixedFeeRule,
     change_memo: Option<MemoBytes>,
