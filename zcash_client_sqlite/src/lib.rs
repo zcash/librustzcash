@@ -1967,9 +1967,11 @@ mod tests {
     #[test]
     fn transparent_receivers() {
         // Add an account to the wallet.
+
+        use crate::testing::BlockCache;
         let st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory)
-            .with_block_cache()
+            .with_block_cache(BlockCache::new())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().unwrap();
@@ -1997,9 +1999,11 @@ mod tests {
         use zcash_primitives::consensus::NetworkConstants;
         use zcash_primitives::zip32;
 
+        use crate::testing::FsBlockCache;
+
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory)
-            .with_fs_block_cache()
+            .with_block_cache(FsBlockCache::new())
             .build();
 
         // The BlockMeta DB starts off empty.

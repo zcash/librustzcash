@@ -157,25 +157,11 @@ impl TestBuilder<(), ()> {
 
 impl<A> TestBuilder<(), A> {
     /// Adds a [`BlockDb`] cache to the test.
-    pub(crate) fn with_block_cache(self) -> TestBuilder<BlockCache, A> {
+    pub(crate) fn with_block_cache<C: TestCache>(self, cache: C) -> TestBuilder<C, A> {
         TestBuilder {
             rng: self.rng,
             network: self.network,
-            cache: BlockCache::new(),
-            ds_factory: self.ds_factory,
-            initial_chain_state: self.initial_chain_state,
-            account_birthday: self.account_birthday,
-            account_index: self.account_index,
-        }
-    }
-
-    /// Adds a [`FsBlockDb`] cache to the test.
-    #[cfg(feature = "unstable")]
-    pub(crate) fn with_fs_block_cache(self) -> TestBuilder<FsBlockCache, A> {
-        TestBuilder {
-            rng: self.rng,
-            network: self.network,
-            cache: FsBlockCache::new(),
+            cache,
             ds_factory: self.ds_factory,
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
@@ -1898,7 +1884,7 @@ pub(crate) struct BlockCache {
 }
 
 impl BlockCache {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let cache_file = NamedTempFile::new().unwrap();
         let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
@@ -1981,7 +1967,7 @@ pub(crate) struct FsBlockCache {
 
 #[cfg(feature = "unstable")]
 impl FsBlockCache {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let fsblockdb_root = tempfile::tempdir().unwrap();
         let mut db_meta = FsBlockDb::for_path(&fsblockdb_root).unwrap();
         init_blockmeta_db(&mut db_meta).unwrap();

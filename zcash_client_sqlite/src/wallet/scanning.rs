@@ -649,7 +649,7 @@ pub(crate) mod tests {
 
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory)
-            .with_block_cache()
+            .with_block_cache(BlockCache::new())
             .with_initial_chain_state(|rng, network| {
                 let sapling_activation_height =
                     network.activation_height(NetworkUpgrade::Sapling).unwrap();
@@ -816,7 +816,7 @@ pub(crate) mod tests {
     ) {
         let st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory)
-            .with_block_cache()
+            .with_block_cache(BlockCache::new())
             .with_initial_chain_state(|rng, network| {
                 // We set the Sapling and Orchard frontiers at the birthday height to be
                 // 1234 notes into the second shard.
@@ -911,7 +911,7 @@ pub(crate) mod tests {
 
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory)
-            .with_block_cache()
+            .with_block_cache(BlockCache::new())
             .build();
         let sap_active = st.sapling_activation_height();
 
@@ -1064,7 +1064,7 @@ pub(crate) mod tests {
         let frontier_tree_size: u32 = (0x1 << 16) + 1234;
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory)
-            .with_block_cache()
+            .with_block_cache(BlockCache::new())
             .with_initial_chain_state(|rng, network| {
                 let birthday_height =
                     network.activation_height(NetworkUpgrade::Nu5).unwrap() + birthday_offset;
@@ -1257,7 +1257,7 @@ pub(crate) mod tests {
         let frontier_tree_size: u32 = (0x1 << 16) + 1234;
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory)
-            .with_block_cache()
+            .with_block_cache(BlockCache::new())
             .with_initial_chain_state(|rng, network| {
                 let birthday_height =
                     network.activation_height(NetworkUpgrade::Nu5).unwrap() + birthday_offset;
@@ -1562,7 +1562,7 @@ pub(crate) mod tests {
         let birthday_tree_size: u32 = (0x1 << 17) - 50;
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory)
-            .with_block_cache()
+            .with_block_cache(BlockCache::new())
             .with_initial_chain_state(|rng, network| {
                 let birthday_height =
                     network.activation_height(NetworkUpgrade::Nu5).unwrap() + birthday_nu5_offset;

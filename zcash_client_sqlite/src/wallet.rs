@@ -3260,8 +3260,8 @@ mod tests {
 
     use crate::{
         testing::{
-            db::TestDbFactory, AddressType, DataStoreFactory, FakeCompactOutput, TestBuilder,
-            TestState,
+            db::TestDbFactory, AddressType, BlockCache, DataStoreFactory, FakeCompactOutput,
+            TestBuilder, TestState,
         },
         AccountId,
     };
@@ -3339,7 +3339,7 @@ mod tests {
     fn check_block_fully_scanned<DsF: DataStoreFactory>(dsf: DsF) {
         let mut st = TestBuilder::new()
             .with_data_store_factory(dsf)
-            .with_block_cache()
+            .with_block_cache(BlockCache::new())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
@@ -3399,7 +3399,7 @@ mod tests {
     fn test_account_birthday() {
         let st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory)
-            .with_block_cache()
+            .with_block_cache(BlockCache::new())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 

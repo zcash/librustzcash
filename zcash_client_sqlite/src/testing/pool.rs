@@ -55,7 +55,8 @@ use crate::{
     error::SqliteClientError,
     testing::{
         db::{TestDb, TestDbFactory},
-        input_selector, AddressType, FakeCompactOutput, InitialChainState, TestBuilder, TestState,
+        input_selector, AddressType, BlockCache, FakeCompactOutput, InitialChainState, TestBuilder,
+        TestState,
     },
     wallet::{commitment_tree, parse_scope, truncate_to_height},
     AccountId, NoteId, ReceivedNoteId,
@@ -154,7 +155,7 @@ pub(crate) trait ShieldedPoolTester {
 pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -326,7 +327,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -731,7 +732,7 @@ pub(crate) fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPo
 
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -873,7 +874,7 @@ pub(crate) fn proposal_fails_with_no_blocks<T: ShieldedPoolTester>() {
 pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -1025,7 +1026,7 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
 pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -1161,7 +1162,7 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
 pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -1254,7 +1255,7 @@ pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
 pub(crate) fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -1299,7 +1300,7 @@ pub(crate) fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
 pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -1365,7 +1366,7 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
 >() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .build();
 
     // Add two accounts to the wallet.
@@ -1455,7 +1456,7 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
 pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -1542,7 +1543,7 @@ pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
 pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -1616,7 +1617,7 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
     let frontier_tree_size: u32 = (0x1 << 16) + 1234;
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_initial_chain_state(|rng, network| {
             let birthday_height = network.activation_height(NetworkUpgrade::Nu5).unwrap() + 1000;
 
@@ -1722,7 +1723,7 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
 pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -1795,7 +1796,7 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
 pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
         // activation after Sapling
         .build();
@@ -1882,7 +1883,7 @@ pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTes
 pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
         // activation after Sapling
         .build();
@@ -1971,7 +1972,7 @@ pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoo
 pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
         // activation after Sapling
         .build();
@@ -2056,7 +2057,7 @@ pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTes
 pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
         // activation after Sapling
         .build();
@@ -2242,7 +2243,7 @@ pub(crate) fn multi_pool_checkpoints_with_pruning<
 >() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
         // activation after Sapling
         .build();
@@ -2273,7 +2274,7 @@ pub(crate) fn multi_pool_checkpoints_with_pruning<
 pub(crate) fn valid_chain_states<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -2308,7 +2309,7 @@ pub(crate) fn valid_chain_states<T: ShieldedPoolTester>() {
 pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -2363,7 +2364,7 @@ pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
 pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -2424,7 +2425,7 @@ pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
 pub(crate) fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -2481,7 +2482,7 @@ pub(crate) fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTeste
 pub(crate) fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -2525,7 +2526,7 @@ pub(crate) fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
 pub(crate) fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -2565,7 +2566,7 @@ pub(crate) fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester>() {
 pub(crate) fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
-        .with_block_cache()
+        .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 

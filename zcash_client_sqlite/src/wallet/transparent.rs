@@ -824,7 +824,7 @@ pub(crate) fn queue_transparent_spend_detection<P: consensus::Parameters>(
 mod tests {
     use crate::testing::{
         db::{TestDb, TestDbFactory},
-        AddressType, TestBuilder, TestState,
+        AddressType, BlockCache, TestBuilder, TestState,
     };
 
     use sapling::zip32::ExtendedSpendingKey;
@@ -956,7 +956,7 @@ mod tests {
 
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory)
-            .with_block_cache()
+            .with_block_cache(BlockCache::new())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
