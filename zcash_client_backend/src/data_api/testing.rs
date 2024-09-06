@@ -1,4 +1,4 @@
-//! Utilities for testing wallets based upon the [`zcash_client_backend::super`] traits.
+//! Utilities for testing wallets based upon the [`crate::data_api`] traits.
 use assert_matches::assert_matches;
 use core::fmt;
 use group::ff::Field;
@@ -368,7 +368,7 @@ impl<Cache, DataStore: WalletRead, Network: consensus::Parameters>
             .expect("NU5 activation height must be known.")
     }
 
-    /// Exposes the test seed, if enabled via [`TestBuilder::with_test_account`].
+    /// Exposes the seed for the test wallet.
     pub fn test_seed(&self) -> Option<&SecretVec<u8>> {
         self.test_account.as_ref().map(|(seed, _)| seed)
     }
@@ -379,19 +379,19 @@ where
     Network: consensus::Parameters,
     DataStore: WalletRead,
 {
-    /// Exposes the test account, if enabled via [`TestBuilder::with_test_account`].
+    /// Returns a reference to the test account, if one was configured.
     pub fn test_account(&self) -> Option<&TestAccount<<DataStore as WalletRead>::Account>> {
         self.test_account.as_ref().map(|(_, acct)| acct)
     }
 
-    /// Exposes the test account's Sapling DFVK, if enabled via [`TestBuilder::with_test_account`].
+    /// Returns the test account's Sapling DFVK, if one was configured.
     pub fn test_account_sapling(&self) -> Option<&DiversifiableFullViewingKey> {
         let (_, acct) = self.test_account.as_ref()?;
         let ufvk = acct.ufvk()?;
         ufvk.sapling()
     }
 
-    /// Exposes the test account's Sapling DFVK, if enabled via [`TestBuilder::with_test_account`].
+    /// Returns the test account's Orchard FVK, if one was configured.
     #[cfg(feature = "orchard")]
     pub fn test_account_orchard(&self) -> Option<&orchard::keys::FullViewingKey> {
         let (_, acct) = self.test_account.as_ref()?;
@@ -866,7 +866,7 @@ where
         )
     }
 
-    /// Invokes [`propose_standard_transfer`] with the given arguments.
+    /// Invokes [`propose_standard_transfer_to_address`] with the given arguments.
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
     pub fn propose_standard_transfer<CommitmentTreeErrT>(
@@ -910,6 +910,8 @@ where
     }
 
     /// Invokes [`propose_shielding`] with the given arguments.
+    ///
+    /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
     #[cfg(feature = "transparent-inputs")]
     #[allow(clippy::type_complexity)]
     #[allow(dead_code)]
@@ -972,6 +974,8 @@ where
     }
 
     /// Invokes [`shield_transparent_funds`] with the given arguments.
+    ///
+    /// [`shield_transparent_funds`]: crate::data_api::wallet::shield_transparent_funds
     #[cfg(feature = "transparent-inputs")]
     #[allow(clippy::type_complexity)]
     pub fn shield_transparent_funds<InputsT>(
@@ -1194,7 +1198,7 @@ impl Default for TestBuilder<(), ()> {
 }
 
 impl<A> TestBuilder<(), A> {
-    /// Adds a [`BlockDb`] cache to the test.
+    /// Adds a block cache to the test environment.
     pub fn with_block_cache<C: TestCache>(self, cache: C) -> TestBuilder<C, A> {
         TestBuilder {
             rng: self.rng,
@@ -1265,9 +1269,10 @@ impl<Cache, DsFactory> TestBuilder<Cache, DsFactory> {
         self
     }
 
-    /// Sets the [`account_index`] field for the test account
+    /// Sets the account index for the test account.
     ///
-    /// Call either [`with_account_from_sapling_activation`] or [`with_account_having_current_birthday`] before calling this method.
+    /// Call either [`Self::with_account_from_sapling_activation`] or
+    /// [`Self::with_account_having_current_birthday`] before calling this method.
     pub fn set_account_index(mut self, index: zip32::AccountId) -> Self {
         assert!(self.account_index.is_none());
         self.account_index = Some(index);
