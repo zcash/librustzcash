@@ -16,20 +16,13 @@ use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTre
 use std::{
     collections::{BTreeMap, HashMap},
     convert::Infallible,
+    hash::Hash,
     num::NonZeroU32,
 };
 use subtle::ConditionallySelectable;
+
 use zcash_keys::address::Address;
 use zcash_note_encryption::Domain;
-use zcash_proofs::prover::LocalTxProver;
-use zcash_protocol::{
-    consensus::{self, NetworkUpgrade, Parameters as _},
-    local_consensus::LocalNetwork,
-    memo::MemoBytes,
-    value::{ZatBalance, Zatoshis},
-};
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
-
 use zcash_primitives::{
     block::BlockHash,
     consensus::{BlockHeight, Network},
@@ -40,6 +33,14 @@ use zcash_primitives::{
         Transaction, TxId,
     },
 };
+use zcash_proofs::prover::LocalTxProver;
+use zcash_protocol::{
+    consensus::{self, NetworkUpgrade, Parameters as _},
+    local_consensus::LocalNetwork,
+    memo::MemoBytes,
+    value::{ZatBalance, Zatoshis},
+};
+use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{
     address::UnifiedAddress,
@@ -1147,9 +1148,11 @@ pub struct InitialChainState {
 
 pub trait DataStoreFactory {
     type Error: core::fmt::Debug;
-    type AccountId: ConditionallySelectable + Default + Send + 'static;
-    type DataStore: InputSource<AccountId = Self::AccountId>
-        + WalletRead<AccountId = Self::AccountId>
+    type AccountId: ConditionallySelectable + Default + Hash + Eq + Send + 'static;
+    type Account: Account<AccountId = Self::AccountId> + Clone;
+    type DsError: core::fmt::Debug;
+    type DataStore: InputSource<AccountId = Self::AccountId, Error = Self::DsError>
+        + WalletRead<AccountId = Self::AccountId, Account = Self::Account, Error = Self::DsError>
         + WalletWrite
         + WalletCommitmentTrees;
 
@@ -1988,7 +1991,8 @@ fn fake_compact_block_from_compact_tx(
 
 /// Trait used by tests that require a block cache.
 pub trait TestCache {
-    type BlockSource: BlockSource;
+    type BsError: core::fmt::Debug;
+    type BlockSource: BlockSource<Error = Self::BsError>;
     type InsertResult;
 
     /// Exposes the block cache as a [`BlockSource`].

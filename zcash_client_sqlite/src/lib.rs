@@ -74,7 +74,7 @@ use zip32::fingerprint::SeedFingerprint;
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
-#[cfg(not(feature = "orchard"))]
+#[cfg(any(feature = "test-dependencies", not(feature = "orchard")))]
 use zcash_protocol::PoolType;
 
 #[cfg(feature = "orchard")]
@@ -618,6 +618,31 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     #[cfg(any(test, feature = "test-dependencies"))]
     fn get_tx_history(&self) -> Result<Vec<TransactionSummary<Self::AccountId>>, Self::Error> {
         wallet::testing::get_tx_history(self.conn.borrow())
+    }
+
+    #[cfg(any(test, feature = "test-dependencies"))]
+    fn get_sent_note_ids(
+        &self,
+        txid: &TxId,
+        protocol: ShieldedProtocol,
+    ) -> Result<Vec<NoteId>, Self::Error> {
+        use crate::wallet::pool_code;
+        use rusqlite::named_params;
+
+        let mut stmt_sent_notes = self.conn.borrow().prepare(
+            "SELECT output_index
+             FROM sent_notes
+             JOIN transactions ON transactions.id_tx = sent_notes.tx
+             WHERE transactions.txid = :txid
+             AND sent_notes.output_pool = :pool_code",
+        )?;
+
+        stmt_sent_notes
+            .query(named_params![":txid": txid.as_ref(), ":pool_code": pool_code(PoolType::Shielded(protocol))])
+            .unwrap()
+            .mapped(|row| Ok(NoteId::new(*txid, protocol, row.get(0)?)))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(SqliteClientError::from)
     }
 }
 

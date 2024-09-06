@@ -102,8 +102,11 @@ use {
     zcash_primitives::legacy::TransparentAddress,
 };
 
+#[cfg(feature = "test-dependencies")]
+use ambassador::delegatable_trait;
+
 #[cfg(any(test, feature = "test-dependencies"))]
-use {ambassador::delegatable_trait, zcash_primitives::consensus::NetworkUpgrade};
+use zcash_primitives::consensus::NetworkUpgrade;
 
 pub mod chain;
 pub mod error;
@@ -1173,6 +1176,17 @@ pub trait WalletRead {
     fn get_tx_history(
         &self,
     ) -> Result<Vec<testing::TransactionSummary<Self::AccountId>>, Self::Error> {
+        Ok(vec![])
+    }
+
+    /// Returns the note IDs for shielded notes sent by the wallet in a particular
+    /// transaction.
+    #[cfg(any(test, feature = "test-dependencies"))]
+    fn get_sent_note_ids(
+        &self,
+        _txid: &TxId,
+        _protocol: ShieldedProtocol,
+    ) -> Result<Vec<NoteId>, Self::Error> {
         Ok(vec![])
     }
 }

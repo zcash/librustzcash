@@ -1,25 +1,24 @@
 use prost::Message;
-
 use rusqlite::params;
-
 use tempfile::NamedTempFile;
-
-#[cfg(feature = "unstable")]
-use {std::fs::File, tempfile::TempDir};
 
 use zcash_client_backend::data_api::testing::{NoteCommitments, TestCache};
 
 #[allow(deprecated)]
 use zcash_client_backend::proto::compact_formats::CompactBlock;
 
-use crate::chain::init::init_cache_database;
+use crate::{chain::init::init_cache_database, error::SqliteClientError};
 
 use super::BlockDb;
 
 #[cfg(feature = "unstable")]
-use crate::{
-    chain::{init::init_blockmeta_db, BlockMeta},
-    FsBlockDb,
+use {
+    crate::{
+        chain::{init::init_blockmeta_db, BlockMeta},
+        FsBlockDb, FsBlockDbError,
+    },
+    std::fs::File,
+    tempfile::TempDir,
 };
 
 pub(crate) mod db;
@@ -44,6 +43,7 @@ impl BlockCache {
 }
 
 impl TestCache for BlockCache {
+    type BsError = SqliteClientError;
     type BlockSource = BlockDb;
     type InsertResult = NoteCommitments;
 
@@ -86,6 +86,7 @@ impl FsBlockCache {
 
 #[cfg(feature = "unstable")]
 impl TestCache for FsBlockCache {
+    type BsError = FsBlockDbError;
     type BlockSource = FsBlockDb;
     type InsertResult = BlockMeta;
 
