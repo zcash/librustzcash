@@ -80,6 +80,8 @@ use {
     group::ff::PrimeField, orchard::tree::MerkleHashOrchard, pasta_curves::pallas,
 };
 
+pub mod pool;
+
 pub struct TransactionSummary<AccountId> {
     account_id: AccountId,
     txid: TxId,

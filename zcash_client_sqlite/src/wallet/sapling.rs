@@ -432,10 +432,7 @@ pub(crate) mod tests {
     use zcash_protocol::consensus;
 
     use crate::{
-        testing::{
-            self,
-            pool::{OutputRecoveryError, ShieldedPoolTester},
-        },
+        testing::{self, pool::ShieldedPoolTester},
         AccountId, SAPLING_TABLES_PREFIX,
     };
 
@@ -538,7 +535,7 @@ pub(crate) mod tests {
             height: BlockHeight,
             tx: &Transaction,
             fvk: &Self::Fvk,
-        ) -> Result<Option<(Note, Address, MemoBytes)>, OutputRecoveryError> {
+        ) -> Option<(Note, Address, MemoBytes)> {
             for output in tx.sapling_bundle().unwrap().shielded_outputs() {
                 // Find the output that decrypts with the external OVK
                 let result = try_sapling_output_recovery(
@@ -548,17 +545,17 @@ pub(crate) mod tests {
                 );
 
                 if result.is_some() {
-                    return Ok(result.map(|(note, addr, memo)| {
+                    return result.map(|(note, addr, memo)| {
                         (
                             Note::Sapling(note),
                             addr.into(),
                             MemoBytes::from_bytes(&memo).expect("correct length"),
                         )
-                    }));
+                    });
                 }
             }
 
-            Ok(None)
+            None
         }
 
         fn received_note_count(

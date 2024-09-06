@@ -76,13 +76,6 @@ use {
 #[cfg(feature = "orchard")]
 use zcash_client_backend::PoolType;
 
-pub(crate) type OutputRecoveryError = Error<
-    SqliteClientError,
-    commitment_tree::Error,
-    GreedyInputSelectorError<Zip317FeeError, ReceivedNoteId>,
-    Zip317FeeError,
->;
-
 /// Trait that exposes the pool-specific types and operations necessary to run the
 /// single-shielded-pool tests on a given pool.
 pub(crate) trait ShieldedPoolTester {
@@ -149,7 +142,7 @@ pub(crate) trait ShieldedPoolTester {
         height: BlockHeight,
         tx: &Transaction,
         fvk: &Self::Fvk,
-    ) -> Result<Option<(Note, Address, MemoBytes)>, OutputRecoveryError>;
+    ) -> Option<(Note, Address, MemoBytes)>;
 
     fn received_note_count(summary: &ScanSummary) -> usize;
 }
@@ -1224,7 +1217,7 @@ pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
             .unwrap();
         let tx = Transaction::read(&raw_tx[..], BranchId::Canopy).unwrap();
 
-        T::try_output_recovery(st.network(), h1, &tx, &dfvk)
+        Ok(T::try_output_recovery(st.network(), h1, &tx, &dfvk))
     };
 
     // Send some of the funds to another address, keeping history.

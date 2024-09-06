@@ -416,10 +416,7 @@ pub(crate) mod tests {
     };
 
     use crate::{
-        testing::{
-            self,
-            pool::{OutputRecoveryError, ShieldedPoolTester},
-        },
+        testing::{self, pool::ShieldedPoolTester},
         wallet::sapling::tests::SaplingPoolTester,
         ORCHARD_TABLES_PREFIX,
     };
@@ -537,7 +534,7 @@ pub(crate) mod tests {
             _: BlockHeight,
             tx: &Transaction,
             fvk: &Self::Fvk,
-        ) -> Result<Option<(Note, Address, MemoBytes)>, OutputRecoveryError> {
+        ) -> Option<(Note, Address, MemoBytes)> {
             for action in tx.orchard_bundle().unwrap().actions() {
                 // Find the output that decrypts with the external OVK
                 let result = try_output_recovery_with_ovk(
@@ -549,7 +546,7 @@ pub(crate) mod tests {
                 );
 
                 if result.is_some() {
-                    return Ok(result.map(|(note, addr, memo)| {
+                    return result.map(|(note, addr, memo)| {
                         (
                             Note::Orchard(note),
                             UnifiedAddress::from_receivers(Some(addr), None, None)
@@ -557,11 +554,11 @@ pub(crate) mod tests {
                                 .into(),
                             MemoBytes::from_bytes(&memo).expect("correct length"),
                         )
-                    }));
+                    });
                 }
             }
 
-            Ok(None)
+            None
         }
 
         fn received_note_count(
