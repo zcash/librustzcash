@@ -400,14 +400,26 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::hash::Hash;
+
     use incrementalmerkletree::{Hashable, Level};
-
-    use shardtree::error::ShardTreeError;
-
     use sapling::{
         self,
         note_encryption::try_sapling_output_recovery,
         zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
+    };
+    use shardtree::error::ShardTreeError;
+
+    use zcash_client_backend::{
+        address::Address,
+        data_api::{
+            chain::CommitmentTreeRoot,
+            testing::{pool::ShieldedPoolTester, TestState},
+            DecryptedTransaction, InputSource, WalletCommitmentTrees, WalletRead, WalletSummary,
+        },
+        keys::UnifiedSpendingKey,
+        wallet::{Note, ReceivedNote},
+        ShieldedProtocol,
     };
     use zcash_primitives::{
         consensus::BlockHeight,
@@ -418,28 +430,19 @@ pub(crate) mod tests {
         },
         zip32::Scope,
     };
-
-    use zcash_client_backend::{
-        address::Address,
-        data_api::{
-            chain::CommitmentTreeRoot, testing::TestState, DecryptedTransaction, InputSource,
-            WalletCommitmentTrees, WalletRead, WalletSummary,
-        },
-        keys::UnifiedSpendingKey,
-        wallet::{Note, ReceivedNote},
-        ShieldedProtocol,
-    };
     use zcash_protocol::consensus;
 
     use crate::{
-        testing::{self, pool::ShieldedPoolTester},
-        AccountId, SAPLING_TABLES_PREFIX,
+        testing::{self, pool::ShieldedPoolPersistence},
+        SAPLING_TABLES_PREFIX,
     };
 
     pub(crate) struct SaplingPoolTester;
+    impl ShieldedPoolPersistence for SaplingPoolTester {
+        const TABLES_PREFIX: &'static str = SAPLING_TABLES_PREFIX;
+    }
     impl ShieldedPoolTester for SaplingPoolTester {
         const SHIELDED_PROTOCOL: ShieldedProtocol = ShieldedProtocol::Sapling;
-        const TABLES_PREFIX: &'static str = SAPLING_TABLES_PREFIX;
         // const MERKLE_TREE_DEPTH: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH;
 
         type Sk = ExtendedSpendingKey;
@@ -494,7 +497,7 @@ pub(crate) mod tests {
                 .put_sapling_subtree_roots(start_index, roots)
         }
 
-        fn next_subtree_index(s: &WalletSummary<AccountId>) -> u64 {
+        fn next_subtree_index<A: Hash + Eq>(s: &WalletSummary<A>) -> u64 {
             s.next_sapling_subtree_index()
         }
 
@@ -517,12 +520,12 @@ pub(crate) mod tests {
                 .map(|n| n.take_sapling())
         }
 
-        fn decrypted_pool_outputs_count(d_tx: &DecryptedTransaction<'_, AccountId>) -> usize {
+        fn decrypted_pool_outputs_count<A>(d_tx: &DecryptedTransaction<'_, A>) -> usize {
             d_tx.sapling_outputs().len()
         }
 
-        fn with_decrypted_pool_memos(
-            d_tx: &DecryptedTransaction<'_, AccountId>,
+        fn with_decrypted_pool_memos<A>(
+            d_tx: &DecryptedTransaction<'_, A>,
             mut f: impl FnMut(&MemoBytes),
         ) {
             for output in d_tx.sapling_outputs() {

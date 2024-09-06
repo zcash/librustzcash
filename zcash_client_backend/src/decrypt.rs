@@ -38,7 +38,7 @@ pub struct DecryptedOutput<Note, AccountId> {
     transfer_type: TransferType,
 }
 
-impl<Note, AccountId: Copy> DecryptedOutput<Note, AccountId> {
+impl<Note, AccountId> DecryptedOutput<Note, AccountId> {
     pub fn new(
         index: usize,
         note: Note,

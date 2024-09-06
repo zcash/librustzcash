@@ -587,7 +587,10 @@ pub(crate) mod tests {
     use zcash_client_backend::data_api::{
         chain::{ChainState, CommitmentTreeRoot},
         scanning::{spanning_tree::testing::scan_range, ScanPriority},
-        testing::{AddressType, FakeCompactOutput, InitialChainState, TestBuilder, TestState},
+        testing::{
+            pool::ShieldedPoolTester, AddressType, FakeCompactOutput, InitialChainState,
+            TestBuilder, TestState,
+        },
         AccountBirthday, Ratio, WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
     use zcash_primitives::{
@@ -601,7 +604,6 @@ pub(crate) mod tests {
         error::SqliteClientError,
         testing::{
             db::{TestDb, TestDbFactory},
-            pool::ShieldedPoolTester,
             BlockCache,
         },
         wallet::{

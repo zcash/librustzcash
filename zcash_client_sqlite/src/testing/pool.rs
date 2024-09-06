@@ -7,11 +7,11 @@ use std::{
     num::{NonZeroU32, NonZeroU8},
 };
 
-use incrementalmerkletree::{frontier::Frontier, Level};
-use rand_core::RngCore;
+use incrementalmerkletree::frontier::Frontier;
+
 use rusqlite::params;
 use secrecy::Secret;
-use shardtree::error::ShardTreeError;
+
 use zcash_primitives::{
     block::BlockHash,
     consensus::{BranchId, NetworkUpgrade, Parameters},
@@ -31,28 +31,25 @@ use zcash_client_backend::{
     address::Address,
     data_api::{
         self,
-        chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
+        chain::{self, ChainState, CommitmentTreeRoot},
         error::Error,
         testing::{
-            input_selector, AddressType, FakeCompactOutput, InitialChainState, TestBuilder,
-            TestFvk, TestState,
+            input_selector, pool::ShieldedPoolTester, AddressType, FakeCompactOutput,
+            InitialChainState, TestBuilder, TestState,
         },
         wallet::{
             decrypt_and_store_transaction,
             input_selection::{GreedyInputSelector, GreedyInputSelectorError},
         },
-        Account as _, AccountBirthday, DecryptedTransaction, InputSource, Ratio,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        Account as _, AccountBirthday, Ratio, WalletRead, WalletWrite,
     },
     decrypt_transaction,
     fees::{fixed, standard, DustOutputPolicy},
     keys::UnifiedSpendingKey,
     scanning::ScanError,
-    wallet::{Note, OvkPolicy, ReceivedNote},
+    wallet::{Note, OvkPolicy},
     zip321::{self, Payment, TransactionRequest},
-    ShieldedProtocol,
 };
-use zcash_protocol::consensus::{self, BlockHeight};
 
 use crate::{
     error::SqliteClientError,
@@ -61,12 +58,13 @@ use crate::{
         BlockCache,
     },
     wallet::{commitment_tree, parse_scope, truncate_to_height},
-    AccountId, NoteId, ReceivedNoteId,
+    NoteId, ReceivedNoteId,
 };
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    zcash_client_backend::wallet::WalletTransparentOutput,
+    crate::AccountId,
+    zcash_client_backend::{data_api::DecryptedTransaction, wallet::WalletTransparentOutput},
     zcash_primitives::transaction::{
         components::{OutPoint, TxOut},
         fees::zip317,
@@ -74,77 +72,13 @@ use {
 };
 
 #[cfg(feature = "orchard")]
-use zcash_client_backend::PoolType;
+use {
+    zcash_client_backend::PoolType,
+    zcash_protocol::{consensus::BlockHeight, ShieldedProtocol},
+};
 
-/// Trait that exposes the pool-specific types and operations necessary to run the
-/// single-shielded-pool tests on a given pool.
-pub(crate) trait ShieldedPoolTester {
-    const SHIELDED_PROTOCOL: ShieldedProtocol;
+pub(crate) trait ShieldedPoolPersistence {
     const TABLES_PREFIX: &'static str;
-
-    type Sk;
-    type Fvk: TestFvk;
-    type MerkleTreeHash;
-    type Note;
-
-    fn test_account_fvk<Cache, DbT: WalletRead, P: consensus::Parameters>(
-        st: &TestState<Cache, DbT, P>,
-    ) -> Self::Fvk;
-    fn usk_to_sk(usk: &UnifiedSpendingKey) -> &Self::Sk;
-    fn sk(seed: &[u8]) -> Self::Sk;
-    fn sk_to_fvk(sk: &Self::Sk) -> Self::Fvk;
-    fn sk_default_address(sk: &Self::Sk) -> Address;
-    fn fvk_default_address(fvk: &Self::Fvk) -> Address;
-    fn fvks_equal(a: &Self::Fvk, b: &Self::Fvk) -> bool;
-
-    fn random_fvk(mut rng: impl RngCore) -> Self::Fvk {
-        let sk = {
-            let mut sk_bytes = vec![0; 32];
-            rng.fill_bytes(&mut sk_bytes);
-            Self::sk(&sk_bytes)
-        };
-
-        Self::sk_to_fvk(&sk)
-    }
-    fn random_address(rng: impl RngCore) -> Address {
-        Self::fvk_default_address(&Self::random_fvk(rng))
-    }
-
-    fn empty_tree_leaf() -> Self::MerkleTreeHash;
-    fn empty_tree_root(level: Level) -> Self::MerkleTreeHash;
-
-    fn put_subtree_roots<Cache, DbT: WalletRead + WalletCommitmentTrees, P>(
-        st: &mut TestState<Cache, DbT, P>,
-        start_index: u64,
-        roots: &[CommitmentTreeRoot<Self::MerkleTreeHash>],
-    ) -> Result<(), ShardTreeError<<DbT as WalletCommitmentTrees>::Error>>;
-
-    fn next_subtree_index(s: &WalletSummary<AccountId>) -> u64;
-
-    #[allow(clippy::type_complexity)]
-    fn select_spendable_notes<Cache, DbT: InputSource + WalletRead, P>(
-        st: &TestState<Cache, DbT, P>,
-        account: <DbT as InputSource>::AccountId,
-        target_value: NonNegativeAmount,
-        anchor_height: BlockHeight,
-        exclude: &[DbT::NoteRef],
-    ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error>;
-
-    fn decrypted_pool_outputs_count(d_tx: &DecryptedTransaction<'_, AccountId>) -> usize;
-
-    fn with_decrypted_pool_memos(
-        d_tx: &DecryptedTransaction<'_, AccountId>,
-        f: impl FnMut(&MemoBytes),
-    );
-
-    fn try_output_recovery<P: consensus::Parameters>(
-        params: &P,
-        height: BlockHeight,
-        tx: &Transaction,
-        fvk: &Self::Fvk,
-    ) -> Option<(Note, Address, MemoBytes)>;
-
-    fn received_note_count(summary: &ScanSummary) -> usize;
 }
 
 pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
@@ -1291,7 +1225,7 @@ pub(crate) fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
     );
 }
 
-pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester>() {
+pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester + ShieldedPoolPersistence>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
         .with_block_cache(BlockCache::new())

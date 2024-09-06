@@ -387,18 +387,21 @@ pub(crate) fn mark_orchard_note_spent(
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::hash::Hash;
+
     use incrementalmerkletree::{Hashable, Level};
     use orchard::{
         keys::{FullViewingKey, SpendingKey},
         note_encryption::OrchardDomain,
         tree::MerkleHashOrchard,
     };
-
     use shardtree::error::ShardTreeError;
+
     use zcash_client_backend::{
         data_api::{
-            chain::CommitmentTreeRoot, testing::TestState, DecryptedTransaction, InputSource,
-            WalletCommitmentTrees, WalletRead, WalletSummary,
+            chain::CommitmentTreeRoot,
+            testing::{pool::ShieldedPoolTester, TestState},
+            DecryptedTransaction, InputSource, WalletCommitmentTrees, WalletRead, WalletSummary,
         },
         wallet::{Note, ReceivedNote},
     };
@@ -416,15 +419,17 @@ pub(crate) mod tests {
     };
 
     use crate::{
-        testing::{self, pool::ShieldedPoolTester},
+        testing::{self, pool::ShieldedPoolPersistence},
         wallet::sapling::tests::SaplingPoolTester,
         ORCHARD_TABLES_PREFIX,
     };
 
     pub(crate) struct OrchardPoolTester;
+    impl ShieldedPoolPersistence for OrchardPoolTester {
+        const TABLES_PREFIX: &'static str = ORCHARD_TABLES_PREFIX;
+    }
     impl ShieldedPoolTester for OrchardPoolTester {
         const SHIELDED_PROTOCOL: ShieldedProtocol = ShieldedProtocol::Orchard;
-        const TABLES_PREFIX: &'static str = ORCHARD_TABLES_PREFIX;
         // const MERKLE_TREE_DEPTH: u8 = {orchard::NOTE_COMMITMENT_TREE_DEPTH as u8};
 
         type Sk = SpendingKey;
@@ -491,7 +496,7 @@ pub(crate) mod tests {
                 .put_orchard_subtree_roots(start_index, roots)
         }
 
-        fn next_subtree_index(s: &WalletSummary<crate::AccountId>) -> u64 {
+        fn next_subtree_index<A: Hash + Eq>(s: &WalletSummary<A>) -> u64 {
             s.next_orchard_subtree_index()
         }
 
@@ -514,14 +519,12 @@ pub(crate) mod tests {
                 .map(|n| n.take_orchard())
         }
 
-        fn decrypted_pool_outputs_count(
-            d_tx: &DecryptedTransaction<'_, crate::AccountId>,
-        ) -> usize {
+        fn decrypted_pool_outputs_count<A>(d_tx: &DecryptedTransaction<'_, A>) -> usize {
             d_tx.orchard_outputs().len()
         }
 
-        fn with_decrypted_pool_memos(
-            d_tx: &DecryptedTransaction<'_, crate::AccountId>,
+        fn with_decrypted_pool_memos<A>(
+            d_tx: &DecryptedTransaction<'_, A>,
             mut f: impl FnMut(&MemoBytes),
         ) {
             for output in d_tx.orchard_outputs() {
