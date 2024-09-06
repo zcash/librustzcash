@@ -612,12 +612,14 @@ pub(crate) mod tests {
 
     #[cfg(feature = "orchard")]
     use {
-        crate::wallet::orchard::tests::OrchardPoolTester,
         incrementalmerkletree::Level,
         orchard::tree::MerkleHashOrchard,
         std::{convert::Infallible, num::NonZeroU32},
         zcash_client_backend::{
-            data_api::{wallet::input_selection::GreedyInputSelector, WalletCommitmentTrees},
+            data_api::{
+                testing::orchard::OrchardPoolTester, wallet::input_selection::GreedyInputSelector,
+                WalletCommitmentTrees,
+            },
             fees::{standard, DustOutputPolicy},
             wallet::OvkPolicy,
         },

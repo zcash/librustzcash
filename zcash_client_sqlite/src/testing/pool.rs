@@ -73,7 +73,8 @@ use {
 
 #[cfg(feature = "orchard")]
 use {
-    zcash_client_backend::PoolType,
+    crate::ORCHARD_TABLES_PREFIX,
+    zcash_client_backend::{data_api::testing::orchard::OrchardPoolTester, PoolType},
     zcash_protocol::{consensus::BlockHeight, ShieldedProtocol},
 };
 
@@ -83,6 +84,11 @@ pub(crate) trait ShieldedPoolPersistence {
 
 impl ShieldedPoolPersistence for SaplingPoolTester {
     const TABLES_PREFIX: &'static str = SAPLING_TABLES_PREFIX;
+}
+
+#[cfg(feature = "orchard")]
+impl ShieldedPoolPersistence for OrchardPoolTester {
+    const TABLES_PREFIX: &'static str = ORCHARD_TABLES_PREFIX;
 }
 
 pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {

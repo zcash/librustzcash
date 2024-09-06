@@ -404,6 +404,9 @@ pub(crate) mod tests {
 
     use crate::testing;
 
+    #[cfg(feature = "orchard")]
+    use zcash_client_backend::data_api::testing::orchard::OrchardPoolTester;
+
     #[test]
     fn send_single_step_proposed_transfer() {
         testing::pool::send_single_step_proposed_transfer::<SaplingPoolTester>()
@@ -496,40 +499,30 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn pool_crossing_required() {
-        use crate::wallet::orchard::tests::OrchardPoolTester;
-
         testing::pool::pool_crossing_required::<SaplingPoolTester, OrchardPoolTester>()
     }
 
     #[test]
     #[cfg(feature = "orchard")]
     fn fully_funded_fully_private() {
-        use crate::wallet::orchard::tests::OrchardPoolTester;
-
         testing::pool::fully_funded_fully_private::<SaplingPoolTester, OrchardPoolTester>()
     }
 
     #[test]
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
     fn fully_funded_send_to_t() {
-        use crate::wallet::orchard::tests::OrchardPoolTester;
-
         testing::pool::fully_funded_send_to_t::<SaplingPoolTester, OrchardPoolTester>()
     }
 
     #[test]
     #[cfg(feature = "orchard")]
     fn multi_pool_checkpoint() {
-        use crate::wallet::orchard::tests::OrchardPoolTester;
-
         testing::pool::multi_pool_checkpoint::<SaplingPoolTester, OrchardPoolTester>()
     }
 
     #[test]
     #[cfg(feature = "orchard")]
     fn multi_pool_checkpoints_with_pruning() {
-        use crate::wallet::orchard::tests::OrchardPoolTester;
-
         testing::pool::multi_pool_checkpoints_with_pruning::<SaplingPoolTester, OrchardPoolTester>()
     }
 }

@@ -327,7 +327,7 @@ mod tests {
     use crate::testing;
 
     #[cfg(feature = "orchard")]
-    use crate::wallet::orchard::tests::OrchardPoolTester;
+    use zcash_client_backend::data_api::testing::orchard::OrchardPoolTester;
 
     #[test]
     fn valid_chain_states_sapling() {

@@ -77,9 +77,11 @@ use {
 #[cfg(feature = "orchard")]
 use {
     super::ORCHARD_SHARD_HEIGHT, crate::proto::compact_formats::CompactOrchardAction,
-    group::ff::PrimeField, orchard::tree::MerkleHashOrchard, pasta_curves::pallas,
+    ::orchard::tree::MerkleHashOrchard, group::ff::PrimeField, pasta_curves::pallas,
 };
 
+#[cfg(feature = "orchard")]
+pub mod orchard;
 pub mod pool;
 pub mod sapling;
 
@@ -396,7 +398,7 @@ where
 
     /// Returns the test account's Orchard FVK, if one was configured.
     #[cfg(feature = "orchard")]
-    pub fn test_account_orchard(&self) -> Option<&orchard::keys::FullViewingKey> {
+    pub fn test_account_orchard(&self) -> Option<&::orchard::keys::FullViewingKey> {
         let (_, acct) = self.test_account.as_ref()?;
         let ufvk = acct.ufvk()?;
         ufvk.orchard()
@@ -1385,7 +1387,7 @@ pub trait TestFvk {
     fn sapling_ovk(&self) -> Option<::sapling::keys::OutgoingViewingKey>;
 
     #[cfg(feature = "orchard")]
-    fn orchard_ovk(&self, scope: zip32::Scope) -> Option<orchard::keys::OutgoingViewingKey>;
+    fn orchard_ovk(&self, scope: zip32::Scope) -> Option<::orchard::keys::OutgoingViewingKey>;
 
     fn add_spend<R: RngCore + CryptoRng>(
         &self,
@@ -1432,7 +1434,7 @@ impl<'a, A: TestFvk> TestFvk for &'a A {
     }
 
     #[cfg(feature = "orchard")]
-    fn orchard_ovk(&self, scope: zip32::Scope) -> Option<orchard::keys::OutgoingViewingKey> {
+    fn orchard_ovk(&self, scope: zip32::Scope) -> Option<::orchard::keys::OutgoingViewingKey> {
         (*self).orchard_ovk(scope)
     }
 
@@ -1502,7 +1504,7 @@ impl TestFvk for DiversifiableFullViewingKey {
     }
 
     #[cfg(feature = "orchard")]
-    fn orchard_ovk(&self, _: zip32::Scope) -> Option<orchard::keys::OutgoingViewingKey> {
+    fn orchard_ovk(&self, _: zip32::Scope) -> Option<::orchard::keys::OutgoingViewingKey> {
         None
     }
 
@@ -1567,14 +1569,14 @@ impl TestFvk for DiversifiableFullViewingKey {
 }
 
 #[cfg(feature = "orchard")]
-impl TestFvk for orchard::keys::FullViewingKey {
-    type Nullifier = orchard::note::Nullifier;
+impl TestFvk for ::orchard::keys::FullViewingKey {
+    type Nullifier = ::orchard::note::Nullifier;
 
     fn sapling_ovk(&self) -> Option<::sapling::keys::OutgoingViewingKey> {
         None
     }
 
-    fn orchard_ovk(&self, scope: zip32::Scope) -> Option<orchard::keys::OutgoingViewingKey> {
+    fn orchard_ovk(&self, scope: zip32::Scope) -> Option<::orchard::keys::OutgoingViewingKey> {
         Some(self.to_ovk(scope))
     }
 
@@ -1588,9 +1590,9 @@ impl TestFvk for orchard::keys::FullViewingKey {
         let recipient = loop {
             let mut bytes = [0; 32];
             rng.fill_bytes(&mut bytes);
-            let sk = orchard::keys::SpendingKey::from_bytes(bytes);
+            let sk = ::orchard::keys::SpendingKey::from_bytes(bytes);
             if sk.is_some().into() {
-                break orchard::keys::FullViewingKey::from(&sk.unwrap())
+                break ::orchard::keys::FullViewingKey::from(&sk.unwrap())
                     .address_at(0u32, zip32::Scope::External);
             }
         };
@@ -1617,7 +1619,7 @@ impl TestFvk for orchard::keys::FullViewingKey {
     ) -> Self::Nullifier {
         // Generate a dummy nullifier for the spend
         let revealed_spent_note_nullifier =
-            orchard::note::Nullifier::from_bytes(&pallas::Base::random(&mut rng).to_repr())
+            ::orchard::note::Nullifier::from_bytes(&pallas::Base::random(&mut rng).to_repr())
                 .unwrap();
 
         let (j, scope) = match req {
@@ -1715,19 +1717,19 @@ fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
 /// Returns the `CompactOrchardAction` and the new note.
 #[cfg(feature = "orchard")]
 fn compact_orchard_action<R: RngCore + CryptoRng>(
-    nf_old: orchard::note::Nullifier,
-    recipient: orchard::Address,
+    nf_old: ::orchard::note::Nullifier,
+    recipient: ::orchard::Address,
     value: NonNegativeAmount,
-    ovk: Option<orchard::keys::OutgoingViewingKey>,
+    ovk: Option<::orchard::keys::OutgoingViewingKey>,
     rng: &mut R,
-) -> (CompactOrchardAction, orchard::Note) {
+) -> (CompactOrchardAction, ::orchard::Note) {
     use zcash_note_encryption::ShieldedOutput;
 
-    let (compact_action, note) = orchard::note_encryption::testing::fake_compact_action(
+    let (compact_action, note) = ::orchard::note_encryption::testing::fake_compact_action(
         rng,
         nf_old,
         recipient,
-        orchard::value::NoteValue::from_raw(value.into_u64()),
+        ::orchard::value::NoteValue::from_raw(value.into_u64()),
         ovk,
     );
 
@@ -1906,9 +1908,10 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
             #[cfg(feature = "orchard")]
             if let Some(recipient) = ua.orchard() {
                 // Generate a dummy nullifier
-                let nullifier =
-                    orchard::note::Nullifier::from_bytes(&pallas::Base::random(&mut rng).to_repr())
-                        .unwrap();
+                let nullifier = ::orchard::note::Nullifier::from_bytes(
+                    &pallas::Base::random(&mut rng).to_repr(),
+                )
+                .unwrap();
 
                 ctx.actions.push(
                     compact_orchard_action(
@@ -2046,7 +2049,7 @@ pub struct MockWalletDb {
     >,
     #[cfg(feature = "orchard")]
     pub orchard_tree: ShardTree<
-        MemoryShardStore<orchard::tree::MerkleHashOrchard, BlockHeight>,
+        MemoryShardStore<::orchard::tree::MerkleHashOrchard, BlockHeight>,
         { ORCHARD_SHARD_HEIGHT * 2 },
         ORCHARD_SHARD_HEIGHT,
     >,
@@ -2225,7 +2228,7 @@ impl WalletRead for MockWalletDb {
     fn get_orchard_nullifiers(
         &self,
         _query: NullifierQuery,
-    ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error> {
+    ) -> Result<Vec<(Self::AccountId, ::orchard::note::Nullifier)>, Self::Error> {
         Ok(Vec::new())
     }
 
@@ -2412,7 +2415,7 @@ impl WalletCommitmentTrees for MockWalletDb {
     }
 
     #[cfg(feature = "orchard")]
-    type OrchardShardStore<'a> = MemoryShardStore<orchard::tree::MerkleHashOrchard, BlockHeight>;
+    type OrchardShardStore<'a> = MemoryShardStore<::orchard::tree::MerkleHashOrchard, BlockHeight>;
 
     #[cfg(feature = "orchard")]
     fn with_orchard_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
@@ -2434,7 +2437,7 @@ impl WalletCommitmentTrees for MockWalletDb {
     fn put_orchard_subtree_roots(
         &mut self,
         start_index: u64,
-        roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+        roots: &[CommitmentTreeRoot<::orchard::tree::MerkleHashOrchard>],
     ) -> Result<(), ShardTreeError<Self::Error>> {
         self.with_orchard_tree_mut(|t| {
             for (root, i) in roots.iter().zip(0u64..) {

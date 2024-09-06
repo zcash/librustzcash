@@ -1107,7 +1107,7 @@ mod tests {
     #[cfg(feature = "orchard")]
     mod orchard {
         use super::new_tree;
-        use crate::wallet::orchard::tests::OrchardPoolTester;
+        use zcash_client_backend::data_api::testing::orchard::OrchardPoolTester;
 
         #[test]
         fn append() {
