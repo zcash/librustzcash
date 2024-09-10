@@ -411,15 +411,8 @@ where
     DbT::Error: std::error::Error + Send + Sync + 'static,
 {
     info!("Scanning {}", scan_range);
-    let scan_result = scan_cached_blocks(
-        params,
-        db_cache,
-        db_data,
-        scan_range.block_range().start,
-        initial_chain_state,
-        scan_range.len(),
-    )
-    .await;
+    let scan_result =
+        scan_cached_blocks(params, db_cache, db_data, initial_chain_state, scan_range).await;
 
     match scan_result {
         Err(ChainError::Scan(err)) if err.is_continuity_error() => {

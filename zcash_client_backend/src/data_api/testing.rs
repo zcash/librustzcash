@@ -64,7 +64,7 @@ use super::{
     chain::{
         scan_cached_blocks, BlockCache, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary,
     },
-    scanning::ScanRange,
+    scanning::{ScanPriority, ScanRange},
     wallet::{
         create_proposed_transactions,
         input_selection::{GreedyInputSelector, InputSelector},
@@ -822,15 +822,18 @@ where
             .cloned()
             .unwrap_or_else(|| CachedBlock::none(from_height - 1));
 
-        let result = futures::executor::block_on(scan_cached_blocks(
+        let scan_range = ScanRange::from_parts(
+            from_height..from_height + limit as u32,
+            ScanPriority::Historic,
+        );
+
+        futures::executor::block_on(scan_cached_blocks(
             &self.network,
-            self.cache.block_source(),
+            self.cache.block_cache(),
             &mut self.wallet_data,
-            from_height,
             &prior_cached_block.chain_state,
-            limit,
-        ));
-        result
+            &scan_range,
+        ))
     }
 
     /// Insert shard roots for both trees.

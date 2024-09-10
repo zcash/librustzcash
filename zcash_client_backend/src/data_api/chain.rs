@@ -72,9 +72,8 @@
 //!                 &network,
 //!                 &block_source,
 //!                 &mut wallet_db,
-//!                 scan_range.block_range().start,
 //!                 chain_state,
-//!                 scan_range.len()
+//!                 scan_range
 //!             ).await;
 //!
 //!             // Check for scanning errors that indicate that the wallet's chain tip is out of
@@ -141,9 +140,8 @@
 //!         &network,
 //!         &block_source,
 //!         &mut wallet_db,
-//!         scan_range.block_range().start,
 //!         chain_state,
-//!         scan_range.len()
+//!         &scan_range
 //!     ).await?;
 //!
 //!     // Handle scan errors, etc.
@@ -586,22 +584,22 @@ impl ChainState {
 /// ## Panics
 ///
 /// This method will panic if `from_height != from_state.block_height() + 1`.
-#[tracing::instrument(skip(params, block_source, data_db, from_state))]
+#[tracing::instrument(skip(params, block_cache, data_db, from_state))]
 #[allow(clippy::type_complexity)]
-pub async fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
+pub async fn scan_cached_blocks<ParamsT, DbT, BlockCacheT>(
     params: &ParamsT,
-    block_source: &BlockSourceT,
+    block_cache: &BlockCacheT,
     data_db: &mut DbT,
-    from_height: BlockHeight,
     from_state: &ChainState,
-    limit: usize,
-) -> Result<ScanSummary, Error<DbT::Error, BlockSourceT::Error>>
+    scan_range: &ScanRange,
+) -> Result<ScanSummary, Error<DbT::Error, BlockCacheT::Error>>
 where
     ParamsT: consensus::Parameters + Send + Sync + 'static,
-    BlockSourceT: BlockSource,
+    BlockCacheT: BlockCache,
     DbT: WalletWrite,
     <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
 {
+    let from_height = scan_range.block_range().start;
     assert_eq!(from_height, from_state.block_height + 1);
 
     // Fetch the UnifiedFullViewingKeys we are tracking
@@ -611,14 +609,12 @@ where
     let scanning_keys = ScanningKeys::from_account_ufvks(account_ufvks);
     let mut runners = BatchRunners::<_, (), ()>::for_keys(100, &scanning_keys);
 
-    block_source
-        .with_blocks(
-            Some(from_height),
-            Some(limit),
-            |block| runners.add_block(params, block).map_err(|e| e.into()),
-            Error::BlockSource,
-        )
-        .await?;
+    block_cache
+        .read(scan_range)
+        .await
+        .map_err(Error::BlockSource)?
+        .into_iter()
+        .try_for_each(|block| runners.add_block(params, block).map_err(Error::Scan))?;
     runners.flush();
 
     let mut prior_block_metadata = if from_height > BlockHeight::from(0) {
@@ -642,68 +638,64 @@ where
 
     let mut scanned_blocks = vec![];
     let mut scan_summary = ScanSummary::for_range(from_height..from_height);
-    block_source
-        .with_blocks(
-            Some(from_height),
-            Some(limit),
-            |block: CompactBlock| {
-                scan_summary.scanned_range.end = block.height() + 1;
-                let scanned_block = scan_block_with_runners::<_, _, _, (), ()>(
-                    params,
-                    block,
-                    &scanning_keys,
-                    &nullifiers,
-                    prior_block_metadata.as_ref(),
-                    Some(&mut runners),
-                )
-                .map_err(Error::Scan)?;
 
-                for wtx in &scanned_block.transactions {
-                    scan_summary.spent_sapling_note_count += wtx.sapling_spends().len();
-                    scan_summary.received_sapling_note_count += wtx.sapling_outputs().len();
-                    #[cfg(feature = "orchard")]
-                    {
-                        scan_summary.spent_orchard_note_count += wtx.orchard_spends().len();
-                        scan_summary.received_orchard_note_count += wtx.orchard_outputs().len();
-                    }
-                }
-
-                let sapling_spent_nf: Vec<&sapling::Nullifier> = scanned_block
-                    .transactions
-                    .iter()
-                    .flat_map(|tx| tx.sapling_spends().iter().map(|spend| spend.nf()))
-                    .collect();
-                nullifiers.retain_sapling(|(_, nf)| !sapling_spent_nf.contains(&nf));
-                nullifiers.extend_sapling(scanned_block.transactions.iter().flat_map(|tx| {
-                    tx.sapling_outputs()
-                        .iter()
-                        .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
-                }));
-
-                #[cfg(feature = "orchard")]
-                {
-                    let orchard_spent_nf: Vec<&orchard::note::Nullifier> = scanned_block
-                        .transactions
-                        .iter()
-                        .flat_map(|tx| tx.orchard_spends().iter().map(|spend| spend.nf()))
-                        .collect();
-
-                    nullifiers.retain_orchard(|(_, nf)| !orchard_spent_nf.contains(&nf));
-                    nullifiers.extend_orchard(scanned_block.transactions.iter().flat_map(|tx| {
-                        tx.orchard_outputs()
-                            .iter()
-                            .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
-                    }));
-                }
-
-                prior_block_metadata = Some(scanned_block.to_block_metadata());
-                scanned_blocks.push(scanned_block);
-
-                Ok(())
-            },
-            Error::BlockSource,
+    let compact_blocks = block_cache
+        .read(scan_range)
+        .await
+        .map_err(Error::BlockSource)?;
+    for block in compact_blocks {
+        scan_summary.scanned_range.end = block.height() + 1;
+        let scanned_block = scan_block_with_runners::<_, _, _, (), ()>(
+            params,
+            block,
+            &scanning_keys,
+            &nullifiers,
+            prior_block_metadata.as_ref(),
+            Some(&mut runners),
         )
-        .await?;
+        .map_err(Error::Scan)?;
+
+        for wtx in &scanned_block.transactions {
+            scan_summary.spent_sapling_note_count += wtx.sapling_spends().len();
+            scan_summary.received_sapling_note_count += wtx.sapling_outputs().len();
+            #[cfg(feature = "orchard")]
+            {
+                scan_summary.spent_orchard_note_count += wtx.orchard_spends().len();
+                scan_summary.received_orchard_note_count += wtx.orchard_outputs().len();
+            }
+        }
+
+        let sapling_spent_nf: Vec<&sapling::Nullifier> = scanned_block
+            .transactions
+            .iter()
+            .flat_map(|tx| tx.sapling_spends().iter().map(|spend| spend.nf()))
+            .collect();
+        nullifiers.retain_sapling(|(_, nf)| !sapling_spent_nf.contains(&nf));
+        nullifiers.extend_sapling(scanned_block.transactions.iter().flat_map(|tx| {
+            tx.sapling_outputs()
+                .iter()
+                .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
+        }));
+
+        #[cfg(feature = "orchard")]
+        {
+            let orchard_spent_nf: Vec<&orchard::note::Nullifier> = scanned_block
+                .transactions
+                .iter()
+                .flat_map(|tx| tx.orchard_spends().iter().map(|spend| spend.nf()))
+                .collect();
+
+            nullifiers.retain_orchard(|(_, nf)| !orchard_spent_nf.contains(&nf));
+            nullifiers.extend_orchard(scanned_block.transactions.iter().flat_map(|tx| {
+                tx.orchard_outputs()
+                    .iter()
+                    .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
+            }));
+        }
+
+        prior_block_metadata = Some(scanned_block.to_block_metadata());
+        scanned_blocks.push(scanned_block);
+    }
 
     data_db
         .put_blocks(from_state, scanned_blocks)
