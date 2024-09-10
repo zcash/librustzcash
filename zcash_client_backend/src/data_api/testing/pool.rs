@@ -22,7 +22,7 @@ use zcash_primitives::{
     },
 };
 use zcash_protocol::{
-    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
+    consensus::{self, BlockHeight, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     value::Zatoshis,
     PoolType, ShieldedProtocol,
@@ -275,13 +275,13 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     use zcash_primitives::{
         legacy::keys::{NonHardenedChildIndex, TransparentKeyScope},
         transaction::{
-            builder::{BuildConfig, Builder}, components::{OutPoint, TxOut}, fees::zip317
+            builder::{BuildConfig, Builder},
+            components::{OutPoint, TxOut},
+            fees::zip317,
         },
     };
     use zcash_proofs::prover::LocalTxProver;
     use zcash_protocol::value::ZatBalance;
-
-    // use crate::wallet::{transparent::get_wallet_transparent_output, GAP_LIMIT};
 
     let mut st = TestBuilder::new()
         .with_data_store_factory(dsf)
@@ -356,9 +356,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         // Check that there are sent outputs with the correct values.
         let confirmed_sent: Vec<Vec<_>> = txids
             .iter()
-            .map(|sent_txid| {
-                st.wallet().get_confirmed_sends(sent_txid).unwrap()
-            })
+            .map(|sent_txid| st.wallet().get_confirmed_sends(sent_txid).unwrap())
             .collect();
 
         // Verify that a status request has been generated for the second transaction of
@@ -537,10 +535,10 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 
     // We call get_wallet_transparent_output with `allow_unspendable = true` to verify
     // storage because the decrypted transaction has not yet been mined.
-    // let utxo =
-    //     get_wallet_transparent_output(st.wallet().conn(), &OutPoint::new(txid.into(), 0), true)
-    //         .unwrap();
-    let utxo = st.wallet().get_all_unspent_transparent_output(&OutPoint::new(txid.into(), 0), true).unwrap();
+    let utxo = st
+        .wallet()
+        .get_all_unspent_transparent_output(&OutPoint::new(txid.into(), 0), true)
+        .unwrap();
     assert_matches!(utxo, Some(v) if v.value() == utxo_value);
 
     // That should have advanced the start of the gap to index 11.
@@ -559,14 +557,18 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         assert_eq!(reserved.len(), n);
         reserved
     };
-    let reservation_should_fail = |st: &mut TestState<_, DSF::DataStore, _>, n, expected_bad_index| {
-        // TODO: W: Figure out how to handle this
-        // assert_matches!(st
-        //     .wallet_mut()
-        //     .reserve_next_n_ephemeral_addresses(account_id, n),
-        //     Err(SqliteClientError::ReachedGapLimit(acct, bad_index))
-        //     if acct == account_id && bad_index == expected_bad_index);
-    };
+    let reservation_should_fail =
+        |st: &mut TestState<_, DSF::DataStore, _>, n, _expected_bad_index| {
+            // TODO: W: Figure out how to handle this
+            assert_matches!(
+                st.wallet_mut()
+                    .reserve_next_n_ephemeral_addresses(account_id, n),
+                Err(..)
+            );
+            // previously it was hard-coded to a SqlClientError. Not sure how best to handle this..
+            // Err(SqliteClientError::ReachedGapLimit(acct, bad_index))
+            // if acct == account_id && bad_index == expected_bad_index);
+        };
 
     let next_reserved = reservation_should_succeed(&mut st, 1);
     assert_eq!(next_reserved[0], known_addrs[11]);
@@ -2157,25 +2159,24 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     })
     .collect();
 
-    // TODO: Add method for getting checkpoint history without db
-    // let actual_checkpoints = get_checkpoint_history(st.wallet().conn()).unwrap();
+    let actual_checkpoints = st.wallet().get_checkpoint_history().unwrap();
 
-    // assert_eq!(
-    //     actual_checkpoints
-    //         .iter()
-    //         .filter(|(_, p, _)| p == &P0::SHIELDED_PROTOCOL)
-    //         .cloned()
-    //         .collect::<Vec<_>>(),
-    //     expected_checkpoints_p0
-    // );
-    // assert_eq!(
-    //     actual_checkpoints
-    //         .iter()
-    //         .filter(|(_, p, _)| p == &P1::SHIELDED_PROTOCOL)
-    //         .cloned()
-    //         .collect::<Vec<_>>(),
-    //     expected_checkpoints_p1
-    // );
+    assert_eq!(
+        actual_checkpoints
+            .iter()
+            .filter(|(_, p, _)| p == &P0::SHIELDED_PROTOCOL)
+            .cloned()
+            .collect::<Vec<_>>(),
+        expected_checkpoints_p0
+    );
+    assert_eq!(
+        actual_checkpoints
+            .iter()
+            .filter(|(_, p, _)| p == &P1::SHIELDED_PROTOCOL)
+            .cloned()
+            .collect::<Vec<_>>(),
+        expected_checkpoints_p1
+    );
 }
 
 #[cfg(feature = "orchard")]

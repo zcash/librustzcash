@@ -1220,6 +1220,13 @@ pub trait WalletRead {
     ) -> Result<Vec<(u64, Option<String>, Option<String>, Option<u32>)>, Self::Error> {
         Ok(vec![])
     }
+
+    #[cfg(any(test, feature = "test-dependencies"))]
+    fn get_checkpoint_history(
+        &self,
+    ) -> Result<Vec<(BlockHeight, ShieldedProtocol, Option<incrementalmerkletree::Position>)>, Self::Error> {
+        Ok(vec![])
+    }
 }
 
 /// The relevance of a seed to a given wallet.

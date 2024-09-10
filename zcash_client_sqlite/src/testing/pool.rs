@@ -2,77 +2,18 @@
 //!
 //! Generalised for sharing across the Sapling and Orchard implementations.
 
-use std::{
-    convert::Infallible,
-    num::{NonZeroU32, NonZeroU8},
-};
-
-use incrementalmerkletree::frontier::Frontier;
-
-use rusqlite::params;
-use secrecy::Secret;
-
-use zcash_client_backend::{
-    address::Address,
-    data_api::{
-        self,
-        chain::{self, ChainState, CommitmentTreeRoot},
-        error::Error,
-        testing::{
-            input_selector, pool::ShieldedPoolTester, sapling::SaplingPoolTester, AddressType,
-            FakeCompactOutput, InitialChainState, TestBuilder, TestState,
-        },
-        wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
-        Account as _, AccountBirthday, Ratio, WalletRead, WalletWrite,
-    },
-    fees::{fixed, standard, DustOutputPolicy},
-    keys::UnifiedSpendingKey,
-    scanning::ScanError,
-    wallet::{Note, OvkPolicy},
-    zip321::{Payment, TransactionRequest},
-};
-use zcash_primitives::{
-    block::BlockHash,
-    consensus::{BranchId, NetworkUpgrade, Parameters},
-    legacy::TransparentAddress,
-    transaction::{
-        components::amount::NonNegativeAmount,
-        fees::{
-            fixed::FeeRule as FixedFeeRule, zip317::FeeError as Zip317FeeError, StandardFeeRule,
-        },
-        Transaction,
-    },
-    zip32::Scope,
-};
-use zcash_protocol::memo::MemoBytes;
+use zcash_client_backend::data_api::testing::{pool::ShieldedPoolTester, sapling::SaplingPoolTester, orchard::OrchardPoolTester};
 
 use crate::{
-    error::SqliteClientError,
     testing::{
-        db::{TestDb, TestDbFactory},
+        db::TestDbFactory,
         BlockCache,
     },
-    wallet::{commitment_tree, parse_scope, truncate_to_height},
-    ReceivedNoteId, SAPLING_TABLES_PREFIX,
-};
-
-#[cfg(feature = "transparent-inputs")]
-use {
-    crate::AccountId,
-    zcash_client_backend::{data_api::DecryptedTransaction, wallet::WalletTransparentOutput},
-    zcash_primitives::transaction::{
-        components::{OutPoint, TxOut},
-        fees::zip317,
-    },
-    zcash_protocol::memo::Memo,
+    SAPLING_TABLES_PREFIX,
 };
 
 #[cfg(feature = "orchard")]
-use {
-    crate::ORCHARD_TABLES_PREFIX,
-    zcash_client_backend::{data_api::testing::orchard::OrchardPoolTester, PoolType},
-    zcash_protocol::{consensus::BlockHeight, ShieldedProtocol},
-};
+use crate::ORCHARD_TABLES_PREFIX;
 
 pub(crate) trait ShieldedPoolPersistence {
     const TABLES_PREFIX: &'static str;
@@ -166,6 +107,7 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<T: Sh
     )
 }
 
+#[allow(dead_code)]
 pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::zip317_spend::<T>(
         TestDbFactory,

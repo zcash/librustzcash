@@ -354,7 +354,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
         use wallet::common::per_protocol_names;
 
-        let (table_prefix, index_col, note_reconstruction_cols) = per_protocol_names(protocol);
+        let (table_prefix, index_col, _) = per_protocol_names(protocol);
         let mut stmt_received_notes = self.conn.borrow().prepare(&format!(
             "SELECT txid, {index_col}
                  FROM {table_prefix}_received_notes rn
@@ -733,6 +733,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
             })
             .collect::<Result<Vec<_>, _>>()
             .map_err(SqliteClientError::from)
+    }
+
+    #[cfg(any(test, feature = "test-dependencies"))]
+    fn get_checkpoint_history(
+        &self,
+    ) -> Result<Vec<(BlockHeight, ShieldedProtocol, Option<incrementalmerkletree::Position>)>, Self::Error> {
+        use wallet::testing::get_checkpoint_history;
+        get_checkpoint_history(self.conn.borrow())
     }
 }
 
