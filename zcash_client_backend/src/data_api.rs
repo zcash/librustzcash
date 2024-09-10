@@ -809,6 +809,15 @@ pub trait InputSource {
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         Ok(vec![])
     }
+
+    /// Return the notes with a given value
+    #[cfg(any(test, feature = "test-dependencies"))]
+    fn get_notes(
+        &self,
+        _protocol: ShieldedProtocol,
+    ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
+        Ok(vec![])
+    }
 }
 
 /// Read-only operations required for light wallet functions.

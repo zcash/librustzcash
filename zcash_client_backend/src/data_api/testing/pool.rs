@@ -3,6 +3,7 @@ use incrementalmerkletree::Level;
 use rand::RngCore;
 use shardtree::error::ShardTreeError;
 use std::{cmp::Eq, convert::Infallible, hash::Hash, num::NonZeroU32};
+use zip32::Scope;
 
 use zcash_keys::{address::Address, keys::UnifiedSpendingKey};
 use zcash_primitives::{
@@ -11,7 +12,7 @@ use zcash_primitives::{
     transaction::{components::amount::NonNegativeAmount, fees::StandardFeeRule, Transaction},
 };
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, BranchId},
     memo::{Memo, MemoBytes},
     value::Zatoshis,
     ShieldedProtocol,
@@ -23,9 +24,12 @@ use crate::{
         self,
         chain::{CommitmentTreeRoot, ScanSummary},
         testing::{AddressType, TestBuilder},
-        wallet::{decrypt_and_store_transaction, input_selection::GreedyInputSelector},
+        wallet::{
+            decrypt_and_store_transaction,
+            input_selection::{GreedyInputSelector, GreedyInputSelectorError},
+        },
         Account as _, DecryptedTransaction, InputSource, Ratio, WalletCommitmentTrees, WalletRead,
-        WalletSummary,
+        WalletSummary, WalletWrite,
     },
     decrypt_transaction,
     fees::{standard, DustOutputPolicy},
@@ -1093,207 +1097,205 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     );
 }
 
-// pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
-//     let mut st = TestBuilder::new()
-//         .with_data_store_factory(TestDbFactory)
-//         .with_block_cache(BlockCache::new())
-//         .with_account_from_sapling_activation(BlockHash([0; 32]))
-//         .build();
+pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, DSF: DataStoreFactory>(
+    dsf: DSF,
+    cache: impl TestCache,
+) {
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
 
-//     let account = st.test_account().cloned().unwrap();
-//     let account_id = account.id();
-//     let dfvk = T::test_account_fvk(&st);
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+    let dfvk = T::test_account_fvk(&st);
 
-//     // Add funds to the wallet in a single note
-//     let value = NonNegativeAmount::const_from_u64(50000);
-//     let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-//     st.scan_cached_blocks(h1, 1);
+    // Add funds to the wallet in a single note
+    let value = NonNegativeAmount::const_from_u64(50000);
+    let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    st.scan_cached_blocks(h1, 1);
 
-//     // Spendable balance matches total balance at 1 confirmation.
-//     assert_eq!(st.get_total_balance(account_id), value);
-//     assert_eq!(st.get_spendable_balance(account_id, 1), value);
+    // Spendable balance matches total balance at 1 confirmation.
+    assert_eq!(st.get_total_balance(account_id), value);
+    assert_eq!(st.get_spendable_balance(account_id, 1), value);
 
-//     let extsk2 = T::sk(&[0xf5; 32]);
-//     let addr2 = T::sk_default_address(&extsk2);
+    let extsk2 = T::sk(&[0xf5; 32]);
+    let addr2 = T::sk_default_address(&extsk2);
 
-//     let fee_rule = StandardFeeRule::Zip317;
+    let fee_rule = StandardFeeRule::Zip317;
 
-//     #[allow(clippy::type_complexity)]
-//     let send_and_recover_with_policy = |st: &mut TestState<_, TestDb, _>,
-//                                         ovk_policy|
-//      -> Result<
-//         Option<(Note, Address, MemoBytes)>,
-//         Error<
-//             SqliteClientError,
-//             commitment_tree::Error,
-//             GreedyInputSelectorError<Zip317FeeError, ReceivedNoteId>,
-//             Zip317FeeError,
-//         >,
-//     > {
-//         let min_confirmations = NonZeroU32::new(1).unwrap();
-//         let proposal = st.propose_standard_transfer(
-//             account_id,
-//             fee_rule,
-//             min_confirmations,
-//             &addr2,
-//             NonNegativeAmount::const_from_u64(15000),
-//             None,
-//             None,
-//             T::SHIELDED_PROTOCOL,
-//         )?;
+    #[allow(clippy::type_complexity)]
+    let send_and_recover_with_policy = |st: &mut TestState<_, DSF::DataStore, _>,
+                                        ovk_policy|
+     -> Result<Option<(Note, Address, MemoBytes)>, ()> {
+        let min_confirmations = NonZeroU32::new(1).unwrap();
+        let proposal = st
+            .propose_standard_transfer::<Infallible>(
+                account_id,
+                fee_rule,
+                min_confirmations,
+                &addr2,
+                NonNegativeAmount::const_from_u64(15000),
+                None,
+                None,
+                T::SHIELDED_PROTOCOL,
+            )
+            .unwrap();
 
-//         // Executing the proposal should succeed
-//         let txid = st.create_proposed_transactions(account.usk(), ovk_policy, &proposal)?[0];
+        // Executing the proposal should succeed
+        let txid = st
+            .create_proposed_transactions::<Infallible, _>(account.usk(), ovk_policy, &proposal)
+            .unwrap()[0];
 
-//         // Fetch the transaction from the database
-//         let raw_tx: Vec<_> = st
-//             .wallet()
-//             .conn()
-//             .query_row(
-//                 "SELECT raw FROM transactions WHERE txid = ?",
-//                 [txid.as_ref()],
-//                 |row| row.get(0),
-//             )
-//             .unwrap();
-//         let tx = Transaction::read(&raw_tx[..], BranchId::Canopy).unwrap();
+        // Fetch the transaction from the database
+        let tx_summary = st.get_tx_from_history(txid).unwrap().unwrap();
+        let tx = Transaction::read(&tx_summary.raw[..], BranchId::Canopy).unwrap();
 
-//         Ok(T::try_output_recovery(st.network(), h1, &tx, &dfvk))
-//     };
+        Ok(T::try_output_recovery(st.network(), h1, &tx, &dfvk))
+    };
 
-//     // Send some of the funds to another address, keeping history.
-//     // The recipient output is decryptable by the sender.
-//     assert_matches!(
-//         send_and_recover_with_policy(&mut st, OvkPolicy::Sender),
-//         Ok(Some((_, recovered_to, _))) if recovered_to == addr2
-//     );
+    // Send some of the funds to another address, keeping history.
+    // The recipient output is decryptable by the sender.
+    assert_matches!(
+        send_and_recover_with_policy(&mut st, OvkPolicy::Sender),
+        Ok(Some((_, recovered_to, _))) if recovered_to == addr2
+    );
 
-//     // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 42 (that don't send us funds)
-//     // so that the first transaction expires
-//     for i in 1..=42 {
-//         st.generate_next_block(
-//             &T::sk_to_fvk(&T::sk(&[i as u8; 32])),
-//             AddressType::DefaultExternal,
-//             value,
-//         );
-//     }
-//     st.scan_cached_blocks(h1 + 1, 42);
+    // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 42 (that don't send us funds)
+    // so that the first transaction expires
+    for i in 1..=42 {
+        st.generate_next_block(
+            &T::sk_to_fvk(&T::sk(&[i as u8; 32])),
+            AddressType::DefaultExternal,
+            value,
+        );
+    }
+    st.scan_cached_blocks(h1 + 1, 42);
 
-//     // Send the funds again, discarding history.
-//     // Neither transaction output is decryptable by the sender.
-//     assert_matches!(
-//         send_and_recover_with_policy(&mut st, OvkPolicy::Discard),
-//         Ok(None)
-//     );
-// }
+    // Send the funds again, discarding history.
+    // Neither transaction output is decryptable by the sender.
+    assert_matches!(
+        send_and_recover_with_policy(&mut st, OvkPolicy::Discard),
+        Ok(None)
+    );
+}
 
-// pub(crate) fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
-//     let mut st = TestBuilder::new()
-//         .with_data_store_factory(TestDbFactory)
-//         .with_block_cache(BlockCache::new())
-//         .with_account_from_sapling_activation(BlockHash([0; 32]))
-//         .build();
+pub fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
 
-//     let account = st.test_account().cloned().unwrap();
-//     let account_id = account.id();
-//     let dfvk = T::test_account_fvk(&st);
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+    let dfvk = T::test_account_fvk(&st);
 
-//     // Add funds to the wallet in a single note
-//     let value = NonNegativeAmount::const_from_u64(70000);
-//     let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-//     st.scan_cached_blocks(h, 1);
+    // Add funds to the wallet in a single note
+    let value = NonNegativeAmount::const_from_u64(70000);
+    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    st.scan_cached_blocks(h, 1);
 
-//     // Spendable balance matches total balance at 1 confirmation.
-//     assert_eq!(st.get_total_balance(account_id), value);
-//     assert_eq!(st.get_spendable_balance(account_id, 1), value);
+    // Spendable balance matches total balance at 1 confirmation.
+    assert_eq!(st.get_total_balance(account_id), value);
+    assert_eq!(st.get_spendable_balance(account_id, 1), value);
 
-//     let fee_rule = StandardFeeRule::Zip317;
+    let fee_rule = StandardFeeRule::Zip317;
 
-//     // TODO: generate_next_block_from_tx does not currently support transparent outputs.
-//     let to = TransparentAddress::PublicKeyHash([7; 20]).into();
-//     let min_confirmations = NonZeroU32::new(1).unwrap();
-//     let proposal = st
-//         .propose_standard_transfer::<Infallible>(
-//             account_id,
-//             fee_rule,
-//             min_confirmations,
-//             &to,
-//             NonNegativeAmount::const_from_u64(50000),
-//             None,
-//             None,
-//             T::SHIELDED_PROTOCOL,
-//         )
-//         .unwrap();
+    // TODO: generate_next_block_from_tx does not currently support transparent outputs.
+    let to = TransparentAddress::PublicKeyHash([7; 20]).into();
+    let min_confirmations = NonZeroU32::new(1).unwrap();
+    let proposal = st
+        .propose_standard_transfer::<Infallible>(
+            account_id,
+            fee_rule,
+            min_confirmations,
+            &to,
+            NonNegativeAmount::const_from_u64(50000),
+            None,
+            None,
+            T::SHIELDED_PROTOCOL,
+        )
+        .unwrap();
 
-//     // Executing the proposal should succeed
-//     assert_matches!(
-//         st.create_proposed_transactions::<Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal),
-//         Ok(txids) if txids.len() == 1
-//     );
-// }
+    // Executing the proposal should succeed
+    assert_matches!(
+        st.create_proposed_transactions::<Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal),
+        Ok(txids) if txids.len() == 1
+    );
+}
 
-// pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester + ShieldedPoolPersistence>() {
-//     let mut st = TestBuilder::new()
-//         .with_data_store_factory(TestDbFactory)
-//         .with_block_cache(BlockCache::new())
-//         .with_account_from_sapling_activation(BlockHash([0; 32]))
-//         .build();
+pub fn change_note_spends_succeed<T: ShieldedPoolTester, DSF: DataStoreFactory>(
+    dsf: DSF,
+    cache: impl TestCache,
+) {
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
 
-//     let account = st.test_account().cloned().unwrap();
-//     let account_id = account.id();
-//     let dfvk = T::test_account_fvk(&st);
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+    let dfvk = T::test_account_fvk(&st);
 
-//     // Add funds to the wallet in a single note owned by the internal spending key
-//     let value = NonNegativeAmount::const_from_u64(70000);
-//     let (h, _, _) = st.generate_next_block(&dfvk, AddressType::Internal, value);
-//     st.scan_cached_blocks(h, 1);
+    // Add funds to the wallet in a single note owned by the internal spending key
+    let value = NonNegativeAmount::const_from_u64(70000);
+    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::Internal, value);
+    st.scan_cached_blocks(h, 1);
 
-//     // Spendable balance matches total balance at 1 confirmation.
-//     assert_eq!(st.get_total_balance(account_id), value);
-//     assert_eq!(st.get_spendable_balance(account_id, 1), value);
+    // Spendable balance matches total balance at 1 confirmation.
+    assert_eq!(st.get_total_balance(account_id), value);
+    assert_eq!(st.get_spendable_balance(account_id, 1), value);
 
-//     // Value is considered pending at 10 confirmations.
-//     assert_eq!(st.get_pending_shielded_balance(account_id, 10), value);
-//     assert_eq!(
-//         st.get_spendable_balance(account_id, 10),
-//         NonNegativeAmount::ZERO
-//     );
+    // Value is considered pending at 10 confirmations.
+    assert_eq!(st.get_pending_shielded_balance(account_id, 10), value);
+    assert_eq!(
+        st.get_spendable_balance(account_id, 10),
+        NonNegativeAmount::ZERO
+    );
 
-//     let change_note_scope = st.wallet().conn().query_row(
-//         &format!(
-//             "SELECT recipient_key_scope
-//              FROM {}_received_notes
-//              WHERE value = ?",
-//             T::TABLES_PREFIX,
-//         ),
-//         params![u64::from(value)],
-//         |row| Ok(parse_scope(row.get(0)?)),
-//     );
-//     assert_matches!(change_note_scope, Ok(Some(Scope::Internal)));
+    // NOTE: In prior test this was filtered by the notes value to ensure a match
+    //      unfortunately we don't have access to this here but there is only a single note
+    //      so it doesn't matter unless the test is modified
+    let change_note_scope = st
+        .wallet()
+        .get_notes(T::SHIELDED_PROTOCOL)
+        .unwrap()
+        .iter()
+        .map(|note: &ReceivedNote<_, _>| note.spending_key_scope())
+        .next();
 
-//     let fee_rule = StandardFeeRule::Zip317;
+    assert_matches!(change_note_scope, Some(Scope::Internal));
 
-//     // TODO: generate_next_block_from_tx does not currently support transparent outputs.
-//     let to = TransparentAddress::PublicKeyHash([7; 20]).into();
-//     let min_confirmations = NonZeroU32::new(1).unwrap();
-//     let proposal = st
-//         .propose_standard_transfer::<Infallible>(
-//             account_id,
-//             fee_rule,
-//             min_confirmations,
-//             &to,
-//             NonNegativeAmount::const_from_u64(50000),
-//             None,
-//             None,
-//             T::SHIELDED_PROTOCOL,
-//         )
-//         .unwrap();
+    let fee_rule = StandardFeeRule::Zip317;
 
-//     // Executing the proposal should succeed
-//     assert_matches!(
-//         st.create_proposed_transactions::<Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal),
-//         Ok(txids) if txids.len() == 1
-//     );
-// }
+    // TODO: generate_next_block_from_tx does not currently support transparent outputs.
+    let to = TransparentAddress::PublicKeyHash([7; 20]).into();
+    let min_confirmations = NonZeroU32::new(1).unwrap();
+    let proposal = st
+        .propose_standard_transfer::<Infallible>(
+            account_id,
+            fee_rule,
+            min_confirmations,
+            &to,
+            NonNegativeAmount::const_from_u64(50000),
+            None,
+            None,
+            T::SHIELDED_PROTOCOL,
+        )
+        .unwrap();
+
+    // Executing the proposal should succeed
+    assert_matches!(
+        st.create_proposed_transactions::<Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal),
+        Ok(txids) if txids.len() == 1
+    );
+}
 
 // pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
 //     T: ShieldedPoolTester,

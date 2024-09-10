@@ -323,6 +323,43 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
             min_confirmations,
         )
     }
+
+    /// Return all the notes that have been received by the wallet
+    #[cfg(any(test, feature = "test-dependencies"))]
+    fn get_notes(
+        &self,
+        protocol: ShieldedProtocol,
+    ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
+        use wallet::common::per_protocol_names;
+
+        let (table_prefix, index_col, note_reconstruction_cols) = per_protocol_names(protocol);
+        let mut stmt_sent_notes = self.conn.borrow().prepare(&format!(
+            "SELECT txid, output_index
+                 FROM {table_prefix}_received_notes rn
+                 INNER JOIN transactions ON transactions.id_tx = rn.tx
+                 AND transactions.block IS NOT NULL
+                 AND recipient_key_scope IS NOT NULL
+                 AND nf IS NOT NULL
+                 AND commitment_tree_position IS NOT NULL"
+        ))?;
+
+        let result = stmt_sent_notes
+            .query([])
+            .unwrap()
+            .mapped(|row| {
+                let txid: [u8; 32] = row.get(0)?;
+                let output_index: u32 = row.get(1)?;
+                let note = self
+                    .get_spendable_note(&TxId::from_bytes(txid), protocol, output_index)
+                    .unwrap()
+                    .unwrap();
+                Ok(note)
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(SqliteClientError::from)?;
+
+        Ok(result)
+    }
 }
 
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for WalletDb<C, P> {
