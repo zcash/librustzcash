@@ -1841,14 +1841,14 @@ mod tests {
         st: &mut TestState<C, DbT, P>,
         ufvk: &UnifiedFullViewingKey,
         birthday: &AccountBirthday,
-        _existing_id: AccountId,
+        is_account_collision: impl Fn(&DbT::Error) -> bool,
     ) where
         DbT::Account: core::fmt::Debug,
     {
         assert_matches!(
             st.wallet_mut()
                 .import_account_ufvk(ufvk, birthday, AccountPurpose::Spending),
-            Err(_)
+            Err(e) if is_account_collision(&e)
         );
 
         // Remove the transparent component so that we don't have a match on the full UFVK.
@@ -1869,7 +1869,7 @@ mod tests {
                     birthday,
                     AccountPurpose::Spending
                 ),
-                Err(_)
+                Err(e) if is_account_collision(&e)
             );
         }
 
@@ -1891,7 +1891,7 @@ mod tests {
                     birthday,
                     AccountPurpose::Spending
                 ),
-                Err(_)
+                Err(e) if is_account_collision(&e)
             );
         }
     }
@@ -1920,7 +1920,12 @@ mod tests {
             st.wallet_mut().import_account_hd(&seed, zip32_index_1, &birthday),
             Err(SqliteClientError::AccountCollision(id)) if id == first_account.id());
 
-        check_collisions(&mut st, ufvk, &birthday, first_account.id());
+        check_collisions(
+            &mut st,
+            ufvk,
+            &birthday,
+            |e| matches!(e, SqliteClientError::AccountCollision(id) if *id == first_account.id()),
+        );
     }
 
     #[test]
@@ -1960,7 +1965,12 @@ mod tests {
             st.wallet_mut().import_account_hd(&seed, zip32_index_0, &birthday),
             Err(SqliteClientError::AccountCollision(id)) if id == account.id());
 
-        check_collisions(&mut st, &ufvk, &birthday, account.id());
+        check_collisions(
+            &mut st,
+            &ufvk,
+            &birthday,
+            |e| matches!(e, SqliteClientError::AccountCollision(id) if *id == account.id()),
+        );
     }
 
     #[test]
@@ -1984,7 +1994,12 @@ mod tests {
             st.wallet_mut().import_account_hd(&seed, zip32_index_0, &birthday),
             Err(SqliteClientError::AccountCollision(id)) if id == seed_based.0);
 
-        check_collisions(&mut st, ufvk, &birthday, seed_based.0);
+        check_collisions(
+            &mut st,
+            ufvk,
+            &birthday,
+            |e| matches!(e, SqliteClientError::AccountCollision(id) if *id == seed_based.0),
+        );
     }
 
     #[cfg(feature = "transparent-inputs")]

@@ -51,10 +51,7 @@ pub(crate) struct TestDb {
 }
 
 impl TestDb {
-    pub(crate) fn from_parts(
-        wallet_db: WalletDb<Connection, LocalNetwork>,
-        data_file: NamedTempFile,
-    ) -> Self {
+    fn from_parts(wallet_db: WalletDb<Connection, LocalNetwork>, data_file: NamedTempFile) -> Self {
         Self {
             wallet_db,
             data_file,

@@ -1,11 +1,19 @@
 //! Utilities for testing wallets based upon the [`crate::data_api`] traits.
+
+use std::{
+    collections::{BTreeMap, HashMap},
+    convert::Infallible,
+    fmt,
+    hash::Hash,
+    num::NonZeroU32,
+};
+
 use ::sapling::{
     note_encryption::{sapling_note_encryption, SaplingDomain},
     util::generate_random_rseed,
     zip32::DiversifiableFullViewingKey,
 };
 use assert_matches::assert_matches;
-use core::fmt;
 use group::ff::Field;
 use incrementalmerkletree::{Marking, Retention};
 use nonempty::NonEmpty;
@@ -13,12 +21,6 @@ use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaChaRng;
 use secrecy::{ExposeSecret, Secret, SecretVec};
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
-use std::{
-    collections::{BTreeMap, HashMap},
-    convert::Infallible,
-    hash::Hash,
-    num::NonZeroU32,
-};
 use subtle::ConditionallySelectable;
 
 use zcash_keys::address::Address;
@@ -378,13 +380,7 @@ impl<Cache, DataStore: WalletRead, Network: consensus::Parameters>
     pub fn test_seed(&self) -> Option<&SecretVec<u8>> {
         self.test_account.as_ref().map(|(seed, _)| seed)
     }
-}
 
-impl<Cache, DataStore, Network> TestState<Cache, DataStore, Network>
-where
-    Network: consensus::Parameters,
-    DataStore: WalletRead,
-{
     /// Returns a reference to the test account, if one was configured.
     pub fn test_account(&self) -> Option<&TestAccount<<DataStore as WalletRead>::Account>> {
         self.test_account.as_ref().map(|(_, acct)| acct)
@@ -1999,7 +1995,7 @@ pub trait TestCache {
     fn block_source(&self) -> &Self::BlockSource;
 
     /// Inserts a CompactBlock into the cache DB.
-    fn insert(&self, cb: &CompactBlock) -> Self::InsertResult;
+    fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult;
 }
 
 pub struct NoteCommitments {

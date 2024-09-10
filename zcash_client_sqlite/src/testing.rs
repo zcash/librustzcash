@@ -51,7 +51,7 @@ impl TestCache for BlockCache {
         &self.db_cache
     }
 
-    fn insert(&self, cb: &CompactBlock) -> Self::InsertResult {
+    fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult {
         let cb_bytes = cb.encode_to_vec();
         let res = NoteCommitments::from_compact_block(cb);
         self.db_cache
@@ -94,7 +94,7 @@ impl TestCache for FsBlockCache {
         &self.db_meta
     }
 
-    fn insert(&self, cb: &CompactBlock) -> Self::InsertResult {
+    fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult {
         use std::io::Write;
 
         let meta = BlockMeta {
