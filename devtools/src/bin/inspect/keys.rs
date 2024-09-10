@@ -1,12 +1,13 @@
 use std::convert::TryInto;
 use std::iter;
 
-use bech32::ToBase32;
+use bech32::{FromBase32, ToBase32};
 use secrecy::Zeroize;
 use zcash_address::{
     unified::{self, Encoding},
     ToAddress, ZcashAddress,
 };
+use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_primitives::{
     legacy::{
         keys::{AccountPrivKey, IncomingViewingKey},
@@ -14,9 +15,14 @@ use zcash_primitives::{
     },
     zip32,
 };
-use zcash_protocol::consensus::NetworkConstants;
+use zcash_protocol::{
+    consensus::{Network, NetworkConstants, NetworkType},
+    local_consensus::LocalNetwork,
+};
 
 use crate::Context;
+
+pub(crate) mod view;
 
 pub(crate) fn inspect_mnemonic(mnemonic: bip0039::Mnemonic, context: Option<Context>) {
     eprintln!("Mnemonic phrase");
@@ -161,4 +167,82 @@ pub(crate) fn inspect_mnemonic(mnemonic: bip0039::Mnemonic, context: Option<Cont
     eprintln!(
         "WARNING: This mnemonic phrase is now likely cached in your terminal's history buffer."
     );
+}
+
+pub(crate) fn inspect_sapling_extsk(
+    raw: Vec<bech32::u5>,
+    variant: bech32::Variant,
+    network: NetworkType,
+) {
+    match Vec::<u8>::from_base32(&raw)
+        .map_err(|_| ())
+        .and_then(|data| sapling::zip32::ExtendedSpendingKey::read(&data[..]).map_err(|_| ()))
+    {
+        Err(_) => {
+            eprintln!("Invalid encoding that claims to be a Sapling extended spending key");
+        }
+        Ok(extsk) => {
+            eprintln!("Sapling extended spending key");
+            match variant {
+                bech32::Variant::Bech32 => (),
+                bech32::Variant::Bech32m => eprintln!("⚠️  Incorrectly encoded with Bech32m"),
+            }
+
+            let default_addr_bytes = extsk.default_address().1.to_bytes();
+            eprintln!(
+                "- Default address: {}",
+                bech32::encode(
+                    network.hrp_sapling_payment_address(),
+                    default_addr_bytes.to_base32(),
+                    bech32::Variant::Bech32,
+                )
+                .unwrap(),
+            );
+
+            #[allow(deprecated)]
+            if let Ok(ufvk) = UnifiedFullViewingKey::from_sapling_extended_full_viewing_key(
+                extsk.to_extended_full_viewing_key(),
+            ) {
+                let encoded_ufvk = match network {
+                    NetworkType::Main => ufvk.encode(&Network::MainNetwork),
+                    NetworkType::Test => ufvk.encode(&Network::TestNetwork),
+                    NetworkType::Regtest => ufvk.encode(&LocalNetwork {
+                        overwinter: None,
+                        sapling: None,
+                        blossom: None,
+                        heartwood: None,
+                        canopy: None,
+                        nu5: None,
+                        nu6: None,
+                        #[cfg(zcash_unstable = "zfuture")]
+                        z_future: None,
+                    }),
+                };
+                eprintln!("- UFVK: {encoded_ufvk}");
+
+                let (default_ua, _) = ufvk
+                    .default_address(UnifiedAddressRequest::unsafe_new(false, true, false))
+                    .expect("should exist");
+                let encoded_ua = match network {
+                    NetworkType::Main => default_ua.encode(&Network::MainNetwork),
+                    NetworkType::Test => default_ua.encode(&Network::TestNetwork),
+                    NetworkType::Regtest => default_ua.encode(&LocalNetwork {
+                        overwinter: None,
+                        sapling: None,
+                        blossom: None,
+                        heartwood: None,
+                        canopy: None,
+                        nu5: None,
+                        nu6: None,
+                        #[cfg(zcash_unstable = "zfuture")]
+                        z_future: None,
+                    }),
+                };
+                eprintln!("  - Default address: {encoded_ua}");
+            }
+        }
+    }
+
+    eprintln!();
+    eprintln!("WARNING: This spending key is now likely cached in your terminal's history buffer.");
 }
