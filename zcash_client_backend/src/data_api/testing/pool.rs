@@ -25,7 +25,7 @@ use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     value::Zatoshis,
-    PoolType, ShieldedProtocol,
+    ShieldedProtocol,
 };
 use zip321::{Payment, TransactionRequest};
 
@@ -47,6 +47,7 @@ use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
 
 /// The number of ephemeral addresses that can be safely reserved without observing any
 /// of them to be mined. This is the same as the gap limit in Bitcoin.
+#[cfg(feature = "transparent-inputs")]
 pub(crate) const GAP_LIMIT: u32 = 20;
 
 /// Trait that exposes the pool-specific types and operations necessary to run the
@@ -559,13 +560,13 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     };
     let reservation_should_fail =
         |st: &mut TestState<_, DSF::DataStore, _>, n, _expected_bad_index| {
-            // TODO: W: Figure out how to handle this
             assert_matches!(
                 st.wallet_mut()
                     .reserve_next_n_ephemeral_addresses(account_id, n),
                 Err(..)
             );
-            // previously it was hard-coded to a SqlClientError. Not sure how best to handle this..
+            // previously it was hard-coded to a SqlClientError which could check the index
+            // not sure how best to handle this in a generic way
             // Err(SqliteClientError::ReachedGapLimit(acct, bad_index))
             // if acct == account_id && bad_index == expected_bad_index);
         };
@@ -1787,7 +1788,7 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     // Since this is a cross-pool transfer, change will be sent to the preferred pool.
     assert_eq!(
         change_output.output_pool(),
-        PoolType::Shielded(std::cmp::max(
+        zcash_protocol::PoolType::Shielded(std::cmp::max(
             ShieldedProtocol::Sapling,
             ShieldedProtocol::Orchard
         ))
@@ -1882,7 +1883,7 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
     // the source note (the target pool), and does not necessarily follow preference order.
     assert_eq!(
         change_output.output_pool(),
-        PoolType::Shielded(P1::SHIELDED_PROTOCOL)
+        zcash_protocol::PoolType::Shielded(P1::SHIELDED_PROTOCOL)
     );
     assert_eq!(change_output.value(), expected_change);
 
@@ -1971,7 +1972,7 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     // Since there are sufficient funds in either pool, change is kept in the same pool as
     // the source note (the target pool), and does not necessarily follow preference order.
     // The source note will always be sapling, as we spend Sapling funds preferentially.
-    assert_eq!(change_output.output_pool(), PoolType::SAPLING);
+    assert_eq!(change_output.output_pool(), zcash_protocol::PoolType::SAPLING);
     assert_eq!(change_output.value(), expected_change);
 
     let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
