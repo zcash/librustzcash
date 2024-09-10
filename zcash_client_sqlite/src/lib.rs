@@ -74,7 +74,7 @@ use zip32::fingerprint::SeedFingerprint;
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
-#[cfg(not(feature = "orchard"))]
+#[cfg(any(feature = "test-dependencies", not(feature = "orchard")))]
 use zcash_protocol::PoolType;
 
 #[cfg(feature = "orchard")]
@@ -97,6 +97,9 @@ use maybe_rayon::{
     prelude::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
+
+#[cfg(any(test, feature = "test-dependencies"))]
+use zcash_client_backend::data_api::testing::TransactionSummary;
 
 /// `maybe-rayon` doesn't provide this as a fallback, so we have to.
 #[cfg(not(feature = "multicore"))]
@@ -264,28 +267,36 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         &self,
         account: AccountId,
         target_value: NonNegativeAmount,
-        _sources: &[ShieldedProtocol],
+        sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
         Ok(SpendableNotes::new(
-            wallet::sapling::select_spendable_sapling_notes(
-                self.conn.borrow(),
-                &self.params,
-                account,
-                target_value,
-                anchor_height,
-                exclude,
-            )?,
+            if sources.contains(&ShieldedProtocol::Sapling) {
+                wallet::sapling::select_spendable_sapling_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_value,
+                    anchor_height,
+                    exclude,
+                )?
+            } else {
+                vec![]
+            },
             #[cfg(feature = "orchard")]
-            wallet::orchard::select_spendable_orchard_notes(
-                self.conn.borrow(),
-                &self.params,
-                account,
-                target_value,
-                anchor_height,
-                exclude,
-            )?,
+            if sources.contains(&ShieldedProtocol::Orchard) {
+                wallet::orchard::select_spendable_orchard_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_value,
+                    anchor_height,
+                    exclude,
+                )?
+            } else {
+                vec![]
+            },
         ))
     }
 
@@ -602,6 +613,36 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         );
 
         Ok(iter.collect())
+    }
+
+    #[cfg(any(test, feature = "test-dependencies"))]
+    fn get_tx_history(&self) -> Result<Vec<TransactionSummary<Self::AccountId>>, Self::Error> {
+        wallet::testing::get_tx_history(self.conn.borrow())
+    }
+
+    #[cfg(any(test, feature = "test-dependencies"))]
+    fn get_sent_note_ids(
+        &self,
+        txid: &TxId,
+        protocol: ShieldedProtocol,
+    ) -> Result<Vec<NoteId>, Self::Error> {
+        use crate::wallet::pool_code;
+        use rusqlite::named_params;
+
+        let mut stmt_sent_notes = self.conn.borrow().prepare(
+            "SELECT output_index
+             FROM sent_notes
+             JOIN transactions ON transactions.id_tx = sent_notes.tx
+             WHERE transactions.txid = :txid
+             AND sent_notes.output_pool = :pool_code",
+        )?;
+
+        stmt_sent_notes
+            .query(named_params![":txid": txid.as_ref(), ":pool_code": pool_code(PoolType::Shielded(protocol))])
+            .unwrap()
+            .mapped(|row| Ok(NoteId::new(*txid, protocol, row.get(0)?)))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(SqliteClientError::from)
     }
 }
 
@@ -1682,34 +1723,35 @@ extern crate assert_matches;
 mod tests {
     use secrecy::{ExposeSecret, Secret, SecretVec};
     use zcash_client_backend::data_api::{
-        chain::ChainState, Account, AccountBirthday, AccountPurpose, AccountSource, WalletRead,
-        WalletWrite,
+        chain::ChainState,
+        testing::{TestBuilder, TestState},
+        Account, AccountBirthday, AccountPurpose, AccountSource, WalletRead, WalletWrite,
     };
     use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
     use zcash_primitives::block::BlockHash;
+    use zcash_protocol::consensus;
 
     use crate::{
-        error::SqliteClientError,
-        testing::{TestBuilder, TestState},
-        AccountId, DEFAULT_UA_REQUEST,
+        error::SqliteClientError, testing::db::TestDbFactory, AccountId, DEFAULT_UA_REQUEST,
     };
 
     #[cfg(feature = "unstable")]
     use {
-        crate::testing::AddressType, zcash_client_backend::keys::sapling,
+        zcash_client_backend::keys::sapling,
         zcash_primitives::transaction::components::amount::NonNegativeAmount,
     };
 
     #[test]
     fn validate_seed() {
         let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().unwrap();
 
         assert!({
             st.wallet()
-                .validate_seed(account.account_id(), st.test_seed().unwrap())
+                .validate_seed(account.id(), st.test_seed().unwrap())
                 .unwrap()
         });
 
@@ -1724,7 +1766,7 @@ mod tests {
         // check that passing an invalid seed results in a failure
         assert!({
             !st.wallet()
-                .validate_seed(account.account_id(), &SecretVec::new(vec![1u8; 32]))
+                .validate_seed(account.id(), &SecretVec::new(vec![1u8; 32]))
                 .unwrap()
         });
     }
@@ -1732,33 +1774,29 @@ mod tests {
     #[test]
     pub(crate) fn get_next_available_address() {
         let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().cloned().unwrap();
 
-        let current_addr = st
-            .wallet()
-            .get_current_address(account.account_id())
-            .unwrap();
+        let current_addr = st.wallet().get_current_address(account.id()).unwrap();
         assert!(current_addr.is_some());
 
         let addr2 = st
             .wallet_mut()
-            .get_next_available_address(account.account_id(), DEFAULT_UA_REQUEST)
+            .get_next_available_address(account.id(), DEFAULT_UA_REQUEST)
             .unwrap();
         assert!(addr2.is_some());
         assert_ne!(current_addr, addr2);
 
-        let addr2_cur = st
-            .wallet()
-            .get_current_address(account.account_id())
-            .unwrap();
+        let addr2_cur = st.wallet().get_current_address(account.id()).unwrap();
         assert_eq!(addr2, addr2_cur);
     }
 
     #[test]
     pub(crate) fn import_account_hd_0() {
         let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .set_account_index(zip32::AccountId::ZERO)
             .build();
@@ -1769,10 +1807,12 @@ mod tests {
 
     #[test]
     pub(crate) fn import_account_hd_1_then_2() {
-        let mut st = TestBuilder::new().build();
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
+            .build();
 
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(st.wallet().params.sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
             None,
         );
 
@@ -1797,15 +1837,19 @@ mod tests {
             AccountSource::Derived { seed_fingerprint: _, account_index } if account_index == zip32_index_2);
     }
 
-    fn check_collisions<C>(
-        st: &mut TestState<C>,
+    fn check_collisions<C, DbT: WalletWrite, P: consensus::Parameters>(
+        st: &mut TestState<C, DbT, P>,
         ufvk: &UnifiedFullViewingKey,
         birthday: &AccountBirthday,
-        existing_id: AccountId,
-    ) {
+        is_account_collision: impl Fn(&DbT::Error) -> bool,
+    ) where
+        DbT::Account: core::fmt::Debug,
+    {
         assert_matches!(
-            st.wallet_mut().import_account_ufvk(ufvk, birthday, AccountPurpose::Spending),
-            Err(SqliteClientError::AccountCollision(id)) if id == existing_id);
+            st.wallet_mut()
+                .import_account_ufvk(ufvk, birthday, AccountPurpose::Spending),
+            Err(e) if is_account_collision(&e)
+        );
 
         // Remove the transparent component so that we don't have a match on the full UFVK.
         // That should still produce an AccountCollision error.
@@ -1820,8 +1864,13 @@ mod tests {
             )
             .unwrap();
             assert_matches!(
-                st.wallet_mut().import_account_ufvk(&subset_ufvk, birthday, AccountPurpose::Spending),
-                Err(SqliteClientError::AccountCollision(id)) if id == existing_id);
+                st.wallet_mut().import_account_ufvk(
+                    &subset_ufvk,
+                    birthday,
+                    AccountPurpose::Spending
+                ),
+                Err(e) if is_account_collision(&e)
+            );
         }
 
         // Remove the Orchard component so that we don't have a match on the full UFVK.
@@ -1837,17 +1886,24 @@ mod tests {
             )
             .unwrap();
             assert_matches!(
-                st.wallet_mut().import_account_ufvk(&subset_ufvk, birthday, AccountPurpose::Spending),
-                Err(SqliteClientError::AccountCollision(id)) if id == existing_id);
+                st.wallet_mut().import_account_ufvk(
+                    &subset_ufvk,
+                    birthday,
+                    AccountPurpose::Spending
+                ),
+                Err(e) if is_account_collision(&e)
+            );
         }
     }
 
     #[test]
     pub(crate) fn import_account_hd_1_then_conflicts() {
-        let mut st = TestBuilder::new().build();
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
+            .build();
 
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(st.wallet().params.sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
             None,
         );
 
@@ -1864,23 +1920,29 @@ mod tests {
             st.wallet_mut().import_account_hd(&seed, zip32_index_1, &birthday),
             Err(SqliteClientError::AccountCollision(id)) if id == first_account.id());
 
-        check_collisions(&mut st, ufvk, &birthday, first_account.id());
+        check_collisions(
+            &mut st,
+            ufvk,
+            &birthday,
+            |e| matches!(e, SqliteClientError::AccountCollision(id) if *id == first_account.id()),
+        );
     }
 
     #[test]
     pub(crate) fn import_account_ufvk_then_conflicts() {
-        let mut st = TestBuilder::new().build();
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
+            .build();
 
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(st.wallet().params.sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
             None,
         );
 
         let seed = Secret::new(vec![0u8; 32]);
         let zip32_index_0 = zip32::AccountId::ZERO;
-        let usk =
-            UnifiedSpendingKey::from_seed(&st.wallet().params, seed.expose_secret(), zip32_index_0)
-                .unwrap();
+        let usk = UnifiedSpendingKey::from_seed(st.network(), seed.expose_secret(), zip32_index_0)
+            .unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
 
         let account = st
@@ -1888,8 +1950,8 @@ mod tests {
             .import_account_ufvk(&ufvk, &birthday, AccountPurpose::Spending)
             .unwrap();
         assert_eq!(
-            ufvk.encode(&st.wallet().params),
-            account.ufvk().unwrap().encode(&st.wallet().params)
+            ufvk.encode(st.network()),
+            account.ufvk().unwrap().encode(st.network())
         );
 
         assert_matches!(
@@ -1903,15 +1965,22 @@ mod tests {
             st.wallet_mut().import_account_hd(&seed, zip32_index_0, &birthday),
             Err(SqliteClientError::AccountCollision(id)) if id == account.id());
 
-        check_collisions(&mut st, &ufvk, &birthday, account.id());
+        check_collisions(
+            &mut st,
+            &ufvk,
+            &birthday,
+            |e| matches!(e, SqliteClientError::AccountCollision(id) if *id == account.id()),
+        );
     }
 
     #[test]
     pub(crate) fn create_account_then_conflicts() {
-        let mut st = TestBuilder::new().build();
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
+            .build();
 
         let birthday = AccountBirthday::from_parts(
-            ChainState::empty(st.wallet().params.sapling.unwrap() - 1, BlockHash([0; 32])),
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
             None,
         );
 
@@ -1925,25 +1994,30 @@ mod tests {
             st.wallet_mut().import_account_hd(&seed, zip32_index_0, &birthday),
             Err(SqliteClientError::AccountCollision(id)) if id == seed_based.0);
 
-        check_collisions(&mut st, ufvk, &birthday, seed_based.0);
+        check_collisions(
+            &mut st,
+            ufvk,
+            &birthday,
+            |e| matches!(e, SqliteClientError::AccountCollision(id) if *id == seed_based.0),
+        );
     }
 
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn transparent_receivers() {
         // Add an account to the wallet.
+
+        use crate::testing::BlockCache;
         let st = TestBuilder::new()
-            .with_block_cache()
+            .with_data_store_factory(TestDbFactory)
+            .with_block_cache(BlockCache::new())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().unwrap();
         let ufvk = account.usk().to_unified_full_viewing_key();
         let (taddr, _) = account.usk().default_transparent_address();
 
-        let receivers = st
-            .wallet()
-            .get_transparent_receivers(account.account_id())
-            .unwrap();
+        let receivers = st.wallet().get_transparent_receivers(account.id()).unwrap();
 
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(
@@ -1961,10 +2035,16 @@ mod tests {
     #[cfg(feature = "unstable")]
     #[test]
     pub(crate) fn fsblockdb_api() {
-        use zcash_primitives::consensus::NetworkConstants;
+        use zcash_client_backend::data_api::testing::AddressType;
         use zcash_primitives::zip32;
+        use zcash_protocol::consensus::NetworkConstants;
 
-        let mut st = TestBuilder::new().with_fs_block_cache().build();
+        use crate::testing::FsBlockCache;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
+            .with_block_cache(FsBlockCache::new())
+            .build();
 
         // The BlockMeta DB starts off empty.
         assert_eq!(st.cache().get_max_cached_height().unwrap(), None);
@@ -1972,7 +2052,7 @@ mod tests {
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
         let hd_account_index = zip32::AccountId::ZERO;
-        let extsk = sapling::spending_key(&seed, st.wallet().params.coin_type(), hd_account_index);
+        let extsk = sapling::spending_key(&seed, st.network().coin_type(), hd_account_index);
         let dfvk = extsk.to_diversifiable_full_viewing_key();
         let (h1, meta1, _) = st.generate_next_block(
             &dfvk,

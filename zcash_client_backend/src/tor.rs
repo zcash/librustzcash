@@ -6,7 +6,7 @@ use arti_client::{config::TorClientConfigBuilder, TorClient};
 use tor_rtcompat::PreferredRuntime;
 use tracing::debug;
 
-#[cfg(feature = "lightwalletd-tonic")]
+#[cfg(feature = "tor-lightwalletd-tonic")]
 mod grpc;
 
 pub mod http;

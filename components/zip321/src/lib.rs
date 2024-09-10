@@ -654,7 +654,7 @@ mod parse {
         )(input)
     }
 
-    /// The primary parser for <name>=<value> query-string parameter pair.
+    /// The primary parser for `name=value` query-string parameter pairs.
     pub fn zcashparam(input: &str) -> IResult<&str, IndexedParam> {
         map_res(
             separated_pair(indexed_name, char('='), recognize(qchars)),

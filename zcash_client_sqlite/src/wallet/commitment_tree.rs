@@ -1081,17 +1081,16 @@ mod tests {
         Marking, Position, Retention,
     };
     use shardtree::ShardTree;
-    use zcash_client_backend::data_api::chain::CommitmentTreeRoot;
+    use zcash_client_backend::data_api::{
+        chain::CommitmentTreeRoot,
+        testing::{pool::ShieldedPoolTester, sapling::SaplingPoolTester},
+    };
     use zcash_primitives::consensus::{BlockHeight, Network};
 
     use super::SqliteShardStore;
-    use crate::{
-        testing::pool::ShieldedPoolTester,
-        wallet::{init::init_wallet_db, sapling::tests::SaplingPoolTester},
-        WalletDb,
-    };
+    use crate::{testing::pool::ShieldedPoolPersistence, wallet::init::init_wallet_db, WalletDb};
 
-    fn new_tree<T: ShieldedPoolTester>(
+    fn new_tree<T: ShieldedPoolTester + ShieldedPoolPersistence>(
         m: usize,
     ) -> ShardTree<SqliteShardStore<rusqlite::Connection, String, 3>, 4, 3> {
         let data_file = NamedTempFile::new().unwrap();
@@ -1108,7 +1107,7 @@ mod tests {
     #[cfg(feature = "orchard")]
     mod orchard {
         use super::new_tree;
-        use crate::wallet::orchard::tests::OrchardPoolTester;
+        use zcash_client_backend::data_api::testing::orchard::OrchardPoolTester;
 
         #[test]
         fn append() {
@@ -1191,7 +1190,7 @@ mod tests {
         put_shard_roots::<SaplingPoolTester>()
     }
 
-    fn put_shard_roots<T: ShieldedPoolTester>() {
+    fn put_shard_roots<T: ShieldedPoolTester + ShieldedPoolPersistence>() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
         data_file.keep().unwrap();

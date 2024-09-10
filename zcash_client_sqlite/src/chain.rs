@@ -322,10 +322,12 @@ where
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
-    use crate::{testing, wallet::sapling::tests::SaplingPoolTester};
+    use zcash_client_backend::data_api::testing::sapling::SaplingPoolTester;
+
+    use crate::testing;
 
     #[cfg(feature = "orchard")]
-    use crate::wallet::orchard::tests::OrchardPoolTester;
+    use zcash_client_backend::data_api::testing::orchard::OrchardPoolTester;
 
     #[test]
     fn valid_chain_states_sapling() {

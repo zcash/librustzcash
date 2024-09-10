@@ -220,7 +220,9 @@ impl Account {
     }
 }
 
-impl zcash_client_backend::data_api::Account<AccountId> for Account {
+impl zcash_client_backend::data_api::Account for Account {
+    type AccountId = AccountId;
+
     fn id(&self) -> AccountId {
         self.account_id
     }
@@ -3168,17 +3170,99 @@ pub(crate) fn prune_nullifier_map(
     Ok(())
 }
 
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use incrementalmerkletree::Position;
+    use zcash_client_backend::data_api::testing::TransactionSummary;
+    use zcash_primitives::transaction::TxId;
+    use zcash_protocol::{
+        consensus::BlockHeight,
+        value::{ZatBalance, Zatoshis},
+        ShieldedProtocol,
+    };
+
+    use crate::{error::SqliteClientError, AccountId};
+
+    pub(crate) fn get_tx_history(
+        conn: &rusqlite::Connection,
+    ) -> Result<Vec<TransactionSummary<AccountId>>, SqliteClientError> {
+        let mut stmt = conn.prepare_cached(
+            "SELECT *
+             FROM v_transactions
+             ORDER BY mined_height DESC, tx_index DESC",
+        )?;
+
+        let results = stmt
+            .query_and_then::<TransactionSummary<AccountId>, SqliteClientError, _, _>([], |row| {
+                Ok(TransactionSummary::new(
+                    AccountId(row.get("account_id")?),
+                    TxId::from_bytes(row.get("txid")?),
+                    row.get::<_, Option<u32>>("expiry_height")?
+                        .map(BlockHeight::from),
+                    row.get::<_, Option<u32>>("mined_height")?
+                        .map(BlockHeight::from),
+                    ZatBalance::from_i64(row.get("account_balance_delta")?)?,
+                    row.get::<_, Option<i64>>("fee_paid")?
+                        .map(Zatoshis::from_nonnegative_i64)
+                        .transpose()?,
+                    row.get("spent_note_count")?,
+                    row.get("has_change")?,
+                    row.get("sent_note_count")?,
+                    row.get("received_note_count")?,
+                    row.get("memo_count")?,
+                    row.get("expired_unmined")?,
+                    row.get("is_shielding")?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(results)
+    }
+
+    /// Returns a vector of transaction summaries
+    #[allow(dead_code)] // used only for tests that are flagged off by default
+    pub(crate) fn get_checkpoint_history(
+        conn: &rusqlite::Connection,
+    ) -> Result<Vec<(BlockHeight, ShieldedProtocol, Option<Position>)>, SqliteClientError> {
+        let mut stmt = conn.prepare_cached(
+            "SELECT checkpoint_id, 2 AS pool, position FROM sapling_tree_checkpoints
+             UNION
+             SELECT checkpoint_id, 3 AS pool, position FROM orchard_tree_checkpoints
+             ORDER BY checkpoint_id",
+        )?;
+
+        let results = stmt
+            .query_and_then::<_, SqliteClientError, _, _>([], |row| {
+                Ok((
+                    BlockHeight::from(row.get::<_, u32>(0)?),
+                    match row.get::<_, i64>(1)? {
+                        2 => ShieldedProtocol::Sapling,
+                        3 => ShieldedProtocol::Orchard,
+                        _ => unreachable!(),
+                    },
+                    row.get::<_, Option<u64>>(2)?.map(Position::from),
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(results)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroU32;
 
     use sapling::zip32::ExtendedSpendingKey;
     use secrecy::{ExposeSecret, SecretVec};
-    use zcash_client_backend::data_api::{AccountSource, WalletRead};
+    use zcash_client_backend::data_api::{
+        testing::{AddressType, DataStoreFactory, FakeCompactOutput, TestBuilder, TestState},
+        Account as _, AccountSource, WalletRead, WalletWrite,
+    };
     use zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
 
     use crate::{
-        testing::{AddressType, BlockCache, FakeCompactOutput, TestBuilder, TestState},
+        testing::{db::TestDbFactory, BlockCache},
         AccountId,
     };
 
@@ -3187,6 +3271,7 @@ mod tests {
     #[test]
     fn empty_database_has_no_balance() {
         let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().unwrap();
@@ -3203,27 +3288,23 @@ mod tests {
         );
 
         // The default address is set for the test account
-        assert_matches!(
-            st.wallet().get_current_address(account.account_id()),
-            Ok(Some(_))
-        );
+        assert_matches!(st.wallet().get_current_address(account.id()), Ok(Some(_)));
 
         // No default address is set for an un-initialized account
         assert_matches!(
             st.wallet()
-                .get_current_address(AccountId(account.account_id().0 + 1)),
+                .get_current_address(AccountId(account.id().0 + 1)),
             Ok(None)
         );
     }
 
     #[test]
     fn get_default_account_index() {
-        use crate::testing::TestBuilder;
-
         let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
-        let account_id = st.test_account().unwrap().account_id();
+        let account_id = st.test_account().unwrap().id();
         let account_parameters = st.wallet().get_account(account_id).unwrap().unwrap();
 
         let expected_account_index = zip32::AccountId::try_from(0).unwrap();
@@ -3235,10 +3316,8 @@ mod tests {
 
     #[test]
     fn get_account_ids() {
-        use crate::testing::TestBuilder;
-        use zcash_client_backend::data_api::WalletWrite;
-
         let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory)
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
@@ -3254,12 +3333,17 @@ mod tests {
 
     #[test]
     fn block_fully_scanned() {
+        check_block_fully_scanned(TestDbFactory)
+    }
+
+    fn check_block_fully_scanned<DsF: DataStoreFactory>(dsf: DsF) {
         let mut st = TestBuilder::new()
-            .with_block_cache()
+            .with_data_store_factory(dsf)
+            .with_block_cache(BlockCache::new())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
-        let block_fully_scanned = |st: &TestState<BlockCache>| {
+        let block_fully_scanned = |st: &TestState<_, DsF::DataStore, _>| {
             st.wallet()
                 .block_fully_scanned()
                 .unwrap()
@@ -3314,13 +3398,14 @@ mod tests {
     #[test]
     fn test_account_birthday() {
         let st = TestBuilder::new()
-            .with_block_cache()
+            .with_data_store_factory(TestDbFactory)
+            .with_block_cache(BlockCache::new())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
-        let account_id = st.test_account().unwrap().account_id();
+        let account_id = st.test_account().unwrap().id();
         assert_matches!(
-            account_birthday(&st.wallet().conn, account_id),
+            account_birthday(st.wallet().conn(), account_id),
             Ok(birthday) if birthday == st.sapling_activation_height()
         )
     }

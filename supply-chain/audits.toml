@@ -7,6 +7,12 @@ description = "The cryptographic code in this crate has been reviewed for correc
 [criteria.license-reviewed]
 description = "The license of this crate has been reviewed for compatibility with its usage in this repository."
 
+[[audits.ambassador]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+version = "0.4.1"
+notes = "Crate uses no unsafe code and the macros introduced by this crate generate the expected trait implementations without introducing additional unexpected operations."
+
 [[audits.anyhow]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"

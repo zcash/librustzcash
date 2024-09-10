@@ -133,6 +133,7 @@ lazy_static = "1"
 static_assertions = "1"
 
 # Tests and benchmarks
+ambassador = "0.4"
 assert_matches = "1.5"
 criterion = "0.5"
 proptest = "1"
