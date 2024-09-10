@@ -676,7 +676,7 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    use crate::proposal::Proposal;
+    use crate::proposal::{Proposal, StepOutput, StepOutputIndex};
     use nonempty::NonEmpty;
 
     let mut st = TestBuilder::new()
@@ -740,12 +740,11 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
         OvkPolicy::Sender,
         &frobbed_proposal,
     );
-    // TODO: Figure out how we want to handle different kinds of errors
-    // assert_matches!(
-    //     create_proposed_result,
-    //     Err(Error::Proposal(ProposalError::EphemeralOutputLeftUnspent(so)))
-    //     if so == StepOutput::new(0, StepOutputIndex::Change(1))
-    // );
+    assert_matches!(
+        create_proposed_result,
+        Err(data_api::error::Error::Proposal(crate::proposal::ProposalError::EphemeralOutputLeftUnspent(so)))
+        if so == StepOutput::new(0, StepOutputIndex::Change(1))
+    );
 }
 
 #[allow(deprecated)]
@@ -1268,7 +1267,6 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester, DSF: DataStoreFactory>(
     // NOTE: In prior test this was filtered by the notes value to ensure a match
     //      unfortunately we don't have access to this here but there is only a single note
     //      so it doesn't matter unless the test is modified
-    // TODO: Test failing
     let change_note_scope = st
         .wallet()
         .get_notes(T::SHIELDED_PROTOCOL)
@@ -1443,19 +1441,18 @@ pub fn zip317_spend<T: ShieldedPoolTester>(dsf: impl DataStoreFactory, cache: im
     )])
     .unwrap();
 
-    // TODO: Figure out how to handle errors
-    // assert_matches!(
-    //     st.spend(
-    //         &input_selector,
-    //         account.usk(),
-    //         req,
-    //         OvkPolicy::Sender,
-    //         NonZeroU32::new(1).unwrap(),
-    //     ),
-    //     Err(Error::InsufficientFunds { available, required })
-    //         if available == NonNegativeAmount::const_from_u64(51000)
-    //         && required == NonNegativeAmount::const_from_u64(60000)
-    // );
+    assert_matches!(
+        st.spend(
+            &input_selector,
+            account.usk(),
+            req,
+            OvkPolicy::Sender,
+            NonZeroU32::new(1).unwrap(),
+        ),
+        Err(data_api::error::Error::InsufficientFunds { available, required })
+            if available == NonNegativeAmount::const_from_u64(51000)
+            && required == NonNegativeAmount::const_from_u64(60000)
+    );
 
     // This request will succeed, spending a single dust input to pay the 10000
     // ZAT fee in addition to the 41000 ZAT output to the recipient
@@ -1718,7 +1715,7 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester>(dsf: impl DataStoreFactory, cache:
     st.scan_cached_blocks(account.birthday().height() + 10, 1);
 
     // Fake that everything has been scanned
-    // TODO: Add methods for updating scan queue
+    // TODO: Add methods for updating scan queue (it seems to work without though..)
     // st.wallet()
     //     .conn()
     //     .execute_batch("UPDATE scan_queue SET priority = 10")
@@ -2329,15 +2326,14 @@ pub fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>(
     );
 
     // Data+cache chain should be invalid at the data/cache boundary
-    // TODO: Requires error handling
-    // assert_matches!(
-    //     st.try_scan_cached_blocks(
-    //         disconnect_height,
-    //         2
-    //     ),
-    //     Err(chain::error::Error::Scan(ScanError::PrevHashMismatch { at_height }))
-    //         if at_height == disconnect_height
-    // );
+    assert_matches!(
+        st.try_scan_cached_blocks(
+            disconnect_height,
+            2
+        ),
+        Err(data_api::chain::error::Error::Scan(crate::scanning::ScanError::PrevHashMismatch { at_height }))
+            if at_height == disconnect_height
+    );
 }
 
 pub fn data_db_truncation<T: ShieldedPoolTester, DSF>(dsf: DSF, cache: impl TestCache)
