@@ -21,17 +21,7 @@ exclude = ["*.proto"]
 development = ["zcash_proofs"]
 
 [package.metadata.docs.rs]
-# Manually specify features while `orchard` is not in the public API.
-#all-features = true
-features = [
-    "lightwalletd-tonic",
-    "transparent-inputs",
-    "test-dependencies",
-    "tor",
-    "unstable",
-    "unstable-serialization",
-    "unstable-spanning-tree",
-]
+all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
@@ -162,6 +152,9 @@ zcash_protocol = { workspace = true, features = ["local-consensus"] }
 ## Enables the `tonic` gRPC client bindings for connecting to a `lightwalletd` server.
 lightwalletd-tonic = ["dep:tonic", "hyper-util?/tokio"]
 
+## Enables the `tls-webpki-roots` feature of `tonic`.
+lightwalletd-tonic-tls-webpki-roots = ["lightwalletd-tonic", "tonic?/tls-webpki-roots"]
+
 ## Enables the `transport` feature of `tonic` producing a fully-featured client and server implementation
 lightwalletd-tonic-transport = ["lightwalletd-tonic", "tonic?/transport"]
 
@@ -228,14 +221,6 @@ unstable-serialization = ["dep:byteorder"]
 
 ## Exposes the [`data_api::scanning::spanning_tree`] module.
 unstable-spanning-tree = []
-
-## Exposes access to the lightwalletd server via TOR
-tor-lightwalletd-tonic = [
-  "tor",
-  "lightwalletd-tonic",
-  "tonic?/tls",
-  "tonic?/tls-webpki-roots"
-]
 
 [lib]
 bench = false

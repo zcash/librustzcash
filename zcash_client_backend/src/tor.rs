@@ -6,7 +6,7 @@ use arti_client::{config::TorClientConfigBuilder, TorClient};
 use tor_rtcompat::PreferredRuntime;
 use tracing::debug;
 
-#[cfg(feature = "tor-lightwalletd-tonic")]
+#[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
 mod grpc;
 
 pub mod http;
@@ -76,7 +76,7 @@ impl Client {
 pub enum Error {
     /// The directory passed to [`Client::create`] does not exist.
     MissingTorDirectory,
-    #[cfg(feature = "lightwalletd-tonic")]
+    #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
     /// An error occurred while using gRPC-over-Tor.
     Grpc(self::grpc::GrpcError),
     /// An error occurred while using HTTP-over-Tor.
@@ -91,7 +91,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::MissingTorDirectory => write!(f, "Tor directory is missing"),
-            #[cfg(feature = "lightwalletd-tonic")]
+            #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
             Error::Grpc(e) => write!(f, "gRPC-over-Tor error: {}", e),
             Error::Http(e) => write!(f, "HTTP-over-Tor error: {}", e),
             Error::Io(e) => write!(f, "IO error: {}", e),
@@ -104,7 +104,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::MissingTorDirectory => None,
-            #[cfg(feature = "lightwalletd-tonic")]
+            #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
             Error::Grpc(e) => Some(e),
             Error::Http(e) => Some(e),
             Error::Io(e) => Some(e),
@@ -113,7 +113,7 @@ impl std::error::Error for Error {
     }
 }
 
-#[cfg(feature = "lightwalletd-tonic")]
+#[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
 impl From<self::grpc::GrpcError> for Error {
     fn from(e: self::grpc::GrpcError) -> Self {
         Error::Grpc(e)
