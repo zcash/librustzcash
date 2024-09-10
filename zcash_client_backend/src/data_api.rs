@@ -1208,7 +1208,7 @@ pub trait WalletRead {
 /// of the [`testing`] framework. They should not be used in production software.
 #[cfg(any(test, feature = "test-dependencies"))]
 #[delegatable_trait]
-pub trait WalletTest: WalletRead {
+pub trait WalletTest: InputSource + WalletRead {
     /// Returns a vector of transaction summaries.
     ///
     /// Currently test-only, as production use could return a very large number of results; either
@@ -1216,7 +1216,10 @@ pub trait WalletTest: WalletRead {
     /// use.
     fn get_tx_history(
         &self,
-    ) -> Result<Vec<testing::TransactionSummary<Self::AccountId>>, Self::Error> {
+    ) -> Result<
+        Vec<testing::TransactionSummary<<Self as WalletRead>::AccountId>>,
+        <Self as WalletRead>::Error,
+    > {
         Ok(vec![])
     }
 
@@ -1226,9 +1229,45 @@ pub trait WalletTest: WalletRead {
         &self,
         _txid: &TxId,
         _protocol: ShieldedProtocol,
-    ) -> Result<Vec<NoteId>, Self::Error> {
+    ) -> Result<Vec<NoteId>, <Self as WalletRead>::Error> {
         Ok(vec![])
     }
+
+    #[allow(clippy::type_complexity)]
+    fn get_confirmed_sends(
+        &self,
+        txid: &TxId,
+    ) -> Result<Vec<(u64, Option<String>, Option<String>, Option<u32>)>, <Self as WalletRead>::Error>;
+
+    #[allow(clippy::type_complexity)]
+    fn get_checkpoint_history(
+        &self,
+    ) -> Result<
+        Vec<(
+            BlockHeight,
+            ShieldedProtocol,
+            Option<incrementalmerkletree::Position>,
+        )>,
+        <Self as WalletRead>::Error,
+    >;
+
+    /// Fetches the transparent output corresponding to the provided `outpoint`.
+    /// Allows selecting unspendable outputs for testing purposes.
+    ///
+    /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or is not
+    /// spendable as of the chain tip height.
+    #[cfg(feature = "transparent-inputs")]
+    fn get_transparent_output(
+        &self,
+        outpoint: &OutPoint,
+        allow_unspendable: bool,
+    ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error>;
+
+    /// Returns all the notes that have been received by the wallet.
+    fn get_notes(
+        &self,
+        protocol: ShieldedProtocol,
+    ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error>;
 }
 
 /// The relevance of a seed to a given wallet.

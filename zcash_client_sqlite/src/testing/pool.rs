@@ -9,7 +9,6 @@ use std::{
 
 use incrementalmerkletree::frontier::Frontier;
 
-use rusqlite::params;
 use secrecy::Secret;
 
 use zcash_client_backend::{
@@ -23,7 +22,7 @@ use zcash_client_backend::{
             FakeCompactOutput, InitialChainState, TestBuilder, TestState,
         },
         wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
-        Account as _, AccountBirthday, Ratio, WalletRead, WalletWrite,
+        Account as _, AccountBirthday, Ratio, WalletRead, WalletTest, WalletWrite,
     },
     fees::{fixed, standard, DustOutputPolicy},
     keys::UnifiedSpendingKey,
@@ -52,7 +51,7 @@ use crate::{
         db::{TestDb, TestDbFactory},
         BlockCache,
     },
-    wallet::{commitment_tree, parse_scope, truncate_to_height},
+    wallet::{commitment_tree, truncate_to_height},
     ReceivedNoteId, SAPLING_TABLES_PREFIX,
 };
 
@@ -100,7 +99,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     use rand_core::OsRng;
     use zcash_client_backend::{
-        data_api::{TransactionDataRequest, TransactionStatus, WalletTest},
+        data_api::{TransactionDataRequest, TransactionStatus},
         fees::ChangeValue,
         wallet::TransparentAddressMetadata,
     };
@@ -111,7 +110,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     use zcash_proofs::prover::LocalTxProver;
     use zcash_protocol::value::ZatBalance;
 
-    use crate::wallet::{transparent::get_wallet_transparent_output, GAP_LIMIT};
+    use crate::wallet::GAP_LIMIT;
 
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
@@ -199,37 +198,10 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 2);
         let txids = create_proposed_result.unwrap();
 
-        // Verify that the stored sent outputs match what we're expecting.
-        let mut stmt_sent = st
-            .wallet()
-            .conn()
-            .prepare(
-                "SELECT value, to_address, ephemeral_addresses.address, ephemeral_addresses.address_index
-                 FROM sent_notes
-                 JOIN transactions ON transactions.id_tx = sent_notes.tx
-                 LEFT JOIN ephemeral_addresses ON ephemeral_addresses.used_in_tx = sent_notes.tx
-                 WHERE transactions.txid = ?
-                 ORDER BY value",
-            )
-            .unwrap();
-
         // Check that there are sent outputs with the correct values.
         let confirmed_sent: Vec<Vec<_>> = txids
             .iter()
-            .map(|sent_txid| {
-                stmt_sent
-                    .query(rusqlite::params![sent_txid.as_ref()])
-                    .unwrap()
-                    .mapped(|row| {
-                        let v: u32 = row.get(0)?;
-                        let to_address: Option<String> = row.get(1)?;
-                        let ephemeral_address: Option<String> = row.get(2)?;
-                        let address_index: Option<u32> = row.get(3)?;
-                        Ok((u64::from(v), to_address, ephemeral_address, address_index))
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-                    .unwrap()
-            })
+            .map(|sent_txid| st.wallet().get_confirmed_sends(sent_txid).unwrap())
             .collect();
 
         // Verify that a status request has been generated for the second transaction of
@@ -406,11 +378,12 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     let tx_data_requests = st.wallet().transaction_data_requests().unwrap();
     assert!(tx_data_requests.contains(&TransactionDataRequest::GetStatus(txid)));
 
-    // We call get_wallet_transparent_output with `allow_unspendable = true` to verify
+    // We call get_transparent_output with `allow_unspendable = true` to verify
     // storage because the decrypted transaction has not yet been mined.
-    let utxo =
-        get_wallet_transparent_output(st.wallet().conn(), &OutPoint::new(txid.into(), 0), true)
-            .unwrap();
+    let utxo = st
+        .wallet()
+        .get_transparent_output(&OutPoint::new(txid.into(), 0), true)
+        .unwrap();
     assert_matches!(utxo, Some(v) if v.value() == utxo_value);
 
     // That should have advanced the start of the gap to index 11.
@@ -1102,7 +1075,7 @@ pub(crate) fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
     );
 }
 
-pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester + ShieldedPoolPersistence>() {
+pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_data_store_factory(TestDbFactory)
         .with_block_cache(BlockCache::new())
@@ -1129,17 +1102,13 @@ pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester + ShieldedPoolPer
         NonNegativeAmount::ZERO
     );
 
-    let change_note_scope = st.wallet().conn().query_row(
-        &format!(
-            "SELECT recipient_key_scope
-             FROM {}_received_notes
-             WHERE value = ?",
-            T::TABLES_PREFIX,
-        ),
-        params![u64::from(value)],
-        |row| Ok(parse_scope(row.get(0)?)),
-    );
-    assert_matches!(change_note_scope, Ok(Some(Scope::Internal)));
+    let change_note_scope = st
+        .wallet()
+        .get_notes(T::SHIELDED_PROTOCOL)
+        .unwrap()
+        .iter()
+        .find_map(|note| (note.note().value() == value).then_some(note.spending_key_scope()));
+    assert_matches!(change_note_scope, Some(Scope::Internal));
 
     let fee_rule = StandardFeeRule::Zip317;
 
@@ -1980,7 +1949,6 @@ pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTest
 
     use incrementalmerkletree::Position;
 
-    use crate::wallet::testing::get_checkpoint_history;
     let expected_checkpoints_p0: Vec<(BlockHeight, ShieldedProtocol, Option<Position>)> = [
         (99999, None),
         (100000, Some(0)),
@@ -2021,7 +1989,7 @@ pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTest
     })
     .collect();
 
-    let actual_checkpoints = get_checkpoint_history(st.wallet().conn()).unwrap();
+    let actual_checkpoints = st.wallet().get_checkpoint_history().unwrap();
 
     assert_eq!(
         actual_checkpoints
