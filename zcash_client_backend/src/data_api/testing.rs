@@ -757,7 +757,7 @@ where
         Ok(())
     }
 
-    pub fn add_funds<Fvk: TestFvk>(&mut self, account: &TestAccount<<DbT as WalletRead>::Account>, fvk: &Fvk, value: NonNegativeAmount) {
+    pub fn add_funds<Fvk: TestFvk>(&mut self, account: &TestAccount<<DbT as WalletRead>::Account>, fvk: &Fvk, value: NonNegativeAmount) -> BlockHeight {
         let account_id = account.id();
 
         let (h, _, _) = self.generate_next_block(&fvk, AddressType::DefaultExternal, value);
@@ -772,6 +772,7 @@ where
             h
         );
         assert_eq!(self.get_spendable_balance(account_id, 1), value);
+        h
     }
 }
 

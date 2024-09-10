@@ -792,6 +792,20 @@ pub trait InputSource {
         Ok(None)
     }
 
+    /// Fetches the transparent output corresponding to the provided `outpoint`.
+    /// Allows selecting unspendable outputs for testing purposes.
+    ///
+    /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or is not
+    /// spendable as of the chain tip height.
+    #[cfg(all(feature = "test-dependencies", feature = "transparent-inputs"))]
+    fn get_all_unspent_transparent_output(
+        &self,
+        _outpoint: &OutPoint,
+        _allow_unspendable: bool,
+    ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
+        Ok(None)
+    }
+
     /// Returns the list of spendable transparent outputs received by this wallet at `address`
     /// such that, at height `target_height`:
     /// * the transaction that produced the output had or will have at least `min_confirmations`
@@ -1196,6 +1210,14 @@ pub trait WalletRead {
         _txid: &TxId,
         _protocol: ShieldedProtocol,
     ) -> Result<Vec<NoteId>, Self::Error> {
+        Ok(vec![])
+    }
+
+    #[cfg(any(test, feature = "test-dependencies"))]
+    fn get_confirmed_sends(
+        &self,
+        _txid: &TxId,
+    ) -> Result<Vec<(u64, Option<String>, Option<String>, Option<u32>)>, Self::Error> {
         Ok(vec![])
     }
 }
