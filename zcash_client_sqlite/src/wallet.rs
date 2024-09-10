@@ -3194,7 +3194,6 @@ pub mod testing {
 
         let results = stmt
             .query_and_then::<TransactionSummary<AccountId>, SqliteClientError, _, _>([], |row| {
-                let raw_tx: Vec<u8> = row.get("raw")?;
                 Ok(TransactionSummary::new(
                     AccountId(row.get("account_id")?),
                     TxId::from_bytes(row.get("txid")?),
@@ -3213,7 +3212,6 @@ pub mod testing {
                     row.get("memo_count")?,
                     row.get("expired_unmined")?,
                     row.get("is_shielding")?,
-                    &raw_tx,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
