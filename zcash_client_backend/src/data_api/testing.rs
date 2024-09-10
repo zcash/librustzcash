@@ -701,7 +701,7 @@ where
     Cache: TestCache,
     <Cache::BlockSource as BlockSource>::Error: fmt::Debug,
     ParamsT: consensus::Parameters + Send + 'static,
-    DbT: InputSource + WalletWrite + WalletCommitmentTrees,
+    DbT: InputSource<AccountId = <DbT as WalletRead>::AccountId, Error = <DbT as WalletRead>::Error> + WalletWrite + WalletCommitmentTrees,
     <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
 {
     /// Invokes [`scan_cached_blocks`] with the given arguments, expecting success.
@@ -755,6 +755,23 @@ where
             .put_orchard_subtree_roots(orchard_start_index, orchard_roots)?;
 
         Ok(())
+    }
+
+    pub fn add_funds<Fvk: TestFvk>(&mut self, account: &TestAccount<<DbT as WalletRead>::Account>, fvk: &Fvk, value: NonNegativeAmount) {
+        let account_id = account.id();
+
+        let (h, _, _) = self.generate_next_block(&fvk, AddressType::DefaultExternal, value);
+        self.scan_cached_blocks(h, 1);
+
+        assert_eq!(
+            self.wallet()
+                .block_max_scanned()
+                .unwrap()
+                .unwrap()
+                .block_height(),
+            h
+        );
+        assert_eq!(self.get_spendable_balance(account_id, 1), value);
     }
 }
 

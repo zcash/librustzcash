@@ -515,300 +515,31 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTester>() {
-    use nonempty::NonEmpty;
-    use zcash_client_backend::proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex};
-
-    let mut st = TestBuilder::new()
-        .with_data_store_factory(TestDbFactory)
-        .with_block_cache(BlockCache::new())
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
-        .build();
-
-    let account = st.test_account().cloned().unwrap();
-    let account_id = account.id();
-    let dfvk = T::test_account_fvk(&st);
-
-    let add_funds = |st: &mut TestState<_, TestDb, _>, value| {
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-        st.scan_cached_blocks(h, 1);
-
-        assert_eq!(
-            st.wallet()
-                .block_max_scanned()
-                .unwrap()
-                .unwrap()
-                .block_height(),
-            h
-        );
-        assert_eq!(st.get_spendable_balance(account_id, 1), value);
-    };
-
-    let value = NonNegativeAmount::const_from_u64(100000);
-    let transfer_amount = NonNegativeAmount::const_from_u64(50000);
-
-    // Add funds to the wallet.
-    add_funds(&mut st, value);
-
-    // Generate a ZIP 320 proposal, sending to the wallet's default transparent address
-    // expressed as a TEX address.
-    let tex_addr = match account.usk().default_transparent_address().0 {
-        TransparentAddress::PublicKeyHash(data) => Address::Tex(data),
-        _ => unreachable!(),
-    };
-
-    let proposal = st
-        .propose_standard_transfer::<Infallible>(
-            account_id,
-            StandardFeeRule::Zip317,
-            NonZeroU32::new(1).unwrap(),
-            &tex_addr,
-            transfer_amount,
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        )
-        .unwrap();
-
-    // This is somewhat redundant with `send_multi_step_proposed_transfer`,
-    // but tests the case with no change memo and ensures we haven't messed
-    // up the test setup.
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal,
-    );
-    assert_matches!(create_proposed_result, Ok(_));
-
-    // Frobnicate the proposal to make it invalid because it does not consume
-    // the ephemeral output, by truncating it to the first step.
-    let frobbed_proposal = Proposal::multi_step(
-        *proposal.fee_rule(),
-        proposal.min_target_height(),
-        NonEmpty::singleton(proposal.steps().first().clone()),
+    zcash_client_backend::data_api::testing::pool::proposal_fails_if_not_all_ephemeral_outputs_consumed::<T>(
+        TestDbFactory,
+        BlockCache::new(),
     )
-    .unwrap();
-
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &frobbed_proposal,
-    );
-    assert_matches!(
-        create_proposed_result,
-        Err(Error::Proposal(ProposalError::EphemeralOutputLeftUnspent(so)))
-        if so == StepOutput::new(0, StepOutputIndex::Change(1))
-    );
 }
 
 #[allow(deprecated)]
 pub(crate) fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester>() {
-    let mut st = TestBuilder::new()
-        .with_data_store_factory(TestDbFactory)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
-        .build();
-    let dfvk = T::test_account_fvk(&st);
-    let to = T::fvk_default_address(&dfvk);
-
-    // Create a USK that doesn't exist in the wallet
-    let acct1 = zip32::AccountId::try_from(1).unwrap();
-    let usk1 = UnifiedSpendingKey::from_seed(st.network(), &[1u8; 32], acct1).unwrap();
-
-    // Attempting to spend with a USK that is not in the wallet results in an error
-    assert_matches!(
-        st.create_spend_to_address(
-            &usk1,
-            &to,
-            NonNegativeAmount::const_from_u64(1),
-            None,
-            OvkPolicy::Sender,
-            NonZeroU32::new(1).unwrap(),
-            None,
-            T::SHIELDED_PROTOCOL,
-        ),
-        Err(data_api::error::Error::KeyNotRecognized)
-    );
+    zcash_client_backend::data_api::testing::pool::create_to_address_fails_on_incorrect_usk::<T>(
+        TestDbFactory,
+    )
 }
 
 #[allow(deprecated)]
 pub(crate) fn proposal_fails_with_no_blocks<T: ShieldedPoolTester>() {
-    let mut st = TestBuilder::new()
-        .with_data_store_factory(TestDbFactory)
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
-        .build();
-
-    let account_id = st.test_account().unwrap().id();
-    let dfvk = T::test_account_fvk(&st);
-    let to = T::fvk_default_address(&dfvk);
-
-    // Wallet summary is not yet available
-    assert_eq!(st.get_wallet_summary(0), None);
-
-    // We cannot do anything if we aren't synchronised
-    assert_matches!(
-        st.propose_standard_transfer::<Infallible>(
-            account_id,
-            StandardFeeRule::PreZip313,
-            NonZeroU32::new(1).unwrap(),
-            &to,
-            NonNegativeAmount::const_from_u64(1),
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        ),
-        Err(data_api::error::Error::ScanRequired)
-    );
+    zcash_client_backend::data_api::testing::pool::proposal_fails_with_no_blocks::<T, _>(
+        TestDbFactory,
+    )
 }
 
 pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
-    let mut st = TestBuilder::new()
-        .with_data_store_factory(TestDbFactory)
-        .with_block_cache(BlockCache::new())
-        .with_account_from_sapling_activation(BlockHash([0; 32]))
-        .build();
-
-    let account = st.test_account().cloned().unwrap();
-    let account_id = account.id();
-    let dfvk = T::test_account_fvk(&st);
-
-    // Add funds to the wallet in a single note
-    let value = NonNegativeAmount::const_from_u64(50000);
-    let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-    st.scan_cached_blocks(h1, 1);
-
-    // Spendable balance matches total balance at 1 confirmation.
-    assert_eq!(st.get_total_balance(account_id), value);
-    assert_eq!(st.get_spendable_balance(account_id, 1), value);
-
-    // Value is considered pending at 10 confirmations.
-    assert_eq!(st.get_pending_shielded_balance(account_id, 10), value);
-    assert_eq!(
-        st.get_spendable_balance(account_id, 10),
-        NonNegativeAmount::ZERO
-    );
-
-    // Wallet is fully scanned
-    let summary = st.get_wallet_summary(1);
-    assert_eq!(
-        summary.and_then(|s| s.scan_progress()),
-        Some(Ratio::new(1, 1))
-    );
-
-    // Add more funds to the wallet in a second note
-    let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-    st.scan_cached_blocks(h2, 1);
-
-    // Verified balance does not include the second note
-    let total = (value + value).unwrap();
-    assert_eq!(st.get_spendable_balance(account_id, 2), value);
-    assert_eq!(st.get_pending_shielded_balance(account_id, 2), value);
-    assert_eq!(st.get_total_balance(account_id), total);
-
-    // Wallet is still fully scanned
-    let summary = st.get_wallet_summary(1);
-    assert_eq!(
-        summary.and_then(|s| s.scan_progress()),
-        Some(Ratio::new(2, 2))
-    );
-
-    // Spend fails because there are insufficient verified notes
-    let extsk2 = T::sk(&[0xf5; 32]);
-    let to = T::sk_default_address(&extsk2);
-    assert_matches!(
-        st.propose_standard_transfer::<Infallible>(
-            account_id,
-            StandardFeeRule::Zip317,
-            NonZeroU32::new(2).unwrap(),
-            &to,
-            NonNegativeAmount::const_from_u64(70000),
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        ),
-        Err(data_api::error::Error::InsufficientFunds {
-            available,
-            required
-        })
-        if available == NonNegativeAmount::const_from_u64(50000)
-            && required == NonNegativeAmount::const_from_u64(80000)
-    );
-
-    // Mine blocks SAPLING_ACTIVATION_HEIGHT + 2 to 9 until just before the second
-    // note is verified
-    for _ in 2..10 {
-        st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-    }
-    st.scan_cached_blocks(h2 + 1, 8);
-
-    // Total balance is value * number of blocks scanned (10).
-    assert_eq!(st.get_total_balance(account_id), (value * 10).unwrap());
-
-    // Spend still fails
-    assert_matches!(
-        st.propose_standard_transfer::<Infallible>(
-            account_id,
-            StandardFeeRule::Zip317,
-            NonZeroU32::new(10).unwrap(),
-            &to,
-            NonNegativeAmount::const_from_u64(70000),
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        ),
-        Err(data_api::error::Error::InsufficientFunds {
-            available,
-            required
-        })
-        if available == NonNegativeAmount::const_from_u64(50000)
-            && required == NonNegativeAmount::const_from_u64(80000)
-    );
-
-    // Mine block 11 so that the second note becomes verified
-    let (h11, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-    st.scan_cached_blocks(h11, 1);
-
-    // Total balance is value * number of blocks scanned (11).
-    assert_eq!(st.get_total_balance(account_id), (value * 11).unwrap());
-    // Spendable balance at 10 confirmations is value * 2.
-    assert_eq!(
-        st.get_spendable_balance(account_id, 10),
-        (value * 2).unwrap()
-    );
-    assert_eq!(
-        st.get_pending_shielded_balance(account_id, 10),
-        (value * 9).unwrap()
-    );
-
-    // Should now be able to generate a proposal
-    let amount_sent = NonNegativeAmount::from_u64(70000).unwrap();
-    let min_confirmations = NonZeroU32::new(10).unwrap();
-    let proposal = st
-        .propose_standard_transfer::<Infallible>(
-            account_id,
-            StandardFeeRule::Zip317,
-            min_confirmations,
-            &to,
-            amount_sent,
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        )
-        .unwrap();
-
-    // Executing the proposal should succeed
-    let txid = st
-        .create_proposed_transactions::<Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal)
-        .unwrap()[0];
-
-    let (h, _) = st.generate_next_block_including(txid);
-    st.scan_cached_blocks(h, 1);
-
-    // TODO: send to an account so that we can check its balance.
-    assert_eq!(
-        st.get_total_balance(account_id),
-        ((value * 11).unwrap()
-            - (amount_sent + NonNegativeAmount::from_u64(10000).unwrap()).unwrap())
-        .unwrap()
-    );
+    zcash_client_backend::data_api::testing::pool::spend_fails_on_unverified_notes::<T>(
+        TestDbFactory,
+        BlockCache::new(),
+    )
 }
 
 pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
