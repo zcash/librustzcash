@@ -2,13 +2,12 @@
 //!
 //! Generalised for sharing across the Sapling and Orchard implementations.
 
-use zcash_client_backend::data_api::testing::{pool::ShieldedPoolTester, sapling::SaplingPoolTester, orchard::OrchardPoolTester};
+use zcash_client_backend::data_api::testing::{
+    orchard::OrchardPoolTester, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+};
 
 use crate::{
-    testing::{
-        db::TestDbFactory,
-        BlockCache,
-    },
+    testing::{db::TestDbFactory, BlockCache},
     SAPLING_TABLES_PREFIX,
 };
 
@@ -100,7 +99,9 @@ pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester>() {
     )
 }
 
-pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedPoolTester>() {
+pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
+    T: ShieldedPoolTester,
+>() {
     zcash_client_backend::data_api::testing::pool::external_address_change_spends_detected_in_restore_from_seed::<T, _>(
         TestDbFactory,
         BlockCache::new(),
@@ -220,8 +221,8 @@ pub(crate) fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester>() {
 }
 
 pub(crate) fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester>() {
-    zcash_client_backend::data_api::testing::pool::scan_cached_blocks_detects_spends_out_of_order::<T, _>(
-        TestDbFactory,
-        BlockCache::new(),
-    )
+    zcash_client_backend::data_api::testing::pool::scan_cached_blocks_detects_spends_out_of_order::<
+        T,
+        _,
+    >(TestDbFactory, BlockCache::new())
 }

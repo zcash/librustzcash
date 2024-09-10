@@ -13,7 +13,9 @@ use crate::{error::SqliteClientError, AccountId, ReceivedNoteId, SAPLING_TABLES_
 #[cfg(feature = "orchard")]
 use crate::ORCHARD_TABLES_PREFIX;
 
-pub(crate) fn per_protocol_names(protocol: ShieldedProtocol) -> (&'static str, &'static str, &'static str) {
+pub(crate) fn per_protocol_names(
+    protocol: ShieldedProtocol,
+) -> (&'static str, &'static str, &'static str) {
     match protocol {
         ShieldedProtocol::Sapling => (SAPLING_TABLES_PREFIX, "output_index", "rcm"),
         #[cfg(feature = "orchard")]

@@ -305,11 +305,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         &self,
         outpoint: &OutPoint,
     ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
-        wallet::transparent::get_wallet_transparent_output(
-            self.conn.borrow(),
-            outpoint,
-            false,
-        )
+        wallet::transparent::get_wallet_transparent_output(self.conn.borrow(), outpoint, false)
     }
 
     /// Fetches the transparent output corresponding to the provided `outpoint`.
@@ -738,7 +734,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     #[cfg(any(test, feature = "test-dependencies"))]
     fn get_checkpoint_history(
         &self,
-    ) -> Result<Vec<(BlockHeight, ShieldedProtocol, Option<incrementalmerkletree::Position>)>, Self::Error> {
+    ) -> Result<
+        Vec<(
+            BlockHeight,
+            ShieldedProtocol,
+            Option<incrementalmerkletree::Position>,
+        )>,
+        Self::Error,
+    > {
         use wallet::testing::get_checkpoint_history;
         get_checkpoint_history(self.conn.borrow())
     }
