@@ -29,25 +29,27 @@ impl ShieldedPoolPersistence for OrchardPoolTester {
     const TABLES_PREFIX: &'static str = ORCHARD_TABLES_PREFIX;
 }
 
-pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
+pub(crate) async fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_single_step_proposed_transfer::<T>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
-pub(crate) fn send_with_multiple_change_outputs<T: ShieldedPoolTester>() {
+pub(crate) async fn send_with_multiple_change_outputs<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_with_multiple_change_outputs::<T>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
 #[cfg(feature = "transparent-inputs")]
-pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
+pub(crate) async fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_multi_step_proposed_transfer::<T, _>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
         |e, account_id, expected_bad_index| {
             matches!(
                 e,
@@ -55,14 +57,15 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
                 if acct == &account_id && bad_index == &expected_bad_index)
         },
     )
+    .await
 }
 
 #[cfg(feature = "transparent-inputs")]
-pub(crate) fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTester>() {
+pub(crate) async fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::proposal_fails_if_not_all_ephemeral_outputs_consumed::<T, _>(
         TestDbFactory::default(),
-        BlockCache::new(),
-    )
+        BlockCache::new().await,
+    ).await
 }
 
 pub(crate) fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester>() {
@@ -77,180 +80,201 @@ pub(crate) fn proposal_fails_with_no_blocks<T: ShieldedPoolTester>() {
     )
 }
 
-pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
+pub(crate) async fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::spend_fails_on_unverified_notes::<T>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
-pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
+pub(crate) async fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::spend_fails_on_locked_notes::<T>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
-pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
+pub(crate) async fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::ovk_policy_prevents_recovery_from_chain::<T, _>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
-pub(crate) fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
+pub(crate) async fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::spend_succeeds_to_t_addr_zero_change::<T>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
-pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester>() {
+pub(crate) async fn change_note_spends_succeed<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::change_note_spends_succeed::<T>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
-pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
+pub(crate) async fn external_address_change_spends_detected_in_restore_from_seed<
     T: ShieldedPoolTester,
 >() {
     zcash_client_backend::data_api::testing::pool::external_address_change_spends_detected_in_restore_from_seed::<T, _>(
         TestDbFactory::default(),
-        BlockCache::new(),
-    )
+        BlockCache::new().await,
+    ).await
 }
 
 #[allow(dead_code)]
-pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
+pub(crate) async fn zip317_spend<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::zip317_spend::<T, _>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
 #[cfg(feature = "transparent-inputs")]
-pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
+pub(crate) async fn shield_transparent<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::shield_transparent::<T, _>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
 // FIXME: This requires fixes to the test framework.
 #[allow(dead_code)]
-pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
+pub(crate) async fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::birthday_in_anchor_shard::<T>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
-pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
+pub(crate) async fn checkpoint_gaps<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::checkpoint_gaps::<T, _>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
 #[cfg(feature = "orchard")]
-pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
+pub(crate) async fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::pool_crossing_required::<P0, P1>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
 #[cfg(feature = "orchard")]
-pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
+pub(crate) async fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::fully_funded_fully_private::<P0, P1>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
 #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
-pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
+pub(crate) async fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::fully_funded_send_to_t::<P0, P1>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
 #[cfg(feature = "orchard")]
-pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
+pub(crate) async fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::multi_pool_checkpoint::<P0, P1>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
 #[cfg(feature = "orchard")]
-pub(crate) fn multi_pool_checkpoints_with_pruning<
+pub(crate) async fn multi_pool_checkpoints_with_pruning<
     P0: ShieldedPoolTester,
     P1: ShieldedPoolTester,
 >() {
     zcash_client_backend::data_api::testing::pool::multi_pool_checkpoints_with_pruning::<P0, P1>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
-pub(crate) fn valid_chain_states<T: ShieldedPoolTester>() {
+pub(crate) async fn valid_chain_states<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::valid_chain_states::<T>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
 // FIXME: This requires fixes to the test framework.
 #[allow(dead_code)]
-pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
+pub(crate) async fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::invalid_chain_cache_disconnected::<T>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
-pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
+pub(crate) async fn data_db_truncation<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::data_db_truncation::<T, _>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
-pub(crate) fn reorg_to_checkpoint<T: ShieldedPoolTester>() {
+pub(crate) async fn reorg_to_checkpoint<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::reorg_to_checkpoint::<T, _, _>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
-pub(crate) fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>() {
+pub(crate) async fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::scan_cached_blocks_allows_blocks_out_of_order::<T>(
         TestDbFactory::default(),
-        BlockCache::new(),
-    )
+        BlockCache::new().await,
+    ).await
 }
 
-pub(crate) fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
+pub(crate) async fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::scan_cached_blocks_finds_received_notes::<T, _>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
 // TODO: This test can probably be entirely removed, as the following test duplicates it entirely.
-pub(crate) fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester>() {
+pub(crate) async fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::scan_cached_blocks_finds_change_notes::<T, _>(
         TestDbFactory::default(),
-        BlockCache::new(),
+        BlockCache::new().await,
     )
+    .await
 }
 
-pub(crate) fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester>() {
+pub(crate) async fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::scan_cached_blocks_detects_spends_out_of_order::<
         T,
         _,
-    >(TestDbFactory::default(), BlockCache::new())
+    >(TestDbFactory::default(), BlockCache::new().await)
+    .await
 }

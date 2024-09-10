@@ -347,92 +347,92 @@ mod tests {
     #[cfg(feature = "orchard")]
     use zcash_client_backend::data_api::testing::orchard::OrchardPoolTester;
 
-    #[test]
-    fn valid_chain_states_sapling() {
-        testing::pool::valid_chain_states::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn valid_chain_states_sapling() {
+        testing::pool::valid_chain_states::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn valid_chain_states_orchard() {
-        testing::pool::valid_chain_states::<OrchardPoolTester>()
+    async fn valid_chain_states_orchard() {
+        testing::pool::valid_chain_states::<OrchardPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn invalid_chain_cache_disconnected_sapling() {
-        testing::pool::invalid_chain_cache_disconnected::<SaplingPoolTester>()
+    async fn invalid_chain_cache_disconnected_sapling() {
+        testing::pool::invalid_chain_cache_disconnected::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn invalid_chain_cache_disconnected_orchard() {
-        testing::pool::invalid_chain_cache_disconnected::<OrchardPoolTester>()
+    async fn invalid_chain_cache_disconnected_orchard() {
+        testing::pool::invalid_chain_cache_disconnected::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn data_db_truncation_sapling() {
-        testing::pool::data_db_truncation::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn data_db_truncation_sapling() {
+        testing::pool::data_db_truncation::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn data_db_truncation_orchard() {
-        testing::pool::data_db_truncation::<OrchardPoolTester>()
+    async fn data_db_truncation_orchard() {
+        testing::pool::data_db_truncation::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn reorg_to_checkpoint_sapling() {
-        testing::pool::reorg_to_checkpoint::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn reorg_to_checkpoint_sapling() {
+        testing::pool::reorg_to_checkpoint::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn reorg_to_checkpoint_orchard() {
-        testing::pool::reorg_to_checkpoint::<OrchardPoolTester>()
+    async fn reorg_to_checkpoint_orchard() {
+        testing::pool::reorg_to_checkpoint::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn scan_cached_blocks_allows_blocks_out_of_order_sapling() {
-        testing::pool::scan_cached_blocks_allows_blocks_out_of_order::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn scan_cached_blocks_allows_blocks_out_of_order_sapling() {
+        testing::pool::scan_cached_blocks_allows_blocks_out_of_order::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn scan_cached_blocks_allows_blocks_out_of_order_orchard() {
-        testing::pool::scan_cached_blocks_allows_blocks_out_of_order::<OrchardPoolTester>()
+    async fn scan_cached_blocks_allows_blocks_out_of_order_orchard() {
+        testing::pool::scan_cached_blocks_allows_blocks_out_of_order::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn scan_cached_blocks_finds_received_notes_sapling() {
-        testing::pool::scan_cached_blocks_finds_received_notes::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn scan_cached_blocks_finds_received_notes_sapling() {
+        testing::pool::scan_cached_blocks_finds_received_notes::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn scan_cached_blocks_finds_received_notes_orchard() {
-        testing::pool::scan_cached_blocks_finds_received_notes::<OrchardPoolTester>()
+    async fn scan_cached_blocks_finds_received_notes_orchard() {
+        testing::pool::scan_cached_blocks_finds_received_notes::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn scan_cached_blocks_finds_change_notes_sapling() {
-        testing::pool::scan_cached_blocks_finds_change_notes::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn scan_cached_blocks_finds_change_notes_sapling() {
+        testing::pool::scan_cached_blocks_finds_change_notes::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn scan_cached_blocks_finds_change_notes_orchard() {
-        testing::pool::scan_cached_blocks_finds_change_notes::<OrchardPoolTester>()
+    async fn scan_cached_blocks_finds_change_notes_orchard() {
+        testing::pool::scan_cached_blocks_finds_change_notes::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn scan_cached_blocks_detects_spends_out_of_order_sapling() {
-        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn scan_cached_blocks_detects_spends_out_of_order_sapling() {
+        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn scan_cached_blocks_detects_spends_out_of_order_orchard() {
-        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<OrchardPoolTester>()
+    async fn scan_cached_blocks_detects_spends_out_of_order_orchard() {
+        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<OrchardPoolTester>().await
     }
 }

@@ -85,7 +85,6 @@ maybe-rayon.workspace = true
 ambassador.workspace = true
 assert_matches.workspace = true
 bls12_381.workspace = true
-futures = { workspace = true, features = ["executor"] }
 incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
 incrementalmerkletree-testing.workspace = true
 pasta_curves.workspace = true

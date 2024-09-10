@@ -2314,14 +2314,14 @@ mod tests {
     }
 
     #[cfg(feature = "transparent-inputs")]
-    #[test]
-    fn transparent_receivers() {
+    #[tokio::test]
+    async fn transparent_receivers() {
         // Add an account to the wallet.
 
         use crate::testing::BlockCache;
         let st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
-            .with_block_cache(BlockCache::new())
+            .with_block_cache(BlockCache::new().await)
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().unwrap();
@@ -2344,8 +2344,8 @@ mod tests {
     }
 
     #[cfg(feature = "unstable")]
-    #[test]
-    pub(crate) fn fsblockdb_api() {
+    #[tokio::test]
+    pub(crate) async fn fsblockdb_api() {
         use zcash_client_backend::data_api::testing::AddressType;
         use zcash_primitives::zip32;
         use zcash_protocol::consensus::NetworkConstants;
@@ -2354,45 +2354,52 @@ mod tests {
 
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
-            .with_block_cache(FsBlockCache::new())
+            .with_block_cache(FsBlockCache::new().await)
             .build();
 
         // The BlockMeta DB starts off empty.
-        assert_eq!(st.cache().get_max_cached_height().unwrap(), None);
+        assert_eq!(st.cache().get_max_cached_height().await.unwrap(), None);
 
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
         let hd_account_index = zip32::AccountId::ZERO;
         let extsk = sapling::spending_key(&seed, st.network().coin_type(), hd_account_index);
         let dfvk = extsk.to_diversifiable_full_viewing_key();
-        let (h1, meta1, _) = st.generate_next_block(
-            &dfvk,
-            AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(5),
-        );
-        let (h2, meta2, _) = st.generate_next_block(
-            &dfvk,
-            AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(10),
-        );
+        let (h1, meta1, _) = st
+            .generate_next_block(
+                &dfvk,
+                AddressType::DefaultExternal,
+                NonNegativeAmount::const_from_u64(5),
+            )
+            .await;
+        let (h2, meta2, _) = st
+            .generate_next_block(
+                &dfvk,
+                AddressType::DefaultExternal,
+                NonNegativeAmount::const_from_u64(10),
+            )
+            .await;
 
         // The BlockMeta DB is not updated until we do so explicitly.
-        assert_eq!(st.cache().get_max_cached_height().unwrap(), None);
+        assert_eq!(st.cache().get_max_cached_height().await.unwrap(), None);
 
         // Inform the BlockMeta DB about the newly-persisted CompactBlocks.
-        st.cache().write_block_metadata(&[meta1, meta2]).unwrap();
+        st.cache()
+            .write_block_metadata(&[meta1, meta2])
+            .await
+            .unwrap();
 
         // The BlockMeta DB now sees blocks up to height 2.
-        assert_eq!(st.cache().get_max_cached_height().unwrap(), Some(h2),);
-        assert_eq!(st.cache().find_block(h1).unwrap(), Some(meta1));
-        assert_eq!(st.cache().find_block(h2).unwrap(), Some(meta2));
-        assert_eq!(st.cache().find_block(h2 + 1).unwrap(), None);
+        assert_eq!(st.cache().get_max_cached_height().await.unwrap(), Some(h2),);
+        assert_eq!(st.cache().find_block(h1).await.unwrap(), Some(meta1));
+        assert_eq!(st.cache().find_block(h2).await.unwrap(), Some(meta2));
+        assert_eq!(st.cache().find_block(h2 + 1).await.unwrap(), None);
 
         // Rewinding to height 1 should cause the metadata for height 2 to be deleted.
-        st.cache().truncate_to_height(h1).unwrap();
-        assert_eq!(st.cache().get_max_cached_height().unwrap(), Some(h1));
-        assert_eq!(st.cache().find_block(h1).unwrap(), Some(meta1));
-        assert_eq!(st.cache().find_block(h2).unwrap(), None);
-        assert_eq!(st.cache().find_block(h2 + 1).unwrap(), None);
+        st.cache().truncate_to_height(h1).await.unwrap();
+        assert_eq!(st.cache().get_max_cached_height().await.unwrap(), Some(h1));
+        assert_eq!(st.cache().find_block(h1).await.unwrap(), Some(meta1));
+        assert_eq!(st.cache().find_block(h2).await.unwrap(), None);
+        assert_eq!(st.cache().find_block(h2 + 1).await.unwrap(), None);
     }
 }

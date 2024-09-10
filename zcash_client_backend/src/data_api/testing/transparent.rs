@@ -108,7 +108,7 @@ where
     );
 }
 
-pub fn transparent_balance_across_shielding<DSF>(dsf: DSF, cache: impl TestCache)
+pub async fn transparent_balance_across_shielding<DSF>(dsf: DSF, cache: impl TestCache)
 where
     DSF: DataStoreFactory,
 {
@@ -129,10 +129,12 @@ where
     // Initialize the wallet with chain data that has no shielded notes for us.
     let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
     let not_our_value = NonNegativeAmount::const_from_u64(10000);
-    let (start_height, _, _) =
-        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    let (start_height, _, _) = st
+        .generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value)
+        .await;
     for _ in 1..10 {
-        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value)
+            .await;
     }
     st.scan_cached_blocks(start_height, 10);
 
@@ -219,7 +221,7 @@ where
     check_balance(&st, 0, NonNegativeAmount::ZERO);
 
     // Mine the shielding transaction.
-    let (mined_height, _) = st.generate_next_block_including(txid);
+    let (mined_height, _) = st.generate_next_block_including(txid).await;
     st.scan_cached_blocks(mined_height, 1);
 
     // The wallet should still have zero transparent balance.

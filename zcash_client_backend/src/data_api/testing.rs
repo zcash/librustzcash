@@ -503,7 +503,7 @@ where
         self.cached_blocks.range(..height).last().map(|(_, b)| b)
     }
 
-    fn cache_block(
+    async fn cache_block(
         &mut self,
         prev_block: &CachedBlock,
         compact_block: CompactBlock,
@@ -512,12 +512,12 @@ where
             compact_block.height(),
             prev_block.roll_forward(&compact_block),
         );
-        self.cache.insert(&compact_block)
+        self.cache.insert(&compact_block).await
     }
 
     /// Creates a fake block at the expected next height containing a single output of the
     /// given value, and inserts it into the cache.
-    pub fn generate_next_block<Fvk: TestFvk>(
+    pub async fn generate_next_block<Fvk: TestFvk>(
         &mut self,
         fvk: &Fvk,
         address_type: AddressType,
@@ -527,14 +527,16 @@ where
         let prior_cached_block = self.latest_cached_block().unwrap_or(&pre_activation_block);
         let height = prior_cached_block.height() + 1;
 
-        let (res, nfs) = self.generate_block_at(
-            height,
-            prior_cached_block.chain_state.block_hash(),
-            &[FakeCompactOutput::new(fvk, address_type, value)],
-            prior_cached_block.sapling_end_size,
-            prior_cached_block.orchard_end_size,
-            false,
-        );
+        let (res, nfs) = self
+            .generate_block_at(
+                height,
+                prior_cached_block.chain_state.block_hash(),
+                &[FakeCompactOutput::new(fvk, address_type, value)],
+                prior_cached_block.sapling_end_size,
+                prior_cached_block.orchard_end_size,
+                false,
+            )
+            .await;
 
         (height, res, nfs[0])
     }
@@ -542,7 +544,7 @@ where
     /// Creates a fake block at the expected next height containing multiple outputs
     /// and inserts it into the cache.
     #[allow(dead_code)]
-    pub fn generate_next_block_multi<Fvk: TestFvk>(
+    pub async fn generate_next_block_multi<Fvk: TestFvk>(
         &mut self,
         outputs: &[FakeCompactOutput<Fvk>],
     ) -> (BlockHeight, Cache::InsertResult, Vec<Fvk::Nullifier>) {
@@ -550,21 +552,23 @@ where
         let prior_cached_block = self.latest_cached_block().unwrap_or(&pre_activation_block);
         let height = prior_cached_block.height() + 1;
 
-        let (res, nfs) = self.generate_block_at(
-            height,
-            prior_cached_block.chain_state.block_hash(),
-            outputs,
-            prior_cached_block.sapling_end_size,
-            prior_cached_block.orchard_end_size,
-            false,
-        );
+        let (res, nfs) = self
+            .generate_block_at(
+                height,
+                prior_cached_block.chain_state.block_hash(),
+                outputs,
+                prior_cached_block.sapling_end_size,
+                prior_cached_block.orchard_end_size,
+                false,
+            )
+            .await;
 
         (height, res, nfs)
     }
 
     /// Adds an empty block to the cache, advancing the simulated chain height.
     #[allow(dead_code)] // used only for tests that are flagged off by default
-    pub fn generate_empty_block(&mut self) -> (BlockHeight, Cache::InsertResult) {
+    pub async fn generate_empty_block(&mut self) -> (BlockHeight, Cache::InsertResult) {
         let new_hash = {
             let mut hash = vec![0; 32];
             self.rng.fill_bytes(&mut hash);
@@ -591,7 +595,7 @@ where
             orchard_commitment_tree_size: prior_cached_block.orchard_end_size,
         });
 
-        let res = self.cache_block(&prior_cached_block, cb);
+        let res = self.cache_block(&prior_cached_block, cb).await;
         self.latest_block_height = Some(new_height);
 
         (new_height, res)
@@ -603,7 +607,7 @@ where
     /// This generated block will be treated as the latest block, and subsequent calls to
     /// [`Self::generate_next_block`] will build on it.
     #[allow(clippy::too_many_arguments)]
-    pub fn generate_block_at<Fvk: TestFvk>(
+    pub async fn generate_block_at<Fvk: TestFvk>(
         &mut self,
         height: BlockHeight,
         prev_hash: BlockHash,
@@ -676,7 +680,7 @@ where
         );
         assert_eq!(cb.height(), height);
 
-        let res = self.cache_block(&prior_cached_block, cb);
+        let res = self.cache_block(&prior_cached_block, cb).await;
         self.latest_block_height = Some(height);
 
         (res, nfs)
@@ -684,7 +688,7 @@ where
 
     /// Creates a fake block at the expected next height spending the given note, and
     /// inserts it into the cache.
-    pub fn generate_next_block_spending<Fvk: TestFvk>(
+    pub async fn generate_next_block_spending<Fvk: TestFvk>(
         &mut self,
         fvk: &Fvk,
         note: (Fvk::Nullifier, NonNegativeAmount),
@@ -711,7 +715,7 @@ where
         );
         assert_eq!(cb.height(), height);
 
-        let res = self.cache_block(&prior_cached_block, cb);
+        let res = self.cache_block(&prior_cached_block, cb).await;
         self.latest_block_height = Some(height);
 
         (height, res)
@@ -722,7 +726,7 @@ where
     ///
     /// This generated block will be treated as the latest block, and subsequent calls to
     /// [`Self::generate_next_block`] (or similar) will build on it.
-    pub fn generate_next_block_including(
+    pub async fn generate_next_block_including(
         &mut self,
         txid: TxId,
     ) -> (BlockHeight, Cache::InsertResult) {
@@ -735,7 +739,7 @@ where
         // Index 0 is by definition a coinbase transaction, and the wallet doesn't
         // construct coinbase transactions. So we pretend here that the block has a
         // coinbase transaction that does not have shielded coinbase outputs.
-        self.generate_next_block_from_tx(1, &tx)
+        self.generate_next_block_from_tx(1, &tx).await
     }
 
     /// Creates a fake block at the expected next height containing only the given
@@ -743,7 +747,7 @@ where
     ///
     /// This generated block will be treated as the latest block, and subsequent calls to
     /// [`Self::generate_next_block`] will build on it.
-    pub fn generate_next_block_from_tx(
+    pub async fn generate_next_block_from_tx(
         &mut self,
         tx_index: usize,
         tx: &Transaction,
@@ -765,7 +769,7 @@ where
         );
         assert_eq!(cb.height(), height);
 
-        let res = self.cache_block(&prior_cached_block, cb);
+        let res = self.cache_block(&prior_cached_block, cb).await;
         self.latest_block_height = Some(height);
 
         (height, res)
@@ -794,19 +798,24 @@ impl<Cache, DbT, ParamsT> TestState<Cache, DbT, ParamsT>
 where
     Cache: TestCache,
     <Cache::BlockSource as BlockSource>::Error: fmt::Debug,
+    <Cache::BlockCache as BlockSource>::Error: fmt::Debug,
     ParamsT: consensus::Parameters + Send + Sync + 'static,
     DbT: InputSource + WalletTest + WalletWrite + WalletCommitmentTrees,
     <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
 {
     /// Invokes [`scan_cached_blocks`] with the given arguments, expecting success.
-    pub fn scan_cached_blocks(&mut self, from_height: BlockHeight, limit: usize) -> ScanSummary {
-        let result = self.try_scan_cached_blocks(from_height, limit);
+    pub async fn scan_cached_blocks(
+        &mut self,
+        from_height: BlockHeight,
+        limit: usize,
+    ) -> ScanSummary {
+        let result = self.try_scan_cached_blocks(from_height, limit).await;
         assert_matches!(result, Ok(_));
         result.unwrap()
     }
 
     /// Invokes [`scan_cached_blocks`] with the given arguments.
-    pub fn try_scan_cached_blocks(
+    pub async fn try_scan_cached_blocks(
         &mut self,
         from_height: BlockHeight,
         limit: usize,
@@ -814,7 +823,7 @@ where
         ScanSummary,
         super::chain::error::Error<
             <DbT as WalletRead>::Error,
-            <Cache::BlockSource as BlockSource>::Error,
+            <Cache::BlockCache as BlockSource>::Error,
         >,
     > {
         let prior_cached_block = self
@@ -827,13 +836,14 @@ where
             ScanPriority::Historic,
         );
 
-        futures::executor::block_on(scan_cached_blocks(
+        scan_cached_blocks(
             &self.network,
             self.cache.block_cache(),
             &mut self.wallet_data,
             &prior_cached_block.chain_state,
             &scan_range,
-        ))
+        )
+        .await
     }
 
     /// Insert shard roots for both trees.
@@ -2252,11 +2262,11 @@ pub trait TestCache {
     fn block_cache(&self) -> &Self::BlockCache;
 
     /// Inserts a CompactBlock into the cache DB.
-    fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult;
+    async fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult;
 
     /// Deletes block data from the cache, retaining blocks at heights less than or equal to the
     /// specified height.
-    fn truncate_to_height(&mut self, height: BlockHeight);
+    async fn truncate_to_height(&mut self, height: BlockHeight);
 }
 
 /// A convenience type for the note commitments contained within a [`CompactBlock`].

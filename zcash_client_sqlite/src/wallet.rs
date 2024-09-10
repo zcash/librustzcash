@@ -3677,15 +3677,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn block_fully_scanned() {
-        check_block_fully_scanned(TestDbFactory::default())
+    #[tokio::test]
+    async fn block_fully_scanned() {
+        check_block_fully_scanned(TestDbFactory::default()).await
     }
 
-    fn check_block_fully_scanned<DsF: DataStoreFactory>(dsf: DsF) {
+    async fn check_block_fully_scanned<DsF: DataStoreFactory>(dsf: DsF) {
         let mut st = TestBuilder::new()
             .with_data_store_factory(dsf)
-            .with_block_cache(BlockCache::new())
+            .with_block_cache(BlockCache::new().await)
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
@@ -3703,49 +3703,53 @@ mod tests {
         let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
         let not_our_value = NonNegativeAmount::const_from_u64(10000);
         let start_height = st.sapling_activation_height();
-        let _ = st.generate_block_at(
-            start_height,
-            BlockHash([0; 32]),
-            &[FakeCompactOutput::new(
-                &not_our_key,
-                AddressType::DefaultExternal,
-                not_our_value,
-            )],
-            0,
-            0,
-            false,
-        );
-        let (mid_height, _, _) =
-            st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
-        let (end_height, _, _) =
-            st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+        let _ = st
+            .generate_block_at(
+                start_height,
+                BlockHash([0; 32]),
+                &[FakeCompactOutput::new(
+                    &not_our_key,
+                    AddressType::DefaultExternal,
+                    not_our_value,
+                )],
+                0,
+                0,
+                false,
+            )
+            .await;
+        let (mid_height, _, _) = st
+            .generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value)
+            .await;
+        let (end_height, _, _) = st
+            .generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value)
+            .await;
 
         // Scan the last block first
-        st.scan_cached_blocks(end_height, 1);
+        st.scan_cached_blocks(end_height, 1).await;
 
         // The wallet should still have no fully-scanned block, as no scanned block range
         // overlaps the wallet's birthday.
         assert_eq!(block_fully_scanned(&st), None);
 
         // Scan the block at the wallet's birthday height.
-        st.scan_cached_blocks(start_height, 1);
+        st.scan_cached_blocks(start_height, 1).await;
 
         // The fully-scanned height should now be that of the scanned block.
         assert_eq!(block_fully_scanned(&st), Some(start_height));
 
         // Scan the block in between the two previous blocks.
-        st.scan_cached_blocks(mid_height, 1);
+        st.scan_cached_blocks(mid_height, 1).await;
 
         // The fully-scanned height should now be the latest block, as the two disjoint
         // ranges have been connected.
         assert_eq!(block_fully_scanned(&st), Some(end_height));
     }
 
-    #[test]
-    fn test_account_birthday() {
+    #[tokio::test]
+    async fn test_account_birthday() {
         let st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
-            .with_block_cache(BlockCache::new())
+            .with_block_cache(BlockCache::new().await)
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
