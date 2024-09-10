@@ -60,7 +60,7 @@ pub async fn run<P, ChT, CaT, DbT>(
     batch_size: u32,
 ) -> Result<(), Error<CaT::Error, <DbT as WalletRead>::Error, <DbT as WalletCommitmentTrees>::Error>>
 where
-    P: Parameters + Send + 'static,
+    P: Parameters + Send + Sync + 'static,
     ChT: GrpcService<BoxBody>,
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
@@ -68,7 +68,7 @@ where
     CaT: BlockCache,
     CaT::Error: std::error::Error + Send + Sync + 'static,
     DbT: WalletWrite + WalletCommitmentTrees,
-    DbT::AccountId: ConditionallySelectable + Default + Send + 'static,
+    DbT::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
     <DbT as WalletRead>::Error: std::error::Error + Send + Sync + 'static,
     <DbT as WalletCommitmentTrees>::Error: std::error::Error + Send + Sync + 'static,
 {
@@ -106,7 +106,7 @@ async fn running<P, ChT, CaT, DbT, TrErr>(
     #[cfg(feature = "transparent-inputs")] wallet_birthday: BlockHeight,
 ) -> Result<bool, Error<CaT::Error, <DbT as WalletRead>::Error, TrErr>>
 where
-    P: Parameters + Send + 'static,
+    P: Parameters + Send + Sync + 'static,
     ChT: GrpcService<BoxBody>,
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
@@ -114,7 +114,7 @@ where
     CaT: BlockCache,
     CaT::Error: std::error::Error + Send + Sync + 'static,
     DbT: WalletWrite,
-    DbT::AccountId: ConditionallySelectable + Default + Send + 'static,
+    DbT::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
     DbT::Error: std::error::Error + Send + Sync + 'static,
 {
     // 3) Download chain tip metadata from lightwalletd
@@ -403,11 +403,11 @@ async fn scan_blocks<P, CaT, DbT, TrErr>(
     scan_range: &ScanRange,
 ) -> Result<bool, Error<CaT::Error, <DbT as WalletRead>::Error, TrErr>>
 where
-    P: Parameters + Send + 'static,
+    P: Parameters + Send + Sync + 'static,
     CaT: BlockCache,
     CaT::Error: std::error::Error + Send + Sync + 'static,
     DbT: WalletWrite,
-    DbT::AccountId: ConditionallySelectable + Default + Send + 'static,
+    DbT::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
     DbT::Error: std::error::Error + Send + Sync + 'static,
 {
     info!("Scanning {}", scan_range);
@@ -418,7 +418,8 @@ where
         scan_range.block_range().start,
         initial_chain_state,
         scan_range.len(),
-    );
+    )
+    .await;
 
     match scan_result {
         Err(ChainError::Scan(err)) if err.is_continuity_error() => {

@@ -80,6 +80,7 @@ shardtree.workspace = true
 # - Test dependencies
 ambassador = { workspace = true, optional = true }
 assert_matches = { workspace = true, optional = true }
+futures = { workspace = true, optional = true, features = ["executor"] }
 pasta_curves = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
 jubjub = { workspace = true, optional = true }
@@ -201,6 +202,7 @@ tor = [
 test-dependencies = [
     "dep:ambassador",
     "dep:assert_matches",
+    "dep:futures",
     "dep:proptest",
     "dep:jubjub",
     "dep:rand",

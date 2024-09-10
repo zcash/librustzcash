@@ -32,6 +32,8 @@
 //! # }
 //! #
 //! # fn test() -> Result<(), Error<(), Infallible>> {
+//! # let rt = tokio::runtime::Runtime::new().unwrap();
+//! # rt.block_on(async {
 //! let network = Network::TestNetwork;
 //! let block_source = chain_testing::MockBlockSource;
 //! let mut wallet_db = testing::MockWalletDb::new(Network::TestNetwork);
@@ -73,7 +75,7 @@
 //!                 scan_range.block_range().start,
 //!                 chain_state,
 //!                 scan_range.len()
-//!             );
+//!             ).await;
 //!
 //!             // Check for scanning errors that indicate that the wallet's chain tip is out of
 //!             // sync with blockchain history.
@@ -142,11 +144,12 @@
 //!         scan_range.block_range().start,
 //!         chain_state,
 //!         scan_range.len()
-//!     )?;
+//!     ).await?;
 //!
 //!     // Handle scan errors, etc.
 //! }
 //! # Ok(())
+//! # })
 //! # }
 //! # }
 //! ```
@@ -166,13 +169,13 @@ use crate::{
     scanning::{scan_block_with_runners, BatchRunners, Nullifiers, ScanningKeys},
 };
 
-#[cfg(feature = "sync")]
-use {super::scanning::ScanPriority, crate::data_api::scanning::ScanRange};
-
 pub mod error;
 use error::Error;
 
-use super::WalletRead;
+use super::{
+    scanning::{ScanPriority, ScanRange},
+    WalletRead,
+};
 
 /// A struct containing metadata about a subtree root of the note commitment tree.
 ///
@@ -210,8 +213,9 @@ impl<H> CommitmentTreeRoot<H> {
 
 /// This trait provides sequential access to raw blockchain data via a callback-oriented
 /// API.
-pub trait BlockSource {
-    type Error;
+#[trait_variant::make(Send)]
+pub trait BlockSource: Sync {
+    type Error: Send + Sync;
 
     /// Scan the specified `limit` number of blocks from the blockchain, starting at
     /// `from_height`, applying the provided callback to each block. If `from_height`
@@ -221,7 +225,7 @@ pub trait BlockSource {
     ///   as part of processing each row.
     /// * `NoteRefT`: the type of note identifiers in the wallet data store, for use in
     ///   reporting errors related to specific notes.
-    fn with_blocks<E, F, G>(
+    async fn with_blocks<E, F, G>(
         &self,
         from_height: Option<BlockHeight>,
         limit: Option<usize>,
@@ -229,8 +233,8 @@ pub trait BlockSource {
         map_err: G,
     ) -> Result<(), E>
     where
-        F: FnMut(CompactBlock) -> Result<(), E>,
-        G: Fn(Self::Error) -> E;
+        F: FnMut(CompactBlock) -> Result<(), E> + Send,
+        G: Fn(Self::Error) -> E + Send;
 }
 
 /// `BlockCache` is a trait that extends `BlockSource` and defines methods for managing
@@ -254,7 +258,7 @@ pub trait BlockSource {
 /// #    impl BlockSource for ExampleBlockCache {
 /// #        type Error = ();
 /// #
-/// #        fn with_blocks<E, F, G>(
+/// #        async fn with_blocks<E, F, G>(
 /// #            &self,
 /// #            _from_height: Option<BlockHeight>,
 /// #            _limit: Option<usize>,
@@ -262,15 +266,15 @@ pub trait BlockSource {
 /// #            _map_err: G,
 /// #        ) -> Result<(), E>
 /// #        where
-/// #            F: FnMut(CompactBlock) -> Result<(), E>,
-/// #            G: Fn(Self::Error) -> E,
+/// #            F: FnMut(CompactBlock) -> Result<(), E> + Send,
+/// #            G: Fn(Self::Error) -> E + Send,
 /// #        {
 /// #            Ok(())
 /// #        }
 /// #    }
 /// #
 ///    impl BlockCache for ExampleBlockCache {
-///        fn get_tip_height(&self, range: Option<&ScanRange>) -> Result<Option<BlockHeight>, Self::Error> {
+///        async fn get_tip_height(&self, range: Option<&ScanRange>) -> Result<Option<BlockHeight>, Self::Error> {
 ///            let cached_blocks = self.cached_blocks.lock().unwrap();
 ///            let blocks: Vec<&CompactBlock> = match range {
 ///                Some(range) => cached_blocks
@@ -348,48 +352,43 @@ pub trait BlockSource {
 /// #    );
 ///    let compact_blocks = vec![compact_block1, compact_block2];
 ///
-///    // Insert blocks into the block cache
 ///    rt.block_on(async {
+///        // Insert blocks into the block cache
 ///        block_cache.insert(compact_blocks.clone()).await.unwrap();
-///    });
-///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 2);
+///        assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 2);
 ///
-///    // Find highest block in the block cache
-///    let get_tip_height = block_cache.get_tip_height(None).unwrap();
-///    assert_eq!(get_tip_height, Some(BlockHeight::from_u32(2)));
+///        // Find highest block in the block cache
+///        let get_tip_height = block_cache.get_tip_height(None).await.unwrap();
+///        assert_eq!(get_tip_height, Some(BlockHeight::from_u32(2)));
 ///
-///    // Read from the block cache
-///    rt.block_on(async {
+///        // Read from the block cache
 ///        let blocks_from_cache = block_cache.read(&range).await.unwrap();
 ///        assert_eq!(blocks_from_cache, compact_blocks);
-///    });
 ///
-///    // Truncate the block cache
-///    rt.block_on(async {
+///        // Truncate the block cache
 ///        truncate_block_cache(&block_cache, BlockHeight::from_u32(1)).await.unwrap();
-///    });
-///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 1);
-///    assert_eq!(
-///        block_cache.get_tip_height(None).unwrap(),
-///        Some(BlockHeight::from_u32(1))
-///    );
+///        assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 1);
+///        assert_eq!(
+///            block_cache.get_tip_height(None).await.unwrap(),
+///            Some(BlockHeight::from_u32(1))
+///        );
 ///
-///    // Delete blocks from the block cache
-///    rt.block_on(async {
+///        // Delete blocks from the block cache
 ///        block_cache.delete(range).await.unwrap();
+///        assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 0);
+///        assert_eq!(block_cache.get_tip_height(None).await.unwrap(), None);
 ///    });
-///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 0);
-///    assert_eq!(block_cache.get_tip_height(None).unwrap(), None);
 /// ```
-#[cfg(feature = "sync")]
 #[trait_variant::make(Send)]
-pub trait BlockCache: BlockSource + Sync {
+pub trait BlockCache: BlockSource {
     /// Finds the height of the highest block known to the block cache within a specified range.
     ///
     /// If `range` is `None`, returns the tip of the entire cache.
     /// If no blocks are found in the cache, returns Ok(`None`).
-    fn get_tip_height(&self, range: Option<&ScanRange>)
-        -> Result<Option<BlockHeight>, Self::Error>;
+    async fn get_tip_height(
+        &self,
+        range: Option<&ScanRange>,
+    ) -> Result<Option<BlockHeight>, Self::Error>;
 
     /// Retrieves contiguous compact blocks specified by the given `range` from the block cache.
     ///
@@ -425,7 +424,7 @@ where
     Cache: BlockCache,
     Cache::Error: Send,
 {
-    if let Some(latest) = block_cache.get_tip_height(None)? {
+    if let Some(latest) = block_cache.get_tip_height(None).await? {
         block_cache
             .delete(ScanRange::from_parts(
                 Range {
@@ -589,7 +588,7 @@ impl ChainState {
 /// This method will panic if `from_height != from_state.block_height() + 1`.
 #[tracing::instrument(skip(params, block_source, data_db, from_state))]
 #[allow(clippy::type_complexity)]
-pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
+pub async fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
     params: &ParamsT,
     block_source: &BlockSourceT,
     data_db: &mut DbT,
@@ -598,10 +597,10 @@ pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
     limit: usize,
 ) -> Result<ScanSummary, Error<DbT::Error, BlockSourceT::Error>>
 where
-    ParamsT: consensus::Parameters + Send + 'static,
+    ParamsT: consensus::Parameters + Send + Sync + 'static,
     BlockSourceT: BlockSource,
     DbT: WalletWrite,
-    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
+    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
 {
     assert_eq!(from_height, from_state.block_height + 1);
 
@@ -612,12 +611,14 @@ where
     let scanning_keys = ScanningKeys::from_account_ufvks(account_ufvks);
     let mut runners = BatchRunners::<_, (), ()>::for_keys(100, &scanning_keys);
 
-    block_source.with_blocks(
-        Some(from_height),
-        Some(limit),
-        |block| runners.add_block(params, block).map_err(|e| e.into()),
-        Error::BlockSource,
-    )?;
+    block_source
+        .with_blocks(
+            Some(from_height),
+            Some(limit),
+            |block| runners.add_block(params, block).map_err(|e| e.into()),
+            Error::BlockSource,
+        )
+        .await?;
     runners.flush();
 
     let mut prior_block_metadata = if from_height > BlockHeight::from(0) {
@@ -641,66 +642,68 @@ where
 
     let mut scanned_blocks = vec![];
     let mut scan_summary = ScanSummary::for_range(from_height..from_height);
-    block_source.with_blocks(
-        Some(from_height),
-        Some(limit),
-        |block: CompactBlock| {
-            scan_summary.scanned_range.end = block.height() + 1;
-            let scanned_block = scan_block_with_runners::<_, _, _, (), ()>(
-                params,
-                block,
-                &scanning_keys,
-                &nullifiers,
-                prior_block_metadata.as_ref(),
-                Some(&mut runners),
-            )
-            .map_err(Error::Scan)?;
+    block_source
+        .with_blocks(
+            Some(from_height),
+            Some(limit),
+            |block: CompactBlock| {
+                scan_summary.scanned_range.end = block.height() + 1;
+                let scanned_block = scan_block_with_runners::<_, _, _, (), ()>(
+                    params,
+                    block,
+                    &scanning_keys,
+                    &nullifiers,
+                    prior_block_metadata.as_ref(),
+                    Some(&mut runners),
+                )
+                .map_err(Error::Scan)?;
 
-            for wtx in &scanned_block.transactions {
-                scan_summary.spent_sapling_note_count += wtx.sapling_spends().len();
-                scan_summary.received_sapling_note_count += wtx.sapling_outputs().len();
-                #[cfg(feature = "orchard")]
-                {
-                    scan_summary.spent_orchard_note_count += wtx.orchard_spends().len();
-                    scan_summary.received_orchard_note_count += wtx.orchard_outputs().len();
+                for wtx in &scanned_block.transactions {
+                    scan_summary.spent_sapling_note_count += wtx.sapling_spends().len();
+                    scan_summary.received_sapling_note_count += wtx.sapling_outputs().len();
+                    #[cfg(feature = "orchard")]
+                    {
+                        scan_summary.spent_orchard_note_count += wtx.orchard_spends().len();
+                        scan_summary.received_orchard_note_count += wtx.orchard_outputs().len();
+                    }
                 }
-            }
 
-            let sapling_spent_nf: Vec<&sapling::Nullifier> = scanned_block
-                .transactions
-                .iter()
-                .flat_map(|tx| tx.sapling_spends().iter().map(|spend| spend.nf()))
-                .collect();
-            nullifiers.retain_sapling(|(_, nf)| !sapling_spent_nf.contains(&nf));
-            nullifiers.extend_sapling(scanned_block.transactions.iter().flat_map(|tx| {
-                tx.sapling_outputs()
-                    .iter()
-                    .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
-            }));
-
-            #[cfg(feature = "orchard")]
-            {
-                let orchard_spent_nf: Vec<&orchard::note::Nullifier> = scanned_block
+                let sapling_spent_nf: Vec<&sapling::Nullifier> = scanned_block
                     .transactions
                     .iter()
-                    .flat_map(|tx| tx.orchard_spends().iter().map(|spend| spend.nf()))
+                    .flat_map(|tx| tx.sapling_spends().iter().map(|spend| spend.nf()))
                     .collect();
-
-                nullifiers.retain_orchard(|(_, nf)| !orchard_spent_nf.contains(&nf));
-                nullifiers.extend_orchard(scanned_block.transactions.iter().flat_map(|tx| {
-                    tx.orchard_outputs()
+                nullifiers.retain_sapling(|(_, nf)| !sapling_spent_nf.contains(&nf));
+                nullifiers.extend_sapling(scanned_block.transactions.iter().flat_map(|tx| {
+                    tx.sapling_outputs()
                         .iter()
                         .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
                 }));
-            }
 
-            prior_block_metadata = Some(scanned_block.to_block_metadata());
-            scanned_blocks.push(scanned_block);
+                #[cfg(feature = "orchard")]
+                {
+                    let orchard_spent_nf: Vec<&orchard::note::Nullifier> = scanned_block
+                        .transactions
+                        .iter()
+                        .flat_map(|tx| tx.orchard_spends().iter().map(|spend| spend.nf()))
+                        .collect();
 
-            Ok(())
-        },
-        Error::BlockSource,
-    )?;
+                    nullifiers.retain_orchard(|(_, nf)| !orchard_spent_nf.contains(&nf));
+                    nullifiers.extend_orchard(scanned_block.transactions.iter().flat_map(|tx| {
+                        tx.orchard_outputs()
+                            .iter()
+                            .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
+                    }));
+                }
+
+                prior_block_metadata = Some(scanned_block.to_block_metadata());
+                scanned_blocks.push(scanned_block);
+
+                Ok(())
+            },
+            Error::BlockSource,
+        )
+        .await?;
 
     data_db
         .put_blocks(from_state, scanned_blocks)
@@ -722,7 +725,7 @@ pub mod testing {
     impl BlockSource for MockBlockSource {
         type Error = Infallible;
 
-        fn with_blocks<E, F, G>(
+        async fn with_blocks<E, F, G>(
             &self,
             _from_height: Option<BlockHeight>,
             _limit: Option<usize>,
@@ -730,8 +733,8 @@ pub mod testing {
             _map_err: G,
         ) -> Result<(), E>
         where
-            F: FnMut(CompactBlock) -> Result<(), E>,
-            G: Fn(Self::Error) -> E,
+            F: FnMut(CompactBlock) -> Result<(), E> + Send,
+            G: Fn(Self::Error) -> E + Send,
         {
             Ok(())
         }

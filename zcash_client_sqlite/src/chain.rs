@@ -26,7 +26,7 @@ pub mod migrations;
 /// Starting at `from_height`, the `with_row` callback is invoked with each block retrieved from
 /// the backing store. If the `limit` value provided is `None`, all blocks are traversed up to the
 /// maximum height.
-pub(crate) fn blockdb_with_blocks<E, F, G>(
+pub(crate) async fn blockdb_with_blocks<E, F, G>(
     block_source: &BlockDb,
     from_height: Option<BlockHeight>,
     limit: Option<usize>,
@@ -38,8 +38,8 @@ where
     G: Fn(SqliteClientError) -> E,
 {
     // Fetch the CompactBlocks we need to scan
-    let mut stmt_blocks = block_source
-        .0
+    let connector = block_source.0.lock().await;
+    let mut stmt_blocks = connector
         .prepare(
             "SELECT height, data FROM compactblocks
             WHERE height >= ?
@@ -246,7 +246,7 @@ pub(crate) fn blockmetadb_find_block(
 /// the backing store. If the `limit` value provided is `None`, all blocks are traversed up to the
 /// maximum height for which metadata is available.
 #[cfg(feature = "unstable")]
-pub(crate) fn fsblockdb_with_blocks<E, F, G>(
+pub(crate) async fn fsblockdb_with_blocks<E, F, G>(
     cache: &FsBlockDb,
     from_height: Option<BlockHeight>,
     limit: Option<usize>,
@@ -258,8 +258,8 @@ where
     G: Fn(FsBlockDbError) -> E,
 {
     // Fetch the CompactBlocks we need to scan
-    let mut stmt_blocks = cache
-        .conn
+    let connector = cache.conn.lock().await;
+    let mut stmt_blocks = connector
         .prepare(
             "SELECT height, blockhash, time, sapling_outputs_count, orchard_actions_count
              FROM compactblocks_meta
@@ -306,7 +306,7 @@ where
             }
         }
 
-        let mut block_file = File::open(cbr.block_file_path(&cache.blocks_dir))
+        let mut block_file = File::open(cbr.block_file_path(cache.blocks_dir.as_ref()))
             .map_err(FsBlockDbError::from)
             .map_err(&to_chain_error)?;
         let mut block_data = vec![];

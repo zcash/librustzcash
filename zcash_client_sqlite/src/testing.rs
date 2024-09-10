@@ -33,7 +33,7 @@ impl BlockCache {
     pub(crate) fn new() -> Self {
         let cache_file = NamedTempFile::new().unwrap();
         let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
-        init_cache_database(&db_cache).unwrap();
+        futures::executor::block_on(init_cache_database(&db_cache)).unwrap();
 
         BlockCache {
             _cache_file: cache_file,
@@ -45,17 +45,21 @@ impl BlockCache {
 impl TestCache for BlockCache {
     type BsError = SqliteClientError;
     type BlockSource = BlockDb;
+    type BlockCache = BlockDb;
     type InsertResult = NoteCommitments;
 
     fn block_source(&self) -> &Self::BlockSource {
         &self.db_cache
     }
 
+    fn block_cache(&self) -> &Self::BlockCache {
+        &self.db_cache
+    }
+
     fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult {
         let cb_bytes = cb.encode_to_vec();
         let res = NoteCommitments::from_compact_block(cb);
-        self.db_cache
-            .0
+        futures::executor::block_on(self.db_cache.0.lock())
             .execute(
                 "INSERT INTO compactblocks (height, data) VALUES (?, ?)",
                 params![u32::from(cb.height()), cb_bytes,],
@@ -65,8 +69,7 @@ impl TestCache for BlockCache {
     }
 
     fn truncate_to_height(&mut self, height: zcash_protocol::consensus::BlockHeight) {
-        self.db_cache
-            .0
+        futures::executor::block_on(self.db_cache.0.lock())
             .execute(
                 "DELETE FROM compactblocks WHERE height > ?",
                 params![u32::from(height)],
@@ -86,7 +89,7 @@ impl FsBlockCache {
     pub(crate) fn new() -> Self {
         let fsblockdb_root = tempfile::tempdir().unwrap();
         let mut db_meta = FsBlockDb::for_path(&fsblockdb_root).unwrap();
-        init_blockmeta_db(&mut db_meta).unwrap();
+        futures::executor::block_on(init_blockmeta_db(&mut db_meta)).unwrap();
 
         FsBlockCache {
             fsblockdb_root,
@@ -99,9 +102,14 @@ impl FsBlockCache {
 impl TestCache for FsBlockCache {
     type BsError = FsBlockDbError;
     type BlockSource = FsBlockDb;
+    type BlockCache = FsBlockDb;
     type InsertResult = BlockMeta;
 
     fn block_source(&self) -> &Self::BlockSource {
+        &self.db_meta
+    }
+
+    fn block_cache(&self) -> &Self::BlockCache {
         &self.db_meta
     }
 
@@ -128,6 +136,6 @@ impl TestCache for FsBlockCache {
     }
 
     fn truncate_to_height(&mut self, height: zcash_protocol::consensus::BlockHeight) {
-        self.db_meta.truncate_to_height(height).unwrap()
+        futures::executor::block_on(self.db_meta.truncate_to_height(height)).unwrap()
     }
 }

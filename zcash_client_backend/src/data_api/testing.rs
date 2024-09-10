@@ -61,7 +61,9 @@ use crate::{
 
 use super::error::Error;
 use super::{
-    chain::{scan_cached_blocks, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
+    chain::{
+        scan_cached_blocks, BlockCache, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary,
+    },
     scanning::ScanRange,
     wallet::{
         create_proposed_transactions,
@@ -792,9 +794,9 @@ impl<Cache, DbT, ParamsT> TestState<Cache, DbT, ParamsT>
 where
     Cache: TestCache,
     <Cache::BlockSource as BlockSource>::Error: fmt::Debug,
-    ParamsT: consensus::Parameters + Send + 'static,
+    ParamsT: consensus::Parameters + Send + Sync + 'static,
     DbT: InputSource + WalletTest + WalletWrite + WalletCommitmentTrees,
-    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
+    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
 {
     /// Invokes [`scan_cached_blocks`] with the given arguments, expecting success.
     pub fn scan_cached_blocks(&mut self, from_height: BlockHeight, limit: usize) -> ScanSummary {
@@ -820,14 +822,14 @@ where
             .cloned()
             .unwrap_or_else(|| CachedBlock::none(from_height - 1));
 
-        let result = scan_cached_blocks(
+        let result = futures::executor::block_on(scan_cached_blocks(
             &self.network,
             self.cache.block_source(),
             &mut self.wallet_data,
             from_height,
             &prior_cached_block.chain_state,
             limit,
-        );
+        ));
         result
     }
 
@@ -1241,7 +1243,7 @@ pub struct InitialChainState {
 /// Trait representing the ability to construct a new data store for use in a test.
 pub trait DataStoreFactory {
     type Error: core::fmt::Debug;
-    type AccountId: ConditionallySelectable + Default + Hash + Eq + Send + 'static;
+    type AccountId: ConditionallySelectable + Default + Hash + Eq + Send + Sync + 'static;
     type Account: Account<AccountId = Self::AccountId> + Clone;
     type DsError: core::fmt::Debug;
     type DataStore: InputSource<AccountId = Self::AccountId, Error = Self::DsError>
@@ -2237,10 +2239,14 @@ fn fake_compact_block_from_compact_tx(
 pub trait TestCache {
     type BsError: core::fmt::Debug;
     type BlockSource: BlockSource<Error = Self::BsError>;
+    type BlockCache: BlockCache<Error = Self::BsError>;
     type InsertResult;
 
     /// Exposes the block cache as a [`BlockSource`].
     fn block_source(&self) -> &Self::BlockSource;
+
+    /// Exposes the block cache as a [`BlockCache`].
+    fn block_cache(&self) -> &Self::BlockCache;
 
     /// Inserts a CompactBlock into the cache DB.
     fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult;

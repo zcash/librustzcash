@@ -73,6 +73,9 @@ time.workspace = true
 uuid.workspace = true
 regex = "1.4"
 
+# - Sync engine
+tokio = { workspace = true }
+
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 document-features.workspace = true
@@ -82,6 +85,7 @@ maybe-rayon.workspace = true
 ambassador.workspace = true
 assert_matches.workspace = true
 bls12_381.workspace = true
+futures = { workspace = true, features = ["executor"] }
 incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
 incrementalmerkletree-testing.workspace = true
 pasta_curves.workspace = true
