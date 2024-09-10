@@ -334,7 +334,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
 
         let (table_prefix, index_col, note_reconstruction_cols) = per_protocol_names(protocol);
         let mut stmt_sent_notes = self.conn.borrow().prepare(&format!(
-            "SELECT txid, output_index
+            "SELECT txid, {index_col}
                  FROM {table_prefix}_received_notes rn
                  INNER JOIN transactions ON transactions.id_tx = rn.tx
                  AND transactions.block IS NOT NULL

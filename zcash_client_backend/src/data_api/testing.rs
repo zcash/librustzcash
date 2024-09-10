@@ -100,7 +100,6 @@ pub struct TransactionSummary<AccountId> {
     memo_count: usize,
     expired_unmined: bool,
     is_shielding: bool,
-    raw: Vec<u8>,
 }
 
 impl<AccountId> TransactionSummary<AccountId> {
@@ -119,7 +118,6 @@ impl<AccountId> TransactionSummary<AccountId> {
         memo_count: usize,
         expired_unmined: bool,
         is_shielding: bool,
-        raw: &[u8],
     ) -> Self {
         Self {
             account_id,
@@ -135,7 +133,6 @@ impl<AccountId> TransactionSummary<AccountId> {
             memo_count,
             expired_unmined,
             is_shielding,
-            raw: raw.to_vec(),
         }
     }
 
