@@ -81,6 +81,14 @@ and this library adheres to Rust's notion of
   `ProposalDecodingError::FeeRuleNotSupported` has been added to replace it.
 - `zcash_client_backend::data_api::fees::fixed` is now available only via the
   use of the `non-standard-fees` feature flag.
+- zcash_client_backend::data_api::chain:
+  - `BlockSource` added Send + Sync trait bounds
+  - `BlockSource::with_blocks` changed to async fn
+  - Changes to `BlockCache` trait:
+    - removed `sync` feature flag so it can be used in `scan_cached_blocks`
+    - all trait methods now return `zcash_client_backend::data_api::chain::error::Error`
+      so implementations may call `BlockSource::with_blocks` and propagate errors correctly.
+  - `scan_cached_blocks` now takes a block cache and a scan range for scanning.
 - `zcash_client_backend::tor::http::cryptex`:
   - The `Exchange` trait is no longer object-safe. Replace any existing uses of
     `dyn Exchange` with `DynExchange`.

@@ -15,6 +15,22 @@ and this library adheres to Rust's notion of
 - MSRV is now 1.77.0.
 - Migrated from `schemer` to our fork `schemerz`.
 - Migrated to `rusqlite 0.32`.
+- `zcash_client_sqlite::chain::init`:
+    - `init_cache_database` changed to async fn
+    - `init_blockmeta_db` changed to async fn
+- `zcash_client_sqlite::BlockDb`:
+  - wrapped `Connection` field in an arc mutex to implement `Sync` trait
+  - updated `with_blocks` to match changes to `BlockSource` trait
+  - added unimplemented `BlockCache` trait methods
+- `zcash_client_sqlite::FsBlockDb`:
+  - wrapped `conn` field in an arc mutex to implement `Sync` trait
+  - wrapped `blocks_dir` field in an arc to implement `Sync` trait
+  - `get_max_cached_height` changed to async fn
+  - `write_block_metadata` changed to async fn
+  - `find_block` changed to async fn
+  - `truncate_to_height` changed to async fn
+  - updated `with_blocks` to match changes to `BlockSource` trait
+  - implemented `BlockCache` trait
 
 ## [0.12.2] - 2024-10-21
 
