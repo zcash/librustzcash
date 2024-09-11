@@ -7,12 +7,17 @@ use gumdrop::{Options, ParsingStyle};
 use lazy_static::lazy_static;
 use secrecy::Zeroize;
 use tokio::runtime::Runtime;
-use zcash_address::ZcashAddress;
+use zcash_address::{
+    unified::{self, Encoding},
+    ZcashAddress,
+};
 use zcash_primitives::{block::BlockHeader, consensus::BranchId, transaction::Transaction};
 use zcash_proofs::{default_params_folder, load_parameters, ZcashParameters};
+use zcash_protocol::consensus::NetworkType;
 
 mod context;
 use context::{Context, ZUint256};
+use zcash_protocol::constants;
 
 mod address;
 mod block;
@@ -72,6 +77,36 @@ fn main() {
         inspect_bytes(bytes, opts.context, opts.lookup);
     } else if let Ok(addr) = ZcashAddress::try_from_encoded(&opts.data) {
         address::inspect(addr);
+    } else if let Ok((network, uivk)) = unified::Uivk::decode(&opts.data) {
+        keys::view::inspect_uivk(uivk, network);
+    } else if let Ok((network, ufvk)) = unified::Ufvk::decode(&opts.data) {
+        keys::view::inspect_ufvk(ufvk, network);
+    } else if let Ok((hrp, data, variant)) = bech32::decode(&opts.data) {
+        match hrp.as_str() {
+            constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY => {
+                keys::view::inspect_sapling_extfvk(data, variant, NetworkType::Main);
+            }
+            constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY => {
+                keys::view::inspect_sapling_extfvk(data, variant, NetworkType::Test);
+            }
+            constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY => {
+                keys::view::inspect_sapling_extfvk(data, variant, NetworkType::Regtest);
+            }
+            constants::mainnet::HRP_SAPLING_EXTENDED_SPENDING_KEY => {
+                keys::inspect_sapling_extsk(data, variant, NetworkType::Main);
+            }
+            constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY => {
+                keys::inspect_sapling_extsk(data, variant, NetworkType::Test);
+            }
+            constants::regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY => {
+                keys::inspect_sapling_extsk(data, variant, NetworkType::Regtest);
+            }
+            _ => {
+                // Unknown data format.
+                eprintln!("String does not match known Zcash data formats.");
+                process::exit(2);
+            }
+        }
     } else {
         // Unknown data format.
         eprintln!("String does not match known Zcash data formats.");

@@ -19,11 +19,11 @@ sha2.workspace = true
 zcash_address.workspace = true
 zcash_client_backend ={ workspace = true, features = ["lightwalletd-tonic-transport"] }
 zcash_encoding.workspace = true
-zcash_keys.workspace = true
+zcash_keys = { workspace = true, features = ["unstable"] }
 zcash_note_encryption.workspace = true
 zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 zcash_proofs = { workspace = true, features = ["directories"] }
-zcash_protocol.workspace = true
+zcash_protocol = {workspace = true, features = ["local-consensus"] }
 
 # Transparent
 secp256k1.workspace = true
