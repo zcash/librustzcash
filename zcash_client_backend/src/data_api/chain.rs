@@ -708,9 +708,9 @@ pub mod testing {
     use std::convert::Infallible;
     use zcash_primitives::consensus::BlockHeight;
 
-    use crate::proto::compact_formats::CompactBlock;
+    use crate::{data_api::scanning::ScanRange, proto::compact_formats::CompactBlock};
 
-    use super::BlockSource;
+    use super::{BlockCache, BlockSource};
 
     pub struct MockBlockSource;
 
@@ -728,6 +728,27 @@ pub mod testing {
             F: FnMut(CompactBlock) -> Result<(), E> + Send,
             G: Fn(Self::Error) -> E + Send,
         {
+            Ok(())
+        }
+    }
+
+    impl BlockCache for MockBlockSource {
+        async fn get_tip_height(
+            &self,
+            _range: Option<&ScanRange>,
+        ) -> Result<Option<BlockHeight>, Self::Error> {
+            Ok(None)
+        }
+
+        async fn read(&self, _range: &ScanRange) -> Result<Vec<CompactBlock>, Self::Error> {
+            Ok(Vec::new())
+        }
+
+        async fn insert(&self, _compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        async fn delete(&self, _range: ScanRange) -> Result<(), Self::Error> {
             Ok(())
         }
     }
