@@ -74,7 +74,7 @@ uuid.workspace = true
 regex = "1.4"
 
 # - Sync engine
-tokio = { workspace = true }
+tokio = { workspace = true , features = ["fs"] }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)

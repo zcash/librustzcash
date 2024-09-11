@@ -120,8 +120,9 @@ impl<T> ParallelSliceMut<T> for [T] {
 #[cfg(feature = "unstable")]
 use {
     crate::chain::{fsblockdb_with_blocks, BlockMeta},
+    prost::Message,
     std::path::PathBuf,
-    std::{fs, io},
+    std::{fs, io, io::Write},
 };
 
 pub mod chain;
@@ -1880,19 +1881,84 @@ impl BlockCache for FsBlockDb {
         &self,
         range: Option<&ScanRange>,
     ) -> Result<Option<BlockHeight>, Self::Error> {
-        todo!()
+        // TODO: Implement cache tip for a specified range.
+        if range.is_some() {
+            panic!("Cache tip for a specified range not currently implemented.")
+        }
+
+        chain::blockmetadb_get_max_cached_height(&*self.conn.lock().await)
+            .map_err(FsBlockDbError::Db)
     }
 
     async fn read(&self, range: &ScanRange) -> Result<Vec<CompactBlock>, Self::Error> {
-        todo!()
+        let mut compact_blocks = vec![];
+        self.with_blocks(
+            Some(range.block_range().start),
+            Some(range.len()),
+            |block| {
+                compact_blocks.push(block);
+                Ok(())
+            },
+            |e| e,
+        )
+        .await?;
+        Ok(compact_blocks)
     }
 
     async fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error> {
-        todo!()
+        if compact_blocks.is_empty() {
+            panic!("`compact_blocks` is empty, cannot insert zero blocks into cache!");
+        }
+
+        let mut block_meta = Vec::<BlockMeta>::with_capacity(compact_blocks.len());
+
+        for block in compact_blocks {
+            let (sapling_outputs_count, orchard_actions_count) = block
+                .vtx
+                .iter()
+                .map(|tx| (tx.outputs.len() as u32, tx.actions.len() as u32))
+                .fold((0, 0), |(acc_sapling, acc_orchard), (sapling, orchard)| {
+                    (acc_sapling + sapling, acc_orchard + orchard)
+                });
+
+            let meta = BlockMeta {
+                height: block.height(),
+                block_hash: block.hash(),
+                block_time: block.time,
+                sapling_outputs_count,
+                orchard_actions_count,
+            };
+
+            let encoded = block.encode_to_vec();
+            let mut block_file =
+                std::fs::File::create(meta.block_file_path(self.blocks_dir.as_ref()))
+                    .map_err(FsBlockDbError::Fs)?;
+            block_file.write_all(&encoded).map_err(FsBlockDbError::Fs)?;
+            block_meta.push(meta);
+        }
+        self.write_block_metadata(&block_meta).await?;
+        Ok(())
     }
 
     async fn delete(&self, range: ScanRange) -> Result<(), Self::Error> {
-        todo!()
+        let block_cache_root = Arc::clone(&self.blocks_dir);
+        let start = u32::from(range.block_range().start);
+        let end = u32::from(range.block_range().end);
+
+        let mut block_meta = Vec::with_capacity((end - start) as usize);
+        for height in start..end {
+            block_meta.push(self.find_block(BlockHeight::from_u32(height)).await?);
+        }
+
+        for block in block_meta.into_iter().flatten() {
+            tokio::fs::remove_file(block.block_file_path(block_cache_root.as_ref()))
+                .await
+                .map_err(FsBlockDbError::Fs)?;
+        }
+
+        // TODO: implement a fn to delete block metadata?
+
+        Ok(())
     }
 }
 
