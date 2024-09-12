@@ -23,7 +23,7 @@ use crate::{
         testing::{AddressType, TestBuilder},
         wallet::{decrypt_and_store_transaction, input_selection::GreedyInputSelector},
         Account as _, DecryptedTransaction, InputSource, WalletCommitmentTrees, WalletRead,
-        WalletSummary,
+        WalletSummary, WalletTest,
     },
     decrypt_transaction,
     fees::{standard, DustOutputPolicy},
@@ -42,7 +42,7 @@ pub trait ShieldedPoolTester {
     type MerkleTreeHash;
     type Note;
 
-    fn test_account_fvk<Cache, DbT: WalletRead, P: consensus::Parameters>(
+    fn test_account_fvk<Cache, DbT: WalletTest, P: consensus::Parameters>(
         st: &TestState<Cache, DbT, P>,
     ) -> Self::Fvk;
     fn usk_to_sk(usk: &UnifiedSpendingKey) -> &Self::Sk;
@@ -68,7 +68,7 @@ pub trait ShieldedPoolTester {
     fn empty_tree_leaf() -> Self::MerkleTreeHash;
     fn empty_tree_root(level: Level) -> Self::MerkleTreeHash;
 
-    fn put_subtree_roots<Cache, DbT: WalletRead + WalletCommitmentTrees, P>(
+    fn put_subtree_roots<Cache, DbT: WalletTest + WalletCommitmentTrees, P>(
         st: &mut TestState<Cache, DbT, P>,
         start_index: u64,
         roots: &[CommitmentTreeRoot<Self::MerkleTreeHash>],
@@ -77,7 +77,7 @@ pub trait ShieldedPoolTester {
     fn next_subtree_index<A: Hash + Eq>(s: &WalletSummary<A>) -> u64;
 
     #[allow(clippy::type_complexity)]
-    fn select_spendable_notes<Cache, DbT: InputSource + WalletRead, P>(
+    fn select_spendable_notes<Cache, DbT: InputSource + WalletTest, P>(
         st: &TestState<Cache, DbT, P>,
         account: <DbT as InputSource>::AccountId,
         target_value: Zatoshis,

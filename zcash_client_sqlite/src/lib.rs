@@ -53,7 +53,7 @@ use zcash_client_backend::{
         Account, AccountBirthday, AccountPurpose, AccountSource, BlockMetadata,
         DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
         SentTransaction, SpendableNotes, TransactionDataRequest, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        WalletSummary, WalletTest, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -614,13 +614,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
 
         Ok(iter.collect())
     }
+}
 
-    #[cfg(any(test, feature = "test-dependencies"))]
+#[cfg(any(test, feature = "test-dependencies"))]
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletTest for WalletDb<C, P> {
     fn get_tx_history(&self) -> Result<Vec<TransactionSummary<Self::AccountId>>, Self::Error> {
         wallet::testing::get_tx_history(self.conn.borrow())
     }
 
-    #[cfg(any(test, feature = "test-dependencies"))]
     fn get_sent_note_ids(
         &self,
         txid: &TxId,
@@ -1725,7 +1726,8 @@ mod tests {
     use zcash_client_backend::data_api::{
         chain::ChainState,
         testing::{TestBuilder, TestState},
-        Account, AccountBirthday, AccountPurpose, AccountSource, WalletRead, WalletWrite,
+        Account, AccountBirthday, AccountPurpose, AccountSource, WalletRead, WalletTest,
+        WalletWrite,
     };
     use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
     use zcash_primitives::block::BlockHash;
@@ -1837,7 +1839,7 @@ mod tests {
             AccountSource::Derived { seed_fingerprint: _, account_index } if account_index == zip32_index_2);
     }
 
-    fn check_collisions<C, DbT: WalletWrite, P: consensus::Parameters>(
+    fn check_collisions<C, DbT: WalletTest + WalletWrite, P: consensus::Parameters>(
         st: &mut TestState<C, DbT, P>,
         ufvk: &UnifiedFullViewingKey,
         birthday: &AccountBirthday,

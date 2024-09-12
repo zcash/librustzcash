@@ -43,6 +43,7 @@ use {
 #[derive(Delegate)]
 #[delegate(InputSource, target = "wallet_db")]
 #[delegate(WalletRead, target = "wallet_db")]
+#[delegate(WalletTest, target = "wallet_db")]
 #[delegate(WalletWrite, target = "wallet_db")]
 #[delegate(WalletCommitmentTrees, target = "wallet_db")]
 pub(crate) struct TestDb {

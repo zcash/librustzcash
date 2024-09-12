@@ -56,6 +56,7 @@ use crate::{
     ShieldedProtocol,
 };
 
+use super::WalletTest;
 #[allow(deprecated)]
 use super::{
     chain::{scan_cached_blocks, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
@@ -319,14 +320,14 @@ impl<A: Account> Account for TestAccount<A> {
     }
 }
 
-pub trait Reset: WalletRead + Sized {
+pub trait Reset: WalletTest + Sized {
     type Handle;
 
     fn reset<C>(st: &mut TestState<C, Self, LocalNetwork>) -> Self::Handle;
 }
 
 /// The state for a `zcash_client_sqlite` test.
-pub struct TestState<Cache, DataStore: WalletRead, Network> {
+pub struct TestState<Cache, DataStore: WalletTest, Network> {
     cache: Cache,
     cached_blocks: BTreeMap<BlockHeight, CachedBlock>,
     latest_block_height: Option<BlockHeight>,
@@ -336,7 +337,7 @@ pub struct TestState<Cache, DataStore: WalletRead, Network> {
     rng: ChaChaRng,
 }
 
-impl<Cache, DataStore: WalletRead, Network> TestState<Cache, DataStore, Network> {
+impl<Cache, DataStore: WalletTest, Network> TestState<Cache, DataStore, Network> {
     /// Exposes an immutable reference to the test's `DataStore`.
     pub fn wallet(&self) -> &DataStore {
         &self.wallet_data
@@ -358,7 +359,7 @@ impl<Cache, DataStore: WalletRead, Network> TestState<Cache, DataStore, Network>
     }
 }
 
-impl<Cache, DataStore: WalletRead, Network: consensus::Parameters>
+impl<Cache, DataStore: WalletTest, Network: consensus::Parameters>
     TestState<Cache, DataStore, Network>
 {
     /// Convenience method for obtaining the Sapling activation height for the network under test.
@@ -405,7 +406,7 @@ impl<Cache, DataStore: WalletRead, Network: consensus::Parameters>
 impl<Cache: TestCache, DataStore, Network> TestState<Cache, DataStore, Network>
 where
     Network: consensus::Parameters,
-    DataStore: WalletWrite,
+    DataStore: WalletTest + WalletWrite,
     <Cache::BlockSource as BlockSource>::Error: fmt::Debug,
 {
     /// Exposes an immutable reference to the test's [`BlockSource`].
@@ -697,7 +698,7 @@ where
     Cache: TestCache,
     <Cache::BlockSource as BlockSource>::Error: fmt::Debug,
     ParamsT: consensus::Parameters + Send + 'static,
-    DbT: InputSource + WalletWrite + WalletCommitmentTrees,
+    DbT: InputSource + WalletTest + WalletWrite + WalletCommitmentTrees,
     <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
 {
     /// Invokes [`scan_cached_blocks`] with the given arguments, expecting success.
@@ -760,6 +761,7 @@ where
     AccountIdT: std::cmp::Eq + std::hash::Hash,
     ErrT: std::fmt::Debug,
     DbT: InputSource<AccountId = AccountIdT, Error = ErrT>
+        + WalletTest
         + WalletWrite<AccountId = AccountIdT, Error = ErrT>
         + WalletCommitmentTrees,
     <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
@@ -1069,7 +1071,19 @@ where
     pub fn get_wallet_summary(&self, min_confirmations: u32) -> Option<WalletSummary<AccountIdT>> {
         self.wallet().get_wallet_summary(min_confirmations).unwrap()
     }
+}
 
+impl<Cache, DbT, ParamsT, AccountIdT, ErrT> TestState<Cache, DbT, ParamsT>
+where
+    ParamsT: consensus::Parameters + Send + 'static,
+    AccountIdT: std::cmp::Eq + std::hash::Hash,
+    ErrT: std::fmt::Debug,
+    DbT: InputSource<AccountId = AccountIdT, Error = ErrT>
+        + WalletTest
+        + WalletWrite<AccountId = AccountIdT, Error = ErrT>
+        + WalletCommitmentTrees,
+    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
+{
     /// Returns a transaction from the history.
     #[allow(dead_code)]
     pub fn get_tx_from_history(
@@ -1149,6 +1163,7 @@ pub trait DataStoreFactory {
     type DsError: core::fmt::Debug;
     type DataStore: InputSource<AccountId = Self::AccountId, Error = Self::DsError>
         + WalletRead<AccountId = Self::AccountId, Account = Self::Account, Error = Self::DsError>
+        + WalletTest
         + WalletWrite
         + WalletCommitmentTrees;
 
