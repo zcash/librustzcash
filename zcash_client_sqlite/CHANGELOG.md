@@ -22,6 +22,7 @@ and this library adheres to Rust's notion of
   - wrapped `Connection` field in an arc mutex to implement `Sync` trait
   - updated `with_blocks` to match changes to `BlockSource` trait
   - added unimplemented `BlockCache` trait methods
+  - implemented `BlockCache::read` trait method
 - `zcash_client_sqlite::FsBlockDb`:
   - wrapped `conn` field in an arc mutex to implement `Sync` trait
   - wrapped `blocks_dir` field in an arc to implement `Sync` trait

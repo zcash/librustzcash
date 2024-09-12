@@ -1661,7 +1661,18 @@ impl BlockCache for BlockDb {
     }
 
     async fn read(&self, range: &ScanRange) -> Result<Vec<CompactBlock>, Self::Error> {
-        todo!()
+        let mut compact_blocks = vec![];
+        self.with_blocks(
+            Some(range.block_range().start),
+            Some(range.len()),
+            |block| {
+                compact_blocks.push(block);
+                Ok(())
+            },
+            |e| e,
+        )
+        .await?;
+        Ok(compact_blocks)
     }
 
     async fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error> {
