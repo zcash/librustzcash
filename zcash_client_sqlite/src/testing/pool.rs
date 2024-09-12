@@ -3,8 +3,10 @@
 //! Generalised for sharing across the Sapling and Orchard implementations.
 
 use zcash_client_backend::data_api::testing::{
-    orchard::OrchardPoolTester, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+    pool::ShieldedPoolTester, sapling::SaplingPoolTester,
 };
+#[cfg(feature = "orchard")]
+use zcash_client_backend::data_api::testing::orchard::OrchardPoolTester;
 
 use crate::{
     testing::{db::TestDbFactory, BlockCache},
