@@ -1,0 +1,20 @@
+{
+    "wpk": "02b4395f62fc0b786902b37924c2773195ad707ef07dd5ec7e31f2b3cda4804d8c",
+    "message": {
+        "channelId": [
+            "e364621e321eb713c4ca523430a1b9b5c7d0542dad7d8dc24593b586503f2c43"
+        ],
+        "wpk": [
+            "e89587a54c69d77e1134a6ec3fc0d3921977e4fb6c9d6377118d19820e3a4ff1"
+        ],
+        "bc": 140,
+        "bm": 70,
+        "close": [
+            "da216b09f459cfca3d162c993c191bc980f2eda5a1edf34200004737a55be223"
+        ]
+    },
+    "signature": {
+        "h": "8d4ff4d96f17760cabdd9728e667596c2c6d238427dd0529f2b6b60140fc71efc890e03502bdae679ca09236fbb11d9d",
+        "H": "832b9fc275bf44bad06fd9d0b0296722140273f6cba23859b48c3aaa5ed25455e70bd665165169956be25708026478b6"
+    }
+}
