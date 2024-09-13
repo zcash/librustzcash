@@ -187,11 +187,12 @@ impl<AccountId> ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifie
 
 /// A set of keys to be used in scanning for decryptable transaction outputs.
 pub struct ScanningKeys<AccountId, IvkTag> {
-    sapling: HashMap<IvkTag, Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>>,
+    sapling:
+        HashMap<IvkTag, ScanningKey<sapling::SaplingIvk, sapling::NullifierDerivingKey, AccountId>>,
     #[cfg(feature = "orchard")]
     orchard: HashMap<
         IvkTag,
-        Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
+        ScanningKey<orchard::keys::IncomingViewingKey, orchard::keys::FullViewingKey, AccountId>,
     >,
 }
 
@@ -200,11 +201,15 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
     pub fn new(
         sapling: HashMap<
             IvkTag,
-            Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>,
+            ScanningKey<sapling::SaplingIvk, sapling::NullifierDerivingKey, AccountId>,
         >,
         #[cfg(feature = "orchard")] orchard: HashMap<
             IvkTag,
-            Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
+            ScanningKey<
+                orchard::keys::IncomingViewingKey,
+                orchard::keys::FullViewingKey,
+                AccountId,
+            >,
         >,
     ) -> Self {
         Self {
@@ -226,7 +231,7 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
     /// Returns the Sapling keys to be used for incoming note detection.
     pub fn sapling(
         &self,
-    ) -> &HashMap<IvkTag, Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>>
+    ) -> &HashMap<IvkTag, ScanningKey<sapling::SaplingIvk, sapling::NullifierDerivingKey, AccountId>>
     {
         &self.sapling
     }
@@ -235,8 +240,10 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
     #[cfg(feature = "orchard")]
     pub fn orchard(
         &self,
-    ) -> &HashMap<IvkTag, Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>>
-    {
+    ) -> &HashMap<
+        IvkTag,
+        ScanningKey<orchard::keys::IncomingViewingKey, orchard::keys::FullViewingKey, AccountId>,
+    > {
         &self.orchard
     }
 }
@@ -251,12 +258,16 @@ impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, 
 
         let mut sapling: HashMap<
             (AccountId, Scope),
-            Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>,
+            ScanningKey<sapling::SaplingIvk, sapling::NullifierDerivingKey, AccountId>,
         > = HashMap::new();
         #[cfg(feature = "orchard")]
         let mut orchard: HashMap<
             (AccountId, Scope),
-            Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
+            ScanningKey<
+                orchard::keys::IncomingViewingKey,
+                orchard::keys::FullViewingKey,
+                AccountId,
+            >,
         > = HashMap::new();
 
         for (account_id, ufvk) in ufvks {
@@ -264,12 +275,12 @@ impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, 
                 for scope in [Scope::External, Scope::Internal] {
                     sapling.insert(
                         (account_id, scope),
-                        Box::new(ScanningKey {
+                        ScanningKey {
                             ivk: dfvk.to_ivk(scope),
                             nk: Some(dfvk.to_nk(scope)),
                             account_id,
                             key_scope: Some(scope),
-                        }),
+                        },
                     );
                 }
             }
@@ -279,12 +290,12 @@ impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, 
                 for scope in [Scope::External, Scope::Internal] {
                     orchard.insert(
                         (account_id, scope),
-                        Box::new(ScanningKey {
+                        ScanningKey {
                             ivk: fvk.to_ivk(scope),
                             nk: Some(fvk.clone()),
                             account_id,
                             key_scope: Some(scope),
-                        }),
+                        },
                     );
                 }
             }
