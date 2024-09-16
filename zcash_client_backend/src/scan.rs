@@ -56,6 +56,7 @@ pub(crate) trait Decryptor<D: BatchDomain, Output> {
 }
 
 /// A decryptor of outputs as encoded in transactions.
+#[allow(dead_code)]
 pub(crate) struct FullDecryptor;
 
 impl<D: BatchDomain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>> Decryptor<D, Output>
@@ -200,6 +201,7 @@ impl<Item: Task> Tasks<Item> for () {
 ///
 /// This struct implements `DynamicUsage` without any item bounds, but that works because
 /// it only implements `Tasks` for items that implement `DynamicUsage`.
+#[allow(dead_code)]
 pub(crate) struct WithUsage {
     // The current heap usage for all running tasks.
     running_usage: Arc<AtomicUsize>,

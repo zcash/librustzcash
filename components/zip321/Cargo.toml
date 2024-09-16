@@ -22,7 +22,14 @@ nom = "7"
 base64.workspace = true
 percent-encoding.workspace = true
 
+# - Test dependencies
+proptest = { workspace = true, optional = true }
+
 [dev-dependencies]
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 zcash_protocol = { workspace = true, features = ["test-dependencies"] }
 proptest.workspace = true
+
+[features]
+## Exposes APIs that are useful for testing, such as `proptest` strategies.
+test-dependencies = ["dep:proptest"]
