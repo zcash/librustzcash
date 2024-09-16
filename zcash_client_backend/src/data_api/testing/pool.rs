@@ -34,6 +34,19 @@ use super::{DataStoreFactory, TestCache, TestFvk, TestState};
 
 /// Trait that exposes the pool-specific types and operations necessary to run the
 /// single-shielded-pool tests on a given pool.
+///
+/// You should not need to implement this yourself; instead use [`SaplingPoolTester`] or
+/// [`OrchardPoolTester`] as appropriate.
+///
+/// [`SaplingPoolTester`]: super::sapling::SaplingPoolTester
+#[cfg_attr(
+    feature = "orchard",
+    doc = "[`OrchardPoolTester`]: super::orchard::OrchardPoolTester"
+)]
+#[cfg_attr(
+    not(feature = "orchard"),
+    doc = "[`OrchardPoolTester`]: https://github.com/zcash/librustzcash/blob/0777cbc2def6ba6b99f96333eaf96c314c1f3a37/zcash_client_backend/src/data_api/testing/orchard.rs#L33"
+)]
 pub trait ShieldedPoolTester {
     const SHIELDED_PROTOCOL: ShieldedProtocol;
 
@@ -99,6 +112,16 @@ pub trait ShieldedPoolTester {
     fn received_note_count(summary: &ScanSummary) -> usize;
 }
 
+/// Tests sending funds within the given shielded pool in a single transaction.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Checks that the wallet balances are correct.
+/// - Constructs a request to spend part of that balance to an external address in the
+///   same pool.
+/// - Builds the transaction.
+/// - Checks that the transaction was stored, and that the outputs are decryptable and
+///   have the expected details.
 pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,

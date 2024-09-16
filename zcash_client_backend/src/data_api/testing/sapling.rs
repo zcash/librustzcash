@@ -26,6 +26,7 @@ use crate::{
 
 use super::{pool::ShieldedPoolTester, TestState};
 
+/// Type for running pool-agnostic tests on the Sapling pool.
 pub struct SaplingPoolTester;
 impl ShieldedPoolTester for SaplingPoolTester {
     const SHIELDED_PROTOCOL: ShieldedProtocol = ShieldedProtocol::Sapling;

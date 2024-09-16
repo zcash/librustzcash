@@ -30,6 +30,7 @@ use crate::{
     wallet::{Note, ReceivedNote},
 };
 
+/// Type for running pool-agnostic tests on the Orchard pool.
 pub struct OrchardPoolTester;
 impl ShieldedPoolTester for OrchardPoolTester {
     const SHIELDED_PROTOCOL: ShieldedProtocol = ShieldedProtocol::Orchard;
