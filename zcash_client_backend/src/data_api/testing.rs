@@ -107,7 +107,7 @@ pub struct TransactionSummary<AccountId> {
 
 impl<AccountId> TransactionSummary<AccountId> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub fn from_parts(
         account_id: AccountId,
         txid: TxId,
         expiry_height: Option<BlockHeight>,
