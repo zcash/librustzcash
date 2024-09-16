@@ -7,11 +7,17 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::sync`:
+  - `SyncHandle`
+  - `ShutdownListener`
+
 ### Changed
 - The `Account` trait now uses an associated type for its `AccountId`
   type instead of a type parameter. This change allows for the simplification
   of some type signatures.
 - `zcash_client_backend::sync::run`:
+  - It now takes a `ShutdownListener` argument.
   - Transparent outputs are now refreshed in addition to shielded notes.
 
 ### Fixed
