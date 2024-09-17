@@ -830,6 +830,107 @@ pub(crate) trait ScanProgress {
 #[derive(Debug)]
 pub(crate) struct SubtreeScanProgress;
 
+fn subtree_scan_progress(
+    conn: &rusqlite::Connection,
+    table_prefix: &'static str,
+    output_count_col: &'static str,
+    shard_height: u8,
+    birthday_height: BlockHeight,
+    fully_scanned_height: BlockHeight,
+    chain_tip_height: BlockHeight,
+) -> Result<Option<Ratio<u64>>, SqliteClientError> {
+    if fully_scanned_height == chain_tip_height {
+        // Compute the total blocks scanned since the wallet birthday
+        conn.query_row(
+            &format!(
+                "SELECT SUM({output_count_col})
+                FROM blocks
+                WHERE height >= :birthday_height",
+            ),
+            named_params![":birthday_height": u32::from(birthday_height)],
+            |row| {
+                let scanned = row.get::<_, Option<u64>>(0)?;
+                Ok(scanned.map(|n| Ratio::new(n, n)))
+            },
+        )
+        .map_err(SqliteClientError::from)
+    } else {
+        // Get the starting note commitment tree size from the wallet birthday, or failing that
+        // from the blocks table.
+        let start_size = conn
+            .query_row(
+                &format!(
+                    "SELECT birthday_{table_prefix}_tree_size
+                    FROM accounts
+                    WHERE birthday_height = :birthday_height",
+                ),
+                named_params![":birthday_height": u32::from(birthday_height)],
+                |row| row.get::<_, Option<u64>>(0),
+            )
+            .optional()?
+            .flatten()
+            .map(Ok)
+            .or_else(|| {
+                conn.query_row(
+                    &format!(
+                        "SELECT MAX({table_prefix}_commitment_tree_size - {output_count_col})
+                        FROM blocks
+                        WHERE height <= :start_height",
+                    ),
+                    named_params![":start_height": u32::from(birthday_height)],
+                    |row| row.get::<_, Option<u64>>(0),
+                )
+                .optional()
+                .map(|opt| opt.flatten())
+                .transpose()
+            })
+            .transpose()?;
+
+        // Compute the total blocks scanned so far above the starting height
+        let scanned_count = conn.query_row(
+            &format!(
+                "SELECT SUM({output_count_col})
+                FROM blocks
+                WHERE height > :start_height",
+            ),
+            named_params![":start_height": u32::from(birthday_height)],
+            |row| row.get::<_, Option<u64>>(0),
+        )?;
+
+        // We don't have complete information on how many outputs will exist in the shard at
+        // the chain tip without having scanned the chain tip block, so we overestimate by
+        // computing the maximum possible number of notes directly from the shard indices.
+        //
+        // TODO: it would be nice to be able to reliably have the size of the commitment tree
+        // at the chain tip without having to have scanned that block.
+        Ok(conn
+            .query_row(
+                &format!(
+                    "SELECT MIN(shard_index), MAX(shard_index)
+                    FROM {table_prefix}_tree_shards
+                    WHERE subtree_end_height > :start_height
+                    OR subtree_end_height IS NULL",
+                ),
+                named_params![":start_height": u32::from(birthday_height)],
+                |row| {
+                    let min_tree_size = row
+                        .get::<_, Option<u64>>(0)?
+                        .map(|min_idx| min_idx << shard_height);
+                    let max_tree_size = row
+                        .get::<_, Option<u64>>(1)?
+                        .map(|max_idx| (max_idx + 1) << shard_height);
+                    Ok(start_size.or(min_tree_size).zip(max_tree_size).map(
+                        |(min_tree_size, max_tree_size)| {
+                            Ratio::new(scanned_count.unwrap_or(0), max_tree_size - min_tree_size)
+                        },
+                    ))
+                },
+            )
+            .optional()?
+            .flatten())
+    }
+}
+
 impl ScanProgress for SubtreeScanProgress {
     #[tracing::instrument(skip(conn))]
     fn sapling_scan_progress(
@@ -839,89 +940,15 @@ impl ScanProgress for SubtreeScanProgress {
         fully_scanned_height: BlockHeight,
         chain_tip_height: BlockHeight,
     ) -> Result<Option<Ratio<u64>>, SqliteClientError> {
-        if fully_scanned_height == chain_tip_height {
-            // Compute the total blocks scanned since the wallet birthday
-            conn.query_row(
-                "SELECT SUM(sapling_output_count)
-                 FROM blocks
-                 WHERE height >= :birthday_height",
-                named_params![":birthday_height": u32::from(birthday_height)],
-                |row| {
-                    let scanned = row.get::<_, Option<u64>>(0)?;
-                    Ok(scanned.map(|n| Ratio::new(n, n)))
-                },
-            )
-            .map_err(SqliteClientError::from)
-        } else {
-            // Get the starting note commitment tree size from the wallet birthday, or failing that
-            // from the blocks table.
-            let start_size = conn
-                .query_row(
-                    "SELECT birthday_sapling_tree_size
-                     FROM accounts
-                     WHERE birthday_height = :birthday_height",
-                    named_params![":birthday_height": u32::from(birthday_height)],
-                    |row| row.get::<_, Option<u64>>(0),
-                )
-                .optional()?
-                .flatten()
-                .map(Ok)
-                .or_else(|| {
-                    conn.query_row(
-                        "SELECT MAX(sapling_commitment_tree_size - sapling_output_count)
-                         FROM blocks
-                         WHERE height <= :start_height",
-                        named_params![":start_height": u32::from(birthday_height)],
-                        |row| row.get::<_, Option<u64>>(0),
-                    )
-                    .optional()
-                    .map(|opt| opt.flatten())
-                    .transpose()
-                })
-                .transpose()?;
-
-            // Compute the total blocks scanned so far above the starting height
-            let scanned_count = conn.query_row(
-                "SELECT SUM(sapling_output_count)
-                 FROM blocks
-                 WHERE height > :start_height",
-                named_params![":start_height": u32::from(birthday_height)],
-                |row| row.get::<_, Option<u64>>(0),
-            )?;
-
-            // We don't have complete information on how many outputs will exist in the shard at
-            // the chain tip without having scanned the chain tip block, so we overestimate by
-            // computing the maximum possible number of notes directly from the shard indices.
-            //
-            // TODO: it would be nice to be able to reliably have the size of the commitment tree
-            // at the chain tip without having to have scanned that block.
-            Ok(conn
-                .query_row(
-                    "SELECT MIN(shard_index), MAX(shard_index)
-                     FROM sapling_tree_shards
-                     WHERE subtree_end_height > :start_height
-                     OR subtree_end_height IS NULL",
-                    named_params![":start_height": u32::from(birthday_height)],
-                    |row| {
-                        let min_tree_size = row
-                            .get::<_, Option<u64>>(0)?
-                            .map(|min_idx| min_idx << SAPLING_SHARD_HEIGHT);
-                        let max_tree_size = row
-                            .get::<_, Option<u64>>(1)?
-                            .map(|max_idx| (max_idx + 1) << SAPLING_SHARD_HEIGHT);
-                        Ok(start_size.or(min_tree_size).zip(max_tree_size).map(
-                            |(min_tree_size, max_tree_size)| {
-                                Ratio::new(
-                                    scanned_count.unwrap_or(0),
-                                    max_tree_size - min_tree_size,
-                                )
-                            },
-                        ))
-                    },
-                )
-                .optional()?
-                .flatten())
-        }
+        subtree_scan_progress(
+            conn,
+            SAPLING_TABLES_PREFIX,
+            "sapling_output_count",
+            SAPLING_SHARD_HEIGHT,
+            birthday_height,
+            fully_scanned_height,
+            chain_tip_height,
+        )
     }
 
     #[cfg(feature = "orchard")]
@@ -933,88 +960,15 @@ impl ScanProgress for SubtreeScanProgress {
         fully_scanned_height: BlockHeight,
         chain_tip_height: BlockHeight,
     ) -> Result<Option<Ratio<u64>>, SqliteClientError> {
-        if fully_scanned_height == chain_tip_height {
-            // Compute the total blocks scanned since the wallet birthday
-            conn.query_row(
-                "SELECT SUM(orchard_action_count)
-                 FROM blocks
-                 WHERE height >= :birthday_height",
-                named_params![":birthday_height": u32::from(birthday_height)],
-                |row| {
-                    let scanned = row.get::<_, Option<u64>>(0)?;
-                    Ok(scanned.map(|n| Ratio::new(n, n)))
-                },
-            )
-            .map_err(SqliteClientError::from)
-        } else {
-            // Compute the starting number of notes directly from the blocks table
-            let start_size = conn
-                .query_row(
-                    "SELECT birthday_orchard_tree_size
-                     FROM accounts
-                     WHERE birthday_height = :birthday_height",
-                    named_params![":birthday_height": u32::from(birthday_height)],
-                    |row| row.get::<_, Option<u64>>(0),
-                )
-                .optional()?
-                .flatten()
-                .map(Ok)
-                .or_else(|| {
-                    conn.query_row(
-                        "SELECT MAX(orchard_commitment_tree_size - orchard_action_count)
-                         FROM blocks
-                         WHERE height <= :start_height",
-                        named_params![":start_height": u32::from(birthday_height)],
-                        |row| row.get::<_, Option<u64>>(0),
-                    )
-                    .optional()
-                    .map(|opt| opt.flatten())
-                    .transpose()
-                })
-                .transpose()?;
-
-            // Compute the total blocks scanned so far above the starting height
-            let scanned_count = conn.query_row(
-                "SELECT SUM(orchard_action_count)
-                 FROM blocks
-                 WHERE height > :start_height",
-                named_params![":start_height": u32::from(birthday_height)],
-                |row| row.get::<_, Option<u64>>(0),
-            )?;
-
-            // We don't have complete information on how many actions will exist in the shard at
-            // the chain tip without having scanned the chain tip block, so we overestimate by
-            // computing the maximum possible number of notes directly from the shard indices.
-            //
-            // TODO: it would be nice to be able to reliably have the size of the commitment tree
-            // at the chain tip without having to have scanned that block.
-            Ok(conn
-                .query_row(
-                    "SELECT MIN(shard_index), MAX(shard_index)
-                     FROM orchard_tree_shards
-                     WHERE subtree_end_height > :start_height
-                     OR subtree_end_height IS NULL",
-                    named_params![":start_height": u32::from(birthday_height)],
-                    |row| {
-                        let min_tree_size = row
-                            .get::<_, Option<u64>>(0)?
-                            .map(|min_idx| min_idx << ORCHARD_SHARD_HEIGHT);
-                        let max_tree_size = row
-                            .get::<_, Option<u64>>(1)?
-                            .map(|max_idx| (max_idx + 1) << ORCHARD_SHARD_HEIGHT);
-                        Ok(start_size.or(min_tree_size).zip(max_tree_size).map(
-                            |(min_tree_size, max_tree_size)| {
-                                Ratio::new(
-                                    scanned_count.unwrap_or(0),
-                                    max_tree_size - min_tree_size,
-                                )
-                            },
-                        ))
-                    },
-                )
-                .optional()?
-                .flatten())
-        }
+        subtree_scan_progress(
+            conn,
+            ORCHARD_TABLES_PREFIX,
+            "orchard_action_count",
+            ORCHARD_SHARD_HEIGHT,
+            birthday_height,
+            fully_scanned_height,
+            chain_tip_height,
+        )
     }
 }
 
