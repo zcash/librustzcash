@@ -839,21 +839,23 @@ fn subtree_scan_progress(
     fully_scanned_height: BlockHeight,
     chain_tip_height: BlockHeight,
 ) -> Result<Option<Ratio<u64>>, SqliteClientError> {
+    let mut stmt_scanned_count_from = conn.prepare_cached(&format!(
+        "SELECT SUM({output_count_col})
+        FROM blocks
+        WHERE :start_height <= height",
+    ))?;
+
     if fully_scanned_height == chain_tip_height {
         // Compute the total blocks scanned since the wallet birthday
-        conn.query_row(
-            &format!(
-                "SELECT SUM({output_count_col})
-                FROM blocks
-                WHERE height >= :birthday_height",
-            ),
-            named_params![":birthday_height": u32::from(birthday_height)],
-            |row| {
-                let scanned = row.get::<_, Option<u64>>(0)?;
-                Ok(scanned.map(|n| Ratio::new(n, n)))
-            },
-        )
-        .map_err(SqliteClientError::from)
+        stmt_scanned_count_from
+            .query_row(
+                named_params![":start_height": u32::from(birthday_height)],
+                |row| {
+                    let scanned = row.get::<_, Option<u64>>(0)?;
+                    Ok(scanned.map(|n| Ratio::new(n, n)))
+                },
+            )
+            .map_err(SqliteClientError::from)
     } else {
         // Get the starting note commitment tree size from the wallet birthday, or failing that
         // from the blocks table.
@@ -887,13 +889,8 @@ fn subtree_scan_progress(
             .transpose()?;
 
         // Compute the total blocks scanned so far above the starting height
-        let scanned_count = conn.query_row(
-            &format!(
-                "SELECT SUM({output_count_col})
-                FROM blocks
-                WHERE height > :start_height",
-            ),
-            named_params![":start_height": u32::from(birthday_height)],
+        let scanned_count = stmt_scanned_count_from.query_row(
+            named_params![":start_height": u32::from(birthday_height + 1)],
             |row| row.get::<_, Option<u64>>(0),
         )?;
 
