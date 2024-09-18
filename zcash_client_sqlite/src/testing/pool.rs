@@ -686,8 +686,21 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
         NonNegativeAmount::ZERO
     );
 
+    // The account is configured without a recover-until height, so is by definition
+    // fully recovered, and we count 1 per pool for both numerator and denominator.
+    let fully_recovered = {
+        let n = 1;
+        #[cfg(feature = "orchard")]
+        let n = n * 2;
+        Some(Ratio::new(n, n))
+    };
+
     // Wallet is fully scanned
     let summary = st.get_wallet_summary(1);
+    assert_eq!(
+        summary.as_ref().and_then(|s| s.recovery_progress()),
+        fully_recovered,
+    );
     assert_eq!(
         summary.and_then(|s| s.scan_progress()),
         Some(Ratio::new(1, 1))
@@ -705,6 +718,10 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
 
     // Wallet is still fully scanned
     let summary = st.get_wallet_summary(1);
+    assert_eq!(
+        summary.as_ref().and_then(|s| s.recovery_progress()),
+        fully_recovered
+    );
     assert_eq!(
         summary.and_then(|s| s.scan_progress()),
         Some(Ratio::new(2, 2))

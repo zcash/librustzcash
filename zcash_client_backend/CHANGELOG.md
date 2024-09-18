@@ -7,10 +7,18 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api`:
+  - `WalletSummary::recovery_progress`
+
 ### Changed
 - The `Account` trait now uses an associated type for its `AccountId`
   type instead of a type parameter. This change allows for the simplification
   of some type signatures.
+- `zcash_client_backend::data_api`:
+  - `WalletSummary::scan_progress` now only reports progress for scanning blocks
+    "near" the chain tip. Progress for scanning earlier blocks is now reported
+    via `WalletSummary::recovery_progress`.
 - `zcash_client_backend::sync::run`:
   - Transparent outputs are now refreshed in addition to shielded notes.
 

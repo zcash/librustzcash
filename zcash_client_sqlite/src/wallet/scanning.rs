@@ -1292,8 +1292,21 @@ pub(crate) mod tests {
         let birthday = account.birthday();
         let sap_active = st.sapling_activation_height();
 
+        // The account is configured without a recover-until height, so is by definition
+        // fully recovered, and we count 1 per pool for both numerator and denominator.
+        let fully_recovered = {
+            let n = 1;
+            #[cfg(feature = "orchard")]
+            let n = n * 2;
+            Some(Ratio::new(n, n))
+        };
+
         // We have scan ranges and a subtree, but have scanned no blocks.
         let summary = st.get_wallet_summary(1);
+        assert_eq!(
+            summary.as_ref().and_then(|s| s.recovery_progress()),
+            fully_recovered,
+        );
         assert_eq!(summary.and_then(|s| s.scan_progress()), None);
 
         // Set up prior chain state. This simulates us having imported a wallet
@@ -1331,6 +1344,11 @@ pub(crate) mod tests {
         // wallet birthday but before the end of the shard.
         let summary = st.get_wallet_summary(1);
         assert_eq!(summary.as_ref().map(|s| T::next_subtree_index(s)), Some(0));
+
+        assert_eq!(
+            summary.as_ref().and_then(|s| s.recovery_progress()),
+            fully_recovered,
+        );
 
         // Progress denominator depends on which pools are enabled (which changes the
         // initial tree states). Here we compute the denominator based upon the fact that
