@@ -815,9 +815,10 @@ pub(crate) struct Progress {
 }
 
 pub(crate) trait ScanProgress {
-    fn sapling_scan_progress(
+    fn sapling_scan_progress<P: consensus::Parameters>(
         &self,
         conn: &rusqlite::Connection,
+        params: &P,
         birthday_height: BlockHeight,
         recover_until_height: Option<BlockHeight>,
         fully_scanned_height: BlockHeight,
@@ -825,9 +826,10 @@ pub(crate) trait ScanProgress {
     ) -> Result<Progress, SqliteClientError>;
 
     #[cfg(feature = "orchard")]
-    fn orchard_scan_progress(
+    fn orchard_scan_progress<P: consensus::Parameters>(
         &self,
         conn: &rusqlite::Connection,
+        params: &P,
         birthday_height: BlockHeight,
         recover_until_height: Option<BlockHeight>,
         fully_scanned_height: BlockHeight,
@@ -839,11 +841,13 @@ pub(crate) trait ScanProgress {
 pub(crate) struct SubtreeScanProgress;
 
 #[allow(clippy::too_many_arguments)]
-fn subtree_scan_progress(
+fn subtree_scan_progress<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
+    params: &P,
     table_prefix: &'static str,
     output_count_col: &'static str,
     shard_height: u8,
+    pool_activation_height: BlockHeight,
     birthday_height: BlockHeight,
     recover_until_height: Option<BlockHeight>,
     fully_scanned_height: BlockHeight,
@@ -863,6 +867,11 @@ fn subtree_scan_progress(
         "SELECT MAX({table_prefix}_commitment_tree_size - {output_count_col})
         FROM blocks
         WHERE height <= :start_height",
+    ))?;
+    let mut stmt_end_tree_size_at = conn.prepare_cached(&format!(
+        "SELECT {table_prefix}_commitment_tree_size
+        FROM blocks
+        WHERE height = :height",
     ))?;
 
     if fully_scanned_height == chain_tip_height {
@@ -954,16 +963,13 @@ fn subtree_scan_progress(
             })
             .transpose()?;
 
-        // We don't have complete information on how many outputs will exist in the shard at
-        // the chain tip without having scanned the chain tip block, so we overestimate by
-        // computing the maximum possible number of notes directly from the shard indices.
-        //
-        // TODO: it would be nice to be able to reliably have the size of the commitment tree
-        // at the chain tip without having to have scanned that block.
-        let (min_tree_size, max_tree_size) = conn
+        // In case we didn't have information about the tree size at the recover-until
+        // height, get the tree size from a nearby subtree. It's fine for this to be
+        // approximate; it just shifts the boundary between scan and recover progress.
+        let min_tree_size = conn
             .query_row(
                 &format!(
-                    "SELECT MIN(shard_index), MAX(shard_index)
+                    "SELECT MIN(shard_index)
                     FROM {table_prefix}_tree_shards
                     WHERE subtree_end_height > :start_height
                     OR subtree_end_height IS NULL",
@@ -975,15 +981,181 @@ fn subtree_scan_progress(
                     let min_tree_size = row
                         .get::<_, Option<u64>>(0)?
                         .map(|min_idx| min_idx << shard_height);
-                    let max_tree_size = row
-                        .get::<_, Option<u64>>(1)?
-                        .map(|max_idx| (max_idx + 1) << shard_height);
-                    Ok(min_tree_size.zip(max_tree_size))
+                    Ok(min_tree_size)
                 },
             )
             .optional()?
+            .flatten();
+
+        // If we've scanned the block at the chain tip, we know how many notes are
+        // currently in the tree.
+        let tip_tree_size = match stmt_end_tree_size_at
+            .query_row(
+                named_params! {":height": u32::from(chain_tip_height)},
+                |row| row.get::<_, Option<u64>>(0),
+            )
+            .optional()?
             .flatten()
-            .unzip();
+        {
+            Some(tree_size) => Some(tree_size),
+            None => {
+                // Estimate the size of the tree by linear extrapolation from available
+                // data closest to the chain tip.
+                //
+                // - If we have scanned blocks within the incomplete subtree, and we know
+                //   the tree size for the end of the most recent scanned range, then we
+                //   extrapolate from the start of the incomplete subtree:
+                //
+                //         subtree
+                //         /     \
+                //       /         \
+                //     /             \
+                //   /                 \
+                //   |<--------->|  |
+                //     | scanned |  tip
+                //           last_scanned
+                //
+                //
+                //             subtree
+                //             /     \
+                //           /         \
+                //         /             \
+                //       /                 \
+                //       |<------->|    |
+                //   |   scanned   |    tip
+                //             last_scanned
+                //
+                // - If we don't have scanned blocks within the incomplete subtree, or we
+                //   don't know the tree size, then we extrapolate from the block-width of
+                //   the last complete subtree.
+                //
+                // This avoids having a sharp discontinuity in the progress percentages
+                // shown to users, and gets more accurate the closer to the chain tip we
+                // have scanned.
+                //
+                // TODO: it would be nice to be able to reliably have the size of the
+                // commitment tree at the chain tip without having to have scanned that
+                // block.
+
+                // Get the tree size at the last scanned height, if known.
+                let last_scanned = block_max_scanned(conn, params)?.and_then(|last_scanned| {
+                    match table_prefix {
+                        SAPLING_TABLES_PREFIX => last_scanned.sapling_tree_size(),
+                        #[cfg(feature = "orchard")]
+                        ORCHARD_TABLES_PREFIX => last_scanned.orchard_tree_size(),
+                        _ => unreachable!(),
+                    }
+                    .map(|tree_size| (last_scanned.block_height(), u64::from(tree_size)))
+                });
+
+                // Get the last completed subtree.
+                let last_completed_subtree = conn
+                    .query_row(
+                        &format!(
+                            "SELECT shard_index, subtree_end_height
+                            FROM {table_prefix}_tree_shards
+                            WHERE subtree_end_height IS NOT NULL
+                            ORDER BY shard_index DESC
+                            LIMIT 1"
+                        ),
+                        [],
+                        |row| {
+                            Ok((
+                                incrementalmerkletree::Address::from_parts(
+                                    incrementalmerkletree::Level::new(shard_height),
+                                    row.get(0)?,
+                                ),
+                                BlockHeight::from_u32(row.get(1)?),
+                            ))
+                        },
+                    )
+                    // `None` if we have no subtree roots yet.
+                    .optional()?;
+
+                if let Some((last_completed_subtree, last_completed_subtree_end)) =
+                    last_completed_subtree
+                {
+                    // If we know the tree size at the last scanned height, and that
+                    // height is within the incomplete subtree, extrapolate.
+                    let tip_tree_size =
+                        last_scanned.and_then(|(last_scanned, last_scanned_tree_size)| {
+                            (last_scanned > last_completed_subtree_end)
+                                .then(|| {
+                                    let scanned_notes = last_scanned_tree_size
+                                        - u64::from(last_completed_subtree.position_range_end());
+                                    let scanned_range =
+                                        u64::from(last_scanned - last_completed_subtree_end);
+                                    let unscanned_range =
+                                        u64::from(chain_tip_height - last_scanned);
+
+                                    (scanned_notes * unscanned_range)
+                                        .checked_div(scanned_range)
+                                        .map(|extrapolated_unscanned_notes| {
+                                            last_scanned_tree_size + extrapolated_unscanned_notes
+                                        })
+                                })
+                                .flatten()
+                        });
+
+                    if let Some(tree_size) = tip_tree_size {
+                        Some(tree_size)
+                    } else if let Some(second_to_last_completed_subtree_end) =
+                        last_completed_subtree
+                            .index()
+                            .checked_sub(1)
+                            .and_then(|subtree_index| {
+                                conn.query_row(
+                                    &format!(
+                                        "SELECT subtree_end_height
+                                        FROM {table_prefix}_tree_shards
+                                        WHERE shard_index = :shard_index"
+                                    ),
+                                    named_params! {":shard_index": subtree_index},
+                                    |row| {
+                                        Ok(row.get::<_, Option<_>>(0)?.map(BlockHeight::from_u32))
+                                    },
+                                )
+                                .transpose()
+                            })
+                            .transpose()?
+                    {
+                        let notes_in_complete_subtrees =
+                            u64::from(last_completed_subtree.position_range_end());
+
+                        let subtree_notes = 1 << shard_height;
+                        let subtree_range = u64::from(
+                            last_completed_subtree_end - second_to_last_completed_subtree_end,
+                        );
+                        let unscanned_range =
+                            u64::from(chain_tip_height - last_completed_subtree_end);
+
+                        (subtree_notes * unscanned_range)
+                            .checked_div(subtree_range)
+                            .map(|extrapolated_incomplete_subtree_notes| {
+                                notes_in_complete_subtrees + extrapolated_incomplete_subtree_notes
+                            })
+                    } else {
+                        // There's only one completed subtree; its start height must
+                        // be the activation height for this shielded protocol.
+                        let subtree_notes = 1 << shard_height;
+
+                        let subtree_range =
+                            u64::from(last_completed_subtree_end - pool_activation_height);
+                        let unscanned_range =
+                            u64::from(chain_tip_height - last_completed_subtree_end);
+
+                        (subtree_notes * unscanned_range)
+                            .checked_div(subtree_range)
+                            .map(|extrapolated_incomplete_subtree_notes| {
+                                subtree_notes + extrapolated_incomplete_subtree_notes
+                            })
+                    }
+                } else {
+                    // We don't have subtree information, so give up. We'll get it soon.
+                    None
+                }
+            }
+        };
 
         let recover = recovered_count
             .zip(recover_until_size)
@@ -1017,9 +1189,9 @@ fn subtree_scan_progress(
             recover_until_size
                 .unwrap_or(start_size)
                 .or(min_tree_size)
-                .zip(max_tree_size)
-                .map(|(min_tree_size, max_tree_size)| {
-                    Ratio::new(scanned_count.unwrap_or(0), max_tree_size - min_tree_size)
+                .zip(tip_tree_size)
+                .map(|(start_size, tip_tree_size)| {
+                    Ratio::new(scanned_count.unwrap_or(0), tip_tree_size - start_size)
                 })
         };
 
@@ -1028,10 +1200,11 @@ fn subtree_scan_progress(
 }
 
 impl ScanProgress for SubtreeScanProgress {
-    #[tracing::instrument(skip(conn))]
-    fn sapling_scan_progress(
+    #[tracing::instrument(skip(conn, params))]
+    fn sapling_scan_progress<P: consensus::Parameters>(
         &self,
         conn: &rusqlite::Connection,
+        params: &P,
         birthday_height: BlockHeight,
         recover_until_height: Option<BlockHeight>,
         fully_scanned_height: BlockHeight,
@@ -1039,9 +1212,13 @@ impl ScanProgress for SubtreeScanProgress {
     ) -> Result<Progress, SqliteClientError> {
         subtree_scan_progress(
             conn,
+            params,
             SAPLING_TABLES_PREFIX,
             "sapling_output_count",
             SAPLING_SHARD_HEIGHT,
+            params
+                .activation_height(NetworkUpgrade::Sapling)
+                .expect("Sapling activation height must be available."),
             birthday_height,
             recover_until_height,
             fully_scanned_height,
@@ -1050,10 +1227,11 @@ impl ScanProgress for SubtreeScanProgress {
     }
 
     #[cfg(feature = "orchard")]
-    #[tracing::instrument(skip(conn))]
-    fn orchard_scan_progress(
+    #[tracing::instrument(skip(conn, params))]
+    fn orchard_scan_progress<P: consensus::Parameters>(
         &self,
         conn: &rusqlite::Connection,
+        params: &P,
         birthday_height: BlockHeight,
         recover_until_height: Option<BlockHeight>,
         fully_scanned_height: BlockHeight,
@@ -1061,9 +1239,13 @@ impl ScanProgress for SubtreeScanProgress {
     ) -> Result<Progress, SqliteClientError> {
         subtree_scan_progress(
             conn,
+            params,
             ORCHARD_TABLES_PREFIX,
             "orchard_action_count",
             ORCHARD_SHARD_HEIGHT,
+            params
+                .activation_height(NetworkUpgrade::Nu5)
+                .expect("NU5 activation height must be available."),
             birthday_height,
             recover_until_height,
             fully_scanned_height,
@@ -1103,6 +1285,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
     let sapling_progress = progress.sapling_scan_progress(
         tx,
+        params,
         birthday_height,
         recover_until_height,
         fully_scanned_height,
@@ -1112,6 +1295,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     #[cfg(feature = "orchard")]
     let orchard_progress = progress.orchard_scan_progress(
         tx,
+        params,
         birthday_height,
         recover_until_height,
         fully_scanned_height,

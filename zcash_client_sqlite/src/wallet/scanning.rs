@@ -570,7 +570,7 @@ pub(crate) mod tests {
             pool::ShieldedPoolTester, sapling::SaplingPoolTester, AddressType, FakeCompactOutput,
             InitialChainState, TestBuilder, TestState,
         },
-        AccountBirthday, Ratio, WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
+        AccountBirthday, Ratio, WalletRead, WalletWrite,
     };
     use zcash_primitives::{
         block::BlockHash,
@@ -1351,11 +1351,12 @@ pub(crate) mod tests {
         );
 
         // Progress denominator depends on which pools are enabled (which changes the
-        // initial tree states). Here we compute the denominator based upon the fact that
-        // the trees are the same size at present.
-        let expected_denom = (1 << SAPLING_SHARD_HEIGHT) * 2 - frontier_tree_size;
+        // initial tree states), and is extrapolated from the scanned range.
+        let expected_denom = 10
+            + ((1234 + 10) * (prior_tip - max_scanned)) / (max_scanned - (birthday.height() - 10));
         #[cfg(feature = "orchard")]
         let expected_denom = expected_denom * 2;
+        let expected_denom = expected_denom + 1;
         assert_eq!(
             summary.and_then(|s| s.scan_progress()),
             Some(Ratio::new(1, u64::from(expected_denom)))
@@ -1427,10 +1428,16 @@ pub(crate) mod tests {
         let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
 
-        // We've crossed a subtree boundary, but only in one pool. We still only have one scanned
-        // note but in the pool where we crossed the subtree boundary we have two shards worth of
-        // notes to scan.
-        let expected_denom = expected_denom + (1 << 16);
+        // We've crossed a subtree boundary, but only in one pool.
+        let expected_denom = (1 << 16) * 2
+            + ((1 << 16) * (new_tip - last_shard_start))
+                / (last_shard_start - (birthday.height() - 10))
+            - frontier_tree_size;
+        #[cfg(feature = "orchard")]
+        let expected_denom = expected_denom
+            + (10
+                + ((1234 + 10) * (new_tip - max_scanned))
+                    / (max_scanned - (birthday.height() - 10)));
         let summary = st.get_wallet_summary(1);
         assert_eq!(
             summary.and_then(|s| s.scan_progress()),

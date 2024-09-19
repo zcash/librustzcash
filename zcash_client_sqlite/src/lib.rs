@@ -74,7 +74,7 @@ use zip32::fingerprint::SeedFingerprint;
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
-#[cfg(any(feature = "test-dependencies", not(feature = "orchard")))]
+#[cfg(any(test, feature = "test-dependencies", not(feature = "orchard")))]
 use zcash_protocol::PoolType;
 
 #[cfg(feature = "orchard")]
