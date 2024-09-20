@@ -3194,7 +3194,7 @@ pub mod testing {
 
         let results = stmt
             .query_and_then::<TransactionSummary<AccountId>, SqliteClientError, _, _>([], |row| {
-                Ok(TransactionSummary::new(
+                Ok(TransactionSummary::from_parts(
                     AccountId(row.get("account_id")?),
                     TxId::from_bytes(row.get("txid")?),
                     row.get::<_, Option<u32>>("expiry_height")?

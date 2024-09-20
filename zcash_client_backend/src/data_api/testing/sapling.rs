@@ -19,13 +19,14 @@ use zip32::Scope;
 use crate::{
     data_api::{
         chain::{CommitmentTreeRoot, ScanSummary},
-        DecryptedTransaction, InputSource, WalletCommitmentTrees, WalletRead, WalletSummary,
+        DecryptedTransaction, InputSource, WalletCommitmentTrees, WalletSummary, WalletTest,
     },
     wallet::{Note, ReceivedNote},
 };
 
 use super::{pool::ShieldedPoolTester, TestState};
 
+/// Type for running pool-agnostic tests on the Sapling pool.
 pub struct SaplingPoolTester;
 impl ShieldedPoolTester for SaplingPoolTester {
     const SHIELDED_PROTOCOL: ShieldedProtocol = ShieldedProtocol::Sapling;
@@ -36,7 +37,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
     type MerkleTreeHash = sapling::Node;
     type Note = sapling::Note;
 
-    fn test_account_fvk<Cache, DbT: WalletRead, P: consensus::Parameters>(
+    fn test_account_fvk<Cache, DbT: WalletTest, P: consensus::Parameters>(
         st: &TestState<Cache, DbT, P>,
     ) -> Self::Fvk {
         st.test_account_sapling().unwrap().clone()
@@ -74,7 +75,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
         ::sapling::Node::empty_root(level)
     }
 
-    fn put_subtree_roots<Cache, DbT: WalletRead + WalletCommitmentTrees, P>(
+    fn put_subtree_roots<Cache, DbT: WalletTest + WalletCommitmentTrees, P>(
         st: &mut TestState<Cache, DbT, P>,
         start_index: u64,
         roots: &[CommitmentTreeRoot<Self::MerkleTreeHash>],
@@ -87,7 +88,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
         s.next_sapling_subtree_index()
     }
 
-    fn select_spendable_notes<Cache, DbT: InputSource + WalletRead, P>(
+    fn select_spendable_notes<Cache, DbT: InputSource + WalletTest, P>(
         st: &TestState<Cache, DbT, P>,
         account: <DbT as InputSource>::AccountId,
         target_value: Zatoshis,

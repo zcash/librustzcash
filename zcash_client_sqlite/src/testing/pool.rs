@@ -100,7 +100,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     use rand_core::OsRng;
     use zcash_client_backend::{
-        data_api::{TransactionDataRequest, TransactionStatus},
+        data_api::{TransactionDataRequest, TransactionStatus, WalletTest},
         fees::ChangeValue,
         wallet::TransparentAddressMetadata,
     };

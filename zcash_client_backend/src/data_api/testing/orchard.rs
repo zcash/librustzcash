@@ -25,11 +25,12 @@ use crate::{
     data_api::{
         chain::{CommitmentTreeRoot, ScanSummary},
         testing::{pool::ShieldedPoolTester, TestState},
-        DecryptedTransaction, InputSource, WalletCommitmentTrees, WalletRead, WalletSummary,
+        DecryptedTransaction, InputSource, WalletCommitmentTrees, WalletSummary, WalletTest,
     },
     wallet::{Note, ReceivedNote},
 };
 
+/// Type for running pool-agnostic tests on the Orchard pool.
 pub struct OrchardPoolTester;
 impl ShieldedPoolTester for OrchardPoolTester {
     const SHIELDED_PROTOCOL: ShieldedProtocol = ShieldedProtocol::Orchard;
@@ -40,7 +41,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
     type MerkleTreeHash = MerkleHashOrchard;
     type Note = orchard::note::Note;
 
-    fn test_account_fvk<Cache, DbT: WalletRead, P: consensus::Parameters>(
+    fn test_account_fvk<Cache, DbT: WalletTest, P: consensus::Parameters>(
         st: &TestState<Cache, DbT, P>,
     ) -> Self::Fvk {
         st.test_account_orchard().unwrap().clone()
@@ -90,7 +91,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
         MerkleHashOrchard::empty_root(level)
     }
 
-    fn put_subtree_roots<Cache, DbT: WalletRead + WalletCommitmentTrees, P>(
+    fn put_subtree_roots<Cache, DbT: WalletTest + WalletCommitmentTrees, P>(
         st: &mut TestState<Cache, DbT, P>,
         start_index: u64,
         roots: &[CommitmentTreeRoot<Self::MerkleTreeHash>],
@@ -103,7 +104,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
         s.next_orchard_subtree_index()
     }
 
-    fn select_spendable_notes<Cache, DbT: InputSource + WalletRead, P>(
+    fn select_spendable_notes<Cache, DbT: InputSource + WalletTest, P>(
         st: &TestState<Cache, DbT, P>,
         account: <DbT as InputSource>::AccountId,
         target_value: Zatoshis,

@@ -1166,13 +1166,20 @@ pub trait WalletRead {
     /// transaction data requests, such as when it is necessary to fill in purely-transparent
     /// transaction history by walking the chain backwards via transparent inputs.
     fn transaction_data_requests(&self) -> Result<Vec<TransactionDataRequest>, Self::Error>;
+}
 
+/// Read-only operations required for testing light wallet functions.
+///
+/// These methods expose internal details or unstable interfaces, primarily to enable use
+/// of the [`testing`] framework. They should not be used in production software.
+#[cfg(any(test, feature = "test-dependencies"))]
+#[delegatable_trait]
+pub trait WalletTest: WalletRead {
     /// Returns a vector of transaction summaries.
     ///
     /// Currently test-only, as production use could return a very large number of results; either
     /// pagination or a streaming design will be necessary to stabilize this feature for production
     /// use.
-    #[cfg(any(test, feature = "test-dependencies"))]
     fn get_tx_history(
         &self,
     ) -> Result<Vec<testing::TransactionSummary<Self::AccountId>>, Self::Error> {
@@ -1181,7 +1188,6 @@ pub trait WalletRead {
 
     /// Returns the note IDs for shielded notes sent by the wallet in a particular
     /// transaction.
-    #[cfg(any(test, feature = "test-dependencies"))]
     fn get_sent_note_ids(
         &self,
         _txid: &TxId,
