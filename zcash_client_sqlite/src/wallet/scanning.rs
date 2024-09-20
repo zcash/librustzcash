@@ -1362,13 +1362,12 @@ pub(crate) mod tests {
             Some(Ratio::new(1, u64::from(expected_denom)))
         );
 
-        // Now simulate shutting down, and then restarting 70 blocks later, after a shard
-        // has been completed in one pool. This shard will have index 2, as our birthday
-        // was in shard 1.
+        // Now simulate shutting down, and then restarting 70 blocks later, after the
+        // shard containing our birthday has been completed in one pool.
         let last_shard_start = prior_tip + 50;
         T::put_subtree_roots(
             &mut st,
-            2,
+            1,
             &[CommitmentTreeRoot::from_parts(
                 last_shard_start,
                 // fake a hash, the value doesn't matter
@@ -1384,13 +1383,17 @@ pub(crate) mod tests {
                 .conn
                 .prepare("SELECT shard_index, subtree_end_height FROM sapling_tree_shards")
                 .unwrap();
-            (shard_stmt
-                .query_and_then::<_, rusqlite::Error, _, _>([], |row| {
-                    Ok((row.get::<_, u32>(0)?, row.get::<_, Option<u32>>(1)?))
-                })
+            assert_eq!(
+                (shard_stmt
+                    .query_and_then::<_, rusqlite::Error, _, _>([], |row| {
+                        Ok((row.get::<_, u32>(0)?, row.get::<_, Option<u32>>(1)?))
+                    })
+                    .unwrap()
+                    .collect::<Result<Vec<_>, _>>())
                 .unwrap()
-                .collect::<Result<Vec<_>, _>>())
-            .unwrap();
+                .len(),
+                2,
+            );
         }
 
         {
@@ -1400,13 +1403,21 @@ pub(crate) mod tests {
                 .conn
                 .prepare("SELECT shard_index, subtree_end_height FROM orchard_tree_shards")
                 .unwrap();
-            (shard_stmt
-                .query_and_then::<_, rusqlite::Error, _, _>([], |row| {
-                    Ok((row.get::<_, u32>(0)?, row.get::<_, Option<u32>>(1)?))
-                })
+            #[cfg(not(feature = "orchard"))]
+            let expected_shards = 0;
+            #[cfg(feature = "orchard")]
+            let expected_shards = 2;
+            assert_eq!(
+                (shard_stmt
+                    .query_and_then::<_, rusqlite::Error, _, _>([], |row| {
+                        Ok((row.get::<_, u32>(0)?, row.get::<_, Option<u32>>(1)?))
+                    })
+                    .unwrap()
+                    .collect::<Result<Vec<_>, _>>())
                 .unwrap()
-                .collect::<Result<Vec<_>, _>>())
-            .unwrap();
+                .len(),
+                expected_shards,
+            );
         }
 
         let new_tip = last_shard_start + 20;
