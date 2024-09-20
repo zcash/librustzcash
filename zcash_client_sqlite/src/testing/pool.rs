@@ -32,14 +32,13 @@ use zcash_client_backend::{
 };
 use zcash_primitives::{
     block::BlockHash,
-    consensus::{BranchId, NetworkUpgrade, Parameters},
+    consensus::{NetworkUpgrade, Parameters},
     legacy::TransparentAddress,
     transaction::{
         components::amount::NonNegativeAmount,
         fees::{
             fixed::FeeRule as FixedFeeRule, zip317::FeeError as Zip317FeeError, StandardFeeRule,
         },
-        Transaction,
     },
     zip32::Scope,
 };
@@ -51,7 +50,7 @@ use crate::{
         db::{TestDb, TestDbFactory},
         BlockCache,
     },
-    wallet::{commitment_tree, truncate_to_height},
+    wallet::commitment_tree,
     ReceivedNoteId, SAPLING_TABLES_PREFIX,
 };
 
@@ -990,16 +989,11 @@ pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
         let txid = st.create_proposed_transactions(account.usk(), ovk_policy, &proposal)?[0];
 
         // Fetch the transaction from the database
-        let raw_tx: Vec<_> = st
+        let tx = st
             .wallet()
-            .conn()
-            .query_row(
-                "SELECT raw FROM transactions WHERE txid = ?",
-                [txid.as_ref()],
-                |row| row.get(0),
-            )
+            .get_transaction(txid)
+            .map_err(Error::DataSource)?
             .unwrap();
-        let tx = Transaction::read(&raw_tx[..], BranchId::Canopy).unwrap();
 
         Ok(T::try_output_recovery(st.network(), h1, &tx, &dfvk))
     };
@@ -1531,12 +1525,6 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
 
     // Scan the block
     st.scan_cached_blocks(account.birthday().height() + 10, 1);
-
-    // Fake that everything has been scanned
-    st.wallet()
-        .conn()
-        .execute_batch("UPDATE scan_queue SET priority = 10")
-        .unwrap();
 
     // Verify that our note is considered spendable
     let spendable = T::select_spendable_notes(
@@ -2163,10 +2151,7 @@ pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
     );
 
     // "Rewind" to height of last scanned block (this is a no-op)
-    st.wallet_mut()
-        .db_mut()
-        .transactionally(|wdb| truncate_to_height(wdb.conn.0, &wdb.params, h + 1))
-        .unwrap();
+    st.wallet_mut().truncate_to_height(h + 1).unwrap();
 
     // Spendable balance should be unaltered
     assert_eq!(
@@ -2175,10 +2160,7 @@ pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
     );
 
     // Rewind so that one block is dropped
-    st.wallet_mut()
-        .db_mut()
-        .transactionally(|wdb| truncate_to_height(wdb.conn.0, &wdb.params, h))
-        .unwrap();
+    st.wallet_mut().truncate_to_height(h).unwrap();
 
     // Spendable balance should only contain the first received note;
     // the rest should be pending.
