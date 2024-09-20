@@ -1223,9 +1223,7 @@ pub trait WalletTest: InputSource + WalletRead {
     ) -> Result<
         Vec<testing::TransactionSummary<<Self as WalletRead>::AccountId>>,
         <Self as WalletRead>::Error,
-    > {
-        Ok(vec![])
-    }
+    >;
 
     /// Returns the note IDs for shielded notes sent by the wallet in a particular
     /// transaction.
@@ -1233,9 +1231,7 @@ pub trait WalletTest: InputSource + WalletRead {
         &self,
         _txid: &TxId,
         _protocol: ShieldedProtocol,
-    ) -> Result<Vec<NoteId>, <Self as WalletRead>::Error> {
-        Ok(vec![])
-    }
+    ) -> Result<Vec<NoteId>, <Self as WalletRead>::Error>;
 
     #[allow(clippy::type_complexity)]
     fn get_confirmed_sends(
