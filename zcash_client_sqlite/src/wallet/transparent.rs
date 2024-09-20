@@ -949,13 +949,13 @@ mod tests {
         assert_matches!(res2, Err(_));
     }
 
-    #[test]
-    fn transparent_balance_across_shielding() {
+    #[tokio::test]
+    async fn transparent_balance_across_shielding() {
         use zcash_client_backend::ShieldedProtocol;
 
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory)
-            .with_block_cache(BlockCache::new())
+            .with_block_cache(BlockCache::new().await)
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
@@ -970,12 +970,14 @@ mod tests {
         // Initialize the wallet with chain data that has no shielded notes for us.
         let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
         let not_our_value = NonNegativeAmount::const_from_u64(10000);
-        let (start_height, _, _) =
-            st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+        let (start_height, _, _) = st
+            .generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value)
+            .await;
         for _ in 1..10 {
-            st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+            st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value)
+                .await;
         }
-        st.scan_cached_blocks(start_height, 10);
+        st.scan_cached_blocks(start_height, 10).await;
 
         let check_balance = |st: &TestState<_, TestDb, _>, min_confirmations: u32, expected| {
             // Check the wallet summary returns the expected transparent balance.
@@ -1054,8 +1056,8 @@ mod tests {
         check_balance(&st, 0, NonNegativeAmount::ZERO);
 
         // Mine the shielding transaction.
-        let (mined_height, _) = st.generate_next_block_including(txid);
-        st.scan_cached_blocks(mined_height, 1);
+        let (mined_height, _) = st.generate_next_block_including(txid).await;
+        st.scan_cached_blocks(mined_height, 1).await;
 
         // The wallet should still have zero transparent balance.
         check_balance(&st, 0, NonNegativeAmount::ZERO);

@@ -99,7 +99,7 @@ pub trait ShieldedPoolTester {
     fn received_note_count(summary: &ScanSummary) -> usize;
 }
 
-pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
+pub async fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
@@ -114,8 +114,10 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
 
     // Add funds to the wallet in a single note
     let value = Zatoshis::const_from_u64(60000);
-    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-    st.scan_cached_blocks(h, 1);
+    let (h, _, _) = st
+        .generate_next_block(&dfvk, AddressType::DefaultExternal, value)
+        .await;
+    st.scan_cached_blocks(h, 1).await;
 
     // Spendable balance matches total balance
     assert_eq!(st.get_total_balance(account.id()), value);

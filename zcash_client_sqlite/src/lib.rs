@@ -39,16 +39,17 @@ use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, ShardTree};
 use std::{
     borrow::Borrow, collections::HashMap, convert::AsRef, fmt, num::NonZeroU32, ops::Range,
-    path::Path,
+    path::Path, sync::Arc,
 };
 use subtle::ConditionallySelectable;
+use tokio::sync::Mutex;
 use tracing::{debug, trace, warn};
 
 use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{
         self,
-        chain::{BlockSource, ChainState, CommitmentTreeRoot},
+        chain::{BlockCache, BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
         Account, AccountBirthday, AccountPurpose, AccountSource, BlockMetadata,
         DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
@@ -74,7 +75,7 @@ use zip32::fingerprint::SeedFingerprint;
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
-#[cfg(any(feature = "test-dependencies", not(feature = "orchard")))]
+#[cfg(any(test, feature = "test-dependencies", not(feature = "orchard")))]
 use zcash_protocol::PoolType;
 
 #[cfg(feature = "orchard")]
@@ -116,8 +117,9 @@ impl<T> ParallelSliceMut<T> for [T] {
 #[cfg(feature = "unstable")]
 use {
     crate::chain::{fsblockdb_with_blocks, BlockMeta},
+    prost::Message,
     std::path::PathBuf,
-    std::{fs, io},
+    std::{fs, io, io::Write},
 };
 
 pub mod chain;
@@ -1458,28 +1460,110 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
 }
 
 /// A handle for the SQLite block source.
-pub struct BlockDb(Connection);
+pub struct BlockDb(Arc<Mutex<Connection>>);
 
 impl BlockDb {
     /// Opens a connection to the wallet database stored at the specified path.
     pub fn for_path<P: AsRef<Path>>(path: P) -> Result<Self, rusqlite::Error> {
-        Connection::open(path).map(BlockDb)
+        Ok(BlockDb(Arc::new(Mutex::new(Connection::open(path)?))))
     }
 }
 
+#[async_trait::async_trait]
 impl BlockSource for BlockDb {
     type Error = SqliteClientError;
 
-    fn with_blocks<F, DbErrT>(
+    async fn with_blocks<F, DbErrT>(
         &self,
         from_height: Option<BlockHeight>,
         limit: Option<usize>,
         with_row: F,
     ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
     where
-        F: FnMut(CompactBlock) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>,
+        F: FnMut(CompactBlock) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
+            + Send,
     {
-        chain::blockdb_with_blocks(self, from_height, limit, with_row)
+        chain::blockdb_with_blocks(self, from_height, limit, with_row).await
+    }
+}
+
+#[async_trait::async_trait]
+impl BlockCache for BlockDb {
+    fn get_tip_height<'life0, 'life1, 'async_trait, WalletErrT>(
+        &'life0 self,
+        _range: Option<&'life1 ScanRange>,
+    ) -> core::pin::Pin<
+        Box<
+            dyn core::future::Future<
+                    Output = Result<
+                        Option<BlockHeight>,
+                        data_api::chain::error::Error<WalletErrT, Self::Error>,
+                    >,
+                > + core::marker::Send
+                + 'async_trait,
+        >,
+    >
+    where
+        'life0: 'async_trait,
+        'life1: 'async_trait,
+        Self: 'async_trait,
+    {
+        todo!()
+    }
+
+    async fn read<WalletErrT>(
+        &self,
+        range: &ScanRange,
+    ) -> Result<Vec<CompactBlock>, data_api::chain::error::Error<WalletErrT, Self::Error>> {
+        let mut compact_blocks = vec![];
+        self.with_blocks(
+            Some(range.block_range().start),
+            Some(range.len()),
+            |block| {
+                compact_blocks.push(block);
+                Ok(())
+            },
+        )
+        .await?;
+        Ok(compact_blocks)
+    }
+
+    fn insert<'life0, 'async_trait, WalletErrT>(
+        &'life0 self,
+        _compact_blocks: Vec<CompactBlock>,
+    ) -> core::pin::Pin<
+        Box<
+            dyn core::future::Future<
+                    Output = Result<(), data_api::chain::error::Error<WalletErrT, Self::Error>>,
+                > + core::marker::Send
+                + 'async_trait,
+        >,
+    >
+    where
+        WalletErrT: 'async_trait,
+        'life0: 'async_trait,
+        Self: 'async_trait,
+    {
+        todo!()
+    }
+
+    fn delete<'life0, 'async_trait, WalletErrT>(
+        &'life0 self,
+        _range: ScanRange,
+    ) -> core::pin::Pin<
+        Box<
+            dyn core::future::Future<
+                    Output = Result<(), data_api::chain::error::Error<WalletErrT, Self::Error>>,
+                > + core::marker::Send
+                + 'async_trait,
+        >,
+    >
+    where
+        WalletErrT: 'async_trait,
+        'life0: 'async_trait,
+        Self: 'async_trait,
+    {
+        todo!()
     }
 }
 
@@ -1523,8 +1607,8 @@ impl BlockSource for BlockDb {
 /// order; this assumption is likely to be weakened and/or removed in a future update.
 #[cfg(feature = "unstable")]
 pub struct FsBlockDb {
-    conn: Connection,
-    blocks_dir: PathBuf,
+    conn: Arc<Mutex<Connection>>,
+    blocks_dir: Arc<PathBuf>,
 }
 
 /// Errors that can be generated by the filesystem/sqlite-backed
@@ -1583,8 +1667,10 @@ impl FsBlockDb {
             let blocks_dir = fsblockdb_root.as_ref().join("blocks");
             fs::create_dir_all(&blocks_dir)?;
             Ok(FsBlockDb {
-                conn: Connection::open(db_path).map_err(FsBlockDbError::Db)?,
-                blocks_dir,
+                conn: Arc::new(Mutex::new(
+                    Connection::open(db_path).map_err(FsBlockDbError::Db)?,
+                )),
+                blocks_dir: Arc::new(blocks_dir),
             })
         } else {
             Err(FsBlockDbError::InvalidBlockstoreRoot(
@@ -1594,8 +1680,10 @@ impl FsBlockDb {
     }
 
     /// Returns the maximum height of blocks known to the block metadata database.
-    pub fn get_max_cached_height(&self) -> Result<Option<BlockHeight>, FsBlockDbError> {
-        Ok(chain::blockmetadb_get_max_cached_height(&self.conn)?)
+    pub async fn get_max_cached_height(&self) -> Result<Option<BlockHeight>, FsBlockDbError> {
+        Ok(chain::blockmetadb_get_max_cached_height(
+            &*self.conn.lock().await,
+        )?)
     }
 
     /// Adds a set of block metadata entries to the metadata database, overwriting any
@@ -1603,9 +1691,13 @@ impl FsBlockDb {
     ///
     /// This will return an error if any block file corresponding to one of these metadata records
     /// is absent from the blocks directory.
-    pub fn write_block_metadata(&self, block_meta: &[BlockMeta]) -> Result<(), FsBlockDbError> {
+    pub async fn write_block_metadata(
+        &self,
+        block_meta: &[BlockMeta],
+    ) -> Result<(), FsBlockDbError> {
+        let block_cache_root = Arc::clone(&self.blocks_dir);
         for m in block_meta {
-            let block_path = m.block_file_path(&self.blocks_dir);
+            let block_path = m.block_file_path(block_cache_root.as_ref());
             match fs::metadata(&block_path) {
                 Err(e) => {
                     return Err(match e.kind() {
@@ -1621,13 +1713,22 @@ impl FsBlockDb {
             }
         }
 
-        Ok(chain::blockmetadb_insert(&self.conn, block_meta)?)
+        Ok(chain::blockmetadb_insert(
+            &*self.conn.lock().await,
+            block_meta,
+        )?)
     }
 
     /// Returns the metadata for the block with the given height, if it exists in the
     /// database.
-    pub fn find_block(&self, height: BlockHeight) -> Result<Option<BlockMeta>, FsBlockDbError> {
-        Ok(chain::blockmetadb_find_block(&self.conn, height)?)
+    pub async fn find_block(
+        &self,
+        height: BlockHeight,
+    ) -> Result<Option<BlockMeta>, FsBlockDbError> {
+        Ok(chain::blockmetadb_find_block(
+            &*self.conn.lock().await,
+            height,
+        )?)
     }
 
     /// Rewinds the BlockMeta Db to the `block_height` provided.
@@ -1638,28 +1739,140 @@ impl FsBlockDb {
     /// If the requested height is greater than or equal to the height
     /// of the last scanned block, or if the DB is empty, this function
     /// does nothing.
-    pub fn truncate_to_height(&self, block_height: BlockHeight) -> Result<(), FsBlockDbError> {
+    pub async fn truncate_to_height(
+        &self,
+        block_height: BlockHeight,
+    ) -> Result<(), FsBlockDbError> {
         Ok(chain::blockmetadb_truncate_to_height(
-            &self.conn,
+            &*self.conn.lock().await,
             block_height,
         )?)
     }
 }
 
 #[cfg(feature = "unstable")]
+#[async_trait::async_trait]
 impl BlockSource for FsBlockDb {
     type Error = FsBlockDbError;
 
-    fn with_blocks<F, DbErrT>(
+    async fn with_blocks<F, DbErrT>(
         &self,
         from_height: Option<BlockHeight>,
         limit: Option<usize>,
         with_row: F,
     ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
     where
-        F: FnMut(CompactBlock) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>,
+        F: FnMut(CompactBlock) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
+            + Send,
     {
-        fsblockdb_with_blocks(self, from_height, limit, with_row)
+        fsblockdb_with_blocks(self, from_height, limit, with_row).await
+    }
+}
+
+#[cfg(feature = "unstable")]
+#[async_trait::async_trait]
+impl BlockCache for FsBlockDb {
+    async fn get_tip_height<DbErrT>(
+        &self,
+        range: Option<&ScanRange>,
+    ) -> Result<Option<BlockHeight>, data_api::chain::error::Error<DbErrT, Self::Error>> {
+        // TODO: Implement cache tip for a specified range.
+        if range.is_some() {
+            panic!("Cache tip for a specified range not currently implemented.")
+        }
+
+        Ok(
+            chain::blockmetadb_get_max_cached_height(&*self.conn.lock().await)
+                .map_err(|e| data_api::chain::error::Error::BlockSource(FsBlockDbError::Db(e)))?,
+        )
+    }
+
+    async fn read<DbErrT>(
+        &self,
+        range: &ScanRange,
+    ) -> Result<Vec<CompactBlock>, data_api::chain::error::Error<DbErrT, Self::Error>> {
+        let mut compact_blocks = vec![];
+        self.with_blocks(
+            Some(range.block_range().start),
+            Some(range.len()),
+            |block| {
+                compact_blocks.push(block);
+                Ok(())
+            },
+        )
+        .await?;
+        Ok(compact_blocks)
+    }
+
+    async fn insert<WalletErrT>(
+        &self,
+        compact_blocks: Vec<CompactBlock>,
+    ) -> Result<(), data_api::chain::error::Error<WalletErrT, Self::Error>> {
+        if compact_blocks.is_empty() {
+            panic!("`compact_blocks` is empty, cannot insert zero blocks into cache!");
+        }
+
+        let mut block_meta = Vec::<BlockMeta>::with_capacity(compact_blocks.len());
+
+        for block in compact_blocks {
+            let (sapling_outputs_count, orchard_actions_count) = block
+                .vtx
+                .iter()
+                .map(|tx| (tx.outputs.len() as u32, tx.actions.len() as u32))
+                .fold((0, 0), |(acc_sapling, acc_orchard), (sapling, orchard)| {
+                    (acc_sapling + sapling, acc_orchard + orchard)
+                });
+
+            let meta = BlockMeta {
+                height: block.height(),
+                block_hash: block.hash(),
+                block_time: block.time,
+                sapling_outputs_count,
+                orchard_actions_count,
+            };
+
+            let encoded = block.encode_to_vec();
+            let mut block_file = std::fs::File::create(
+                meta.block_file_path(self.blocks_dir.as_ref()),
+            )
+            .map_err(|e| data_api::chain::error::Error::BlockSource(FsBlockDbError::Fs(e)))?;
+            block_file
+                .write_all(&encoded)
+                .map_err(|e| data_api::chain::error::Error::BlockSource(FsBlockDbError::Fs(e)))?;
+            block_meta.push(meta);
+        }
+        self.write_block_metadata(&block_meta)
+            .await
+            .map_err(data_api::chain::error::Error::BlockSource)?;
+        Ok(())
+    }
+
+    async fn delete<WalletErrT>(
+        &self,
+        range: ScanRange,
+    ) -> Result<(), data_api::chain::error::Error<WalletErrT, Self::Error>> {
+        let block_cache_root = Arc::clone(&self.blocks_dir);
+        let start = u32::from(range.block_range().start);
+        let end = u32::from(range.block_range().end);
+
+        let mut block_meta = Vec::with_capacity((end - start) as usize);
+        for height in start..end {
+            block_meta.push(
+                self.find_block(BlockHeight::from_u32(height))
+                    .await
+                    .map_err(data_api::chain::error::Error::BlockSource)?,
+            );
+        }
+
+        for block in block_meta.into_iter().flatten() {
+            tokio::fs::remove_file(block.block_file_path(block_cache_root.as_ref()))
+                .await
+                .map_err(|e| data_api::chain::error::Error::BlockSource(FsBlockDbError::Fs(e)))?;
+        }
+
+        // TODO: implement a fn to delete block metadata?
+
+        Ok(())
     }
 }
 
@@ -2003,14 +2216,14 @@ mod tests {
     }
 
     #[cfg(feature = "transparent-inputs")]
-    #[test]
-    fn transparent_receivers() {
+    #[tokio::test]
+    async fn transparent_receivers() {
         // Add an account to the wallet.
 
         use crate::testing::BlockCache;
         let st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory)
-            .with_block_cache(BlockCache::new())
+            .with_block_cache(BlockCache::new().await)
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().unwrap();
@@ -2033,8 +2246,8 @@ mod tests {
     }
 
     #[cfg(feature = "unstable")]
-    #[test]
-    pub(crate) fn fsblockdb_api() {
+    #[tokio::test]
+    pub(crate) async fn fsblockdb_api() {
         use zcash_client_backend::data_api::testing::AddressType;
         use zcash_primitives::zip32;
         use zcash_protocol::consensus::NetworkConstants;
@@ -2043,45 +2256,52 @@ mod tests {
 
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory)
-            .with_block_cache(FsBlockCache::new())
+            .with_block_cache(FsBlockCache::new().await)
             .build();
 
         // The BlockMeta DB starts off empty.
-        assert_eq!(st.cache().get_max_cached_height().unwrap(), None);
+        assert_eq!(st.cache().get_max_cached_height().await.unwrap(), None);
 
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
         let hd_account_index = zip32::AccountId::ZERO;
         let extsk = sapling::spending_key(&seed, st.network().coin_type(), hd_account_index);
         let dfvk = extsk.to_diversifiable_full_viewing_key();
-        let (h1, meta1, _) = st.generate_next_block(
-            &dfvk,
-            AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(5),
-        );
-        let (h2, meta2, _) = st.generate_next_block(
-            &dfvk,
-            AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(10),
-        );
+        let (h1, meta1, _) = st
+            .generate_next_block(
+                &dfvk,
+                AddressType::DefaultExternal,
+                NonNegativeAmount::const_from_u64(5),
+            )
+            .await;
+        let (h2, meta2, _) = st
+            .generate_next_block(
+                &dfvk,
+                AddressType::DefaultExternal,
+                NonNegativeAmount::const_from_u64(10),
+            )
+            .await;
 
         // The BlockMeta DB is not updated until we do so explicitly.
-        assert_eq!(st.cache().get_max_cached_height().unwrap(), None);
+        assert_eq!(st.cache().get_max_cached_height().await.unwrap(), None);
 
         // Inform the BlockMeta DB about the newly-persisted CompactBlocks.
-        st.cache().write_block_metadata(&[meta1, meta2]).unwrap();
+        st.cache()
+            .write_block_metadata(&[meta1, meta2])
+            .await
+            .unwrap();
 
         // The BlockMeta DB now sees blocks up to height 2.
-        assert_eq!(st.cache().get_max_cached_height().unwrap(), Some(h2),);
-        assert_eq!(st.cache().find_block(h1).unwrap(), Some(meta1));
-        assert_eq!(st.cache().find_block(h2).unwrap(), Some(meta2));
-        assert_eq!(st.cache().find_block(h2 + 1).unwrap(), None);
+        assert_eq!(st.cache().get_max_cached_height().await.unwrap(), Some(h2),);
+        assert_eq!(st.cache().find_block(h1).await.unwrap(), Some(meta1));
+        assert_eq!(st.cache().find_block(h2).await.unwrap(), Some(meta2));
+        assert_eq!(st.cache().find_block(h2 + 1).await.unwrap(), None);
 
         // Rewinding to height 1 should cause the metadata for height 2 to be deleted.
-        st.cache().truncate_to_height(h1).unwrap();
-        assert_eq!(st.cache().get_max_cached_height().unwrap(), Some(h1));
-        assert_eq!(st.cache().find_block(h1).unwrap(), Some(meta1));
-        assert_eq!(st.cache().find_block(h2).unwrap(), None);
-        assert_eq!(st.cache().find_block(h2 + 1).unwrap(), None);
+        st.cache().truncate_to_height(h1).await.unwrap();
+        assert_eq!(st.cache().get_max_cached_height().await.unwrap(), Some(h1));
+        assert_eq!(st.cache().find_block(h1).await.unwrap(), Some(meta1));
+        assert_eq!(st.cache().find_block(h2).await.unwrap(), None);
+        assert_eq!(st.cache().find_block(h2 + 1).await.unwrap(), None);
     }
 }

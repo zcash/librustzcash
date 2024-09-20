@@ -5896,6 +5896,7 @@ version = "0.11.2"
 dependencies = [
  "ambassador",
  "assert_matches",
+ "async-trait",
  "bip32",
  "bls12_381",
  "bs58",
@@ -5923,6 +5924,7 @@ dependencies = [
  "subtle",
  "tempfile",
  "time",
+ "tokio",
  "tracing",
  "uuid",
  "zcash_address",

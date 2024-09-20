@@ -71,7 +71,7 @@ orchard = { workspace = true, optional = true }
 sapling.workspace = true
 
 # - Sync engine
-async-trait = { version = "0.1", optional = true }
+async-trait = { version = "0.1" }
 futures-util = { version = "0.3", optional = true }
 
 # - Note commitment trees
@@ -171,7 +171,6 @@ orchard = ["dep:orchard", "dep:pasta_curves", "zcash_keys/orchard"]
 ## Exposes a wallet synchronization function that implements the necessary state machine.
 sync = [
     "lightwalletd-tonic",
-    "dep:async-trait",
     "dep:futures-util",
 ]
 
@@ -179,7 +178,6 @@ sync = [
 ## operations.
 tor = [
     "dep:arti-client",
-    "dep:async-trait",
     "dep:futures-util",
     "dep:http-body-util",
     "dep:hyper",

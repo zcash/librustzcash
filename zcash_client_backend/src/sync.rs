@@ -225,7 +225,7 @@ where
             // error or because a higher priority range has been added).
             info!("Waiting for cached blocks to be deleted...");
             for deletion in block_deletions {
-                deletion.await.map_err(Error::Cache)?;
+                deletion.await?;
             }
             return Ok(true);
         }
@@ -233,7 +233,7 @@ where
 
     info!("Waiting for cached blocks to be deleted...");
     for deletion in block_deletions {
-        deletion.await.map_err(Error::Cache)?;
+        deletion.await?;
     }
     Ok(false)
 }
@@ -360,10 +360,7 @@ where
         .try_collect::<Vec<_>>()
         .await?;
 
-    db_cache
-        .insert(compact_blocks)
-        .await
-        .map_err(Error::Cache)?;
+    db_cache.insert(compact_blocks).await?;
 
     Ok(())
 }
@@ -411,14 +408,8 @@ where
     DbT::Error: std::error::Error + Send + Sync + 'static,
 {
     info!("Scanning {}", scan_range);
-    let scan_result = scan_cached_blocks(
-        params,
-        db_cache,
-        db_data,
-        scan_range.block_range().start,
-        initial_chain_state,
-        scan_range.len(),
-    );
+    let scan_result =
+        scan_cached_blocks(params, db_cache, db_data, initial_chain_state, scan_range).await;
 
     match scan_result {
         Err(ChainError::Scan(err)) if err.is_continuity_error() => {
@@ -443,10 +434,7 @@ where
             // This does imply that assumed-valid blocks will be re-downloaded, but it is
             // also possible that in the intervening time, a chain reorg has occurred that
             // orphaned some of those blocks.
-            db_cache
-                .truncate(rewind_height)
-                .await
-                .map_err(Error::Cache)?;
+            db_cache.truncate(rewind_height).await?;
 
             // The database was truncated, invalidating prior suggested ranges.
             Ok(true)
