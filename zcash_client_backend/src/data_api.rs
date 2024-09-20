@@ -471,6 +471,7 @@ pub struct WalletSummary<AccountId: Eq + Hash> {
     chain_tip_height: BlockHeight,
     fully_scanned_height: BlockHeight,
     scan_progress: Option<Ratio<u64>>,
+    recovery_progress: Option<Ratio<u64>>,
     next_sapling_subtree_index: u64,
     #[cfg(feature = "orchard")]
     next_orchard_subtree_index: u64,
@@ -483,6 +484,7 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
         chain_tip_height: BlockHeight,
         fully_scanned_height: BlockHeight,
         scan_progress: Option<Ratio<u64>>,
+        recovery_progress: Option<Ratio<u64>>,
         next_sapling_subtree_index: u64,
         #[cfg(feature = "orchard")] next_orchard_subtree_index: u64,
     ) -> Self {
@@ -491,6 +493,7 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
             chain_tip_height,
             fully_scanned_height,
             scan_progress,
+            recovery_progress,
             next_sapling_subtree_index,
             #[cfg(feature = "orchard")]
             next_orchard_subtree_index,
@@ -513,14 +516,45 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
         self.fully_scanned_height
     }
 
-    /// Returns the progress of scanning shielded outputs, in terms of the ratio between notes
-    /// scanned and the total number of notes added to the chain since the wallet birthday.
+    /// Returns the progress of scanning the chain to bring the wallet up to date.
     ///
-    /// This ratio should only be used to compute progress percentages, and the numerator and
-    /// denominator should not be treated as authoritative note counts. Returns `None` if the
-    /// wallet is unable to determine the size of the note commitment tree.
+    /// This progress metric is intended as an indicator of how close the wallet is to
+    /// general usability, including the ability to spend existing funds that were
+    /// previously spendable.
+    ///
+    /// The window over which progress is computed spans from the wallet's recovery height
+    /// to the current chain tip. This may be adjusted in future updates to better match
+    /// the intended semantics.
+    ///
+    /// Progress is represented in terms of the ratio between notes scanned and the total
+    /// number of notes added to the chain in the relevant window. This ratio should only
+    /// be used to compute progress percentages, and the numerator and denominator should
+    /// not be treated as authoritative note counts.
+    ///
+    /// Returns `None` if the wallet is unable to determine the size of the note
+    /// commitment tree.
     pub fn scan_progress(&self) -> Option<Ratio<u64>> {
         self.scan_progress
+    }
+
+    /// Returns the progress of recovering the wallet from seed.
+    ///
+    /// This progress metric is intended as an indicator of how close the wallet is to
+    /// having a complete history.
+    ///
+    /// The window over which progress is computed spans from the wallet birthday to the
+    /// wallet's recovery height. This may be adjusted in future updates to better match
+    /// the intended semantics.
+    ///
+    /// Progress is represented in terms of the ratio between notes scanned and the total
+    /// number of notes added to the chain in the relevant window. This ratio should only
+    /// be used to compute progress percentages, and the numerator and denominator should
+    /// not be treated as authoritative note counts.
+    ///
+    /// Returns `None` if the wallet is unable to determine the size of the note
+    /// commitment tree.
+    pub fn recovery_progress(&self) -> Option<Ratio<u64>> {
+        self.recovery_progress
     }
 
     /// Returns the Sapling subtree index that should start the next range of subtree

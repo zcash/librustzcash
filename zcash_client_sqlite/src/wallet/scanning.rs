@@ -570,7 +570,7 @@ pub(crate) mod tests {
             pool::ShieldedPoolTester, sapling::SaplingPoolTester, AddressType, FakeCompactOutput,
             InitialChainState, TestBuilder, TestState,
         },
-        AccountBirthday, Ratio, WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
+        AccountBirthday, Ratio, WalletRead, WalletWrite,
     };
     use zcash_primitives::{
         block::BlockHash,
@@ -1292,8 +1292,21 @@ pub(crate) mod tests {
         let birthday = account.birthday();
         let sap_active = st.sapling_activation_height();
 
+        // The account is configured without a recover-until height, so is by definition
+        // fully recovered, and we count 1 per pool for both numerator and denominator.
+        let fully_recovered = {
+            let n = 1;
+            #[cfg(feature = "orchard")]
+            let n = n * 2;
+            Some(Ratio::new(n, n))
+        };
+
         // We have scan ranges and a subtree, but have scanned no blocks.
         let summary = st.get_wallet_summary(1);
+        assert_eq!(
+            summary.as_ref().and_then(|s| s.recovery_progress()),
+            fully_recovered,
+        );
         assert_eq!(summary.and_then(|s| s.scan_progress()), None);
 
         // Set up prior chain state. This simulates us having imported a wallet
@@ -1332,24 +1345,29 @@ pub(crate) mod tests {
         let summary = st.get_wallet_summary(1);
         assert_eq!(summary.as_ref().map(|s| T::next_subtree_index(s)), Some(0));
 
+        assert_eq!(
+            summary.as_ref().and_then(|s| s.recovery_progress()),
+            fully_recovered,
+        );
+
         // Progress denominator depends on which pools are enabled (which changes the
-        // initial tree states). Here we compute the denominator based upon the fact that
-        // the trees are the same size at present.
-        let expected_denom = (1 << SAPLING_SHARD_HEIGHT) * 2 - frontier_tree_size;
+        // initial tree states), and is extrapolated from the scanned range.
+        let expected_denom = 10
+            + ((1234 + 10) * (prior_tip - max_scanned)) / (max_scanned - (birthday.height() - 10));
         #[cfg(feature = "orchard")]
         let expected_denom = expected_denom * 2;
+        let expected_denom = expected_denom + 1;
         assert_eq!(
             summary.and_then(|s| s.scan_progress()),
             Some(Ratio::new(1, u64::from(expected_denom)))
         );
 
-        // Now simulate shutting down, and then restarting 70 blocks later, after a shard
-        // has been completed in one pool. This shard will have index 2, as our birthday
-        // was in shard 1.
+        // Now simulate shutting down, and then restarting 70 blocks later, after the
+        // shard containing our birthday has been completed in one pool.
         let last_shard_start = prior_tip + 50;
         T::put_subtree_roots(
             &mut st,
-            2,
+            1,
             &[CommitmentTreeRoot::from_parts(
                 last_shard_start,
                 // fake a hash, the value doesn't matter
@@ -1365,13 +1383,17 @@ pub(crate) mod tests {
                 .conn
                 .prepare("SELECT shard_index, subtree_end_height FROM sapling_tree_shards")
                 .unwrap();
-            (shard_stmt
-                .query_and_then::<_, rusqlite::Error, _, _>([], |row| {
-                    Ok((row.get::<_, u32>(0)?, row.get::<_, Option<u32>>(1)?))
-                })
+            assert_eq!(
+                (shard_stmt
+                    .query_and_then::<_, rusqlite::Error, _, _>([], |row| {
+                        Ok((row.get::<_, u32>(0)?, row.get::<_, Option<u32>>(1)?))
+                    })
+                    .unwrap()
+                    .collect::<Result<Vec<_>, _>>())
                 .unwrap()
-                .collect::<Result<Vec<_>, _>>())
-            .unwrap();
+                .len(),
+                2,
+            );
         }
 
         {
@@ -1381,13 +1403,21 @@ pub(crate) mod tests {
                 .conn
                 .prepare("SELECT shard_index, subtree_end_height FROM orchard_tree_shards")
                 .unwrap();
-            (shard_stmt
-                .query_and_then::<_, rusqlite::Error, _, _>([], |row| {
-                    Ok((row.get::<_, u32>(0)?, row.get::<_, Option<u32>>(1)?))
-                })
+            #[cfg(not(feature = "orchard"))]
+            let expected_shards = 0;
+            #[cfg(feature = "orchard")]
+            let expected_shards = 2;
+            assert_eq!(
+                (shard_stmt
+                    .query_and_then::<_, rusqlite::Error, _, _>([], |row| {
+                        Ok((row.get::<_, u32>(0)?, row.get::<_, Option<u32>>(1)?))
+                    })
+                    .unwrap()
+                    .collect::<Result<Vec<_>, _>>())
                 .unwrap()
-                .collect::<Result<Vec<_>, _>>())
-            .unwrap();
+                .len(),
+                expected_shards,
+            );
         }
 
         let new_tip = last_shard_start + 20;
@@ -1409,10 +1439,16 @@ pub(crate) mod tests {
         let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
 
-        // We've crossed a subtree boundary, but only in one pool. We still only have one scanned
-        // note but in the pool where we crossed the subtree boundary we have two shards worth of
-        // notes to scan.
-        let expected_denom = expected_denom + (1 << 16);
+        // We've crossed a subtree boundary, but only in one pool.
+        let expected_denom = (1 << 16) * 2
+            + ((1 << 16) * (new_tip - last_shard_start))
+                / (last_shard_start - (birthday.height() - 10))
+            - frontier_tree_size;
+        #[cfg(feature = "orchard")]
+        let expected_denom = expected_denom
+            + (10
+                + ((1234 + 10) * (new_tip - max_scanned))
+                    / (max_scanned - (birthday.height() - 10)));
         let summary = st.get_wallet_summary(1);
         assert_eq!(
             summary.and_then(|s| s.scan_progress()),
