@@ -9,6 +9,7 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `zcash_client_backend::data_api`:
+  - `GAP_LIMIT`
   - `WalletSummary::recovery_progress`
 
 ### Changed

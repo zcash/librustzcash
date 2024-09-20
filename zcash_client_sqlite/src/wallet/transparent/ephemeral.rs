@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use rusqlite::{named_params, OptionalExtension};
 
-use zcash_client_backend::wallet::TransparentAddressMetadata;
+use zcash_client_backend::{data_api::GAP_LIMIT, wallet::TransparentAddressMetadata};
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_keys::{encoding::AddressCodec, keys::AddressGenerationError};
 use zcash_primitives::{
@@ -16,7 +16,7 @@ use zcash_primitives::{
 };
 use zcash_protocol::consensus;
 
-use crate::{error::SqliteClientError, wallet::GAP_LIMIT, AccountId, TxRef};
+use crate::{error::SqliteClientError, AccountId, TxRef};
 
 // Returns `TransparentAddressMetadata` in the ephemeral scope for the
 // given address index.

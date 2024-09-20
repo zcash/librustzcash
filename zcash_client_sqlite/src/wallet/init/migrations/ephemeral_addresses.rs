@@ -99,13 +99,15 @@ mod tests {
     };
 
     #[cfg(feature = "transparent-inputs")]
-    use crate::{
-        error::SqliteClientError,
-        wallet::{
-            self, account_kind_code, init::init_wallet_db_internal, transparent::ephemeral,
-            GAP_LIMIT,
+    use {
+        crate::{
+            error::SqliteClientError,
+            wallet::{
+                self, account_kind_code, init::init_wallet_db_internal, transparent::ephemeral,
+            },
+            AccountId, WalletDb,
         },
-        AccountId, WalletDb,
+        zcash_client_backend::data_api::GAP_LIMIT,
     };
 
     /// This is a minimized copy of [`wallet::create_account`] as of the time of the

@@ -129,6 +129,10 @@ pub const SAPLING_SHARD_HEIGHT: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH / 2;
 #[cfg(feature = "orchard")]
 pub const ORCHARD_SHARD_HEIGHT: u8 = { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 } / 2;
 
+/// The number of ephemeral addresses that can be safely reserved without observing any
+/// of them to be mined. This is the same as the gap limit in Bitcoin.
+pub const GAP_LIMIT: u32 = 20;
+
 /// An enumeration of constraints that can be applied when querying for nullifiers for notes
 /// belonging to the wallet.
 pub enum NullifierQuery {
@@ -1113,7 +1117,7 @@ pub trait WalletRead {
 
     /// Returns a vector of ephemeral transparent addresses associated with the given
     /// account controlled by this wallet, along with their metadata. The result includes
-    /// reserved addresses, and addresses for `GAP_LIMIT` additional indices (capped to
+    /// reserved addresses, and addresses for [`GAP_LIMIT`] additional indices (capped to
     /// the maximum index).
     ///
     /// If `index_range` is some `Range`, it limits the result to addresses with indices
