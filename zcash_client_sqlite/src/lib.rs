@@ -53,7 +53,7 @@ use zcash_client_backend::{
         Account, AccountBirthday, AccountPurpose, AccountSource, BlockMetadata,
         DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
         SentTransaction, SpendableNotes, TransactionDataRequest, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletTest, WalletWrite, SAPLING_SHARD_HEIGHT,
+        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -99,7 +99,7 @@ use maybe_rayon::{
 };
 
 #[cfg(any(test, feature = "test-dependencies"))]
-use zcash_client_backend::data_api::testing::TransactionSummary;
+use zcash_client_backend::data_api::{testing::TransactionSummary, WalletTest};
 
 /// `maybe-rayon` doesn't provide this as a fallback, so we have to.
 #[cfg(not(feature = "multicore"))]

@@ -84,7 +84,7 @@ sha2 = "0.10"
 document-features = "0.2"
 
 # Encodings
-base64 = "0.21"
+base64 = "0.22"
 bech32 = "0.9"
 bs58 = { version = "0.5", features = ["check"] }
 byteorder = "1"
