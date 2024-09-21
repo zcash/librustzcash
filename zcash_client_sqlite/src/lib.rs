@@ -618,7 +618,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
 
 #[cfg(any(test, feature = "test-dependencies"))]
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletTest for WalletDb<C, P> {
-    fn get_tx_history(&self) -> Result<Vec<TransactionSummary<Self::AccountId>>, Self::Error> {
+    fn get_tx_history(
+        &self,
+    ) -> Result<Vec<TransactionSummary<<Self as WalletRead>::AccountId>>, <Self as WalletRead>::Error>
+    {
         wallet::testing::get_tx_history(self.conn.borrow())
     }
 
@@ -626,7 +629,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletTest for W
         &self,
         txid: &TxId,
         protocol: ShieldedProtocol,
-    ) -> Result<Vec<NoteId>, Self::Error> {
+    ) -> Result<Vec<NoteId>, <Self as WalletRead>::Error> {
         use crate::wallet::pool_code;
         use rusqlite::named_params;
 
@@ -638,12 +641,102 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletTest for W
              AND sent_notes.output_pool = :pool_code",
         )?;
 
-        stmt_sent_notes
-            .query(named_params![":txid": txid.as_ref(), ":pool_code": pool_code(PoolType::Shielded(protocol))])
-            .unwrap()
-            .mapped(|row| Ok(NoteId::new(*txid, protocol, row.get(0)?)))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(SqliteClientError::from)
+        let note_ids = stmt_sent_notes
+            .query_map(
+                named_params! {
+                    ":txid": txid.as_ref(),
+                    ":pool_code": pool_code(PoolType::Shielded(protocol)),
+                },
+                |row| Ok(NoteId::new(*txid, protocol, row.get(0)?)),
+            )?
+            .collect::<Result<_, _>>()?;
+
+        Ok(note_ids)
+    }
+
+    fn get_confirmed_sends(
+        &self,
+        txid: &TxId,
+    ) -> Result<Vec<(u64, Option<String>, Option<String>, Option<u32>)>, <Self as WalletRead>::Error>
+    {
+        let mut stmt_sent = self
+            .conn.borrow()
+            .prepare(
+                "SELECT value, to_address, ephemeral_addresses.address, ephemeral_addresses.address_index
+                 FROM sent_notes
+                 JOIN transactions ON transactions.id_tx = sent_notes.tx
+                 LEFT JOIN ephemeral_addresses ON ephemeral_addresses.used_in_tx = sent_notes.tx
+                 WHERE transactions.txid = ?
+                 ORDER BY value",
+            )?;
+
+        let sends = stmt_sent
+            .query_map(rusqlite::params![txid.as_ref()], |row| {
+                let v: u32 = row.get(0)?;
+                let to_address: Option<String> = row.get(1)?;
+                let ephemeral_address: Option<String> = row.get(2)?;
+                let address_index: Option<u32> = row.get(3)?;
+                Ok((u64::from(v), to_address, ephemeral_address, address_index))
+            })?
+            .collect::<Result<_, _>>()?;
+
+        Ok(sends)
+    }
+
+    fn get_checkpoint_history(
+        &self,
+    ) -> Result<
+        Vec<(
+            BlockHeight,
+            ShieldedProtocol,
+            Option<incrementalmerkletree::Position>,
+        )>,
+        <Self as WalletRead>::Error,
+    > {
+        wallet::testing::get_checkpoint_history(self.conn.borrow())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_transparent_output(
+        &self,
+        outpoint: &OutPoint,
+        allow_unspendable: bool,
+    ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
+        wallet::transparent::get_wallet_transparent_output(
+            self.conn.borrow(),
+            outpoint,
+            allow_unspendable,
+        )
+    }
+
+    fn get_notes(
+        &self,
+        protocol: ShieldedProtocol,
+    ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error> {
+        let (table_prefix, index_col, _) = wallet::common::per_protocol_names(protocol);
+        let mut stmt_received_notes = self.conn.borrow().prepare(&format!(
+            "SELECT txid, {index_col}
+             FROM {table_prefix}_received_notes rn
+             INNER JOIN transactions ON transactions.id_tx = rn.tx
+             WHERE transactions.block IS NOT NULL
+             AND recipient_key_scope IS NOT NULL
+             AND nf IS NOT NULL
+             AND commitment_tree_position IS NOT NULL"
+        ))?;
+
+        let result = stmt_received_notes
+            .query_map([], |row| {
+                let txid: [u8; 32] = row.get(0)?;
+                let output_index: u32 = row.get(1)?;
+                let note = self
+                    .get_spendable_note(&TxId::from_bytes(txid), protocol, output_index)
+                    .unwrap()
+                    .unwrap();
+                Ok(note)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(result)
     }
 }
 
@@ -1843,7 +1936,7 @@ mod tests {
         st: &mut TestState<C, DbT, P>,
         ufvk: &UnifiedFullViewingKey,
         birthday: &AccountBirthday,
-        is_account_collision: impl Fn(&DbT::Error) -> bool,
+        is_account_collision: impl Fn(&<DbT as WalletRead>::Error) -> bool,
     ) where
         DbT::Account: core::fmt::Debug,
     {

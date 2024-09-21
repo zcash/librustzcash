@@ -140,10 +140,6 @@ pub(crate) mod transparent;
 
 pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
 
-/// The number of ephemeral addresses that can be safely reserved without observing any
-/// of them to be mined. This is the same as the gap limit in Bitcoin.
-pub(crate) const GAP_LIMIT: u32 = 20;
-
 fn parse_account_source(
     account_kind: u32,
     hd_seed_fingerprint: Option<[u8; 32]>,

@@ -129,6 +129,10 @@ pub const SAPLING_SHARD_HEIGHT: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH / 2;
 #[cfg(feature = "orchard")]
 pub const ORCHARD_SHARD_HEIGHT: u8 = { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 } / 2;
 
+/// The number of ephemeral addresses that can be safely reserved without observing any
+/// of them to be mined. This is the same as the gap limit in Bitcoin.
+pub const GAP_LIMIT: u32 = 20;
+
 /// An enumeration of constraints that can be applied when querying for nullifiers for notes
 /// belonging to the wallet.
 pub enum NullifierQuery {
@@ -1113,7 +1117,7 @@ pub trait WalletRead {
 
     /// Returns a vector of ephemeral transparent addresses associated with the given
     /// account controlled by this wallet, along with their metadata. The result includes
-    /// reserved addresses, and addresses for `GAP_LIMIT` additional indices (capped to
+    /// reserved addresses, and addresses for [`GAP_LIMIT`] additional indices (capped to
     /// the maximum index).
     ///
     /// If `index_range` is some `Range`, it limits the result to addresses with indices
@@ -1208,7 +1212,7 @@ pub trait WalletRead {
 /// of the [`testing`] framework. They should not be used in production software.
 #[cfg(any(test, feature = "test-dependencies"))]
 #[delegatable_trait]
-pub trait WalletTest: WalletRead {
+pub trait WalletTest: InputSource + WalletRead {
     /// Returns a vector of transaction summaries.
     ///
     /// Currently test-only, as production use could return a very large number of results; either
@@ -1216,9 +1220,10 @@ pub trait WalletTest: WalletRead {
     /// use.
     fn get_tx_history(
         &self,
-    ) -> Result<Vec<testing::TransactionSummary<Self::AccountId>>, Self::Error> {
-        Ok(vec![])
-    }
+    ) -> Result<
+        Vec<testing::TransactionSummary<<Self as WalletRead>::AccountId>>,
+        <Self as WalletRead>::Error,
+    >;
 
     /// Returns the note IDs for shielded notes sent by the wallet in a particular
     /// transaction.
@@ -1226,9 +1231,43 @@ pub trait WalletTest: WalletRead {
         &self,
         _txid: &TxId,
         _protocol: ShieldedProtocol,
-    ) -> Result<Vec<NoteId>, Self::Error> {
-        Ok(vec![])
-    }
+    ) -> Result<Vec<NoteId>, <Self as WalletRead>::Error>;
+
+    #[allow(clippy::type_complexity)]
+    fn get_confirmed_sends(
+        &self,
+        txid: &TxId,
+    ) -> Result<Vec<(u64, Option<String>, Option<String>, Option<u32>)>, <Self as WalletRead>::Error>;
+
+    #[allow(clippy::type_complexity)]
+    fn get_checkpoint_history(
+        &self,
+    ) -> Result<
+        Vec<(
+            BlockHeight,
+            ShieldedProtocol,
+            Option<incrementalmerkletree::Position>,
+        )>,
+        <Self as WalletRead>::Error,
+    >;
+
+    /// Fetches the transparent output corresponding to the provided `outpoint`.
+    /// Allows selecting unspendable outputs for testing purposes.
+    ///
+    /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or is not
+    /// spendable as of the chain tip height.
+    #[cfg(feature = "transparent-inputs")]
+    fn get_transparent_output(
+        &self,
+        outpoint: &OutPoint,
+        allow_unspendable: bool,
+    ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error>;
+
+    /// Returns all the notes that have been received by the wallet.
+    fn get_notes(
+        &self,
+        protocol: ShieldedProtocol,
+    ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error>;
 }
 
 /// The relevance of a seed to a given wallet.

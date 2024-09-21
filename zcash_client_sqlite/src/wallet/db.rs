@@ -15,10 +15,10 @@
 
 use static_assertions::const_assert_eq;
 
-use zcash_client_backend::data_api::scanning::ScanPriority;
+use zcash_client_backend::data_api::{scanning::ScanPriority, GAP_LIMIT};
 use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
 
-use crate::wallet::{scanning::priority_code, GAP_LIMIT};
+use crate::wallet::scanning::priority_code;
 
 /// Stores information about the accounts that the wallet is tracking.
 pub(super) const TABLE_ACCOUNTS: &str = r#"
@@ -85,7 +85,7 @@ CREATE INDEX "addresses_accounts" ON "addresses" (
 /// (`TransparentKeyScope::EPHEMERAL`) at the "change" level of the BIP 32 address hierarchy.
 /// The ephemeral addresses stored in the table are exactly the "reserved" ephemeral addresses
 /// (that is addresses that have been allocated for use in a ZIP 320 transaction proposal), plus
-/// the addresses at the next `GAP_LIMIT` indices.
+/// the addresses at the next [`GAP_LIMIT`] indices.
 ///
 /// Addresses are never removed. New ones should only be reserved via the
 /// `WalletWrite::reserve_next_n_ephemeral_addresses` API. All of the addresses in the table
@@ -103,12 +103,12 @@ CREATE INDEX "addresses_accounts" ON "addresses" (
 ///
 /// It is an external invariant that within each account:
 /// - the address indices are contiguous and start from 0;
-/// - the last `GAP_LIMIT` addresses have `used_in_tx` and `seen_in_tx` both NULL.
+/// - the last [`GAP_LIMIT`] addresses have `used_in_tx` and `seen_in_tx` both NULL.
 ///
-/// All but the last `GAP_LIMIT` addresses are defined to be "reserved" addresses. Since the next
+/// All but the last [`GAP_LIMIT`] addresses are defined to be "reserved" addresses. Since the next
 /// index to reserve is determined by dead reckoning from the last stored address, we use dummy
 /// entries having `NULL` for the value of the `address` column after the maximum valid index in
-/// order to allow the last `GAP_LIMIT` addresses at the end of the index range to be used.
+/// order to allow the last [`GAP_LIMIT`] addresses at the end of the index range to be used.
 ///
 /// Note that the fact that `used_in_tx` references a specific transaction is just a debugging aid.
 /// The same is mostly true of `seen_in_tx`, but we also take into account whether the referenced
