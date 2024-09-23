@@ -96,6 +96,7 @@ assert_matches.workspace = true
 rand_xorshift.workspace = true
 sapling = { workspace = true, features = ["test-dependencies"] }
 orchard = { workspace = true, features = ["test-dependencies"] }
+zcash_protocol = { workspace = true, features = ["test-dependencies"] }
 
 # MSRV pins for transitive dev-dependencies:
 clap = ">=4, <4.5" # clap 4.5 has MSRV 1.74

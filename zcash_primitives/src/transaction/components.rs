@@ -4,7 +4,7 @@ pub mod amount {
         BalanceError, ZatBalance as Amount, Zatoshis as NonNegativeAmount, COIN,
     };
 
-    #[cfg(feature = "test-dependencies")]
+    #[cfg(any(test, feature = "test-dependencies"))]
     pub mod testing {
         pub use zcash_protocol::value::testing::{
             arb_positive_zat_balance as arb_positive_amount, arb_zat_balance as arb_amount,
