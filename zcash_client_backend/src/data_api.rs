@@ -1211,7 +1211,7 @@ pub trait WalletRead {
 /// These methods expose internal details or unstable interfaces, primarily to enable use
 /// of the [`testing`] framework. They should not be used in production software.
 #[cfg(any(test, feature = "test-dependencies"))]
-#[delegatable_trait]
+#[cfg_attr(feature = "test-dependencies", delegatable_trait)]
 pub trait WalletTest: InputSource + WalletRead {
     /// Returns a vector of transaction summaries.
     ///

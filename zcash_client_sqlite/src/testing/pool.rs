@@ -3,7 +3,6 @@
 //! Generalised for sharing across the Sapling and Orchard implementations.
 
 use crate::{
-    error::SqliteClientError,
     testing::{db::TestDbFactory, BlockCache},
     SAPLING_TABLES_PREFIX,
 };
@@ -16,6 +15,9 @@ use {
     crate::ORCHARD_TABLES_PREFIX,
     zcash_client_backend::data_api::testing::orchard::OrchardPoolTester,
 };
+
+#[cfg(feature = "transparent-inputs")]
+use crate::error::SqliteClientError;
 
 pub(crate) trait ShieldedPoolPersistence {
     const TABLES_PREFIX: &'static str;
