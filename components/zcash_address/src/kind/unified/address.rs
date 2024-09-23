@@ -159,7 +159,7 @@ impl super::Container for Address {
     }
 }
 
-#[cfg(feature = "test-dependencies")]
+#[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::{
         array::{uniform11, uniform20, uniform32},
