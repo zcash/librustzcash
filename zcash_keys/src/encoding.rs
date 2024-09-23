@@ -6,7 +6,7 @@
 use crate::address::UnifiedAddress;
 use bs58::{self, decode::Error as Bs58Error};
 use std::fmt;
-use zcash_primitives::consensus::{NetworkConstants, NetworkType};
+use zcash_primitives::consensus::NetworkConstants;
 
 use zcash_address::unified::{self, Encoding};
 use zcash_primitives::{consensus, legacy::TransparentAddress};
@@ -16,6 +16,7 @@ use {
     bech32::{self, Error, FromBase32, ToBase32, Variant},
     sapling::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     std::io::{self, Write},
+    zcash_primitives::consensus::NetworkType,
 };
 
 #[cfg(feature = "sapling")]
