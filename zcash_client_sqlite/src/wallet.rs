@@ -2435,11 +2435,19 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         };
         wdb.with_sapling_tree_mut(|tree| {
             tree.truncate_removing_checkpoint(&block_height)?;
+            // We do want a checkpoint preserved at the end of the block, but it should have no
+            // other data associated with it. TODO: `truncate_removing_checkpoint` is an awkward
+            // API to work with, and should be replaced with `truncate_to_checkpoint`.
+            tree.checkpoint(block_height)?;
             Ok::<_, SqliteClientError>(())
         })?;
         #[cfg(feature = "orchard")]
         wdb.with_orchard_tree_mut(|tree| {
             tree.truncate_removing_checkpoint(&block_height)?;
+            // We do want a checkpoint preserved at the end of the block, but it should have no
+            // other data associated with it. TODO: `truncate_removing_checkpoint` is an awkward
+            // API to work with, and should be replaced with `truncate_to_checkpoint`.
+            tree.checkpoint(block_height)?;
             Ok::<_, SqliteClientError>(())
         })?;
 
