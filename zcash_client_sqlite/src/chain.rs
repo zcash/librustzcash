@@ -365,6 +365,17 @@ mod tests {
     }
 
     #[test]
+    fn reorg_to_checkpoint_sapling() {
+        testing::pool::reorg_to_checkpoint::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn reorg_to_checkpoint_orchard() {
+        testing::pool::reorg_to_checkpoint::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn scan_cached_blocks_allows_blocks_out_of_order_sapling() {
         testing::pool::scan_cached_blocks_allows_blocks_out_of_order::<SaplingPoolTester>()
     }

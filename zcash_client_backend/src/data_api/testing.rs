@@ -17,7 +17,7 @@ use assert_matches::assert_matches;
 use group::ff::Field;
 use incrementalmerkletree::{Marking, Retention};
 use nonempty::NonEmpty;
-use rand::{CryptoRng, RngCore, SeedableRng};
+use rand::{CryptoRng, Rng, RngCore, SeedableRng};
 use rand_chacha::ChaChaRng;
 use secrecy::{ExposeSecret, Secret, SecretVec};
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
@@ -507,6 +507,7 @@ where
         );
         self.cache.insert(&compact_block)
     }
+
     /// Creates a fake block at the expected next height containing a single output of the
     /// given value, and inserts it into the cache.
     pub fn generate_next_block<Fvk: TestFvk>(
@@ -761,6 +762,24 @@ where
         self.latest_block_height = Some(height);
 
         (height, res)
+    }
+
+    /// Truncates the test wallet and block cache to the specified height, discarding all data from
+    /// blocks at heights greater than the specified height, excluding transaction data that may
+    /// not be recoverable from the chain.
+    pub fn truncate_to_height(&mut self, height: BlockHeight) {
+        self.wallet_mut().truncate_to_height(height).unwrap();
+        self.cache.truncate_to_height(height);
+        self.cached_blocks.split_off(&(height + 1));
+        self.latest_block_height = Some(height);
+    }
+
+    /// Truncates the test wallet to the specified height, and resets the cache's latest block
+    /// height but does not truncate the block cache. This is useful for circumstances when you
+    /// want to re-scan a set of cached blocks.
+    pub fn truncate_to_height_retaining_cache(&mut self, height: BlockHeight) {
+        self.wallet_mut().truncate_to_height(height).unwrap();
+        self.latest_block_height = Some(height);
     }
 }
 
@@ -1590,7 +1609,7 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
 }
 
 /// Trait used by tests that require a full viewing key.
-pub trait TestFvk {
+pub trait TestFvk: Clone {
     /// The type of nullifier corresponding to the kind of note that this full viewing key
     /// can detect (and that its corresponding spending key can spend).
     type Nullifier: Copy;
@@ -2013,6 +2032,16 @@ impl<Fvk> FakeCompactOutput<Fvk> {
             value,
         }
     }
+
+    /// Constructs a new random fake external output to the given FVK with a value in the range
+    /// 10000..1000000 ZAT.
+    pub fn random<R: RngCore>(rng: &mut R, fvk: Fvk) -> Self {
+        Self {
+            fvk,
+            address_type: AddressType::DefaultExternal,
+            value: Zatoshis::const_from_u64(rng.gen_range(10000..1000000)),
+        }
+    }
 }
 
 /// Create a fake CompactBlock at the given height, containing the specified fake compact outputs.
@@ -2241,6 +2270,10 @@ pub trait TestCache {
 
     /// Inserts a CompactBlock into the cache DB.
     fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult;
+
+    /// Deletes block data from the cache, retaining blocks at heights less than or equal to the
+    /// specified height.
+    fn truncate_to_height(&mut self, height: BlockHeight);
 }
 
 /// A convenience type for the note commitments contained within a [`CompactBlock`].

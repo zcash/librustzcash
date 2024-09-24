@@ -685,15 +685,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletTest for W
 
     fn get_checkpoint_history(
         &self,
+        protocol: &ShieldedProtocol,
     ) -> Result<
-        Vec<(
-            BlockHeight,
-            ShieldedProtocol,
-            Option<incrementalmerkletree::Position>,
-        )>,
+        Vec<(BlockHeight, Option<incrementalmerkletree::Position>)>,
         <Self as WalletRead>::Error,
     > {
-        wallet::testing::get_checkpoint_history(self.conn.borrow())
+        wallet::testing::get_checkpoint_history(self.conn.borrow(), protocol)
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -1186,6 +1183,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             from_state.block_height(),
                             from_state.final_sapling_tree().tree_size()
                         );
+                        // We insert the frontier with `Checkpoint` retention because we need to be
+                        // able to truncate the tree back to this point.
                         sapling_tree.insert_frontier(
                             from_state.final_sapling_tree().clone(),
                             Retention::Checkpoint {
@@ -1235,6 +1234,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             from_state.block_height(),
                             from_state.final_orchard_tree().tree_size()
                         );
+                        // We insert the frontier with `Checkpoint` retention because we need to be
+                        // able to truncate the tree back to this point.
                         orchard_tree.insert_frontier(
                             from_state.final_orchard_tree().clone(),
                             Retention::Checkpoint {

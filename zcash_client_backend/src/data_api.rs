@@ -1242,12 +1242,9 @@ pub trait WalletTest: InputSource + WalletRead {
     #[allow(clippy::type_complexity)]
     fn get_checkpoint_history(
         &self,
+        protocol: &ShieldedProtocol,
     ) -> Result<
-        Vec<(
-            BlockHeight,
-            ShieldedProtocol,
-            Option<incrementalmerkletree::Position>,
-        )>,
+        Vec<(BlockHeight, Option<incrementalmerkletree::Position>)>,
         <Self as WalletRead>::Error,
     >;
 

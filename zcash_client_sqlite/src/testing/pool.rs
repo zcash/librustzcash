@@ -217,6 +217,13 @@ pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn reorg_to_checkpoint<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::reorg_to_checkpoint::<T, _, _>(
+        TestDbFactory,
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::scan_cached_blocks_allows_blocks_out_of_order::<T>(
         TestDbFactory,

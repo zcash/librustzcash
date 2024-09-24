@@ -2434,11 +2434,13 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
             params: params.clone(),
         };
         wdb.with_sapling_tree_mut(|tree| {
-            tree.truncate_removing_checkpoint(&block_height).map(|_| ())
+            tree.truncate_removing_checkpoint(&block_height)?;
+            Ok::<_, SqliteClientError>(())
         })?;
         #[cfg(feature = "orchard")]
         wdb.with_orchard_tree_mut(|tree| {
-            tree.truncate_removing_checkpoint(&block_height).map(|_| ())
+            tree.truncate_removing_checkpoint(&block_height)?;
+            Ok::<_, SqliteClientError>(())
         })?;
 
         // Do not delete sent notes; this can contain data that is not recoverable
@@ -3448,7 +3450,10 @@ pub mod testing {
         ShieldedProtocol,
     };
 
-    use crate::{error::SqliteClientError, AccountId};
+    use crate::{error::SqliteClientError, AccountId, SAPLING_TABLES_PREFIX};
+
+    #[cfg(feature = "orchard")]
+    use crate::ORCHARD_TABLES_PREFIX;
 
     pub(crate) fn get_tx_history(
         conn: &rusqlite::Connection,
@@ -3490,24 +3495,31 @@ pub mod testing {
     #[allow(dead_code)] // used only for tests that are flagged off by default
     pub(crate) fn get_checkpoint_history(
         conn: &rusqlite::Connection,
-    ) -> Result<Vec<(BlockHeight, ShieldedProtocol, Option<Position>)>, SqliteClientError> {
-        let mut stmt = conn.prepare_cached(
-            "SELECT checkpoint_id, 2 AS pool, position FROM sapling_tree_checkpoints
-             UNION
-             SELECT checkpoint_id, 3 AS pool, position FROM orchard_tree_checkpoints
+        protocol: &ShieldedProtocol,
+    ) -> Result<Vec<(BlockHeight, Option<Position>)>, SqliteClientError> {
+        let table_prefix = match protocol {
+            ShieldedProtocol::Sapling => SAPLING_TABLES_PREFIX,
+            #[cfg(feature = "orchard")]
+            ShieldedProtocol::Orchard => ORCHARD_TABLES_PREFIX,
+            #[cfg(not(feature = "orchard"))]
+            ShieldedProtocol::Orchard => {
+                return Err(SqliteClientError::UnsupportedPoolType(
+                    zcash_protocol::PoolType::ORCHARD,
+                ));
+            }
+        };
+
+        let mut stmt = conn.prepare_cached(&format!(
+            "SELECT checkpoint_id, position FROM {}_tree_checkpoints
              ORDER BY checkpoint_id",
-        )?;
+            table_prefix
+        ))?;
 
         let results = stmt
             .query_and_then::<_, SqliteClientError, _, _>([], |row| {
                 Ok((
                     BlockHeight::from(row.get::<_, u32>(0)?),
-                    match row.get::<_, i64>(1)? {
-                        2 => ShieldedProtocol::Sapling,
-                        3 => ShieldedProtocol::Orchard,
-                        _ => unreachable!(),
-                    },
-                    row.get::<_, Option<u64>>(2)?.map(Position::from),
+                    row.get::<_, Option<u64>>(1)?.map(Position::from),
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;

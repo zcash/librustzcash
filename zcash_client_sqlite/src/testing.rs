@@ -56,11 +56,22 @@ impl TestCache for BlockCache {
         let res = NoteCommitments::from_compact_block(cb);
         self.db_cache
             .0
-            .prepare("INSERT INTO compactblocks (height, data) VALUES (?, ?)")
-            .unwrap()
-            .execute(params![u32::from(cb.height()), cb_bytes,])
+            .execute(
+                "INSERT INTO compactblocks (height, data) VALUES (?, ?)",
+                params![u32::from(cb.height()), cb_bytes,],
+            )
             .unwrap();
         res
+    }
+
+    fn truncate_to_height(&mut self, height: zcash_protocol::consensus::BlockHeight) {
+        self.db_cache
+            .0
+            .execute(
+                "DELETE FROM compactblocks WHERE height > ?",
+                params![u32::from(height)],
+            )
+            .unwrap();
     }
 }
 
@@ -114,5 +125,9 @@ impl TestCache for FsBlockCache {
             .unwrap();
 
         meta
+    }
+
+    fn truncate_to_height(&mut self, height: zcash_protocol::consensus::BlockHeight) {
+        self.db_meta.truncate_to_height(height).unwrap()
     }
 }
