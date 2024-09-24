@@ -14,6 +14,7 @@ and this library adheres to Rust's notion of
   height from another yields the delta between them.
 
 ### Changed
+- Mainnet activation height has been set for `consensus::BranchId::Nu6`.
 - Adding a delta to a `BlockHeight` now uses saturating addition.
 - Subtracting a delta to a `BlockHeight` now uses saturating subtraction.
 
