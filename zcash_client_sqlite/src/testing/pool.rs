@@ -16,9 +16,6 @@ use {
     zcash_client_backend::data_api::testing::orchard::OrchardPoolTester,
 };
 
-#[cfg(feature = "transparent-inputs")]
-use crate::error::SqliteClientError;
-
 pub(crate) trait ShieldedPoolPersistence {
     const TABLES_PREFIX: &'static str;
 }
@@ -47,7 +44,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         |e, account_id, expected_bad_index| {
             matches!(
                 e,
-                SqliteClientError::ReachedGapLimit(acct, bad_index)
+                crate::error::SqliteClientError::ReachedGapLimit(acct, bad_index)
                 if acct == &account_id && bad_index == &expected_bad_index)
         },
     )

@@ -885,19 +885,27 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             orchard_start_position: Position,
         }
 
+        if blocks.is_empty() {
+            return Ok(());
+        }
+
         self.transactionally(|wdb| {
-            let start_positions = blocks.first().map(|block| BlockPositions {
-                height: block.height(),
+            let initial_block = blocks.first().expect("blocks is known to be nonempty");
+            assert!(from_state.block_height() + 1 == initial_block.height());
+
+            let start_positions = BlockPositions {
+                height: initial_block.height(),
                 sapling_start_position: Position::from(
-                    u64::from(block.sapling().final_tree_size())
-                        - u64::try_from(block.sapling().commitments().len()).unwrap(),
+                    u64::from(initial_block.sapling().final_tree_size())
+                        - u64::try_from(initial_block.sapling().commitments().len()).unwrap(),
                 ),
                 #[cfg(feature = "orchard")]
                 orchard_start_position: Position::from(
-                    u64::from(block.orchard().final_tree_size())
-                        - u64::try_from(block.orchard().commitments().len()).unwrap(),
+                    u64::from(initial_block.orchard().final_tree_size())
+                        - u64::try_from(initial_block.orchard().commitments().len()).unwrap(),
                 ),
-            });
+            };
+
             let mut sapling_commitments = vec![];
             #[cfg(feature = "orchard")]
             let mut orchard_commitments = vec![];
@@ -1052,9 +1060,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
             // We will have a start position and a last scanned height in all cases where
             // `blocks` is non-empty.
-            if let Some((start_positions, last_scanned_height)) =
-                start_positions.zip(last_scanned_height)
-            {
+            if let Some(last_scanned_height) = last_scanned_height {
                 // Create subtrees from the note commitments in parallel.
                 const CHUNK_SIZE: usize = 1024;
                 let sapling_subtrees = sapling_commitments
