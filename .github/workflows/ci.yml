@@ -168,42 +168,42 @@ jobs:
       - name: Verify working directory is clean (excluding lockfile)
         run: git diff --exit-code ':!Cargo.lock'
 
-#  build-nodefault:
-#    name: Build target ${{ matrix.target }}
-#    runs-on: ubuntu-latest
-#    strategy:
-#      matrix:
-#        target:
-#          - wasm32-wasi
-#
-#    steps:
-#      - uses: actions/checkout@v4
-#        with:
-#          path: crates
-#      # We use a synthetic crate to ensure no dev-dependencies are enabled, which can
-#      # be incompatible with some of these targets.
-#      - name: Create synthetic crate for testing
-#        run: cargo init --lib ci-build
-#      - name: Copy Rust version into synthetic crate
-#        run: cp crates/rust-toolchain.toml ci-build/
-#      - name: Copy patch directives into synthetic crate
-#        run: |
-#          echo "[patch.crates-io]" >> ./ci-build/Cargo.toml
-#          cat ./crates/Cargo.toml | sed "0,/.\+\(patch.crates.\+\)/d" >> ./ci-build/Cargo.toml
-#      - name: Add zcash_proofs as a dependency of the synthetic crate
-#        working-directory: ./ci-build
-#        run: cargo add --no-default-features --path ../crates/zcash_proofs
+  build-nodefault:
+    name: Build target ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - wasm32-wasi
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: crates
+      # We use a synthetic crate to ensure no dev-dependencies are enabled, which can
+      # be incompatible with some of these targets.
+      - name: Create synthetic crate for testing
+        run: cargo init --lib ci-build
+      - name: Copy Rust version into synthetic crate
+        run: cp crates/rust-toolchain.toml ci-build/
+      - name: Copy patch directives into synthetic crate
+        run: |
+          echo "[patch.crates-io]" >> ./ci-build/Cargo.toml
+          cat ./crates/Cargo.toml | sed "0,/.\+\(patch.crates.\+\)/d" >> ./ci-build/Cargo.toml
+      - name: Add zcash_proofs as a dependency of the synthetic crate
+        working-directory: ./ci-build
+        run: cargo add --no-default-features --path ../crates/zcash_proofs
 #      - name: Add zcash_client_backend as a dependency of the synthetic crate
 #        working-directory: ./ci-build
 #        run: cargo add --features lightwalletd-tonic --path ../crates/zcash_client_backend
-#      - name: Copy pinned dependencies into synthetic crate
-#        run: cp crates/Cargo.lock ci-build/
-#      - name: Add target
-#        working-directory: ./ci-build
-#        run: rustup target add ${{ matrix.target }}
-#      - name: Build for target
-#        working-directory: ./ci-build
-#        run: cargo build --verbose --target ${{ matrix.target }}
+      - name: Copy pinned dependencies into synthetic crate
+        run: cp crates/Cargo.lock ci-build/
+      - name: Add target
+        working-directory: ./ci-build
+        run: rustup target add ${{ matrix.target }}
+      - name: Build for target
+        working-directory: ./ci-build
+        run: cargo build --verbose --target ${{ matrix.target }}
 
   bitrot:
     name: Bitrot check
