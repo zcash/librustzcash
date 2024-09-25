@@ -77,15 +77,10 @@ pub fn read_note<R: Read>(mut reader: R) -> io::Result<Note> {
 fn read_rho<R: Read>(mut reader: R) -> io::Result<Rho> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
-    let rho_ctopt = Rho::from_bytes(&bytes);
-    if rho_ctopt.is_some().into() {
-        Ok(rho_ctopt.unwrap())
-    } else {
-        Err(Error::new(
-            ErrorKind::InvalidData,
-            "invalid Pallas point for rho",
-        ))
-    }
+    Option::from(Rho::from_bytes(&bytes)).ok_or(Error::new(
+        ErrorKind::InvalidData,
+        "invalid Pallas point for rho",
+    ))
 }
 
 fn read_recipient<R: Read>(mut reader: R) -> io::Result<Address> {
@@ -111,12 +106,12 @@ fn read_rseed<R: Read>(mut reader: R, nullifier: &Rho) -> io::Result<RandomSeed>
         .ok_or(Error::new(ErrorKind::InvalidData, "Invalid rseed"))
 }
 
-/// Writes an [`IssueBundle`] in the v5 transaction format.
+/// Writes an [`IssueBundle`] in the v6 transaction format.
 pub fn write_v6_bundle<W: Write>(
     bundle: Option<&IssueBundle<Signed>>,
     mut writer: W,
 ) -> io::Result<()> {
-    if let Some(bundle) = &bundle {
+    if let Some(bundle) = bundle {
         Vector::write_nonempty(&mut writer, bundle.actions(), |w, action| {
             write_action(action, w)
         })?;

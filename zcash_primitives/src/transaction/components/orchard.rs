@@ -5,12 +5,11 @@ use std::io::{self, Read, Write};
 use crate::transaction::components::issuance::read_asset;
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use nonempty::NonEmpty;
-use orchard::note::AssetBase;
-use orchard::note_encryption::OrchardDomainCommon;
-use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
 use orchard::{
     bundle::{Authorization, Authorized, Flags},
-    note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
+    note::{AssetBase, ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
+    note_encryption::OrchardDomainCommon,
+    orchard_flavor::{OrchardVanilla, OrchardZSA},
     primitives::redpallas::{self, SigType, Signature, SpendAuth, VerificationKey},
     value::{NoteValue, ValueCommitment},
     Action, Anchor,
@@ -248,9 +247,9 @@ pub fn read_signature<R: Read, T: SigType>(mut reader: R) -> io::Result<Signatur
 }
 
 fn read_note_value<R: Read>(mut reader: R) -> io::Result<NoteValue> {
-    let mut tmp = [0; 8];
-    reader.read_exact(&mut tmp)?;
-    Ok(NoteValue::from_bytes(tmp))
+    let mut bytes = [0; 8];
+    reader.read_exact(&mut bytes)?;
+    Ok(NoteValue::from_bytes(bytes))
 }
 
 /// Writes an [`orchard::Bundle`] in the v5 transaction format.

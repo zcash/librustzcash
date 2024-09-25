@@ -239,7 +239,8 @@ fn zip_0244() {
     ) -> (TransactionData<TestUnauthorized>, TxDigests<Blake2bHash>) {
         let tx = Transaction::read(
             &tv.tx[..],
-            #[cfg(not(zcash_unstable = "nu6"))] /* TODO nu7 */ BranchId::Nu5,
+            #[cfg(not(zcash_unstable = "nu6" /* TODO nu7 */ ))]
+            BranchId::Nu5,
             #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             BranchId::Nu7,
         )

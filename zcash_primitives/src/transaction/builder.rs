@@ -109,22 +109,18 @@ pub enum Error<FE> {
     /// The builder was constructed without support for the Sapling pool, but a Sapling
     /// spend or output was added.
     SaplingBuilderNotAvailable,
-    /// The Orchard support is disabled.
-    OrchardIsDisabled,
     /// The builder was constructed with a target height before NU5 activation, but an Orchard
     /// spend or output was added.
-    OrchardBuilderNotAvailable,
-    /// The builder was constructed without support for the Orchard
-    OrchardBuilderConfigNotAvailable,
+    OrchardBundleNotAvailable,
     ///  The issuance bundle not initialized.
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     IssuanceBuilderNotAvailable,
     /// An error occurred in constructing the Issuance bundle.
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     IssuanceBundle(issuance::Error),
-    /// An error occurred in constructing the Issuance builder.
+    /// Issuance bundle already initialized.
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    IssuanceBuilder(&'static str),
+    IssuanceBundleAlreadyInitialized,
     /// An error occurred in constructing the TZE parts of a transaction.
     #[cfg(zcash_unstable = "zfuture")]
     TzeBuild(tze::builder::Error),
@@ -154,14 +150,9 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
                 f,
                 "Cannot create Sapling transactions without a Sapling anchor"
             ),
-            Error::OrchardBuilderNotAvailable => write!(
+            Error::OrchardBundleNotAvailable => write!(
                 f,
-                "Cannot create Orchard transactions without an Orchard anchor, or before NU5 activation"
-            ),
-            Error::OrchardIsDisabled =>  write!(f, "Orchard support is disabled"),
-            Error::OrchardBuilderConfigNotAvailable => write!(
-                f,
-                "Orchard builder configuration not available"
+                "The builder was constructed with a target height before NU5 activation, but an Orchard spend or output was added"
             ),
             #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             Error::IssuanceBuilderNotAvailable => write!(
@@ -171,7 +162,10 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
             #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             Error::IssuanceBundle(err) => write!(f, "{:?}", err),
             #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-            Error::IssuanceBuilder(err) => write!(f, "{:?}", err),
+            Error::IssuanceBundleAlreadyInitialized => write!(
+                f,
+                "Issuance bundle already initialized"
+            ),
             #[cfg(zcash_unstable = "zfuture")]
             Error::TzeBuild(err) => err.fmt(f),
         }
@@ -201,13 +195,6 @@ impl<FE> From<sapling::builder::Error> for Error<FE> {
 impl<FE> From<orchard::builder::SpendError> for Error<FE> {
     fn from(e: orchard::builder::SpendError) -> Self {
         Error::OrchardSpend(e)
-    }
-}
-
-#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-impl<FE> From<issuance::Error> for Error<FE> {
-    fn from(e: issuance::Error) -> Self {
-        Error::IssuanceBundle(e)
     }
 }
 
@@ -248,11 +235,11 @@ impl Progress {
 /// Rules for how the builder should be configured for each shielded pool.
 #[derive(Clone, Copy)]
 pub enum BuildConfig {
-    Zsa {
+    Standard {
         sapling_anchor: Option<sapling::Anchor>,
         orchard_anchor: Option<orchard::Anchor>,
     },
-    Standard {
+    Zsa {
         sapling_anchor: Option<sapling::Anchor>,
         orchard_anchor: Option<orchard::Anchor>,
     },
@@ -292,7 +279,7 @@ impl BuildConfig {
     pub fn orchard_bundle_type<FE>(&self) -> Result<BundleType, Error<FE>> {
         let (bundle_type, _) = self
             .orchard_builder_config()
-            .ok_or(Error::OrchardBuilderNotAvailable)?;
+            .ok_or(Error::OrchardBundleNotAvailable)?;
         Ok(bundle_type)
     }
 }
@@ -485,9 +472,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
         issue_info: Option<IssueInfo>,
     ) -> Result<(), Error<FE>> {
         if self.issuance_builder.is_some() {
-            return Err(Error::IssuanceBuilder(
-                "Issuance bundle already initialized",
-            ));
+            return Err(Error::IssuanceBundleAlreadyInitialized);
         }
 
         self.issuance_builder = Some(
@@ -539,7 +524,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     pub fn add_burn<FE>(&mut self, value: u64, asset: AssetBase) -> Result<(), Error<FE>> {
         self.orchard_builder
             .as_mut()
-            .ok_or(Error::OrchardBuilderNotAvailable)?
+            .ok_or(Error::OrchardBundleNotAvailable)?
             .add_burn(asset, orchard::value::NoteValue::from_raw(value))
             .map_err(Error::OrchardBuild)?;
 
@@ -560,11 +545,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     ) -> Result<(), Error<FE>> {
         let bundle_type = self.build_config.orchard_bundle_type()?;
         if bundle_type == BundleType::DEFAULT_VANILLA {
-            assert_eq!(note.asset().is_native().unwrap_u8(), 1);
+            assert!(bool::from(note.asset().is_native()));
         }
         self.orchard_builder
             .as_mut()
-            .ok_or(Error::OrchardBuilderNotAvailable)?
+            .ok_or(Error::OrchardBundleNotAvailable)?
             .add_spend(orchard::keys::FullViewingKey::from(sk), note, merkle_path)
             .map_err(Error::OrchardSpend)?;
 
@@ -585,11 +570,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     ) -> Result<(), Error<FE>> {
         let bundle_type = self.build_config.orchard_bundle_type()?;
         if bundle_type == BundleType::DEFAULT_VANILLA {
-            assert_eq!(asset, AssetBase::native());
+            assert!(bool::from(asset.is_native()));
         }
         self.orchard_builder
             .as_mut()
-            .ok_or(Error::OrchardBuilderNotAvailable)?
+            .ok_or(Error::OrchardBundleNotAvailable)?
             .add_output(
                 ovk,
                 recipient,
