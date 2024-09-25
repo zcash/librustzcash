@@ -2105,7 +2105,7 @@ pub(crate) fn get_max_height_hash(
 }
 
 /// Gets the height to which the database must be truncated if any truncation that would remove a
-/// number of blocks greater than the pruning height is attempted.
+/// number of blocks greater than the note commitment tree pruning depth is attempted.
 pub(crate) fn get_min_unspent_height(
     conn: &rusqlite::Connection,
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
@@ -2357,34 +2357,86 @@ pub(crate) fn set_transaction_status(
     Ok(())
 }
 
-/// Truncates the database to the given height.
+/// Truncates the database to at most the given height.
 ///
 /// If the requested height is greater than or equal to the height of the last scanned
 /// block, this function does nothing.
 ///
 /// This should only be executed inside a transactional context.
+///
+/// Returns the block height to which the database was truncated.
 pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
-    block_height: BlockHeight,
-) -> Result<(), SqliteClientError> {
-    let sapling_activation_height = params
-        .activation_height(NetworkUpgrade::Sapling)
-        .expect("Sapling activation height must be available.");
+    max_height: BlockHeight,
+) -> Result<BlockHeight, SqliteClientError> {
+    // Determine a checkpoint to which we can rewind, if any.
+    #[cfg(not(feature = "orchard"))]
+    let truncation_height_query = r#"
+        SELECT MAX(height) FROM blocks
+        JOIN sapling_tree_checkpoints ON checkpoint_id = blocks.height
+        WHERE blocks.height <= :block_height
+    "#;
 
-    // Recall where we synced up to previously.
+    #[cfg(feature = "orchard")]
+    let truncation_height_query = r#"
+        SELECT MAX(height) FROM blocks
+        JOIN sapling_tree_checkpoints sc ON sc.checkpoint_id = blocks.height
+        JOIN orchard_tree_checkpoints oc ON oc.checkpoint_id = blocks.height
+        WHERE blocks.height <= :block_height
+    "#;
+
+    let truncation_height = conn
+        .query_row(
+            truncation_height_query,
+            named_params! {":block_height": u32::from(max_height)},
+            |row| row.get::<_, Option<u32>>(0),
+        )
+        .optional()?
+        .flatten()
+        .map_or_else(
+            || {
+                // If we don't have a checkpoint at a height less than or equal to the requested
+                // truncation height, query for the minimum height to which it's possible for us to
+                // truncate so that we can report it to the caller.
+                #[cfg(not(feature = "orchard"))]
+                let min_checkpoint_height_query =
+                    "SELECT MIN(checkpoint_id) FROM sapling_tree_checkpoints";
+                #[cfg(feature = "orchard")]
+                let min_checkpoint_height_query = "SELECT MIN(checkpoint_id) 
+                     FROM sapling_tree_checkpoints sc
+                     JOIN orchard_tree_checkpoints oc
+                     ON oc.checkpoint_id = sc.checkpoint_id";
+
+                let min_truncation_height = conn
+                    .query_row(min_checkpoint_height_query, [], |row| {
+                        row.get::<_, Option<u32>>(0)
+                    })
+                    .optional()?
+                    .flatten()
+                    .map(BlockHeight::from);
+
+                Err(SqliteClientError::RequestedRewindInvalid {
+                    safe_rewind_height: min_truncation_height,
+                    requested_height: max_height,
+                })
+            },
+            |h| Ok(BlockHeight::from(h)),
+        )?;
+
     let last_scanned_height = conn.query_row("SELECT MAX(height) FROM blocks", [], |row| {
-        row.get::<_, Option<u32>>(0)
-            .map(|opt| opt.map_or_else(|| sapling_activation_height - 1, BlockHeight::from))
-    })?;
+        let h = row.get::<_, Option<u32>>(0)?;
 
-    if block_height < last_scanned_height - PRUNING_DEPTH {
-        if let Some(h) = get_min_unspent_height(conn)? {
-            if block_height > h {
-                return Err(SqliteClientError::RequestedRewindInvalid(h, block_height));
-            }
-        }
-    }
+        Ok(h.map_or_else(
+            || {
+                params
+                    .activation_height(NetworkUpgrade::Sapling)
+                    .expect("Sapling activation height must be available.")
+                    - 1
+            },
+            BlockHeight::from,
+        ))
+    })?;
 
     // Delete from the scanning queue any range with a start height greater than the
     // truncation height, and then truncate any remaining range by setting the end
@@ -2393,13 +2445,13 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     conn.execute(
         "DELETE FROM scan_queue
         WHERE block_range_start >= :new_end_height",
-        named_params![":new_end_height": u32::from(block_height + 1)],
+        named_params![":new_end_height": u32::from(truncation_height + 1)],
     )?;
     conn.execute(
         "UPDATE scan_queue
         SET block_range_end = :new_end_height
         WHERE block_range_end > :new_end_height",
-        named_params![":new_end_height": u32::from(block_height + 1)],
+        named_params![":new_end_height": u32::from(truncation_height + 1)],
     )?;
 
     // Mark transparent utxos as un-mined. Since the TXO is now not mined, it would ideally be
@@ -2413,7 +2465,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
          FROM transactions tx
          WHERE tx.id_tx = transaction_id
          AND max_observed_unspent_height > :height",
-        named_params![":height": u32::from(block_height)],
+        named_params![":height": u32::from(truncation_height)],
     )?;
 
     // Un-mine transactions. This must be done outside of the last_scanned_height check because
@@ -2422,32 +2474,32 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         "UPDATE transactions
          SET block = NULL, mined_height = NULL, tx_index = NULL
          WHERE mined_height > :height",
-        named_params![":height": u32::from(block_height)],
+        named_params![":height": u32::from(truncation_height)],
     )?;
 
     // If we're removing scanned blocks, we need to truncate the note commitment tree and remove
     // affected block records from the database.
-    if block_height < last_scanned_height {
+    if truncation_height < last_scanned_height {
         // Truncate the note commitment trees
         let mut wdb = WalletDb {
             conn: SqlTransaction(conn),
             params: params.clone(),
         };
         wdb.with_sapling_tree_mut(|tree| {
-            tree.truncate_removing_checkpoint(&block_height)?;
+            tree.truncate_removing_checkpoint(&truncation_height)?;
             // We do want a checkpoint preserved at the end of the block, but it should have no
             // other data associated with it. TODO: `truncate_removing_checkpoint` is an awkward
             // API to work with, and should be replaced with `truncate_to_checkpoint`.
-            tree.checkpoint(block_height)?;
+            tree.checkpoint(truncation_height)?;
             Ok::<_, SqliteClientError>(())
         })?;
         #[cfg(feature = "orchard")]
         wdb.with_orchard_tree_mut(|tree| {
-            tree.truncate_removing_checkpoint(&block_height)?;
+            tree.truncate_removing_checkpoint(&truncation_height)?;
             // We do want a checkpoint preserved at the end of the block, but it should have no
             // other data associated with it. TODO: `truncate_removing_checkpoint` is an awkward
             // API to work with, and should be replaced with `truncate_to_checkpoint`.
-            tree.checkpoint(block_height)?;
+            tree.checkpoint(truncation_height)?;
             Ok::<_, SqliteClientError>(())
         })?;
 
@@ -2461,7 +2513,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         // Now that they aren't depended on, delete un-mined blocks.
         conn.execute(
             "DELETE FROM blocks WHERE height > ?",
-            [u32::from(block_height)],
+            [u32::from(truncation_height)],
         )?;
 
         // Delete from the nullifier map any entries with a locator referencing a block
@@ -2469,11 +2521,11 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         conn.execute(
             "DELETE FROM tx_locator_map
             WHERE block_height > :block_height",
-            named_params![":block_height": u32::from(block_height)],
+            named_params![":block_height": u32::from(truncation_height)],
         )?;
     }
 
-    Ok(())
+    Ok(truncation_height)
 }
 
 /// Returns a vector with the IDs of all accounts known to this wallet.

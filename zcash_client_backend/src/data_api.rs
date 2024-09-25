@@ -2038,20 +2038,27 @@ pub trait WalletWrite: WalletRead {
         transactions: &[SentTransaction<Self::AccountId>],
     ) -> Result<(), Self::Error>;
 
-    /// Truncates the wallet database to the specified height.
+    /// Truncates the wallet database to at most the specified height.
     ///
-    /// This method assumes that the state of the underlying data store is
-    /// consistent up to a particular block height. Since it is possible that
-    /// a chain reorg might invalidate some stored state, this method must be
-    /// implemented in order to allow users of this API to "reset" the data store
-    /// to correctly represent chainstate as of a specified block height.
+    /// Implementations of this method may choose a lower block height to which the data store will
+    /// be truncated if it is not possible to truncate exactly to the specified height. Upon
+    /// successful truncation, this method returns the height to which the data store was actually
+    /// truncated.
     ///
-    /// After calling this method, the block at the given height will be the
-    /// most recent block and all other operations will treat this block
-    /// as the chain tip for balance determination purposes.
+    /// This method assumes that the state of the underlying data store is consistent up to a
+    /// particular block height. Since it is possible that a chain reorg might invalidate some
+    /// stored state, this method must be implemented in order to allow users of this API to
+    /// "reset" the data store to correctly represent chainstate as of at most the requested block
+    /// height.
     ///
-    /// There may be restrictions on heights to which it is possible to truncate.
-    fn truncate_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error>;
+    /// After calling this method, the block at the returned height will be the most recent block
+    /// and all other operations will treat this block as the chain tip for balance determination
+    /// purposes.
+    ///
+    /// There may be restrictions on heights to which it is possible to truncate. Specifically, it
+    /// will only be possible to truncate to heights at which is is possible to create a witness
+    /// given the current state of the wallet's note commitment tree.
+    fn truncate_to_height(&mut self, max_height: BlockHeight) -> Result<BlockHeight, Self::Error>;
 
     /// Reserves the next `n` available ephemeral addresses for the given account.
     /// This cannot be undone, so as far as possible, errors associated with transaction

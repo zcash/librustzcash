@@ -197,7 +197,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::TableNotEmpty => unreachable!("wallet already initialized"),
         SqliteClientError::BlockConflict(_)
         | SqliteClientError::NonSequentialBlocks
-        | SqliteClientError::RequestedRewindInvalid(_, _)
+        | SqliteClientError::RequestedRewindInvalid { .. }
         | SqliteClientError::KeyDerivationError(_)
         | SqliteClientError::AccountIdDiscontinuity
         | SqliteClientError::AccountIdOutOfRange

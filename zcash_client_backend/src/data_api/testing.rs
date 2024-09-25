@@ -2633,8 +2633,11 @@ impl WalletWrite for MockWalletDb {
         Ok(())
     }
 
-    fn truncate_to_height(&mut self, _block_height: BlockHeight) -> Result<(), Self::Error> {
-        Ok(())
+    fn truncate_to_height(
+        &mut self,
+        _block_height: BlockHeight,
+    ) -> Result<BlockHeight, Self::Error> {
+        Err(())
     }
 
     /// Adds a transparent UTXO received by the wallet to the data store.

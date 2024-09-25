@@ -7,12 +7,15 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+- `zcash_client_sqlite::error::SqliteClientError::RequestedRewindInvalid`
+  is now a structured variant.
+
 ## [0.11.2] - 2024-08-21
 
 ### Changed
 - The `v_tx_outputs` view was modified slightly to support older versions of
   `sqlite`. Queries to the exposed `v_tx_outputs` and `v_transactions` views
-  are supported for SQLite versions back to `3.19.x`. 
+  are supported for SQLite versions back to `3.19.x`.
 - `zcash_client_sqlite::wallet::init::WalletMigrationError` has an additional
   variant, `DatabaseNotSupported`. The `init_wallet_db` function now checks
   that the sqlite version in use is compatible with the features required by
