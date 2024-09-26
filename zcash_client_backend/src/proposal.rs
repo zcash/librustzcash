@@ -38,6 +38,8 @@ pub enum ProposalError {
     /// * There provided transaction request is empty; i.e. the only output values specified
     ///   are change and fee amounts.
     ShieldingInvalid,
+    /// No anchor information could be obtained for the specified block height.
+    AnchorNotFound(BlockHeight),
     /// A reference to the output of a prior step is invalid.
     ReferenceError(StepOutput),
     /// An attempted double-spend of a prior step output was detected.
@@ -85,6 +87,9 @@ impl Display for ProposalError {
                 f,
                 "The proposal violates the rules for a shielding transaction."
             ),
+            ProposalError::AnchorNotFound(h) => {
+                write!(f, "Unable to compute anchor for block height {:?}", h)
+            }
             ProposalError::ReferenceError(r) => {
                 write!(f, "No prior step output found for reference {:?}", r)
             }

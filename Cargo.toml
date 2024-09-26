@@ -47,7 +47,7 @@ zcash_proofs = { version = "0.17", path = "zcash_proofs", default-features = fal
 bellman = { version = "0.14", default-features = false, features = ["groth16"] }
 ff = "0.13"
 group = "0.13"
-incrementalmerkletree = "0.6"
+incrementalmerkletree = "0.7"
 shardtree = "0.4"
 zcash_spec = "0.1"
 
@@ -139,6 +139,7 @@ criterion = "0.5"
 proptest = "1"
 rand_chacha = "0.3"
 rand_xorshift = "0.3"
+incrementalmerkletree-testing = "0.1"
 
 # Tor
 # - `arti-client` depends on `rusqlite`, and a version mismatch there causes a compilation
@@ -160,3 +161,10 @@ codegen-units = 1
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
+
+[patch.crates-io]
+sapling-crypto = { git = "https://github.com/zcash/sapling-crypto", rev = "b1ad3694ee13a2fc5d291ad04721a6252da0993c" }
+orchard = { git = "https://github.com/zcash/orchard", rev = "55fb089a335bbbc1cda186c706bc037073df8eb7" }
+incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }
+incrementalmerkletree-testing = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }
+shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }

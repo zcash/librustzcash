@@ -31,6 +31,7 @@ document-features.workspace = true
 # - Test dependencies
 proptest = { workspace = true, optional = true }
 incrementalmerkletree = { workspace = true, optional = true }
+incrementalmerkletree-testing = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest.workspace = true
@@ -39,6 +40,7 @@ proptest.workspace = true
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
     "dep:incrementalmerkletree",
+    "dep:incrementalmerkletree-testing",
     "dep:proptest",
     "incrementalmerkletree?/test-dependencies",
 ]

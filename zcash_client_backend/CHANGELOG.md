@@ -22,6 +22,8 @@ and this library adheres to Rust's notion of
     via `WalletSummary::recovery_progress`.
 - `zcash_client_backend::sync::run`:
   - Transparent outputs are now refreshed in addition to shielded notes.
+- `zcash_client_backend::proposal::ProposalError` has a new `AnchorNotFound`
+  variant.
 
 ### Fixed
 - `zcash_client_backend::tor::grpc` now needs the `lightwalletd-tonic-tls-webpki-roots`

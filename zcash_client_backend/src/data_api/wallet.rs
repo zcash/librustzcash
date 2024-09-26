@@ -39,6 +39,7 @@ use sapling::{
     note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
     prover::{OutputProver, SpendProver},
 };
+use shardtree::error::{QueryError, ShardTreeError};
 use std::num::NonZeroU32;
 
 use super::InputSource;
@@ -756,6 +757,7 @@ where
                     wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _>>(|sapling_tree| {
                         let anchor = sapling_tree
                             .root_at_checkpoint_id(&inputs.anchor_height())?
+                            .ok_or(ProposalError::AnchorNotFound(inputs.anchor_height()))?
                             .into();
 
                         let sapling_inputs = inputs
@@ -773,6 +775,11 @@ where
                                             selected.note_commitment_tree_position(),
                                             &inputs.anchor_height(),
                                         )
+                                        .and_then(|witness| {
+                                            witness.ok_or(ShardTreeError::Query(
+                                                QueryError::CheckpointPruned,
+                                            ))
+                                        })
                                         .map(|merkle_path| Some((key, note, merkle_path)))
                                         .map_err(Error::from)
                                         .transpose()
@@ -791,40 +798,46 @@ where
         };
 
     #[cfg(feature = "orchard")]
-    let (orchard_anchor, orchard_inputs) =
-        if proposal_step.involves(PoolType::Shielded(ShieldedProtocol::Orchard)) {
-            proposal_step.shielded_inputs().map_or_else(
-                || Ok((Some(orchard::Anchor::empty_tree()), vec![])),
-                |inputs| {
-                    wallet_db.with_orchard_tree_mut::<_, _, Error<_, _, _, _>>(|orchard_tree| {
-                        let anchor = orchard_tree
-                            .root_at_checkpoint_id(&inputs.anchor_height())?
-                            .into();
+    let (orchard_anchor, orchard_inputs) = if proposal_step
+        .involves(PoolType::Shielded(ShieldedProtocol::Orchard))
+    {
+        proposal_step.shielded_inputs().map_or_else(
+            || Ok((Some(orchard::Anchor::empty_tree()), vec![])),
+            |inputs| {
+                wallet_db.with_orchard_tree_mut::<_, _, Error<_, _, _, _>>(|orchard_tree| {
+                    let anchor = orchard_tree
+                        .root_at_checkpoint_id(&inputs.anchor_height())?
+                        .ok_or(ProposalError::AnchorNotFound(inputs.anchor_height()))?
+                        .into();
 
-                        let orchard_inputs = inputs
-                            .notes()
-                            .iter()
-                            .filter_map(|selected| match selected.note() {
-                                #[cfg(feature = "orchard")]
-                                Note::Orchard(note) => orchard_tree
-                                    .witness_at_checkpoint_id_caching(
-                                        selected.note_commitment_tree_position(),
-                                        &inputs.anchor_height(),
-                                    )
-                                    .map(|merkle_path| Some((note, merkle_path)))
-                                    .map_err(Error::from)
-                                    .transpose(),
-                                Note::Sapling(_) => None,
-                            })
-                            .collect::<Result<Vec<_>, Error<_, _, _, _>>>()?;
+                    let orchard_inputs = inputs
+                        .notes()
+                        .iter()
+                        .filter_map(|selected| match selected.note() {
+                            #[cfg(feature = "orchard")]
+                            Note::Orchard(note) => orchard_tree
+                                .witness_at_checkpoint_id_caching(
+                                    selected.note_commitment_tree_position(),
+                                    &inputs.anchor_height(),
+                                )
+                                .and_then(|witness| {
+                                    witness
+                                        .ok_or(ShardTreeError::Query(QueryError::CheckpointPruned))
+                                })
+                                .map(|merkle_path| Some((note, merkle_path)))
+                                .map_err(Error::from)
+                                .transpose(),
+                            Note::Sapling(_) => None,
+                        })
+                        .collect::<Result<Vec<_>, Error<_, _, _, _>>>()?;
 
-                        Ok((Some(anchor), orchard_inputs))
-                    })
-                },
-            )?
-        } else {
-            (None, vec![])
-        };
+                    Ok((Some(anchor), orchard_inputs))
+                })
+            },
+        )?
+    } else {
+        (None, vec![])
+    };
     #[cfg(not(feature = "orchard"))]
     let orchard_anchor = None;
 

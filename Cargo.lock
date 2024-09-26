@@ -2109,14 +2109,22 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
 name = "incrementalmerkletree"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75346da3bd8e3d8891d02508245ed2df34447ca6637e343829f8d08986e9cde2"
+version = "0.7.0"
+source = "git+https://github.com/zcash/incrementalmerkletree?rev=ffe4234788fd22662b937ba7c6ea01535fcc1293#ffe4234788fd22662b937ba7c6ea01535fcc1293"
 dependencies = [
  "either",
  "proptest",
  "rand 0.8.5",
  "rand_core 0.6.4",
+]
+
+[[package]]
+name = "incrementalmerkletree-testing"
+version = "0.1.0"
+source = "git+https://github.com/zcash/incrementalmerkletree?rev=ffe4234788fd22662b937ba7c6ea01535fcc1293#ffe4234788fd22662b937ba7c6ea01535fcc1293"
+dependencies = [
+ "incrementalmerkletree",
+ "proptest",
 ]
 
 [[package]]
@@ -2631,9 +2639,8 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchard"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dc7bde644aeb980be296cd908c6650894dc8541deb56f9f5294c52ed7ca568f"
+version = "0.9.1"
+source = "git+https://github.com/zcash/orchard?rev=55fb089a335bbbc1cda186c706bc037073df8eb7#55fb089a335bbbc1cda186c706bc037073df8eb7"
 dependencies = [
  "aes",
  "bitvec",
@@ -3650,8 +3657,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15e379398fffad84e49f9a45a05635fc004f66086e65942dbf4eb95332c26d2a"
+source = "git+https://github.com/zcash/sapling-crypto?rev=b1ad3694ee13a2fc5d291ad04721a6252da0993c#b1ad3694ee13a2fc5d291ad04721a6252da0993c"
 dependencies = [
  "aes",
  "bellman",
@@ -3912,13 +3918,13 @@ dependencies = [
 [[package]]
 name = "shardtree"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78222845cd8bbe5eb95687407648ff17693a35de5e8abaa39a4681fb21e033f9"
+source = "git+https://github.com/zcash/incrementalmerkletree?rev=ffe4234788fd22662b937ba7c6ea01535fcc1293#ffe4234788fd22662b937ba7c6ea01535fcc1293"
 dependencies = [
  "assert_matches",
  "bitflags 2.6.0",
  "either",
  "incrementalmerkletree",
+ "incrementalmerkletree-testing",
  "proptest",
  "tracing",
 ]
@@ -5897,6 +5903,7 @@ dependencies = [
  "document-features",
  "group",
  "incrementalmerkletree",
+ "incrementalmerkletree-testing",
  "jubjub",
  "maybe-rayon",
  "nonempty",
@@ -6082,6 +6089,7 @@ version = "0.3.0"
 dependencies = [
  "document-features",
  "incrementalmerkletree",
+ "incrementalmerkletree-testing",
  "memuse",
  "proptest",
 ]
