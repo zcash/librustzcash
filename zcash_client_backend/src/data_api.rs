@@ -67,6 +67,7 @@ use incrementalmerkletree::{frontier::Frontier, Retention};
 use nonempty::NonEmpty;
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
+use zcash_keys::address::Address;
 use zip32::fingerprint::SeedFingerprint;
 
 use self::{
@@ -1230,11 +1231,12 @@ pub trait WalletTest: InputSource + WalletRead {
         _protocol: ShieldedProtocol,
     ) -> Result<Vec<NoteId>, <Self as WalletRead>::Error>;
 
+    /// Returns the outputs for a transaction sent by the wallet.
     #[allow(clippy::type_complexity)]
-    fn get_confirmed_sends(
+    fn get_sent_outputs(
         &self,
         txid: &TxId,
-    ) -> Result<Vec<(u64, Option<String>, Option<String>, Option<u32>)>, <Self as WalletRead>::Error>;
+    ) -> Result<Vec<OutputOfSentTx>, <Self as WalletRead>::Error>;
 
     #[allow(clippy::type_complexity)]
     fn get_checkpoint_history(
@@ -1262,6 +1264,37 @@ pub trait WalletTest: InputSource + WalletRead {
         &self,
         protocol: ShieldedProtocol,
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error>;
+}
+
+/// The output of a transaction sent by the wallet.
+///
+/// This type is opaque, and exists for use by tests defined in this crate.
+#[cfg(any(test, feature = "test-dependencies"))]
+#[derive(Clone, Debug)]
+pub struct OutputOfSentTx {
+    value: NonNegativeAmount,
+    external_recipient: Option<Address>,
+    ephemeral_address: Option<(Address, u32)>,
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+impl OutputOfSentTx {
+    /// Constructs an output from its test-relevant parts.
+    ///
+    /// If the output is to an ephemeral address, `ephemeral_address` should contain the
+    /// address along with the `address_index` it was derived from under the BIP 32 path
+    /// `m/44'/<coin_type>'/<account>'/2/<address_index>`.
+    pub fn from_parts(
+        value: NonNegativeAmount,
+        external_recipient: Option<Address>,
+        ephemeral_address: Option<(Address, u32)>,
+    ) -> Self {
+        Self {
+            value,
+            external_recipient,
+            ephemeral_address,
+        }
+    }
 }
 
 /// The relevance of a seed to a given wallet.

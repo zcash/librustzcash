@@ -99,7 +99,10 @@ use maybe_rayon::{
 };
 
 #[cfg(any(test, feature = "test-dependencies"))]
-use zcash_client_backend::data_api::{testing::TransactionSummary, WalletTest};
+use {
+    zcash_client_backend::data_api::{testing::TransactionSummary, OutputOfSentTx, WalletTest},
+    zcash_keys::address::Address,
+};
 
 /// `maybe-rayon` doesn't provide this as a fallback, so we have to.
 #[cfg(not(feature = "multicore"))]
@@ -650,11 +653,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletTest for W
         Ok(note_ids)
     }
 
-    fn get_confirmed_sends(
+    fn get_sent_outputs(
         &self,
         txid: &TxId,
-    ) -> Result<Vec<(u64, Option<String>, Option<String>, Option<u32>)>, <Self as WalletRead>::Error>
-    {
+    ) -> Result<Vec<OutputOfSentTx>, <Self as WalletRead>::Error> {
         let mut stmt_sent = self
             .conn.borrow()
             .prepare(
@@ -668,12 +670,24 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletTest for W
 
         let sends = stmt_sent
             .query_map(rusqlite::params![txid.as_ref()], |row| {
-                let v: u32 = row.get(0)?;
-                let to_address: Option<String> = row.get(1)?;
-                let ephemeral_address: Option<String> = row.get(2)?;
+                let v = row.get(0)?;
+                let to_address = row
+                    .get::<_, Option<String>>(1)?
+                    .and_then(|s| Address::decode(&self.params, &s));
+                let ephemeral_address = row
+                    .get::<_, Option<String>>(2)?
+                    .and_then(|s| Address::decode(&self.params, &s));
                 let address_index: Option<u32> = row.get(3)?;
-                Ok((u64::from(v), to_address, ephemeral_address, address_index))
+                Ok((v, to_address, ephemeral_address.zip(address_index)))
             })?
+            .map(|res| {
+                let (amount, external_recipient, ephemeral_address) = res?;
+                Ok::<_, <Self as WalletRead>::Error>(OutputOfSentTx::from_parts(
+                    NonNegativeAmount::from_u64(amount)?,
+                    external_recipient,
+                    ephemeral_address,
+                ))
+            })
             .collect::<Result<_, _>>()?;
 
         Ok(sends)

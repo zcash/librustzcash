@@ -319,7 +319,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     DSF: DataStoreFactory,
     <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::data_api::GAP_LIMIT;
+    use crate::data_api::{OutputOfSentTx, GAP_LIMIT};
 
     let mut st = TestBuilder::new()
         .with_data_store_factory(ds_factory)
@@ -410,7 +410,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         // Check that there are sent outputs with the correct values.
         let confirmed_sent: Vec<Vec<_>> = txids
             .iter()
-            .map(|sent_txid| st.wallet().get_confirmed_sends(sent_txid).unwrap())
+            .map(|sent_txid| st.wallet().get_sent_outputs(sent_txid).unwrap())
             .collect();
 
         // Verify that a status request has been generated for the second transaction of
@@ -421,21 +421,24 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         assert!(expected_step0_change < expected_ephemeral);
         assert_eq!(confirmed_sent.len(), 2);
         assert_eq!(confirmed_sent[0].len(), 2);
-        assert_eq!(
-            confirmed_sent[0][0].0,
-            u64::try_from(expected_step0_change).unwrap()
-        );
-        let (ephemeral_v, to_addr, ephemeral_addr, index) = confirmed_sent[0][1].clone();
-        assert_eq!(ephemeral_v, u64::try_from(expected_ephemeral).unwrap());
+        assert_eq!(confirmed_sent[0][0].value, expected_step0_change);
+        let OutputOfSentTx {
+            value: ephemeral_v,
+            external_recipient: to_addr,
+            ephemeral_address,
+        } = confirmed_sent[0][1].clone();
+        assert_eq!(ephemeral_v, expected_ephemeral);
         assert!(to_addr.is_some());
-        assert_eq!(ephemeral_addr, to_addr);
-        assert_eq!(index, Some(expected_index));
+        assert_eq!(
+            ephemeral_address,
+            to_addr.map(|addr| (addr, expected_index)),
+        );
 
         assert_eq!(confirmed_sent[1].len(), 1);
         assert_matches!(
-            confirmed_sent[1][0].clone(),
-            (sent_v, sent_to_addr, None, None)
-            if sent_v == u64::try_from(transfer_amount).unwrap() && sent_to_addr == Some(tex_addr.encode(st.network())));
+            &confirmed_sent[1][0],
+            OutputOfSentTx { value: sent_v, external_recipient: sent_to_addr, ephemeral_address: None }
+            if sent_v == &transfer_amount && sent_to_addr == &Some(tex_addr));
 
         // Check that the transaction history matches what we expect.
         let tx_history = st.wallet().get_tx_history().unwrap();
@@ -467,7 +470,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
             -ZatBalance::from(expected_ephemeral),
         );
 
-        (ephemeral_addr.unwrap(), txids)
+        (ephemeral_address.unwrap().0, txids)
     };
 
     // Each transfer should use a different ephemeral address.
@@ -477,9 +480,8 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 
     let height = add_funds(&mut st, value);
 
-    let ephemeral_taddr = Address::decode(st.network(), &ephemeral0).expect("valid address");
     assert_matches!(
-        ephemeral_taddr,
+        ephemeral0,
         Address::Transparent(TransparentAddress::PublicKeyHash(_))
     );
 
@@ -489,7 +491,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
             account_id,
             StandardFeeRule::Zip317,
             NonZeroU32::new(1).unwrap(),
-            &ephemeral_taddr,
+            &ephemeral0,
             transfer_amount,
             None,
             None,
@@ -504,7 +506,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     );
     assert_matches!(
         &create_proposed_result,
-        Err(Error::PaysEphemeralTransparentAddress(address_str)) if address_str == &ephemeral0);
+        Err(Error::PaysEphemeralTransparentAddress(address_str)) if address_str == &ephemeral0.encode(st.network()));
 
     // Simulate another wallet sending to an ephemeral address with an index
     // within the current gap limit. The `PaysEphemeralTransparentAddress` error
