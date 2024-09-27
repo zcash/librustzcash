@@ -393,6 +393,26 @@ CREATE TABLE transparent_spend_map (
 /// this table, distinguished by the `output_pool` column. The information we want to
 /// record for sent outputs is the same across all pools, whereas for received outputs we
 /// want to cache pool-specific data.
+///
+/// ### Columns
+/// - `(tx, output_pool, output_index)` collectively identify a transaction output.
+/// - `from_account_id`: the ID of the account that created the transaction.
+///   - On recover-from-seed or when scanning by UFVK, this will be either the account
+///     that decrypted the output, or one of the accounts that funded the transaction.
+/// - `to_address`: the address of the external recipient of this output, or `NULL` if the
+///   output was received by the wallet.
+/// - `to_account_id`: the ID of the account that received this output, or `NULL` if the
+///   output was for an external recipient.
+/// - `value`: the value of the output in zatoshis.
+/// - `memo`: the memo bytes associated with this output, if known.
+///   - This is always `NULL` for transparent outputs.
+///   - This will be set for all shielded outputs of transactions created by the wallet.
+///   - On recover-from-seed or when scanning by UFVK, this will only be set for shielded
+///     outputs after post-scanning transaction enhancement. For shielded notes sent to
+///     external recipients, the transaction needs to have been created with an
+///     [`OvkPolicy`] using a known OVK.
+///
+/// [`OvkPolicy`]: zcash_client_backend::wallet::OvkPolicy
 pub(super) const TABLE_SENT_NOTES: &str = r#"
 CREATE TABLE "sent_notes" (
     id INTEGER PRIMARY KEY,
