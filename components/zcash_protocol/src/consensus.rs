@@ -695,7 +695,7 @@ pub mod testing {
     }
 
     #[cfg(feature = "test-dependencies")]
-    impl incrementalmerkletree::testing::TestCheckpoint for BlockHeight {
+    impl incrementalmerkletree_testing::TestCheckpoint for BlockHeight {
         fn from_u64(value: u64) -> Self {
             BlockHeight(u32::try_from(value).expect("Test checkpoint ids do not exceed 32 bits"))
         }

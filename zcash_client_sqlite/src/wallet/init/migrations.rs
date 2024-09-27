@@ -4,6 +4,7 @@ mod add_utxo_account;
 mod addresses_table;
 mod ensure_orchard_ua_receiver;
 mod ephemeral_addresses;
+mod fix_broken_commitment_trees;
 mod full_account_ids;
 mod initial_setup;
 mod nullifier_map;
@@ -77,6 +78,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //              ------------------------------ tx_retrieval_queue ----------------------------
     //                                                     |
     //                                            support_legacy_sqlite
+    //                                                     |
+    //                                         fix_broken_commitment_trees
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -135,6 +138,9 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
             params: params.clone(),
         }),
         Box::new(support_legacy_sqlite::Migration),
+        Box::new(fix_broken_commitment_trees::Migration {
+            params: params.clone(),
+        }),
     ]
 }
 

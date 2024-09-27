@@ -12,7 +12,6 @@ use zcash_primitives::{consensus::BlockHeight, transaction::components::amount::
 
 use crate::wallet::commitment_tree;
 use crate::AccountId;
-use crate::PRUNING_DEPTH;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -64,8 +63,12 @@ pub enum SqliteClientError {
     NonSequentialBlocks,
 
     /// A requested rewind would violate invariants of the storage layer. The payload returned with
-    /// this error is (safe rewind height, requested height).
-    RequestedRewindInvalid(BlockHeight, BlockHeight),
+    /// this error is (safe rewind height, requested height). If no safe rewind height can be
+    /// determined, the safe rewind height member will be `None`.
+    RequestedRewindInvalid {
+        safe_rewind_height: Option<BlockHeight>,
+        requested_height: BlockHeight,
+    },
 
     /// An error occurred in generating a Zcash address.
     AddressGeneration(AddressGenerationError),
@@ -152,8 +155,12 @@ impl fmt::Display for SqliteClientError {
             }
             SqliteClientError::Protobuf(e) => write!(f, "Failed to parse protobuf-encoded record: {}", e),
             SqliteClientError::InvalidNote => write!(f, "Invalid note"),
-            SqliteClientError::RequestedRewindInvalid(h, r) =>
-                write!(f, "A rewind must be either of less than {} blocks, or at least back to block {} for your wallet; the requested height was {}.", PRUNING_DEPTH, h, r),
+            SqliteClientError::RequestedRewindInvalid { safe_rewind_height,  requested_height } => write!(
+                f,
+                "A rewind for your wallet may only target height {} or greater; the requested height was {}.",
+                safe_rewind_height.map_or("<unavailable>".to_owned(), |h0| format!("{}", h0)),
+               requested_height
+            ),
             SqliteClientError::DecodingError(e) => write!(f, "{}", e),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::TransparentDerivation(e) => write!(f, "{:?}", e),
