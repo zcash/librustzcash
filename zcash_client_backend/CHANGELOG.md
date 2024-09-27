@@ -20,6 +20,10 @@ and this library adheres to Rust's notion of
   - `WalletSummary::scan_progress` now only reports progress for scanning blocks
     "near" the chain tip. Progress for scanning earlier blocks is now reported
     via `WalletSummary::recovery_progress`.
+  - `WalletRead::get_min_unspent_height` has been removed. This was added to make
+    it possible to obtain a "safe truncation" height in order to facilitate rewinds
+    to a greater depth than the available note commitment tree checkpoints provide,
+    but such rewinds are no longer supported.
 - `zcash_client_backend::sync::run`:
   - Transparent outputs are now refreshed in addition to shielded notes.
 - `zcash_client_backend::proposal::ProposalError` has a new `AnchorNotFound`

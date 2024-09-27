@@ -1007,9 +1007,6 @@ pub trait WalletRead {
         min_confirmations: NonZeroU32,
     ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
 
-    /// Returns the minimum block height corresponding to an unspent note in the wallet.
-    fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error>;
-
     /// Returns the block height in which the specified transaction was mined, or `Ok(None)` if the
     /// transaction is not in the main chain.
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;

@@ -2104,54 +2104,6 @@ pub(crate) fn get_max_height_hash(
     .optional()
 }
 
-/// Gets the height to which the database must be truncated if any truncation that would remove a
-/// number of blocks greater than the note commitment tree pruning depth is attempted.
-pub(crate) fn get_min_unspent_height(
-    conn: &rusqlite::Connection,
-) -> Result<Option<BlockHeight>, SqliteClientError> {
-    let min_sapling: Option<BlockHeight> = conn.query_row(
-        "SELECT MIN(tx.block)
-         FROM sapling_received_notes n
-         JOIN transactions tx ON tx.id_tx = n.tx
-         WHERE n.id NOT IN (
-            SELECT sapling_received_note_id
-            FROM sapling_received_note_spends
-            JOIN transactions tx ON tx.id_tx = transaction_id
-            WHERE tx.block IS NOT NULL
-         )",
-        [],
-        |row| {
-            row.get(0)
-                .map(|maybe_height: Option<u32>| maybe_height.map(|height| height.into()))
-        },
-    )?;
-    #[cfg(feature = "orchard")]
-    let min_orchard: Option<BlockHeight> = conn.query_row(
-        "SELECT MIN(tx.block)
-         FROM orchard_received_notes n
-         JOIN transactions tx ON tx.id_tx = n.tx
-         WHERE n.id NOT IN (
-            SELECT orchard_received_note_id
-            FROM orchard_received_note_spends
-            JOIN transactions tx ON tx.id_tx = transaction_id
-            WHERE tx.block IS NOT NULL
-         )",
-        [],
-        |row| {
-            row.get(0)
-                .map(|maybe_height: Option<u32>| maybe_height.map(|height| height.into()))
-        },
-    )?;
-    #[cfg(not(feature = "orchard"))]
-    let min_orchard = None;
-
-    Ok(min_sapling
-        .zip(min_orchard)
-        .map(|(s, o)| s.min(o))
-        .or(min_sapling)
-        .or(min_orchard))
-}
-
 pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
     wdb: &mut WalletDb<SqlTransaction<'_>, P>,
     sent_tx: &SentTransaction<AccountId>,

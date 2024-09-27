@@ -499,10 +499,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
             .map_err(SqliteClientError::from)
     }
 
-    fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        wallet::get_min_unspent_height(self.conn.borrow()).map_err(SqliteClientError::from)
-    }
-
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
         wallet::get_tx_height(self.conn.borrow(), txid).map_err(SqliteClientError::from)
     }

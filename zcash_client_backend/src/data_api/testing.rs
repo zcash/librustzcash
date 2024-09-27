@@ -2481,10 +2481,6 @@ impl WalletRead for MockWalletDb {
         Ok(None)
     }
 
-    fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        Ok(None)
-    }
-
     fn get_tx_height(&self, _txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
         Ok(None)
     }
