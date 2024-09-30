@@ -48,48 +48,30 @@ impl MapAuth<Authorized, Authorized> for () {
     }
 }
 
-/// Reads an [`orchard::Bundle`] from a v5 transaction format.
-pub fn read_v5_bundle<R: Read>(
-    mut reader: R,
-) -> io::Result<Option<orchard::Bundle<Authorized, Amount, OrchardVanilla>>> {
-    #[allow(clippy::redundant_closure)]
-    let actions_without_auth = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
-    if actions_without_auth.is_empty() {
-        Ok(None)
-    } else {
-        let flags = read_flags(&mut reader)?;
-        let value_balance = Transaction::read_amount(&mut reader)?;
-        let anchor = read_anchor(&mut reader)?;
-        let proof_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
-        let actions = NonEmpty::from_vec(
-            actions_without_auth
-                .into_iter()
-                .map(|act| act.try_map(|_| read_signature::<_, redpallas::SpendAuth>(&mut reader)))
-                .collect::<Result<Vec<_>, _>>()?,
-        )
-        .expect("A nonzero number of actions was read from the transaction data.");
-        let binding_signature = read_signature::<_, redpallas::Binding>(&mut reader)?;
 
-        let authorization = orchard::bundle::Authorized::from_parts(
-            orchard::Proof::new(proof_bytes),
-            binding_signature,
-        );
+pub trait ReadBurn<R: Read> {
+    fn read_burn(reader: &mut R) -> io::Result<Vec<(AssetBase, NoteValue)>>;
+}
 
-        Ok(Some(orchard::Bundle::from_parts(
-            actions,
-            flags,
-            value_balance,
-            Default::default(),
-            anchor,
-            authorization,
-        )))
+// OrchardVanilla has no burn to read
+impl<R: Read> ReadBurn<R> for OrchardVanilla {
+    fn read_burn(_reader: &mut R) -> io::Result<Vec<(AssetBase, NoteValue)>> {
+        Ok(Vec::new())
     }
 }
 
+// Read burn for OrchardZSA
+impl<R: Read> ReadBurn<R> for OrchardZSA {
+    fn read_burn(reader: &mut R) -> io::Result<Vec<(AssetBase, NoteValue)>> {
+        Ok(Vector::read(reader, |r| read_burn(r))?)
+    }
+}
+
+
 /// Reads an [`orchard::Bundle`] from a v6 transaction format.
-pub fn read_v6_bundle<R: Read>(
+pub fn read_orchard_bundle<R: Read, D: OrchardDomainCommon + ReadBurn<R>>(
     mut reader: R,
-) -> io::Result<Option<orchard::Bundle<Authorized, Amount, OrchardZSA>>> {
+) -> io::Result<Option<orchard::Bundle<Authorized, Amount, D>>> {
     #[allow(clippy::redundant_closure)]
     let actions_without_auth = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
     if actions_without_auth.is_empty() {
@@ -107,7 +89,7 @@ pub fn read_v6_bundle<R: Read>(
         )
         .expect("A nonzero number of actions was read from the transaction data.");
 
-        let burn = Vector::read(&mut reader, |r| read_burn(r))?;
+        let burn = D::read_burn(&mut reader)?;
 
         let binding_signature = read_signature::<_, redpallas::Binding>(&mut reader)?;
 
@@ -252,68 +234,54 @@ fn read_note_value<R: Read>(mut reader: R) -> io::Result<NoteValue> {
     Ok(NoteValue::from_bytes(bytes))
 }
 
-/// Writes an [`orchard::Bundle`] in the v5 transaction format.
-pub fn write_v5_bundle<W: Write>(
-    bundle: Option<&orchard::Bundle<Authorized, Amount, OrchardVanilla>>,
-    mut writer: W,
-) -> io::Result<()> {
-    if let Some(bundle) = &bundle {
-        Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
-            write_action_without_auth(w, a)
-        })?;
-
-        writer.write_all(&[bundle.flags().to_byte()])?;
-        writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
-        writer.write_all(&bundle.anchor().to_bytes())?;
-        Vector::write(
-            &mut writer,
-            bundle.authorization().proof().as_ref(),
-            |w, b| w.write_u8(*b),
-        )?;
-        Array::write(
-            &mut writer,
-            bundle.actions().iter().map(|a| a.authorization()),
-            |w, auth| w.write_all(&<[u8; 64]>::from(*auth)),
-        )?;
-        writer.write_all(&<[u8; 64]>::from(
-            bundle.authorization().binding_signature(),
-        ))?;
-    } else {
-        CompactSize::write(&mut writer, 0)?;
-    }
-
-    Ok(())
+pub trait WriteBurn<W: Write> {
+    fn write_burn(writer: &mut W, burn: &Vec<(AssetBase, NoteValue)>) -> io::Result<()>;
 }
 
-/// Writes an [`orchard::Bundle`] in the v6 transaction format.
-pub fn write_v6_bundle<W: Write>(
-    bundle: Option<&orchard::Bundle<Authorized, Amount, OrchardZSA>>,
-    mut writer: W,
-) -> io::Result<()> {
-    if let Some(bundle) = &bundle {
-        Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
-            write_action_without_auth(w, a)
-        })?;
+// OrchardVanilla has no burn to write
+impl<W: Write> WriteBurn<W> for OrchardVanilla {
+    fn write_burn(_writer: &mut W, _burn: &Vec<(AssetBase, NoteValue)>) -> io::Result<()> {
+        Ok(())
+    }
+}
 
-        writer.write_all(&[bundle.flags().to_byte()])?;
-        writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
-        writer.write_all(&bundle.anchor().to_bytes())?;
-        Vector::write(
-            &mut writer,
-            bundle.authorization().proof().as_ref(),
-            |w, b| w.write_u8(*b),
-        )?;
-        Array::write(
-            &mut writer,
-            bundle.actions().iter().map(|a| a.authorization()),
-            |w, auth| w.write_all(&<[u8; 64]>::from(*auth)),
-        )?;
-
-        Vector::write(&mut writer, bundle.burn(), |w, (asset, amount)| {
+// Write burn for OrchardZSA
+impl<W: Write> WriteBurn<W> for OrchardZSA {
+    fn write_burn(writer: &mut W, burn: &Vec<(AssetBase, NoteValue)>) -> io::Result<()> {
+        Vector::write(writer, burn, |w, (asset, amount)| {
             w.write_all(&asset.to_bytes())?;
             w.write_all(&amount.to_bytes())?;
             Ok(())
         })?;
+        Ok(())
+    }
+}
+
+/// Writes an [`orchard::Bundle`] in the v6 transaction format.
+pub fn write_orchard_bundle<W: Write, D: OrchardDomainCommon + WriteBurn<W>>(
+    bundle: Option<&orchard::Bundle<Authorized, Amount, D>>,
+    mut writer: W,
+) -> io::Result<()> {
+    if let Some(bundle) = &bundle {
+        Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
+            write_action_without_auth(w, a)
+        })?;
+
+        writer.write_all(&[bundle.flags().to_byte()])?;
+        writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
+        writer.write_all(&bundle.anchor().to_bytes())?;
+        Vector::write(
+            &mut writer,
+            bundle.authorization().proof().as_ref(),
+            |w, b| w.write_u8(*b),
+        )?;
+        Array::write(
+            &mut writer,
+            bundle.actions().iter().map(|a| a.authorization()),
+            |w, auth| w.write_all(&<[u8; 64]>::from(*auth)),
+        )?;
+
+        D::write_burn(&mut writer, bundle.burn())?;
 
         writer.write_all(&<[u8; 64]>::from(
             bundle.authorization().binding_signature(),
