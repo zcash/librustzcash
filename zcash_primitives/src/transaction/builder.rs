@@ -471,6 +471,8 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
         asset_desc: String,
         issue_info: Option<IssueInfo>,
     ) -> Result<(), Error<FE>> {
+        assert!(self.build_config.orchard_bundle_type()? == BundleType::DEFAULT_ZSA);
+
         if self.issuance_builder.is_some() {
             return Err(Error::IssuanceBundleAlreadyInitialized);
         }
@@ -498,6 +500,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
         recipient: Address,
         value: orchard::value::NoteValue,
     ) -> Result<(), Error<FE>> {
+        assert!(self.build_config.orchard_bundle_type()? == BundleType::DEFAULT_ZSA);
         self.issuance_builder
             .as_mut()
             .ok_or(Error::IssuanceBuilderNotAvailable)?
@@ -510,6 +513,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     /// Finalizes a given asset
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     pub fn finalize_asset<FE>(&mut self, asset_desc: String) -> Result<(), Error<FE>> {
+        assert!(self.build_config.orchard_bundle_type()? == BundleType::DEFAULT_ZSA);
         self.issuance_builder
             .as_mut()
             .ok_or(Error::IssuanceBuilderNotAvailable)?
@@ -522,6 +526,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     /// Adds a Burn action to the transaction.
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     pub fn add_burn<FE>(&mut self, value: u64, asset: AssetBase) -> Result<(), Error<FE>> {
+        assert!(self.build_config.orchard_bundle_type()? == BundleType::DEFAULT_ZSA);
         self.orchard_builder
             .as_mut()
             .ok_or(Error::OrchardBundleNotAvailable)?
@@ -1604,7 +1609,7 @@ mod tests {
         let iak = IssuanceAuthorizingKey::from_zip32_seed(seed, COIN_TYPE, 0).unwrap();
         let tx_height = TEST_NETWORK.activation_height(NetworkUpgrade::Nu7).unwrap();
 
-        let build_config = BuildConfig::Standard {
+        let build_config = BuildConfig::Zsa {
             sapling_anchor: None,
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
         };
