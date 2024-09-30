@@ -1061,7 +1061,7 @@ mod testing {
     use rand::RngCore;
     use rand_core::CryptoRng;
     use std::convert::Infallible;
-
+    use zcash_protocol::value::Zatoshis;
     use super::{BuildResult, Builder, Error};
     use crate::{
         consensus,
@@ -1069,13 +1069,25 @@ mod testing {
             self,
             prover::mock::{MockOutputProver, MockSpendProver},
         },
-        transaction::fees::fixed,
+        transaction::fees::fixed::FeeRule,
     };
 
     impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
         /// Build the transaction using mocked randomness and proving capabilities.
         /// DO NOT USE EXCEPT FOR UNIT TESTING.
         pub fn mock_build<R: RngCore>(self, rng: R) -> Result<BuildResult, Error<Infallible>> {
+            #[allow(deprecated)]
+            self.mock_build_internal(rng, &FeeRule::standard())
+        }
+
+        /// Build the transaction using mocked randomness and proving capabilities.
+        /// DO NOT USE EXCEPT FOR UNIT TESTING.
+        pub fn mock_build_no_fee<R: RngCore>(self, rng: R) -> Result<BuildResult, Error<Infallible>> {
+            #[allow(deprecated)]
+            self.mock_build_internal(rng, &FeeRule::non_standard(Zatoshis::from_u64(0)?))
+        }
+
+        fn mock_build_internal<R: RngCore>(self, rng: R, fee_rule: &FeeRule) -> Result<BuildResult, Error<Infallible>> {
             struct FakeCryptoRng<R: RngCore>(R);
             impl<R: RngCore> CryptoRng for FakeCryptoRng<R> {}
             impl<R: RngCore> RngCore for FakeCryptoRng<R> {
@@ -1096,12 +1108,11 @@ mod testing {
                 }
             }
 
-            #[allow(deprecated)]
             self.build(
                 FakeCryptoRng(rng),
                 &MockSpendProver,
                 &MockOutputProver,
-                &fixed::FeeRule::standard(),
+                fee_rule,
             )
         }
     }
@@ -1440,13 +1451,15 @@ mod tests {
             .init_issuance_bundle::<FeeError>(iak, asset.clone(), None)
             .unwrap();
 
-        let issuance_builder = builder.issuance_builder.clone().unwrap();
+        let binding = builder.mock_build_no_fee(OsRng).unwrap().into_transaction();
+        let bundle = binding.issue_bundle().unwrap();
+
         assert_eq!(
-            issuance_builder.actions().len(),
+            bundle.actions().len(),
             1,
             "There should be only one action"
         );
-        let action = issuance_builder.get_action(asset).unwrap();
+        let action = bundle.get_action(asset).unwrap();
         assert!(action.is_finalized(), "Action should be finalized");
         assert_eq!(action.notes().len(), 0, "Action should have zero notes");
     }
@@ -1469,13 +1482,15 @@ mod tests {
             )
             .unwrap();
 
-        let issuance_builder = builder.issuance_builder.unwrap();
+        let binding = builder.mock_build_no_fee(OsRng).unwrap().into_transaction();
+        let bundle = binding.issue_bundle().unwrap();
+
         assert_eq!(
-            issuance_builder.actions().len(),
+            bundle.actions().len(),
             1,
             "There should be only one action"
         );
-        let action = issuance_builder.get_action(asset).unwrap();
+        let action = bundle.get_action(asset).unwrap();
         assert_eq!(
             action.is_finalized(),
             false,
@@ -1510,13 +1525,15 @@ mod tests {
             .add_recipient::<FeeError>(asset.clone(), address, NoteValue::from_raw(21))
             .unwrap();
 
-        let issuance_builder = builder.issuance_builder.unwrap();
+        let binding = builder.mock_build_no_fee(OsRng).unwrap().into_transaction();
+        let bundle = binding.issue_bundle().unwrap();
+
         assert_eq!(
-            issuance_builder.actions().len(),
+            bundle.actions().len(),
             1,
             "There should be only one action"
         );
-        let action = issuance_builder.get_action(asset).unwrap();
+        let action = bundle.get_action(asset).unwrap();
         assert_eq!(
             action.is_finalized(),
             false,
@@ -1556,14 +1573,16 @@ mod tests {
             .add_recipient::<FeeError>(asset2.clone(), address, NoteValue::from_raw(21))
             .unwrap();
 
-        let issuance_builder = builder.issuance_builder.unwrap();
+        let binding = builder.mock_build_no_fee(OsRng).unwrap().into_transaction();
+        let bundle = binding.issue_bundle().unwrap();
+
         assert_eq!(
-            issuance_builder.actions().len(),
+            bundle.actions().len(),
             2,
             "There should be 2 actions"
         );
 
-        let action = issuance_builder.get_action(asset1).unwrap();
+        let action = bundle.get_action(asset1).unwrap();
         assert_eq!(
             action.is_finalized(),
             false,
@@ -1580,7 +1599,7 @@ mod tests {
             "Incorrect notes sum"
         );
 
-        let action2 = issuance_builder.get_action(asset2).unwrap();
+        let action2 = bundle.get_action(asset2).unwrap();
         assert_eq!(
             action2.is_finalized(),
             false,
