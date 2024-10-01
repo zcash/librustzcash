@@ -1144,8 +1144,9 @@ mod tests {
     use {
         crate::transaction::fees::zip317::FeeError,
         orchard::issuance::IssueInfo,
-        orchard::keys::{FullViewingKey, IssuanceAuthorizingKey, SpendingKey},
+        orchard::keys::{FullViewingKey, IssuanceAuthorizingKey, IssuanceValidatingKey, SpendingKey},
         orchard::value::NoteValue,
+        orchard::note::AssetBase,
         orchard::Address,
         zcash_protocol::consensus::TestNetwork,
         zcash_protocol::constants::testnet::COIN_TYPE,
@@ -1615,6 +1616,22 @@ mod tests {
             21,
             "Incorrect notes sum"
         );
+    }
+
+    #[test]
+    #[should_panic]
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+    fn fails_on_add_burn_without_input() {
+        let (mut builder, iak, address) = prepare_zsa_test();
+
+        let asset = "asset_desc".to_string();
+        let asset_base = AssetBase::derive(&IssuanceValidatingKey::from(&iak), &asset);
+
+        builder
+            .add_burn::<FeeError>(42, asset_base)
+            .unwrap();
+
+        builder.mock_build_no_fee(OsRng).unwrap();
     }
 
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
