@@ -17,13 +17,11 @@ use crate::transaction::{
 };
 
 #[cfg(zcash_unstable = "zfuture")]
-use byteorder::WriteBytesExt;
-
-#[cfg(zcash_unstable = "zfuture")]
-use zcash_encoding::{CompactSize, Vector};
-
-#[cfg(zcash_unstable = "zfuture")]
-use crate::transaction::{components::tze, TzeDigests};
+use {
+    crate::transaction::{components::tze, TzeDigests},
+    byteorder::WriteBytesExt,
+    zcash_encoding::{CompactSize, Vector},
+};
 
 const ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash___TxInHash";
 const ZCASH_TRANSPARENT_AMOUNTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxTrAmountsHash";
