@@ -1615,7 +1615,7 @@ mod tests {
     #[should_panic]
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     fn fails_on_add_burn_without_input() {
-        let (mut builder, iak, address) = prepare_zsa_test();
+        let (mut builder, iak, _) = prepare_zsa_test();
 
         let asset = "asset_desc".to_string();
         let asset_base = AssetBase::derive(&IssuanceValidatingKey::from(&iak), &asset);

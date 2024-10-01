@@ -62,7 +62,7 @@ impl<R: Read> ReadBurn<R> for OrchardVanilla {
 // Read burn for OrchardZSA
 impl<R: Read> ReadBurn<R> for OrchardZSA {
     fn read_burn(reader: &mut R) -> io::Result<Vec<(AssetBase, NoteValue)>> {
-        Ok(Vector::read(reader, |r| read_burn(r))?)
+        Vector::read(reader, |r| read_burn(r))
     }
 }
 
@@ -233,19 +233,19 @@ fn read_note_value<R: Read>(mut reader: R) -> io::Result<NoteValue> {
 }
 
 pub trait WriteBurn<W: Write> {
-    fn write_burn(writer: &mut W, burn: &Vec<(AssetBase, NoteValue)>) -> io::Result<()>;
+    fn write_burn(writer: &mut W, burn: &[(AssetBase, NoteValue)]) -> io::Result<()>;
 }
 
 // OrchardVanilla has no burn to write
 impl<W: Write> WriteBurn<W> for OrchardVanilla {
-    fn write_burn(_writer: &mut W, _burn: &Vec<(AssetBase, NoteValue)>) -> io::Result<()> {
+    fn write_burn(_writer: &mut W, _burn: &[(AssetBase, NoteValue)]) -> io::Result<()> {
         Ok(())
     }
 }
 
 // Write burn for OrchardZSA
 impl<W: Write> WriteBurn<W> for OrchardZSA {
-    fn write_burn(writer: &mut W, burn: &Vec<(AssetBase, NoteValue)>) -> io::Result<()> {
+    fn write_burn(writer: &mut W, burn: &[(AssetBase, NoteValue)]) -> io::Result<()> {
         Vector::write(writer, burn, |w, (asset, amount)| {
             w.write_all(&asset.to_bytes())?;
             w.write_all(&amount.to_bytes())?;

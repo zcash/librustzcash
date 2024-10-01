@@ -558,6 +558,12 @@ impl<A: Authorization> TransactionData<A> {
         )
     }
 
+    #[cfg(not(zcash_unstable = "nu6" /* TODO nu7 */ ))]
+    fn digest_orchard<D: TransactionDigest<A>>(&self, digester: &D) -> D::OrchardDigest {
+        digester.digest_orchard(self.orchard_bundle.as_ref())
+    }
+
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     fn digest_orchard<D: TransactionDigest<A>>(&self, digester: &D) -> D::OrchardDigest {
         if self.version.has_orchard_zsa() {
             digester.digest_orchard_zsa(self.orchard_zsa_bundle.as_ref())
