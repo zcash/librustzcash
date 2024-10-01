@@ -48,7 +48,6 @@ impl MapAuth<Authorized, Authorized> for () {
     }
 }
 
-
 pub trait ReadBurn<R: Read> {
     fn read_burn(reader: &mut R) -> io::Result<Vec<(AssetBase, NoteValue)>>;
 }
@@ -66,7 +65,6 @@ impl<R: Read> ReadBurn<R> for OrchardZSA {
         Ok(Vector::read(reader, |r| read_burn(r))?)
     }
 }
-
 
 /// Reads an [`orchard::Bundle`] from a v6 transaction format.
 pub fn read_orchard_bundle<R: Read, D: OrchardDomainCommon + ReadBurn<R>>(
