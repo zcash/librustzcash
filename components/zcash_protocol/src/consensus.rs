@@ -703,34 +703,28 @@ impl BranchId {
 }
 #[allow(unused_variables)]
 fn upper_bound<P: Parameters>(target_height: BlockHeight, params: &P) -> Option<BlockHeight> {
-    #[allow(dead_code)]
-    fn check_bound<P: Parameters>(
-        target_height: BlockHeight,
-        current_upper: Option<BlockHeight>,
-        nu: NetworkUpgrade,
-        params: &P,
-    ) -> Option<BlockHeight> {
-        let nu_height = params.activation_height(nu);
-        if nu_height.is_some() && nu_height.unwrap() > target_height {
-            nu_height
-        } else {
-            current_upper
-        }
-    }
-
     #[allow(unused_mut)]
     let mut upper = None;
     #[cfg(zcash_unstable = "nu6")]
     {
-        upper = check_bound(target_height, upper, NetworkUpgrade::Nu6, params);
+        upper = params
+            .activation_height(NetworkUpgrade::Nu6)
+            .filter(|&nu_height| nu_height > target_height)
+            .or(upper);
     }
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     {
-        upper = check_bound(target_height, upper, NetworkUpgrade::Nu7, params);
+        upper = params
+            .activation_height(NetworkUpgrade::Nu7)
+            .filter(|&nu_height| nu_height > target_height)
+            .or(upper);
     }
     #[cfg(zcash_unstable = "zfuture")]
     {
-        upper = check_bound(target_height, upper, NetworkUpgrade::ZFuture, params);
+        upper = params
+            .activation_height(NetworkUpgrade::ZFuture)
+            .filter(|&nu_height| nu_height > target_height)
+            .or(upper);
     }
     upper
 }
