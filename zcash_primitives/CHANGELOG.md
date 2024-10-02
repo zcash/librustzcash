@@ -7,11 +7,16 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
-## [0.17.0] - 2024-08-26
+## [0.18.0] - 2024-10-02
 
 ### Changed
 - Update dependencies to `incrementalmerkletree 0.7`, `orchard 0.10`,
-  `sapling-crypto 0.3`, `zcash_protocol 0.3.0`, `zcash_address 0.5.0`.
+  `sapling-crypto 0.3`, `zcash_protocol 0.4`.
+
+## [0.17.0] - 2024-08-26
+
+### Changed
+- Update dependencies to `zcash_protocol 0.3`, `zcash_address 0.5`.
 
 ## [0.16.0] - 2024-08-19
 

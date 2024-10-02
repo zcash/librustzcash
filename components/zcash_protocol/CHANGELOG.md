@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.4.0] - 2024-10-02
 ### Added
 - `impl Sub<BlockHeight> for BlockHeight` unlike the implementation that was
   removed in version `0.3.0`, a saturating subtraction for block heights having
