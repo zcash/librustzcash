@@ -6,16 +6,8 @@ version = "0.6.0"
 audited_as = "0.5.0"
 
 [[unpublished.zcash_primitives]]
-version = "0.18.0"
-audited_as = "0.17.0"
-
-[[unpublished.zcash_proofs]]
-version = "0.18.0"
-audited_as = "0.17.0"
-
-[[unpublished.zcash_protocol]]
-version = "0.4.0"
-audited_as = "0.3.0"
+version = "0.19.0"
+audited_as = "0.18.0"
 
 [[publisher.bumpalo]]
 version = "3.16.0"
@@ -295,22 +287,22 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_primitives]]
-version = "0.17.0"
-when = "2024-08-26"
+version = "0.18.0"
+when = "2024-10-02"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_proofs]]
-version = "0.17.0"
-when = "2024-08-26"
+version = "0.18.0"
+when = "2024-10-02"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_protocol]]
-version = "0.3.0"
-when = "2024-08-26"
+version = "0.4.0"
+when = "2024-10-02"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
