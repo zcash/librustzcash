@@ -7,6 +7,17 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.19.0] - 2024-10-02
+
+### Changed
+- Migrated to `zcash_primitives 0.19`.
+
+### Fixed
+- The previous release of `zcash_primitives` did not bump `zcash_address` and
+  ended up depending on multiple versions of `zcash_protocol`, which didn't
+  cause a code conflict but results in two different consensus protocol states
+  being present in the dependency tree.
+
 ## [0.18.0] - 2024-10-02
 
 ### Changed
