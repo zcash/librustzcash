@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.6.0] - 2024-10-02
+### Changed
+- Migrated to `zcash_protocol 0.4`.
+
 ## [0.5.0] - 2024-08-26
 ### Changed
 - Updated `zcash_protocol` dependency to version `0.3`
