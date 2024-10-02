@@ -6020,7 +6020,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "aes",
  "assert_matches",

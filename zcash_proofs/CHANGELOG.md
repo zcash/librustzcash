@@ -8,7 +8,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Changed
-- Migrated to `sapling-crypto 0.3`.
+- Migrated to `sapling-crypto 0.3`, `zcash_primitives 0.18`.
 
 ## [0.17.0] - 2024-08-26
 

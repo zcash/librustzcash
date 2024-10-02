@@ -40,7 +40,7 @@ zcash_protocol = { version = "0.4", path = "components/zcash_protocol" }
 zip321 = { version = "0.1", path = "components/zip321" }
 
 zcash_note_encryption = "0.4"
-zcash_primitives = { version = "0.17", path = "zcash_primitives", default-features = false }
+zcash_primitives = { version = "0.18", path = "zcash_primitives", default-features = false }
 zcash_proofs = { version = "0.17", path = "zcash_proofs", default-features = false }
 
 # Shielded protocols
