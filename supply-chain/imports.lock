@@ -9,6 +9,10 @@ audited_as = "0.5.0"
 version = "0.19.0"
 audited_as = "0.18.0"
 
+[[unpublished.zcash_proofs]]
+version = "0.19.0"
+audited_as = "0.18.0"
+
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
