@@ -163,6 +163,5 @@ codegen-units = 1
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
 
 [patch.crates-io]
-incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }
-incrementalmerkletree-testing = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }
-shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }
+incrementalmerkletree-testing = { git = "https://github.com/zcash/incrementalmerkletree", rev = "336452152536dde5831c9a4029fd26b4ec310608" }
+shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "336452152536dde5831c9a4029fd26b4ec310608" }

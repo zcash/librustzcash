@@ -2110,7 +2110,8 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "incrementalmerkletree"
 version = "0.7.0"
-source = "git+https://github.com/zcash/incrementalmerkletree?rev=ffe4234788fd22662b937ba7c6ea01535fcc1293#ffe4234788fd22662b937ba7c6ea01535fcc1293"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d45063fbc4b0a37837f6bfe0445f269d13d730ad0aa3b5a7f74aa7bf27a0f4df"
 dependencies = [
  "either",
  "proptest",
@@ -2121,7 +2122,7 @@ dependencies = [
 [[package]]
 name = "incrementalmerkletree-testing"
 version = "0.1.0"
-source = "git+https://github.com/zcash/incrementalmerkletree?rev=ffe4234788fd22662b937ba7c6ea01535fcc1293#ffe4234788fd22662b937ba7c6ea01535fcc1293"
+source = "git+https://github.com/zcash/incrementalmerkletree?rev=336452152536dde5831c9a4029fd26b4ec310608#336452152536dde5831c9a4029fd26b4ec310608"
 dependencies = [
  "incrementalmerkletree",
  "proptest",
@@ -3920,7 +3921,7 @@ dependencies = [
 [[package]]
 name = "shardtree"
 version = "0.4.0"
-source = "git+https://github.com/zcash/incrementalmerkletree?rev=ffe4234788fd22662b937ba7c6ea01535fcc1293#ffe4234788fd22662b937ba7c6ea01535fcc1293"
+source = "git+https://github.com/zcash/incrementalmerkletree?rev=336452152536dde5831c9a4029fd26b4ec310608#336452152536dde5831c9a4029fd26b4ec310608"
 dependencies = [
  "assert_matches",
  "bitflags 2.6.0",

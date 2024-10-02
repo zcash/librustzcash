@@ -49,8 +49,8 @@ user-id = 1244
 user-login = "ebfull"
 
 [[publisher.incrementalmerkletree]]
-version = "0.6.0"
-when = "2024-08-12"
+version = "0.7.0"
+when = "2024-09-25"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
