@@ -57,11 +57,11 @@ bitvec = "1"
 blake2s_simd = "1"
 bls12_381 = "0.8"
 jubjub = "0.10"
-sapling = { package = "sapling-crypto", version = "0.2", default-features = false }
+sapling = { package = "sapling-crypto", version = "0.3", default-features = false }
 
 # - Orchard
 nonempty = "0.7"
-orchard = { version = "0.9", default-features = false }
+orchard = { version = "0.10", default-features = false }
 pasta_curves = "0.5"
 
 # - Transparent
@@ -163,8 +163,5 @@ codegen-units = 1
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
 
 [patch.crates-io]
-sapling-crypto = { git = "https://github.com/zcash/sapling-crypto", rev = "b1ad3694ee13a2fc5d291ad04721a6252da0993c" }
-orchard = { git = "https://github.com/zcash/orchard", rev = "55fb089a335bbbc1cda186c706bc037073df8eb7" }
-incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }
-incrementalmerkletree-testing = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }
-shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }
+incrementalmerkletree-testing = { git = "https://github.com/zcash/incrementalmerkletree", rev = "336452152536dde5831c9a4029fd26b4ec310608" }
+shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "336452152536dde5831c9a4029fd26b4ec310608" }
