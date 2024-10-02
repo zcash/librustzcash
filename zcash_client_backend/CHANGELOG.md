@@ -13,7 +13,7 @@ and this library adheres to Rust's notion of
   - `WalletSummary::recovery_progress`
 
 ### Changed
-- Migrated to `orchard 0.10`, `sapling-crypto 0.3`.
+- Migrated to `orchard 0.10`, `sapling-crypto 0.3`, `zcash_protocol 0.4`.
 - The `Account` trait now uses an associated type for its `AccountId`
   type instead of a type parameter. This change allows for the simplification
   of some type signatures.
