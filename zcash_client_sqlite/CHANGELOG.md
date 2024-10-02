@@ -9,7 +9,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - Migrated to `orchard 0.10`, `sapling-crypto 0.3`, `zcash_primitives 0.18`,
-  `zcash_protocol 0.4`.
+  `zcash_proofs 0.18`, `zcash_protocol 0.4`.
 - `zcash_client_sqlite::error::SqliteClientError::RequestedRewindInvalid`
   is now a structured variant.
 
