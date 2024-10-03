@@ -156,7 +156,7 @@ fn inspect_bytes(bytes: Vec<u8>, context: Option<Context>, lookup: bool) {
 }
 
 fn inspect_possible_hash(bytes: [u8; 32], context: Option<Context>, lookup: bool) {
-    let maybe_mainnet_block_hash = bytes.iter().take(4).all(|c| c == &0);
+    let mut maybe_mainnet_block_hash = bytes.iter().take(4).all(|c| c == &0);
 
     if lookup {
         // Block hashes and txids are byte-reversed; we didn't do this when parsing the
@@ -169,6 +169,13 @@ fn inspect_possible_hash(bytes: [u8; 32], context: Option<Context>, lookup: bool
             match lookup::Lightwalletd::mainnet().await {
                 Err(e) => eprintln!("Error: Failed to connect to mainnet lightwalletd: {:?}", e),
                 Ok(mut mainnet) => {
+                    if let Some(block) = mainnet.lookup_block_hash(candidate).await {
+                        block::inspect_block_hash(&block, "main");
+                        return true;
+                    } else {
+                        maybe_mainnet_block_hash = false;
+                    }
+
                     if let Some((tx, mined_height)) = mainnet.lookup_txid(candidate).await {
                         transaction::inspect(tx, context, mined_height);
                         return true;
@@ -179,6 +186,11 @@ fn inspect_possible_hash(bytes: [u8; 32], context: Option<Context>, lookup: bool
             match lookup::Lightwalletd::testnet().await {
                 Err(e) => eprintln!("Error: Failed to connect to testnet lightwalletd: {:?}", e),
                 Ok(mut testnet) => {
+                    if let Some(block) = testnet.lookup_block_hash(candidate).await {
+                        block::inspect_block_hash(&block, "main");
+                        return true;
+                    }
+
                     if let Some((tx, mined_height)) = testnet.lookup_txid(candidate).await {
                         transaction::inspect(tx, context, mined_height);
                         return true;
