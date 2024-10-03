@@ -141,6 +141,29 @@ pub(crate) fn single_change_output_policy(
     )
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct OutputManifest {
+    transparent: usize,
+    sapling: usize,
+    orchard: usize,
+}
+
+impl OutputManifest {
+    const ZERO: OutputManifest = OutputManifest {
+        transparent: 0,
+        sapling: 0,
+        orchard: 0,
+    };
+
+    pub(crate) fn sapling(&self) -> usize {
+        self.sapling
+    }
+
+    pub(crate) fn orchard(&self) -> usize {
+        self.orchard
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn single_change_output_balance<
     P: consensus::Parameters,
@@ -200,9 +223,16 @@ where
         let possible_change =
             // These are the situations where we might not have a change output.
             if transparent || (dust_output_policy.action() == DustAction::AddDustToFee && change_memo.is_none()) {
-                vec![(0, 0, 0), (0, sapling_change, orchard_change)]
+                vec![
+                    OutputManifest::ZERO,
+                    OutputManifest {
+                        transparent: 0,
+                        sapling: sapling_change,
+                        orchard: orchard_change
+                    }
+                ]
             } else {
-                vec![(0, sapling_change, orchard_change)]
+                vec![OutputManifest { transparent: 0, sapling: sapling_change, orchard: orchard_change}]
             };
 
         check_for_uneconomic_inputs(
@@ -456,7 +486,7 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
     #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
     marginal_fee: NonNegativeAmount,
     grace_actions: usize,
-    possible_change: &[(usize, usize, usize)],
+    possible_change: &[OutputManifest],
     ephemeral_balance: Option<&EphemeralBalance>,
 ) -> Result<(), ChangeError<E, NoteRefT>> {
     let mut t_dust: Vec<_> = transparent_inputs
@@ -519,7 +549,7 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
     let o_non_dust = o_inputs_len.checked_sub(o_dust.len()).unwrap();
 
     // Return the number of allowed dust inputs from each pool.
-    let allowed_dust = |(t_change, s_change, o_change): &(usize, usize, usize)| {
+    let allowed_dust = |change: &OutputManifest| {
         // Here we assume a "ZIP 317-like" fee model in which the existence of an output
         // to a given pool implies that a corresponding input from that pool can be
         // provided without increasing the fee. (This is also likely to be true for
@@ -534,15 +564,15 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
 
         let t_allowed = min(
             t_dust.len(),
-            (t_outputs_len + t_change).saturating_sub(t_non_dust),
+            (t_outputs_len + change.transparent).saturating_sub(t_non_dust),
         );
         let s_allowed = min(
             s_dust.len(),
-            (s_outputs_len + s_change).saturating_sub(s_non_dust),
+            (s_outputs_len + change.sapling).saturating_sub(s_non_dust),
         );
         let o_allowed = min(
             o_dust.len(),
-            (o_outputs_len + o_change).saturating_sub(o_non_dust),
+            (o_outputs_len + change.orchard).saturating_sub(o_non_dust),
         );
 
         // We'll be spending the non-dust and allowed dust in each pool.
@@ -566,22 +596,24 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
 
             let s_output_count = sapling
                 .bundle_type()
-                .num_outputs(s_req_inputs + s_extra, s_outputs_len + s_change)
+                .num_outputs(s_req_inputs + s_extra, s_outputs_len + change.sapling)
                 .map_err(ChangeError::BundleError)?;
 
             #[cfg(feature = "orchard")]
             let o_action_count = orchard
                 .bundle_type()
-                .num_actions(o_req_inputs + _o_extra, o_outputs_len + o_change)
+                .num_actions(o_req_inputs + _o_extra, o_outputs_len + change.orchard)
                 .map_err(ChangeError::BundleError)?;
             #[cfg(not(feature = "orchard"))]
             let o_action_count = 0;
 
             // To calculate the number of unused actions, we assume that transparent inputs
             // and outputs are P2PKH.
-            Ok(max(t_req_inputs + t_extra, t_outputs_len + t_change)
-                + max(s_spend_count, s_output_count)
-                + o_action_count)
+            Ok(
+                max(t_req_inputs + t_extra, t_outputs_len + change.transparent)
+                    + max(s_spend_count, s_output_count)
+                    + o_action_count,
+            )
         };
 
         // First calculate the baseline number of logical actions with only the definitely
@@ -606,27 +638,31 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
         } else {
             (0, 0, 0)
         };
-        Ok((
-            t_allowed + t_extra,
-            s_allowed + s_extra,
-            o_allowed + o_extra,
-        ))
+        Ok(OutputManifest {
+            transparent: t_allowed + t_extra,
+            sapling: s_allowed + s_extra,
+            orchard: o_allowed + o_extra,
+        })
     };
 
     // Find the least number of allowed dust inputs for each pool for any `possible_change`.
-    let (t_allowed, s_allowed, o_allowed) = possible_change
+    let allowed = possible_change
         .iter()
         .map(allowed_dust)
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
-        .reduce(|(a, b, c), (x, y, z)| (min(a, x), min(b, y), min(c, z)))
+        .reduce(|l, r| OutputManifest {
+            transparent: min(l.transparent, r.transparent),
+            sapling: min(l.sapling, r.sapling),
+            orchard: min(l.orchard, r.orchard),
+        })
         .expect("possible_change is nonempty");
 
     // The inputs in the tail of each list after the first `*_allowed` are returned as uneconomic.
     // The caller should order the inputs from most to least preferred to spend.
-    let t_dust = t_dust.split_off(t_allowed);
-    let s_dust = s_dust.split_off(s_allowed);
-    let o_dust = o_dust.split_off(o_allowed);
+    let t_dust = t_dust.split_off(allowed.transparent);
+    let s_dust = s_dust.split_off(allowed.sapling);
+    let o_dust = o_dust.split_off(allowed.orchard);
 
     if t_dust.is_empty() && s_dust.is_empty() && o_dust.is_empty() {
         Ok(())
