@@ -32,6 +32,9 @@ use crate::{
     },
 };
 
+#[cfg(zcash_unstable = "zsf")]
+use zcash_protocol::value::ZatBalance;
+
 #[cfg(feature = "transparent-inputs")]
 use crate::transaction::components::transparent::builder::TransparentInputInfo;
 
@@ -287,6 +290,8 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     // derivatives for proving and signing to complete transaction creation.
     sapling_asks: Vec<sapling::keys::SpendAuthorizingKey>,
     orchard_saks: Vec<orchard::keys::SpendAuthorizingKey>,
+    #[cfg(zcash_unstable = "zsf")]
+    zsf_deposit: Option<NonNegativeAmount>,
     #[cfg(zcash_unstable = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(zcash_unstable = "zfuture"))]
@@ -372,6 +377,8 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             orchard_builder,
             sapling_asks: vec![],
             orchard_saks: Vec::new(),
+            #[cfg(zcash_unstable = "zsf")]
+            zsf_deposit: None,
             #[cfg(zcash_unstable = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
@@ -400,6 +407,8 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             orchard_builder: self.orchard_builder,
             sapling_asks: self.sapling_asks,
             orchard_saks: self.orchard_saks,
+            #[cfg(zcash_unstable = "zsf")]
+            zsf_deposit: self.zsf_deposit,
             tze_builder: self.tze_builder,
             progress_notifier,
         }
@@ -524,6 +533,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
                         .map_err(|_| BalanceError::Overflow)
                 },
             )?,
+            #[cfg(zcash_unstable = "zsf")]
+            -self
+                .zsf_deposit
+                .map(Into::into)
+                .unwrap_or(ZatBalance::zero()),
             #[cfg(zcash_unstable = "zfuture")]
             self.tze_builder.value_balance()?,
         ];
@@ -629,6 +643,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
                 self.tze_builder.outputs(),
             )
             .map_err(FeeError::FeeRule)
+    }
+
+    #[cfg(zcash_unstable = "zsf")]
+    pub fn set_zsf_deposit(&mut self, deposit: Option<NonNegativeAmount>) {
+        self.zsf_deposit = deposit;
     }
 
     /// Builds a transaction from the configured spends and outputs.
@@ -743,7 +762,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             None => (None, orchard::builder::BundleMetadata::empty()),
         };
 
-        #[cfg(zcash_unstable = "zfuture")]
+        #[cfg(zcash_unstable = "tze")]
         let (tze_bundle, tze_signers) = self.tze_builder.build();
 
         let unauthed_tx: TransactionData<Unauthorized> = TransactionData {
@@ -755,7 +774,9 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             sprout_bundle: None,
             sapling_bundle,
             orchard_bundle,
-            #[cfg(zcash_unstable = "zfuture")]
+            #[cfg(zcash_unstable = "zsf")]
+            zsf_deposit: self.zsf_deposit,
+            #[cfg(zcash_unstable = "tze")]
             tze_bundle,
         };
 
@@ -773,7 +794,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             )
         });
 
-        #[cfg(zcash_unstable = "zfuture")]
+        #[cfg(zcash_unstable = "tze")]
         let tze_bundle = unauthed_tx
             .tze_bundle
             .clone()
@@ -823,7 +844,9 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             sprout_bundle: unauthed_tx.sprout_bundle,
             sapling_bundle,
             orchard_bundle,
-            #[cfg(zcash_unstable = "zfuture")]
+            #[cfg(zcash_unstable = "zsf")]
+            zsf_deposit: self.zsf_deposit,
+            #[cfg(zcash_unstable = "tze")]
             tze_bundle,
         };
 
@@ -978,6 +1001,8 @@ mod tests {
             expiry_height: sapling_activation_height + DEFAULT_TX_EXPIRY_DELTA,
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder: None,
+            #[cfg(zcash_unstable = "zsf")]
+            zsf_deposit: None,
             #[cfg(zcash_unstable = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
@@ -1139,6 +1164,24 @@ mod tests {
             );
         }
 
+        // Fail if there is only a ZSF deposit
+        // 0.0005 ZSF deposit out, 0.0001 t-ZEC fee
+        #[cfg(zcash_unstable = "zsf")]
+        {
+            let build_config = BuildConfig::Standard {
+                sapling_anchor: Some(sapling::Anchor::empty_tree()),
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            };
+            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            builder.set_zsf_deposit(Some(NonNegativeAmount::const_from_u64(50000)));
+
+            assert_matches!(
+                builder.mock_build(OsRng),
+                Err(Error::InsufficientFunds(expected)) if expected ==
+                    (NonNegativeAmount::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
+            );
+        }
+
         let note1 = to.create_note(
             sapling::value::NoteValue::from_raw(59999),
             Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)),
@@ -1173,6 +1216,40 @@ mod tests {
                     NonNegativeAmount::const_from_u64(20000),
                 )
                 .unwrap();
+            assert_matches!(
+                builder.mock_build(OsRng),
+                Err(Error::InsufficientFunds(expected)) if expected == Amount::const_from_i64(1)
+            );
+        }
+
+        // Fail if there is insufficient input
+        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 ZSF deposit out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
+        #[cfg(zcash_unstable = "zsf")]
+        {
+            let build_config = BuildConfig::Standard {
+                sapling_anchor: Some(witness1.root().into()),
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            };
+            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            builder
+                .add_sapling_spend::<Infallible>(&extsk, note1.clone(), witness1.path().unwrap())
+                .unwrap();
+            builder
+                .add_sapling_output::<Infallible>(
+                    ovk,
+                    to,
+                    NonNegativeAmount::const_from_u64(30000),
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+            builder
+                .add_transparent_output(
+                    &TransparentAddress::PublicKeyHash([0; 20]),
+                    NonNegativeAmount::const_from_u64(10000),
+                )
+                .unwrap();
+            #[cfg(zcash_unstable = "zsf")]
+            builder.set_zsf_deposit(Some(NonNegativeAmount::const_from_u64(10000)));
             assert_matches!(
                 builder.mock_build(OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected == Amount::const_from_i64(1)
@@ -1216,6 +1293,48 @@ mod tests {
                     NonNegativeAmount::const_from_u64(20000),
                 )
                 .unwrap();
+            assert_matches!(
+                builder.mock_build(OsRng),
+                Ok(res) if res.transaction().fee_paid(|_| Err(BalanceError::Overflow)).unwrap() == Amount::const_from_i64(10_000)
+            );
+        }
+
+        // Succeeds if there is sufficient input
+        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.0006 z-ZEC in
+        #[cfg(zcash_unstable = "zsf")]
+        {
+            let note1 = to.create_note(
+                sapling::value::NoteValue::from_raw(70000),
+                Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)),
+            );
+            let cmu1 = Node::from_cmu(&note1.cmu());
+            let mut tree = CommitmentTree::<Node, 32>::empty();
+            tree.append(cmu1).unwrap();
+            let witness1 = IncrementalWitness::from_tree(tree.clone());
+
+            let build_config = BuildConfig::Standard {
+                sapling_anchor: Some(witness1.root().into()),
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            };
+            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            builder
+                .add_sapling_spend::<Infallible>(&extsk, note1, witness1.path().unwrap())
+                .unwrap();
+            builder
+                .add_sapling_output::<Infallible>(
+                    ovk,
+                    to,
+                    NonNegativeAmount::const_from_u64(30000),
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+            builder
+                .add_transparent_output(
+                    &TransparentAddress::PublicKeyHash([0; 20]),
+                    NonNegativeAmount::const_from_u64(20000),
+                )
+                .unwrap();
+            builder.set_zsf_deposit(Some(NonNegativeAmount::const_from_u64(10000)));
             assert_matches!(
                 builder.mock_build(OsRng),
                 Ok(res) if res.transaction().fee_paid(|_| Err(BalanceError::Overflow)).unwrap() == Amount::const_from_i64(10_000)

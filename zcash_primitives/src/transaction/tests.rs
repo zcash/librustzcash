@@ -9,10 +9,7 @@ use crate::{
 
 use super::{
     sapling,
-    sighash::{
-        SignableInput, TransparentAuthorizingContext, SIGHASH_ALL, SIGHASH_ANYONECANPAY,
-        SIGHASH_NONE, SIGHASH_SINGLE,
-    },
+    sighash::{SignableInput, TransparentAuthorizingContext},
     sighash_v4::v4_signature_hash,
     sighash_v5::v5_signature_hash,
     testing::arb_tx,
@@ -21,8 +18,10 @@ use super::{
     Authorization, Transaction, TransactionData, TxDigests, TxIn,
 };
 
-#[cfg(zcash_unstable = "zfuture")]
+#[cfg(zcash_unstable = "tze")]
 use super::components::tze;
+#[cfg(not(zcash_unstable = "tze"))]
+use super::sighash::{SIGHASH_ALL, SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE};
 
 #[test]
 fn tx_read_write() {
@@ -44,7 +43,7 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     let txo = Transaction::read(&txn_bytes[..], tx.consensus_branch_id).unwrap();
 
     prop_assert_eq!(tx.version, txo.version);
-    #[cfg(zcash_unstable = "zfuture")]
+    #[cfg(zcash_unstable = "tze")]
     prop_assert_eq!(tx.tze_bundle.as_ref(), txo.tze_bundle.as_ref());
     prop_assert_eq!(tx.lock_time, txo.lock_time);
     prop_assert_eq!(
@@ -202,10 +201,11 @@ impl Authorization for TestUnauthorized {
     type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 
-    #[cfg(zcash_unstable = "zfuture")]
+    #[cfg(zcash_unstable = "tze")]
     type TzeAuth = tze::Authorized;
 }
 
+#[cfg(not(zcash_unstable = "tze"))]
 #[test]
 fn zip_0244() {
     fn to_test_txdata(
@@ -252,7 +252,6 @@ fn zip_0244() {
                 },
             });
 
-        #[cfg(not(zcash_unstable = "zfuture"))]
         let tdata = TransactionData::from_parts(
             txdata.version(),
             txdata.consensus_branch_id(),
@@ -262,17 +261,9 @@ fn zip_0244() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
-        );
-        #[cfg(zcash_unstable = "zfuture")]
-        let tdata = TransactionData::from_parts_zfuture(
-            txdata.version(),
-            txdata.consensus_branch_id(),
-            txdata.lock_time(),
-            txdata.expiry_height(),
-            test_bundle,
-            txdata.sprout_bundle().cloned(),
-            txdata.sapling_bundle().cloned(),
-            txdata.orchard_bundle().cloned(),
+            #[cfg(zcash_unstable = "zsf")]
+            txdata.zsf_deposit,
+            #[cfg(zcash_unstable = "tze")]
             txdata.tze_bundle().cloned(),
         );
         (tdata, txdata.digest(TxIdDigester))
@@ -349,6 +340,80 @@ fn zip_0244() {
                 assert_eq!(tv.sighash_single_anyone, None);
             }
         };
+
+        assert_eq!(
+            v5_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),
+            tv.sighash_shielded
+        );
+    }
+}
+
+#[cfg(all(zcash_unstable = "zsf", not(zcash_unstable = "tze")))]
+#[test]
+fn zip_zsf() {
+    fn to_test_txdata(
+        tv: &self::data::zip_zsf::TestVector,
+    ) -> (TransactionData<TestUnauthorized>, TxDigests<Blake2bHash>) {
+        let tx = Transaction::read(&tv.tx[..], BranchId::ZFuture).unwrap();
+
+        assert_eq!(tx.txid.as_ref(), &tv.txid);
+        assert_eq!(tx.auth_commitment().as_ref(), &tv.auth_digest);
+
+        let txdata = tx.deref();
+
+        let input_amounts = tv
+            .amounts
+            .iter()
+            .map(|amount| NonNegativeAmount::from_nonnegative_i64(*amount).unwrap())
+            .collect();
+        let input_scriptpubkeys = tv
+            .script_pubkeys
+            .iter()
+            .map(|s| Script(s.clone()))
+            .collect();
+
+        let test_bundle = txdata
+            .transparent_bundle
+            .as_ref()
+            .map(|b| transparent::Bundle {
+                // we have to do this map/clone to make the types line up, since the
+                // Authorization::ScriptSig type is bound to transparent::Authorized, and we need
+                // it to be bound to TestTransparentAuth.
+                vin: b
+                    .vin
+                    .iter()
+                    .map(|vin| TxIn {
+                        prevout: vin.prevout.clone(),
+                        script_sig: vin.script_sig.clone(),
+                        sequence: vin.sequence,
+                    })
+                    .collect(),
+                vout: b.vout.clone(),
+                authorization: TestTransparentAuth {
+                    input_amounts,
+                    input_scriptpubkeys,
+                },
+            });
+
+        let tdata = TransactionData::from_parts(
+            txdata.version(),
+            txdata.consensus_branch_id(),
+            txdata.lock_time(),
+            txdata.expiry_height(),
+            test_bundle,
+            txdata.sprout_bundle().cloned(),
+            txdata.sapling_bundle().cloned(),
+            txdata.orchard_bundle().cloned(),
+            txdata.zsf_deposit,
+            #[cfg(zcash_unstable = "tze")]
+            None,
+        );
+
+        (tdata, txdata.digest(TxIdDigester))
+    }
+
+    for tv in self::data::zip_zsf::make_test_vectors() {
+        let (txdata, txid_parts) = to_test_txdata(&tv);
 
         assert_eq!(
             v5_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),

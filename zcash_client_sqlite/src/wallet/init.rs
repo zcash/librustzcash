@@ -819,6 +819,10 @@ mod tests {
                 None,
                 None,
                 None,
+                #[cfg(zcash_unstable = "zsf")]
+                None,
+                #[cfg(zcash_unstable = "tze")]
+                None,
             )
             .freeze()
             .unwrap();
