@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.2.0] 2024-10-04
+
+### Changed
+- Migrated to `zcash_address 0.6`
+
 ## [0.1.0] 2024-08-20
 
 The contents of this crate were factored out from `zcash_client_backend` to

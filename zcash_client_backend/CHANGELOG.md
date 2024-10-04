@@ -7,14 +7,41 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.14.0] - 2024-10-04
+
 ### Added
 - `zcash_client_backend::data_api`:
   - `GAP_LIMIT`
   - `WalletSummary::recovery_progress`
+  - `SpendableNotes::{take_sapling, take_orchard}`
+  - Tests and testing infrastructure have been migrated from the 
+    `zcash_client_sqlite` internal tests to the `testing` module, and have been
+    generalized so that they may be used for testing arbitrary implementations
+    of the `zcash_client_backend::data_api` interfaces. The following have been
+    added under the `test-dependencies` feature flag as part of this migration:
+    - `WalletTest`
+    - `testing::AddressType`
+    - `testing::CachedBlock`
+    - `testing::DataStoreFactory`
+    - `testing::FakeCompactOutput`
+    - `testing::InitialChainState`
+    - `testing::NoteCommitments`
+    - `testing::Reset`
+    - `testing::TestAccount`
+    - `testing::TestBuilder`
+    - `testing::TestCache`
+    - `testing::TestFvk`
+    - `testing::TestState`
+    - `testing::TransactionSummary`
+    - `testing::input_selector`
+    - `testing::orchard`
+    - `testing::pool`
+    - `testing::sapling`
 
 ### Changed
-- Migrated to `orchard 0.10`, `sapling-crypto 0.3`, `zcash_address 0.6`,
-  `zcash_primitives 0.19`, `zcash_proofs 0.19`, `zcash_protocol 0.4`.
+- Migrated to `orchard 0.10`, `sapling-crypto 0.3`, `shardtree 0.5`,
+  `zcash_address 0.6`, `zcash_primitives 0.19`, `zcash_proofs 0.19`,
+  `zcash_protocol 0.4`.
 - The `Account` trait now uses an associated type for its `AccountId`
   type instead of a type parameter. This change allows for the simplification
   of some type signatures.

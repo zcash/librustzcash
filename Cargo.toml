@@ -33,11 +33,11 @@ categories = ["cryptography::cryptocurrencies"]
 # Intra-workspace dependencies
 equihash = { version = "0.2", path = "components/equihash" }
 zcash_address = { version = "0.6", path = "components/zcash_address" }
-zcash_client_backend = { version = "0.13", path = "zcash_client_backend" }
+zcash_client_backend = { version = "0.14", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.2.1", path = "components/zcash_encoding" }
-zcash_keys = { version = "0.3", path = "zcash_keys" }
+zcash_keys = { version = "0.4", path = "zcash_keys" }
 zcash_protocol = { version = "0.4", path = "components/zcash_protocol" }
-zip321 = { version = "0.1", path = "components/zip321" }
+zip321 = { version = "0.2", path = "components/zip321" }
 
 zcash_note_encryption = "0.4"
 zcash_primitives = { version = "0.19", path = "zcash_primitives", default-features = false }
@@ -48,7 +48,7 @@ bellman = { version = "0.14", default-features = false, features = ["groth16"] }
 ff = "0.13"
 group = "0.13"
 incrementalmerkletree = "0.7"
-shardtree = "0.4"
+shardtree = "0.5"
 zcash_spec = "0.1"
 
 # Payment protocols
@@ -139,7 +139,7 @@ criterion = "0.5"
 proptest = "1"
 rand_chacha = "0.3"
 rand_xorshift = "0.3"
-incrementalmerkletree-testing = "0.1"
+incrementalmerkletree-testing = "0.2"
 
 # Tor
 # - `arti-client` depends on `rusqlite`, and a version mismatch there causes a compilation
@@ -161,7 +161,3 @@ codegen-units = 1
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
-
-[patch.crates-io]
-incrementalmerkletree-testing = { git = "https://github.com/zcash/incrementalmerkletree", rev = "336452152536dde5831c9a4029fd26b4ec310608" }
-shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "336452152536dde5831c9a4029fd26b4ec310608" }
