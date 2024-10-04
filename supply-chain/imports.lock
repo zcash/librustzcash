@@ -1,6 +1,14 @@
 
 # cargo-vet imports lock
 
+[[unpublished.zcash_client_backend]]
+version = "0.14.0"
+audited_as = "0.13.0"
+
+[[unpublished.zcash_keys]]
+version = "0.4.0"
+audited_as = "0.3.0"
+
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
@@ -55,6 +63,13 @@ user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
+[[publisher.incrementalmerkletree-testing]]
+version = "0.2.0"
+when = "2024-10-04"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
+
 [[publisher.orchard]]
 version = "0.10.0"
 when = "2024-10-02"
@@ -72,6 +87,13 @@ user-name = "Kris Nuttycombe"
 [[publisher.shardtree]]
 version = "0.4.0"
 when = "2024-08-12"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
+
+[[publisher.shardtree]]
+version = "0.5.0"
+when = "2024-10-04"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
