@@ -1,7 +1,7 @@
 [package]
 name = "zip321"
 description = "Parsing functions and data types for Zcash ZIP 321 Payment Request URIs"
-version = "0.1.0"
+version = "0.2.0"
 authors = [
     "Kris Nuttycombe <kris@electriccoin.co>"
 ]
