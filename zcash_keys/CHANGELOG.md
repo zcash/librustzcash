@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.4.0] - 2024-10-04
+
 ### Added
 - `zcash_keys::encoding::decode_extfvk_with_network`
 - `impl std::error::Error for Bech32DecodeError`
