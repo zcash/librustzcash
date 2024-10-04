@@ -7,8 +7,15 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.12.0] - 2024-10-04
+
+### Added
+- `impl WalletTest for WalletDb` is now available under the `test-dependencies`
+  feature flag.
+
 ### Changed
-- Migrated to `orchard 0.10`, `sapling-crypto 0.3`, `zcash_address 0.6`,
+- Migrated to `zcash_client_backend 0.14`, `orchard 0.10`,
+  `sapling-crypto 0.3`, `shardtree 0.5`, `zcash_address 0.6`,
   `zcash_primitives 0.19`, `zcash_proofs 0.19`, `zcash_protocol 0.4`.
 - `zcash_client_sqlite::error::SqliteClientError::RequestedRewindInvalid`
   is now a structured variant.
