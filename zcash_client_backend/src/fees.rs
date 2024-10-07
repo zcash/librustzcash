@@ -1,17 +1,16 @@
-use std::fmt;
+use std::fmt::{self, Debug, Display};
 
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     transaction::{
-        components::{
-            amount::{BalanceError, NonNegativeAmount},
-            OutPoint,
-        },
+        components::{amount::NonNegativeAmount, OutPoint},
         fees::{transparent, FeeRule},
     },
 };
 use zcash_protocol::{PoolType, ShieldedProtocol};
+
+use crate::data_api::InputSource;
 
 pub(crate) mod common;
 pub mod fixed;
@@ -273,9 +272,16 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
     }
 }
 
-impl<NoteRefT> From<BalanceError> for ChangeError<BalanceError, NoteRefT> {
-    fn from(err: BalanceError) -> ChangeError<BalanceError, NoteRefT> {
-        ChangeError::StrategyError(err)
+impl<E, N> std::error::Error for ChangeError<E, N>
+where
+    E: Debug + Display + std::error::Error + 'static,
+    N: Debug + Display + 'static,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self {
+            ChangeError::StrategyError(e) => Some(e),
+            _ => None,
+        }
     }
 }
 
@@ -368,12 +374,29 @@ impl EphemeralBalance {
 /// A trait that represents the ability to compute the suggested change and fees that must be paid
 /// by a transaction having a specified set of inputs and outputs.
 pub trait ChangeStrategy {
-    type FeeRule: FeeRule;
+    type FeeRule: FeeRule + Clone;
     type Error;
+
+    /// The type of metadata source that this change strategy requires in order to be able to
+    /// retrieve required wallet metadata. If more capabilities are required of the backend than
+    /// are exposed in the [`InputSource`] trait, the implementer of this trait should define their
+    /// own trait that descends from [`InputSource`] and adds the required capabilities there, and
+    /// then implement that trait for their desired database backend.
+    type MetaSource: InputSource;
+    type WalletMeta;
 
     /// Returns the fee rule that this change strategy will respect when performing
     /// balance computations.
     fn fee_rule(&self) -> &Self::FeeRule;
+
+    /// Uses the provided metadata source to obtain the wallet metadata required for change
+    /// creation determinations.
+    fn fetch_wallet_meta(
+        &self,
+        meta_source: &Self::MetaSource,
+        account: <Self::MetaSource as InputSource>::AccountId,
+        exclude: &[<Self::MetaSource as InputSource>::NoteRef],
+    ) -> Result<Self::WalletMeta, <Self::MetaSource as InputSource>::Error>;
 
     /// Computes the totals of inputs, suggested change amounts, and fees given the
     /// provided inputs and outputs being used to construct a transaction.
@@ -393,7 +416,11 @@ pub trait ChangeStrategy {
     /// - `ephemeral_balance`: if the transaction is to be constructed with either an
     ///   ephemeral transparent input or an ephemeral transparent output this argument
     ///   may be used to provide the value of that input or output. The value of this
-    ///   output should be `None` in the case that there are no such items.
+    ///   argument should be `None` in the case that there are no such items.
+    /// - `wallet_meta`: Additional wallet metadata that the change strategy may use
+    ///   in determining how to construct change outputs. This wallet metadata value
+    ///   should be computed excluding the inputs provided in the `transparent_inputs`,
+    ///   `sapling`, and `orchard` arguments.
     ///
     /// [ZIP 320]: https://zips.z.cash/zip-0320
     #[allow(clippy::too_many_arguments)]
@@ -405,8 +432,8 @@ pub trait ChangeStrategy {
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard::BundleView<NoteRefT>,
-        dust_output_policy: &DustOutputPolicy,
         ephemeral_balance: Option<&EphemeralBalance>,
+        wallet_meta: Option<&Self::WalletMeta>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
 }
 

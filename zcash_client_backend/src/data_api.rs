@@ -794,7 +794,7 @@ impl<NoteRef> SpendableNotes<NoteRef> {
     }
 }
 
-/// Metadata about the structure of the wallet for a particular account. 
+/// Metadata about the structure of the wallet for a particular account.
 ///
 /// At present this just contains counts of unspent outputs in each pool, but it may be extended in
 /// the future to contain note values or other more detailed information about wallet structure.

@@ -1779,20 +1779,21 @@ pub(crate) mod tests {
             fee_rule,
             Some(change_memo.into()),
             OrchardPoolTester::SHIELDED_PROTOCOL,
+            DustOutputPolicy::default(),
         );
-        let input_selector =
-            &GreedyInputSelector::new(change_strategy, DustOutputPolicy::default());
+        let input_selector = GreedyInputSelector::new();
 
         let proposal = st
             .propose_transfer(
                 account.id(),
-                input_selector,
+                &input_selector,
+                &change_strategy,
                 request,
                 NonZeroU32::new(10).unwrap(),
             )
             .unwrap();
 
-        let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
+        let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
             account.usk(),
             OvkPolicy::Sender,
             &proposal,
@@ -1867,13 +1868,14 @@ pub(crate) mod tests {
             fee_rule,
             Some(change_memo.into()),
             OrchardPoolTester::SHIELDED_PROTOCOL,
+            DustOutputPolicy::default(),
         );
-        let input_selector =
-            &GreedyInputSelector::new(change_strategy, DustOutputPolicy::default());
+        let input_selector = GreedyInputSelector::new();
 
         let proposal = st.propose_transfer(
             account.id(),
-            input_selector,
+            &input_selector,
+            &change_strategy,
             request.clone(),
             NonZeroU32::new(10).unwrap(),
         );
@@ -1886,7 +1888,8 @@ pub(crate) mod tests {
         // Verify that it's now possible to create the proposal
         let proposal = st.propose_transfer(
             account.id(),
-            input_selector,
+            &input_selector,
+            &change_strategy,
             request,
             NonZeroU32::new(10).unwrap(),
         );

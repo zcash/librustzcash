@@ -12,10 +12,55 @@ and this library adheres to Rust's notion of
   - `Progress`
   - `WalletSummary::progress`
   - `WalletMeta`
+  - `impl Default for wallet::input_selection::GreedyInputSelector`
 
 ### Changed
 - `zcash_client_backend::data_api`:
   - `InputSource` has an added method `get_wallet_metadata`
+  - `error::Error` has additional variant `Error::Change`. This necessitates
+    the addition of two type parameters to the `Error` type,
+    `ChangeErrT` and `NoteRefT`.
+  - The following methods each now take an additional `change_strategy`
+    argument, along with an associated `ChangeT` type parameter:
+    - `zcash_client_backend::data_api::wallet::spend`
+    - `zcash_client_backend::data_api::wallet::propose_transfer`
+    - `zcash_client_backend::data_api::wallet::propose_shielding`. This method
+      also now takes an additional `to_account` argument.
+    - `zcash_client_backend::data_api::wallet::shield_transparent_funds`. This
+      method also now takes an additional `to_account` argument.
+  - `wallet::input_selection::InputSelectionError` now has an additional `Change`
+    variant. This necessitates the addition of two type parameters.
+  - `wallet::input_selection::InputSelector::propose_transaction` takes an
+    additional `change_strategy` argument, along with an associated `ChangeT`
+    type parameter.
+  - The `wallet::input_selection::InputSelector::FeeRule` associated type has
+    been removed. The fee rule is now part of the change strategy passed to
+    `propose_transaction`.
+  - `wallet::input_selection::ShieldingSelector::propose_shielding` takes an
+    additional `change_strategy` argument, along with an associated `ChangeT`
+    type parameter. In addition, it also takes a new `to_account` argument
+    that identifies the destination account for the shielded notes.
+  - The `wallet::input_selection::ShieldingSelector::FeeRule` associated type
+    has been removed. The fee rule is now part of the change strategy passed to
+    `propose_shielding`.
+  - The `Change` variant of `wallet::input_selection::GreedyInputSelectorError`
+    has been removed, along with the additional type parameters it necessitated.
+  - The arguments to `wallet::input_selection::GreedyInputSelector::new` have
+    changed.
+- `zcash_client_backend::fees::ChangeStrategy` has changed. It has two new
+  associated types, `MetaSource` and `WalletMeta`, and its `FeeRule` associated
+  type now has an additional `Clone` bound. In addition, it defines a new
+  `fetch_wallet_meta` method, and the arguments to `compute_balance` have
+  changed.
+- `zcash_client_backend::fees::fixed::SingleOutputChangeStrategy::new`
+  now takes an additional `DustOutputPolicy` argument. It also now carries
+  an additional type parameter.
+- `zcash_client_backend::fees::standard::SingleOutputChangeStrategy::new`
+  now takes an additional `DustOutputPolicy` argument. It also now carries
+  an additional type parameter.
+- `zcash_client_backend::fees::zip317::SingleOutputChangeStrategy::new`
+  now takes an additional `DustOutputPolicy` argument. It also now carries
+  an additional type parameter.
 
 ### Changed
 - MSRV is now 1.77.0.
@@ -25,6 +70,8 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api`:
   - `WalletSummary::scan_progress` and `WalletSummary::recovery_progress` have
     been removed. Use `WalletSummary::progress` instead.
+- `zcash_client_backend::fees`:
+  - `impl From<BalanceError> for ChangeError<...>`
 
 ## [0.14.0] - 2024-10-04
 

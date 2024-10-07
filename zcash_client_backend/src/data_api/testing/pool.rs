@@ -17,9 +17,7 @@ use zcash_primitives::{
     legacy::TransparentAddress,
     transaction::{
         components::amount::NonNegativeAmount,
-        fees::{
-            fixed::FeeRule as FixedFeeRule, zip317::FeeError as Zip317FeeError, StandardFeeRule,
-        },
+        fees::{fixed::FeeRule as FixedFeeRule, StandardFeeRule},
         Transaction,
     },
 };
@@ -38,16 +36,22 @@ use crate::{
         self,
         chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
         error::Error,
-        testing::{input_selector, AddressType, FakeCompactOutput, InitialChainState, TestBuilder},
+        testing::{
+            single_output_change_strategy, AddressType, FakeCompactOutput, InitialChainState,
+            TestBuilder,
+        },
         wallet::{
-            decrypt_and_store_transaction,
-            input_selection::{GreedyInputSelector, GreedyInputSelectorError},
+            decrypt_and_store_transaction, input_selection::GreedyInputSelector, TransferErrT,
         },
         Account as _, AccountBirthday, DecryptedTransaction, InputSource, Ratio,
         WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
     },
     decrypt_transaction,
-    fees::{fixed, standard, DustOutputPolicy},
+    fees::{
+        fixed,
+        standard::{self, SingleOutputChangeStrategy},
+        DustOutputPolicy,
+    },
     scanning::ScanError,
     wallet::{Note, NoteId, OvkPolicy, ReceivedNote},
 };
@@ -216,19 +220,21 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
         fee_rule,
         Some(change_memo.clone().into()),
         T::SHIELDED_PROTOCOL,
+        DustOutputPolicy::default(),
     );
-    let input_selector = &GreedyInputSelector::new(change_strategy, DustOutputPolicy::default());
+    let input_selector = GreedyInputSelector::new();
 
     let proposal = st
         .propose_transfer(
             account.id(),
-            input_selector,
+            &input_selector,
+            &change_strategy,
             request,
             NonZeroU32::new(1).unwrap(),
         )
         .unwrap();
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal,
@@ -399,7 +405,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         );
         assert_eq!(steps[1].balance().proposed_change(), []);
 
-        let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
+        let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
             account.usk(),
             OvkPolicy::Sender,
             &proposal,
@@ -499,7 +505,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         )
         .unwrap();
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal,
@@ -758,7 +764,7 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
     // This is somewhat redundant with `send_multi_step_proposed_transfer`,
     // but tests the case with no change memo and ensures we haven't messed
     // up the test setup.
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal,
@@ -774,7 +780,7 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
     )
     .unwrap();
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
         account.usk(),
         OvkPolicy::Sender,
         &frobbed_proposal,
@@ -998,7 +1004,11 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
 
     // Executing the proposal should succeed
     let txid = st
-        .create_proposed_transactions::<Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal)
+        .create_proposed_transactions::<Infallible, _, Infallible>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
+        )
         .unwrap()[0];
 
     let (h, _) = st.generate_next_block_including(txid);
@@ -1057,7 +1067,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
 
     // Executing the proposal should succeed
     assert_matches!(
-        st.create_proposed_transactions::<Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal,),
+        st.create_proposed_transactions::<Infallible, _, Infallible>(account.usk(), OvkPolicy::Sender, &proposal,),
         Ok(txids) if txids.len() == 1
     );
 
@@ -1139,7 +1149,11 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
         .unwrap();
 
     let txid2 = st
-        .create_proposed_transactions::<Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal)
+        .create_proposed_transactions::<Infallible, _, Infallible>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
+        )
         .unwrap()[0];
 
     let (h, _) = st.generate_next_block_including(txid2);
@@ -1187,7 +1201,11 @@ pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, DSF>(
                                         ovk_policy|
      -> Result<
         Option<(Note, Address, MemoBytes)>,
-        Error<_, _, GreedyInputSelectorError<Zip317FeeError, _>, Zip317FeeError>,
+        TransferErrT<
+            DSF::DataStore,
+            GreedyInputSelector<DSF::DataStore>,
+            SingleOutputChangeStrategy<DSF::DataStore>,
+        >,
     > {
         let min_confirmations = NonZeroU32::new(1).unwrap();
         let proposal = st.propose_standard_transfer(
@@ -1283,7 +1301,7 @@ pub fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>(
 
     // Executing the proposal should succeed
     assert_matches!(
-        st.create_proposed_transactions::<Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal),
+        st.create_proposed_transactions::<Infallible, _, Infallible>(account.usk(), OvkPolicy::Sender, &proposal),
         Ok(txids) if txids.len() == 1
     );
 }
@@ -1346,7 +1364,7 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
 
     // Executing the proposal should succeed
     assert_matches!(
-        st.create_proposed_transactions::<Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal),
+        st.create_proposed_transactions::<Infallible, _, Infallible>(account.usk(), OvkPolicy::Sender, &proposal),
         Ok(txids) if txids.len() == 1
     );
 }
@@ -1396,14 +1414,18 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
 
     #[allow(deprecated)]
     let fee_rule = FixedFeeRule::standard();
-    let input_selector = GreedyInputSelector::new(
-        fixed::SingleOutputChangeStrategy::new(fee_rule, None, T::SHIELDED_PROTOCOL),
+    let change_strategy = fixed::SingleOutputChangeStrategy::new(
+        fee_rule,
+        None,
+        T::SHIELDED_PROTOCOL,
         DustOutputPolicy::default(),
     );
+    let input_selector = GreedyInputSelector::new();
 
     let txid = st
         .spend(
             &input_selector,
+            &change_strategy,
             &usk,
             req,
             OvkPolicy::Sender,
@@ -1447,8 +1469,8 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
 }
 
 #[allow(dead_code)]
-pub fn zip317_spend<T: ShieldedPoolTester>(
-    ds_factory: impl DataStoreFactory,
+pub fn zip317_spend<T: ShieldedPoolTester, DSF: DataStoreFactory>(
+    ds_factory: DSF,
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
@@ -1484,7 +1506,9 @@ pub fn zip317_spend<T: ShieldedPoolTester>(
     assert_eq!(st.get_total_balance(account_id), total);
     assert_eq!(st.get_spendable_balance(account_id, 1), total);
 
-    let input_selector = input_selector(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let input_selector = GreedyInputSelector::<DSF::DataStore>::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
 
     // This first request will fail due to insufficient non-dust funds
     let req = TransactionRequest::new(vec![Payment::without_memo(
@@ -1496,6 +1520,7 @@ pub fn zip317_spend<T: ShieldedPoolTester>(
     assert_matches!(
         st.spend(
             &input_selector,
+            &change_strategy,
             account.usk(),
             req,
             OvkPolicy::Sender,
@@ -1517,6 +1542,7 @@ pub fn zip317_spend<T: ShieldedPoolTester>(
     let txid = st
         .spend(
             &input_selector,
+            &change_strategy,
             account.usk(),
             req,
             OvkPolicy::Sender,
@@ -1579,19 +1605,18 @@ where
     let res0 = st.wallet_mut().put_received_transparent_utxo(&utxo);
     assert_matches!(res0, Ok(_));
 
-    let fee_rule = StandardFeeRule::Zip317;
-
-    let input_selector = GreedyInputSelector::new(
-        standard::SingleOutputChangeStrategy::new(fee_rule, None, T::SHIELDED_PROTOCOL),
-        DustOutputPolicy::default(),
-    );
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
 
     let txids = st
         .shield_transparent_funds(
             &input_selector,
+            &change_strategy,
             NonNegativeAmount::from_u64(10000).unwrap(),
             account.usk(),
             &[*taddr],
+            account.id(),
             1,
         )
         .unwrap();
@@ -1827,15 +1852,14 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     )])
     .unwrap();
 
-    let fee_rule = StandardFeeRule::Zip317;
-    let input_selector = GreedyInputSelector::new(
-        standard::SingleOutputChangeStrategy::new(fee_rule, None, P1::SHIELDED_PROTOCOL),
-        DustOutputPolicy::default(),
-    );
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, P1::SHIELDED_PROTOCOL);
     let proposal0 = st
         .propose_transfer(
             account.id(),
             &input_selector,
+            &change_strategy,
             p0_to_p1,
             NonZeroU32::new(1).unwrap(),
         )
@@ -1863,7 +1887,7 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     );
     assert_eq!(change_output.value(), expected_change);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal0,
@@ -1918,17 +1942,16 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
     )])
     .unwrap();
 
-    let fee_rule = StandardFeeRule::Zip317;
-    let input_selector = GreedyInputSelector::new(
-        // We set the default change output pool to P0, because we want to verify later that
-        // change is actually sent to P1 (as the transaction is fully fundable from P1).
-        standard::SingleOutputChangeStrategy::new(fee_rule, None, P0::SHIELDED_PROTOCOL),
-        DustOutputPolicy::default(),
-    );
+    let input_selector = GreedyInputSelector::new();
+    // We set the default change output pool to P0, because we want to verify later that
+    // change is actually sent to P1 (as the transaction is fully fundable from P1).
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, P0::SHIELDED_PROTOCOL);
     let proposal0 = st
         .propose_transfer(
             account.id(),
             &input_selector,
+            &change_strategy,
             p0_to_p1,
             NonZeroU32::new(1).unwrap(),
         )
@@ -1955,7 +1978,7 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
     );
     assert_eq!(change_output.value(), expected_change);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal0,
@@ -2009,17 +2032,16 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     )])
     .unwrap();
 
-    let fee_rule = StandardFeeRule::Zip317;
-    let input_selector = GreedyInputSelector::new(
-        // We set the default change output pool to P0, because we want to verify later that
-        // change is actually sent to P1 (as the transaction is fully fundable from P1).
-        standard::SingleOutputChangeStrategy::new(fee_rule, None, P0::SHIELDED_PROTOCOL),
-        DustOutputPolicy::default(),
-    );
+    let input_selector = GreedyInputSelector::new();
+    // We set the default change output pool to P0, because we want to verify later that
+    // change is actually sent to P1 (as the transaction is fully fundable from P1).
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, P0::SHIELDED_PROTOCOL);
     let proposal0 = st
         .propose_transfer(
             account.id(),
             &input_selector,
+            &change_strategy,
             p0_to_p1,
             NonZeroU32::new(1).unwrap(),
         )
@@ -2043,7 +2065,7 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     assert_eq!(change_output.output_pool(), PoolType::SAPLING);
     assert_eq!(change_output.value(), expected_change);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal0,
@@ -2110,11 +2132,9 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     assert_eq!(st.get_spendable_balance(acct_id, 1), initial_balance);
 
     // Set up the fee rule and input selector we'll use for all the transfers.
-    let fee_rule = StandardFeeRule::Zip317;
-    let input_selector = GreedyInputSelector::new(
-        standard::SingleOutputChangeStrategy::new(fee_rule, None, P1::SHIELDED_PROTOCOL),
-        DustOutputPolicy::default(),
-    );
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, P1::SHIELDED_PROTOCOL);
 
     // First, send funds just to P0
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
@@ -2126,6 +2146,7 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     let res = st
         .spend(
             &input_selector,
+            &change_strategy,
             account.usk(),
             p0_transfer,
             OvkPolicy::Sender,
@@ -2157,6 +2178,7 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     let res = st
         .spend(
             &input_selector,
+            &change_strategy,
             account.usk(),
             both_transfer,
             OvkPolicy::Sender,
@@ -2597,17 +2619,14 @@ pub fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>(
     .unwrap();
 
     #[allow(deprecated)]
-    let input_selector = GreedyInputSelector::new(
-        standard::SingleOutputChangeStrategy::new(
-            StandardFeeRule::Zip317,
-            None,
-            T::SHIELDED_PROTOCOL,
-        ),
-        DustOutputPolicy::default(),
-    );
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+
     assert_matches!(
         st.spend(
             &input_selector,
+            &change_strategy,
             account.usk(),
             req,
             OvkPolicy::Sender,

@@ -118,7 +118,7 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
 
 #[allow(dead_code)]
 pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
-    zcash_client_backend::data_api::testing::pool::zip317_spend::<T>(
+    zcash_client_backend::data_api::testing::pool::zip317_spend::<T, TestDbFactory>(
         TestDbFactory,
         BlockCache::new(),
     )
