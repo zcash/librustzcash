@@ -4,6 +4,8 @@
 //! to ensure that inputs added to a transaction do not cause fees to rise by
 //! an amount greater than their value.
 
+use std::marker::PhantomData;
+
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
@@ -13,7 +15,7 @@ use zcash_primitives::{
     },
 };
 
-use crate::ShieldedProtocol;
+use crate::{data_api::InputSource, ShieldedProtocol};
 
 use super::{
     common::single_change_output_balance, sapling as sapling_fees, ChangeError, ChangeStrategy,
@@ -27,13 +29,15 @@ use super::orchard as orchard_fees;
 /// as the most current pool that avoids unnecessary pool-crossing (with a specified
 /// fallback when the transaction has no shielded inputs). Fee calculation is delegated
 /// to the provided fee rule.
-pub struct SingleOutputChangeStrategy {
+pub struct SingleOutputChangeStrategy<I> {
     fee_rule: Zip317FeeRule,
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedProtocol,
+    dust_output_policy: DustOutputPolicy,
+    meta_source: PhantomData<I>,
 }
 
-impl SingleOutputChangeStrategy {
+impl<I> SingleOutputChangeStrategy<I> {
     /// Constructs a new [`SingleOutputChangeStrategy`] with the specified ZIP 317
     /// fee parameters and change memo.
     ///
@@ -43,21 +47,35 @@ impl SingleOutputChangeStrategy {
         fee_rule: Zip317FeeRule,
         change_memo: Option<MemoBytes>,
         fallback_change_pool: ShieldedProtocol,
+        dust_output_policy: DustOutputPolicy,
     ) -> Self {
         Self {
             fee_rule,
             change_memo,
             fallback_change_pool,
+            dust_output_policy,
+            meta_source: PhantomData,
         }
     }
 }
 
-impl ChangeStrategy for SingleOutputChangeStrategy {
+impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
     type FeeRule = Zip317FeeRule;
     type Error = Zip317FeeError;
+    type MetaSource = I;
+    type WalletMeta = ();
 
     fn fee_rule(&self) -> &Self::FeeRule {
         &self.fee_rule
+    }
+
+    fn fetch_wallet_meta(
+        &self,
+        _meta_source: &Self::MetaSource,
+        _account: <Self::MetaSource as InputSource>::AccountId,
+        _exclude: &[<Self::MetaSource as InputSource>::NoteRef],
+    ) -> Result<Self::WalletMeta, <Self::MetaSource as InputSource>::Error> {
+        Ok(())
     }
 
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
@@ -68,8 +86,8 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
-        dust_output_policy: &DustOutputPolicy,
         ephemeral_balance: Option<&EphemeralBalance>,
+        _wallet_meta: Option<&Self::WalletMeta>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         single_change_output_balance(
             params,
@@ -80,7 +98,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
-            dust_output_policy,
+            &self.dust_output_policy,
             self.fee_rule.marginal_fee(),
             self.change_memo.as_ref(),
             self.fallback_change_pool,
@@ -106,7 +124,7 @@ mod tests {
 
     use super::SingleOutputChangeStrategy;
     use crate::{
-        data_api::wallet::input_selection::SaplingPayment,
+        data_api::{testing::MockWalletDb, wallet::input_selection::SaplingPayment},
         fees::{
             tests::{TestSaplingInput, TestTransparentInput},
             ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy,
@@ -122,10 +140,11 @@ mod tests {
 
     #[test]
     fn change_without_dust() {
-        let change_strategy = SingleOutputChangeStrategy::new(
+        let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedProtocol::Sapling,
+            DustOutputPolicy::default(),
         );
 
         // spend a single Sapling note that is sufficient to pay the fee
@@ -148,7 +167,7 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
-            &DustOutputPolicy::default(),
+            None,
             None,
         );
 
@@ -163,10 +182,11 @@ mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn cross_pool_change_without_dust() {
-        let change_strategy = SingleOutputChangeStrategy::new(
+        let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedProtocol::Orchard,
+            DustOutputPolicy::default(),
         );
 
         // spend a single Sapling note that is sufficient to pay the fee
@@ -192,7 +212,7 @@ mod tests {
                     30000,
                 ))][..],
             ),
-            &DustOutputPolicy::default(),
+            None,
             None,
         );
 
@@ -206,22 +226,23 @@ mod tests {
 
     #[test]
     fn change_with_transparent_payments_implicitly_allowing_zero_change() {
-        change_with_transparent_payments(&DustOutputPolicy::default())
+        change_with_transparent_payments(DustOutputPolicy::default())
     }
 
     #[test]
     fn change_with_transparent_payments_explicitly_allowing_zero_change() {
-        change_with_transparent_payments(&DustOutputPolicy::new(
+        change_with_transparent_payments(DustOutputPolicy::new(
             DustAction::AllowDustChange,
             Some(NonNegativeAmount::ZERO),
         ))
     }
 
-    fn change_with_transparent_payments(dust_output_policy: &DustOutputPolicy) {
-        let change_strategy = SingleOutputChangeStrategy::new(
+    fn change_with_transparent_payments(dust_output_policy: DustOutputPolicy) {
+        let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedProtocol::Sapling,
+            dust_output_policy,
         );
 
         // spend a single Sapling note that is sufficient to pay the fee
@@ -245,7 +266,7 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
-            dust_output_policy,
+            None,
             None,
         );
 
@@ -263,10 +284,11 @@ mod tests {
         use crate::fees::sapling as sapling_fees;
         use zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint};
 
-        let change_strategy = SingleOutputChangeStrategy::new(
+        let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedProtocol::Sapling,
+            DustOutputPolicy::default(),
         );
 
         // Spend a single transparent UTXO that is exactly sufficient to pay the fee.
@@ -289,7 +311,7 @@ mod tests {
             &sapling_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
-            &DustOutputPolicy::default(),
+            None,
             None,
         );
 
@@ -307,10 +329,11 @@ mod tests {
         use crate::fees::sapling as sapling_fees;
         use zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint};
 
-        let change_strategy = SingleOutputChangeStrategy::new(
+        let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedProtocol::Sapling,
+            DustOutputPolicy::default(),
         );
 
         // Spend a single transparent UTXO that is sufficient to pay the fee.
@@ -333,7 +356,7 @@ mod tests {
             &sapling_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
-            &DustOutputPolicy::default(),
+            None,
             None,
         );
 
@@ -351,10 +374,14 @@ mod tests {
         use crate::fees::sapling as sapling_fees;
         use zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint};
 
-        let change_strategy = SingleOutputChangeStrategy::new(
+        let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedProtocol::Sapling,
+            DustOutputPolicy::new(
+                DustAction::AllowDustChange,
+                Some(NonNegativeAmount::const_from_u64(1000)),
+            ),
         );
 
         // Spend a single transparent UTXO that is sufficient to pay the fee.
@@ -380,10 +407,7 @@ mod tests {
             &sapling_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
-            &DustOutputPolicy::new(
-                DustAction::AllowDustChange,
-                Some(NonNegativeAmount::const_from_u64(1000)),
-            ),
+            None,
             None,
         );
 
@@ -397,22 +421,23 @@ mod tests {
 
     #[test]
     fn change_with_allowable_dust_implicitly_allowing_zero_change() {
-        change_with_allowable_dust(&DustOutputPolicy::default())
+        change_with_allowable_dust(DustOutputPolicy::default())
     }
 
     #[test]
     fn change_with_allowable_dust_explicitly_allowing_zero_change() {
-        change_with_allowable_dust(&DustOutputPolicy::new(
+        change_with_allowable_dust(DustOutputPolicy::new(
             DustAction::AllowDustChange,
             Some(NonNegativeAmount::ZERO),
         ))
     }
 
-    fn change_with_allowable_dust(dust_output_policy: &DustOutputPolicy) {
-        let change_strategy = SingleOutputChangeStrategy::new(
+    fn change_with_allowable_dust(dust_output_policy: DustOutputPolicy) {
+        let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedProtocol::Sapling,
+            dust_output_policy,
         );
 
         // Spend two Sapling notes, one of them dust. There is sufficient to
@@ -444,7 +469,7 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
-            dust_output_policy,
+            None,
             None,
         );
 
@@ -458,10 +483,11 @@ mod tests {
 
     #[test]
     fn change_with_disallowed_dust() {
-        let change_strategy = SingleOutputChangeStrategy::new(
+        let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
             ShieldedProtocol::Sapling,
+            DustOutputPolicy::default(),
         );
 
         // Attempt to spend three Sapling notes, one of them dust. Adding the third
@@ -495,7 +521,7 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
-            &DustOutputPolicy::default(),
+            None,
             None,
         );
 

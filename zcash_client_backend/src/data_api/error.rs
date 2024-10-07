@@ -13,6 +13,7 @@ use zcash_primitives::transaction::{
 
 use crate::address::UnifiedAddress;
 use crate::data_api::wallet::input_selection::InputSelectorError;
+use crate::fees::ChangeError;
 use crate::proposal::ProposalError;
 use crate::PoolType;
 
@@ -23,7 +24,8 @@ use crate::wallet::NoteId;
 
 /// Errors that can occur as a consequence of wallet operations.
 #[derive(Debug)]
-pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
+pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, ChangeErrT, NoteRefT>
+{
     /// An error occurred retrieving data from the underlying data source
     DataSource(DataSourceError),
 
@@ -32,6 +34,9 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
 
     /// An error in note selection
     NoteSelection(SelectionError),
+
+    /// An error in change selection during transaction proposal construction
+    Change(ChangeError<ChangeErrT, NoteRefT>),
 
     /// An error in transaction proposal construction
     Proposal(ProposalError),
@@ -98,12 +103,14 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     PaysEphemeralTransparentAddress(String),
 }
 
-impl<DE, CE, SE, FE> fmt::Display for Error<DE, CE, SE, FE>
+impl<DE, TE, SE, FE, CE, N> fmt::Display for Error<DE, TE, SE, FE, CE, N>
 where
     DE: fmt::Display,
-    CE: fmt::Display,
+    TE: fmt::Display,
     SE: fmt::Display,
     FE: fmt::Display,
+    CE: fmt::Display,
+    N: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -119,6 +126,9 @@ where
             }
             Error::NoteSelection(e) => {
                 write!(f, "Note selection encountered the following error: {}", e)
+            }
+            Error::Change(e) => {
+                write!(f, "Change output generation failed: {}", e)
             }
             Error::Proposal(e) => {
                 write!(f, "Input selection attempted to construct an invalid proposal: {}", e)
@@ -173,12 +183,14 @@ where
     }
 }
 
-impl<DE, CE, SE, FE> error::Error for Error<DE, CE, SE, FE>
+impl<DE, TE, SE, FE, CE, N> error::Error for Error<DE, TE, SE, FE, CE, N>
 where
     DE: Debug + Display + error::Error + 'static,
-    CE: Debug + Display + error::Error + 'static,
+    TE: Debug + Display + error::Error + 'static,
     SE: Debug + Display + error::Error + 'static,
     FE: Debug + Display + 'static,
+    CE: Debug + Display + error::Error + 'static,
+    N: Debug + Display + 'static,
 {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self {
@@ -192,35 +204,38 @@ where
     }
 }
 
-impl<DE, CE, SE, FE> From<builder::Error<FE>> for Error<DE, CE, SE, FE> {
+impl<DE, TE, SE, FE, CE, N> From<builder::Error<FE>> for Error<DE, TE, SE, FE, CE, N> {
     fn from(e: builder::Error<FE>) -> Self {
         Error::Builder(e)
     }
 }
 
-impl<DE, CE, SE, FE> From<ProposalError> for Error<DE, CE, SE, FE> {
+impl<DE, TE, SE, FE, CE, N> From<ProposalError> for Error<DE, TE, SE, FE, CE, N> {
     fn from(e: ProposalError) -> Self {
         Error::Proposal(e)
     }
 }
 
-impl<DE, CE, SE, FE> From<BalanceError> for Error<DE, CE, SE, FE> {
+impl<DE, TE, SE, FE, CE, N> From<BalanceError> for Error<DE, TE, SE, FE, CE, N> {
     fn from(e: BalanceError) -> Self {
         Error::BalanceError(e)
     }
 }
 
-impl<DE, CE, SE, FE> From<ConversionError<&'static str>> for Error<DE, CE, SE, FE> {
+impl<DE, TE, SE, FE, CE, N> From<ConversionError<&'static str>> for Error<DE, TE, SE, FE, CE, N> {
     fn from(value: ConversionError<&'static str>) -> Self {
         Error::Address(value)
     }
 }
 
-impl<DE, CE, SE, FE> From<InputSelectorError<DE, SE>> for Error<DE, CE, SE, FE> {
-    fn from(e: InputSelectorError<DE, SE>) -> Self {
+impl<DE, TE, SE, FE, CE, N> From<InputSelectorError<DE, SE, CE, N>>
+    for Error<DE, TE, SE, FE, CE, N>
+{
+    fn from(e: InputSelectorError<DE, SE, CE, N>) -> Self {
         match e {
             InputSelectorError::DataSource(e) => Error::DataSource(e),
             InputSelectorError::Selection(e) => Error::NoteSelection(e),
+            InputSelectorError::Change(e) => Error::Change(e),
             InputSelectorError::Proposal(e) => Error::Proposal(e),
             InputSelectorError::InsufficientFunds {
                 available,
@@ -235,20 +250,20 @@ impl<DE, CE, SE, FE> From<InputSelectorError<DE, SE>> for Error<DE, CE, SE, FE> 
     }
 }
 
-impl<DE, CE, SE, FE> From<sapling::builder::Error> for Error<DE, CE, SE, FE> {
+impl<DE, TE, SE, FE, CE, N> From<sapling::builder::Error> for Error<DE, TE, SE, FE, CE, N> {
     fn from(e: sapling::builder::Error) -> Self {
         Error::Builder(builder::Error::SaplingBuild(e))
     }
 }
 
-impl<DE, CE, SE, FE> From<transparent::builder::Error> for Error<DE, CE, SE, FE> {
+impl<DE, TE, SE, FE, CE, N> From<transparent::builder::Error> for Error<DE, TE, SE, FE, CE, N> {
     fn from(e: transparent::builder::Error) -> Self {
         Error::Builder(builder::Error::TransparentBuild(e))
     }
 }
 
-impl<DE, CE, SE, FE> From<ShardTreeError<CE>> for Error<DE, CE, SE, FE> {
-    fn from(e: ShardTreeError<CE>) -> Self {
+impl<DE, TE, SE, FE, CE, N> From<ShardTreeError<TE>> for Error<DE, TE, SE, FE, CE, N> {
+    fn from(e: ShardTreeError<TE>) -> Self {
         Error::CommitmentTree(e)
     }
 }
