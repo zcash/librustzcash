@@ -18,8 +18,9 @@ use zcash_primitives::{
 use crate::{data_api::InputSource, ShieldedProtocol};
 
 use super::{
-    common::single_change_output_balance, sapling as sapling_fees, ChangeError, ChangeStrategy,
-    DustOutputPolicy, EphemeralBalance, TransactionBalance,
+    common::{single_change_output_balance, SinglePoolBalanceConfig},
+    sapling as sapling_fees, ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralBalance,
+    TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
@@ -89,21 +90,25 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         ephemeral_balance: Option<&EphemeralBalance>,
         _wallet_meta: Option<&Self::WalletMeta>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
-        single_change_output_balance(
+        let cfg = SinglePoolBalanceConfig::new(
             params,
             &self.fee_rule,
+            &self.dust_output_policy,
+            self.fee_rule.marginal_fee(),
+            self.fallback_change_pool,
+            self.fee_rule.marginal_fee(),
+            self.fee_rule.grace_actions(),
+        );
+
+        single_change_output_balance(
+            cfg,
             target_height,
             transparent_inputs,
             transparent_outputs,
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
-            &self.dust_output_policy,
-            self.fee_rule.marginal_fee(),
             self.change_memo.as_ref(),
-            self.fallback_change_pool,
-            self.fee_rule.marginal_fee(),
-            self.fee_rule.grace_actions(),
             ephemeral_balance,
         )
     }
