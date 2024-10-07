@@ -164,6 +164,38 @@ impl OutputManifest {
     }
 }
 
+pub(crate) struct SinglePoolBalanceConfig<'a, P, F> {
+    params: &'a P,
+    fee_rule: &'a F,
+    dust_output_policy: &'a DustOutputPolicy,
+    default_dust_threshold: NonNegativeAmount,
+    fallback_change_pool: ShieldedProtocol,
+    marginal_fee: NonNegativeAmount,
+    grace_actions: usize,
+}
+
+impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
+    pub(crate) fn new(
+        params: &'a P,
+        fee_rule: &'a F,
+        dust_output_policy: &'a DustOutputPolicy,
+        default_dust_threshold: NonNegativeAmount,
+        fallback_change_pool: ShieldedProtocol,
+        marginal_fee: NonNegativeAmount,
+        grace_actions: usize,
+    ) -> Self {
+        Self {
+            params,
+            fee_rule,
+            dust_output_policy,
+            default_dust_threshold,
+            fallback_change_pool,
+            marginal_fee,
+            grace_actions,
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn single_change_output_balance<
     P: consensus::Parameters,
@@ -171,19 +203,13 @@ pub(crate) fn single_change_output_balance<
     F: FeeRule,
     E,
 >(
-    params: &P,
-    fee_rule: &F,
+    cfg: SinglePoolBalanceConfig<P, F>,
     target_height: BlockHeight,
     transparent_inputs: &[impl transparent::InputView],
     transparent_outputs: &[impl transparent::OutputView],
     sapling: &impl sapling_fees::BundleView<NoteRefT>,
     #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
-    dust_output_policy: &DustOutputPolicy,
-    default_dust_threshold: NonNegativeAmount,
     change_memo: Option<&MemoBytes>,
-    fallback_change_pool: ShieldedProtocol,
-    marginal_fee: NonNegativeAmount,
-    grace_actions: usize,
     ephemeral_balance: Option<&EphemeralBalance>,
 ) -> Result<TransactionBalance, ChangeError<E, NoteRefT>>
 where
@@ -208,7 +234,7 @@ where
 
     #[allow(unused_variables)]
     let (change_pool, sapling_change, orchard_change) =
-        single_change_output_policy(&net_flows, fallback_change_pool);
+        single_change_output_policy(&net_flows, cfg.fallback_change_pool);
 
     // We don't create a fully-transparent transaction if a change memo is used.
     let transparent = net_flows.is_transparent() && change_memo.is_none();
@@ -216,13 +242,13 @@ where
     // If we have a non-zero marginal fee, we need to check for uneconomic inputs.
     // This is basically assuming that fee rules with non-zero marginal fee are
     // "ZIP 317-like", but we can generalize later if needed.
-    if marginal_fee.is_positive() {
+    if cfg.marginal_fee.is_positive() {
         // Is it certain that there will be a change output? If it is not certain,
         // we should call `check_for_uneconomic_inputs` with `possible_change`
         // including both possibilities.
         let possible_change =
             // These are the situations where we might not have a change output.
-            if transparent || (dust_output_policy.action() == DustAction::AddDustToFee && change_memo.is_none()) {
+            if transparent || (cfg.dust_output_policy.action() == DustAction::AddDustToFee && change_memo.is_none()) {
                 vec![
                     OutputManifest::ZERO,
                     OutputManifest {
@@ -241,8 +267,8 @@ where
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
-            marginal_fee,
-            grace_actions,
+            cfg.marginal_fee,
+            cfg.grace_actions,
             &possible_change[..],
             ephemeral_balance,
         )?;
@@ -331,9 +357,10 @@ where
                 .map(|_| P2PKH_STANDARD_OUTPUT_SIZE),
         );
 
-    let fee_without_change = fee_rule
+    let fee_without_change = cfg
+        .fee_rule
         .fee_required(
-            params,
+            cfg.params,
             target_height,
             transparent_input_sizes.clone(),
             transparent_output_sizes.clone(),
@@ -345,9 +372,9 @@ where
 
     let fee_with_change = max(
         fee_without_change,
-        fee_rule
+        cfg.fee_rule
             .fee_required(
-                params,
+                cfg.params,
                 target_height,
                 transparent_input_sizes,
                 transparent_output_sizes,
@@ -394,12 +421,13 @@ where
                 )
             };
 
-            let change_dust_threshold = dust_output_policy
+            let change_dust_threshold = cfg
+                .dust_output_policy
                 .dust_threshold()
-                .unwrap_or(default_dust_threshold);
+                .unwrap_or(cfg.default_dust_threshold);
 
             if proposed_change < change_dust_threshold {
-                match dust_output_policy.action() {
+                match cfg.dust_output_policy.action() {
                     DustAction::Reject => {
                         // Always allow zero-valued change even for the `Reject` policy:
                         // * it should be allowed in order to record change memos and to improve
