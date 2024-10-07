@@ -413,6 +413,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn send_with_multiple_change_outputs() {
+        testing::pool::send_with_multiple_change_outputs::<SaplingPoolTester>()
+    }
+
+    #[test]
     #[cfg(feature = "transparent-inputs")]
     fn send_multi_step_proposed_transfer() {
         testing::pool::send_multi_step_proposed_transfer::<SaplingPoolTester>()
