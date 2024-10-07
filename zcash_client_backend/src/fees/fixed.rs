@@ -14,9 +14,9 @@ use zcash_primitives::{
 use crate::{data_api::InputSource, ShieldedProtocol};
 
 use super::{
-    common::{single_change_output_balance, SinglePoolBalanceConfig},
+    common::{single_pool_output_balance, SinglePoolBalanceConfig},
     sapling as sapling_fees, ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralBalance,
-    TransactionBalance,
+    SplitPolicy, TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
@@ -86,18 +86,21 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         ephemeral_balance: Option<&EphemeralBalance>,
         _wallet_meta: Option<&Self::WalletMeta>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
+        let split_policy = SplitPolicy::single_output();
         let cfg = SinglePoolBalanceConfig::new(
             params,
             &self.fee_rule,
             &self.dust_output_policy,
             self.fee_rule.fixed_fee(),
+            &split_policy,
             self.fallback_change_pool,
             NonNegativeAmount::ZERO,
             0,
         );
 
-        single_change_output_balance(
+        single_pool_output_balance(
             cfg,
+            None,
             target_height,
             transparent_inputs,
             transparent_outputs,

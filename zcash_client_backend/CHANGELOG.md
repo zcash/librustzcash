@@ -13,6 +13,8 @@ and this library adheres to Rust's notion of
   - `WalletSummary::progress`
   - `WalletMeta`
   - `impl Default for wallet::input_selection::GreedyInputSelector`
+- `zcash_client_backend::fees::SplitPolicy`
+- `zcash_client_backend::fees::zip317::MultiOutputChangeStrategy`
 
 ### Changed
 - `zcash_client_backend::data_api`:

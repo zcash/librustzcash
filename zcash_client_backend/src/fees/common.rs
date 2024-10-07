@@ -1,4 +1,5 @@
 use core::cmp::{max, min};
+use std::num::{NonZeroU64, NonZeroUsize};
 
 use zcash_primitives::{
     consensus::{self, BlockHeight},
@@ -10,9 +11,11 @@ use zcash_primitives::{
 };
 use zcash_protocol::ShieldedProtocol;
 
+use crate::data_api::WalletMeta;
+
 use super::{
     sapling as sapling_fees, ChangeError, ChangeValue, DustAction, DustOutputPolicy,
-    EphemeralBalance, TransactionBalance,
+    EphemeralBalance, SplitPolicy, TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
@@ -112,33 +115,26 @@ where
 }
 
 /// Decide which shielded pool change should go to if there is any.
-pub(crate) fn single_change_output_policy(
+pub(crate) fn select_change_pool(
     _net_flows: &NetFlows,
     _fallback_change_pool: ShieldedProtocol,
-) -> (ShieldedProtocol, usize, usize) {
+) -> ShieldedProtocol {
     // TODO: implement a less naive strategy for selecting the pool to which change will be sent.
-    let change_pool = {
-        #[cfg(feature = "orchard")]
-        if _net_flows.orchard_in.is_positive() || _net_flows.orchard_out.is_positive() {
-            // Send change to Orchard if we're spending any Orchard inputs or creating any Orchard outputs.
-            ShieldedProtocol::Orchard
-        } else if _net_flows.sapling_in.is_positive() || _net_flows.sapling_out.is_positive() {
-            // Otherwise, send change to Sapling if we're spending any Sapling inputs or creating any
-            // Sapling outputs, so that we avoid pool-crossing.
-            ShieldedProtocol::Sapling
-        } else {
-            // The flows are transparent, so there may not be change. If there is, the caller
-            // gets to decide where to shield it.
-            _fallback_change_pool
-        }
-        #[cfg(not(feature = "orchard"))]
+    #[cfg(feature = "orchard")]
+    if _net_flows.orchard_in.is_positive() || _net_flows.orchard_out.is_positive() {
+        // Send change to Orchard if we're spending any Orchard inputs or creating any Orchard outputs.
+        ShieldedProtocol::Orchard
+    } else if _net_flows.sapling_in.is_positive() || _net_flows.sapling_out.is_positive() {
+        // Otherwise, send change to Sapling if we're spending any Sapling inputs or creating any
+        // Sapling outputs, so that we avoid pool-crossing.
         ShieldedProtocol::Sapling
-    };
-    (
-        change_pool,
-        (change_pool == ShieldedProtocol::Sapling).into(),
-        (change_pool == ShieldedProtocol::Orchard).into(),
-    )
+    } else {
+        // The flows are transparent, so there may not be change. If there is, the caller
+        // gets to decide where to shield it.
+        _fallback_change_pool
+    }
+    #[cfg(not(feature = "orchard"))]
+    ShieldedProtocol::Sapling
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -162,6 +158,10 @@ impl OutputManifest {
     pub(crate) fn orchard(&self) -> usize {
         self.orchard
     }
+
+    pub(crate) fn total_shielded(&self) -> usize {
+        self.sapling + self.orchard
+    }
 }
 
 pub(crate) struct SinglePoolBalanceConfig<'a, P, F> {
@@ -169,17 +169,20 @@ pub(crate) struct SinglePoolBalanceConfig<'a, P, F> {
     fee_rule: &'a F,
     dust_output_policy: &'a DustOutputPolicy,
     default_dust_threshold: NonNegativeAmount,
+    split_policy: &'a SplitPolicy,
     fallback_change_pool: ShieldedProtocol,
     marginal_fee: NonNegativeAmount,
     grace_actions: usize,
 }
 
 impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         params: &'a P,
         fee_rule: &'a F,
         dust_output_policy: &'a DustOutputPolicy,
         default_dust_threshold: NonNegativeAmount,
+        split_policy: &'a SplitPolicy,
         fallback_change_pool: ShieldedProtocol,
         marginal_fee: NonNegativeAmount,
         grace_actions: usize,
@@ -189,6 +192,7 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
             fee_rule,
             dust_output_policy,
             default_dust_threshold,
+            split_policy,
             fallback_change_pool,
             marginal_fee,
             grace_actions,
@@ -197,13 +201,9 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn single_change_output_balance<
-    P: consensus::Parameters,
-    NoteRefT: Clone,
-    F: FeeRule,
-    E,
->(
+pub(crate) fn single_pool_output_balance<P: consensus::Parameters, NoteRefT: Clone, F: FeeRule, E>(
     cfg: SinglePoolBalanceConfig<P, F>,
+    wallet_meta: Option<&WalletMeta>,
     target_height: BlockHeight,
     transparent_inputs: &[impl transparent::InputView],
     transparent_outputs: &[impl transparent::OutputView],
@@ -232,9 +232,32 @@ where
         ephemeral_balance,
     )?;
 
-    #[allow(unused_variables)]
-    let (change_pool, sapling_change, orchard_change) =
-        single_change_output_policy(&net_flows, cfg.fallback_change_pool);
+    let change_pool = select_change_pool(&net_flows, cfg.fallback_change_pool);
+    let target_change_counts = OutputManifest {
+        transparent: 0,
+        sapling: if change_pool == ShieldedProtocol::Sapling {
+            wallet_meta.map_or(1, |m| {
+                std::cmp::max(
+                    usize::from(cfg.split_policy.target_output_count)
+                        .saturating_sub(m.total_note_count()),
+                    1,
+                )
+            })
+        } else {
+            0
+        },
+        orchard: if change_pool == ShieldedProtocol::Orchard {
+            wallet_meta.map_or(1, |m| {
+                std::cmp::max(
+                    usize::from(cfg.split_policy.target_output_count)
+                        .saturating_sub(m.total_note_count()),
+                    1,
+                )
+            })
+        } else {
+            0
+        },
+    };
 
     // We don't create a fully-transparent transaction if a change memo is used.
     let transparent = net_flows.is_transparent() && change_memo.is_none();
@@ -246,20 +269,17 @@ where
         // Is it certain that there will be a change output? If it is not certain,
         // we should call `check_for_uneconomic_inputs` with `possible_change`
         // including both possibilities.
-        let possible_change =
+        let possible_change = {
             // These are the situations where we might not have a change output.
-            if transparent || (cfg.dust_output_policy.action() == DustAction::AddDustToFee && change_memo.is_none()) {
-                vec![
-                    OutputManifest::ZERO,
-                    OutputManifest {
-                        transparent: 0,
-                        sapling: sapling_change,
-                        orchard: orchard_change
-                    }
-                ]
+            if transparent
+                || (cfg.dust_output_policy.action() == DustAction::AddDustToFee
+                    && change_memo.is_none())
+            {
+                vec![OutputManifest::ZERO, target_change_counts]
             } else {
-                vec![OutputManifest { transparent: 0, sapling: sapling_change, orchard: orchard_change}]
-            };
+                vec![target_change_counts]
+            }
+        };
 
         check_for_uneconomic_inputs(
             transparent_inputs,
@@ -285,35 +305,36 @@ where
         .bundle_type()
         .num_spends(sapling.inputs().len())
         .map_err(ChangeError::BundleError)?;
-    let sapling_output_count = sapling
-        .bundle_type()
-        .num_outputs(sapling.inputs().len(), sapling.outputs().len())
-        .map_err(ChangeError::BundleError)?;
-    let sapling_output_count_with_change = sapling
-        .bundle_type()
-        .num_outputs(
-            sapling.inputs().len(),
-            sapling.outputs().len() + sapling_change,
-        )
-        .map_err(ChangeError::BundleError)?;
+    let sapling_output_count = |change_count| {
+        sapling
+            .bundle_type()
+            .num_outputs(
+                sapling.inputs().len(),
+                sapling.outputs().len() + change_count,
+            )
+            .map_err(ChangeError::BundleError)
+    };
 
     #[cfg(feature = "orchard")]
-    let orchard_action_count = orchard
-        .bundle_type()
-        .num_actions(orchard.inputs().len(), orchard.outputs().len())
-        .map_err(ChangeError::BundleError)?;
-    #[cfg(feature = "orchard")]
-    let orchard_action_count_with_change = orchard
-        .bundle_type()
-        .num_actions(
-            orchard.inputs().len(),
-            orchard.outputs().len() + orchard_change,
-        )
-        .map_err(ChangeError::BundleError)?;
+    let orchard_action_count = |change_count| {
+        orchard
+            .bundle_type()
+            .num_actions(
+                orchard.inputs().len(),
+                orchard.outputs().len() + change_count,
+            )
+            .map_err(ChangeError::BundleError)
+    };
     #[cfg(not(feature = "orchard"))]
-    let orchard_action_count = 0;
-    #[cfg(not(feature = "orchard"))]
-    let orchard_action_count_with_change = 0;
+    let orchard_action_count = |change_count: usize| -> Result<usize, ChangeError<E, NoteRefT>> {
+        if change_count != 0 {
+            Err(ChangeError::BundleError(
+                "Nonzero Orchard change requested but the `orchard` feature is not enabled.",
+            ))
+        } else {
+            Ok(0)
+        }
+    };
 
     // Once we calculate the balance with and without change, there are five cases:
     //
@@ -365,8 +386,8 @@ where
             transparent_input_sizes.clone(),
             transparent_output_sizes.clone(),
             sapling_input_count,
-            sapling_output_count,
-            orchard_action_count,
+            sapling_output_count(0)?,
+            orchard_action_count(0)?,
         )
         .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?;
 
@@ -376,11 +397,11 @@ where
             .fee_required(
                 cfg.params,
                 target_height,
-                transparent_input_sizes,
-                transparent_output_sizes,
+                transparent_input_sizes.clone(),
+                transparent_output_sizes.clone(),
                 sapling_input_count,
-                sapling_output_count_with_change,
-                orchard_action_count_with_change,
+                sapling_output_count(target_change_counts.sapling())?,
+                orchard_action_count(target_change_counts.orchard())?,
             )
             .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?,
     );
@@ -410,13 +431,73 @@ where
             // Case 3b or 3c.
             let proposed_change =
                 (total_in - total_out_plus_fee_with_change).expect("checked above");
+
+            // We obtain a split count based on the total number of notes of sufficient size
+            // available in the wallet, irrespective of pool. If we don't have any wallet metadata
+            // available, we fall back to generating a single change output.
+            let split_count = wallet_meta.map_or(NonZeroUsize::MIN, |wm| {
+                cfg.split_policy
+                    .split_count(wm.total_note_count(), proposed_change)
+            });
+            let per_output_change = proposed_change.div_with_remainder(
+                NonZeroU64::new(
+                    u64::try_from(usize::from(split_count)).expect("usize fits into u64"),
+                )
+                .unwrap(),
+            );
+
+            // If we don't have as many change outputs as we expected, recompute the fee.
+            let (fee_with_change, excess_fee) =
+                if usize::from(split_count) < target_change_counts.total_shielded() {
+                    let new_fee_with_change = cfg
+                        .fee_rule
+                        .fee_required(
+                            cfg.params,
+                            target_height,
+                            transparent_input_sizes,
+                            transparent_output_sizes,
+                            sapling_input_count,
+                            sapling_output_count(if change_pool == ShieldedProtocol::Sapling {
+                                usize::from(split_count)
+                            } else {
+                                0
+                            })?,
+                            orchard_action_count(if change_pool == ShieldedProtocol::Orchard {
+                                usize::from(split_count)
+                            } else {
+                                0
+                            })?,
+                        )
+                        .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?;
+                    (
+                        new_fee_with_change,
+                        (fee_with_change - new_fee_with_change).unwrap_or(NonNegativeAmount::ZERO),
+                    )
+                } else {
+                    (fee_with_change, NonNegativeAmount::ZERO)
+                };
+
             let simple_case = || {
                 (
-                    vec![ChangeValue::shielded(
-                        change_pool,
-                        proposed_change,
-                        change_memo.cloned(),
-                    )],
+                    (0usize..split_count.into())
+                        .map(|i| {
+                            ChangeValue::shielded(
+                                change_pool,
+                                if i == 0 {
+                                    // Add any remainder to the first output only
+                                    (*per_output_change.quotient()
+                                        + *per_output_change.remainder()
+                                        + excess_fee)
+                                        .unwrap()
+                                } else {
+                                    // For any other output, the change value will just be the
+                                    // quotient.
+                                    *per_output_change.quotient()
+                                },
+                                change_memo.cloned(),
+                            )
+                        })
+                        .collect(),
                     fee_with_change,
                 )
             };
@@ -426,7 +507,7 @@ where
                 .dust_threshold()
                 .unwrap_or(cfg.default_dust_threshold);
 
-            if proposed_change < change_dust_threshold {
+            if per_output_change.quotient() < &change_dust_threshold {
                 match cfg.dust_output_policy.action() {
                     DustAction::Reject => {
                         // Always allow zero-valued change even for the `Reject` policy:
@@ -435,11 +516,11 @@ where
                         // * this case occurs in practice when sending all funds from an account;
                         // * zero-valued notes do not require witness tracking;
                         // * the effect on trial decryption overhead is small.
-                        if proposed_change.is_zero() {
+                        if per_output_change.quotient().is_zero() {
                             simple_case()
                         } else {
-                            let shortfall =
-                                (change_dust_threshold - proposed_change).ok_or_else(underflow)?;
+                            let shortfall = (change_dust_threshold - *per_output_change.quotient())
+                                .ok_or_else(underflow)?;
 
                             return Err(ChangeError::InsufficientFunds {
                                 available: total_in,

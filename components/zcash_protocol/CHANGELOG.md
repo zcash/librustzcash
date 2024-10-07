@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::value::QuotRem`
+- `zcash_protocol::value::Zatoshis::div_with_remainder`
+
 ### Changed
 - MSRV is now 1.77.0.
 
@@ -80,9 +84,9 @@ The entries below are relative to the `zcash_primitives` crate as of the tag
 - `zcash_protocol::consensus::Parameters` has been split into two traits, with
   the newly added `NetworkConstants` trait providing all network constant
   accessors. Also, the `address_network` method has been replaced with a new
-  `network_type` method that serves the same purpose. A blanket impl of 
+  `network_type` method that serves the same purpose. A blanket impl of
   `NetworkConstants` is provided for all types that implement `Parameters`,
-  so call sites for methods that have moved to `NetworkConstants` should 
+  so call sites for methods that have moved to `NetworkConstants` should
   remain unchanged (though they may require an additional `use` statement.)
 
 ### Removed

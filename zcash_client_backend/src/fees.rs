@@ -1,4 +1,7 @@
-use std::fmt::{self, Debug, Display};
+use std::{
+    fmt::{self, Debug, Display},
+    num::{NonZeroU64, NonZeroUsize},
+};
 
 use zcash_primitives::{
     consensus::{self, BlockHeight},
@@ -333,6 +336,72 @@ impl DustOutputPolicy {
 impl Default for DustOutputPolicy {
     fn default() -> Self {
         DustOutputPolicy::new(DustAction::Reject, None)
+    }
+}
+
+/// A policy that describes how change output should be split into multiple notes for the purpose
+/// of note management.
+#[derive(Clone, Copy, Debug)]
+pub struct SplitPolicy {
+    target_output_count: NonZeroUsize,
+    min_split_output_size: NonNegativeAmount,
+}
+
+impl SplitPolicy {
+    /// Constructs a new [`SplitPolicy`] from its constituent parts.
+    pub fn new(
+        target_output_count: NonZeroUsize,
+        min_split_output_size: NonNegativeAmount,
+    ) -> Self {
+        Self {
+            target_output_count,
+            min_split_output_size,
+        }
+    }
+
+    /// Constructs a [`SplitPolicy`] that prescribes a single output (no splitting).
+    pub fn single_output() -> Self {
+        Self {
+            target_output_count: NonZeroUsize::MIN,
+            min_split_output_size: NonNegativeAmount::ZERO,
+        }
+    }
+
+    /// Returns the minimum value for a note resulting from splitting of change.
+    ///
+    /// If splitting change would result in notes of value less than the minimum split output size,
+    /// a smaller number of splits should be chosen.
+    pub fn min_split_output_size(&self) -> NonNegativeAmount {
+        self.min_split_output_size
+    }
+
+    /// Returns the number of output notes to produce from the given total change value, given the
+    /// number of existing unspent notes in the account and this policy.
+    pub fn split_count(
+        &self,
+        existing_notes: usize,
+        total_change: NonNegativeAmount,
+    ) -> NonZeroUsize {
+        let mut split_count =
+            NonZeroUsize::new(usize::from(self.target_output_count).saturating_sub(existing_notes))
+                .unwrap_or(NonZeroUsize::MIN);
+
+        loop {
+            let per_output_change = total_change.div_with_remainder(
+                NonZeroU64::new(
+                    u64::try_from(usize::from(split_count)).expect("usize fits into u64"),
+                )
+                .unwrap(),
+            );
+            if split_count > NonZeroUsize::MIN
+                && *per_output_change.quotient() < self.min_split_output_size
+            {
+                split_count = NonZeroUsize::new(usize::from(split_count) - 1)
+                    .expect("split_count checked to be > 1");
+            } else {
+                return split_count;
+            }
+        }
     }
 }
 

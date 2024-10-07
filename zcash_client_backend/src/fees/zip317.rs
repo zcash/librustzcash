@@ -15,12 +15,15 @@ use zcash_primitives::{
     },
 };
 
-use crate::{data_api::InputSource, ShieldedProtocol};
+use crate::{
+    data_api::{InputSource, WalletMeta},
+    ShieldedProtocol,
+};
 
 use super::{
-    common::{single_change_output_balance, SinglePoolBalanceConfig},
+    common::{single_pool_output_balance, SinglePoolBalanceConfig},
     sapling as sapling_fees, ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralBalance,
-    TransactionBalance,
+    SplitPolicy, TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
@@ -90,18 +93,118 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         ephemeral_balance: Option<&EphemeralBalance>,
         _wallet_meta: Option<&Self::WalletMeta>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
+        let split_policy = SplitPolicy::single_output();
         let cfg = SinglePoolBalanceConfig::new(
             params,
             &self.fee_rule,
             &self.dust_output_policy,
             self.fee_rule.marginal_fee(),
+            &split_policy,
             self.fallback_change_pool,
             self.fee_rule.marginal_fee(),
             self.fee_rule.grace_actions(),
         );
 
-        single_change_output_balance(
+        single_pool_output_balance(
             cfg,
+            None,
+            target_height,
+            transparent_inputs,
+            transparent_outputs,
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+            self.change_memo.as_ref(),
+            ephemeral_balance,
+        )
+    }
+}
+
+/// A change strategy that attempts to split the change value into some number of equal-sized notes
+/// as dictated by the included [`SplitPolicy`] value.
+pub struct MultiOutputChangeStrategy<I> {
+    fee_rule: Zip317FeeRule,
+    change_memo: Option<MemoBytes>,
+    fallback_change_pool: ShieldedProtocol,
+    dust_output_policy: DustOutputPolicy,
+    split_policy: SplitPolicy,
+    meta_source: PhantomData<I>,
+}
+
+impl<I> MultiOutputChangeStrategy<I> {
+    /// Constructs a new [`MultiOutputChangeStrategy`] with the specified ZIP 317
+    /// fee parameters, change memo, and change splitting policy.
+    ///
+    /// This change strategy will fall back to creating a single change output if insufficient
+    /// change value is available to create notes with at least the minimum value dictated by the
+    /// split policy.
+    ///
+    /// `fallback_change_pool`: the pool to which change will be sent if when more than one
+    /// shielded pool is enabled via feature flags, and the transaction has no shielded inputs.
+    /// `split_policy`: A policy value describing how the change value should be returned as
+    /// multiple notes.
+    pub fn new(
+        fee_rule: Zip317FeeRule,
+        change_memo: Option<MemoBytes>,
+        fallback_change_pool: ShieldedProtocol,
+        dust_output_policy: DustOutputPolicy,
+        split_policy: SplitPolicy,
+    ) -> Self {
+        Self {
+            fee_rule,
+            change_memo,
+            fallback_change_pool,
+            dust_output_policy,
+            split_policy,
+            meta_source: PhantomData,
+        }
+    }
+}
+
+impl<I: InputSource> ChangeStrategy for MultiOutputChangeStrategy<I> {
+    type FeeRule = Zip317FeeRule;
+    type Error = Zip317FeeError;
+    type MetaSource = I;
+    type WalletMeta = WalletMeta;
+
+    fn fee_rule(&self) -> &Self::FeeRule {
+        &self.fee_rule
+    }
+
+    fn fetch_wallet_meta(
+        &self,
+        meta_source: &Self::MetaSource,
+        account: <Self::MetaSource as InputSource>::AccountId,
+        exclude: &[<Self::MetaSource as InputSource>::NoteRef],
+    ) -> Result<Self::WalletMeta, <Self::MetaSource as InputSource>::Error> {
+        meta_source.get_wallet_metadata(account, self.split_policy.min_split_output_size(), exclude)
+    }
+
+    fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
+        &self,
+        params: &P,
+        target_height: BlockHeight,
+        transparent_inputs: &[impl transparent::InputView],
+        transparent_outputs: &[impl transparent::OutputView],
+        sapling: &impl sapling_fees::BundleView<NoteRefT>,
+        #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
+        ephemeral_balance: Option<&EphemeralBalance>,
+        wallet_meta: Option<&Self::WalletMeta>,
+    ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
+        let cfg = SinglePoolBalanceConfig::new(
+            params,
+            &self.fee_rule,
+            &self.dust_output_policy,
+            self.fee_rule.marginal_fee(),
+            &self.split_policy,
+            self.fallback_change_pool,
+            self.fee_rule.marginal_fee(),
+            self.fee_rule.grace_actions(),
+        );
+
+        single_pool_output_balance(
+            cfg,
+            wallet_meta,
             target_height,
             transparent_inputs,
             transparent_outputs,
@@ -116,7 +219,7 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::Infallible;
+    use std::{convert::Infallible, num::NonZeroUsize};
 
     use zcash_primitives::{
         consensus::{Network, NetworkUpgrade, Parameters},
@@ -129,10 +232,11 @@ mod tests {
 
     use super::SingleOutputChangeStrategy;
     use crate::{
-        data_api::{testing::MockWalletDb, wallet::input_selection::SaplingPayment},
+        data_api::{testing::MockWalletDb, wallet::input_selection::SaplingPayment, WalletMeta},
         fees::{
             tests::{TestSaplingInput, TestTransparentInput},
-            ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy,
+            zip317::MultiOutputChangeStrategy,
+            ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy, SplitPolicy,
         },
         ShieldedProtocol,
     };
@@ -182,6 +286,119 @@ mod tests {
                 balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(5000), None)] &&
                 balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
         );
+    }
+
+    #[test]
+    fn change_without_dust_multi() {
+        let change_strategy = MultiOutputChangeStrategy::<MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedProtocol::Sapling,
+            DustOutputPolicy::default(),
+            SplitPolicy::new(
+                NonZeroUsize::new(5).unwrap(),
+                NonNegativeAmount::const_from_u64(100_0000),
+            ),
+        );
+
+        {
+            // spend a single Sapling note and produce 5 outputs
+            let balance = |existing_notes| {
+                change_strategy.compute_balance(
+                    &Network::TestNetwork,
+                    Network::TestNetwork
+                        .activation_height(NetworkUpgrade::Nu5)
+                        .unwrap(),
+                    &[] as &[TestTransparentInput],
+                    &[] as &[TxOut],
+                    &(
+                        sapling::builder::BundleType::DEFAULT,
+                        &[TestSaplingInput {
+                            note_id: 0,
+                            value: NonNegativeAmount::const_from_u64(750_0000),
+                        }][..],
+                        &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
+                            100_0000,
+                        ))][..],
+                    ),
+                    #[cfg(feature = "orchard")]
+                    &orchard_fees::EmptyBundleView,
+                    None,
+                    Some(&WalletMeta::new(
+                        existing_notes,
+                        #[cfg(feature = "orchard")]
+                        0,
+                    )),
+                )
+            };
+
+            assert_matches!(
+                balance(0),
+                Ok(balance) if
+                    balance.proposed_change() == [
+                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(129_4000), None),
+                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(129_4000), None),
+                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(129_4000), None),
+                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(129_4000), None),
+                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(129_4000), None),
+                    ] &&
+                    balance.fee_required() == NonNegativeAmount::const_from_u64(30000)
+            );
+
+            assert_matches!(
+                balance(2),
+                Ok(balance) if
+                    balance.proposed_change() == [
+                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(216_0000), None),
+                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(216_0000), None),
+                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(216_0000), None),
+                    ] &&
+                    balance.fee_required() == NonNegativeAmount::const_from_u64(20000)
+            );
+        }
+
+        {
+            // spend a single Sapling note and produce 4 outputs, as the value of the note isn't
+            // sufficient to produce 5
+            let result = change_strategy.compute_balance(
+                &Network::TestNetwork,
+                Network::TestNetwork
+                    .activation_height(NetworkUpgrade::Nu5)
+                    .unwrap(),
+                &[] as &[TestTransparentInput],
+                &[] as &[TxOut],
+                &(
+                    sapling::builder::BundleType::DEFAULT,
+                    &[TestSaplingInput {
+                        note_id: 0,
+                        value: NonNegativeAmount::const_from_u64(600_0000),
+                    }][..],
+                    &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
+                        100_0000,
+                    ))][..],
+                ),
+                #[cfg(feature = "orchard")]
+                &orchard_fees::EmptyBundleView,
+                None,
+                Some(&WalletMeta::new(
+                    0,
+                    #[cfg(feature = "orchard")]
+                    0,
+                )),
+            );
+
+            assert_matches!(
+                result,
+                Ok(balance) if
+                    balance.proposed_change() == [
+                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(124_7500), None),
+                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(124_2500), None),
+                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(124_2500), None),
+                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(124_2500), None),
+                    ] &&
+                    balance.fee_required() == NonNegativeAmount::const_from_u64(25000)
+            );
+        }
     }
 
     #[test]

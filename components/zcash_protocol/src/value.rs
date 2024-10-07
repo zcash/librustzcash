@@ -1,6 +1,7 @@
 use std::convert::{Infallible, TryFrom};
 use std::error;
 use std::iter::Sum;
+use std::num::NonZeroU64;
 use std::ops::{Add, Mul, Neg, Sub};
 
 use memuse::DynamicUsage;
@@ -229,6 +230,24 @@ impl Mul<usize> for ZatBalance {
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
 pub struct Zatoshis(u64);
 
+/// A struct that provides both the quotient and remainder of a division operation.
+pub struct QuotRem<A> {
+    quotient: A,
+    remainder: A,
+}
+
+impl<A> QuotRem<A> {
+    /// Returns the quotient portion of the value.
+    pub fn quotient(&self) -> &A {
+        &self.quotient
+    }
+
+    /// Returns the remainder portion of the value.
+    pub fn remainder(&self) -> &A {
+        &self.remainder
+    }
+}
+
 impl Zatoshis {
     /// Returns the identity `Zatoshis`
     pub const ZERO: Self = Zatoshis(0);
@@ -297,6 +316,15 @@ impl Zatoshis {
     /// Returns whether or not this `Zatoshis` is positive.
     pub fn is_positive(&self) -> bool {
         self > &Zatoshis::ZERO
+    }
+
+    /// Divides this `Zatoshis` value by the given divisor and returns the quotient and remainder.
+    pub fn div_with_remainder(&self, divisor: NonZeroU64) -> QuotRem<Zatoshis> {
+        let divisor = u64::from(divisor);
+        QuotRem {
+            quotient: Zatoshis(self.0 / divisor),
+            remainder: Zatoshis(self.0 % divisor),
+        }
     }
 }
 

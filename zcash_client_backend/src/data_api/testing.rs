@@ -1221,12 +1221,6 @@ impl<Cache, DbT: WalletRead + Reset> TestState<Cache, DbT, LocalNetwork> {
     //    }
 }
 
-/// Helper method for constructing a [`GreedyInputSelector`] with a
-/// [`standard::SingleOutputChangeStrategy`].
-pub fn input_selector<DbT: InputSource>() -> GreedyInputSelector<DbT> {
-    GreedyInputSelector::<DbT>::new()
-}
-
 pub fn single_output_change_strategy<DbT: InputSource>(
     fee_rule: StandardFeeRule,
     change_memo: Option<&str>,
