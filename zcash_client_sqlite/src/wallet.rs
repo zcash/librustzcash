@@ -840,15 +840,26 @@ pub(crate) struct SubtreeScanProgress;
 fn subtree_scan_progress<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    table_prefix: &'static str,
-    output_count_col: &'static str,
-    shard_height: u8,
+    shielded_protocol: ShieldedProtocol,
     pool_activation_height: BlockHeight,
     birthday_height: BlockHeight,
     recover_until_height: Option<BlockHeight>,
     fully_scanned_height: BlockHeight,
     chain_tip_height: BlockHeight,
 ) -> Result<Progress, SqliteClientError> {
+    let (table_prefix, output_count_col, shard_height) = match shielded_protocol {
+        ShieldedProtocol::Sapling => (
+            SAPLING_TABLES_PREFIX,
+            "sapling_output_count",
+            SAPLING_SHARD_HEIGHT,
+        ),
+        ShieldedProtocol::Orchard => (
+            ORCHARD_TABLES_PREFIX,
+            "orchard_action_count",
+            ORCHARD_SHARD_HEIGHT,
+        ),
+    };
+
     let mut stmt_scanned_count_until = conn.prepare_cached(&format!(
         "SELECT SUM({output_count_col})
         FROM blocks
@@ -1033,11 +1044,10 @@ fn subtree_scan_progress<P: consensus::Parameters>(
 
                 // Get the tree size at the last scanned height, if known.
                 let last_scanned = block_max_scanned(conn, params)?.and_then(|last_scanned| {
-                    match table_prefix {
-                        SAPLING_TABLES_PREFIX => last_scanned.sapling_tree_size(),
+                    match shielded_protocol {
+                        ShieldedProtocol::Sapling => last_scanned.sapling_tree_size(),
                         #[cfg(feature = "orchard")]
-                        ORCHARD_TABLES_PREFIX => last_scanned.orchard_tree_size(),
-                        _ => unreachable!(),
+                        ShieldedProtocol::Orchard => last_scanned.orchard_tree_size(),
                     }
                     .map(|tree_size| (last_scanned.block_height(), u64::from(tree_size)))
                 });
@@ -1207,9 +1217,7 @@ impl ScanProgress for SubtreeScanProgress {
         subtree_scan_progress(
             conn,
             params,
-            SAPLING_TABLES_PREFIX,
-            "sapling_output_count",
-            SAPLING_SHARD_HEIGHT,
+            ShieldedProtocol::Sapling,
             params
                 .activation_height(NetworkUpgrade::Sapling)
                 .expect("Sapling activation height must be available."),
@@ -1234,9 +1242,7 @@ impl ScanProgress for SubtreeScanProgress {
         subtree_scan_progress(
             conn,
             params,
-            ORCHARD_TABLES_PREFIX,
-            "orchard_action_count",
-            ORCHARD_SHARD_HEIGHT,
+            ShieldedProtocol::Orchard,
             params
                 .activation_height(NetworkUpgrade::Nu5)
                 .expect("NU5 activation height must be available."),
