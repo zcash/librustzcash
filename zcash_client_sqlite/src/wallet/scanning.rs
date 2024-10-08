@@ -1292,20 +1292,16 @@ pub(crate) mod tests {
         let birthday = account.birthday();
         let sap_active = st.sapling_activation_height();
 
-        // The account is configured without a recover-until height, so is by definition
-        // fully recovered, and we count 1 per pool for both numerator and denominator.
-        let fully_recovered = {
-            let n = 1;
-            #[cfg(feature = "orchard")]
-            let n = n * 2;
-            Some(Ratio::new(n, n))
-        };
+        // If none of the wallet's accounts have a recover-until height, then there
+        // is no recovery phase for the wallet, and therefore the denominator in the
+        // resulting ratio (the number of notes in the recovery range) is zero.
+        let no_recovery = Some(Ratio::new(0, 0));
 
         // We have scan ranges and a subtree, but have scanned no blocks.
         let summary = st.get_wallet_summary(1);
         assert_eq!(
             summary.as_ref().and_then(|s| s.recovery_progress()),
-            fully_recovered,
+            no_recovery,
         );
         assert_eq!(summary.and_then(|s| s.scan_progress()), None);
 
@@ -1347,7 +1343,7 @@ pub(crate) mod tests {
 
         assert_eq!(
             summary.as_ref().and_then(|s| s.recovery_progress()),
-            fully_recovered,
+            no_recovery
         );
 
         // Progress denominator depends on which pools are enabled (which changes the
