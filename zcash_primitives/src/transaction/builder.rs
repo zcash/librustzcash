@@ -112,7 +112,7 @@ pub enum Error<FE> {
     /// The builder was constructed with a target height before NU5 activation, but an Orchard
     /// spend or output was added.
     OrchardBundleNotAvailable,
-    ///  The issuance bundle not initialized.
+    /// The issuance bundle not initialized.
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     IssuanceBuilderNotAvailable,
     /// An error occurred in constructing the Issuance bundle.
@@ -1461,8 +1461,8 @@ mod tests {
             .init_issuance_bundle::<FeeError>(iak, asset.clone(), None)
             .unwrap();
 
-        let binding = builder.mock_build_no_fee(OsRng).unwrap().into_transaction();
-        let bundle = binding.issue_bundle().unwrap();
+        let tx = builder.mock_build_no_fee(OsRng).unwrap().into_transaction();
+        let bundle = tx.issue_bundle().unwrap();
 
         assert_eq!(bundle.actions().len(), 1, "There should be only one action");
         let action = bundle.get_action(asset).unwrap();

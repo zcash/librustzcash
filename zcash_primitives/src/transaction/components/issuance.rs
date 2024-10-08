@@ -54,7 +54,16 @@ fn read_action<R: Read>(mut reader: R) -> io::Result<IssueAction> {
     let asset_descr: String = String::from_utf8(asset_descr_bytes)
         .map_err(|_| Error::new(ErrorKind::InvalidData, "Asset Description not valid UTF-8"))?;
     let notes = Vector::read(&mut reader, |r| read_note(r))?;
-    let finalize = reader.read_u8()? != 0;
+    let finalize = match reader.read_u8()? {
+        0 => false,
+        1 => true,
+        _ => {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "Invalid value for finalize",
+            ))
+        }
+    };
     Ok(IssueAction::from_parts(asset_descr, notes, finalize))
 }
 
@@ -113,7 +122,7 @@ pub fn write_v6_bundle<W: Write>(
 ) -> io::Result<()> {
     if let Some(bundle) = bundle {
         Vector::write_nonempty(&mut writer, bundle.actions(), |w, action| {
-            write_action(action, w)
+            write_action(w, action)
         })?;
         writer.write_all(&bundle.ik().to_bytes())?;
         writer.write_all(&<[u8; 64]>::from(bundle.authorization().signature()))?;
@@ -123,16 +132,16 @@ pub fn write_v6_bundle<W: Write>(
     Ok(())
 }
 
-fn write_action<W: Write>(action: &IssueAction, mut writer: W) -> io::Result<()> {
+fn write_action<W: Write>(mut writer: &mut W, action: &IssueAction) -> io::Result<()> {
     Vector::write(&mut writer, action.asset_desc().as_bytes(), |w, b| {
         w.write_u8(*b)
     })?;
-    Vector::write(&mut writer, action.notes(), |w, note| write_note(note, w))?;
+    Vector::write(&mut writer, action.notes(), write_note)?;
     writer.write_u8(action.is_finalized() as u8)?;
     Ok(())
 }
 
-pub fn write_note<W: Write>(note: &Note, writer: &mut W) -> io::Result<()> {
+pub fn write_note<W: Write>(writer: &mut W, note: &Note) -> io::Result<()> {
     writer.write_all(&note.recipient().to_raw_address_bytes())?;
     writer.write_u64::<LittleEndian>(note.value().inner())?;
     writer.write_all(&note.asset().to_bytes())?;

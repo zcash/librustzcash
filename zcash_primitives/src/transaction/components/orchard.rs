@@ -255,7 +255,7 @@ impl<W: Write> WriteBurn<W> for OrchardZSA {
     }
 }
 
-/// Writes an [`orchard::Bundle`] in the v6 transaction format.
+/// Writes an [`orchard::Bundle`] in the appropriate transaction format.
 pub fn write_orchard_bundle<W: Write, D: OrchardDomainCommon + WriteBurn<W>>(
     bundle: Option<&orchard::Bundle<Authorized, Amount, D>>,
     mut writer: W,
