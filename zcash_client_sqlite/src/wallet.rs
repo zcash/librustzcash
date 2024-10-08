@@ -849,10 +849,10 @@ fn subtree_scan_progress<P: consensus::Parameters>(
     fully_scanned_height: BlockHeight,
     chain_tip_height: BlockHeight,
 ) -> Result<Progress, SqliteClientError> {
-    let mut stmt_scanned_count_between = conn.prepare_cached(&format!(
+    let mut stmt_scanned_count_until = conn.prepare_cached(&format!(
         "SELECT SUM({output_count_col})
         FROM blocks
-        WHERE :start_height <= height AND height <= :end_height",
+        WHERE :start_height <= height AND height < :end_height",
     ))?;
     let mut stmt_scanned_count_from = conn.prepare_cached(&format!(
         "SELECT SUM({output_count_col})
@@ -875,7 +875,7 @@ fn subtree_scan_progress<P: consensus::Parameters>(
         // the recover-until height.
         let recover = recover_until_height
             .map(|end_height| {
-                stmt_scanned_count_between.query_row(
+                stmt_scanned_count_until.query_row(
                     named_params! {
                         ":start_height": u32::from(birthday_height),
                         ":end_height": u32::from(end_height),
@@ -894,8 +894,7 @@ fn subtree_scan_progress<P: consensus::Parameters>(
         let scan = stmt_scanned_count_from.query_row(
             named_params! {
                 ":start_height": u32::from(
-                    recover_until_height.map(|h| h + 1)
-                        .unwrap_or(birthday_height)
+                    recover_until_height.unwrap_or(birthday_height)
                 ),
             },
             |row| {
@@ -932,12 +931,12 @@ fn subtree_scan_progress<P: consensus::Parameters>(
             })
             .transpose()?;
 
-        // Get the note commitment tree size as of the end of the recover-until height.
+        // Get the note commitment tree size as of the start of the recover-until height.
         let recover_until_size = recover_until_height
             .map(|end_height| {
                 stmt_start_tree_size
                     .query_row(
-                        named_params![":start_height": u32::from(end_height + 1)],
+                        named_params![":start_height": u32::from(end_height)],
                         |row| row.get::<_, Option<u64>>(0),
                     )
                     .optional()
@@ -945,11 +944,10 @@ fn subtree_scan_progress<P: consensus::Parameters>(
             })
             .transpose()?;
 
-        // Count the total outputs scanned so far on the birthday side of the
-        // recover-until height.
+        // Count the total outputs scanned so far on the birthday side of the recover-until height.
         let recovered_count = recover_until_height
             .map(|end_height| {
-                stmt_scanned_count_between.query_row(
+                stmt_scanned_count_until.query_row(
                     named_params! {
                         ":start_height": u32::from(birthday_height),
                         ":end_height": u32::from(end_height),
@@ -967,11 +965,11 @@ fn subtree_scan_progress<P: consensus::Parameters>(
                 &format!(
                     "SELECT MIN(shard_index)
                     FROM {table_prefix}_tree_shards
-                    WHERE subtree_end_height > :start_height
+                    WHERE subtree_end_height >= :start_height
                     OR subtree_end_height IS NULL",
                 ),
                 named_params! {
-                    ":start_height": u32::from(recover_until_height.unwrap_or(birthday_height) + 1),
+                    ":start_height": u32::from(recover_until_height.unwrap_or(birthday_height)),
                 },
                 |row| {
                     let min_tree_size = row
@@ -1178,7 +1176,7 @@ fn subtree_scan_progress<P: consensus::Parameters>(
             // Count the total outputs scanned so far on the chain tip side of the
             // recover-until height.
             let scanned_count = stmt_scanned_count_from.query_row(
-                named_params![":start_height": u32::from(recover_until_height.unwrap_or(birthday_height) + 1)],
+                named_params![":start_height": u32::from(recover_until_height.unwrap_or(birthday_height))],
                 |row| row.get::<_, Option<u64>>(0),
             )?;
 
