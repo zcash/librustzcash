@@ -19,13 +19,18 @@ use super::{
     components::{
         amount::Amount,
         transparent::{self, TxIn, TxOut},
+        AuthorizedOrchardPart, AuthorizedSaplingPart, AuthorizedTransparentPart, Bundles, Orchard,
+        OrchardPart, Sapling, SaplingPart, Transparent, TransparentPart,
     },
-    Authorization, Authorized, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
+    TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
 };
 
 #[cfg(zcash_unstable = "zfuture")]
 use super::{
-    components::tze::{self, TzeIn, TzeOut},
+    components::{
+        tze::{self, TzeIn, TzeOut},
+        AuthorizedTzePart, Tze, TzePart,
+    },
     TzeDigests,
 };
 
@@ -198,6 +203,19 @@ pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>])
     h.finalize()
 }
 
+pub trait TransparentDigester: TransparentPart {
+    fn digest(transparent_bundle: Option<&Self::Bundle>)
+        -> Option<TransparentDigests<Blake2bHash>>;
+}
+
+impl<A: transparent::Authorization> TransparentDigester for Transparent<A> {
+    fn digest(
+        transparent_bundle: Option<&Self::Bundle>,
+    ) -> Option<TransparentDigests<Blake2bHash>> {
+        transparent_bundle.map(transparent_digests)
+    }
+}
+
 /// The txid commits to the hash of all transparent outputs. The
 /// prevout and sequence_hash components of txid
 fn transparent_digests<A: transparent::Authorization>(
@@ -207,6 +225,18 @@ fn transparent_digests<A: transparent::Authorization>(
         prevouts_digest: transparent_prevout_hash(&bundle.vin),
         sequence_digest: transparent_sequence_hash(&bundle.vin),
         outputs_digest: transparent_outputs_hash(&bundle.vout),
+    }
+}
+
+#[cfg(zcash_unstable = "zfuture")]
+pub trait TzeDigester: TzePart {
+    fn digest(tze_bundle: Option<&Self::Bundle>) -> Option<TzeDigests<Blake2bHash>>;
+}
+
+#[cfg(zcash_unstable = "zfuture")]
+impl<A: tze::Authorization> TzeDigester for Tze<A> {
+    fn digest(tze_bundle: Option<&Self::Bundle>) -> Option<TzeDigests<Blake2bHash>> {
+        tze_bundle.map(tze_digests)
     }
 }
 
@@ -254,6 +284,15 @@ pub(crate) fn hash_transparent_txid_data(
     h.finalize()
 }
 
+pub trait SaplingDigester: SaplingPart {
+    fn digest(sapling_bundle: Option<&Self::Bundle>) -> Option<Blake2bHash>;
+}
+
+impl<A: sapling::bundle::Authorization> SaplingDigester for Sapling<A> {
+    fn digest(sapling_bundle: Option<&Self::Bundle>) -> Option<Blake2bHash> {
+        sapling_bundle.map(hash_sapling_txid_data)
+    }
+}
 /// Implements [ZIP 244 section T.3](https://zips.z.cash/zip-0244#t-3-sapling-digest)
 fn hash_sapling_txid_data<A: sapling::bundle::Authorization>(
     bundle: &sapling::Bundle<A, Amount>,
@@ -276,6 +315,16 @@ fn hash_sapling_txid_empty() -> Blake2bHash {
     hasher(ZCASH_SAPLING_HASH_PERSONALIZATION).finalize()
 }
 
+pub trait OrchardDigester: OrchardPart {
+    fn digest(orchard_bundle: Option<&Self::Bundle>) -> Option<Blake2bHash>;
+}
+
+impl<A: orchard::Authorization> OrchardDigester for Orchard<A> {
+    fn digest(orchard_bundle: Option<&Self::Bundle>) -> Option<Blake2bHash> {
+        orchard_bundle.map(|b| b.commitment().0)
+    }
+}
+
 #[cfg(zcash_unstable = "zfuture")]
 fn hash_tze_txid_data(tze_digests: Option<&TzeDigests<Blake2bHash>>) -> Blake2bHash {
     let mut h = hasher(ZCASH_TZE_HASH_PERSONALIZATION);
@@ -289,6 +338,25 @@ fn hash_tze_txid_data(tze_digests: Option<&TzeDigests<Blake2bHash>>) -> Blake2bH
     h.finalize()
 }
 
+/// Trait marker for bounds that are not yet required by consensus rules.
+#[cfg(not(zcash_unstable = "zfuture"))]
+pub trait FutureBundles {}
+#[cfg(not(zcash_unstable = "zfuture"))]
+impl<B: Bundles> FutureBundles for B {}
+
+#[cfg(zcash_unstable = "zfuture")]
+pub trait FutureBundles: Bundles<Tze = Self::FutureTze> {
+    type FutureTze: TzeDigester;
+}
+#[cfg(zcash_unstable = "zfuture")]
+impl<B> FutureBundles for B
+where
+    B: Bundles,
+    B::Tze: TzeDigester,
+{
+    type FutureTze = B::Tze;
+}
+
 /// A TransactionDigest implementation that commits to all of the effecting
 /// data of a transaction to produce a nonmalleable transaction identifier.
 ///
@@ -298,7 +366,13 @@ fn hash_tze_txid_data(tze_digests: Option<&TzeDigests<Blake2bHash>>) -> Blake2bH
 /// This implements the [TxId Digest section of ZIP 244](https://zips.z.cash/zip-0244#txid-digest)
 pub struct TxIdDigester;
 
-impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
+impl<B> TransactionDigest<B> for TxIdDigester
+where
+    B: Bundles + FutureBundles,
+    B::Transparent: TransparentDigester,
+    B::Sapling: SaplingDigester,
+    B::Orchard: OrchardDigester,
+{
     type HeaderDigest = Blake2bHash;
     type TransparentDigest = Option<TransparentDigests<Blake2bHash>>;
     type SaplingDigest = Option<Blake2bHash>;
@@ -321,28 +395,28 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
 
     fn digest_transparent(
         &self,
-        transparent_bundle: Option<&transparent::Bundle<A::TransparentAuth>>,
+        transparent_bundle: Option<&<B::Transparent as TransparentPart>::Bundle>,
     ) -> Self::TransparentDigest {
-        transparent_bundle.map(transparent_digests)
+        B::Transparent::digest(transparent_bundle)
     }
 
     fn digest_sapling(
         &self,
-        sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth, Amount>>,
+        sapling_bundle: Option<&<B::Sapling as SaplingPart>::Bundle>,
     ) -> Self::SaplingDigest {
-        sapling_bundle.map(hash_sapling_txid_data)
+        B::Sapling::digest(sapling_bundle)
     }
 
     fn digest_orchard(
         &self,
-        orchard_bundle: Option<&orchard::Bundle<A::OrchardAuth, Amount>>,
+        orchard_bundle: Option<&<B::Orchard as OrchardPart>::Bundle>,
     ) -> Self::OrchardDigest {
-        orchard_bundle.map(|b| b.commitment().0)
+        B::Orchard::digest(orchard_bundle)
     }
 
     #[cfg(zcash_unstable = "zfuture")]
-    fn digest_tze(&self, tze_bundle: Option<&tze::Bundle<A::TzeAuth>>) -> Self::TzeDigest {
-        tze_bundle.map(tze_digests)
+    fn digest_tze(&self, tze_bundle: Option<&<B::Tze as TzePart>::Bundle>) -> Self::TzeDigest {
+        B::Tze::digest(tze_bundle)
     }
 
     fn combine(
@@ -423,13 +497,112 @@ pub fn to_txid(
     TxId(<[u8; 32]>::try_from(txid_digest.as_bytes()).unwrap())
 }
 
+pub trait TransparentWitnessDigester: AuthorizedTransparentPart {
+    fn witness_digest(transparent_bundle: Option<&Self::Bundle>) -> Blake2bHash;
+}
+
+impl TransparentWitnessDigester for Transparent<transparent::Authorized> {
+    fn witness_digest(transparent_bundle: Option<&Self::Bundle>) -> Blake2bHash {
+        let mut h = hasher(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION);
+        if let Some(bundle) = transparent_bundle {
+            for txin in &bundle.vin {
+                txin.script_sig.write(&mut h).unwrap();
+            }
+        }
+        h.finalize()
+    }
+}
+
+pub trait SaplingWitnessDigester: AuthorizedSaplingPart {
+    fn witness_digest(sapling_bundle: Option<&Self::Bundle>) -> Blake2bHash;
+}
+
+impl SaplingWitnessDigester for Sapling<sapling::bundle::Authorized> {
+    fn witness_digest(sapling_bundle: Option<&Self::Bundle>) -> Blake2bHash {
+        let mut h = hasher(ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION);
+        if let Some(bundle) = sapling_bundle {
+            for spend in bundle.shielded_spends() {
+                h.write_all(spend.zkproof()).unwrap();
+            }
+
+            for spend in bundle.shielded_spends() {
+                h.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))
+                    .unwrap();
+            }
+
+            for output in bundle.shielded_outputs() {
+                h.write_all(output.zkproof()).unwrap();
+            }
+
+            h.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))
+                .unwrap();
+        }
+        h.finalize()
+    }
+}
+
+pub trait OrchardWitnessDigester: AuthorizedOrchardPart {
+    fn witness_digest(orchard_bundle: Option<&Self::Bundle>) -> Blake2bHash;
+}
+
+impl OrchardWitnessDigester for Orchard<orchard::Authorized> {
+    fn witness_digest(orchard_bundle: Option<&Self::Bundle>) -> Blake2bHash {
+        orchard_bundle.map_or_else(orchard::commitments::hash_bundle_auth_empty, |b| {
+            b.authorizing_commitment().0
+        })
+    }
+}
+
+#[cfg(zcash_unstable = "zfuture")]
+pub trait TzeWitnessDigester: AuthorizedTzePart {
+    fn witness_digest(tze_bundle: Option<&Self::Bundle>) -> Blake2bHash;
+}
+
+#[cfg(zcash_unstable = "zfuture")]
+impl TzeWitnessDigester for Tze<tze::Authorized> {
+    fn witness_digest(tze_bundle: Option<&Self::Bundle>) -> Blake2bHash {
+        let mut h = hasher(ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION);
+        if let Some(bundle) = tze_bundle {
+            for tzein in &bundle.vin {
+                h.write_all(&tzein.witness.payload.0).unwrap();
+            }
+        }
+        h.finalize()
+    }
+}
+
+/// Trait marker for bounds that are not yet required by consensus rules.
+#[cfg(not(zcash_unstable = "zfuture"))]
+pub trait FutureWitnesses {}
+#[cfg(not(zcash_unstable = "zfuture"))]
+impl<B: Bundles> FutureWitnesses for B {}
+
+#[cfg(zcash_unstable = "zfuture")]
+pub trait FutureWitnesses: Bundles<Tze = Self::FutureTze> {
+    type FutureTze: TzeWitnessDigester;
+}
+#[cfg(zcash_unstable = "zfuture")]
+impl<B> FutureWitnesses for B
+where
+    B: Bundles,
+    B::Tze: TzeWitnessDigester,
+{
+    type FutureTze = B::Tze;
+}
+
 /// Digester which constructs a digest of only the witness data.
 /// This does not internally commit to the txid, so if that is
 /// desired it should be done using the result of this digest
 /// function.
 pub struct BlockTxCommitmentDigester;
 
-impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
+impl<B> TransactionDigest<B> for BlockTxCommitmentDigester
+where
+    B: Bundles + FutureWitnesses,
+    B::Transparent: TransparentWitnessDigester,
+    B::Sapling: SaplingWitnessDigester,
+    B::Orchard: OrchardWitnessDigester,
+{
     /// We use the header digest to pass the transaction ID into
     /// where it needs to be used for personalization string construction.
     type HeaderDigest = BranchId;
@@ -454,60 +627,28 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
 
     fn digest_transparent(
         &self,
-        transparent_bundle: Option<&transparent::Bundle<transparent::Authorized>>,
-    ) -> Blake2bHash {
-        let mut h = hasher(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION);
-        if let Some(bundle) = transparent_bundle {
-            for txin in &bundle.vin {
-                txin.script_sig.write(&mut h).unwrap();
-            }
-        }
-        h.finalize()
+        transparent_bundle: Option<&<B::Transparent as TransparentPart>::Bundle>,
+    ) -> Self::TransparentDigest {
+        B::Transparent::witness_digest(transparent_bundle)
     }
 
     fn digest_sapling(
         &self,
-        sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, Amount>>,
-    ) -> Blake2bHash {
-        let mut h = hasher(ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION);
-        if let Some(bundle) = sapling_bundle {
-            for spend in bundle.shielded_spends() {
-                h.write_all(spend.zkproof()).unwrap();
-            }
-
-            for spend in bundle.shielded_spends() {
-                h.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))
-                    .unwrap();
-            }
-
-            for output in bundle.shielded_outputs() {
-                h.write_all(output.zkproof()).unwrap();
-            }
-
-            h.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))
-                .unwrap();
-        }
-        h.finalize()
+        sapling_bundle: Option<&<B::Sapling as SaplingPart>::Bundle>,
+    ) -> Self::SaplingDigest {
+        B::Sapling::witness_digest(sapling_bundle)
     }
 
     fn digest_orchard(
         &self,
-        orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, Amount>>,
+        orchard_bundle: Option<&<B::Orchard as OrchardPart>::Bundle>,
     ) -> Self::OrchardDigest {
-        orchard_bundle.map_or_else(orchard::commitments::hash_bundle_auth_empty, |b| {
-            b.authorizing_commitment().0
-        })
+        B::Orchard::witness_digest(orchard_bundle)
     }
 
     #[cfg(zcash_unstable = "zfuture")]
-    fn digest_tze(&self, tze_bundle: Option<&tze::Bundle<tze::Authorized>>) -> Blake2bHash {
-        let mut h = hasher(ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION);
-        if let Some(bundle) = tze_bundle {
-            for tzein in &bundle.vin {
-                h.write_all(&tzein.witness.payload.0).unwrap();
-            }
-        }
-        h.finalize()
+    fn digest_tze(&self, tze_bundle: Option<&<B::Tze as TzePart>::Bundle>) -> Blake2bHash {
+        B::Tze::witness_digest(tze_bundle)
     }
 
     fn combine(
