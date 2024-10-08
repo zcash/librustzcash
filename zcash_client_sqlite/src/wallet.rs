@@ -898,10 +898,11 @@ fn subtree_scan_progress<P: consensus::Parameters>(
                 )
             })
             .transpose()?
-            // If none of the wallet's accounts have a recover-until height, then we can't
-            // (yet) distinguish general scanning from recovery, so treat the wallet as
-            // fully recovered.
-            .unwrap_or_else(|| Some(Ratio::new(1, 1)));
+            // If none of the wallet's accounts have a recover-until height, then there
+            // is no recovery phase for the wallet, and therefore the denominator in the
+            // resulting ratio (the number of notes in the recovery range) is zero.
+            .unwrap_or_else(|| Some(Ratio::new(0, 0)));
+
         let scan = stmt_scanned_count_from.query_row(
             named_params! {
                 ":start_height": u32::from(
@@ -915,9 +916,46 @@ fn subtree_scan_progress<P: consensus::Parameters>(
         )?;
         Ok(Progress { scan, recover })
     } else {
+        // In case we didn't have information about the tree size at the recover-until
+        // height, get the tree size from a nearby subtree. It's fine for this to be
+        // approximate; it just shifts the boundary between scan and recover progress.
+        let mut get_tree_size_near = |as_of: BlockHeight| {
+            stmt_start_tree_size
+                .query_row(
+                    named_params![":start_height": u32::from(as_of)],
+                    |row| row.get::<_, Option<u64>>(0),
+                )
+                .optional()
+                .map(|opt| opt.flatten())
+                .transpose()
+                .or_else(|| {
+                    conn.query_row(
+                        &format!(
+                            "SELECT MIN(shard_index)
+                    FROM {table_prefix}_tree_shards
+                    WHERE subtree_end_height >= :start_height
+                    OR subtree_end_height IS NULL",
+                        ),
+                        named_params! {
+                            ":start_height": u32::from(as_of),
+                        },
+                        |row| {
+                            let min_tree_size = row
+                                .get::<_, Option<u64>>(0)?
+                                .map(|min_idx| min_idx << shard_height);
+                            Ok(min_tree_size)
+                        },
+                    )
+                    .optional()
+                    .map(|opt| opt.flatten())
+                    .transpose()
+                })
+                .transpose()
+        };
+
         // Get the starting note commitment tree size from the wallet birthday, or failing that
         // from the blocks table.
-        let start_size = conn
+        let birthday_size = conn
             .query_row(
                 &format!(
                     "SELECT birthday_{table_prefix}_tree_size
@@ -930,29 +968,14 @@ fn subtree_scan_progress<P: consensus::Parameters>(
             .optional()?
             .flatten()
             .map(Ok)
-            .or_else(|| {
-                stmt_start_tree_size
-                    .query_row(
-                        named_params![":start_height": u32::from(birthday_height)],
-                        |row| row.get::<_, Option<u64>>(0),
-                    )
-                    .optional()
-                    .map(|opt| opt.flatten())
-                    .transpose()
-            })
+            // If we don't have an explicit birthday tree size, find something nearby.
+            .or_else(|| get_tree_size_near(birthday_height).transpose())
             .transpose()?;
 
         // Get the note commitment tree size as of the start of the recover-until height.
         let recover_until_size = recover_until_height
-            .map(|end_height| {
-                stmt_start_tree_size
-                    .query_row(
-                        named_params![":start_height": u32::from(end_height)],
-                        |row| row.get::<_, Option<u64>>(0),
-                    )
-                    .optional()
-                    .map(|opt| opt.flatten())
-            })
+            // Find a tree size near to the recover-until height
+            .map(get_tree_size_near)
             .transpose()?;
 
         // Count the total outputs scanned so far on the birthday side of the recover-until height.
@@ -967,31 +990,6 @@ fn subtree_scan_progress<P: consensus::Parameters>(
                 )
             })
             .transpose()?;
-
-        // In case we didn't have information about the tree size at the recover-until
-        // height, get the tree size from a nearby subtree. It's fine for this to be
-        // approximate; it just shifts the boundary between scan and recover progress.
-        let min_tree_size = conn
-            .query_row(
-                &format!(
-                    "SELECT MIN(shard_index)
-                    FROM {table_prefix}_tree_shards
-                    WHERE subtree_end_height >= :start_height
-                    OR subtree_end_height IS NULL",
-                ),
-                named_params! {
-                    ":start_height": u32::from(recover_until_height.unwrap_or(birthday_height)),
-                },
-                |row| {
-                    let min_tree_size = row
-                        .get::<_, Option<u64>>(0)?
-                        .map(|min_idx| min_idx << shard_height);
-                    Ok(min_tree_size)
-                },
-            )
-            .optional()?
-            .flatten();
-
         // If we've scanned the block at the chain tip, we know how many notes are
         // currently in the tree.
         let tip_tree_size = match stmt_end_tree_size_at
@@ -1164,25 +1162,16 @@ fn subtree_scan_progress<P: consensus::Parameters>(
         let recover = recovered_count
             .zip(recover_until_size)
             .map(|(recovered, end_size)| {
-                start_size
-                    .or(min_tree_size)
-                    .zip(end_size)
-                    .map(|(start_size, end_size)| {
-                        Ratio::new(recovered.unwrap_or(0), end_size - start_size)
-                    })
+                birthday_size.zip(end_size).map(|(start_size, end_size)| {
+                    Ratio::new(recovered.unwrap_or(0), end_size - start_size)
+                })
             })
-            // If none of the wallet's accounts have a recover-until height, then we can't
-            // (yet) distinguish general scanning from recovery, so treat the wallet as
-            // fully recovered.
-            .unwrap_or_else(|| Some(Ratio::new(1, 1)));
+            // If none of the wallet's accounts have a recover-until height, then there
+            // is no recovery phase for the wallet, and therefore the denominator in the
+            // resulting ratio (the number of notes in the recovery range) is zero.
+            .unwrap_or_else(|| Some(Ratio::new(0, 0)));
 
-        let scan = if recover_until_height.map_or(false, |h| h == chain_tip_height) {
-            // The wallet was likely just created for a recovery from seed, or with an
-            // imported viewing key. In this state, it is fully synced as there is nothing
-            // else for us to scan beyond `recover_until_height`; ensure we show 100%
-            // instead of 0%.
-            Some(Ratio::new(1, 1))
-        } else {
+        let scan = {
             // Count the total outputs scanned so far on the chain tip side of the
             // recover-until height.
             let scanned_count = stmt_scanned_count_from.query_row(
@@ -1191,8 +1180,7 @@ fn subtree_scan_progress<P: consensus::Parameters>(
             )?;
 
             recover_until_size
-                .unwrap_or(start_size)
-                .or(min_tree_size)
+                .unwrap_or(birthday_size)
                 .zip(tip_tree_size)
                 .map(|(start_size, tip_tree_size)| {
                     Ratio::new(scanned_count.unwrap_or(0), tip_tree_size - start_size)
