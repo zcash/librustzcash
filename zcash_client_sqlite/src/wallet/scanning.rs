@@ -1303,7 +1303,10 @@ pub(crate) mod tests {
             summary.as_ref().and_then(|s| s.recovery_progress()),
             no_recovery,
         );
-        assert_eq!(summary.and_then(|s| s.scan_progress()), None);
+        assert_matches!(
+            summary.and_then(|s| s.scan_progress()),
+            Some(progress) if progress.numerator() == &0
+        );
 
         // Set up prior chain state. This simulates us having imported a wallet
         // with a birthday 520 blocks below the chain tip.
