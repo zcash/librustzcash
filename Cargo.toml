@@ -58,6 +58,7 @@ bitvec = "1"
 blake2s_simd = "1"
 bls12_381 = "0.8"
 jubjub = "0.10"
+redjubjub = "0.7"
 sapling = { package = "sapling-crypto", version = "0.3", default-features = false }
 
 # - Orchard

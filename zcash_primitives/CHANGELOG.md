@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction`
+  - `components::transparent`:
+    - `impl MapAuth<Authorized, Authorized> for ()`
+
 ## [0.20.0] - 2024-11-14
 
 ### Added
