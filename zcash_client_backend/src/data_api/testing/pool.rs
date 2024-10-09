@@ -886,7 +886,6 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     // resulting ratio (the number of notes in the recovery range) is zero.
     let no_recovery = Some(Ratio::new(0, 0));
 
-
     // Wallet is fully scanned
     let summary = st.get_wallet_summary(1);
     assert_eq!(

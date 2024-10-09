@@ -836,6 +836,28 @@ pub(crate) trait ScanProgress {
 #[derive(Debug)]
 pub(crate) struct SubtreeScanProgress;
 
+fn table_constants(
+    shielded_protocol: ShieldedProtocol,
+) -> Result<(&'static str, &'static str, u8), SqliteClientError> {
+    match shielded_protocol {
+        ShieldedProtocol::Sapling => Ok((
+            SAPLING_TABLES_PREFIX,
+            "sapling_output_count",
+            SAPLING_SHARD_HEIGHT,
+        )),
+        #[cfg(feature = "orchard")]
+        ShieldedProtocol::Orchard => Ok((
+            ORCHARD_TABLES_PREFIX,
+            "orchard_action_count",
+            ORCHARD_SHARD_HEIGHT,
+        )),
+        #[cfg(not(feature = "orchard"))]
+        ShieldedProtocol::Orchard => {
+            Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD))
+        }
+    }
+}
+
 fn estimate_tree_size<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -843,10 +865,7 @@ fn estimate_tree_size<P: consensus::Parameters>(
     pool_activation_height: BlockHeight,
     chain_tip_height: BlockHeight,
 ) -> Result<Option<u64>, SqliteClientError> {
-    let (table_prefix, shard_height) = match shielded_protocol {
-        ShieldedProtocol::Sapling => (SAPLING_TABLES_PREFIX, SAPLING_SHARD_HEIGHT),
-        ShieldedProtocol::Orchard => (ORCHARD_TABLES_PREFIX, ORCHARD_SHARD_HEIGHT),
-    };
+    let (table_prefix, _, shard_height) = table_constants(shielded_protocol)?;
 
     // Estimate the size of the tree by linear extrapolation from available
     // data closest to the chain tip.
@@ -892,6 +911,8 @@ fn estimate_tree_size<P: consensus::Parameters>(
             ShieldedProtocol::Sapling => last_scanned.sapling_tree_size(),
             #[cfg(feature = "orchard")]
             ShieldedProtocol::Orchard => last_scanned.orchard_tree_size(),
+            #[cfg(not(feature = "orchard"))]
+            ShieldedProtocol::Orchard => None
         }
         .map(|tree_size| (last_scanned.block_height(), u64::from(tree_size)))
     });
@@ -1002,18 +1023,7 @@ fn subtree_scan_progress<P: consensus::Parameters>(
     fully_scanned_height: BlockHeight,
     chain_tip_height: BlockHeight,
 ) -> Result<Progress, SqliteClientError> {
-    let (table_prefix, output_count_col, shard_height) = match shielded_protocol {
-        ShieldedProtocol::Sapling => (
-            SAPLING_TABLES_PREFIX,
-            "sapling_output_count",
-            SAPLING_SHARD_HEIGHT,
-        ),
-        ShieldedProtocol::Orchard => (
-            ORCHARD_TABLES_PREFIX,
-            "orchard_action_count",
-            ORCHARD_SHARD_HEIGHT,
-        ),
-    };
+    let (table_prefix, output_count_col, shard_height) = table_constants(shielded_protocol)?;
 
     let mut stmt_scanned_count_until = conn.prepare_cached(&format!(
         "SELECT SUM({output_count_col})
