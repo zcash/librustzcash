@@ -889,13 +889,10 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     // Wallet is fully scanned
     let summary = st.get_wallet_summary(1);
     assert_eq!(
-        summary.as_ref().and_then(|s| s.recovery_progress()),
+        summary.as_ref().and_then(|s| s.progress().recovery()),
         no_recovery,
     );
-    assert_eq!(
-        summary.and_then(|s| s.scan_progress()),
-        Some(Ratio::new(1, 1))
-    );
+    assert_eq!(summary.map(|s| s.progress().scan()), Some(Ratio::new(1, 1)));
 
     // Add more funds to the wallet in a second note
     let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
@@ -910,13 +907,10 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     // Wallet is still fully scanned
     let summary = st.get_wallet_summary(1);
     assert_eq!(
-        summary.as_ref().and_then(|s| s.recovery_progress()),
+        summary.as_ref().and_then(|s| s.progress().recovery()),
         no_recovery
     );
-    assert_eq!(
-        summary.and_then(|s| s.scan_progress()),
-        Some(Ratio::new(2, 2))
-    );
+    assert_eq!(summary.map(|s| s.progress().scan()), Some(Ratio::new(2, 2)));
 
     // Spend fails because there are insufficient verified notes
     let extsk2 = T::sk(&[0xf5; 32]);

@@ -69,7 +69,7 @@ use rusqlite::{self, named_params, params, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zcash_client_backend::data_api::{
-    AccountPurpose, DecryptedTransaction, TransactionDataRequest, TransactionStatus,
+    AccountPurpose, DecryptedTransaction, Progress, TransactionDataRequest, TransactionStatus,
 };
 use zip32::fingerprint::SeedFingerprint;
 
@@ -804,22 +804,16 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
     accounts.next().transpose()
 }
 
-#[derive(Debug)]
-pub(crate) struct Progress {
-    scan: Option<Ratio<u64>>,
-    recover: Option<Ratio<u64>>,
-}
-
-pub(crate) trait ScanProgress {
+pub(crate) trait ProgressEstimator {
     fn sapling_scan_progress<P: consensus::Parameters>(
         &self,
         conn: &rusqlite::Connection,
         params: &P,
         birthday_height: BlockHeight,
         recover_until_height: Option<BlockHeight>,
-        fully_scanned_height: BlockHeight,
+        fully_scanned_height: Option<BlockHeight>,
         chain_tip_height: BlockHeight,
-    ) -> Result<Progress, SqliteClientError>;
+    ) -> Result<Option<Progress>, SqliteClientError>;
 
     #[cfg(feature = "orchard")]
     fn orchard_scan_progress<P: consensus::Parameters>(
@@ -828,13 +822,13 @@ pub(crate) trait ScanProgress {
         params: &P,
         birthday_height: BlockHeight,
         recover_until_height: Option<BlockHeight>,
-        fully_scanned_height: BlockHeight,
+        fully_scanned_height: Option<BlockHeight>,
         chain_tip_height: BlockHeight,
-    ) -> Result<Progress, SqliteClientError>;
+    ) -> Result<Option<Progress>, SqliteClientError>;
 }
 
 #[derive(Debug)]
-pub(crate) struct SubtreeScanProgress;
+pub(crate) struct SubtreeProgressEstimator;
 
 fn table_constants(
     shielded_protocol: ShieldedProtocol,
@@ -852,9 +846,7 @@ fn table_constants(
             ORCHARD_SHARD_HEIGHT,
         )),
         #[cfg(not(feature = "orchard"))]
-        ShieldedProtocol::Orchard => {
-            Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD))
-        }
+        ShieldedProtocol::Orchard => Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD)),
     }
 }
 
@@ -912,7 +904,7 @@ fn estimate_tree_size<P: consensus::Parameters>(
             #[cfg(feature = "orchard")]
             ShieldedProtocol::Orchard => last_scanned.orchard_tree_size(),
             #[cfg(not(feature = "orchard"))]
-            ShieldedProtocol::Orchard => None
+            ShieldedProtocol::Orchard => None,
         }
         .map(|tree_size| (last_scanned.block_height(), u64::from(tree_size)))
     });
@@ -1007,8 +999,22 @@ fn estimate_tree_size<P: consensus::Parameters>(
                 }))
         }
     } else {
-        // We don't have subtree information, so give up. We'll get it soon.
-        Ok(None)
+        // If there are no completed subtrees, but we have scanned some blocks, we can still
+        // interpolate based upon the tree size as of the last scanned block. Here, since we
+        // don't have any subtree data to draw on, we will interpolate based on the number of
+        // blocks since the pool activation height
+        Ok(
+            last_scanned.and_then(|(last_scanned_height, last_scanned_tree_size)| {
+                let subtree_range = u64::from(last_scanned_height - pool_activation_height);
+                let unscanned_range = u64::from(chain_tip_height - last_scanned_height);
+
+                (last_scanned_tree_size * unscanned_range)
+                    .checked_div(subtree_range)
+                    .map(|extrapolated_incomplete_subtree_notes| {
+                        last_scanned_tree_size + extrapolated_incomplete_subtree_notes
+                    })
+            }),
+        )
     }
 }
 
@@ -1020,9 +1026,9 @@ fn subtree_scan_progress<P: consensus::Parameters>(
     pool_activation_height: BlockHeight,
     birthday_height: BlockHeight,
     recover_until_height: Option<BlockHeight>,
-    fully_scanned_height: BlockHeight,
+    fully_scanned_height: Option<BlockHeight>,
     chain_tip_height: BlockHeight,
-) -> Result<Progress, SqliteClientError> {
+) -> Result<Option<Progress>, SqliteClientError> {
     let (table_prefix, output_count_col, shard_height) = table_constants(shielded_protocol)?;
 
     let mut stmt_scanned_count_until = conn.prepare_cached(&format!(
@@ -1046,7 +1052,7 @@ fn subtree_scan_progress<P: consensus::Parameters>(
         WHERE height = :height",
     ))?;
 
-    if fully_scanned_height == chain_tip_height {
+    if fully_scanned_height == Some(chain_tip_height) {
         // Compute the total blocks scanned since the wallet birthday on either side of
         // the recover-until height.
         let recover = recover_until_height
@@ -1079,7 +1085,8 @@ fn subtree_scan_progress<P: consensus::Parameters>(
                 Ok(scanned.map(|n| Ratio::new(n, n)))
             },
         )?;
-        Ok(Progress { scan, recover })
+
+        Ok(scan.map(|scan| Progress::new(scan, recover)))
     } else {
         // In case we didn't have information about the tree size at the recover-until
         // height, get the tree size from a nearby subtree. It's fine for this to be
@@ -1155,8 +1162,9 @@ fn subtree_scan_progress<P: consensus::Parameters>(
                 )
             })
             .transpose()?;
-        // If we've scanned the block at the chain tip, we know how many notes are
-        // currently in the tree.
+
+        // If we've scanned the block at the chain tip, we know how many notes are currently in the
+        // tree.
         let tip_tree_size = match stmt_end_tree_size_at
             .query_row(
                 named_params! {":height": u32::from(chain_tip_height)},
@@ -1203,11 +1211,11 @@ fn subtree_scan_progress<P: consensus::Parameters>(
                 })
         };
 
-        Ok(Progress { scan, recover })
+        Ok(scan.map(|scan| Progress::new(scan, recover)))
     }
 }
 
-impl ScanProgress for SubtreeScanProgress {
+impl ProgressEstimator for SubtreeProgressEstimator {
     #[tracing::instrument(skip(conn, params))]
     fn sapling_scan_progress<P: consensus::Parameters>(
         &self,
@@ -1215,9 +1223,9 @@ impl ScanProgress for SubtreeScanProgress {
         params: &P,
         birthday_height: BlockHeight,
         recover_until_height: Option<BlockHeight>,
-        fully_scanned_height: BlockHeight,
+        fully_scanned_height: Option<BlockHeight>,
         chain_tip_height: BlockHeight,
-    ) -> Result<Progress, SqliteClientError> {
+    ) -> Result<Option<Progress>, SqliteClientError> {
         subtree_scan_progress(
             conn,
             params,
@@ -1240,9 +1248,9 @@ impl ScanProgress for SubtreeScanProgress {
         params: &P,
         birthday_height: BlockHeight,
         recover_until_height: Option<BlockHeight>,
-        fully_scanned_height: BlockHeight,
+        fully_scanned_height: Option<BlockHeight>,
         chain_tip_height: BlockHeight,
-    ) -> Result<Progress, SqliteClientError> {
+    ) -> Result<Option<Progress>, SqliteClientError> {
         subtree_scan_progress(
             conn,
             params,
@@ -1270,7 +1278,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     tx: &rusqlite::Transaction,
     params: &P,
     min_confirmations: u32,
-    progress: &impl ScanProgress,
+    progress: &impl ProgressEstimator,
 ) -> Result<Option<WalletSummary<AccountId>>, SqliteClientError> {
     let chain_tip_height = match chain_tip_height(tx)? {
         Some(h) => h,
@@ -1279,12 +1287,16 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         }
     };
 
-    let birthday_height =
-        wallet_birthday(tx)?.expect("If a scan range exists, we know the wallet birthday.");
+    let birthday_height = match wallet_birthday(tx)? {
+        Some(h) => h,
+        None => {
+            return Ok(None);
+        }
+    };
+
     let recover_until_height = recover_until_height(tx)?;
 
-    let fully_scanned_height =
-        block_fully_scanned(tx, params)?.map_or(birthday_height - 1, |m| m.block_height());
+    let fully_scanned_height = block_fully_scanned(tx, params)?.map(|m| m.block_height());
     let summary_height = (chain_tip_height + 1).saturating_sub(std::cmp::max(min_confirmations, 1));
 
     let sapling_progress = progress.sapling_scan_progress(
@@ -1306,34 +1318,36 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         chain_tip_height,
     )?;
     #[cfg(not(feature = "orchard"))]
-    let orchard_progress: Progress = Progress {
-        scan: None,
-        recover: None,
-    };
+    let orchard_progress: Option<Progress> = None;
 
     // Treat Sapling and Orchard outputs as having the same cost to scan.
-    let scan_progress = sapling_progress
-        .scan
-        .zip(orchard_progress.scan)
+    let progress = sapling_progress
+        .zip(orchard_progress)
         .map(|(s, o)| {
-            Ratio::new(
-                s.numerator() + o.numerator(),
-                s.denominator() + o.denominator(),
+            Progress::new(
+                Ratio::new(
+                    s.scan().numerator() + o.scan().numerator(),
+                    s.scan().denominator() + o.scan().denominator(),
+                ),
+                s.recovery()
+                    .zip(o.recovery())
+                    .map(|(s, o)| {
+                        Ratio::new(
+                            s.numerator() + o.numerator(),
+                            s.denominator() + o.denominator(),
+                        )
+                    })
+                    .or_else(|| s.recovery())
+                    .or_else(|| o.recovery()),
             )
         })
-        .or(sapling_progress.scan)
-        .or(orchard_progress.scan);
-    let recover_progress = sapling_progress
-        .recover
-        .zip(orchard_progress.recover)
-        .map(|(s, o)| {
-            Ratio::new(
-                s.numerator() + o.numerator(),
-                s.denominator() + o.denominator(),
-            )
-        })
-        .or(sapling_progress.recover)
-        .or(orchard_progress.recover);
+        .or(sapling_progress)
+        .or(orchard_progress);
+
+    let progress = match progress {
+        Some(p) => p,
+        None => return Ok(None),
+    };
 
     let mut stmt_accounts = tx.prepare_cached("SELECT id FROM accounts")?;
     let mut account_balances = stmt_accounts
@@ -1554,9 +1568,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     let summary = WalletSummary::new(
         account_balances,
         chain_tip_height,
-        fully_scanned_height,
-        scan_progress,
-        recover_progress,
+        fully_scanned_height.unwrap_or(birthday_height - 1),
+        progress,
         next_sapling_subtree_index,
         #[cfg(feature = "orchard")]
         next_orchard_subtree_index,
