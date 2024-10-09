@@ -1,0 +1,13 @@
+[package]
+name = "pczt"
+version = "0.0.0"
+authors = ["Jack Grigg <jack@electriccoin.co>"]
+edition.workspace = true
+rust-version.workspace = true
+description = "Tools for working with partially-created Zcash transactions"
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+license.workspace = true
+categories.workspace = true
+
+[dependencies]
