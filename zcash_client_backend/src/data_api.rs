@@ -1270,6 +1270,7 @@ pub trait WalletTest: InputSource + WalletRead {
 ///
 /// This type is opaque, and exists for use by tests defined in this crate.
 #[cfg(any(test, feature = "test-dependencies"))]
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct OutputOfSentTx {
     value: NonNegativeAmount,
