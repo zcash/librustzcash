@@ -67,7 +67,6 @@ use incrementalmerkletree::{frontier::Frontier, Retention};
 use nonempty::NonEmpty;
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-use zcash_keys::address::Address;
 use zip32::fingerprint::SeedFingerprint;
 
 use self::{
@@ -107,7 +106,7 @@ use {
 use ambassador::delegatable_trait;
 
 #[cfg(any(test, feature = "test-dependencies"))]
-use zcash_primitives::consensus::NetworkUpgrade;
+use {zcash_keys::address::Address, zcash_primitives::consensus::NetworkUpgrade};
 
 pub mod chain;
 pub mod error;
@@ -462,6 +461,51 @@ impl<T> Ratio<T> {
     }
 }
 
+/// A type representing the progress the wallet has made toward detecting all of the funds
+/// belonging to the wallet.
+///
+/// The window over which progress is computed spans from the wallet's birthday to the current
+/// chain tip. It is divided into two regions, the "Scan Window" which covers the region from the
+/// wallet recovery height to the current chain tip, and the "Recovery Window" which covers the
+/// range from the wallet birthday to the wallet recovery height. If no wallet recovery height is
+/// available, the scan window will cover the entire range from the wallet birthday to the chain
+/// tip.
+///
+/// Progress for both scanning and recovery is represented in terms of the ratio between notes
+/// scanned and the total number of notes added to the chain in the relevant window. This ratio
+/// should only be used to compute progress percentages for display, and the numerator and
+/// denominator should not be treated as authoritative note counts. In the case that there are no
+/// notes in a given block range, the denominator of these values will be zero, so callers should always
+/// use checked division when converting the resulting values to percentages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Progress {
+    scan: Ratio<u64>,
+    recovery: Option<Ratio<u64>>,
+}
+
+impl Progress {
+    /// Constructs a new progress value from its constituent parts.
+    pub fn new(scan: Ratio<u64>, recovery: Option<Ratio<u64>>) -> Self {
+        Self { scan, recovery }
+    }
+
+    /// Returns the progress the wallet has made in scanning blocks for shielded notes belonging to
+    /// the wallet between the wallet recovery height (or the wallet birthday if no recovery height
+    /// is set) and the chain tip.
+    pub fn scan(&self) -> Ratio<u64> {
+        self.scan
+    }
+
+    /// Returns the progress the wallet has made in scanning blocks for shielded notes belonging to
+    /// the wallet between the wallet birthday and the block height at which recovery from seed was
+    /// initiated.
+    ///
+    /// Returns `None` if no recovery height is set for the wallet.
+    pub fn recovery(&self) -> Option<Ratio<u64>> {
+        self.recovery
+    }
+}
+
 /// A type representing the potentially-spendable value of unspent outputs in the wallet.
 ///
 /// The balances reported using this data structure may overestimate the total spendable value of
@@ -475,8 +519,7 @@ pub struct WalletSummary<AccountId: Eq + Hash> {
     account_balances: HashMap<AccountId, AccountBalance>,
     chain_tip_height: BlockHeight,
     fully_scanned_height: BlockHeight,
-    scan_progress: Option<Ratio<u64>>,
-    recovery_progress: Option<Ratio<u64>>,
+    progress: Progress,
     next_sapling_subtree_index: u64,
     #[cfg(feature = "orchard")]
     next_orchard_subtree_index: u64,
@@ -488,8 +531,7 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
         account_balances: HashMap<AccountId, AccountBalance>,
         chain_tip_height: BlockHeight,
         fully_scanned_height: BlockHeight,
-        scan_progress: Option<Ratio<u64>>,
-        recovery_progress: Option<Ratio<u64>>,
+        progress: Progress,
         next_sapling_subtree_index: u64,
         #[cfg(feature = "orchard")] next_orchard_subtree_index: u64,
     ) -> Self {
@@ -497,8 +539,7 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
             account_balances,
             chain_tip_height,
             fully_scanned_height,
-            scan_progress,
-            recovery_progress,
+            progress,
             next_sapling_subtree_index,
             #[cfg(feature = "orchard")]
             next_orchard_subtree_index,
@@ -527,42 +568,16 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
     /// general usability, including the ability to spend existing funds that were
     /// previously spendable.
     ///
-    /// The window over which progress is computed spans from the wallet's recovery height
-    /// to the current chain tip. This may be adjusted in future updates to better match
-    /// the intended semantics.
+    /// The window over which progress is computed spans from the wallet's birthday to the current
+    /// chain tip. It is divided into two segments: a "recovery" segment, between the wallet
+    /// birthday and the recovery height (the height at which recovery from seed was initiated),
+    /// and a "scan" segment, between the recovery height and the current chain tip.
     ///
-    /// Progress is represented in terms of the ratio between notes scanned and the total
-    /// number of notes added to the chain in the relevant window. This ratio should only
-    /// be used to compute progress percentages, and the numerator and denominator should
-    /// not be treated as authoritative note counts. The denominator of this ratio is
-    /// guaranteed to be nonzero.
-    ///
-    /// Returns `None` if the wallet has insufficient information to be able to determine
-    /// scan progress.
-    pub fn scan_progress(&self) -> Option<Ratio<u64>> {
-        self.scan_progress
-    }
-
-    /// Returns the progress of recovering the wallet from seed.
-    ///
-    /// This progress metric is intended as an indicator of how close the wallet is to
-    /// having a complete history.
-    ///
-    /// The window over which progress is computed spans from the wallet birthday to the
-    /// wallet's recovery height. This may be adjusted in future updates to better match
-    /// the intended semantics.
-    ///
-    /// Progress is represented in terms of the ratio between notes scanned and the total
-    /// number of notes added to the chain in the relevant window. This ratio should only
-    /// be used to compute progress percentages, and the numerator and denominator should
-    /// not be treated as authoritative note counts. Note that both the numerator and the
-    /// denominator of this ratio may be zero in the case that there is no recovery range
-    /// that need be scanned.
-    ///
-    /// Returns `None` if the wallet has insufficient information to be able to determine
-    /// progress in scanning between the wallet birthday and the wallet recovery height.
-    pub fn recovery_progress(&self) -> Option<Ratio<u64>> {
-        self.recovery_progress
+    /// When converting the ratios returned here to percentages, checked division must be used in
+    /// order to avoid divide-by-zero errors. A zero denominator in a returned ratio indicates that
+    /// there are no shielded notes to be scanned in the associated block range.
+    pub fn progress(&self) -> Progress {
+        self.progress
     }
 
     /// Returns the Sapling subtree index that should start the next range of subtree
