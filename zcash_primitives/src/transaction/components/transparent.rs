@@ -1,6 +1,7 @@
 //! Structs representing the components within Zcash transactions.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use serde::{Deserialize, Serialize};
 
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
@@ -92,7 +93,7 @@ impl<A: Authorization> Bundle<A> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct OutPoint {
     hash: TxId,
     n: u32,
@@ -180,7 +181,7 @@ impl TxIn<Authorized> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TxOut {
     pub value: NonNegativeAmount,
     pub script_pubkey: Script,

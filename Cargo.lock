@@ -6057,6 +6057,7 @@ dependencies = [
  "ripemd",
  "sapling-crypto",
  "secp256k1",
+ "serde",
  "sha2 0.10.8",
  "subtle",
  "tracing",

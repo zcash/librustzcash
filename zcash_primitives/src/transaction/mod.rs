@@ -14,6 +14,7 @@ mod tests;
 use blake2b_simd::Hash as Blake2bHash;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use memuse::DynamicUsage;
+use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Debug;
@@ -67,7 +68,7 @@ const ZFUTURE_TX_VERSION: u32 = 0x0000FFFF;
 ///   that have been mined.
 /// - For v5 transactions onwards, this identifier is derived only from "effecting" data,
 ///   and is non-malleable in all contexts.
-#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TxId([u8; 32]);
 
 memuse::impl_no_dynamic_usage!(TxId);

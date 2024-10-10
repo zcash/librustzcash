@@ -1,6 +1,7 @@
 //! Support for legacy transparent addresses and scripts.
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
+use serde::{Deserialize, Serialize};
 use zcash_address::TryFromRawAddress;
 
 use std::fmt;
@@ -272,7 +273,7 @@ impl OpCode {
 }
 
 /// A serialized script, used inside transparent inputs and outputs of a transaction.
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Script(pub Vec<u8>);
 
 impl fmt::Debug for Script {
