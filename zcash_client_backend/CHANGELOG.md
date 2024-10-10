@@ -7,6 +7,16 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api`:
+  - `Progress`
+  - `WalletSummary::progress`
+
+### Removed
+- `zcash_client_backend::data_api`:
+  - `WalletSummary::scan_progress` and `WalletSummary::recovery_progress` have
+    been removed. Use `WalletSummary::progress` instead.
+
 ## [0.14.0] - 2024-10-04
 
 ### Added

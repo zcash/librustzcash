@@ -1062,7 +1062,7 @@ mod tests {
 
         // Unmine the shielding transaction via a reorg.
         st.wallet_mut()
-            .truncate_to_height(mined_height - 1)
+            .truncate_to_height(dbg!(mined_height - 1))
             .unwrap();
         assert_eq!(st.wallet().chain_height().unwrap(), Some(mined_height - 1));
 
