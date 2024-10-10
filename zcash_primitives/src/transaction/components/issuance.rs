@@ -121,9 +121,7 @@ pub fn write_v6_bundle<W: Write>(
     mut writer: W,
 ) -> io::Result<()> {
     if let Some(bundle) = bundle {
-        Vector::write_nonempty(&mut writer, bundle.actions(), |w, action| {
-            write_action(w, action)
-        })?;
+        Vector::write_nonempty(&mut writer, bundle.actions(), write_action)?;
         writer.write_all(&bundle.ik().to_bytes())?;
         writer.write_all(&<[u8; 64]>::from(bundle.authorization().signature()))?;
     } else {
