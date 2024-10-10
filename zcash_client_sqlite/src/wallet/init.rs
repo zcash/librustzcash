@@ -1275,6 +1275,10 @@ mod tests {
                 None,
                 None,
                 None,
+                #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+                None,
+                #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+                None,
             )
             .freeze()
             .unwrap();

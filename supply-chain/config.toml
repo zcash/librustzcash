@@ -344,6 +344,10 @@ criteria = "safe-to-run"
 version = "0.3.21"
 criteria = "safe-to-deploy"
 
+[[exemptions.half]]
+version = "2.2.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.hashbrown]]
 version = "0.14.2"
 criteria = "safe-to-deploy"

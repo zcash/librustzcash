@@ -92,7 +92,7 @@ impl BlockHeaderData {
 }
 
 impl BlockHeader {
-    fn from_data(data: BlockHeaderData) -> io::Result<Self> {
+    pub fn from_data(data: BlockHeaderData) -> io::Result<Self> {
         let mut header = BlockHeader {
             hash: BlockHash([0; 32]),
             data,

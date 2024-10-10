@@ -2,16 +2,20 @@
 use std::convert::TryFrom;
 use std::io::{self, Read, Write};
 
+use crate::transaction::components::issuance::read_asset;
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use nonempty::NonEmpty;
 use orchard::{
     bundle::{Authorization, Authorized, Flags},
-    note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
+    note::{AssetBase, ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
+    note_encryption::OrchardDomainCommon,
+    orchard_flavor::{OrchardVanilla, OrchardZSA},
     primitives::redpallas::{self, SigType, Signature, SpendAuth, VerificationKey},
-    value::ValueCommitment,
+    value::{NoteValue, ValueCommitment},
     Action, Anchor,
 };
 use zcash_encoding::{Array, CompactSize, Vector};
+use zcash_note_encryption::note_bytes::NoteBytes;
 
 use super::Amount;
 use crate::transaction::Transaction;
@@ -44,10 +48,28 @@ impl MapAuth<Authorized, Authorized> for () {
     }
 }
 
-/// Reads an [`orchard::Bundle`] from a v5 transaction format.
-pub fn read_v5_bundle<R: Read>(
+pub trait ReadBurn<R: Read> {
+    fn read_burn(reader: &mut R) -> io::Result<Vec<(AssetBase, NoteValue)>>;
+}
+
+// OrchardVanilla has no burn to read
+impl<R: Read> ReadBurn<R> for OrchardVanilla {
+    fn read_burn(_reader: &mut R) -> io::Result<Vec<(AssetBase, NoteValue)>> {
+        Ok(Vec::new())
+    }
+}
+
+// Read burn for OrchardZSA
+impl<R: Read> ReadBurn<R> for OrchardZSA {
+    fn read_burn(reader: &mut R) -> io::Result<Vec<(AssetBase, NoteValue)>> {
+        Vector::read(reader, |r| read_burn(r))
+    }
+}
+
+/// Reads an [`orchard::Bundle`] from a v6 transaction format.
+pub fn read_orchard_bundle<R: Read, D: OrchardDomainCommon + ReadBurn<R>>(
     mut reader: R,
-) -> io::Result<Option<orchard::Bundle<Authorized, Amount>>> {
+) -> io::Result<Option<orchard::Bundle<Authorized, Amount, D>>> {
     #[allow(clippy::redundant_closure)]
     let actions_without_auth = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
     if actions_without_auth.is_empty() {
@@ -64,22 +86,27 @@ pub fn read_v5_bundle<R: Read>(
                 .collect::<Result<Vec<_>, _>>()?,
         )
         .expect("A nonzero number of actions was read from the transaction data.");
+
+        let burn = D::read_burn(&mut reader)?;
+
         let binding_signature = read_signature::<_, redpallas::Binding>(&mut reader)?;
 
-        let authorization = orchard::bundle::Authorized::from_parts(
-            orchard::Proof::new(proof_bytes),
-            binding_signature,
-        );
+        let authorization =
+            Authorized::from_parts(orchard::Proof::new(proof_bytes), binding_signature);
 
         Ok(Some(orchard::Bundle::from_parts(
             actions,
             flags,
             value_balance,
-            vec![], // TODO implement "burn" reading and writing
+            burn,
             anchor,
             authorization,
         )))
     }
+}
+
+fn read_burn<R: Read>(reader: &mut R) -> io::Result<(AssetBase, NoteValue)> {
+    Ok((read_asset(reader)?, read_note_value(reader)?))
 }
 
 pub fn read_value_commitment<R: Read>(mut reader: R) -> io::Result<ValueCommitment> {
@@ -134,21 +161,27 @@ pub fn read_cmx<R: Read>(mut reader: R) -> io::Result<ExtractedNoteCommitment> {
     })
 }
 
-pub fn read_note_ciphertext<R: Read>(mut reader: R) -> io::Result<TransmittedNoteCiphertext> {
-    let mut tnc = TransmittedNoteCiphertext {
-        epk_bytes: [0u8; 32],
-        enc_ciphertext: [0u8; 612],
-        out_ciphertext: [0u8; 80],
-    };
+pub fn read_note_ciphertext<R: Read, D: OrchardDomainCommon>(
+    mut reader: R,
+) -> io::Result<TransmittedNoteCiphertext<D>> {
+    let mut epk = [0; 32];
+    let mut enc = vec![0u8; D::ENC_CIPHERTEXT_SIZE];
+    let mut out = [0; 80];
 
-    reader.read_exact(&mut tnc.epk_bytes)?;
-    reader.read_exact(&mut tnc.enc_ciphertext)?;
-    reader.read_exact(&mut tnc.out_ciphertext)?;
+    reader.read_exact(&mut epk)?;
+    reader.read_exact(&mut enc)?;
+    reader.read_exact(&mut out)?;
 
-    Ok(tnc)
+    Ok(TransmittedNoteCiphertext::<D> {
+        epk_bytes: epk,
+        enc_ciphertext: <D>::NoteCiphertextBytes::from_slice(&enc).unwrap(),
+        out_ciphertext: out,
+    })
 }
 
-pub fn read_action_without_auth<R: Read>(mut reader: R) -> io::Result<Action<()>> {
+pub fn read_action_without_auth<R: Read, D: OrchardDomainCommon>(
+    mut reader: R,
+) -> io::Result<Action<(), D>> {
     let cv_net = read_value_commitment(&mut reader)?;
     let nf_old = read_nullifier(&mut reader)?;
     let rk = read_verification_key(&mut reader)?;
@@ -193,9 +226,38 @@ pub fn read_signature<R: Read, T: SigType>(mut reader: R) -> io::Result<Signatur
     Ok(Signature::from(bytes))
 }
 
-/// Writes an [`orchard::Bundle`] in the v5 transaction format.
-pub fn write_v5_bundle<W: Write>(
-    bundle: Option<&orchard::Bundle<Authorized, Amount>>,
+fn read_note_value<R: Read>(mut reader: R) -> io::Result<NoteValue> {
+    let mut bytes = [0; 8];
+    reader.read_exact(&mut bytes)?;
+    Ok(NoteValue::from_bytes(bytes))
+}
+
+pub trait WriteBurn<W: Write> {
+    fn write_burn(writer: &mut W, burn: &[(AssetBase, NoteValue)]) -> io::Result<()>;
+}
+
+// OrchardVanilla has no burn to write
+impl<W: Write> WriteBurn<W> for OrchardVanilla {
+    fn write_burn(_writer: &mut W, _burn: &[(AssetBase, NoteValue)]) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+// Write burn for OrchardZSA
+impl<W: Write> WriteBurn<W> for OrchardZSA {
+    fn write_burn(writer: &mut W, burn: &[(AssetBase, NoteValue)]) -> io::Result<()> {
+        Vector::write(writer, burn, |w, (asset, amount)| {
+            w.write_all(&asset.to_bytes())?;
+            w.write_all(&amount.to_bytes())?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+}
+
+/// Writes an [`orchard::Bundle`] in the appropriate transaction format.
+pub fn write_orchard_bundle<W: Write, D: OrchardDomainCommon + WriteBurn<W>>(
+    bundle: Option<&orchard::Bundle<Authorized, Amount, D>>,
     mut writer: W,
 ) -> io::Result<()> {
     if let Some(bundle) = &bundle {
@@ -216,6 +278,9 @@ pub fn write_v5_bundle<W: Write>(
             bundle.actions().iter().map(|a| a.authorization()),
             |w, auth| w.write_all(&<[u8; 64]>::from(*auth)),
         )?;
+
+        D::write_burn(&mut writer, bundle.burn())?;
+
         writer.write_all(&<[u8; 64]>::from(
             bundle.authorization().binding_signature(),
         ))?;
@@ -245,18 +310,18 @@ pub fn write_cmx<W: Write>(mut writer: W, cmx: &ExtractedNoteCommitment) -> io::
     writer.write_all(&cmx.to_bytes())
 }
 
-pub fn write_note_ciphertext<W: Write>(
+pub fn write_note_ciphertext<W: Write, D: OrchardDomainCommon>(
     mut writer: W,
-    nc: &TransmittedNoteCiphertext,
+    nc: &TransmittedNoteCiphertext<D>,
 ) -> io::Result<()> {
     writer.write_all(&nc.epk_bytes)?;
-    writer.write_all(&nc.enc_ciphertext)?;
+    writer.write_all(nc.enc_ciphertext.as_ref())?;
     writer.write_all(&nc.out_ciphertext)
 }
 
-pub fn write_action_without_auth<W: Write>(
+pub fn write_action_without_auth<W: Write, D: OrchardDomainCommon>(
     mut writer: W,
-    act: &Action<<Authorized as Authorization>::SpendAuth>,
+    act: &Action<<Authorized as Authorization>::SpendAuth, D>,
 ) -> io::Result<()> {
     write_value_commitment(&mut writer, act.cv_net())?;
     write_nullifier(&mut writer, act.nullifier())?;
@@ -270,21 +335,20 @@ pub fn write_action_without_auth<W: Write>(
 pub mod testing {
     use proptest::prelude::*;
 
+    use crate::transaction::components::amount::testing::arb_amount;
+    use crate::transaction::components::Amount;
+    use crate::transaction::TxVersion;
     use orchard::bundle::{
         testing::{self as t_orch},
         Authorized, Bundle,
     };
-
-    use crate::transaction::{
-        components::amount::{testing::arb_amount, Amount},
-        TxVersion,
-    };
+    use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
 
     prop_compose! {
         pub fn arb_bundle(n_actions: usize)(
             orchard_value_balance in arb_amount(),
-            bundle in t_orch::arb_bundle(n_actions)
-        ) -> Bundle<Authorized, Amount> {
+            bundle in t_orch::BundleArb::arb_bundle(n_actions)
+        ) -> Bundle<Authorized, Amount, OrchardVanilla> {
             // overwrite the value balance, as we can't guarantee that the
             // value doesn't exceed the MAX_MONEY bounds.
             bundle.try_map_value_balance::<_, (), _>(|_| Ok(orchard_value_balance)).unwrap()
@@ -293,9 +357,30 @@ pub mod testing {
 
     pub fn arb_bundle_for_version(
         v: TxVersion,
-    ) -> impl Strategy<Value = Option<Bundle<Authorized, Amount>>> {
+    ) -> impl Strategy<Value = Option<Bundle<Authorized, Amount, OrchardVanilla>>> {
         if v.has_orchard() {
             Strategy::boxed((1usize..100).prop_flat_map(|n| prop::option::of(arb_bundle(n))))
+        } else {
+            Strategy::boxed(Just(None))
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_zsa_bundle(n_actions: usize)(
+            orchard_value_balance in arb_amount(),
+            bundle in t_orch::BundleArb::arb_bundle(n_actions)
+        ) -> Bundle<Authorized, Amount, OrchardZSA> {
+            // overwrite the value balance, as we can't guarantee that the
+            // value doesn't exceed the MAX_MONEY bounds.
+            bundle.try_map_value_balance::<_, (), _>(|_| Ok(orchard_value_balance)).unwrap()
+        }
+    }
+
+    pub fn arb_zsa_bundle_for_version(
+        v: TxVersion,
+    ) -> impl Strategy<Value = Option<Bundle<Authorized, Amount, OrchardZSA>>> {
+        if v.has_orchard_zsa() {
+            Strategy::boxed((1usize..100).prop_flat_map(|n| prop::option::of(arb_zsa_bundle(n))))
         } else {
             Strategy::boxed(Just(None))
         }
