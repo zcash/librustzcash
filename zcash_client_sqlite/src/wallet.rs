@@ -852,9 +852,7 @@ fn table_constants(
             ORCHARD_SHARD_HEIGHT,
         )),
         #[cfg(not(feature = "orchard"))]
-        ShieldedProtocol::Orchard => {
-            Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD))
-        }
+        ShieldedProtocol::Orchard => Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD)),
     }
 }
 
@@ -912,7 +910,7 @@ fn estimate_tree_size<P: consensus::Parameters>(
             #[cfg(feature = "orchard")]
             ShieldedProtocol::Orchard => last_scanned.orchard_tree_size(),
             #[cfg(not(feature = "orchard"))]
-            ShieldedProtocol::Orchard => None
+            ShieldedProtocol::Orchard => None,
         }
         .map(|tree_size| (last_scanned.block_height(), u64::from(tree_size)))
     });
