@@ -534,10 +534,11 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
     /// Progress is represented in terms of the ratio between notes scanned and the total
     /// number of notes added to the chain in the relevant window. This ratio should only
     /// be used to compute progress percentages, and the numerator and denominator should
-    /// not be treated as authoritative note counts.
+    /// not be treated as authoritative note counts. The denominator of this ratio is
+    /// guaranteed to be nonzero.
     ///
-    /// Returns `None` if the wallet is unable to determine the size of the note
-    /// commitment tree.
+    /// Returns `None` if the wallet has insufficient information to be able to determine
+    /// scan progress.
     pub fn scan_progress(&self) -> Option<Ratio<u64>> {
         self.scan_progress
     }
@@ -554,10 +555,12 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
     /// Progress is represented in terms of the ratio between notes scanned and the total
     /// number of notes added to the chain in the relevant window. This ratio should only
     /// be used to compute progress percentages, and the numerator and denominator should
-    /// not be treated as authoritative note counts.
+    /// not be treated as authoritative note counts. Note that both the numerator and the
+    /// denominator of this ratio may be zero in the case that there is no recovery range
+    /// that need be scanned.
     ///
-    /// Returns `None` if the wallet is unable to determine the size of the note
-    /// commitment tree.
+    /// Returns `None` if the wallet has insufficient information to be able to determine
+    /// progress in scanning between the wallet birthday and the wallet recovery height.
     pub fn recovery_progress(&self) -> Option<Ratio<u64>> {
         self.recovery_progress
     }
