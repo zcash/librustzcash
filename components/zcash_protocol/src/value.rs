@@ -4,6 +4,7 @@ use std::iter::Sum;
 use std::ops::{Add, Mul, Neg, Sub};
 
 use memuse::DynamicUsage;
+use serde::{Deserialize, Serialize};
 
 pub const COIN: u64 = 1_0000_0000;
 pub const MAX_MONEY: u64 = 21_000_000 * COIN;
@@ -17,7 +18,8 @@ pub const MAX_BALANCE: i64 = MAX_MONEY as i64;
 /// invalid ZatBalances would also be rejected by the network consensus rules.)
 ///
 /// [`Transaction`]: https://docs.rs/zcash_primitives/latest/zcash_primitives/transaction/struct.Transaction.html
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord, Serialize, Deserialize)]
+#[serde(try_from = "i64", into = "i64")]
 pub struct ZatBalance(i64);
 
 memuse::impl_no_dynamic_usage!(ZatBalance);
@@ -226,7 +228,8 @@ impl Mul<usize> for ZatBalance {
 ///
 /// A Zatoshis can only be constructed from an integer that is within the valid monetary
 /// range of `{0..MAX_MONEY}` (where `MAX_MONEY` = 21,000,000 × 10⁸ zatoshis).
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord, Serialize, Deserialize)]
+#[serde(try_from = "u64", into = "u64")]
 pub struct Zatoshis(u64);
 
 impl Zatoshis {

@@ -17,6 +17,8 @@
 
 use core::fmt;
 
+use serde::{Deserialize, Serialize};
+
 pub mod consensus;
 pub mod constants;
 #[cfg(feature = "local-consensus")]
@@ -25,7 +27,7 @@ pub mod memo;
 pub mod value;
 
 /// A Zcash shielded transfer protocol.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ShieldedProtocol {
     /// The Sapling protocol
     Sapling,
@@ -34,7 +36,7 @@ pub enum ShieldedProtocol {
 }
 
 /// A value pool in the Zcash protocol.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum PoolType {
     /// The transparent value pool
     Transparent,

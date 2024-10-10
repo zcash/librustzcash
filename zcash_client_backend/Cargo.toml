@@ -47,6 +47,7 @@ rand_core.workspace = true
 base64.workspace = true
 bech32.workspace = true
 bs58.workspace = true
+serde.workspace = true
 
 # - Errors
 bip32 = { workspace = true, optional = true }
@@ -123,7 +124,6 @@ tower = { workspace = true, optional = true }
 http-body-util = { workspace = true, optional = true }
 hyper-util = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true }
 webpki-roots = { workspace = true, optional = true }
 
@@ -186,7 +186,6 @@ tor = [
     "dep:hyper-util",
     "dep:rand",
     "dep:rust_decimal",
-    "dep:serde",
     "dep:serde_json",
     "dep:tokio",
     "dep:tokio-rustls",

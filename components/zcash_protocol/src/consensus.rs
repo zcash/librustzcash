@@ -1,6 +1,7 @@
 //! Consensus logic and parameters.
 
 use memuse::DynamicUsage;
+use serde::{Deserialize, Serialize};
 use std::cmp::{Ord, Ordering};
 use std::convert::TryFrom;
 use std::fmt;
@@ -13,7 +14,7 @@ use crate::constants::{mainnet, regtest, testnet};
 /// Safe conversion from various integer types, as well as addition and subtraction, are
 /// provided.
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BlockHeight(u32);
 
 memuse::impl_no_dynamic_usage!(BlockHeight);
