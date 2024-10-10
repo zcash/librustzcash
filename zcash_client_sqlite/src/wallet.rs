@@ -953,7 +953,9 @@ fn estimate_tree_size<P: consensus::Parameters>(
         // `None` if we have no subtree roots yet.
         .optional()?;
 
-    if let Some((last_completed_subtree, last_completed_subtree_end)) = last_completed_subtree {
+    let result = if let Some((last_completed_subtree, last_completed_subtree_end)) =
+        last_completed_subtree
+    {
         // If we know the tree size at the last scanned height, and that
         // height is within the incomplete subtree, extrapolate.
         let tip_tree_size = last_scanned.and_then(|(last_scanned, last_scanned_tree_size)| {
@@ -974,7 +976,7 @@ fn estimate_tree_size<P: consensus::Parameters>(
         });
 
         if let Some(tree_size) = tip_tree_size {
-            Ok(Some(tree_size))
+            Some(tree_size)
         } else if let Some(second_to_last_completed_subtree_end) = last_completed_subtree
             .index()
             .checked_sub(1)
@@ -999,11 +1001,11 @@ fn estimate_tree_size<P: consensus::Parameters>(
                 u64::from(last_completed_subtree_end - second_to_last_completed_subtree_end);
             let unscanned_range = u64::from(chain_tip_height - last_completed_subtree_end);
 
-            Ok((subtree_notes * unscanned_range)
+            (subtree_notes * unscanned_range)
                 .checked_div(subtree_range)
                 .map(|extrapolated_incomplete_subtree_notes| {
                     notes_in_complete_subtrees + extrapolated_incomplete_subtree_notes
-                }))
+                })
         } else {
             // There's only one completed subtree; its start height must
             // be the activation height for this shielded protocol.
@@ -1012,30 +1014,30 @@ fn estimate_tree_size<P: consensus::Parameters>(
             let subtree_range = u64::from(last_completed_subtree_end - pool_activation_height);
             let unscanned_range = u64::from(chain_tip_height - last_completed_subtree_end);
 
-            Ok((subtree_notes * unscanned_range)
+            (subtree_notes * unscanned_range)
                 .checked_div(subtree_range)
                 .map(|extrapolated_incomplete_subtree_notes| {
                     subtree_notes + extrapolated_incomplete_subtree_notes
-                }))
+                })
         }
     } else {
         // If there are no completed subtrees, but we have scanned some blocks, we can still
         // interpolate based upon the tree size as of the last scanned block. Here, since we
         // don't have any subtree data to draw on, we will interpolate based on the number of
         // blocks since the pool activation height
-        Ok(
-            last_scanned.and_then(|(last_scanned_height, last_scanned_tree_size)| {
-                let subtree_range = u64::from(last_scanned_height - pool_activation_height);
-                let unscanned_range = u64::from(chain_tip_height - last_scanned_height);
+        last_scanned.and_then(|(last_scanned_height, last_scanned_tree_size)| {
+            let subtree_range = u64::from(last_scanned_height - pool_activation_height);
+            let unscanned_range = u64::from(chain_tip_height - last_scanned_height);
 
-                (last_scanned_tree_size * unscanned_range)
-                    .checked_div(subtree_range)
-                    .map(|extrapolated_incomplete_subtree_notes| {
-                        last_scanned_tree_size + extrapolated_incomplete_subtree_notes
-                    })
-            }),
-        )
-    }
+            (last_scanned_tree_size * unscanned_range)
+                .checked_div(subtree_range)
+                .map(|extrapolated_incomplete_subtree_notes| {
+                    last_scanned_tree_size + extrapolated_incomplete_subtree_notes
+                })
+        })
+    };
+
+    Ok(result)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1075,24 +1077,24 @@ fn subtree_scan_progress<P: consensus::Parameters>(
     if fully_scanned_height == Some(chain_tip_height) {
         // Compute the total blocks scanned since the wallet birthday on either side of
         // the recover-until height.
-        let recover = recover_until_height
-            .map(|end_height| {
-                stmt_scanned_count_until.query_row(
-                    named_params! {
-                        ":start_height": u32::from(birthday_height),
-                        ":end_height": u32::from(end_height),
-                    },
-                    |row| {
-                        let recovered = row.get::<_, Option<u64>>(0)?;
-                        Ok(recovered.map(|n| Ratio::new(n, n)))
-                    },
-                )
-            })
-            .transpose()?
-            // If none of the wallet's accounts have a recover-until height, then there
-            // is no recovery phase for the wallet, and therefore the denominator in the
-            // resulting ratio (the number of notes in the recovery range) is zero.
-            .unwrap_or_else(|| Some(Ratio::new(0, 0)));
+        let recover = match recover_until_height {
+            Some(end_height) => stmt_scanned_count_until.query_row(
+                named_params! {
+                    ":start_height": u32::from(birthday_height),
+                    ":end_height": u32::from(end_height),
+                },
+                |row| {
+                    let recovered = row.get::<_, Option<u64>>(0)?;
+                    Ok(recovered.map(|n| Ratio::new(n, n)))
+                },
+            )?,
+            None => {
+                // If none of the wallet's accounts have a recover-until height, then there
+                // is no recovery phase for the wallet, and therefore the denominator in the
+                // resulting ratio (the number of notes in the recovery range) is zero.
+                Some(Ratio::new(0, 0))
+            }
+        };
 
         let scan = stmt_scanned_count_from.query_row(
             named_params! {
@@ -1112,60 +1114,66 @@ fn subtree_scan_progress<P: consensus::Parameters>(
         // height, get the tree size from a nearby subtree. It's fine for this to be
         // approximate; it just shifts the boundary between scan and recover progress.
         let mut get_tree_size_near = |as_of: BlockHeight| {
-            stmt_start_tree_size
-                .query_row(
-                    named_params![":start_height": u32::from(as_of)],
-                    |row| row.get::<_, Option<u64>>(0),
-                )
-                .optional()
-                .map(|opt| opt.flatten())
-                .transpose()
-                .or_else(|| {
-                    conn.query_row(
-                        &format!(
-                            "SELECT MIN(shard_index)
+            let size_from_blocks = stmt_start_tree_size
+                .query_row(named_params![":start_height": u32::from(as_of)], |row| {
+                    row.get::<_, Option<u64>>(0)
+                })
+                .optional()?
+                .flatten();
+
+            let size_from_subtree_roots = || {
+                conn.query_row(
+                    &format!(
+                        "SELECT MIN(shard_index)
                              FROM {table_prefix}_tree_shards
                              WHERE subtree_end_height >= :start_height
                              OR subtree_end_height IS NULL",
-                        ),
-                        named_params! {
-                            ":start_height": u32::from(as_of),
-                        },
-                        |row| {
-                            let min_tree_size = row
-                                .get::<_, Option<u64>>(0)?
-                                .map(|min_idx| min_idx << shard_height);
-                            Ok(min_tree_size)
-                        },
-                    )
-                    .optional()
-                    .map(|opt| opt.flatten())
-                    .transpose()
-                })
-                .transpose()
+                    ),
+                    named_params! {
+                        ":start_height": u32::from(as_of),
+                    },
+                    |row| {
+                        let min_tree_size = row
+                            .get::<_, Option<u64>>(0)?
+                            .map(|min_idx| min_idx << shard_height);
+                        Ok(min_tree_size)
+                    },
+                )
+                .optional()
+                .map(|opt| opt.flatten())
+            };
+
+            match size_from_blocks {
+                Some(size) => Ok(Some(size)),
+                None => size_from_subtree_roots(),
+            }
         };
 
         // Get the starting note commitment tree size from the wallet birthday, or failing that
         // from the blocks table.
-        let birthday_size = conn
+        let birthday_size = match conn
             .query_row(
                 &format!(
                     "SELECT birthday_{table_prefix}_tree_size
-                    FROM accounts
-                    WHERE birthday_height = :birthday_height",
+                     FROM accounts
+                     WHERE birthday_height = :birthday_height",
                 ),
                 named_params![":birthday_height": u32::from(birthday_height)],
                 |row| row.get::<_, Option<u64>>(0),
             )
             .optional()?
             .flatten()
-            .map(Ok)
+        {
+            Some(tree_size) => Some(tree_size),
             // If we don't have an explicit birthday tree size, find something nearby.
-            .or_else(|| get_tree_size_near(birthday_height).transpose())
-            .transpose()?;
+            None => get_tree_size_near(birthday_height)?,
+        };
 
         // Get the note commitment tree size as of the start of the recover-until height.
-        let recover_until_size = recover_until_height
+        // The outer option indicates whether or not we have recover-until height information;
+        // the inner option indicates whether or not we were able to obtain a tree size given
+        // the recover-until height.
+        let recover_until_size: Option<Option<u64>> = recover_until_height
             // Find a tree size near to the recover-until height
             .map(get_tree_size_near)
             .transpose()?;
