@@ -7,6 +7,16 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.12.1] - 2024-10-10
+
+### Fixed
+- An error in scan progress computation was fixed. As part of this fix, wallet
+  summary information is now only returned in the case that some note
+  commitment tree size information can be determined, either from subtree root
+  download or from downloaded block data. NOTE: The recovery progress ratio may
+  be present as `0:0` in the case that the recovery range contains no notes; 
+  this was not adequately documented in the previous release.
+
 ## [0.12.0] - 2024-10-04
 
 ### Added

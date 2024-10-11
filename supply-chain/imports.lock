@@ -9,6 +9,10 @@ audited_as = "0.13.0"
 version = "0.12.0"
 audited_as = "0.11.2"
 
+[[unpublished.zcash_client_sqlite]]
+version = "0.12.1"
+audited_as = "0.12.0"
+
 [[unpublished.zcash_keys]]
 version = "0.4.0"
 audited_as = "0.3.0"
@@ -270,6 +274,13 @@ user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
+[[publisher.zcash_client_sqlite]]
+version = "0.12.0"
+when = "2024-10-04"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
+
 [[publisher.zcash_encoding]]
 version = "0.2.0"
 when = "2022-10-19"
@@ -342,6 +353,13 @@ user-name = "Jack Grigg"
 [[publisher.zip321]]
 version = "0.1.0"
 when = "2024-08-20"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
+
+[[publisher.zip321]]
+version = "0.2.0"
+when = "2024-10-04"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
