@@ -33,6 +33,9 @@ proptest = { workspace = true, optional = true }
 incrementalmerkletree = { workspace = true, optional = true }
 incrementalmerkletree-testing = { workspace = true, optional = true }
 
+serde.workspace = true
+serde_with.workspace = true
+
 [dev-dependencies]
 proptest.workspace = true
 

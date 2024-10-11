@@ -72,6 +72,7 @@ document-features.workspace = true
 bs58.workspace = true
 byteorder.workspace = true
 hex.workspace = true
+serde.workspace = true
 
 # - Shielded protocols
 redjubjub = "0.7"

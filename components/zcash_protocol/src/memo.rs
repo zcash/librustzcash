@@ -6,6 +6,9 @@ use std::fmt;
 use std::ops::Deref;
 use std::str;
 
+use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
+
 /// Format a byte array as a colon-delimited hex string.
 ///
 /// - Source: <https://github.com/tendermint/signatory>
@@ -46,8 +49,9 @@ impl fmt::Display for Error {
 impl error::Error for Error {}
 
 /// The unencrypted memo bytes received alongside a shielded note in a Zcash transaction.
-#[derive(Clone)]
-pub struct MemoBytes(pub(crate) Box<[u8; 512]>);
+#[serde_as]
+#[derive(Clone, Serialize, Deserialize)]
+pub struct MemoBytes(#[serde_as(as = "Box<[_; 512]>")] pub(crate) Box<[u8; 512]>);
 
 impl fmt::Debug for MemoBytes {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
