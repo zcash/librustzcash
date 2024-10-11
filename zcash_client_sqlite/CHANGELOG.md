@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- Exposed `AccountId::from_u32` and `AccountId::as_u32` conversions under the
+  `unstable` feature flag.
+
 ## [0.12.1] - 2024-10-10
 
 ### Fixed
