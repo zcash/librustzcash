@@ -128,7 +128,7 @@ pub mod error;
 pub mod wallet;
 use wallet::{
     commitment_tree::{self, put_shard_roots},
-    SubtreeScanProgress,
+    SubtreeProgressEstimator,
 };
 
 #[cfg(test)]
@@ -481,7 +481,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
             &self.conn.borrow().unchecked_transaction()?,
             &self.params,
             min_confirmations,
-            &SubtreeScanProgress,
+            &SubtreeProgressEstimator,
         )
     }
 
