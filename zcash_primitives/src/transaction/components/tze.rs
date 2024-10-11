@@ -7,7 +7,7 @@ use std::io::{self, Read, Write};
 
 use zcash_encoding::{CompactSize, Vector};
 
-use super::amount::Amount;
+use super::{amount::Amount, AuthorizedTzePart, Tze};
 use crate::{extensions::transparent as tze, transaction::TxId};
 
 pub mod builder;
@@ -227,6 +227,44 @@ impl TzeOut {
         Vector::write(&mut writer, &self.precondition.payload, |w, b| {
             w.write_u8(*b)
         })
+    }
+}
+
+impl AuthorizedTzePart for Tze<Authorized> {
+    fn read_bundle<R: Read>(mut reader: R, tx_has_tze: bool) -> io::Result<Option<Self::Bundle>> {
+        if tx_has_tze {
+            let vin = Vector::read(&mut reader, TzeIn::read)?;
+            let vout = Vector::read(&mut reader, TzeOut::read)?;
+            Ok(if vin.is_empty() && vout.is_empty() {
+                None
+            } else {
+                Some(Bundle {
+                    vin,
+                    vout,
+                    authorization: Authorized,
+                })
+            })
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn write_bundle<W: Write>(
+        bundle: Option<&Self::Bundle>,
+        mut writer: W,
+        tx_has_tze: bool,
+    ) -> io::Result<()> {
+        if tx_has_tze {
+            if let Some(bundle) = bundle {
+                Vector::write(&mut writer, &bundle.vin, |w, e| e.write(w))?;
+                Vector::write(&mut writer, &bundle.vout, |w, e| e.write(w))?;
+            } else {
+                CompactSize::write(&mut writer, 0)?;
+                CompactSize::write(&mut writer, 0)?;
+            }
+        }
+
+        Ok(())
     }
 }
 
