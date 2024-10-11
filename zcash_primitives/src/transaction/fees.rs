@@ -1,7 +1,5 @@
 //! Abstractions and types related to fee calculations.
 
-use serde::{Deserialize, Serialize};
-
 use crate::{
     consensus::{self, BlockHeight},
     transaction::{components::amount::NonNegativeAmount, fees::transparent::InputSize},
@@ -62,7 +60,7 @@ pub trait FutureFeeRule: FeeRule {
 }
 
 /// An enumeration of the standard fee rules supported by the wallet.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum StandardFeeRule {
     #[deprecated(
         note = "Using this fee rule violates ZIP 317, and might cause transactions built with it to fail. Use `StandardFeeRule::Zip317` instead."

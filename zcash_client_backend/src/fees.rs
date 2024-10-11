@@ -1,6 +1,5 @@
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
@@ -25,10 +24,10 @@ pub mod zip317;
 /// `ChangeValue` represents either a proposed change output to a shielded pool
 /// (with an optional change memo), or if the "transparent-inputs" feature is
 /// enabled, an ephemeral output to the transparent pool.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChangeValue(ChangeValueInner);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum ChangeValueInner {
     Shielded {
         protocol: ShieldedProtocol,
@@ -115,7 +114,7 @@ impl ChangeValue {
 /// The amount of change and fees required to make a transaction's inputs and
 /// outputs balance under a specific fee rule, as computed by a particular
 /// [`ChangeStrategy`] that is aware of that rule.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransactionBalance {
     proposed_change: Vec<ChangeValue>,
     fee_required: NonNegativeAmount,

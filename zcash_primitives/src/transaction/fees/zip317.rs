@@ -4,8 +4,6 @@
 //! [ZIP 317]: https//zips.z.cash/zip-0317
 use core::cmp::max;
 
-use serde::{Deserialize, Serialize};
-
 use crate::{
     consensus::{self, BlockHeight},
     transaction::{
@@ -55,7 +53,7 @@ pub const MINIMUM_FEE: NonNegativeAmount = NonNegativeAmount::const_from_u64(10_
 ///
 /// [`FeeRule`]: crate::transaction::fees::FeeRule
 /// [ZIP 317]: https//zips.z.cash/zip-0317
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct FeeRule {
     marginal_fee: NonNegativeAmount,
     grace_actions: usize,
