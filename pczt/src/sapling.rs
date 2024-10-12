@@ -51,6 +51,14 @@ pub(crate) struct Spend {
     ///
     /// This is set by the Signer.
     pub(crate) spend_auth_sig: Option<[u8; 64]>,
+
+    /// The spend authorization randomizer.
+    ///
+    /// - This is chosen by the Constructor.
+    /// - This is required by the Signer for creating `spend_auth_sig`, and may be used to
+    ///   validate `rk`.
+    /// - After`zkproof` / `spend_auth_sig` has been set, this can be redacted.
+    pub(crate) alpha: Option<[u8; 32]>,
 }
 
 /// Information about a Sapling output within a transaction.
@@ -132,6 +140,7 @@ impl Bundle {
                 rk,
                 zkproof,
                 spend_auth_sig,
+                alpha,
             } = rhs;
 
             if lhs.cv != cv || lhs.nullifier != nullifier || lhs.rk != rk {
@@ -139,7 +148,8 @@ impl Bundle {
             }
 
             if !(merge_optional(&mut lhs.zkproof, zkproof)
-                && merge_optional(&mut lhs.spend_auth_sig, spend_auth_sig))
+                && merge_optional(&mut lhs.spend_auth_sig, spend_auth_sig)
+                && merge_optional(&mut lhs.alpha, alpha))
             {
                 return None;
             }
