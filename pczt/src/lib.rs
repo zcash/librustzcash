@@ -7,6 +7,11 @@
 //! - Constructor
 //!   - Adds spends and outputs to the PCZT.
 //!   - A single entity is likely to be both a Creator and Constructor.
+//! - Prover
+//!   - Needs all private information for a single spend or output.
+//!   - In practice, the Updater that adds a given spend or output will either act as
+//!     the Prover themselves, or add the necessary data, offload to the Prover, and
+//!     then receive back the PCZT with private data stripped and proof added.
 //! - Signer
 //!   - Needs the spend authorization randomizers to create signatures.
 //!   - A Signer should only need to implement:

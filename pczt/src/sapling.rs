@@ -52,6 +52,51 @@ pub(crate) struct Spend {
     /// This is set by the Signer.
     pub(crate) spend_auth_sig: Option<[u8; 64]>,
 
+    /// The address that received the note being spent.
+    ///
+    /// - This is set by the Constructor (or Updater?).
+    /// - This is required by the Prover.
+    pub(crate) recipient: Option<[u8; 43]>,
+
+    /// The value of the input being spent.
+    ///
+    /// This may be used by Signers to verify that the value matches `cv`, and to confirm
+    /// the values and change involved in the transaction.
+    ///
+    /// This exposes the input value to all participants. For Signers who don't need this
+    /// information, or after signatures have been applied, this can be redacted.
+    pub(crate) value: Option<u64>,
+
+    /// The seed randomness for the note being spent.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover.
+    pub(crate) rseed: Option<[u8; 32]>,
+
+    /// The value commitment randomness.
+    ///
+    /// - This is set by the Constructor.
+    /// - The IO Finalizer compresses it into the bsk.
+    /// - This is required by the Prover.
+    /// - This may be used by Signers to verify that the value correctly matches `cv`.
+    ///
+    /// This opens `cv` for all participants. For Signers who don't need this information,
+    /// or after proofs / signatures have been applied, this can be redacted.
+    pub(crate) rcv: Option<[u8; 32]>,
+
+    /// The proof generation key `(ak, nsk)` corresponding to the recipient that received
+    /// the note being spent.
+    ///
+    /// - This is set by the Updater.
+    /// - This is required by the Prover.
+    pub(crate) proof_generation_key: Option<([u8; 32], [u8; 32])>,
+
+    /// A witness from the note to the bundle's anchor.
+    ///
+    /// - This is set by the Updater.
+    /// - This is required by the Prover.
+    pub(crate) witness: Option<(u32, [[u8; 32]; 32])>,
+
     /// The spend authorization randomizer.
     ///
     /// - This is chosen by the Constructor.
@@ -81,6 +126,42 @@ pub(crate) struct Output {
     ///
     /// This is set by the Prover.
     pub(crate) zkproof: Option<[u8; GROTH_PROOF_SIZE]>,
+
+    /// The address that will receive the output.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover.
+    pub(crate) recipient: Option<[u8; 43]>,
+
+    /// The value of the output.
+    ///
+    /// This may be used by Signers to verify that the value matches `cv`, and to confirm
+    /// the values and change involved in the transaction.
+    ///
+    /// This exposes the output value to all participants. For Signers who don't need this
+    /// information, or after signatures have been applied, this can be redacted.
+    pub(crate) value: Option<u64>,
+
+    /// The seed randomness for the output.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover.
+    ///
+    /// TODO: This could instead be decrypted from `enc_ciphertext` if `shared_secret`
+    /// were required by the Prover. Likewise for `recipient` and `value`; is there ever a
+    /// need for these to be independently redacted though?
+    pub(crate) rseed: Option<[u8; 32]>,
+
+    /// The value commitment randomness.
+    ///
+    /// - This is set by the Constructor.
+    /// - The IO Finalizer compresses it into the bsk.
+    /// - This is required by the Prover.
+    /// - This may be used by Signers to verify that the value correctly matches `cv`.
+    ///
+    /// This opens `cv` for all participants. For Signers who don't need this information,
+    /// or after proofs / signatures have been applied, this can be redacted.
+    pub(crate) rcv: Option<[u8; 32]>,
 }
 
 impl Bundle {
@@ -140,6 +221,12 @@ impl Bundle {
                 rk,
                 zkproof,
                 spend_auth_sig,
+                recipient,
+                value,
+                rseed,
+                rcv,
+                proof_generation_key,
+                witness,
                 alpha,
             } = rhs;
 
@@ -149,6 +236,12 @@ impl Bundle {
 
             if !(merge_optional(&mut lhs.zkproof, zkproof)
                 && merge_optional(&mut lhs.spend_auth_sig, spend_auth_sig)
+                && merge_optional(&mut lhs.recipient, recipient)
+                && merge_optional(&mut lhs.value, value)
+                && merge_optional(&mut lhs.rseed, rseed)
+                && merge_optional(&mut lhs.rcv, rcv)
+                && merge_optional(&mut lhs.proof_generation_key, proof_generation_key)
+                && merge_optional(&mut lhs.witness, witness)
                 && merge_optional(&mut lhs.alpha, alpha))
             {
                 return None;
@@ -164,6 +257,10 @@ impl Bundle {
                 enc_ciphertext,
                 out_ciphertext,
                 zkproof,
+                recipient,
+                value,
+                rseed,
+                rcv,
             } = rhs;
 
             if lhs.cv != cv
@@ -175,7 +272,12 @@ impl Bundle {
                 return None;
             }
 
-            if !merge_optional(&mut lhs.zkproof, zkproof) {
+            if !(merge_optional(&mut lhs.zkproof, zkproof)
+                && merge_optional(&mut lhs.recipient, recipient)
+                && merge_optional(&mut lhs.value, value)
+                && merge_optional(&mut lhs.rseed, rseed)
+                && merge_optional(&mut lhs.rcv, rcv))
+            {
                 return None;
             }
         }

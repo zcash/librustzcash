@@ -57,6 +57,17 @@ pub(crate) struct Action {
     pub(crate) cv: [u8; 32],
     pub(crate) spend: Spend,
     pub(crate) output: Output,
+
+    /// The value commitment randomness.
+    ///
+    /// - This is set by the Constructor.
+    /// - The IO Finalizer compresses it into the bsk.
+    /// - This is required by the Prover.
+    /// - This may be used by Signers to verify that the value correctly matches `cv`.
+    ///
+    /// This opens `cv` for all participants. For Signers who don't need this information,
+    /// or after proofs / signatures have been applied, this can be redacted.
+    pub(crate) rcv: Option<[u8; 32]>,
 }
 
 /// Information about a Sapling spend within a transaction.
@@ -75,6 +86,49 @@ pub(crate) struct Spend {
     ///
     /// This is set by the Signer.
     pub(crate) spend_auth_sig: Option<[u8; 64]>,
+
+    /// The address that received the note being spent.
+    ///
+    /// - This is set by the Constructor (or Updater?).
+    /// - This is required by the Prover.
+    pub(crate) recipient: Option<[u8; 43]>,
+
+    /// The value of the input being spent.
+    ///
+    /// - This is required by the Prover.
+    /// - This may be used by Signers to verify that the value matches `cv`, and to
+    ///   confirm the values and change involved in the transaction.
+    ///
+    /// This exposes the input value to all participants. For Signers who don't need this
+    /// information, or after signatures have been applied, this can be redacted.
+    pub(crate) value: Option<u64>,
+
+    /// The rho value for the note being spent.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover.
+    ///
+    /// TODO: This could be merged with `rseed` into a tuple. `recipient` and `value` are
+    /// separate because they might need to be independently redacted. (For which role?)
+    pub(crate) rho: Option<[u8; 32]>,
+
+    /// The seed randomness for the note being spent.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover.
+    pub(crate) rseed: Option<[u8; 32]>,
+
+    /// The full viewing key that received the note being spent.
+    ///
+    /// - This is set by the Updater.
+    /// - This is required by the Prover.
+    pub(crate) fvk: Option<[u8; 96]>,
+
+    /// A witness from the note to the bundle's anchor.
+    ///
+    /// - This is set by the Updater.
+    /// - This is required by the Prover.
+    pub(crate) witness: Option<(u32, [[u8; 32]; 32])>,
 
     /// The spend authorization randomizer.
     ///
@@ -99,6 +153,31 @@ pub(crate) struct Output {
     /// TODO: Should it be possible to choose the memo _value_ after defining an Output?
     pub(crate) enc_ciphertext: [u8; 580],
     pub(crate) out_ciphertext: [u8; 80],
+
+    /// The address that will receive the output.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover.
+    pub(crate) recipient: Option<[u8; 43]>,
+
+    /// The value of the output.
+    ///
+    /// This may be used by Signers to verify that the value matches `cv`, and to confirm
+    /// the values and change involved in the transaction.
+    ///
+    /// This exposes the value to all participants. For Signers who don't need this
+    /// information, we can drop the values and compress the rcvs into the bsk global.
+    pub(crate) value: Option<u64>,
+
+    /// The seed randomness for the output.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover.
+    ///
+    /// TODO: This could instead be decrypted from `enc_ciphertext` if `shared_secret`
+    /// were required by the Prover. Likewise for `recipient` and `value`; is there ever a
+    /// need for these to be independently redacted though?
+    pub(crate) rseed: Option<[u8; 32]>,
 }
 
 impl Bundle {
@@ -161,6 +240,12 @@ impl Bundle {
                         nullifier,
                         rk,
                         spend_auth_sig,
+                        recipient,
+                        value,
+                        rho,
+                        rseed,
+                        fvk,
+                        witness,
                         alpha,
                     },
                 output:
@@ -169,7 +254,11 @@ impl Bundle {
                         ephemeral_key,
                         enc_ciphertext,
                         out_ciphertext,
+                        recipient: output_recipient,
+                        value: output_value,
+                        rseed: output_rseed,
                     },
+                rcv,
             } = rhs;
 
             if lhs.cv != cv
@@ -184,7 +273,17 @@ impl Bundle {
             }
 
             if !(merge_optional(&mut lhs.spend.spend_auth_sig, spend_auth_sig)
-                && merge_optional(&mut lhs.spend.alpha, alpha))
+                && merge_optional(&mut lhs.spend.recipient, recipient)
+                && merge_optional(&mut lhs.spend.value, value)
+                && merge_optional(&mut lhs.spend.rho, rho)
+                && merge_optional(&mut lhs.spend.rseed, rseed)
+                && merge_optional(&mut lhs.spend.fvk, fvk)
+                && merge_optional(&mut lhs.spend.witness, witness)
+                && merge_optional(&mut lhs.spend.alpha, alpha)
+                && merge_optional(&mut lhs.output.recipient, output_recipient)
+                && merge_optional(&mut lhs.output.value, output_value)
+                && merge_optional(&mut lhs.output.rseed, output_rseed)
+                && merge_optional(&mut lhs.rcv, rcv))
             {
                 return None;
             }
