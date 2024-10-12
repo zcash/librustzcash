@@ -20,6 +20,7 @@ rand_core = { workspace = true, optional = true }
 # Payment protocols
 # - Sapling
 bls12_381 = { workspace = true, optional = true }
+ff = { workspace = true, optional = true }
 jubjub = { workspace = true, optional = true }
 redjubjub = { workspace = true, optional = true }
 sapling = { workspace = true, optional = true }
@@ -38,6 +39,7 @@ orchard = [
 ]
 sapling = [
     "dep:bls12_381",
+    "dep:ff",
     "dep:jubjub",
     "dep:redjubjub",
     "dep:sapling",
@@ -45,5 +47,6 @@ sapling = [
     "dep:zcash_protocol",
 ]
 transparent = ["dep:zcash_primitives", "dep:zcash_protocol"]
+prover = ["dep:rand_core", "sapling?/temporary-zcashd"]
 signer = ["dep:rand_core", "orchard", "sapling", "transparent"]
 tx-extractor = ["dep:rand_core", "orchard", "sapling", "transparent"]

@@ -1,9 +1,14 @@
 use std::cmp::Ordering;
 
-use crate::roles::combiner::merge_optional;
+use crate::{roles::combiner::merge_optional, IgnoreMissing};
 
 #[cfg(feature = "sapling")]
-use pasta_curves::group::ff::PrimeField;
+use {
+    ff::PrimeField,
+    sapling::{
+        keys::SpendValidatingKey, value::NoteValue, MerklePath, Node, Note, PaymentAddress, Rseed,
+    },
+};
 
 const GROTH_PROOF_SIZE: usize = 48 + 96 + 48;
 
@@ -55,6 +60,65 @@ pub(crate) struct Spend {
     /// This is set by the Signer.
     pub(crate) spend_auth_sig: Option<[u8; 64]>,
 
+    /// The [raw encoding] of the Sapling payment address that received the note being spent.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover.
+    ///
+    /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#saplingpaymentaddrencoding
+    pub(crate) recipient: Option<[u8; 43]>,
+
+    /// The value of the input being spent.
+    ///
+    /// This may be used by Signers to verify that the value matches `cv`, and to confirm
+    /// the values and change involved in the transaction.
+    ///
+    /// This exposes the input value to all participants. For Signers who don't need this
+    /// information, or after signatures have been applied, this can be redacted.
+    pub(crate) value: Option<u64>,
+
+    /// The note commitment randomness.
+    ///
+    /// - This is set by the Constructor. It MUST NOT be set if the note has an `rseed`
+    ///   (i.e. was created after [ZIP 212] activation).
+    /// - The Prover requires either this or `rseed`.
+    ///
+    /// [ZIP 212]: https://zips.z.cash/zip-0212
+    pub(crate) rcm: Option<[u8; 32]>,
+
+    /// The seed randomness for the note being spent.
+    ///
+    /// - This is set by the Constructor. It MUST NOT be set if the note has no `rseed`
+    ///   (i.e. was created before [ZIP 212] activation).
+    /// - The Prover requires either this or `rcm`.
+    ///
+    /// [ZIP 212]: https://zips.z.cash/zip-0212
+    pub(crate) rseed: Option<[u8; 32]>,
+
+    /// The value commitment randomness.
+    ///
+    /// - This is set by the Constructor.
+    /// - The IO Finalizer compresses it into `bsk`.
+    /// - This is required by the Prover.
+    /// - This may be used by Signers to verify that the value correctly matches `cv`.
+    ///
+    /// This opens `cv` for all participants. For Signers who don't need this information,
+    /// or after proofs / signatures have been applied, this can be redacted.
+    pub(crate) rcv: Option<[u8; 32]>,
+
+    /// The proof generation key `(ak, nsk)` corresponding to the recipient that received
+    /// the note being spent.
+    ///
+    /// - This is set by the Updater.
+    /// - This is required by the Prover.
+    pub(crate) proof_generation_key: Option<([u8; 32], [u8; 32])>,
+
+    /// A witness from the note to the bundle's anchor.
+    ///
+    /// - This is set by the Updater.
+    /// - This is required by the Prover.
+    pub(crate) witness: Option<(u32, [[u8; 32]; 32])>,
+
     /// The spend authorization randomizer.
     ///
     /// - This is chosen by the Constructor.
@@ -101,6 +165,40 @@ pub(crate) struct Output {
     ///
     /// This is set by the Prover.
     pub(crate) zkproof: Option<[u8; GROTH_PROOF_SIZE]>,
+
+    /// The [raw encoding] of the Sapling payment address that will receive the output.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover.
+    ///
+    /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#saplingpaymentaddrencoding
+    pub(crate) recipient: Option<[u8; 43]>,
+
+    /// The value of the output.
+    ///
+    /// This may be used by Signers to verify that the value matches `cv`, and to confirm
+    /// the values and change involved in the transaction.
+    ///
+    /// This exposes the output value to all participants. For Signers who don't need this
+    /// information, or after signatures have been applied, this can be redacted.
+    pub(crate) value: Option<u64>,
+
+    /// The seed randomness for the output.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover, instead of disclosing `shared_secret` to them.
+    pub(crate) rseed: Option<[u8; 32]>,
+
+    /// The value commitment randomness.
+    ///
+    /// - This is set by the Constructor.
+    /// - The IO Finalizer compresses it into `bsk`.
+    /// - This is required by the Prover.
+    /// - This may be used by Signers to verify that the value correctly matches `cv`.
+    ///
+    /// This opens `cv` for all participants. For Signers who don't need this information,
+    /// or after proofs / signatures have been applied, this can be redacted.
+    pub(crate) rcv: Option<[u8; 32]>,
 }
 
 impl Bundle {
@@ -180,6 +278,13 @@ impl Bundle {
                 rk,
                 zkproof,
                 spend_auth_sig,
+                recipient,
+                value,
+                rcm,
+                rseed,
+                rcv,
+                proof_generation_key,
+                witness,
                 alpha,
                 dummy_ask,
             } = rhs;
@@ -190,6 +295,13 @@ impl Bundle {
 
             if !(merge_optional(&mut lhs.zkproof, zkproof)
                 && merge_optional(&mut lhs.spend_auth_sig, spend_auth_sig)
+                && merge_optional(&mut lhs.recipient, recipient)
+                && merge_optional(&mut lhs.value, value)
+                && merge_optional(&mut lhs.rcm, rcm)
+                && merge_optional(&mut lhs.rseed, rseed)
+                && merge_optional(&mut lhs.rcv, rcv)
+                && merge_optional(&mut lhs.proof_generation_key, proof_generation_key)
+                && merge_optional(&mut lhs.witness, witness)
                 && merge_optional(&mut lhs.alpha, alpha)
                 && merge_optional(&mut lhs.dummy_ask, dummy_ask))
             {
@@ -206,6 +318,10 @@ impl Bundle {
                 enc_ciphertext,
                 out_ciphertext,
                 zkproof,
+                recipient,
+                value,
+                rseed,
+                rcv,
             } = rhs;
 
             if lhs.cv != cv
@@ -217,7 +333,12 @@ impl Bundle {
                 return None;
             }
 
-            if !merge_optional(&mut lhs.zkproof, zkproof) {
+            if !(merge_optional(&mut lhs.zkproof, zkproof)
+                && merge_optional(&mut lhs.recipient, recipient)
+                && merge_optional(&mut lhs.value, value)
+                && merge_optional(&mut lhs.rseed, rseed)
+                && merge_optional(&mut lhs.rcv, rcv))
+            {
                 return None;
             }
         }
@@ -329,6 +450,59 @@ impl Bundle {
 
 #[cfg(feature = "sapling")]
 impl Spend {
+    /// Parses a [`Note`] from the explicit fields of this spend.
+    pub(crate) fn note_from_fields(&self) -> Result<Note, Error> {
+        // We want to parse all fields that are present for validity, before raising any
+        // errors about missing fields.
+
+        let recipient = self
+            .recipient
+            .as_ref()
+            .map(|r| PaymentAddress::from_bytes(r).ok_or(Error::InvalidRecipient))
+            .transpose()?;
+
+        let value = self.value.map(NoteValue::from_raw);
+        let rseed = self.rseed.map(Rseed::AfterZip212);
+
+        Ok(Note::from_parts(
+            recipient.ok_or(Error::MissingRecipient)?,
+            value.ok_or(Error::MissingValue)?,
+            rseed.ok_or(Error::MissingRandomSeed)?,
+        ))
+    }
+
+    pub(crate) fn proof_generation_key_from_field(
+        &self,
+    ) -> Result<sapling::ProofGenerationKey, Error> {
+        let (ak, nsk) = self
+            .proof_generation_key
+            .ok_or(Error::MissingProofGenerationKey)?;
+
+        Ok(sapling::ProofGenerationKey {
+            ak: SpendValidatingKey::temporary_zcash_from_bytes(&ak)
+                .ok_or(Error::InvalidProofGenerationKey)?,
+            nsk: jubjub::Scalar::from_repr(nsk)
+                .into_option()
+                .ok_or(Error::InvalidProofGenerationKey)?,
+        })
+    }
+
+    pub(crate) fn witness_from_field(&self) -> Result<MerklePath, Error> {
+        let (position, auth_path_bytes) = self.witness.ok_or(Error::MissingWitness)?;
+
+        let path_elems = auth_path_bytes
+            .into_iter()
+            .map(|hash| {
+                Node::from_bytes(hash)
+                    .into_option()
+                    .ok_or(Error::InvalidWitness)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        MerklePath::from_parts(path_elems, u64::from(position).into())
+            .map_err(|()| Error::InvalidWitness)
+    }
+
     pub(crate) fn alpha_from_field(&self) -> Result<jubjub::Scalar, Error> {
         jubjub::Scalar::from_repr(self.alpha.ok_or(Error::MissingSpendAuthRandomizer)?)
             .into_option()
@@ -343,9 +517,35 @@ pub enum Error {
     InvalidEncCiphertext,
     InvalidExtractedNoteCommitment,
     InvalidOutCiphertext,
+    InvalidProofGenerationKey,
     InvalidRandomizedKey,
+    InvalidRecipient,
     InvalidSpendAuthRandomizer,
     InvalidValueBalance(zcash_protocol::value::BalanceError),
     InvalidValueCommitment,
+    InvalidWitness,
+    MissingProofGenerationKey,
+    MissingRandomSeed,
+    MissingRecipient,
     MissingSpendAuthRandomizer,
+    MissingValue,
+    MissingWitness,
+}
+
+#[cfg(feature = "sapling")]
+impl<V> IgnoreMissing for Result<V, Error> {
+    type Value = V;
+    type Error = Error;
+
+    fn ignore_missing(self) -> Result<Option<Self::Value>, Self::Error> {
+        self.map(Some).or_else(|e| match e {
+            Error::MissingProofGenerationKey
+            | Error::MissingRandomSeed
+            | Error::MissingRecipient
+            | Error::MissingSpendAuthRandomizer
+            | Error::MissingValue
+            | Error::MissingWitness => Ok(None),
+            _ => Err(e),
+        })
+    }
 }

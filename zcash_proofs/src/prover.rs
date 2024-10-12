@@ -6,6 +6,7 @@ use std::path::Path;
 
 use sapling::{
     bundle::GrothProofBytes,
+    keys::EphemeralSecretKey,
     prover::{OutputProver, SpendProver},
     value::{NoteValue, ValueCommitTrapdoor},
     Diversifier, MerklePath, PaymentAddress, ProofGenerationKey, Rseed,
@@ -176,7 +177,7 @@ impl OutputProver for LocalTxProver {
     type Proof = Proof<Bls12>;
 
     fn prepare_circuit(
-        esk: jubjub::Fr,
+        esk: &EphemeralSecretKey,
         payment_address: PaymentAddress,
         rcm: jubjub::Fr,
         value: NoteValue,

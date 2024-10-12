@@ -10,9 +10,21 @@
 //!     `Global.tx_modifiable` field. Inputs may only be added if the Inputs Modifiable
 //!     flag is True. Outputs may only be added if the Outputs Modifiable flag is True.
 //!   - A single entity is likely to be both a Creator and Constructor.
+//! - Prover (capability holders can contribute)
+//!   - Needs all private information for a single spend or output.
+//!   - In practice, the Updater that adds a given spend or output will either act as
+//!     the Prover themselves, or add the necessary data, offload to the Prover, and
+//!     then receive back the PCZT with private data stripped and proof added.
 //! - Signer (capability holders can contribute)
 //!   - Needs the spend authorization randomizers to create signatures.
+//!   - Needs sufficient information to verify that the proof is over the correct data,
+//!     without needing to verify the proof itself.
 //!   - A Signer should only need to implement:
+//!     - Pedersen commitments using Jubjub / Pallas arithmetic (for note and value
+//!       commitments)
+//!     - BLAKE2b and BLAKE2s (and the various PRFs / CRHs they are used in)
+//!     - Nullifier check (using Jubjub / Pallas arithmetic)
+//!     - KDF plus note decryption (AEAD_CHACHA20_POLY1305)
 //!     - SignatureHash algorithm
 //!     - Signatures (RedJubjub / RedPallas)
 //!     - A source of randomness.

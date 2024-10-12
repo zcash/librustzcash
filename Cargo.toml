@@ -182,3 +182,6 @@ debug = true
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
+
+[patch.crates-io]
+sapling-crypto = { git = "https://github.com/zcash/sapling-crypto.git", rev = "a8fb276252894cf5d0e97e289f5509cc89bad095" }

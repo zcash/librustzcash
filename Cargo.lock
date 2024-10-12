@@ -2867,6 +2867,7 @@ name = "pczt"
 version = "0.0.0"
 dependencies = [
  "bls12_381",
+ "ff",
  "jubjub",
  "nonempty",
  "orchard",
@@ -3684,8 +3685,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfff8cfce16aeb38da50b8e2ed33c9018f30552beff2210c266662a021b17f38"
+source = "git+https://github.com/zcash/sapling-crypto.git?rev=a8fb276252894cf5d0e97e289f5509cc89bad095#a8fb276252894cf5d0e97e289f5509cc89bad095"
 dependencies = [
  "aes",
  "bellman",

@@ -1,5 +1,8 @@
 pub mod creator;
 
+#[cfg(feature = "prover")]
+pub mod prover;
+
 #[cfg(feature = "signer")]
 pub mod signer;
 

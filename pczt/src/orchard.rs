@@ -1,7 +1,14 @@
-use crate::roles::combiner::merge_optional;
+use crate::{roles::combiner::merge_optional, IgnoreMissing};
 
 #[cfg(feature = "orchard")]
-use pasta_curves::{group::ff::PrimeField, pallas};
+use {
+    orchard::{
+        note::{RandomSeed, Rho},
+        value::NoteValue,
+        Address, Note,
+    },
+    pasta_curves::{group::ff::PrimeField, pallas},
+};
 
 /// PCZT fields that are specific to producing the transaction's Orchard bundle (if any).
 #[derive(Clone, Debug)]
@@ -58,6 +65,17 @@ pub(crate) struct Action {
     pub(crate) cv_net: [u8; 32],
     pub(crate) spend: Spend,
     pub(crate) output: Output,
+
+    /// The value commitment randomness.
+    ///
+    /// - This is set by the Constructor.
+    /// - The IO Finalizer compresses it into the bsk.
+    /// - This is required by the Prover.
+    /// - This may be used by Signers to verify that the value correctly matches `cv`.
+    ///
+    /// This opens `cv` for all participants. For Signers who don't need this information,
+    /// or after proofs / signatures have been applied, this can be redacted.
+    pub(crate) rcv: Option<[u8; 32]>,
 }
 
 /// Information about a Sapling spend within a transaction.
@@ -76,6 +94,48 @@ pub(crate) struct Spend {
     ///
     /// This is set by the Signer.
     pub(crate) spend_auth_sig: Option<[u8; 64]>,
+
+    /// The [raw encoding] of the Orchard payment address that received the note being spent.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover.
+    ///
+    /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#orchardpaymentaddrencoding
+    pub(crate) recipient: Option<[u8; 43]>,
+
+    /// The value of the input being spent.
+    ///
+    /// - This is required by the Prover.
+    /// - This may be used by Signers to verify that the value matches `cv`, and to
+    ///   confirm the values and change involved in the transaction.
+    ///
+    /// This exposes the input value to all participants. For Signers who don't need this
+    /// information, or after signatures have been applied, this can be redacted.
+    pub(crate) value: Option<u64>,
+
+    /// The rho value for the note being spent.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover.
+    pub(crate) rho: Option<[u8; 32]>,
+
+    /// The seed randomness for the note being spent.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover.
+    pub(crate) rseed: Option<[u8; 32]>,
+
+    /// The full viewing key that received the note being spent.
+    ///
+    /// - This is set by the Updater.
+    /// - This is required by the Prover.
+    pub(crate) fvk: Option<[u8; 96]>,
+
+    /// A witness from the note to the bundle's anchor.
+    ///
+    /// - This is set by the Updater.
+    /// - This is required by the Prover.
+    pub(crate) witness: Option<(u32, [[u8; 32]; 32])>,
 
     /// The spend authorization randomizer.
     ///
@@ -115,6 +175,29 @@ pub(crate) struct Output {
     ///
     /// Encoded as a `Vec<u8>` because its length depends on the transaction version.
     pub(crate) out_ciphertext: Vec<u8>,
+
+    /// The [raw encoding] of the Orchard payment address that will receive the output.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover.
+    ///
+    /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#orchardpaymentaddrencoding
+    pub(crate) recipient: Option<[u8; 43]>,
+
+    /// The value of the output.
+    ///
+    /// This may be used by Signers to verify that the value matches `cv`, and to confirm
+    /// the values and change involved in the transaction.
+    ///
+    /// This exposes the value to all participants. For Signers who don't need this
+    /// information, we can drop the values and compress the rcvs into the bsk global.
+    pub(crate) value: Option<u64>,
+
+    /// The seed randomness for the output.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover, instead of disclosing `shared_secret` to them.
+    pub(crate) rseed: Option<[u8; 32]>,
 }
 
 impl Bundle {
@@ -180,6 +263,12 @@ impl Bundle {
                         nullifier,
                         rk,
                         spend_auth_sig,
+                        recipient,
+                        value,
+                        rho,
+                        rseed,
+                        fvk,
+                        witness,
                         alpha,
                         dummy_sk,
                     },
@@ -189,7 +278,11 @@ impl Bundle {
                         ephemeral_key,
                         enc_ciphertext,
                         out_ciphertext,
+                        recipient: output_recipient,
+                        value: output_value,
+                        rseed: output_rseed,
                     },
+                rcv,
             } = rhs;
 
             if lhs.cv_net != cv_net
@@ -204,8 +297,18 @@ impl Bundle {
             }
 
             if !(merge_optional(&mut lhs.spend.spend_auth_sig, spend_auth_sig)
+                && merge_optional(&mut lhs.spend.recipient, recipient)
+                && merge_optional(&mut lhs.spend.value, value)
+                && merge_optional(&mut lhs.spend.rho, rho)
+                && merge_optional(&mut lhs.spend.rseed, rseed)
+                && merge_optional(&mut lhs.spend.fvk, fvk)
+                && merge_optional(&mut lhs.spend.witness, witness)
                 && merge_optional(&mut lhs.spend.alpha, alpha)
-                && merge_optional(&mut lhs.spend.dummy_sk, dummy_sk))
+                && merge_optional(&mut lhs.spend.dummy_sk, dummy_sk)
+                && merge_optional(&mut lhs.output.recipient, output_recipient)
+                && merge_optional(&mut lhs.output.value, output_value)
+                && merge_optional(&mut lhs.output.rseed, output_rseed)
+                && merge_optional(&mut lhs.rcv, rcv))
             {
                 return None;
             }
@@ -313,6 +416,57 @@ impl Bundle {
 
 #[cfg(feature = "orchard")]
 impl Spend {
+    /// Parses a [`Note`] from the explicit fields of this spend.
+    pub(crate) fn note_from_fields(&self) -> Result<Note, Error> {
+        // We want to parse all fields that are present for validity, before raising any
+        // errors about missing fields. The only exception is that we raise an error for a
+        // missing rho before validating rseed (as the latter requires rho).
+
+        let recipient = self
+            .recipient
+            .as_ref()
+            .map(|r| {
+                Address::from_raw_address_bytes(r)
+                    .into_option()
+                    .ok_or(Error::InvalidSpendRecipient)
+            })
+            .transpose()?;
+
+        let value = self.value.map(NoteValue::from_raw);
+
+        let rho = self
+            .rho
+            .as_ref()
+            .map(|rho| Rho::from_bytes(rho).into_option().ok_or(Error::InvalidRho))
+            .transpose()?
+            .ok_or(Error::MissingRho)?;
+
+        let rseed = self
+            .rseed
+            .map(|rseed| {
+                RandomSeed::from_bytes(rseed, &rho)
+                    .into_option()
+                    .ok_or(Error::InvalidRandomSeed)
+            })
+            .transpose()?;
+
+        Note::from_parts(
+            recipient.ok_or(Error::MissingSpendRecipient)?,
+            value.ok_or(Error::MissingValue)?,
+            rho,
+            rseed.ok_or(Error::MissingRandomSeed)?,
+        )
+        .into_option()
+        .ok_or(Error::InvalidSpendNote)
+    }
+
+    pub(crate) fn fvk_from_field(&self) -> Result<orchard::keys::FullViewingKey, Error> {
+        orchard::keys::FullViewingKey::from_bytes(
+            self.fvk.as_ref().ok_or(Error::MissingFullViewingKey)?,
+        )
+        .ok_or(Error::InvalidFullViewingKey)
+    }
+
     pub(crate) fn alpha_from_field(&self) -> Result<pallas::Scalar, Error> {
         pallas::Scalar::from_repr(self.alpha.ok_or(Error::MissingSpendAuthRandomizer)?)
             .into_option()
@@ -326,12 +480,40 @@ pub enum Error {
     InvalidAnchor,
     InvalidEncCiphertext,
     InvalidExtractedNoteCommitment,
+    InvalidFullViewingKey,
     InvalidNullifier,
     InvalidOutCiphertext,
     InvalidRandomizedKey,
+    InvalidRandomSeed,
+    InvalidRho,
     InvalidSpendAuthRandomizer,
+    InvalidSpendNote,
+    InvalidSpendRecipient,
     InvalidValueBalance(zcash_protocol::value::BalanceError),
     InvalidValueCommitment,
+    MissingFullViewingKey,
+    MissingRandomSeed,
+    MissingRho,
     MissingSpendAuthRandomizer,
+    MissingSpendRecipient,
+    MissingValue,
     UnexpectedFlagBitsSet,
+}
+
+#[cfg(feature = "orchard")]
+impl<V> IgnoreMissing for Result<V, Error> {
+    type Value = V;
+    type Error = Error;
+
+    fn ignore_missing(self) -> Result<Option<Self::Value>, Self::Error> {
+        self.map(Some).or_else(|e| match e {
+            Error::MissingFullViewingKey
+            | Error::MissingRandomSeed
+            | Error::MissingRho
+            | Error::MissingSpendAuthRandomizer
+            | Error::MissingSpendRecipient
+            | Error::MissingValue => Ok(None),
+            _ => Err(e),
+        })
+    }
 }
