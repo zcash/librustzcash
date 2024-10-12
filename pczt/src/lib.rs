@@ -10,6 +10,12 @@
 //!     `Global.tx_modifiable` field. Inputs may only be added if the Inputs Modifiable
 //!     flag is True. Outputs may only be added if the Outputs Modifiable flag is True.
 //!   - A single entity is likely to be both a Creator and Constructor.
+//! - Signer (capability holders can contribute)
+//!   - Needs the spend authorization randomizers to create signatures.
+//!   - A Signer should only need to implement:
+//!     - SignatureHash algorithm
+//!     - Signatures (RedJubjub / RedPallas)
+//!     - A source of randomness.
 //! - Combiner (anyone can execute)
 //!   - Combines several PCZTs that represent the same transaction into a single PCZT.
 //! - Transaction Extractor (anyone can execute)

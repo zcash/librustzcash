@@ -1,5 +1,8 @@
 use crate::roles::combiner::merge_optional;
 
+#[cfg(feature = "orchard")]
+use pasta_curves::{group::ff::PrimeField, pallas};
+
 /// PCZT fields that are specific to producing the transaction's Orchard bundle (if any).
 #[derive(Clone, Debug)]
 pub(crate) struct Bundle {
@@ -73,6 +76,21 @@ pub(crate) struct Spend {
     ///
     /// This is set by the Signer.
     pub(crate) spend_auth_sig: Option<[u8; 64]>,
+
+    /// The spend authorization randomizer.
+    ///
+    /// - This is chosen by the Constructor.
+    /// - This is required by the Signer for creating `spend_auth_sig`, and may be used to
+    ///   validate `rk`.
+    /// - After `zkproof` / `spend_auth_sig` has been set, this can be redacted.
+    pub(crate) alpha: Option<[u8; 32]>,
+
+    /// The spending key for this spent note, if it is a dummy note.
+    ///
+    /// - This is chosen by the Constructor.
+    /// - This is required by the IO Finalizer, and is cleared by it once used.
+    /// - Signers MUST reject PCZTs that contain `dummy_sk` values.
+    pub(crate) dummy_sk: Option<[u8; 32]>,
 }
 
 /// Information about an Orchard output within a transaction.
@@ -162,6 +180,8 @@ impl Bundle {
                         nullifier,
                         rk,
                         spend_auth_sig,
+                        alpha,
+                        dummy_sk,
                     },
                 output:
                     Output {
@@ -183,7 +203,10 @@ impl Bundle {
                 return None;
             }
 
-            if !merge_optional(&mut lhs.spend.spend_auth_sig, spend_auth_sig) {
+            if !(merge_optional(&mut lhs.spend.spend_auth_sig, spend_auth_sig)
+                && merge_optional(&mut lhs.spend.alpha, alpha)
+                && merge_optional(&mut lhs.spend.dummy_sk, dummy_sk))
+            {
                 return None;
             }
         }
@@ -289,6 +312,15 @@ impl Bundle {
 }
 
 #[cfg(feature = "orchard")]
+impl Spend {
+    pub(crate) fn alpha_from_field(&self) -> Result<pallas::Scalar, Error> {
+        pallas::Scalar::from_repr(self.alpha.ok_or(Error::MissingSpendAuthRandomizer)?)
+            .into_option()
+            .ok_or(Error::InvalidSpendAuthRandomizer)
+    }
+}
+
+#[cfg(feature = "orchard")]
 #[derive(Debug)]
 pub enum Error {
     InvalidAnchor,
@@ -297,7 +329,9 @@ pub enum Error {
     InvalidNullifier,
     InvalidOutCiphertext,
     InvalidRandomizedKey,
+    InvalidSpendAuthRandomizer,
     InvalidValueBalance(zcash_protocol::value::BalanceError),
     InvalidValueCommitment,
+    MissingSpendAuthRandomizer,
     UnexpectedFlagBitsSet,
 }

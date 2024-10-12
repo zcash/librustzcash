@@ -2867,8 +2867,10 @@ name = "pczt"
 version = "0.0.0"
 dependencies = [
  "bls12_381",
+ "jubjub",
  "nonempty",
  "orchard",
+ "pasta_curves",
  "rand_core",
  "redjubjub",
  "sapling-crypto",

@@ -1,5 +1,8 @@
 pub mod creator;
 
+#[cfg(feature = "signer")]
+pub mod signer;
+
 pub mod combiner;
 
 #[cfg(feature = "tx-extractor")]

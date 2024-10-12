@@ -20,21 +20,30 @@ rand_core = { workspace = true, optional = true }
 # Payment protocols
 # - Sapling
 bls12_381 = { workspace = true, optional = true }
+jubjub = { workspace = true, optional = true }
 redjubjub = { workspace = true, optional = true }
 sapling = { workspace = true, optional = true }
 
 # - Orchard
 nonempty = { workspace = true, optional = true }
 orchard = { workspace = true, optional = true }
+pasta_curves = { workspace = true, optional = true }
 
 [features]
-orchard = ["dep:nonempty", "dep:orchard", "dep:zcash_protocol"]
+orchard = [
+    "dep:nonempty",
+    "dep:orchard",
+    "dep:pasta_curves",
+    "dep:zcash_protocol",
+]
 sapling = [
     "dep:bls12_381",
+    "dep:jubjub",
     "dep:redjubjub",
     "dep:sapling",
     "dep:zcash_note_encryption",
     "dep:zcash_protocol",
 ]
 transparent = ["dep:zcash_primitives", "dep:zcash_protocol"]
+signer = ["dep:rand_core", "orchard", "sapling", "transparent"]
 tx-extractor = ["dep:rand_core", "orchard", "sapling", "transparent"]
