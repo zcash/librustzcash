@@ -421,7 +421,10 @@ pub(crate) fn add_transparent_account_balances(
         account_balances
             .entry(account)
             .or_insert(AccountBalance::ZERO)
-            .add_unshielded_value(value)?;
+            .with_unshielded_balance_mut::<_, SqliteClientError>(|bal| {
+                bal.add_pending_spendable_value(value)?;
+                Ok(())
+            })?;
     }
     Ok(())
 }

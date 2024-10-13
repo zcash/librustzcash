@@ -239,7 +239,7 @@ pub struct AccountBalance {
     /// possible operation on a transparent balance is to shield it, it is possible to create a
     /// zero-conf transaction to perform that shielding, and the resulting shielded notes will be
     /// subject to normal confirmation rules.
-    unshielded: NonNegativeAmount,
+    unshielded_balance: Balance,
 }
 
 impl AccountBalance {
@@ -247,11 +247,11 @@ impl AccountBalance {
     pub const ZERO: Self = Self {
         sapling_balance: Balance::ZERO,
         orchard_balance: Balance::ZERO,
-        unshielded: NonNegativeAmount::ZERO,
+        unshielded_balance: Balance::ZERO,
     };
 
     fn check_total(&self) -> Result<NonNegativeAmount, BalanceError> {
-        (self.sapling_balance.total() + self.orchard_balance.total() + self.unshielded)
+        (self.sapling_balance.total() + self.orchard_balance.total() + self.unshielded_balance.total())
             .ok_or(BalanceError::Overflow)
     }
 
@@ -289,22 +289,45 @@ impl AccountBalance {
         Ok(result)
     }
 
+    
     /// Returns the total value of unspent transparent transaction outputs belonging to the wallet.
+    #[deprecated(
+        note = "this function is deprecated. Please use AccountBalance::unshielded_balance instead."
+    )]
     pub fn unshielded(&self) -> NonNegativeAmount {
-        self.unshielded
+        self.unshielded_balance.total()
+    }
+
+    /// Returns the [`Balance`] of unshielded funds in the account.
+    pub fn unshielded_balance(&self) -> &Balance {
+        &self.unshielded_balance
+    }
+
+    /// Provides a `mutable reference to the [`Balance`] of transparent funds in the account
+    /// to the specified callback, checking invariants after the callback's action has been
+    /// evaluated.
+    pub fn with_unshielded_balance_mut<A, E: From<BalanceError>>(
+        &mut self,
+        f: impl FnOnce(&mut Balance) -> Result<A, E>,
+    ) -> Result<A, E> {
+        let result = f(&mut self.unshielded_balance)?;
+        self.check_total()?;
+        Ok(result)
     }
 
     /// Adds the specified value to the unshielded total, checking for overflow of
     /// the total account balance.
-    pub fn add_unshielded_value(&mut self, value: NonNegativeAmount) -> Result<(), BalanceError> {
-        self.unshielded = (self.unshielded + value).ok_or(BalanceError::Overflow)?;
-        self.check_total()?;
+    #[deprecated(
+        note = "this function is deprecated. Please use the `Balance::add_spendable_value` on the unshielded field instead instead."
+    )]
+    pub fn add_unshielded_value(&mut self, value: NonNegativeAmount) -> Result<(), BalanceError> {        
+        self.unshielded_balance.add_pending_spendable_value(value)?;
         Ok(())
     }
 
     /// Returns the total value of funds belonging to the account.
     pub fn total(&self) -> NonNegativeAmount {
-        (self.sapling_balance.total() + self.orchard_balance.total() + self.unshielded)
+        (self.sapling_balance.total() + self.orchard_balance.total() + self.unshielded_balance.total())
             .expect("Account balance cannot overflow MAX_MONEY")
     }
 
