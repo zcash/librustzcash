@@ -8,6 +8,10 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Changed
+- `zcash_client_backend::data_api::AccountBalance`:
+  - Refactored to use `Balance` for transparent funds (issue #1411).
+    `AccountBalance` now has an `unshielded_balance()` that uses `Balance` and replaces the
+    (now deleted) `unshielded` non-negative amount.
 - `zcash_client_backend::data_api::WalletRead`:
   - The `create_account`, `import_account_hd`, and `import_account_ufvk`
     methods now each take additional `account_name` and `key_source` arguments.
@@ -105,6 +109,15 @@ and this library adheres to Rust's notion of
 
 ### Removed
 - `zcash_client_backend::data_api`:
+  - `AccountBalance::unshielded`. `AccountBalance` no longer provides the `unshielded`
+    method returning a `NonNegativeAmount` for the total of transparent funds.
+    Instead use `unshielded_balance` which provides a `Balance` value.
+  - `zcash_client_backend::AccountBalance::add_unshielded_value`. Instead use
+    `AccountBalance::with_unshielded_balance_mut` with a closure that calls
+    the appropriate `add_*_value` method(s) of `Balance` on its argument.
+    Note that the appropriate method(s) depend on whether the funds are
+    spendable, pending change, or pending non-change (previously, only the
+    total unshielded value was tracked).
   - `WalletSummary::scan_progress` and `WalletSummary::recovery_progress` have
     been removed. Use `WalletSummary::progress` instead.
   - `testing::input_selector` use explicit `InputSelector` constructors

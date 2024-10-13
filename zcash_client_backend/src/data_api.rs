@@ -231,14 +231,8 @@ pub struct AccountBalance {
     /// The value of unspent Orchard outputs belonging to the account.
     orchard_balance: Balance,
 
-    /// The value of all unspent transparent outputs belonging to the account, irrespective of
-    /// confirmation depth.
-    ///
-    /// Unshielded balances are not subject to confirmation-depth constraints, because the only
-    /// possible operation on a transparent balance is to shield it, it is possible to create a
-    /// zero-conf transaction to perform that shielding, and the resulting shielded notes will be
-    /// subject to normal confirmation rules.
-    unshielded: NonNegativeAmount,
+    /// The value of all unspent transparent outputs belonging to the account.
+    unshielded_balance: Balance,
 }
 
 impl AccountBalance {
@@ -246,12 +240,14 @@ impl AccountBalance {
     pub const ZERO: Self = Self {
         sapling_balance: Balance::ZERO,
         orchard_balance: Balance::ZERO,
-        unshielded: NonNegativeAmount::ZERO,
+        unshielded_balance: Balance::ZERO,
     };
 
     fn check_total(&self) -> Result<NonNegativeAmount, BalanceError> {
-        (self.sapling_balance.total() + self.orchard_balance.total() + self.unshielded)
-            .ok_or(BalanceError::Overflow)
+        (self.sapling_balance.total()
+            + self.orchard_balance.total()
+            + self.unshielded_balance.total())
+        .ok_or(BalanceError::Overflow)
     }
 
     /// Returns the [`Balance`] of Sapling funds in the account.
@@ -259,7 +255,7 @@ impl AccountBalance {
         &self.sapling_balance
     }
 
-    /// Provides a `mutable reference to the [`Balance`] of Sapling funds in the account
+    /// Provides a mutable reference to the [`Balance`] of Sapling funds in the account
     /// to the specified callback, checking invariants after the callback's action has been
     /// evaluated.
     pub fn with_sapling_balance_mut<A, E: From<BalanceError>>(
@@ -276,7 +272,7 @@ impl AccountBalance {
         &self.orchard_balance
     }
 
-    /// Provides a `mutable reference to the [`Balance`] of Orchard funds in the account
+    /// Provides a mutable reference to the [`Balance`] of Orchard funds in the account
     /// to the specified callback, checking invariants after the callback's action has been
     /// evaluated.
     pub fn with_orchard_balance_mut<A, E: From<BalanceError>>(
@@ -289,22 +285,36 @@ impl AccountBalance {
     }
 
     /// Returns the total value of unspent transparent transaction outputs belonging to the wallet.
+    #[deprecated(
+        note = "this function is deprecated. Please use [`AccountBalance::unshielded_balance`] instead."
+    )]
     pub fn unshielded(&self) -> NonNegativeAmount {
-        self.unshielded
+        self.unshielded_balance.total()
     }
 
-    /// Adds the specified value to the unshielded total, checking for overflow of
-    /// the total account balance.
-    pub fn add_unshielded_value(&mut self, value: NonNegativeAmount) -> Result<(), BalanceError> {
-        self.unshielded = (self.unshielded + value).ok_or(BalanceError::Overflow)?;
+    /// Returns the [`Balance`] of unshielded funds in the account.
+    pub fn unshielded_balance(&self) -> &Balance {
+        &self.unshielded_balance
+    }
+
+    /// Provides a mutable reference to the [`Balance`] of transparent funds in the account
+    /// to the specified callback, checking invariants after the callback's action has been
+    /// evaluated.
+    pub fn with_unshielded_balance_mut<A, E: From<BalanceError>>(
+        &mut self,
+        f: impl FnOnce(&mut Balance) -> Result<A, E>,
+    ) -> Result<A, E> {
+        let result = f(&mut self.unshielded_balance)?;
         self.check_total()?;
-        Ok(())
+        Ok(result)
     }
 
     /// Returns the total value of funds belonging to the account.
     pub fn total(&self) -> NonNegativeAmount {
-        (self.sapling_balance.total() + self.orchard_balance.total() + self.unshielded)
-            .expect("Account balance cannot overflow MAX_MONEY")
+        (self.sapling_balance.total()
+            + self.orchard_balance.total()
+            + self.unshielded_balance.total())
+        .expect("Account balance cannot overflow MAX_MONEY")
     }
 
     /// Returns the total value of shielded (Sapling and Orchard) funds that may immediately be
@@ -1204,8 +1214,9 @@ pub trait WalletRead {
     /// or `Ok(None)` if the wallet has no initialized accounts.
     fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error>;
 
-    /// Returns the wallet balances and sync status for an account given the specified minimum
-    /// number of confirmations, or `Ok(None)` if the wallet has no balance data available.
+    /// Returns a [`WalletSummary`] that represents the sync status, and the wallet balances
+    /// given the specified minimum number of confirmations for all accounts known to the
+    /// wallet; or `Ok(None)` if the wallet has no summary data available.
     fn get_wallet_summary(
         &self,
         min_confirmations: u32,

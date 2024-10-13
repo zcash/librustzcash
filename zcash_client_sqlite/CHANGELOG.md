@@ -43,6 +43,16 @@ and this library adheres to Rust's notion of
 - Migrated to `rusqlite 0.32`.
 - `error::SqliteClientError` has additional variant `NoteFilterInvalid`
 
+### Fixed
+- `zcash_client_sqlite::WalletDb`'s implementation of
+  `zcash_client_backend::data_api::WalletRead::get_wallet_summary` has been
+  fixed to take account of `min_confirmations` for transparent balances.
+  Note that this implementation treats `min_confirmations == 0` the same
+  as `min_confirmations == 1` for both shielded and transparent TXOs.
+  It also does not currently distinguish between pending change and
+  non-change; the pending value is all counted as non-change (issue
+  [#1592](https://github.com/zcash/librustzcash/issues/1592)).
+
 ## [0.12.2] - 2024-10-21
 
 ### Fixed
