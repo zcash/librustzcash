@@ -28,6 +28,9 @@ and this library adheres to Rust's notion of
 - MSRV is now 1.77.0.
 - Migrated to `arti-client 0.23`.
 - `zcash_client_backend::data_api`:
+  - `AccountBalance` was refactored to use `Balance` for transparent funds (issue #1411).
+    `AccountBalance` now has an `unshielded_balance()` that uses `Balance` and replaces the
+    (now deleted) `unshielded` non-negative amount.
   - `InputSource` has an added method `get_wallet_metadata`
   - `error::Error` has additional variant `Error::Change`. This necessitates
     the addition of two type parameters to the `Error` type,
@@ -79,6 +82,15 @@ and this library adheres to Rust's notion of
 
 ### Removed
 - `zcash_client_backend::data_api`:
+  - `AccountBalance::unshielded`. `AccountBalance` no longer provides the `unshielded`
+    method returning a `NonNegativeAmount` for the total of transparent funds.
+    Instead use `unshielded_balance` which provides a `Balance` value.
+  - `zcash_client_backend::AccountBalance::add_unshielded_value`. Instead use
+    `AccountBalance::with_unshielded_balance_mut` with a closure that calls
+    the appropriate `add_*_value` method(s) of `Balance` on its argument.
+    Note that the appropriate method(s) depend on whether the funds are
+    spendable, pending change, or pending non-change (previously, only the
+    total unshielded value was tracked).
   - `WalletSummary::scan_progress` and `WalletSummary::recovery_progress` have
     been removed. Use `WalletSummary::progress` instead.
   - `testing::input_selector` use explicit `InputSelector` constructors
