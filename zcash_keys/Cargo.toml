@@ -67,6 +67,7 @@ byteorder = { workspace = true, optional = true }
 blake2b_simd = { workspace = true }
 
 [dev-dependencies]
+assert_matches.workspace = true
 hex.workspace = true
 jubjub.workspace = true
 proptest.workspace = true

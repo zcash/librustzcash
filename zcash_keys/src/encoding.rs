@@ -517,13 +517,16 @@ pub fn decode_transparent_address(
 #[cfg(test)]
 #[cfg(feature = "sapling")]
 mod tests_sapling {
+    use assert_matches::assert_matches;
+    use zcash_protocol::consensus::Network;
+
     use super::{
         decode_extended_full_viewing_key, decode_extended_spending_key, decode_payment_address,
         encode_extended_full_viewing_key, encode_extended_spending_key, encode_payment_address,
-        Bech32DecodeError,
+        AddressCodec, Bech32DecodeError,
     };
     use sapling::{zip32::ExtendedSpendingKey, PaymentAddress};
-    use zcash_primitives::constants;
+    use zcash_primitives::{constants, legacy::TransparentAddress};
 
     #[test]
     fn extended_spending_key() {
@@ -687,6 +690,16 @@ mod tests_sapling {
                 encoded_main,
             ),
             Err(Bech32DecodeError::ReadError)
+        );
+    }
+
+    #[test]
+    fn linear_pro_278() {
+        let encoded = "t1gDxhpMTfKJCyTgUHppnEkUonrcqMVL8J8";
+
+        assert_matches!(
+            TransparentAddress::decode(&Network::MainNetwork, encoded),
+            Ok(_)
         );
     }
 }
