@@ -386,7 +386,6 @@ pub(crate) fn add_transparent_account_balances(
     min_confirmations: u32,
     account_balances: &mut HashMap<AccountId, AccountBalance>,
 ) -> Result<(), SqliteClientError> {
-    
     let mut stmt_account_spendable_balances = conn.prepare(
         "SELECT u.account_id, SUM(u.value_zat)
          FROM transparent_received_outputs u
@@ -409,11 +408,10 @@ pub(crate) fn add_transparent_account_balances(
          )
          GROUP BY u.account_id",
     )?;
-    let mut rows = stmt_account_spendable_balances
-        .query(named_params![
-            ":mempool_height": u32::from(mempool_height),
-            ":min_confirmations": min_confirmations,
-            ])?;
+    let mut rows = stmt_account_spendable_balances.query(named_params![
+        ":mempool_height": u32::from(mempool_height),
+        ":min_confirmations": min_confirmations,
+    ])?;
 
     while let Some(row) = rows.next()? {
         let account = AccountId(row.get(0)?);
@@ -422,7 +420,6 @@ pub(crate) fn add_transparent_account_balances(
             SqliteClientError::CorruptedData(format!("Negative UTXO value {:?}", raw_value))
         })?;
 
-        
         account_balances
             .entry(account)
             .or_insert(AccountBalance::ZERO)
@@ -457,11 +454,10 @@ pub(crate) fn add_transparent_account_balances(
          GROUP BY u.account_id",
     )?;
 
-    let mut rows = stmt_account_unconfirmed_balances
-        .query(named_params![
-            ":mempool_height": u32::from(mempool_height),
-            ":min_confirmations": min_confirmations,
-            ])?;
+    let mut rows = stmt_account_unconfirmed_balances.query(named_params![
+        ":mempool_height": u32::from(mempool_height),
+        ":min_confirmations": min_confirmations,
+    ])?;
 
     while let Some(row) = rows.next()? {
         let account = AccountId(row.get(0)?);
@@ -470,7 +466,6 @@ pub(crate) fn add_transparent_account_balances(
             SqliteClientError::CorruptedData(format!("Negative UTXO value {:?}", raw_value))
         })?;
 
-        
         account_balances
             .entry(account)
             .or_insert(AccountBalance::ZERO)
@@ -1033,7 +1028,10 @@ mod tests {
         }
         st.scan_cached_blocks(start_height, 10);
 
-        let check_balance = |st: &TestState<_, TestDb, _>, min_confirmations: u32, expected_total, expected_spendable| {
+        let check_balance = |st: &TestState<_, TestDb, _>,
+                             min_confirmations: u32,
+                             expected_total,
+                             expected_spendable| {
             // Check the wallet summary returns the expected transparent balance.
             let summary = st
                 .wallet()
@@ -1043,7 +1041,10 @@ mod tests {
             let balance = summary.account_balances().get(&account.id()).unwrap();
 
             assert_eq!(balance.unshielded_balance().total(), expected_total);
-            assert_eq!(balance.unshielded_balance().spendable_value(), expected_spendable);
+            assert_eq!(
+                balance.unshielded_balance().spendable_value(),
+                expected_spendable
+            );
             // Check the older APIs for consistency.
             let mempool_height = st.wallet().chain_height().unwrap().unwrap() + 1;
             assert_eq!(

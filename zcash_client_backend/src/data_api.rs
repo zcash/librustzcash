@@ -245,8 +245,10 @@ impl AccountBalance {
     };
 
     fn check_total(&self) -> Result<NonNegativeAmount, BalanceError> {
-        (self.sapling_balance.total() + self.orchard_balance.total() + self.unshielded_balance.total())
-            .ok_or(BalanceError::Overflow)
+        (self.sapling_balance.total()
+            + self.orchard_balance.total()
+            + self.unshielded_balance.total())
+        .ok_or(BalanceError::Overflow)
     }
 
     /// Returns the [`Balance`] of Sapling funds in the account.
@@ -283,7 +285,6 @@ impl AccountBalance {
         Ok(result)
     }
 
-    
     /// Returns the total value of unspent transparent transaction outputs belonging to the wallet.
     #[deprecated(
         note = "this function is deprecated. Please use AccountBalance::unshielded_balance instead."
@@ -314,15 +315,17 @@ impl AccountBalance {
     #[deprecated(
         note = "this function is deprecated. Please use the `Balance::add_spendable_value` on the unshielded field instead instead."
     )]
-    pub fn add_unshielded_value(&mut self, value: NonNegativeAmount) -> Result<(), BalanceError> {        
+    pub fn add_unshielded_value(&mut self, value: NonNegativeAmount) -> Result<(), BalanceError> {
         self.unshielded_balance.add_pending_spendable_value(value)?;
         Ok(())
     }
 
     /// Returns the total value of funds belonging to the account.
     pub fn total(&self) -> NonNegativeAmount {
-        (self.sapling_balance.total() + self.orchard_balance.total() + self.unshielded_balance.total())
-            .expect("Account balance cannot overflow MAX_MONEY")
+        (self.sapling_balance.total()
+            + self.orchard_balance.total()
+            + self.unshielded_balance.total())
+        .expect("Account balance cannot overflow MAX_MONEY")
     }
 
     /// Returns the total value of shielded (Sapling and Orchard) funds that may immediately be

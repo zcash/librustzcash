@@ -1550,7 +1550,12 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     drop(sapling_trace);
 
     #[cfg(feature = "transparent-inputs")]
-    transparent::add_transparent_account_balances(tx, chain_tip_height + 1, min_confirmations, &mut account_balances)?;
+    transparent::add_transparent_account_balances(
+        tx,
+        chain_tip_height + 1,
+        min_confirmations,
+        &mut account_balances,
+    )?;
 
     // The approach used here for Sapling and Orchard subtree indexing was a quick hack
     // that has not yet been replaced. TODO: Make less hacky.
