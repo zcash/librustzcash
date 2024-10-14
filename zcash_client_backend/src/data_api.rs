@@ -232,13 +232,7 @@ pub struct AccountBalance {
     /// The value of unspent Orchard outputs belonging to the account.
     orchard_balance: Balance,
 
-    /// The value of all unspent transparent outputs belonging to the account, irrespective of
-    /// confirmation depth.
-    ///
-    /// Unshielded balances are not subject to confirmation-depth constraints, because the only
-    /// possible operation on a transparent balance is to shield it, it is possible to create a
-    /// zero-conf transaction to perform that shielding, and the resulting shielded notes will be
-    /// subject to normal confirmation rules.
+    /// The value of all unspent transparent outputs belonging to the account.
     unshielded_balance: Balance,
 }
 
