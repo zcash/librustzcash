@@ -570,8 +570,9 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
     ///
     /// The window over which progress is computed spans from the wallet's birthday to the current
     /// chain tip. It is divided into two segments: a "recovery" segment, between the wallet
-    /// birthday and the recovery height (the height at which recovery from seed was initiated),
-    /// and a "scan" segment, between the recovery height and the current chain tip.
+    /// birthday and the recovery height (currently the height at which recovery from seed was
+    /// initiated, but how this boundary is computed may change in the future), and a "scan"
+    /// segment, between the recovery height and the current chain tip.
     ///
     /// When converting the ratios returned here to percentages, checked division must be used in
     /// order to avoid divide-by-zero errors. A zero denominator in a returned ratio indicates that
