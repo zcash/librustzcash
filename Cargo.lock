@@ -3695,10 +3695,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "schemer"
-version = "0.2.1"
+name = "schemerz"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "835d8f9478fd2936195fc941a8666b0d0894d5bf3631cbb884a8ce8ba631f339"
+checksum = "ef620a7502b464270648afce68f6e736a87380854b3e4a6debd5a42e3e88c954"
 dependencies = [
  "daggy",
  "log",
@@ -3707,13 +3707,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "schemer-rusqlite"
-version = "0.2.2"
+name = "schemerz-rusqlite"
+version = "0.290.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fb5ac1fa52c58e2c6a618e3149d464e7ad8d0effca74990ea29c1fe2338b3b1"
+checksum = "51240765dba899b938627b7e0e8fdceb211fe2b2310385cf9ddc9c2a733d671d"
 dependencies = [
  "rusqlite",
- "schemer",
+ "schemerz",
  "uuid",
 ]
 
@@ -5925,8 +5925,8 @@ dependencies = [
  "regex",
  "rusqlite",
  "sapling-crypto",
- "schemer",
- "schemer-rusqlite",
+ "schemerz",
+ "schemerz-rusqlite",
  "secrecy",
  "shardtree",
  "static_assertions",

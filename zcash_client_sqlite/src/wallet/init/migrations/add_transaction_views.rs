@@ -2,7 +2,7 @@
 use std::collections::HashSet;
 
 use rusqlite::{self, types::ToSql, OptionalExtension};
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use zcash_primitives::{
@@ -25,7 +25,7 @@ const DEPENDENCIES: &[Uuid] = &[
 
 pub(crate) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

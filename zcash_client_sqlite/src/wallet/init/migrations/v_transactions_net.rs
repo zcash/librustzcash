@@ -2,9 +2,8 @@
 //! as received value.
 use std::collections::HashSet;
 
-use rusqlite::{self, named_params};
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use rusqlite::named_params;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_client_backend::PoolType;
 
@@ -17,7 +16,7 @@ const DEPENDENCIES: &[Uuid] = &[add_transaction_views::MIGRATION_ID];
 
 pub(crate) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

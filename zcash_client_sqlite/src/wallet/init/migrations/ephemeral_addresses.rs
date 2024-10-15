@@ -1,9 +1,7 @@
 //! The migration that records ephemeral addresses for each account.
 use std::collections::HashSet;
 
-use rusqlite;
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_protocol::consensus;
 
@@ -23,7 +21,7 @@ pub(super) struct Migration<P> {
     pub(super) params: P,
 }
 
-impl<P> schemer::Migration for Migration<P> {
+impl<P> schemerz::Migration for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

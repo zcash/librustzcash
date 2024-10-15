@@ -31,7 +31,7 @@ mod wallet_summaries;
 
 use std::rc::Rc;
 
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use secrecy::SecretVec;
 use uuid::Uuid;
 use zcash_protocol::consensus;

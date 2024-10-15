@@ -5,8 +5,8 @@ use crate::BlockDb;
 use {
     super::migrations,
     crate::FsBlockDb,
-    schemer::{Migrator, MigratorError},
-    schemer_rusqlite::RusqliteAdapter,
+    schemerz::{Migrator, MigratorError},
+    schemerz_rusqlite::RusqliteAdapter,
 };
 
 /// Sets up the internal structure of the cache database.
