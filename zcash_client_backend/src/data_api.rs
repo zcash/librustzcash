@@ -794,6 +794,69 @@ impl<NoteRef> SpendableNotes<NoteRef> {
     }
 }
 
+/// Metadata about the structure of the wallet for a particular account. 
+///
+/// At present this just contains counts of unspent outputs in each pool, but it may be extended in
+/// the future to contain note values or other more detailed information about wallet structure.
+///
+/// Values of this type are intended to be used in selection of change output values. A value of
+/// this type may represent filtered data, and may therefore not count all of the unspent notes in
+/// the wallet.
+pub struct WalletMeta {
+    sapling_note_count: usize,
+    #[cfg(feature = "orchard")]
+    orchard_note_count: usize,
+}
+
+impl WalletMeta {
+    /// Constructs a new [`WalletMeta`] value from its constituent parts.
+    pub fn new(
+        sapling_note_count: usize,
+        #[cfg(feature = "orchard")] orchard_note_count: usize,
+    ) -> Self {
+        Self {
+            sapling_note_count,
+            #[cfg(feature = "orchard")]
+            orchard_note_count,
+        }
+    }
+
+    /// Returns the number of unspent notes in the wallet for the given shielded protocol.
+    pub fn note_count(&self, protocol: ShieldedProtocol) -> usize {
+        match protocol {
+            ShieldedProtocol::Sapling => self.sapling_note_count,
+            #[cfg(feature = "orchard")]
+            ShieldedProtocol::Orchard => self.orchard_note_count,
+            #[cfg(not(feature = "orchard"))]
+            ShieldedProtocol::Orchard => 0,
+        }
+    }
+
+    /// Returns the number of unspent Sapling notes belonging to the account for which this was
+    /// generated.
+    pub fn sapling_note_count(&self) -> usize {
+        self.sapling_note_count
+    }
+
+    /// Returns the number of unspent Orchard notes belonging to the account for which this was
+    /// generated.
+    #[cfg(feature = "orchard")]
+    pub fn orchard_note_count(&self) -> usize {
+        self.orchard_note_count
+    }
+
+    /// Returns the total number of unspent shielded notes belonging to the account for which this
+    /// was generated.
+    pub fn total_note_count(&self) -> usize {
+        #[cfg(feature = "orchard")]
+        let orchard_note_count = self.orchard_note_count;
+        #[cfg(not(feature = "orchard"))]
+        let orchard_note_count = 0;
+
+        self.sapling_note_count + orchard_note_count
+    }
+}
+
 /// A trait representing the capability to query a data store for unspent transaction outputs
 /// belonging to a wallet.
 #[cfg_attr(feature = "test-dependencies", delegatable_trait)]
@@ -837,6 +900,17 @@ pub trait InputSource {
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
+
+    /// Returns metadata describing the structure of the wallet for the specified account.
+    ///
+    /// The returned metadata value must exclude spent notes and unspent notes having value less
+    /// than the specified minimum value or identified in the given exclude list.
+    fn get_wallet_metadata(
+        &self,
+        account: Self::AccountId,
+        min_value: NonNegativeAmount,
+        exclude: &[Self::NoteRef],
+    ) -> Result<WalletMeta, Self::Error>;
 
     /// Fetches the transparent output corresponding to the provided `outpoint`.
     ///
