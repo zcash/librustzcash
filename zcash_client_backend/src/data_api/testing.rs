@@ -56,7 +56,6 @@ use crate::{
     ShieldedProtocol,
 };
 
-use super::WalletTest;
 #[allow(deprecated)]
 use super::{
     chain::{scan_cached_blocks, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
@@ -69,7 +68,8 @@ use super::{
     Account, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, BlockMetadata,
     DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
     SentTransaction, SpendableNotes, TransactionDataRequest, TransactionStatus,
-    WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+    WalletCommitmentTrees, WalletMeta, WalletRead, WalletSummary, WalletTest, WalletWrite,
+    SAPLING_SHARD_HEIGHT,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -2377,6 +2377,15 @@ impl InputSource for MockWalletDb {
         _exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
         Ok(SpendableNotes::empty())
+    }
+
+    fn get_wallet_metadata(
+        &self,
+        _account: Self::AccountId,
+        _min_value: NonNegativeAmount,
+        _exclude: &[Self::NoteRef],
+    ) -> Result<WalletMeta, Self::Error> {
+        Err(())
     }
 }
 

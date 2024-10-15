@@ -225,3 +225,54 @@ where
         .filter_map(|r| r.transpose())
         .collect::<Result<_, _>>()
 }
+
+pub(crate) fn count_outputs(
+    conn: &rusqlite::Connection,
+    account: AccountId,
+    min_value: NonNegativeAmount,
+    exclude: &[ReceivedNoteId],
+    protocol: ShieldedProtocol,
+) -> Result<usize, rusqlite::Error> {
+    let (table_prefix, _, _) = per_protocol_names(protocol);
+
+    let excluded: Vec<Value> = exclude
+        .iter()
+        .filter_map(|ReceivedNoteId(p, n)| {
+            if *p == protocol {
+                Some(Value::from(*n))
+            } else {
+                None
+            }
+        })
+        .collect();
+    let excluded_ptr = Rc::new(excluded);
+
+    conn.query_row(
+        &format!(
+            "SELECT COUNT(*)
+             FROM {table_prefix}_received_notes rn
+             INNER JOIN accounts ON accounts.id = rn.account_id
+             INNER JOIN transactions ON transactions.id_tx = rn.tx
+             WHERE value >= :min_value
+             AND accounts.id = :account_id
+             AND accounts.ufvk IS NOT NULL
+             AND recipient_key_scope IS NOT NULL
+             AND transactions.mined_height IS NOT NULL
+             AND rn.id NOT IN rarray(:exclude)
+             AND rn.id NOT IN (
+               SELECT {table_prefix}_received_note_id
+               FROM {table_prefix}_received_note_spends
+               JOIN transactions stx ON stx.id_tx = transaction_id
+               WHERE stx.block IS NOT NULL -- the spending tx is mined
+               OR stx.expiry_height IS NULL -- the spending tx will not expire
+               OR stx.expiry_height > :anchor_height -- the spending tx is unexpired
+             )"
+        ),
+        named_params![
+            ":account_id": account.0,
+            ":min_value": u64::from(min_value),
+            ":exclude": &excluded_ptr
+        ],
+        |row| row.get(0),
+    )
+}

@@ -11,6 +11,11 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api`:
   - `Progress`
   - `WalletSummary::progress`
+  - `WalletMeta`
+
+### Changed
+- `zcash_client_backend::data_api`:
+  - `InputSource` has an added method `get_wallet_metadata`
 
 ### Changed
 - MSRV is now 1.77.0.
@@ -28,7 +33,7 @@ and this library adheres to Rust's notion of
   - `GAP_LIMIT`
   - `WalletSummary::recovery_progress`
   - `SpendableNotes::{take_sapling, take_orchard}`
-  - Tests and testing infrastructure have been migrated from the 
+  - Tests and testing infrastructure have been migrated from the
     `zcash_client_sqlite` internal tests to the `testing` module, and have been
     generalized so that they may be used for testing arbitrary implementations
     of the `zcash_client_backend::data_api` interfaces. The following have been
