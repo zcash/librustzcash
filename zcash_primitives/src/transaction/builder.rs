@@ -468,7 +468,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     pub fn init_issuance_bundle<FE>(
         &mut self,
         ik: IssuanceAuthorizingKey,
-        asset_desc: String,
+        asset_desc: Vec<u8>,
         issue_info: Option<IssueInfo>,
     ) -> Result<(), Error<FE>> {
         assert!(self.build_config.orchard_bundle_type()? == BundleType::DEFAULT_ZSA);
@@ -496,7 +496,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     pub fn add_recipient<FE>(
         &mut self,
-        asset_desc: String,
+        asset_desc: &[u8],
         recipient: Address,
         value: orchard::value::NoteValue,
     ) -> Result<(), Error<FE>> {
@@ -512,7 +512,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
 
     /// Finalizes a given asset
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    pub fn finalize_asset<FE>(&mut self, asset_desc: String) -> Result<(), Error<FE>> {
+    pub fn finalize_asset<FE>(&mut self, asset_desc: &[u8]) -> Result<(), Error<FE>> {
         assert!(self.build_config.orchard_bundle_type()? == BundleType::DEFAULT_ZSA);
         self.issuance_builder
             .as_mut()
@@ -1455,17 +1455,23 @@ mod tests {
     fn init_issuance_bundle_with_finalization() {
         let (mut builder, iak, _) = prepare_zsa_test();
 
-        let asset = "asset_desc".to_string();
+        let asset_desc: Vec<u8> = "asset_desc".into();
 
         builder
-            .init_issuance_bundle::<FeeError>(iak, asset.clone(), None)
+            .init_issuance_bundle::<FeeError>(iak, asset_desc.clone(), None)
             .unwrap();
 
         let tx = builder.mock_build_no_fee(OsRng).unwrap().into_transaction();
         let bundle = tx.issue_bundle().unwrap();
 
         assert_eq!(bundle.actions().len(), 1, "There should be only one action");
-        let action = bundle.get_action(asset).unwrap();
+        let actions = bundle.get_actions_by_desc(&asset_desc);
+        assert_eq!(
+            actions.len(),
+            1,
+            "The one action should correspond to asset_desc"
+        );
+        let action = actions[0];
         assert!(action.is_finalized(), "Action should be finalized");
         assert_eq!(action.notes().len(), 0, "Action should have zero notes");
     }
@@ -1475,12 +1481,12 @@ mod tests {
     fn init_issuance_bundle_without_finalization() {
         let (mut builder, iak, address) = prepare_zsa_test();
 
-        let asset = "asset_desc".to_string();
+        let asset_desc: Vec<u8> = "asset_desc".into();
 
         builder
             .init_issuance_bundle::<FeeError>(
                 iak,
-                asset.clone(),
+                asset_desc.clone(),
                 Some(IssueInfo {
                     recipient: address,
                     value: NoteValue::from_raw(42),
@@ -1492,12 +1498,14 @@ mod tests {
         let bundle = binding.issue_bundle().unwrap();
 
         assert_eq!(bundle.actions().len(), 1, "There should be only one action");
-        let action = bundle.get_action(asset).unwrap();
+        let actions = bundle.get_actions_by_desc(&asset_desc);
         assert_eq!(
-            action.is_finalized(),
-            false,
-            "Action should not be finalized"
+            actions.len(),
+            1,
+            "The one action should correspond to asset_desc"
         );
+        let action = actions[0];
+        assert!(!action.is_finalized(), "Action should not be finalized");
         assert_eq!(action.notes().len(), 1, "Action should have 1 note");
         assert_eq!(
             action.notes().first().unwrap().value().inner(),
@@ -1511,12 +1519,12 @@ mod tests {
     fn add_issuance_same_asset() {
         let (mut builder, iak, address) = prepare_zsa_test();
 
-        let asset = "asset_desc".to_string();
+        let asset_desc: Vec<u8> = "asset_desc".into();
 
         builder
             .init_issuance_bundle::<FeeError>(
                 iak,
-                asset.clone(),
+                asset_desc.clone(),
                 Some(IssueInfo {
                     recipient: address,
                     value: NoteValue::from_raw(42),
@@ -1524,19 +1532,21 @@ mod tests {
             )
             .unwrap();
         builder
-            .add_recipient::<FeeError>(asset.clone(), address, NoteValue::from_raw(21))
+            .add_recipient::<FeeError>(&asset_desc, address, NoteValue::from_raw(21))
             .unwrap();
 
         let binding = builder.mock_build_no_fee(OsRng).unwrap().into_transaction();
         let bundle = binding.issue_bundle().unwrap();
 
         assert_eq!(bundle.actions().len(), 1, "There should be only one action");
-        let action = bundle.get_action(asset).unwrap();
+        let actions = bundle.get_actions_by_desc(&asset_desc);
         assert_eq!(
-            action.is_finalized(),
-            false,
-            "Action should not be finalized"
+            actions.len(),
+            1,
+            "The one action should correspond to asset_desc"
         );
+        let action = actions[0];
+        assert!(!action.is_finalized(), "Action should not be finalized");
         assert_eq!(action.notes().len(), 2, "Action should have 2 notes");
         assert_eq!(
             action
@@ -1554,13 +1564,13 @@ mod tests {
     fn add_issuance_different_asset() {
         let (mut builder, iak, address) = prepare_zsa_test();
 
-        let asset1 = "asset_desc".to_string();
-        let asset2 = "asset_desc_2".to_string();
+        let asset_desc_1: Vec<u8> = "asset_desc".into();
+        let asset_desc_2: Vec<u8> = "asset_desc_2".into();
 
         builder
             .init_issuance_bundle::<FeeError>(
                 iak,
-                asset1.clone(),
+                asset_desc_1.clone(),
                 Some(IssueInfo {
                     recipient: address,
                     value: NoteValue::from_raw(42),
@@ -1568,7 +1578,7 @@ mod tests {
             )
             .unwrap();
         builder
-            .add_recipient::<FeeError>(asset2.clone(), address, NoteValue::from_raw(21))
+            .add_recipient::<FeeError>(&asset_desc_2, address, NoteValue::from_raw(21))
             .unwrap();
 
         let binding = builder.mock_build_no_fee(OsRng).unwrap().into_transaction();
@@ -1576,12 +1586,14 @@ mod tests {
 
         assert_eq!(bundle.actions().len(), 2, "There should be 2 actions");
 
-        let action = bundle.get_action(asset1).unwrap();
+        let actions = bundle.get_actions_by_desc(&asset_desc_1);
         assert_eq!(
-            action.is_finalized(),
-            false,
-            "Action should not be finalized"
+            actions.len(),
+            1,
+            "Only one action should correspond to asset_desc_1"
         );
+        let action = actions[0];
+        assert!(!action.is_finalized(), "Action should not be finalized");
         assert_eq!(action.notes().len(), 1, "Action should have 1 note");
         assert_eq!(
             action
@@ -1593,12 +1605,14 @@ mod tests {
             "Incorrect notes sum"
         );
 
-        let action2 = bundle.get_action(asset2).unwrap();
+        let actions_2 = bundle.get_actions_by_desc(&asset_desc_2);
         assert_eq!(
-            action2.is_finalized(),
-            false,
-            "Action should not be finalized"
+            actions_2.len(),
+            1,
+            "Only one action should correspond to asset_desc_2"
         );
+        let action2 = actions_2[0];
+        assert!(!action2.is_finalized(), "Action should not be finalized");
         assert_eq!(action2.notes().len(), 1, "Action should have 1 note");
         assert_eq!(
             action2
@@ -1617,8 +1631,8 @@ mod tests {
     fn fails_on_add_burn_without_input() {
         let (mut builder, iak, _) = prepare_zsa_test();
 
-        let asset = "asset_desc".to_string();
-        let asset_base = AssetBase::derive(&IssuanceValidatingKey::from(&iak), &asset);
+        let asset_desc: &[u8] = b"asset_desc";
+        let asset_base = AssetBase::derive(&IssuanceValidatingKey::from(&iak), asset_desc);
 
         builder.add_burn::<FeeError>(42, asset_base).unwrap();
 

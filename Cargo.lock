@@ -771,7 +771,7 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.3.0"
-source = "git+https://github.com/QED-it/halo2?rev=7f5c0babd61f8ca46c9165a1adfac298d3fd3a11#7f5c0babd61f8ca46c9165a1adfac298d3fd3a11"
+source = "git+https://github.com/QED-it/halo2?branch=zsa1#1195c9af90205829ba20662bdfaf20dcc878807d"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -794,7 +794,7 @@ checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
 [[package]]
 name = "halo2_proofs"
 version = "0.3.0"
-source = "git+https://github.com/QED-it/halo2?rev=7f5c0babd61f8ca46c9165a1adfac298d3fd3a11#7f5c0babd61f8ca46c9165a1adfac298d3fd3a11"
+source = "git+https://github.com/QED-it/halo2?branch=zsa1#1195c9af90205829ba20662bdfaf20dcc878807d"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -1229,7 +1229,7 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "orchard"
 version = "0.8.0"
-source = "git+https://github.com/QED-it/orchard?branch=zsa1#07b3697b271f04c736a5f7e130d186e68a85fd8c"
+source = "git+https://github.com/QED-it/orchard?branch=zsa1#410037df38ec60eed49c157d4d430f0eb06604be"
 dependencies = [
  "aes",
  "bitvec",
