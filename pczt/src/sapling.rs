@@ -162,6 +162,21 @@ pub(crate) struct Output {
     /// This opens `cv` for all participants. For Signers who don't need this information,
     /// or after proofs / signatures have been applied, this can be redacted.
     pub(crate) rcv: Option<[u8; 32]>,
+
+    /// The symmetric shared secret used to encrypt `enc_ciphertext`.
+    ///
+    /// This enables Signers to verify that `enc_ciphertext` is correctly encrypted (and
+    /// contains a note plaintext matching the public commitments), and to confirm the
+    /// value of the memo.
+    pub(crate) shared_secret: Option<[u8; 32]>,
+
+    /// The `ock` value used to encrypt `out_ciphertext`.
+    ///
+    /// This enables Signers to verify that `out_ciphertext` is correctly encrypted.
+    ///
+    /// This may be `None` if the Constructor added the output using an OVK policy of
+    /// "None", to make the output unrecoverable from the chain by the sender.
+    pub(crate) ock: Option<[u8; 32]>,
 }
 
 impl Bundle {
@@ -261,6 +276,8 @@ impl Bundle {
                 value,
                 rseed,
                 rcv,
+                shared_secret,
+                ock,
             } = rhs;
 
             if lhs.cv != cv
@@ -276,7 +293,9 @@ impl Bundle {
                 && merge_optional(&mut lhs.recipient, recipient)
                 && merge_optional(&mut lhs.value, value)
                 && merge_optional(&mut lhs.rseed, rseed)
-                && merge_optional(&mut lhs.rcv, rcv))
+                && merge_optional(&mut lhs.rcv, rcv)
+                && merge_optional(&mut lhs.shared_secret, shared_secret)
+                && merge_optional(&mut lhs.ock, ock))
             {
                 return None;
             }

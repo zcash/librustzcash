@@ -178,6 +178,21 @@ pub(crate) struct Output {
     /// were required by the Prover. Likewise for `recipient` and `value`; is there ever a
     /// need for these to be independently redacted though?
     pub(crate) rseed: Option<[u8; 32]>,
+
+    /// The symmetric shared secret used to encrypt `enc_ciphertext`.
+    ///
+    /// This enables Signers to verify that `enc_ciphertext` is correctly encrypted (and
+    /// contains a note plaintext matching the public commitments), and to confirm the
+    /// value of the memo.
+    pub(crate) shared_secret: Option<[u8; 32]>,
+
+    /// The `ock` value used to encrypt `out_ciphertext`.
+    ///
+    /// This enables Signers to verify that `out_ciphertext` is correctly encrypted.
+    ///
+    /// This may be `None` if the Constructor added the output using an OVK policy of
+    /// "None", to make the output unrecoverable from the chain by the sender.
+    pub(crate) ock: Option<[u8; 32]>,
 }
 
 impl Bundle {
@@ -257,6 +272,8 @@ impl Bundle {
                         recipient: output_recipient,
                         value: output_value,
                         rseed: output_rseed,
+                        shared_secret,
+                        ock,
                     },
                 rcv,
             } = rhs;
@@ -283,6 +300,8 @@ impl Bundle {
                 && merge_optional(&mut lhs.output.recipient, output_recipient)
                 && merge_optional(&mut lhs.output.value, output_value)
                 && merge_optional(&mut lhs.output.rseed, output_rseed)
+                && merge_optional(&mut lhs.output.shared_secret, shared_secret)
+                && merge_optional(&mut lhs.output.ock, ock)
                 && merge_optional(&mut lhs.rcv, rcv))
             {
                 return None;
