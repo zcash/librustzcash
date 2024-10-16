@@ -198,6 +198,14 @@ pub(crate) struct Output {
     /// - This is set by the Constructor.
     /// - This is required by the Prover, instead of disclosing `shared_secret` to them.
     pub(crate) rseed: Option<[u8; 32]>,
+
+    /// The `ock` value used to encrypt `out_ciphertext`.
+    ///
+    /// This enables Signers to verify that `out_ciphertext` is correctly encrypted.
+    ///
+    /// This may be `None` if the Constructor added the output using an OVK policy of
+    /// "None", to make the output unrecoverable from the chain by the sender.
+    pub(crate) ock: Option<[u8; 32]>,
 }
 
 impl Bundle {
@@ -281,6 +289,7 @@ impl Bundle {
                         recipient: output_recipient,
                         value: output_value,
                         rseed: output_rseed,
+                        ock,
                     },
                 rcv,
             } = rhs;
@@ -308,6 +317,7 @@ impl Bundle {
                 && merge_optional(&mut lhs.output.recipient, output_recipient)
                 && merge_optional(&mut lhs.output.value, output_value)
                 && merge_optional(&mut lhs.output.rseed, output_rseed)
+                && merge_optional(&mut lhs.output.ock, ock)
                 && merge_optional(&mut lhs.rcv, rcv))
             {
                 return None;
