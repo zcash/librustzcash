@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::{Pczt, V5_TX_VERSION, V5_VERSION_GROUP_ID};
 
 pub struct Creator {
@@ -35,6 +37,7 @@ impl Creator {
                 consensus_branch_id: self.consensus_branch_id,
                 lock_time: 0,
                 expiry_height: self.expiry_height,
+                proprietary: BTreeMap::new(),
             },
             transparent: crate::transparent::Bundle {
                 inputs: vec![],

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::merge_optional;
 
 /// PCZT fields that are specific to producing the transaction's Orchard bundle (if any).
@@ -137,6 +139,8 @@ pub(crate) struct Spend {
     ///   validate `rk`.
     /// - After`zkproof` / `spend_auth_sig` has been set, this can be redacted.
     pub(crate) alpha: Option<[u8; 32]>,
+
+    pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
 /// Information about an Orchard output within a transaction.
@@ -193,6 +197,8 @@ pub(crate) struct Output {
     /// This may be `None` if the Constructor added the output using an OVK policy of
     /// "None", to make the output unrecoverable from the chain by the sender.
     pub(crate) ock: Option<[u8; 32]>,
+
+    pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
 impl Bundle {
@@ -262,6 +268,7 @@ impl Bundle {
                         fvk,
                         witness,
                         alpha,
+                        proprietary: spend_proprietary,
                     },
                 output:
                     Output {
@@ -274,6 +281,7 @@ impl Bundle {
                         rseed: output_rseed,
                         shared_secret,
                         ock,
+                        proprietary: output_proprietary,
                     },
                 rcv,
             } = rhs;
@@ -306,6 +314,8 @@ impl Bundle {
             {
                 return None;
             }
+
+            // TODO: Decide how to merge proprietary fields.
         }
 
         Some(self)

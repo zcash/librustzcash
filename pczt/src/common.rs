@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 /// Global fields that are relevant to the transaction as a whole.
 #[derive(Clone)]
 pub(crate) struct Global {
@@ -18,6 +20,8 @@ pub(crate) struct Global {
     /// same semantics.
     pub(crate) lock_time: u32,
     pub(crate) expiry_height: u32,
+
+    pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
 impl Global {
@@ -28,6 +32,7 @@ impl Global {
             consensus_branch_id,
             lock_time,
             expiry_height,
+            proprietary,
         } = other;
 
         if self.tx_version != tx_version
@@ -38,6 +43,8 @@ impl Global {
         {
             return None;
         }
+
+        // TODO: Decide how to merge proprietary fields.
 
         Some(self)
     }

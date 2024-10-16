@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::merge_optional;
 
 #[cfg(feature = "transparent")]
@@ -39,6 +41,8 @@ pub(crate) struct Input {
     // needed for computing the binding signatures.
     pub(crate) value: u64,
     pub(crate) script_pubkey: Vec<u8>,
+
+    pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
 #[derive(Clone)]
@@ -51,6 +55,8 @@ pub(crate) struct Output {
     //
     pub(crate) value: u64,
     pub(crate) script_pubkey: Vec<u8>,
+
+    pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
 impl Bundle {
@@ -80,6 +86,7 @@ impl Bundle {
                 script_sig,
                 value,
                 script_pubkey,
+                proprietary,
             } = rhs;
 
             if lhs.prevout_txid != prevout_txid
@@ -94,6 +101,8 @@ impl Bundle {
             if !merge_optional(&mut lhs.script_sig, script_sig) {
                 return None;
             }
+
+            // TODO: Decide how to merge proprietary fields.
         }
 
         for (lhs, rhs) in self.outputs.iter_mut().zip(outputs.into_iter()) {
@@ -101,11 +110,14 @@ impl Bundle {
             let Output {
                 value,
                 script_pubkey,
+                proprietary,
             } = rhs;
 
             if lhs.value != value || lhs.script_pubkey != script_pubkey {
                 return None;
             }
+
+            // TODO: Decide how to merge proprietary fields.
         }
 
         Some(self)

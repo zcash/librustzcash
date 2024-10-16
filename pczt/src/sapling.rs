@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::merge_optional;
 
 const GROTH_PROOF_SIZE: usize = 48 + 96 + 48;
@@ -104,6 +106,8 @@ pub(crate) struct Spend {
     ///   validate `rk`.
     /// - After`zkproof` / `spend_auth_sig` has been set, this can be redacted.
     pub(crate) alpha: Option<[u8; 32]>,
+
+    pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
 /// Information about a Sapling output within a transaction.
@@ -177,6 +181,8 @@ pub(crate) struct Output {
     /// This may be `None` if the Constructor added the output using an OVK policy of
     /// "None", to make the output unrecoverable from the chain by the sender.
     pub(crate) ock: Option<[u8; 32]>,
+
+    pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
 impl Bundle {
@@ -243,6 +249,7 @@ impl Bundle {
                 proof_generation_key,
                 witness,
                 alpha,
+                proprietary,
             } = rhs;
 
             if lhs.cv != cv || lhs.nullifier != nullifier || lhs.rk != rk {
@@ -261,6 +268,8 @@ impl Bundle {
             {
                 return None;
             }
+
+            // TODO: Decide how to merge proprietary fields.
         }
 
         for (lhs, rhs) in self.outputs.iter_mut().zip(outputs.into_iter()) {
@@ -278,6 +287,7 @@ impl Bundle {
                 rcv,
                 shared_secret,
                 ock,
+                proprietary,
             } = rhs;
 
             if lhs.cv != cv
@@ -299,6 +309,8 @@ impl Bundle {
             {
                 return None;
             }
+
+            // TODO: Decide how to merge proprietary fields.
         }
 
         Some(self)
