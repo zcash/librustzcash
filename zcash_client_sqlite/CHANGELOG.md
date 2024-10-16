@@ -13,6 +13,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - Migrated from `schemer` to our fork `schemerz`.
+- Migrated to `rusqlite 0.30`.
 
 ## [0.12.1] - 2024-10-10
 
