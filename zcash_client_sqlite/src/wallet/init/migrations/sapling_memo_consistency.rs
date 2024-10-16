@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use rusqlite::named_params;
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_client_backend::{decrypt_transaction, keys::UnifiedFullViewingKey};
 use zcash_primitives::{consensus, transaction::TxId, zip32::AccountId};
@@ -25,7 +25,7 @@ pub(super) struct Migration<P> {
     pub(super) params: P,
 }
 
-impl<P> schemer::Migration for Migration<P> {
+impl<P> schemerz::Migration for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

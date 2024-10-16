@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_client_backend::PoolType;
 
@@ -16,7 +16,7 @@ const DEPENDENCIES: &[Uuid] = &[full_account_ids::MIGRATION_ID];
 
 pub(super) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

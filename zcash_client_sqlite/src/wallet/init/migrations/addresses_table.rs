@@ -1,8 +1,7 @@
 use std::collections::HashSet;
 
 use rusqlite::{named_params, Transaction};
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_client_backend::{address::Address, keys::UnifiedFullViewingKey};
 use zcash_keys::{address::UnifiedAddress, encoding::AddressCodec, keys::UnifiedAddressRequest};
@@ -26,7 +25,7 @@ pub(crate) struct Migration<P: consensus::Parameters> {
     pub(crate) params: P,
 }
 
-impl<P: consensus::Parameters> schemer::Migration for Migration<P> {
+impl<P: consensus::Parameters> schemerz::Migration for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

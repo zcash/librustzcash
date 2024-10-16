@@ -662,8 +662,8 @@ pub(super) const INDEX_NF_MAP_LOCATOR_IDX: &str =
 // Internal tables
 //
 
-/// Internal table used by [`schemer`] to manage migrations.
-pub(super) const TABLE_SCHEMER_MIGRATIONS: &str = "
+/// Internal table used by [`schemerz`] to manage migrations.
+pub(super) const TABLE_SCHEMERZ_MIGRATIONS: &str = "
 CREATE TABLE schemer_migrations (
     id blob PRIMARY KEY
 )";

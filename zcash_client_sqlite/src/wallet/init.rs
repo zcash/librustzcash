@@ -4,8 +4,8 @@ use std::fmt;
 use std::rc::Rc;
 
 use regex::Regex;
-use schemer::{Migrator, MigratorError};
-use schemer_rusqlite::RusqliteAdapter;
+use schemerz::{Migrator, MigratorError};
+use schemerz_rusqlite::RusqliteAdapter;
 use secrecy::SecretVec;
 use shardtree::error::ShardTreeError;
 use uuid::Uuid;
@@ -240,7 +240,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// In order to correctly apply migrations to accounts derived from a seed, sometimes the
 /// optional `seed` argument is required. This function should first be invoked with
 /// `seed` set to `None`; if a pending migration requires the seed, the function returns
-/// `Err(schemer::MigratorError::Migration { error: WalletMigrationError::SeedRequired, .. })`.
+/// `Err(schemerz::MigratorError::Migration { error: WalletMigrationError::SeedRequired, .. })`.
 /// The caller can then re-call this function with the necessary seed.
 ///
 /// > Note that currently only one seed can be provided; as such, wallets containing
@@ -251,8 +251,8 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// _relevance_: if any account in the wallet for which [`Account::source`] is
 /// [`AccountSource::Derived`] can be derived from the given seed, the seed is relevant to
 /// the wallet. If the given seed is not relevant, the function returns
-/// `Err(schemer::MigratorError::Migration { error: WalletMigrationError::SeedNotRelevant, .. })`
-/// or `Err(schemer::MigratorError::Adapter(WalletMigrationError::SeedNotRelevant))`.
+/// `Err(schemerz::MigratorError::Migration { error: WalletMigrationError::SeedNotRelevant, .. })`
+/// or `Err(schemerz::MigratorError::Adapter(WalletMigrationError::SeedNotRelevant))`.
 ///
 /// We do not check whether the seed is relevant to any imported account, because that
 /// would require brute-forcing the ZIP 32 account index space. Consequentially, imported
@@ -480,7 +480,7 @@ mod tests {
             db::TABLE_SAPLING_TREE_CHECKPOINTS,
             db::TABLE_SAPLING_TREE_SHARDS,
             db::TABLE_SCAN_QUEUE,
-            db::TABLE_SCHEMER_MIGRATIONS,
+            db::TABLE_SCHEMERZ_MIGRATIONS,
             db::TABLE_SENT_NOTES,
             db::TABLE_SQLITE_SEQUENCE,
             db::TABLE_TRANSACTIONS,
@@ -1069,7 +1069,7 @@ mod tests {
         );
         assert_matches!(
             init_wallet_db(&mut db_data, Some(Secret::new(other_seed.to_vec()))),
-            Err(schemer::MigratorError::Adapter(
+            Err(schemerz::MigratorError::Adapter(
                 WalletMigrationError::SeedNotRelevant
             ))
         );

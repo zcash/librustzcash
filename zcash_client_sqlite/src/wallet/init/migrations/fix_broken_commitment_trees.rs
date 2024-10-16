@@ -2,9 +2,8 @@
 //! reorg handling.
 use std::collections::HashSet;
 
-use rusqlite::{self, OptionalExtension};
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use rusqlite::OptionalExtension;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_protocol::consensus::{self, BlockHeight};
 
@@ -21,7 +20,7 @@ pub(super) struct Migration<P> {
     pub(super) params: P,
 }
 
-impl<P> schemer::Migration for Migration<P> {
+impl<P> schemerz::Migration for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

@@ -2,9 +2,7 @@
 //! outputs, and adds `spent_note_count` and `is_shielding` to `v_transactions`.
 use std::collections::HashSet;
 
-use rusqlite;
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use crate::wallet::init::{migrations::orchard_received_notes, WalletMigrationError};
@@ -15,7 +13,7 @@ const DEPENDENCIES: &[Uuid] = &[orchard_received_notes::MIGRATION_ID];
 
 pub(super) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
