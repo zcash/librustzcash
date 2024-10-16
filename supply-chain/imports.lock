@@ -77,15 +77,15 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.schemerz]]
-version = "0.1.0"
-when = "2024-10-15"
+version = "0.2.0"
+when = "2024-10-16"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.schemerz-rusqlite]]
-version = "0.290.0"
-when = "2024-10-15"
+version = "0.291.0"
+when = "2024-10-16"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"

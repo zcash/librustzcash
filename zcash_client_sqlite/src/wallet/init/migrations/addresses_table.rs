@@ -25,7 +25,7 @@ pub(crate) struct Migration<P: consensus::Parameters> {
     pub(crate) params: P,
 }
 
-impl<P: consensus::Parameters> schemerz::Migration for Migration<P> {
+impl<P: consensus::Parameters> schemerz::Migration<Uuid> for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

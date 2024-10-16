@@ -3696,11 +3696,12 @@ dependencies = [
 
 [[package]]
 name = "schemerz"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef620a7502b464270648afce68f6e736a87380854b3e4a6debd5a42e3e88c954"
+checksum = "3e82960ac11ccabd77d53c933532612079e01205b5873ec5095f4b3426493434"
 dependencies = [
  "daggy",
+ "indexmap 1.9.3",
  "log",
  "thiserror",
  "uuid",
@@ -3708,9 +3709,9 @@ dependencies = [
 
 [[package]]
 name = "schemerz-rusqlite"
-version = "0.290.0"
+version = "0.291.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51240765dba899b938627b7e0e8fdceb211fe2b2310385cf9ddc9c2a733d671d"
+checksum = "2d63d986477f0882e30bf36870038fff9d4e9c6705e84d66b1407543722f378b"
 dependencies = [
  "rusqlite",
  "schemerz",

@@ -124,8 +124,8 @@ subtle = "2.2.3"
 #   CocoaPods, due to being bound to React Native. We need to ensure that the SQLite
 #   version required for `rusqlite` is a version that is available through CocoaPods.
 rusqlite = { version = "0.29.0", features = ["bundled"] }
-schemerz = "0.1"
-schemerz-rusqlite = "0.290"
+schemerz = "0.2"
+schemerz-rusqlite = "0.291"
 time = "0.3.22"
 uuid = "1.1"
 

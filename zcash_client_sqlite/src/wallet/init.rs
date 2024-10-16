@@ -308,7 +308,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 pub fn init_wallet_db<P: consensus::Parameters + 'static>(
     wdb: &mut WalletDb<rusqlite::Connection, P>,
     seed: Option<SecretVec<u8>>,
-) -> Result<(), MigratorError<WalletMigrationError>> {
+) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
     init_wallet_db_internal(wdb, seed, &[], true)
 }
 
@@ -317,7 +317,7 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     seed: Option<SecretVec<u8>>,
     target_migrations: &[Uuid],
     verify_seed_relevance: bool,
-) -> Result<(), MigratorError<WalletMigrationError>> {
+) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
     let seed = seed.map(Rc::new);
 
     verify_sqlite_version_compatibility(&wdb.conn).map_err(MigratorError::Adapter)?;
@@ -335,7 +335,7 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
 
     let mut migrator = Migrator::new(adapter);
     migrator
-        .register_multiple(migrations::all_migrations(&wdb.params, seed.clone()))
+        .register_multiple(migrations::all_migrations(&wdb.params, seed.clone()).into_iter())
         .expect("Wallet migration registration should have been successful.");
     if target_migrations.is_empty() {
         migrator.up(None)?;

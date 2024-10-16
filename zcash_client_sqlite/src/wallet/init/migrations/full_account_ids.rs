@@ -33,7 +33,7 @@ const DEPENDENCIES: &[Uuid] = &[
     wallet_summaries::MIGRATION_ID,
 ];
 
-impl<P: consensus::Parameters> schemerz::Migration for Migration<P> {
+impl<P: consensus::Parameters> schemerz::Migration<Uuid> for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
