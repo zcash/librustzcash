@@ -31,6 +31,7 @@ impl Creator {
 
     pub fn build(self) -> Pczt {
         Pczt {
+            version: crate::Version::V0,
             global: crate::common::Global {
                 tx_version: self.tx_version,
                 version_group_id: self.version_group_id,

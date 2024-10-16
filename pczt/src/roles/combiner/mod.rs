@@ -25,7 +25,12 @@ impl Combiner {
 }
 
 fn merge(lhs: Pczt, rhs: Pczt) -> Result<Pczt, Error> {
+    if lhs.version != rhs.version {
+        return Err(Error::DataMismatch);
+    }
+
     Ok(Pczt {
+        version: lhs.version,
         global: lhs.global.merge(rhs.global).ok_or(Error::DataMismatch)?,
         transparent: lhs
             .transparent

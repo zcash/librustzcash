@@ -50,6 +50,9 @@ const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
 /// A partially-created Zcash transaction.
 #[derive(Clone)]
 pub struct Pczt {
+    /// The version of this PCZT format, for storage.
+    version: Version,
+
     /// Global fields that are relevant to the transaction as a whole.
     global: common::Global,
 
@@ -64,6 +67,16 @@ pub struct Pczt {
     transparent: transparent::Bundle,
     sapling: sapling::Bundle,
     orchard: orchard::Bundle,
+}
+
+/// The defined versions of PCZT.
+///
+/// TODO: We might just define the version as a prefix byte included within the encoding,
+/// and then permit the entire rest of the format to change arbitrarily in new versions
+/// (though it would likely instead be altered via predictable diffs).
+#[derive(Clone, PartialEq, Eq)]
+enum Version {
+    V0,
 }
 
 /// Merges two values for an optional field together.
