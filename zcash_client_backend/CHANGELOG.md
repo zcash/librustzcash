@@ -13,7 +13,7 @@ and this library adheres to Rust's notion of
   - `WalletSummary::progress`
 
 ### Changed
-- Migrated to `arti-client 0.13`.
+- Migrated to `arti-client 0.22`.
 
 ### Removed
 - `zcash_client_backend::data_api`:

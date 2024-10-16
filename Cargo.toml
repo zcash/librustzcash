@@ -123,9 +123,9 @@ subtle = "2.2.3"
 # - Warning: One of the downstream consumers requires that SQLite be available through
 #   CocoaPods, due to being bound to React Native. We need to ensure that the SQLite
 #   version required for `rusqlite` is a version that is available through CocoaPods.
-rusqlite = { version = "0.30", features = ["bundled"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
 schemerz = "0.2"
-schemerz-rusqlite = "0.300"
+schemerz-rusqlite = "0.310"
 time = "0.3.22"
 uuid = "1.1"
 
@@ -145,9 +145,9 @@ incrementalmerkletree-testing = "0.2"
 # Tor
 # - `arti-client` depends on `rusqlite`, and a version mismatch there causes a compilation
 #   failure due to incompatible `libsqlite3-sys` versions.
-arti-client = { version = "0.13", default-features = false, features = ["compression", "rustls", "tokio"] }
+arti-client = { version = "0.22", default-features = false, features = ["compression", "rustls", "tokio"] }
 tokio = "1"
-tor-rtcompat = "0.9"
+tor-rtcompat = "0.22"
 tower = "0.4"
 
 # ZIP 32
