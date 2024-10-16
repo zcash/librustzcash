@@ -140,6 +140,10 @@ pub(crate) struct Spend {
     /// - After`zkproof` / `spend_auth_sig` has been set, this can be redacted.
     pub(crate) alpha: Option<[u8; 32]>,
 
+    // TODO derivation path
+
+    // TODO FROST
+
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
@@ -197,6 +201,8 @@ pub(crate) struct Output {
     /// This may be `None` if the Constructor added the output using an OVK policy of
     /// "None", to make the output unrecoverable from the chain by the sender.
     pub(crate) ock: Option<[u8; 32]>,
+
+    // TODO derivation path
 
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }

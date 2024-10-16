@@ -42,6 +42,16 @@ pub(crate) struct Input {
     pub(crate) value: u64,
     pub(crate) script_pubkey: Vec<u8>,
 
+    /// A map from a pubkey to a signature created by it.
+    ///
+    /// - Each entry is set by a Signer.
+    /// - These are required by the Spend Finalizer to assemble `script_sig`.
+    ///
+    /// TODO: Decide on map key type.
+    pub(crate) signatures: BTreeMap<Vec<u8>, Vec<u8>>,
+
+    // TODO derivation path
+
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
@@ -55,6 +65,8 @@ pub(crate) struct Output {
     //
     pub(crate) value: u64,
     pub(crate) script_pubkey: Vec<u8>,
+
+    // TODO derivation path
 
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
@@ -86,6 +98,7 @@ impl Bundle {
                 script_sig,
                 value,
                 script_pubkey,
+                signatures,
                 proprietary,
             } = rhs;
 
@@ -101,6 +114,8 @@ impl Bundle {
             if !merge_optional(&mut lhs.script_sig, script_sig) {
                 return None;
             }
+
+            // TODO: Merge signature maps.
 
             // TODO: Decide how to merge proprietary fields.
         }
