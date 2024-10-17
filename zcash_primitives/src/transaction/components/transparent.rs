@@ -30,6 +30,25 @@ pub trait MapAuth<A: Authorization, B: Authorization> {
     fn map_authorization(&self, s: A) -> B;
 }
 
+/// The identity map.
+///
+/// This can be used with [`TransactionData::map_authorization`] when you want to map the
+/// authorization of a subset of a transaction's bundles.
+///
+/// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
+impl MapAuth<Authorized, Authorized> for () {
+    fn map_script_sig(
+        &self,
+        s: <Authorized as Authorization>::ScriptSig,
+    ) -> <Authorized as Authorization>::ScriptSig {
+        s
+    }
+
+    fn map_authorization(&self, s: Authorized) -> Authorized {
+        s
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bundle<A: Authorization> {
     pub vin: Vec<TxIn<A>>,

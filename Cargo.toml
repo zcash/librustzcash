@@ -58,6 +58,7 @@ bitvec = "1"
 blake2s_simd = "1"
 bls12_381 = "0.8"
 jubjub = "0.10"
+redjubjub = "0.7"
 sapling = { package = "sapling-crypto", version = "0.3", default-features = false }
 
 # - Orchard
@@ -162,3 +163,6 @@ codegen-units = 1
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
+
+[patch.crates-io]
+sapling-crypto = { git = "https://github.com/zcash/sapling-crypto.git", rev = "a8fb276252894cf5d0e97e289f5509cc89bad095" }

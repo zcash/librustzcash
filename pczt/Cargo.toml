@@ -11,3 +11,40 @@ license.workspace = true
 categories.workspace = true
 
 [dependencies]
+zcash_note_encryption = { workspace = true, optional = true }
+zcash_primitives = { workspace = true, optional = true }
+zcash_protocol = { workspace = true, optional = true }
+
+rand_core = { workspace = true, optional = true }
+
+# Payment protocols
+# - Sapling
+bls12_381 = { workspace = true, optional = true }
+jubjub = { workspace = true, optional = true }
+redjubjub = { workspace = true, optional = true }
+sapling = { workspace = true, optional = true }
+
+# - Orchard
+nonempty = { workspace = true, optional = true }
+orchard = { workspace = true, optional = true }
+pasta_curves = { workspace = true, optional = true }
+
+[features]
+orchard = [
+    "dep:nonempty",
+    "dep:orchard",
+    "dep:pasta_curves",
+    "dep:zcash_protocol",
+]
+sapling = [
+    "dep:bls12_381",
+    "dep:jubjub",
+    "dep:redjubjub",
+    "dep:sapling",
+    "dep:zcash_note_encryption",
+    "dep:zcash_protocol",
+]
+transparent = ["dep:zcash_primitives", "dep:zcash_protocol"]
+prover = ["dep:rand_core", "sapling?/temporary-zcashd"]
+signer = ["dep:rand_core", "orchard", "sapling", "transparent"]
+tx-extractor = ["dep:rand_core", "orchard", "sapling", "transparent"]
