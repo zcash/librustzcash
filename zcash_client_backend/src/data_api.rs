@@ -794,6 +794,119 @@ impl<NoteRef> SpendableNotes<NoteRef> {
     }
 }
 
+/// Metadata about the structure of the wallet for a particular account.
+///
+/// At present this just contains counts of unspent outputs in each pool, but it may be extended in
+/// the future to contain note values or other more detailed information about wallet structure.
+///
+/// Values of this type are intended to be used in selection of change output values. A value of
+/// this type may represent filtered data, and may therefore not count all of the unspent notes in
+/// the wallet.
+pub struct WalletMeta {
+    sapling_note_count: usize,
+    sapling_total_value: NonNegativeAmount,
+    #[cfg(feature = "orchard")]
+    orchard_note_count: usize,
+    #[cfg(feature = "orchard")]
+    orchard_total_value: NonNegativeAmount,
+}
+
+impl WalletMeta {
+    /// Constructs a new [`WalletMeta`] value from its constituent parts.
+    pub fn new(
+        sapling_note_count: usize,
+        sapling_total_value: NonNegativeAmount,
+        #[cfg(feature = "orchard")] orchard_note_count: usize,
+        #[cfg(feature = "orchard")] orchard_total_value: NonNegativeAmount,
+    ) -> Self {
+        Self {
+            sapling_note_count,
+            sapling_total_value,
+            #[cfg(feature = "orchard")]
+            orchard_note_count,
+            #[cfg(feature = "orchard")]
+            orchard_total_value,
+        }
+    }
+
+    /// Returns the number of unspent notes in the wallet for the given shielded protocol.
+    pub fn note_count(&self, protocol: ShieldedProtocol) -> usize {
+        match protocol {
+            ShieldedProtocol::Sapling => self.sapling_note_count,
+            #[cfg(feature = "orchard")]
+            ShieldedProtocol::Orchard => self.orchard_note_count,
+            #[cfg(not(feature = "orchard"))]
+            ShieldedProtocol::Orchard => 0,
+        }
+    }
+
+    /// Returns the number of unspent Sapling notes belonging to the account for which this was
+    /// generated.
+    pub fn sapling_note_count(&self) -> usize {
+        self.sapling_note_count
+    }
+
+    /// Returns the total value of Sapling notes represented by [`Self::sapling_note_count`].
+    pub fn sapling_total_value(&self) -> NonNegativeAmount {
+        self.sapling_total_value
+    }
+
+    /// Returns the number of unspent Orchard notes belonging to the account for which this was
+    /// generated.
+    #[cfg(feature = "orchard")]
+    pub fn orchard_note_count(&self) -> usize {
+        self.orchard_note_count
+    }
+
+    /// Returns the total value of Orchard notes represented by [`Self::orchard_note_count`].
+    #[cfg(feature = "orchard")]
+    pub fn orchard_total_value(&self) -> NonNegativeAmount {
+        self.orchard_total_value
+    }
+
+    /// Returns the total number of unspent shielded notes belonging to the account for which this
+    /// was generated.
+    pub fn total_note_count(&self) -> usize {
+        #[cfg(feature = "orchard")]
+        let orchard_note_count = self.orchard_note_count;
+        #[cfg(not(feature = "orchard"))]
+        let orchard_note_count = 0;
+
+        self.sapling_note_count + orchard_note_count
+    }
+
+    /// Returns the total value of shielded notes represented by [`Self::total_note_count`]
+    pub fn total_value(&self) -> NonNegativeAmount {
+        #[cfg(feature = "orchard")]
+        let orchard_value = self.orchard_total_value;
+        #[cfg(not(feature = "orchard"))]
+        let orchard_value = NonNegativeAmount::ZERO;
+
+        (self.sapling_total_value + orchard_value).expect("Does not overflow Zcash maximum value.")
+    }
+}
+
+/// A small query language for filtering notes belonging to an account.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NoteSelector {
+    /// Selects notes having value greater than or equal to the provided value.
+    MinValue(NonNegativeAmount),
+    /// Selects notes having value greater than or equal to the n'th percentile of previously sent
+    /// notes in the wallet. The wrapped value must be in the range `0..=100`
+    PriorSendPercentile(u8),
+    /// Selects notes having value greater than or equal to the specified percentage of the wallet
+    /// balance. The wrapped value must be in the range `0..=100`
+    BalancePercentage(u8),
+    /// A note will be selected if it satisfies the first condition; if it is not possible to
+    /// evaaluate that condition (for example, [`NoteSelector::PriorSendPercentile`] cannot be
+    /// evaluated if no sends have been performed) then the second condition will be used for
+    /// evaluation.
+    Try {
+        condition: Box<NoteSelector>,
+        fallback: Box<NoteSelector>
+    }
+}
+
 /// A trait representing the capability to query a data store for unspent transaction outputs
 /// belonging to a wallet.
 #[cfg_attr(feature = "test-dependencies", delegatable_trait)]
@@ -837,6 +950,20 @@ pub trait InputSource {
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
+
+    /// Returns metadata describing the structure of the wallet for the specified account.
+    ///
+    /// The returned metadata value must include only unspent notes and unspent notes that satisfy
+    /// the provided selector and are not identified in the given exclude list.
+    ///
+    /// Implementations of this method may limit the complexity of supported queries. Such
+    /// limitations should be clearly documented for the implementing type.
+    fn get_wallet_metadata(
+        &self,
+        account: Self::AccountId,
+        selector: NoteSelector,
+        exclude: &[Self::NoteRef]
+    ) -> Result<WalletMeta, Self::Error>;
 
     /// Fetches the transparent output corresponding to the provided `outpoint`.
     ///

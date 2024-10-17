@@ -1723,6 +1723,7 @@ mod tests {
         fn prop_usk_roundtrip(usk in arb_unified_spending_key(zcash_protocol::consensus::Network::MainNetwork)) {
             let encoded = usk.to_bytes(Era::Orchard);
 
+            #[allow(clippy::let_and_return)]
             let encoded_len = {
                 let len = 4;
 

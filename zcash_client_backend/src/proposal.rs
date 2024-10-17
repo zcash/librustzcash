@@ -126,7 +126,7 @@ impl Display for ProposalError {
             #[cfg(feature = "transparent-inputs")]
             ProposalError::EphemeralOutputsInvalid => write!(
                 f,
-                "The change strategy provided to input selection failed to correctly generate an ephemeral change output when needed for sending to a TEX address."
+                "The proposal generator failed to correctly generate an ephemeral change output when needed for sending to a TEX address."
             ),
         }
     }

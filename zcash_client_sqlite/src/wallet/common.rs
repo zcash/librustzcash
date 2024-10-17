@@ -3,7 +3,7 @@
 use rusqlite::{named_params, types::Value, Connection, Row};
 use std::rc::Rc;
 
-use zcash_client_backend::{wallet::ReceivedNote, ShieldedProtocol};
+use zcash_client_backend::{data_api::NoteSelector, wallet::ReceivedNote, ShieldedProtocol};
 use zcash_primitives::transaction::{components::amount::NonNegativeAmount, TxId};
 use zcash_protocol::consensus::{self, BlockHeight};
 
@@ -224,4 +224,88 @@ where
     notes
         .filter_map(|r| r.transpose())
         .collect::<Result<_, _>>()
+}
+
+pub(crate) struct PoolMeta {
+    pub(crate) note_count: usize,
+    pub(crate) total_value: NonNegativeAmount,
+}
+
+pub(crate) fn spendable_notes_meta(
+    conn: &rusqlite::Connection,
+    protocol: ShieldedProtocol,
+    account: AccountId,
+    selector: NoteSelector,
+    exclude: &[ReceivedNoteId],
+) -> Result<PoolMeta, SqliteClientError> {
+    let (table_prefix, _, _) = per_protocol_names(protocol);
+
+    fn min_value(selector: &NoteSelector) -> Result<Option<NonNegativeAmount>, SqliteClientError> {
+        match selector {
+            NoteSelector::MinValue(v) => Ok(Some(v)),
+            NoteSelector::PriorSendPercentile(n) => {
+                if n > 100u8 {
+                    return Err(SqliteClientError::
+                }
+            }
+            NoteSelector::BalancePercentage(n) => {
+            }
+            NoteSelector::Try { condition, fallback } => {
+                match min_value(condition)? {
+                    Some(n) => Ok(Some(n)),
+                    None => min_value(fallback)
+                }
+            }
+        }
+    }
+
+    let excluded: Vec<Value> = exclude
+        .iter()
+        .filter_map(|ReceivedNoteId(p, n)| {
+            if *p == protocol {
+                Some(Value::from(*n))
+            } else {
+                None
+            }
+        })
+        .collect();
+    let excluded_ptr = Rc::new(excluded);
+
+
+    let (note_count, total_value) = conn.query_row(
+        &format!(
+            "SELECT COUNT(*), SUM(value)
+             FROM {table_prefix}_received_notes
+             INNER JOIN accounts
+               ON accounts.id = {table_prefix}_received_notes.account_id
+             WHERE value >= :min_value
+             AND accounts.id = :account_id
+             AND accounts.ufvk IS NOT NULL
+             AND recipient_key_scope IS NOT NULL
+             AND nf IS NOT NULL
+             AND commitment_tree_position IS NOT NULL
+             AND {table_prefix}_received_notes.id NOT IN rarray(:exclude)
+             AND {table_prefix}_received_notes.id NOT IN (
+               SELECT {table_prefix}_received_note_id
+               FROM {table_prefix}_received_note_spends
+               JOIN transactions stx ON stx.id_tx = transaction_id
+               WHERE stx.block IS NOT NULL -- the spending tx is mined
+               OR stx.expiry_height IS NULL -- the spending tx will not expire
+               OR stx.expiry_height > :anchor_height -- the spending tx is unexpired
+             )"
+        ),
+        named_params![
+            ":account_id": account.0,
+            ":min_value": u64::from(min_value),
+            ":exclude": &excluded_ptr
+        ],
+        |row| Ok((row.get::<_, usize>(0)?, row.get::<_, Option<i64>>(1)?)),
+    )?;
+
+    Ok(PoolMeta {
+        note_count,
+        total_value: total_value.map_or(Ok(NonNegativeAmount::ZERO), |v| {
+            NonNegativeAmount::from_nonnegative_i64(v).map_err(SqliteClientError::BalanceError)
+        })?,
+    })
 }
