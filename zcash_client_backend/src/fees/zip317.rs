@@ -303,7 +303,7 @@ mod tests {
 
         {
             // spend a single Sapling note and produce 5 outputs
-            let balance = |existing_notes| {
+            let balance = |existing_notes, total| {
                 change_strategy.compute_balance(
                     &Network::TestNetwork,
                     Network::TestNetwork
@@ -326,14 +326,17 @@ mod tests {
                     None,
                     Some(&WalletMeta::new(
                         existing_notes,
+                        total,
                         #[cfg(feature = "orchard")]
                         0,
+                        #[cfg(feature = "orchard")]
+                        NonNegativeAmount::ZERO,
                     )),
                 )
             };
 
             assert_matches!(
-                balance(0),
+                balance(0, NonNegativeAmount::ZERO),
                 Ok(balance) if
                     balance.proposed_change() == [
                         ChangeValue::sapling(NonNegativeAmount::const_from_u64(129_4000), None),
@@ -346,7 +349,7 @@ mod tests {
             );
 
             assert_matches!(
-                balance(2),
+                balance(2, NonNegativeAmount::const_from_u64(100_0000)),
                 Ok(balance) if
                     balance.proposed_change() == [
                         ChangeValue::sapling(NonNegativeAmount::const_from_u64(216_0000), None),
@@ -382,8 +385,11 @@ mod tests {
                 None,
                 Some(&WalletMeta::new(
                     0,
+                    NonNegativeAmount::ZERO,
                     #[cfg(feature = "orchard")]
                     0,
+                    #[cfg(feature = "orchard")]
+                    NonNegativeAmount::ZERO,
                 )),
             );
 

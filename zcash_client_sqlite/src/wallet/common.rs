@@ -3,7 +3,7 @@
 use rusqlite::{named_params, types::Value, Connection, Row};
 use std::rc::Rc;
 
-use zcash_client_backend::{wallet::ReceivedNote, ShieldedProtocol};
+use zcash_client_backend::{data_api::NoteSelector, wallet::ReceivedNote, ShieldedProtocol};
 use zcash_primitives::transaction::{components::amount::NonNegativeAmount, TxId};
 use zcash_protocol::consensus::{self, BlockHeight};
 
@@ -226,14 +226,38 @@ where
         .collect::<Result<_, _>>()
 }
 
-pub(crate) fn count_outputs(
+pub(crate) struct PoolMeta {
+    pub(crate) note_count: usize,
+    pub(crate) total_value: NonNegativeAmount,
+}
+
+pub(crate) fn spendable_notes_meta(
     conn: &rusqlite::Connection,
-    account: AccountId,
-    min_value: NonNegativeAmount,
-    exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
-) -> Result<usize, rusqlite::Error> {
+    account: AccountId,
+    selector: NoteSelector,
+    exclude: &[ReceivedNoteId],
+) -> Result<PoolMeta, SqliteClientError> {
     let (table_prefix, _, _) = per_protocol_names(protocol);
+
+    fn min_value(selector: &NoteSelector) -> Result<Option<NonNegativeAmount>, SqliteClientError> {
+        match selector {
+            NoteSelector::MinValue(v) => Ok(Some(v)),
+            NoteSelector::PriorSendPercentile(n) => {
+                if n > 100u8 {
+                    return Err(SqliteClientError::
+                }
+            }
+            NoteSelector::BalancePercentage(n) => {
+            }
+            NoteSelector::Try { condition, fallback } => {
+                match min_value(condition)? {
+                    Some(n) => Ok(Some(n)),
+                    None => min_value(fallback)
+                }
+            }
+        }
+    }
 
     let excluded: Vec<Value> = exclude
         .iter()
@@ -247,9 +271,10 @@ pub(crate) fn count_outputs(
         .collect();
     let excluded_ptr = Rc::new(excluded);
 
-    conn.query_row(
+
+    let (note_count, total_value) = conn.query_row(
         &format!(
-            "SELECT COUNT(*)
+            "SELECT COUNT(*), SUM(value)
              FROM {table_prefix}_received_notes
              INNER JOIN accounts
                ON accounts.id = {table_prefix}_received_notes.account_id
@@ -274,6 +299,13 @@ pub(crate) fn count_outputs(
             ":min_value": u64::from(min_value),
             ":exclude": &excluded_ptr
         ],
-        |row| row.get(0),
-    )
+        |row| Ok((row.get::<_, usize>(0)?, row.get::<_, Option<i64>>(1)?)),
+    )?;
+
+    Ok(PoolMeta {
+        note_count,
+        total_value: total_value.map_or(Ok(NonNegativeAmount::ZERO), |v| {
+            NonNegativeAmount::from_nonnegative_i64(v).map_err(SqliteClientError::BalanceError)
+        })?,
+    })
 }
