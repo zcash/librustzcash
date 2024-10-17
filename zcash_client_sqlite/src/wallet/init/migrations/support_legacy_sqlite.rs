@@ -12,7 +12,7 @@ const DEPENDENCIES: &[Uuid] = &[tx_retrieval_queue::MIGRATION_ID];
 
 pub(super) struct Migration;
 
-impl schemerz::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

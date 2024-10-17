@@ -12,6 +12,9 @@ and this library adheres to Rust's notion of
   - `Progress`
   - `WalletSummary::progress`
 
+### Changed
+- Migrated to `arti-client 0.22`.
+
 ### Removed
 - `zcash_client_backend::data_api`:
   - `WalletSummary::scan_progress` and `WalletSummary::recovery_progress` have

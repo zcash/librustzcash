@@ -15,7 +15,7 @@ const DEPENDENCIES: &[Uuid] = &[v_sapling_shard_unscanned_ranges::MIGRATION_ID];
 
 pub(super) struct Migration;
 
-impl schemerz::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

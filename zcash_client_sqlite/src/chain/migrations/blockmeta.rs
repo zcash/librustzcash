@@ -24,7 +24,7 @@ pub mod init {
 
     migration!(
         Migration,
-        &format!("{}", MIGRATION_ID),
+        MIGRATION_ID,
         [],
         "Initialize the cachemeta database."
     );

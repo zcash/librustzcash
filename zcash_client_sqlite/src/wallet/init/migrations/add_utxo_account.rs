@@ -33,7 +33,7 @@ pub(super) struct Migration<P> {
     pub(super) _params: P,
 }
 
-impl<P> schemerz::Migration for Migration<P> {
+impl<P> schemerz::Migration<Uuid> for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
