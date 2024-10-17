@@ -230,6 +230,9 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::EphemeralAddressReuse(_, _) => {
             unreachable!("we don't do ephemeral address tracking")
         }
+        SqliteClientError::NoteFilterInvalid(_) => {
+            unreachable!("we don't do note selection in migrations")
+        }
     }
 }
 

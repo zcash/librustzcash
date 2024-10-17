@@ -487,6 +487,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn metadata_queries_exclude_unwanted_notes() {
+        testing::pool::metadata_queries_exclude_unwanted_notes::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn pool_crossing_required() {
         testing::pool::pool_crossing_required::<OrchardPoolTester, SaplingPoolTester>()
     }

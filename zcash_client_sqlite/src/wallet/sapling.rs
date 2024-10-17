@@ -500,6 +500,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn metadata_queries_exclude_unwanted_notes() {
+        testing::pool::metadata_queries_exclude_unwanted_notes::<SaplingPoolTester>()
+    }
+
+    #[test]
     #[cfg(feature = "orchard")]
     fn pool_crossing_required() {
         testing::pool::pool_crossing_required::<SaplingPoolTester, OrchardPoolTester>()

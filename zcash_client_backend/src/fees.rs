@@ -10,7 +10,8 @@ use zcash_primitives::{
         components::{amount::NonNegativeAmount, OutPoint},
         fees::{
             transparent::{self, InputSize},
-            zip317 as prim_zip317, FeeRule,
+            zip317::{self as prim_zip317},
+            FeeRule,
         },
     },
 };
@@ -352,21 +353,32 @@ impl Default for DustOutputPolicy {
 
 /// A policy that describes how change output should be split into multiple notes for the purpose
 /// of note management.
+///
+/// If an account contains at least [`Self::target_output_count`] notes having at least value
+/// [`Self::min_split_output_value`], this policy will recommend a single output; if the account
+/// contains fewer such notes, this policy will recommend that multiple outputs be produced in
+/// order to achieve the target.
 #[derive(Clone, Copy, Debug)]
 pub struct SplitPolicy {
     target_output_count: NonZeroUsize,
-    min_split_output_size: NonNegativeAmount,
+    min_split_output_value: Option<NonNegativeAmount>,
 }
 
 impl SplitPolicy {
-    /// Constructs a new [`SplitPolicy`] from its constituent parts.
-    pub fn new(
+    /// In the case that no other conditions provided by the user are available to fall back on,
+    /// a default value of [`MARGINAL_FEE`] * 100 will be used as the "minimum usable note value"
+    /// when retrieving wallet metadata.
+    pub(crate) const MIN_NOTE_VALUE: NonNegativeAmount = NonNegativeAmount::const_from_u64(500000);
+
+    /// Constructs a new [`SplitPolicy`] that splits change to ensure the given number of spendable
+    /// outputs exists within an account, each having at least the specified minimum note value.
+    pub fn with_min_output_value(
         target_output_count: NonZeroUsize,
-        min_split_output_size: NonNegativeAmount,
+        min_split_output_value: NonNegativeAmount,
     ) -> Self {
         Self {
             target_output_count,
-            min_split_output_size,
+            min_split_output_value: Some(min_split_output_value),
         }
     }
 
@@ -374,44 +386,71 @@ impl SplitPolicy {
     pub fn single_output() -> Self {
         Self {
             target_output_count: NonZeroUsize::MIN,
-            min_split_output_size: NonNegativeAmount::ZERO,
+            min_split_output_value: None,
         }
     }
 
+    /// Returns the number of outputs that this policy will attempt to ensure that the wallet has
+    /// available for spending.
+    pub fn target_output_count(&self) -> NonZeroUsize {
+        self.target_output_count
+    }
+
     /// Returns the minimum value for a note resulting from splitting of change.
-    ///
-    /// If splitting change would result in notes of value less than the minimum split output size,
-    /// a smaller number of splits should be chosen.
-    pub fn min_split_output_size(&self) -> NonNegativeAmount {
-        self.min_split_output_size
+    pub fn min_split_output_value(&self) -> Option<NonNegativeAmount> {
+        self.min_split_output_value
     }
 
     /// Returns the number of output notes to produce from the given total change value, given the
-    /// number of existing unspent notes in the account and this policy.
+    /// total value and number of existing unspent notes in the account and this policy.
+    ///
+    /// If splitting change to produce [`Self::target_output_count`] would result in notes of value less than
+    /// [`Self::min_split_output_value`], then this will produce
+    ///
     pub fn split_count(
         &self,
-        existing_notes: usize,
+        existing_notes: Option<usize>,
+        existing_notes_total: Option<NonNegativeAmount>,
         total_change: NonNegativeAmount,
     ) -> NonZeroUsize {
-        let mut split_count =
-            NonZeroUsize::new(usize::from(self.target_output_count).saturating_sub(existing_notes))
-                .unwrap_or(NonZeroUsize::MIN);
+        fn to_nonzero_u64(value: usize) -> NonZeroU64 {
+            NonZeroU64::new(u64::try_from(value).expect("usize fits into u64"))
+                .expect("NonZeroU64 input derived from NonZeroUsize")
+        }
 
-        loop {
-            let per_output_change = total_change.div_with_remainder(
-                NonZeroU64::new(
-                    u64::try_from(usize::from(split_count)).expect("usize fits into u64"),
-                )
-                .unwrap(),
-            );
-            if *per_output_change.quotient() >= self.min_split_output_size {
-                return split_count;
-            } else if let Some(new_count) = NonZeroUsize::new(usize::from(split_count) - 1) {
-                split_count = new_count;
-            } else {
-                // We always create at least one change output.
-                return NonZeroUsize::MIN;
+        let mut split_count = NonZeroUsize::new(
+            usize::from(self.target_output_count)
+                .saturating_sub(existing_notes.unwrap_or(usize::MAX)),
+        )
+        .unwrap_or(NonZeroUsize::MIN);
+
+        let min_split_output_value = self.min_split_output_value.or_else(|| {
+            // If no minimum split output size is set, we choose the minimum split size to be a
+            // quarter of the average value of notes in the wallet after the transaction.
+            (existing_notes_total + total_change).map(|total| {
+                *total
+                    .div_with_remainder(to_nonzero_u64(
+                        usize::from(self.target_output_count).saturating_mul(4),
+                    ))
+                    .quotient()
+            })
+        });
+
+        if let Some(min_split_output_value) = min_split_output_value {
+            loop {
+                let per_output_change =
+                    total_change.div_with_remainder(to_nonzero_u64(usize::from(split_count)));
+                if *per_output_change.quotient() >= min_split_output_value {
+                    return split_count;
+                } else if let Some(new_count) = NonZeroUsize::new(usize::from(split_count) - 1) {
+                    split_count = new_count;
+                } else {
+                    // We always create at least one change output.
+                    return NonZeroUsize::MIN;
+                }
             }
+        } else {
+            NonZeroUsize::MIN
         }
     }
 }
@@ -466,7 +505,7 @@ pub trait ChangeStrategy {
 
     /// Tye type of wallet metadata that this change strategy relies upon in order to compute
     /// change.
-    type WalletMetaT;
+    type AccountMetaT;
 
     /// Returns the fee rule that this change strategy will respect when performing
     /// balance computations.
@@ -479,7 +518,7 @@ pub trait ChangeStrategy {
         meta_source: &Self::MetaSource,
         account: <Self::MetaSource as InputSource>::AccountId,
         exclude: &[<Self::MetaSource as InputSource>::NoteRef],
-    ) -> Result<Self::WalletMetaT, <Self::MetaSource as InputSource>::Error>;
+    ) -> Result<Self::AccountMetaT, <Self::MetaSource as InputSource>::Error>;
 
     /// Computes the totals of inputs, suggested change amounts, and fees given the
     /// provided inputs and outputs being used to construct a transaction.
@@ -516,7 +555,7 @@ pub trait ChangeStrategy {
         sapling: &impl sapling::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard::BundleView<NoteRefT>,
         ephemeral_balance: Option<&EphemeralBalance>,
-        wallet_meta: &Self::WalletMetaT,
+        wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
 }
 

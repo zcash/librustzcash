@@ -50,10 +50,10 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        Account, AccountBirthday, AccountPurpose, AccountSource, BlockMetadata,
-        DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
-        SentTransaction, SpendableNotes, TransactionDataRequest, WalletCommitmentTrees, WalletMeta,
-        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, BlockMetadata,
+        DecryptedTransaction, InputSource, NoteFilter, NullifierQuery, ScannedBlock, SeedRelevance,
+        SentTransaction, SpendableNotes, TransactionDataRequest, WalletCommitmentTrees, WalletRead,
+        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -128,7 +128,7 @@ pub mod error;
 pub mod wallet;
 use wallet::{
     commitment_tree::{self, put_shard_roots},
-    common::count_outputs,
+    common::spendable_notes_meta,
     SubtreeProgressEstimator,
 };
 
@@ -348,39 +348,38 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         )
     }
 
-    fn get_wallet_metadata(
+    /// Returns metadata for the spendable notes in the wallet.
+    fn get_account_metadata(
         &self,
         account_id: Self::AccountId,
-        min_value: NonNegativeAmount,
+        selector: &NoteFilter,
         exclude: &[Self::NoteRef],
-    ) -> Result<WalletMeta, Self::Error> {
+    ) -> Result<AccountMeta, Self::Error> {
         let chain_tip_height = wallet::chain_tip_height(self.conn.borrow())?
             .ok_or(SqliteClientError::ChainHeightUnknown)?;
 
-        let sapling_note_count = count_outputs(
+        let sapling_pool_meta = spendable_notes_meta(
             self.conn.borrow(),
-            account_id,
-            min_value,
-            exclude,
             ShieldedProtocol::Sapling,
             chain_tip_height,
+            account_id,
+            selector,
+            exclude,
         )?;
 
         #[cfg(feature = "orchard")]
-        let orchard_note_count = count_outputs(
+        let orchard_pool_meta = spendable_notes_meta(
             self.conn.borrow(),
-            account_id,
-            min_value,
-            exclude,
             ShieldedProtocol::Orchard,
             chain_tip_height,
+            account_id,
+            selector,
+            exclude,
         )?;
+        #[cfg(not(feature = "orchard"))]
+        let orchard_pool_meta = None;
 
-        Ok(WalletMeta::new(
-            sapling_note_count,
-            #[cfg(feature = "orchard")]
-            orchard_note_count,
-        ))
+        Ok(AccountMeta::new(sapling_pool_meta, orchard_pool_meta))
     }
 }
 
