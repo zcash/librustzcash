@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::value::DivRem`
+- `zcash_protocol::value::Zatoshis::div_with_remainder`
+
 ## [0.4.0] - 2024-10-02
 ### Added
 - `impl Sub<BlockHeight> for BlockHeight` unlike the implementation that was

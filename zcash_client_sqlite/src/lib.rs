@@ -52,8 +52,8 @@ use zcash_client_backend::{
         scanning::{ScanPriority, ScanRange},
         Account, AccountBirthday, AccountPurpose, AccountSource, BlockMetadata,
         DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
-        SentTransaction, SpendableNotes, TransactionDataRequest, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        SentTransaction, SpendableNotes, TransactionDataRequest, WalletCommitmentTrees, WalletMeta,
+        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -128,6 +128,7 @@ pub mod error;
 pub mod wallet;
 use wallet::{
     commitment_tree::{self, put_shard_roots},
+    common::count_outputs,
     SubtreeProgressEstimator,
 };
 
@@ -345,6 +346,36 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
             target_height,
             min_confirmations,
         )
+    }
+
+    fn get_wallet_metadata(
+        &self,
+        account_id: Self::AccountId,
+        min_value: NonNegativeAmount,
+        exclude: &[Self::NoteRef],
+    ) -> Result<WalletMeta, Self::Error> {
+        let sapling_note_count = count_outputs(
+            self.conn.borrow(),
+            account_id,
+            min_value,
+            exclude,
+            ShieldedProtocol::Sapling,
+        )?;
+
+        #[cfg(feature = "orchard")]
+        let orchard_note_count = count_outputs(
+            self.conn.borrow(),
+            account_id,
+            min_value,
+            exclude,
+            ShieldedProtocol::Orchard,
+        )?;
+
+        Ok(WalletMeta::new(
+            sapling_note_count,
+            #[cfg(feature = "orchard")]
+            orchard_note_count,
+        ))
     }
 }
 
