@@ -383,16 +383,61 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
 pub(crate) fn add_transparent_account_balances(
     conn: &rusqlite::Connection,
     mempool_height: BlockHeight,
+    min_confirmations: u32,
     account_balances: &mut HashMap<AccountId, AccountBalance>,
 ) -> Result<(), SqliteClientError> {
-    let mut stmt_account_balances = conn.prepare(
+    let mut stmt_account_spendable_balances = conn.prepare(
         "SELECT u.account_id, SUM(u.value_zat)
          FROM transparent_received_outputs u
          JOIN transactions t
          ON t.id_tx = u.transaction_id
-         -- the transaction that created the output is mined or is definitely unexpired
+         -- the transaction that created the output is mined and with enough confirmations
          WHERE (
             t.mined_height < :mempool_height -- tx is mined
+            AND :mempool_height - t.mined_height >= :min_confirmations -- has at least min_confirmations
+         )
+         -- and the received txo is unspent
+         AND u.id NOT IN (
+           SELECT transparent_received_output_id
+           FROM transparent_received_output_spends txo_spends
+           JOIN transactions tx
+             ON tx.id_tx = txo_spends.transaction_id
+           WHERE tx.mined_height IS NOT NULL -- the spending tx is mined
+           OR tx.expiry_height = 0 -- the spending tx will not expire
+           OR tx.expiry_height >= :mempool_height -- the spending tx is unexpired
+         )
+         GROUP BY u.account_id",
+    )?;
+    let mut rows = stmt_account_spendable_balances.query(named_params![
+        ":mempool_height": u32::from(mempool_height),
+        ":min_confirmations": min_confirmations,
+    ])?;
+
+    while let Some(row) = rows.next()? {
+        let account = AccountId(row.get(0)?);
+        let raw_value = row.get(1)?;
+        let value = NonNegativeAmount::from_nonnegative_i64(raw_value).map_err(|_| {
+            SqliteClientError::CorruptedData(format!("Negative UTXO value {:?}", raw_value))
+        })?;
+
+        account_balances
+            .entry(account)
+            .or_insert(AccountBalance::ZERO)
+            .with_unshielded_balance_mut::<_, SqliteClientError>(|bal| {
+                bal.add_spendable_value(value)?;
+                Ok(())
+            })?;
+    }
+
+    let mut stmt_account_unconfirmed_balances = conn.prepare(
+        "SELECT u.account_id, SUM(u.value_zat)
+         FROM transparent_received_outputs u
+         JOIN transactions t
+         ON t.id_tx = u.transaction_id
+         -- the transaction that created the output is mined with not enough confirmations or is definitely unexpired
+         WHERE (
+            (t.mined_height < :mempool_height
+            AND (:mempool_height - t.mined_height) < :min_confirmations) -- tx is mined but not confirmed
             OR t.expiry_height = 0 -- tx will not expire
             OR t.expiry_height >= :mempool_height
          )
@@ -408,8 +453,11 @@ pub(crate) fn add_transparent_account_balances(
          )
          GROUP BY u.account_id",
     )?;
-    let mut rows = stmt_account_balances
-        .query(named_params![":mempool_height": u32::from(mempool_height),])?;
+
+    let mut rows = stmt_account_unconfirmed_balances.query(named_params![
+        ":mempool_height": u32::from(mempool_height),
+        ":min_confirmations": min_confirmations,
+    ])?;
 
     while let Some(row) = rows.next()? {
         let account = AccountId(row.get(0)?);
@@ -421,7 +469,10 @@ pub(crate) fn add_transparent_account_balances(
         account_balances
             .entry(account)
             .or_insert(AccountBalance::ZERO)
-            .add_unshielded_value(value)?;
+            .with_unshielded_balance_mut::<_, SqliteClientError>(|bal| {
+                bal.add_pending_spendable_value(value)?;
+                Ok(())
+            })?;
     }
     Ok(())
 }
@@ -977,7 +1028,10 @@ mod tests {
         }
         st.scan_cached_blocks(start_height, 10);
 
-        let check_balance = |st: &TestState<_, TestDb, _>, min_confirmations: u32, expected| {
+        let check_balance = |st: &TestState<_, TestDb, _>,
+                             min_confirmations: u32,
+                             expected_total,
+                             expected_spendable| {
             // Check the wallet summary returns the expected transparent balance.
             let summary = st
                 .wallet()
@@ -985,10 +1039,12 @@ mod tests {
                 .unwrap()
                 .unwrap();
             let balance = summary.account_balances().get(&account.id()).unwrap();
-            // TODO: in the future, we will distinguish between available and total
-            // balance according to `min_confirmations`
-            assert_eq!(balance.unshielded(), expected);
 
+            assert_eq!(balance.unshielded_balance().total(), expected_total);
+            assert_eq!(
+                balance.unshielded_balance().spendable_value(),
+                expected_spendable
+            );
             // Check the older APIs for consistency.
             let mempool_height = st.wallet().chain_height().unwrap().unwrap() + 1;
             assert_eq!(
@@ -998,7 +1054,7 @@ mod tests {
                     .get(taddr)
                     .cloned()
                     .unwrap_or(NonNegativeAmount::ZERO),
-                expected,
+                expected_total,
             );
             assert_eq!(
                 st.wallet()
@@ -1007,7 +1063,7 @@ mod tests {
                     .into_iter()
                     .map(|utxo| utxo.value())
                     .sum::<Option<NonNegativeAmount>>(),
-                Some(expected),
+                Some(expected_total),
             );
         };
 
@@ -1016,7 +1072,7 @@ mod tests {
         // and total balance, we should perform additional checks against available balance;
         // we use minconf 0 here because all transparent funds are considered shieldable,
         // irrespective of confirmation depth.
-        check_balance(&st, 0, NonNegativeAmount::ZERO);
+        check_balance(&st, 0, NonNegativeAmount::ZERO, NonNegativeAmount::ZERO);
 
         // Create a fake transparent output.
         let value = NonNegativeAmount::from_u64(100000).unwrap();
@@ -1034,7 +1090,12 @@ mod tests {
             .unwrap();
 
         // The wallet should detect the balance as available
-        check_balance(&st, 0, value);
+        check_balance(&st, 0, value, value);
+
+        // The wallet should detect the balance as available
+        check_balance(&st, 1, value, value);
+        // The wallet should detect the balance as not available
+        check_balance(&st, 2, value, NonNegativeAmount::ZERO);
 
         // Shield the output.
         let input_selector = GreedyInputSelector::new(
@@ -1051,14 +1112,14 @@ mod tests {
 
         // The wallet should have zero transparent balance, because the shielding
         // transaction can be mined.
-        check_balance(&st, 0, NonNegativeAmount::ZERO);
+        check_balance(&st, 0, NonNegativeAmount::ZERO, NonNegativeAmount::ZERO);
 
         // Mine the shielding transaction.
         let (mined_height, _) = st.generate_next_block_including(txid);
         st.scan_cached_blocks(mined_height, 1);
 
         // The wallet should still have zero transparent balance.
-        check_balance(&st, 0, NonNegativeAmount::ZERO);
+        check_balance(&st, 0, NonNegativeAmount::ZERO, NonNegativeAmount::ZERO);
 
         // Unmine the shielding transaction via a reorg.
         st.wallet_mut()
@@ -1067,7 +1128,7 @@ mod tests {
         assert_eq!(st.wallet().chain_height().unwrap(), Some(mined_height - 1));
 
         // The wallet should still have zero transparent balance.
-        check_balance(&st, 0, NonNegativeAmount::ZERO);
+        check_balance(&st, 0, NonNegativeAmount::ZERO, NonNegativeAmount::ZERO);
 
         // Expire the shielding transaction.
         let expiry_height = st
@@ -1078,6 +1139,6 @@ mod tests {
             .expiry_height();
         st.wallet_mut().update_chain_tip(expiry_height).unwrap();
 
-        check_balance(&st, 0, value);
+        check_balance(&st, 0, value, value);
     }
 }
