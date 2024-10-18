@@ -425,11 +425,7 @@ pub(crate) fn read_v5_bundle<R: Read>(
 
     let shielded_spends = sd_v5s
         .into_iter()
-        .zip(
-            v_spend_proofs
-                .into_iter()
-                .zip(v_spend_auth_sigs.into_iter()),
-        )
+        .zip(v_spend_proofs.into_iter().zip(v_spend_auth_sigs))
         .map(|(sd_5, (zkproof, spend_auth_sig))| {
             // the following `unwrap` is safe because we know n_spends > 0.
             sd_5.into_spend_description(anchor.unwrap(), zkproof, spend_auth_sig)
@@ -438,7 +434,7 @@ pub(crate) fn read_v5_bundle<R: Read>(
 
     let shielded_outputs = od_v5s
         .into_iter()
-        .zip(v_output_proofs.into_iter())
+        .zip(v_output_proofs)
         .map(|(od_5, zkproof)| od_5.into_output_description(zkproof))
         .collect();
 

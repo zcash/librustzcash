@@ -626,10 +626,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         let iter = wallet::transaction_data_requests(self.conn.borrow())?.into_iter();
 
         #[cfg(feature = "transparent-inputs")]
-        let iter = iter.chain(
-            wallet::transparent::transaction_data_requests(self.conn.borrow(), &self.params)?
-                .into_iter(),
-        );
+        let iter = iter.chain(wallet::transparent::transaction_data_requests(
+            self.conn.borrow(),
+            &self.params,
+        )?);
 
         Ok(iter.collect())
     }

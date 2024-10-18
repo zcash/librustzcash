@@ -192,14 +192,14 @@ impl Sub<ZatBalance> for Option<ZatBalance> {
 }
 
 impl Sum<ZatBalance> for Option<ZatBalance> {
-    fn sum<I: Iterator<Item = ZatBalance>>(iter: I) -> Self {
-        iter.fold(Some(ZatBalance::zero()), |acc, a| acc? + a)
+    fn sum<I: Iterator<Item = ZatBalance>>(mut iter: I) -> Self {
+        iter.try_fold(ZatBalance::zero(), |acc, a| acc + a)
     }
 }
 
 impl<'a> Sum<&'a ZatBalance> for Option<ZatBalance> {
-    fn sum<I: Iterator<Item = &'a ZatBalance>>(iter: I) -> Self {
-        iter.fold(Some(ZatBalance::zero()), |acc, a| acc? + *a)
+    fn sum<I: Iterator<Item = &'a ZatBalance>>(mut iter: I) -> Self {
+        iter.try_fold(ZatBalance::zero(), |acc, a| acc + *a)
     }
 }
 
@@ -375,14 +375,14 @@ impl Mul<usize> for Zatoshis {
 }
 
 impl Sum<Zatoshis> for Option<Zatoshis> {
-    fn sum<I: Iterator<Item = Zatoshis>>(iter: I) -> Self {
-        iter.fold(Some(Zatoshis::ZERO), |acc, a| acc? + a)
+    fn sum<I: Iterator<Item = Zatoshis>>(mut iter: I) -> Self {
+        iter.try_fold(Zatoshis::ZERO, |acc, a| acc + a)
     }
 }
 
 impl<'a> Sum<&'a Zatoshis> for Option<Zatoshis> {
-    fn sum<I: Iterator<Item = &'a Zatoshis>>(iter: I) -> Self {
-        iter.fold(Some(Zatoshis::ZERO), |acc, a| acc? + *a)
+    fn sum<I: Iterator<Item = &'a Zatoshis>>(mut iter: I) -> Self {
+        iter.try_fold(Zatoshis::ZERO, |acc, a| acc + *a)
     }
 }
 

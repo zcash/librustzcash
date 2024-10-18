@@ -148,7 +148,7 @@ enum OpCode {
     Nop9 = 0xb8,
     Nop10 = 0xb9,
 
-    InvalidOpCode = 0xff,
+    Invalid = 0xff,
 }
 
 impl OpCode {
@@ -265,7 +265,7 @@ impl OpCode {
             0xb7 => Some(OpCode::Nop8),
             0xb8 => Some(OpCode::Nop9),
             0xb9 => Some(OpCode::Nop10),
-            0xff => Some(OpCode::InvalidOpCode),
+            0xff => Some(OpCode::Invalid),
             _ => None,
         }
     }
@@ -457,7 +457,7 @@ mod tests {
         }
 
         {
-            let short_data = vec![2; 100];
+            let short_data = [2; 100];
             let script = Script::default() << &short_data[..];
             assert_eq!(script.0[0], OpCode::PushData1 as u8);
             assert_eq!(script.0[1] as usize, 100);

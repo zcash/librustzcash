@@ -120,7 +120,7 @@ pub fn write_nonempty_frontier_v1<H: HashSer, W: Write>(
         // than as part of the ommers vector.
         frontier
             .ommers()
-            .get(0)
+            .first()
             .expect("ommers vector cannot be empty for right-hand nodes")
             .write(&mut writer)?;
         Optional::write(&mut writer, Some(frontier.leaf()), |w, n: &H| n.write(w))?;
@@ -273,14 +273,7 @@ pub fn merkle_path_from_slice<Node: HashSer, const DEPTH: u8>(
     }
 
     // Read the position from the witness
-    let position = witness.read_u64::<LittleEndian>().and_then(|p| {
-        Position::try_from(p).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("decoded position {} exceeded the range of a `usize`", p),
-            )
-        })
-    })?;
+    let position = witness.read_u64::<LittleEndian>().map(Position::from)?;
 
     // The witness should be empty now; if it wasn't, the caller would
     // have provided more information than they should have, indicating
