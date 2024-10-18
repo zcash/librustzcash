@@ -12,8 +12,9 @@ and this library adheres to Rust's notion of
   `unstable` feature flag.
 
 ### Changed
+- MSRV is now 1.77.0.
 - Migrated from `schemer` to our fork `schemerz`.
-- Migrated to `rusqlite 0.31`.
+- Migrated to `rusqlite 0.32`.
 
 ## [0.12.1] - 2024-10-10
 

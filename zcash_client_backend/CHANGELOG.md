@@ -13,7 +13,8 @@ and this library adheres to Rust's notion of
   - `WalletSummary::progress`
 
 ### Changed
-- Migrated to `arti-client 0.22`.
+- MSRV is now 1.77.0.
+- Migrated to `arti-client 0.23`.
 
 ### Removed
 - `zcash_client_backend::data_api`:

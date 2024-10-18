@@ -1736,6 +1736,7 @@ mod tests {
                 #[cfg(feature = "transparent-inputs")]
                 let len = len + 2 + 74;
 
+                #[allow(clippy::let_and_return)]
                 len
             };
             assert_eq!(encoded.len(), encoded_len);
