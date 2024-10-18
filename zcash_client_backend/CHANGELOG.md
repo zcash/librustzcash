@@ -13,6 +13,7 @@ and this library adheres to Rust's notion of
   - `WalletSummary::progress`
 
 ### Changed
+- MSRV is now 1.77.0.
 - Migrated to `arti-client 0.22`.
 
 ### Removed
