@@ -110,10 +110,6 @@ criteria = "safe-to-deploy"
 version = "0.1.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.anstyle-wincon]]
-version = "3.0.3"
-criteria = "safe-to-run"
-
 [[exemptions.arrayvec]]
 version = "0.7.4"
 criteria = "safe-to-deploy"
