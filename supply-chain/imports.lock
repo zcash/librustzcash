@@ -84,7 +84,7 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.schemerz-rusqlite]]
-version = "0.310.0"
+version = "0.320.0"
 when = "2024-10-16"
 user-id = 6289
 user-login = "str4d"
@@ -397,12 +397,6 @@ who = "Benjamin Bouvier <public@benj.me>"
 criteria = "safe-to-deploy"
 delta = "0.9.0 -> 0.10.2"
 
-[[audits.bytecode-alliance.audits.cc]]
-who = "Alex Crichton <alex@alexcrichton.com>"
-criteria = "safe-to-deploy"
-version = "1.0.73"
-notes = "I am the author of this crate."
-
 [[audits.bytecode-alliance.audits.constant_time_eq]]
 who = "Nick Fitzgerald <fitzgen@gmail.com>"
 criteria = "safe-to-deploy"
@@ -515,15 +509,6 @@ notes = "Minor documentation updates an additions, nothing major."
 who = "Dan Gohman <dev@sunfishcode.online>"
 criteria = "safe-to-deploy"
 version = "0.1.2"
-
-[[audits.bytecode-alliance.audits.itertools]]
-who = "Nick Fitzgerald <fitzgen@gmail.com>"
-criteria = "safe-to-deploy"
-delta = "0.10.5 -> 0.12.1"
-notes = """
-Minimal `unsafe` usage. Few blocks that existed looked reasonable. Does what it
-says on the tin: lots of iterators.
-"""
 
 [[audits.bytecode-alliance.audits.libm]]
 who = "Alex Crichton <alex@alexcrichton.com>"
@@ -691,18 +676,6 @@ version = "1.0.58"
 who = "Johan Andersson <opensource@embark-studios.com>"
 criteria = "safe-to-deploy"
 version = "1.0.0"
-notes = "No unsafe usage or ambient capabilities"
-
-[[audits.embark-studios.audits.convert_case]]
-who = "Johan Andersson <opensource@embark-studios.com>"
-criteria = "safe-to-deploy"
-version = "0.4.0"
-notes = "No unsafe usage or ambient capabilities"
-
-[[audits.embark-studios.audits.derive_more]]
-who = "Johan Andersson <opensource@embark-studios.com>"
-criteria = "safe-to-deploy"
-version = "0.99.17"
 notes = "No unsafe usage or ambient capabilities"
 
 [[audits.embark-studios.audits.ident_case]]
@@ -1548,6 +1521,12 @@ This crate has been added to Chromium in https://crrev.com/c/3891618.
 '''
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
+[[audits.google.audits.unicode-xid]]
+who = "George Burgess IV <gbiv@google.com>"
+criteria = "safe-to-deploy"
+version = "0.2.4"
+aggregated-from = "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
+
 [[audits.google.audits.version_check]]
 who = "George Burgess IV <gbiv@google.com>"
 criteria = "safe-to-deploy"
@@ -1972,18 +1951,6 @@ criteria = "safe-to-deploy"
 delta = "0.10.2 -> 0.10.3"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
-[[audits.mozilla.audits.cc]]
-who = "Mike Hommey <mh+mozilla@glandium.org>"
-criteria = "safe-to-deploy"
-delta = "1.0.73 -> 1.0.78"
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
-[[audits.mozilla.audits.cc]]
-who = "Jan-Erik Rediger <jrediger@mozilla.com>"
-criteria = "safe-to-deploy"
-delta = "1.0.78 -> 1.0.83"
-aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
-
 [[audits.mozilla.audits.crossbeam-channel]]
 who = "Jan-Erik Rediger <jrediger@mozilla.com>"
 criteria = "safe-to-deploy"
@@ -2209,18 +2176,6 @@ criteria = "safe-to-deploy"
 version = "0.4.3"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
-[[audits.mozilla.audits.libsqlite3-sys]]
-who = "Mark Hammond <mhammond@mozilla.com>"
-criteria = "safe-to-deploy"
-delta = "0.26.0 -> 0.27.0"
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
-[[audits.mozilla.audits.libsqlite3-sys]]
-who = "Mark Hammond <mhammond@mozilla.com>"
-criteria = "safe-to-deploy"
-delta = "0.27.0 -> 0.28.0"
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
 [[audits.mozilla.audits.litrs]]
 who = "Erich Gubler <erichdongubler@gmail.com>"
 criteria = "safe-to-deploy"
@@ -2373,19 +2328,6 @@ criteria = "safe-to-deploy"
 delta = "0.6.27 -> 0.6.28"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
-[[audits.mozilla.audits.rusqlite]]
-who = "Mark Hammond <mhammond@mozilla.com>"
-criteria = "safe-to-deploy"
-delta = "0.29.0 -> 0.30.0"
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
-[[audits.mozilla.audits.rusqlite]]
-who = "Mark Hammond <mhammond@mozilla.com>"
-criteria = "safe-to-deploy"
-delta = "0.30.0 -> 0.31.0"
-notes = "Mostly build and dependency related changes, and bump to sqlite version"
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
 [[audits.mozilla.audits.strsim]]
 who = "Ben Dean-Kawamura <bdk@mozilla.com>"
 criteria = "safe-to-deploy"
@@ -2492,6 +2434,18 @@ Most unsafe code is in implementing non-std sync primitives. Unsafe impls are
 logically correct and justified in comments, and unsafe code is sound and
 justified in comments.
 """
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.unicode-xid]]
+who = "Teodor Tanasoaia <ttanasoaia@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.4 -> 0.2.5"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.unicode-xid]]
+who = "Jim Blandy <jimb@red-bean.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.5 -> 0.2.6"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.zerocopy]]
@@ -2614,24 +2568,6 @@ delta = "1.5.0 -> 1.6.0"
 notes = """
 There is significant use of `unsafe` code, but safety requirements are well documented
 and appear correct as far as I can see.
-"""
-aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
-
-[[audits.zcash.audits.cc]]
-who = "Daira-Emma Hopwood <daira@jacaranda.org>"
-criteria = "safe-to-deploy"
-delta = "1.0.83 -> 1.0.94"
-notes = """
-The optimization to use `buffer.set_len(buffer.capacity())` in `command_helpers::StderrForwarder::forward_available`
-doesn't look panic-safe: if `stderr.read` panics and that panic is caught by a caller of `forward_available`, then
-the inner buffer of `StderrForwarder` will contain uninitialized data. This looks difficult to trigger in practice,
-but I have opened an issue <https://github.com/rust-lang/cc-rs/issues/1036>.
-
-`parallel::async_executor` contains `unsafe` pinning code but it looks reasonable. Similarly for the `unsafe`
-initialization code in `parallel::job_token::JobTokenServer` and file operations in `parallel::stderr`.
-
-This crate executes commands, and my review is likely not sufficient to detect subtle backdoors.
-I did not review the use of library handles in the `com` package on Windows.
 """
 aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
