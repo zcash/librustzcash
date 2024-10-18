@@ -11,19 +11,16 @@ use nonempty::NonEmpty;
 use zcash_address::ConversionError;
 use zcash_primitives::{
     consensus::{self, BlockHeight},
-    transaction::{
-        components::{
-            amount::{BalanceError, NonNegativeAmount},
-            TxOut,
-        },
-        fees::FeeRule,
+    transaction::components::{
+        amount::{BalanceError, NonNegativeAmount},
+        TxOut,
     },
 };
 
 use crate::{
     address::{Address, UnifiedAddress},
     data_api::{InputSource, SimpleNoteRetention, SpendableNotes},
-    fees::{sapling, ChangeError, ChangeStrategy, DustOutputPolicy},
+    fees::{sapling, ChangeError, ChangeStrategy},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
     zip321::TransactionRequest,
@@ -47,11 +44,13 @@ use crate::fees::orchard as orchard_fees;
 
 /// The type of errors that may be produced in input selection.
 #[derive(Debug)]
-pub enum InputSelectorError<DbErrT, SelectorErrT> {
+pub enum InputSelectorError<DbErrT, SelectorErrT, ChangeErrT, N> {
     /// An error occurred accessing the underlying data store.
     DataSource(DbErrT),
     /// An error occurred specific to the provided input selector's selection rules.
     Selection(SelectorErrT),
+    /// An error occurred in computing the change or fee for the proposed transfer.
+    Change(ChangeError<ChangeErrT, N>),
     /// Input selection attempted to generate an invalid transaction proposal.
     Proposal(ProposalError),
     /// An error occurred parsing the address from a payment request.
@@ -67,13 +66,9 @@ pub enum InputSelectorError<DbErrT, SelectorErrT> {
     SyncRequired,
 }
 
-impl<E, S> From<ConversionError<&'static str>> for InputSelectorError<E, S> {
-    fn from(value: ConversionError<&'static str>) -> Self {
-        InputSelectorError::Address(value)
-    }
-}
-
-impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE, SE> {
+impl<DE: fmt::Display, SE: fmt::Display, CE: fmt::Display, N: fmt::Display> fmt::Display
+    for InputSelectorError<DE, SE, CE, N>
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
             InputSelectorError::DataSource(e) => {
@@ -86,6 +81,11 @@ impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE,
             InputSelectorError::Selection(e) => {
                 write!(f, "Note selection encountered the following error: {}", e)
             }
+            InputSelectorError::Change(e) => write!(
+                f,
+                "Proposal generation failed due to an error in computing change or transaction fees: {}",
+                e
+            ),
             InputSelectorError::Proposal(e) => {
                 write!(
                     f,
@@ -116,18 +116,33 @@ impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE,
     }
 }
 
-impl<DE, SE> error::Error for InputSelectorError<DE, SE>
+impl<DE, SE, CE, N> error::Error for InputSelectorError<DE, SE, CE, N>
 where
     DE: Debug + Display + error::Error + 'static,
     SE: Debug + Display + error::Error + 'static,
+    CE: Debug + Display + error::Error + 'static,
+    N: Debug + Display + 'static,
 {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self {
             Self::DataSource(e) => Some(e),
             Self::Selection(e) => Some(e),
+            Self::Change(e) => Some(e),
             Self::Proposal(e) => Some(e),
             _ => None,
         }
+    }
+}
+
+impl<E, S, F, N> From<ConversionError<&'static str>> for InputSelectorError<E, S, F, N> {
+    fn from(value: ConversionError<&'static str>) -> Self {
+        InputSelectorError::Address(value)
+    }
+}
+
+impl<E, S, C, N> From<ChangeError<C, N>> for InputSelectorError<E, S, C, N> {
+    fn from(err: ChangeError<C, N>) -> Self {
+        InputSelectorError::Change(err)
     }
 }
 
@@ -139,14 +154,13 @@ where
 pub trait InputSelector {
     /// The type of errors that may be generated in input selection
     type Error;
-    /// The type of data source that the input selector expects to access to obtain input Sapling
-    /// notes. This associated type permits input selectors that may use specialized knowledge of
-    /// the internals of a particular backing data store, if the generic API of
-    /// `InputSource` does not provide sufficiently fine-grained operations for a particular
-    /// backing store to optimally perform input selection.
+
+    /// The type of data source that the input selector expects to access to obtain input notes.
+    /// This associated type permits input selectors that may use specialized knowledge of the
+    /// internals of a particular backing data store, if the generic API of `InputSource` does not
+    /// provide sufficiently fine-grained operations for a particular backing store to optimally
+    /// perform input selection.
     type InputSource: InputSource;
-    /// The type of the fee rule that this input selector uses when computing fees.
-    type FeeRule: FeeRule;
 
     /// Performs input selection and returns a proposal for transaction construction including
     /// change and fee outputs.
@@ -163,7 +177,8 @@ pub trait InputSelector {
     /// If insufficient funds are available to satisfy the required outputs for the shielding
     /// request, this operation must fail and return [`InputSelectorError::InsufficientFunds`].
     #[allow(clippy::type_complexity)]
-    fn propose_transaction<ParamsT>(
+    #[allow(clippy::too_many_arguments)]
+    fn propose_transaction<ParamsT, ChangeT>(
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
@@ -171,12 +186,19 @@ pub trait InputSelector {
         anchor_height: BlockHeight,
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
+        change_strategy: &ChangeT,
     ) -> Result<
-        Proposal<Self::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
-        InputSelectorError<<Self::InputSource as InputSource>::Error, Self::Error>,
+        Proposal<<ChangeT as ChangeStrategy>::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
+        InputSelectorError<
+            <Self::InputSource as InputSource>::Error,
+            Self::Error,
+            ChangeT::Error,
+            <Self::InputSource as InputSource>::NoteRef,
+        >,
     >
     where
-        ParamsT: consensus::Parameters;
+        ParamsT: consensus::Parameters,
+        ChangeT: ChangeStrategy<MetaSource = Self::InputSource>;
 }
 
 /// A strategy for selecting transaction inputs and proposing transaction outputs
@@ -192,8 +214,6 @@ pub trait ShieldingSelector {
     /// [`InputSource`] does not provide sufficiently fine-grained operations for a
     /// particular backing store to optimally perform input selection.
     type InputSource: InputSource;
-    /// The type of the fee rule that this input selector uses when computing fees.
-    type FeeRule: FeeRule;
 
     /// Performs input selection and returns a proposal for the construction of a shielding
     /// transaction.
@@ -204,36 +224,43 @@ pub trait ShieldingSelector {
     /// outputs for the shielding request, this operation must fail and return
     /// [`InputSelectorError::InsufficientFunds`].
     #[allow(clippy::type_complexity)]
-    fn propose_shielding<ParamsT>(
+    #[allow(clippy::too_many_arguments)]
+    fn propose_shielding<ParamsT, ChangeT>(
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
+        change_strategy: &ChangeT,
         shielding_threshold: NonNegativeAmount,
         source_addrs: &[TransparentAddress],
+        to_account: <Self::InputSource as InputSource>::AccountId,
         target_height: BlockHeight,
         min_confirmations: u32,
     ) -> Result<
-        Proposal<Self::FeeRule, Infallible>,
-        InputSelectorError<<Self::InputSource as InputSource>::Error, Self::Error>,
+        Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
+        InputSelectorError<
+            <Self::InputSource as InputSource>::Error,
+            Self::Error,
+            ChangeT::Error,
+            Infallible,
+        >,
     >
     where
-        ParamsT: consensus::Parameters;
+        ParamsT: consensus::Parameters,
+        ChangeT: ChangeStrategy<MetaSource = Self::InputSource>;
 }
 
 /// Errors that can occur as a consequence of greedy input selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT> {
+pub enum GreedyInputSelectorError {
     /// An intermediate value overflowed or underflowed the valid monetary range.
     Balance(BalanceError),
     /// A unified address did not contain a supported receiver.
     UnsupportedAddress(Box<UnifiedAddress>),
     /// Support for transparent-source-only (TEX) addresses requires the transparent-inputs feature.
     UnsupportedTexAddress,
-    /// An error was encountered in change selection.
-    Change(ChangeError<ChangeStrategyErrT, NoteRefT>),
 }
 
-impl<CE: fmt::Display, N: fmt::Display> fmt::Display for GreedyInputSelectorError<CE, N> {
+impl fmt::Display for GreedyInputSelectorError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
             GreedyInputSelectorError::Balance(e) => write!(
@@ -249,32 +276,20 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for GreedyInputSelectorErro
             GreedyInputSelectorError::UnsupportedTexAddress => {
                 write!(f, "Support for transparent-source-only (TEX) addresses requires the transparent-inputs feature.")
             }
-            GreedyInputSelectorError::Change(err) => {
-                write!(f, "An error occurred computing change and fees: {}", err)
-            }
         }
     }
 }
 
-impl<DbErrT, ChangeStrategyErrT, NoteRefT>
-    From<GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT>>
-    for InputSelectorError<DbErrT, GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT>>
+impl<DbErrT, ChangeErrT, N> From<GreedyInputSelectorError>
+    for InputSelectorError<DbErrT, GreedyInputSelectorError, ChangeErrT, N>
 {
-    fn from(err: GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT>) -> Self {
+    fn from(err: GreedyInputSelectorError) -> Self {
         InputSelectorError::Selection(err)
     }
 }
 
-impl<DbErrT, ChangeStrategyErrT, NoteRefT> From<ChangeError<ChangeStrategyErrT, NoteRefT>>
-    for InputSelectorError<DbErrT, GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT>>
-{
-    fn from(err: ChangeError<ChangeStrategyErrT, NoteRefT>) -> Self {
-        InputSelectorError::Selection(GreedyInputSelectorError::Change(err))
-    }
-}
-
-impl<DbErrT, ChangeStrategyErrT, NoteRefT> From<BalanceError>
-    for InputSelectorError<DbErrT, GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT>>
+impl<DbErrT, ChangeErrT, N> From<BalanceError>
+    for InputSelectorError<DbErrT, GreedyInputSelectorError, ChangeErrT, N>
 {
     fn from(err: BalanceError) -> Self {
         InputSelectorError::Selection(GreedyInputSelectorError::Balance(err))
@@ -319,13 +334,11 @@ impl orchard_fees::OutputView for OrchardPayment {
 ///
 /// This implementation performs input selection using methods available via the
 /// [`InputSource`] interface.
-pub struct GreedyInputSelector<DbT, ChangeT> {
-    change_strategy: ChangeT,
-    dust_output_policy: DustOutputPolicy,
+pub struct GreedyInputSelector<DbT> {
     _ds_type: PhantomData<DbT>,
 }
 
-impl<DbT, ChangeT: ChangeStrategy> GreedyInputSelector<DbT, ChangeT> {
+impl<DbT> GreedyInputSelector<DbT> {
     /// Constructs a new greedy input selector that uses the provided change strategy to determine
     /// change values and fee amounts.
     ///
@@ -335,27 +348,25 @@ impl<DbT, ChangeT: ChangeStrategy> GreedyInputSelector<DbT, ChangeT> {
     /// attempting to construct a transaction proposal that requires such an output.
     ///
     /// [`EphemeralBalance::Output`]: crate::fees::EphemeralBalance::Output
-    pub fn new(change_strategy: ChangeT, dust_output_policy: DustOutputPolicy) -> Self {
+    pub fn new() -> Self {
         GreedyInputSelector {
-            change_strategy,
-            dust_output_policy,
             _ds_type: PhantomData,
         }
     }
 }
 
-impl<DbT, ChangeT> InputSelector for GreedyInputSelector<DbT, ChangeT>
-where
-    DbT: InputSource,
-    ChangeT: ChangeStrategy,
-    ChangeT::FeeRule: Clone,
-{
-    type Error = GreedyInputSelectorError<ChangeT::Error, DbT::NoteRef>;
+impl<DbT> Default for GreedyInputSelector<DbT> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
+    type Error = GreedyInputSelectorError;
     type InputSource = DbT;
-    type FeeRule = ChangeT::FeeRule;
 
     #[allow(clippy::type_complexity)]
-    fn propose_transaction<ParamsT>(
+    fn propose_transaction<ParamsT, ChangeT>(
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
@@ -363,13 +374,15 @@ where
         anchor_height: BlockHeight,
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
+        change_strategy: &ChangeT,
     ) -> Result<
-        Proposal<Self::FeeRule, DbT::NoteRef>,
-        InputSelectorError<<DbT as InputSource>::Error, Self::Error>,
+        Proposal<<ChangeT as ChangeStrategy>::FeeRule, DbT::NoteRef>,
+        InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, DbT::NoteRef>,
     >
     where
         ParamsT: consensus::Parameters,
         Self::InputSource: InputSource,
+        ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
         let mut transparent_outputs = vec![];
         let mut sapling_outputs = vec![];
@@ -484,8 +497,8 @@ where
                 // catching the `InsufficientFunds` error to obtain the required amount
                 // given the provided change strategy. Ignore the change memo in order
                 // to avoid adding a change output.
-                let tr1_required_input_value =
-                    match self.change_strategy.compute_balance::<_, DbT::NoteRef>(
+                let tr1_required_input_value = match change_strategy
+                    .compute_balance::<_, DbT::NoteRef>(
                         params,
                         target_height,
                         &[] as &[WalletTransparentOutput],
@@ -493,17 +506,18 @@ where
                         &sapling::EmptyBundleView,
                         #[cfg(feature = "orchard")]
                         &orchard_fees::EmptyBundleView,
-                        &self.dust_output_policy,
                         Some(&EphemeralBalance::Input(NonNegativeAmount::ZERO)),
+                        None,
                     ) {
-                        Err(ChangeError::InsufficientFunds { required, .. }) => required,
-                        Ok(_) => NonNegativeAmount::ZERO, // shouldn't happen
-                        Err(other) => return Err(other.into()),
-                    };
+                    Err(ChangeError::InsufficientFunds { required, .. }) => required,
+                    Err(ChangeError::DustInputs { .. }) => unreachable!("no inputs were supplied"),
+                    Err(other) => return Err(InputSelectorError::Change(other)),
+                    Ok(_) => NonNegativeAmount::ZERO, // shouldn't happen
+                };
 
                 // Now recompute to obtain the `TransactionBalance` and verify that it
                 // fully accounts for the required fees.
-                let tr1_balance = self.change_strategy.compute_balance::<_, DbT::NoteRef>(
+                let tr1_balance = change_strategy.compute_balance::<_, DbT::NoteRef>(
                     params,
                     target_height,
                     &[] as &[WalletTransparentOutput],
@@ -511,8 +525,8 @@ where
                     &sapling::EmptyBundleView,
                     #[cfg(feature = "orchard")]
                     &orchard_fees::EmptyBundleView,
-                    &self.dust_output_policy,
                     Some(&EphemeralBalance::Input(tr1_required_input_value)),
+                    None,
                 )?;
                 assert_eq!(tr1_balance.total(), tr1_balance.fee_required());
 
@@ -573,9 +587,20 @@ where
                 vec![]
             };
 
+            let selected_input_ids = sapling_inputs.iter().map(|(id, _)| id);
+            #[cfg(feature = "orchard")]
+            let selected_input_ids =
+                selected_input_ids.chain(orchard_inputs.iter().map(|(id, _)| id));
+
+            let selected_input_ids = selected_input_ids.cloned().collect::<Vec<_>>();
+
+            let wallet_meta = change_strategy
+                .fetch_wallet_meta(wallet_db, account, &selected_input_ids)
+                .map_err(InputSelectorError::DataSource)?;
+
             // In the ZIP 320 case, this is the balance for transaction 0, taking into account
             // the ephemeral output.
-            let balance = self.change_strategy.compute_balance(
+            let balance = change_strategy.compute_balance(
                 params,
                 target_height,
                 &[] as &[WalletTransparentOutput],
@@ -591,8 +616,8 @@ where
                     &orchard_inputs[..],
                     &orchard_outputs[..],
                 ),
-                &self.dust_output_policy,
                 ephemeral_balance.as_ref(),
+                Some(&wallet_meta),
             );
 
             match balance {
@@ -681,7 +706,7 @@ where
                         );
 
                         return Proposal::multi_step(
-                            self.change_strategy.fee_rule().clone(),
+                            change_strategy.fee_rule().clone(),
                             target_height,
                             NonEmpty::from_vec(steps).expect("steps is known to be nonempty"),
                         )
@@ -694,7 +719,7 @@ where
                         vec![],
                         shielded_inputs,
                         balance,
-                        self.change_strategy.fee_rule().clone(),
+                        (*change_strategy.fee_rule()).clone(),
                         target_height,
                         false,
                     )
@@ -713,7 +738,7 @@ where
                 Err(ChangeError::InsufficientFunds { required, .. }) => {
                     amount_required = required;
                 }
-                Err(other) => return Err(other.into()),
+                Err(other) => return Err(InputSelectorError::Change(other)),
             }
 
             #[cfg(not(feature = "orchard"))]
@@ -747,31 +772,28 @@ where
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl<DbT, ChangeT> ShieldingSelector for GreedyInputSelector<DbT, ChangeT>
-where
-    DbT: InputSource,
-    ChangeT: ChangeStrategy,
-    ChangeT::FeeRule: Clone,
-{
-    type Error = GreedyInputSelectorError<ChangeT::Error, Infallible>;
+impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
+    type Error = GreedyInputSelectorError;
     type InputSource = DbT;
-    type FeeRule = ChangeT::FeeRule;
 
     #[allow(clippy::type_complexity)]
-    fn propose_shielding<ParamsT>(
+    fn propose_shielding<ParamsT, ChangeT>(
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
+        change_strategy: &ChangeT,
         shielding_threshold: NonNegativeAmount,
         source_addrs: &[TransparentAddress],
+        to_account: <Self::InputSource as InputSource>::AccountId,
         target_height: BlockHeight,
         min_confirmations: u32,
     ) -> Result<
-        Proposal<Self::FeeRule, Infallible>,
-        InputSelectorError<<DbT as InputSource>::Error, Self::Error>,
+        Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
+        InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, Infallible>,
     >
     where
         ParamsT: consensus::Parameters,
+        ChangeT: ChangeStrategy<MetaSource = Self::InputSource>,
     {
         let mut transparent_inputs: Vec<WalletTransparentOutput> = source_addrs
             .iter()
@@ -784,7 +806,11 @@ where
             .flat_map(|v| v.into_iter())
             .collect();
 
-        let trial_balance = self.change_strategy.compute_balance(
+        let wallet_meta = change_strategy
+            .fetch_wallet_meta(wallet_db, to_account, &[])
+            .map_err(InputSelectorError::DataSource)?;
+
+        let trial_balance = change_strategy.compute_balance(
             params,
             target_height,
             &transparent_inputs,
@@ -792,8 +818,8 @@ where
             &sapling::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
-            &self.dust_output_policy,
             None,
+            Some(&wallet_meta),
         );
 
         let balance = match trial_balance {
@@ -802,7 +828,7 @@ where
                 let exclusions: BTreeSet<OutPoint> = transparent.into_iter().collect();
                 transparent_inputs.retain(|i| !exclusions.contains(i.outpoint()));
 
-                self.change_strategy.compute_balance(
+                change_strategy.compute_balance(
                     params,
                     target_height,
                     &transparent_inputs,
@@ -810,13 +836,11 @@ where
                     &sapling::EmptyBundleView,
                     #[cfg(feature = "orchard")]
                     &orchard_fees::EmptyBundleView,
-                    &self.dust_output_policy,
                     None,
+                    Some(&wallet_meta),
                 )?
             }
-            Err(other) => {
-                return Err(other.into());
-            }
+            Err(other) => return Err(InputSelectorError::Change(other)),
         };
 
         if balance.total() >= shielding_threshold {
@@ -826,7 +850,7 @@ where
                 transparent_inputs,
                 None,
                 balance,
-                (*self.change_strategy.fee_rule()).clone(),
+                (*change_strategy.fee_rule()).clone(),
                 target_height,
                 true,
             )

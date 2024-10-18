@@ -121,6 +121,9 @@ pub enum SqliteClientError {
     /// An error occurred in computing wallet balance
     BalanceError(BalanceError),
 
+    /// A note selection query contained an invalid constant or was otherwise not supported.
+    NoteSelectorInvalid(NoteSelector),
+
     /// The proposal cannot be constructed until transactions with previously reserved
     /// ephemeral address outputs have been mined. The parameters are the account id and
     /// the index that could not safely be reserved.
@@ -187,6 +190,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::ChainHeightUnknown => write!(f, "Chain height unknown; please call `update_chain_tip`"),
             SqliteClientError::UnsupportedPoolType(t) => write!(f, "Pool type is not currently supported: {}", t),
             SqliteClientError::BalanceError(e) => write!(f, "Balance error: {}", e),
+            SqliteClientError::NoteSelectorInvalid(s) => write!(f, "Could not evaluate selection query: {:?}", s),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::ReachedGapLimit(account_id, bad_index) => write!(f,
                 "The proposal cannot be constructed until transactions with previously reserved ephemeral address outputs have been mined. \
