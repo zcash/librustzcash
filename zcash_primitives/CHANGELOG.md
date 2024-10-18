@@ -6,11 +6,22 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_client_backend::AccountBalance::with_unshielded_balance_mut`
 
+### Deprecated
+- `zcash_client_backend::AccountBalance::add_unshielded_value`
+- `zcash_client_backend::AccountBalance::unshielded`
 ## [0.19.0] - 2024-10-02
 
 ### Changed
 - Migrated to `zcash_address 0.6`.
+- Implemented changes to refactor AccountBalance to use Balance for transparent funds
+(see issue #1411). `AccountBalance` now has an `unshielded` value that uses Balance.
+The current implementation maintains retrocompatibility with the `unshielded` value
+represeted with a `NonNegativeAmount`. There are values that are pending to be 
+implemented such as change tracking.
+  
 
 ### Fixed
 - The previous release did not bump `zcash_address` and ended up depending on
