@@ -354,12 +354,16 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         min_value: NonNegativeAmount,
         exclude: &[Self::NoteRef],
     ) -> Result<WalletMeta, Self::Error> {
+        let chain_tip_height = wallet::chain_tip_height(self.conn.borrow())?
+            .ok_or(SqliteClientError::ChainHeightUnknown)?;
+
         let sapling_note_count = count_outputs(
             self.conn.borrow(),
             account_id,
             min_value,
             exclude,
             ShieldedProtocol::Sapling,
+            chain_tip_height,
         )?;
 
         #[cfg(feature = "orchard")]
@@ -369,6 +373,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
             min_value,
             exclude,
             ShieldedProtocol::Orchard,
+            chain_tip_height,
         )?;
 
         Ok(WalletMeta::new(

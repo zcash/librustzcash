@@ -848,12 +848,7 @@ impl WalletMeta {
     /// Returns the total number of unspent shielded notes belonging to the account for which this
     /// was generated.
     pub fn total_note_count(&self) -> usize {
-        #[cfg(feature = "orchard")]
-        let orchard_note_count = self.orchard_note_count;
-        #[cfg(not(feature = "orchard"))]
-        let orchard_note_count = 0;
-
-        self.sapling_note_count + orchard_note_count
+        self.sapling_note_count + self.note_count(ShieldedProtocol::Orchard)
     }
 }
 
@@ -903,8 +898,10 @@ pub trait InputSource {
 
     /// Returns metadata describing the structure of the wallet for the specified account.
     ///
-    /// The returned metadata value must exclude spent notes and unspent notes having value less
-    /// than the specified minimum value or identified in the given exclude list.
+    /// The returned metadata value must exclude:
+    /// - spent notes;
+    /// - unspent notes having value less than the specified minimum value;
+    /// - unspent notes identified in the given `exclude` list.
     fn get_wallet_metadata(
         &self,
         account: Self::AccountId,

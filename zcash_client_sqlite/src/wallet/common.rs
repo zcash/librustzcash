@@ -232,6 +232,7 @@ pub(crate) fn count_outputs(
     min_value: NonNegativeAmount,
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
+    chain_tip_height: BlockHeight,
 ) -> Result<usize, rusqlite::Error> {
     let (table_prefix, _, _) = per_protocol_names(protocol);
 
@@ -265,13 +266,14 @@ pub(crate) fn count_outputs(
                JOIN transactions stx ON stx.id_tx = transaction_id
                WHERE stx.block IS NOT NULL -- the spending tx is mined
                OR stx.expiry_height IS NULL -- the spending tx will not expire
-               OR stx.expiry_height > :anchor_height -- the spending tx is unexpired
+               OR stx.expiry_height > :chain_tip_height -- the spending tx is unexpired
              )"
         ),
         named_params![
             ":account_id": account.0,
             ":min_value": u64::from(min_value),
-            ":exclude": &excluded_ptr
+            ":exclude": &excluded_ptr,
+            ":chain_tip_height": u32::from(chain_tip_height)
         ],
         |row| row.get(0),
     )

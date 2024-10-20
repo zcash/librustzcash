@@ -393,13 +393,13 @@ impl SplitPolicy {
                 )
                 .unwrap(),
             );
-            if split_count > NonZeroUsize::MIN
-                && *per_output_change.quotient() < self.min_split_output_size
-            {
-                split_count = NonZeroUsize::new(usize::from(split_count) - 1)
-                    .expect("split_count checked to be > 1");
-            } else {
+            if *per_output_change.quotient() >= self.min_split_output_size {
                 return split_count;
+            } else if let Some(new_count) = NonZeroUsize::new(usize::from(split_count) - 1) {
+                split_count = new_count;
+            } else {
+                // We always create at least one change output.
+                return NonZeroUsize::MIN;
             }
         }
     }
@@ -452,7 +452,10 @@ pub trait ChangeStrategy {
     /// own trait that descends from [`InputSource`] and adds the required capabilities there, and
     /// then implement that trait for their desired database backend.
     type MetaSource: InputSource;
-    type WalletMeta;
+
+    /// Tye type of wallet metadata that this change strategy relies upon in order to compute
+    /// change.
+    type WalletMetaT;
 
     /// Returns the fee rule that this change strategy will respect when performing
     /// balance computations.
@@ -465,7 +468,7 @@ pub trait ChangeStrategy {
         meta_source: &Self::MetaSource,
         account: <Self::MetaSource as InputSource>::AccountId,
         exclude: &[<Self::MetaSource as InputSource>::NoteRef],
-    ) -> Result<Self::WalletMeta, <Self::MetaSource as InputSource>::Error>;
+    ) -> Result<Self::WalletMetaT, <Self::MetaSource as InputSource>::Error>;
 
     /// Computes the totals of inputs, suggested change amounts, and fees given the
     /// provided inputs and outputs being used to construct a transaction.
@@ -502,7 +505,7 @@ pub trait ChangeStrategy {
         sapling: &impl sapling::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard::BundleView<NoteRefT>,
         ephemeral_balance: Option<&EphemeralBalance>,
-        wallet_meta: Option<&Self::WalletMeta>,
+        wallet_meta: Option<&Self::WalletMetaT>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
 }
 

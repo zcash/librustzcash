@@ -115,6 +115,8 @@ where
     Ok(())
 }
 
+/// Errors that may be generated in construction of proposals for shielded->shielded or
+/// shielded->transparent transfers.
 pub type ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT> = Error<
     <DbT as WalletRead>::Error,
     CommitmentTreeErrT,
@@ -124,6 +126,8 @@ pub type ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT> = Error<
     <<InputsT as InputSelector>::InputSource as InputSource>::NoteRef,
 >;
 
+/// Errors that may be generated in construction of proposals for transparent->shielded
+/// wallet-internal transfers.
 #[cfg(feature = "transparent-inputs")]
 pub type ProposeShieldingErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT> = Error<
     <DbT as WalletRead>::Error,
@@ -134,6 +138,7 @@ pub type ProposeShieldingErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT> = Error
     Infallible,
 >;
 
+/// Errors that may be generated in combined creation and execution of transaction proposals.
 pub type CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N> = Error<
     <DbT as WalletRead>::Error,
     <DbT as WalletCommitmentTrees>::Error,
@@ -143,6 +148,7 @@ pub type CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N> = Error<
     N,
 >;
 
+/// Errors that may be generated in the execution of proposals that may send shielded inputs.
 pub type TransferErrT<DbT, InputsT, ChangeT> = Error<
     <DbT as WalletRead>::Error,
     <DbT as WalletCommitmentTrees>::Error,
@@ -152,6 +158,7 @@ pub type TransferErrT<DbT, InputsT, ChangeT> = Error<
     <<InputsT as InputSelector>::InputSource as InputSource>::NoteRef,
 >;
 
+/// Errors that may be generated in the execution of shielding proposals.
 #[cfg(feature = "transparent-inputs")]
 pub type ShieldErrT<DbT, InputsT, ChangeT> = Error<
     <DbT as WalletRead>::Error,

@@ -233,27 +233,20 @@ where
     )?;
 
     let change_pool = select_change_pool(&net_flows, cfg.fallback_change_pool);
+    let target_change_count = wallet_meta.map_or(1, |m| {
+        usize::from(cfg.split_policy.target_output_count)
+            .saturating_sub(m.total_note_count())
+            .max(1)
+    });
     let target_change_counts = OutputManifest {
         transparent: 0,
         sapling: if change_pool == ShieldedProtocol::Sapling {
-            wallet_meta.map_or(1, |m| {
-                std::cmp::max(
-                    usize::from(cfg.split_policy.target_output_count)
-                        .saturating_sub(m.total_note_count()),
-                    1,
-                )
-            })
+            target_change_count
         } else {
             0
         },
         orchard: if change_pool == ShieldedProtocol::Orchard {
-            wallet_meta.map_or(1, |m| {
-                std::cmp::max(
-                    usize::from(cfg.split_policy.target_output_count)
-                        .saturating_sub(m.total_note_count()),
-                    1,
-                )
-            })
+            target_change_count
         } else {
             0
         },

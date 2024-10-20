@@ -60,7 +60,7 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
     type FeeRule = FixedFeeRule;
     type Error = BalanceError;
     type MetaSource = I;
-    type WalletMeta = ();
+    type WalletMetaT = ();
 
     fn fee_rule(&self) -> &Self::FeeRule {
         &self.fee_rule
@@ -71,7 +71,7 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         _meta_source: &Self::MetaSource,
         _account: <Self::MetaSource as InputSource>::AccountId,
         _exclude: &[<Self::MetaSource as crate::data_api::InputSource>::NoteRef],
-    ) -> Result<Self::WalletMeta, <Self::MetaSource as crate::data_api::InputSource>::Error> {
+    ) -> Result<Self::WalletMetaT, <Self::MetaSource as crate::data_api::InputSource>::Error> {
         Ok(())
     }
 
@@ -84,7 +84,7 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         ephemeral_balance: Option<&EphemeralBalance>,
-        _wallet_meta: Option<&Self::WalletMeta>,
+        _wallet_meta: Option<&Self::WalletMetaT>,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         let split_policy = SplitPolicy::single_output();
         let cfg = SinglePoolBalanceConfig::new(

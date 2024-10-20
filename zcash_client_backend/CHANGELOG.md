@@ -24,12 +24,12 @@ and this library adheres to Rust's notion of
     `ChangeErrT` and `NoteRefT`.
   - The following methods each now take an additional `change_strategy`
     argument, along with an associated `ChangeT` type parameter:
-    - `zcash_client_backend::data_api::wallet::spend`
-    - `zcash_client_backend::data_api::wallet::propose_transfer`
-    - `zcash_client_backend::data_api::wallet::propose_shielding`. This method
-      also now takes an additional `to_account` argument.
-    - `zcash_client_backend::data_api::wallet::shield_transparent_funds`. This
-      method also now takes an additional `to_account` argument.
+    - `wallet::spend`
+    - `wallet::propose_transfer`
+    - `wallet::propose_shielding`. This method also now takes an additional
+      `to_account` argument.
+    - `wallet::shield_transparent_funds`. This method also now takes an
+      additional `to_account` argument.
   - `wallet::input_selection::InputSelectionError` now has an additional `Change`
     variant. This necessitates the addition of two type parameters.
   - `wallet::input_selection::InputSelector::propose_transaction` takes an
@@ -49,20 +49,16 @@ and this library adheres to Rust's notion of
     has been removed, along with the additional type parameters it necessitated.
   - The arguments to `wallet::input_selection::GreedyInputSelector::new` have
     changed.
-- `zcash_client_backend::fees::ChangeStrategy` has changed. It has two new
-  associated types, `MetaSource` and `WalletMeta`, and its `FeeRule` associated
-  type now has an additional `Clone` bound. In addition, it defines a new
-  `fetch_wallet_meta` method, and the arguments to `compute_balance` have
-  changed.
-- `zcash_client_backend::fees::fixed::SingleOutputChangeStrategy::new`
-  now takes an additional `DustOutputPolicy` argument. It also now carries
-  an additional type parameter.
-- `zcash_client_backend::fees::standard::SingleOutputChangeStrategy::new`
-  now takes an additional `DustOutputPolicy` argument. It also now carries
-  an additional type parameter.
-- `zcash_client_backend::fees::zip317::SingleOutputChangeStrategy::new`
-  now takes an additional `DustOutputPolicy` argument. It also now carries
-  an additional type parameter.
+- `zcash_client_backend::fees`:
+  - `ChangeStrategy` has changed. It has two new associated types, `MetaSource`
+    and `WalletMeta`, and its `FeeRule` associated type now has an additional
+    `Clone` bound. In addition, it defines a new `fetch_wallet_meta` method, and
+    the arguments to `compute_balance` have changed.
+  - The following methods now take an additional `DustOutputPolicy` argument,
+    and carry an additional type parameter:
+    - `fixed::SingleOutputChangeStrategy::new`
+    - `standard::SingleOutputChangeStrategy::new`
+    - `zip317::SingleOutputChangeStrategy::new`
 
 ### Changed
 - MSRV is now 1.77.0.
@@ -72,6 +68,8 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api`:
   - `WalletSummary::scan_progress` and `WalletSummary::recovery_progress` have
     been removed. Use `WalletSummary::progress` instead.
+  - `testing::input_selector` use explicit `InputSelector` constructors
+    directly instead.
 - `zcash_client_backend::fees`:
   - `impl From<BalanceError> for ChangeError<...>`
 

@@ -422,7 +422,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
         .unwrap();
     assert_eq!(sent_note_ids.len(), 3);
 
-    // The sent memo should be the empty memo for the sent output, and the
+    // The sent memo should be the empty memo for the sent output, and each
     // change output's memo should be as specified.
     let mut change_memo_count = 0;
     let mut found_sent_empty_memo = false;
