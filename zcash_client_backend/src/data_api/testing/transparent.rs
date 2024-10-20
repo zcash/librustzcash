@@ -199,6 +199,7 @@ where
     // Shield the output.
     let input_selector = GreedyInputSelector::new();
     let change_strategy = fixed::SingleOutputChangeStrategy::new(
+        #[allow(deprecated)]
         FixedFeeRule::non_standard(NonNegativeAmount::ZERO),
         None,
         ShieldedProtocol::Sapling,

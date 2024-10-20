@@ -17,7 +17,11 @@ use zcash_primitives::{
     legacy::TransparentAddress,
     transaction::{
         components::amount::NonNegativeAmount,
-        fees::{fixed::FeeRule as FixedFeeRule, zip317::FeeRule as Zip317FeeRule, StandardFeeRule},
+        fees::{
+            fixed::FeeRule as FixedFeeRule,
+            zip317::{FeeRule as Zip317FeeRule, MINIMUM_FEE},
+            StandardFeeRule,
+        },
         Transaction,
     },
 };
@@ -1589,7 +1593,7 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
     .unwrap();
 
     #[allow(deprecated)]
-    let fee_rule = FixedFeeRule::standard();
+    let fee_rule = FixedFeeRule::non_standard(MINIMUM_FEE);
     let change_strategy = fees::fixed::SingleOutputChangeStrategy::new(
         fee_rule,
         None,

@@ -883,7 +883,7 @@ mod testing {
             self,
             prover::mock::{MockOutputProver, MockSpendProver},
         },
-        transaction::fees::fixed,
+        transaction::fees::{fixed, zip317::MINIMUM_FEE},
     };
 
     impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
@@ -910,12 +910,12 @@ mod testing {
                 }
             }
 
-            #[allow(deprecated)]
             self.build(
                 FakeCryptoRng(rng),
                 &MockSpendProver,
                 &MockOutputProver,
-                &fixed::FeeRule::standard(),
+                #[allow(deprecated)]
+                &fixed::FeeRule::non_standard(MINIMUM_FEE),
             )
         }
     }

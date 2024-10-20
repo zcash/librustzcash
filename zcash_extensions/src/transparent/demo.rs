@@ -493,7 +493,7 @@ mod tests {
                 amount::{Amount, NonNegativeAmount},
                 tze::{Authorized, Bundle, OutPoint, TzeIn, TzeOut},
             },
-            fees::fixed,
+            fees::{fixed, zip317::MINIMUM_FEE},
             Transaction, TransactionData, TxVersion,
         },
     };
@@ -794,7 +794,7 @@ mod tests {
 
         // FIXME: implement zcash_primitives::transaction::fees::FutureFeeRule for zip317::FeeRule.
         #[allow(deprecated)]
-        let fee_rule = fixed::FeeRule::standard();
+        let fee_rule = fixed::FeeRule::non_standard(MINIMUM_FEE);
 
         // create some inputs to spend
         let extsk = ExtendedSpendingKey::master(&[]);
