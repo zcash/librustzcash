@@ -482,61 +482,6 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             }
         }
 
-        #[cfg(not(feature = "transparent-inputs"))]
-        let ephemeral_balance = None;
-
-        #[cfg(feature = "transparent-inputs")]
-        let (ephemeral_balance, tr1_balance_opt) = {
-            if tr1_transparent_outputs.is_empty() {
-                (None, None)
-            } else {
-                // The ephemeral input going into transaction 1 must be able to pay that
-                // transaction's fee, as well as the TEX address payments.
-
-                // First compute the required total with an additional zero input,
-                // catching the `InsufficientFunds` error to obtain the required amount
-                // given the provided change strategy. Ignore the change memo in order
-                // to avoid adding a change output.
-                let tr1_required_input_value = match change_strategy
-                    .compute_balance::<_, DbT::NoteRef>(
-                        params,
-                        target_height,
-                        &[] as &[WalletTransparentOutput],
-                        &tr1_transparent_outputs,
-                        &sapling::EmptyBundleView,
-                        #[cfg(feature = "orchard")]
-                        &orchard_fees::EmptyBundleView,
-                        Some(&EphemeralBalance::Input(NonNegativeAmount::ZERO)),
-                        None,
-                    ) {
-                    Err(ChangeError::InsufficientFunds { required, .. }) => required,
-                    Err(ChangeError::DustInputs { .. }) => unreachable!("no inputs were supplied"),
-                    Err(other) => return Err(InputSelectorError::Change(other)),
-                    Ok(_) => NonNegativeAmount::ZERO, // shouldn't happen
-                };
-
-                // Now recompute to obtain the `TransactionBalance` and verify that it
-                // fully accounts for the required fees.
-                let tr1_balance = change_strategy.compute_balance::<_, DbT::NoteRef>(
-                    params,
-                    target_height,
-                    &[] as &[WalletTransparentOutput],
-                    &tr1_transparent_outputs,
-                    &sapling::EmptyBundleView,
-                    #[cfg(feature = "orchard")]
-                    &orchard_fees::EmptyBundleView,
-                    Some(&EphemeralBalance::Input(tr1_required_input_value)),
-                    None,
-                )?;
-                assert_eq!(tr1_balance.total(), tr1_balance.fee_required());
-
-                (
-                    Some(EphemeralBalance::Output(tr1_required_input_value)),
-                    Some(tr1_balance),
-                )
-            }
-        };
-
         let mut shielded_inputs = SpendableNotes::empty();
         let mut prior_available = NonNegativeAmount::ZERO;
         let mut amount_required = NonNegativeAmount::ZERO;
@@ -598,6 +543,63 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 .fetch_wallet_meta(wallet_db, account, &selected_input_ids)
                 .map_err(InputSelectorError::DataSource)?;
 
+            #[cfg(not(feature = "transparent-inputs"))]
+            let ephemeral_balance = None;
+
+            #[cfg(feature = "transparent-inputs")]
+            let (ephemeral_balance, tr1_balance_opt) = {
+                if tr1_transparent_outputs.is_empty() {
+                    (None, None)
+                } else {
+                    // The ephemeral input going into transaction 1 must be able to pay that
+                    // transaction's fee, as well as the TEX address payments.
+
+                    // First compute the required total with an additional zero input,
+                    // catching the `InsufficientFunds` error to obtain the required amount
+                    // given the provided change strategy. Ignore the change memo in order
+                    // to avoid adding a change output.
+                    let tr1_required_input_value = match change_strategy
+                        .compute_balance::<_, DbT::NoteRef>(
+                            params,
+                            target_height,
+                            &[] as &[WalletTransparentOutput],
+                            &tr1_transparent_outputs,
+                            &sapling::EmptyBundleView,
+                            #[cfg(feature = "orchard")]
+                            &orchard_fees::EmptyBundleView,
+                            Some(&EphemeralBalance::Input(NonNegativeAmount::ZERO)),
+                            &wallet_meta,
+                        ) {
+                        Err(ChangeError::InsufficientFunds { required, .. }) => required,
+                        Err(ChangeError::DustInputs { .. }) => {
+                            unreachable!("no inputs were supplied")
+                        }
+                        Err(other) => return Err(InputSelectorError::Change(other)),
+                        Ok(_) => NonNegativeAmount::ZERO, // shouldn't happen
+                    };
+
+                    // Now recompute to obtain the `TransactionBalance` and verify that it
+                    // fully accounts for the required fees.
+                    let tr1_balance = change_strategy.compute_balance::<_, DbT::NoteRef>(
+                        params,
+                        target_height,
+                        &[] as &[WalletTransparentOutput],
+                        &tr1_transparent_outputs,
+                        &sapling::EmptyBundleView,
+                        #[cfg(feature = "orchard")]
+                        &orchard_fees::EmptyBundleView,
+                        Some(&EphemeralBalance::Input(tr1_required_input_value)),
+                        &wallet_meta,
+                    )?;
+                    assert_eq!(tr1_balance.total(), tr1_balance.fee_required());
+
+                    (
+                        Some(EphemeralBalance::Output(tr1_required_input_value)),
+                        Some(tr1_balance),
+                    )
+                }
+            };
+
             // In the ZIP 320 case, this is the balance for transaction 0, taking into account
             // the ephemeral output.
             let balance = change_strategy.compute_balance(
@@ -617,7 +619,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     &orchard_outputs[..],
                 ),
                 ephemeral_balance.as_ref(),
-                Some(&wallet_meta),
+                &wallet_meta,
             );
 
             match balance {
@@ -819,7 +821,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            Some(&wallet_meta),
+            &wallet_meta,
         );
 
         let balance = match trial_balance {
@@ -837,7 +839,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                     #[cfg(feature = "orchard")]
                     &orchard_fees::EmptyBundleView,
                     None,
-                    Some(&wallet_meta),
+                    &wallet_meta,
                 )?
             }
             Err(other) => return Err(InputSelectorError::Change(other)),

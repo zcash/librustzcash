@@ -88,7 +88,7 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         ephemeral_balance: Option<&EphemeralBalance>,
-        wallet_meta: Option<&Self::WalletMetaT>,
+        wallet_meta: &Self::WalletMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         #[allow(deprecated)]
         match self.fee_rule() {

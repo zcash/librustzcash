@@ -84,7 +84,7 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         ephemeral_balance: Option<&EphemeralBalance>,
-        _wallet_meta: Option<&Self::WalletMetaT>,
+        _wallet_meta: &Self::WalletMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         let split_policy = SplitPolicy::single_output();
         let cfg = SinglePoolBalanceConfig::new(
@@ -168,7 +168,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            None,
+            &(),
         );
 
         assert_matches!(
@@ -218,7 +218,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            None,
+            &(),
         );
 
         assert_matches!(

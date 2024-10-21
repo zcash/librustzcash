@@ -91,7 +91,7 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         ephemeral_balance: Option<&EphemeralBalance>,
-        _wallet_meta: Option<&Self::WalletMetaT>,
+        _wallet_meta: &Self::WalletMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         let split_policy = SplitPolicy::single_output();
         let cfg = SinglePoolBalanceConfig::new(
@@ -189,7 +189,7 @@ impl<I: InputSource> ChangeStrategy for MultiOutputChangeStrategy<I> {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         ephemeral_balance: Option<&EphemeralBalance>,
-        wallet_meta: Option<&Self::WalletMetaT>,
+        wallet_meta: &Self::WalletMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         let cfg = SinglePoolBalanceConfig::new(
             params,
@@ -204,7 +204,7 @@ impl<I: InputSource> ChangeStrategy for MultiOutputChangeStrategy<I> {
 
         single_pool_output_balance(
             cfg,
-            wallet_meta,
+            Some(wallet_meta),
             target_height,
             transparent_inputs,
             transparent_outputs,
@@ -277,7 +277,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            None,
+            &(),
         );
 
         assert_matches!(
@@ -324,11 +324,11 @@ mod tests {
                     #[cfg(feature = "orchard")]
                     &orchard_fees::EmptyBundleView,
                     None,
-                    Some(&WalletMeta::new(
+                    &WalletMeta::new(
                         existing_notes,
                         #[cfg(feature = "orchard")]
                         0,
-                    )),
+                    ),
                 )
             };
 
@@ -380,11 +380,11 @@ mod tests {
                 #[cfg(feature = "orchard")]
                 &orchard_fees::EmptyBundleView,
                 None,
-                Some(&WalletMeta::new(
+                &WalletMeta::new(
                     0,
                     #[cfg(feature = "orchard")]
                     0,
-                )),
+                ),
             );
 
             assert_matches!(
@@ -435,7 +435,7 @@ mod tests {
                 ))][..],
             ),
             None,
-            None,
+            &(),
         );
 
         assert_matches!(
@@ -489,7 +489,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            None,
+            &(),
         );
 
         assert_matches!(
@@ -534,7 +534,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            None,
+            &(),
         );
 
         assert_matches!(
@@ -579,7 +579,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            None,
+            &(),
         );
 
         assert_matches!(
@@ -630,7 +630,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            None,
+            &(),
         );
 
         assert_matches!(
@@ -692,7 +692,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            None,
+            &(),
         );
 
         assert_matches!(
@@ -744,7 +744,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,
-            None,
+            &(),
         );
 
         // We will get an error here, because the dust input isn't free to add
