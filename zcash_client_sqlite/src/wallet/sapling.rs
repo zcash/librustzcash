@@ -355,7 +355,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
             rcm = :rcm,
             nf = IFNULL(:nf, nf),
             memo = IFNULL(:memo, memo),
-            is_change = IFNULL(:is_change, is_change),
+            is_change = MAX(:is_change, is_change),
             commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position),
             recipient_key_scope = :recipient_key_scope
         RETURNING sapling_received_notes.id",
