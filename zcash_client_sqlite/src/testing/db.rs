@@ -147,6 +147,7 @@ unsafe fn run_sqlite3<S: AsRef<OsStr>>(db_path: S, command: &str) {
     eprintln!("------");
 }
 
+#[derive(Default)]
 pub(crate) struct TestDbFactory {
     target_migrations: Option<Vec<Uuid>>,
 }
@@ -156,14 +157,6 @@ impl TestDbFactory {
     pub(crate) fn new(target_migrations: Vec<Uuid>) -> Self {
         Self {
             target_migrations: Some(target_migrations),
-        }
-    }
-}
-
-impl Default for TestDbFactory {
-    fn default() -> Self {
-        Self {
-            target_migrations: Default::default(),
         }
     }
 }
@@ -179,7 +172,7 @@ impl DataStoreFactory for TestDbFactory {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
         if let Some(migrations) = &self.target_migrations {
-            init_wallet_db_internal(&mut db_data, None, &migrations, true).unwrap();
+            init_wallet_db_internal(&mut db_data, None, migrations, true).unwrap();
         } else {
             init_wallet_db(&mut db_data, None).unwrap();
         }
