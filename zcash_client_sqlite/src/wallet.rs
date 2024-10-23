@@ -3586,7 +3586,7 @@ mod tests {
     #[test]
     fn empty_database_has_no_balance() {
         let st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().unwrap();
@@ -3616,7 +3616,7 @@ mod tests {
     #[test]
     fn get_default_account_index() {
         let st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account_id = st.test_account().unwrap().id();
@@ -3632,7 +3632,7 @@ mod tests {
     #[test]
     fn get_account_ids() {
         let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
@@ -3648,7 +3648,7 @@ mod tests {
 
     #[test]
     fn block_fully_scanned() {
-        check_block_fully_scanned(TestDbFactory)
+        check_block_fully_scanned(TestDbFactory::default())
     }
 
     fn check_block_fully_scanned<DsF: DataStoreFactory>(dsf: DsF) {
@@ -3713,7 +3713,7 @@ mod tests {
     #[test]
     fn test_account_birthday() {
         let st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();

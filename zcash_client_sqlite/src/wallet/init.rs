@@ -312,7 +312,7 @@ pub fn init_wallet_db<P: consensus::Parameters + 'static>(
     init_wallet_db_internal(wdb, seed, &[], true)
 }
 
-fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
+pub(crate) fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     wdb: &mut WalletDb<rusqlite::Connection, P>,
     seed: Option<SecretVec<u8>>,
     target_migrations: &[Uuid],
@@ -455,7 +455,7 @@ mod tests {
     #[test]
     fn verify_schema() {
         let st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .build();
 
         use regex::Regex;
