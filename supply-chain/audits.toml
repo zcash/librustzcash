@@ -173,6 +173,16 @@ criteria = "safe-to-deploy"
 delta = "0.14.2 -> 0.14.5"
 notes = "I did not thoroughly check the safety argument for fold_impl, but it at least seems to be well documented."
 
+[[audits.home]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.5.5 -> 0.5.9"
+notes = """
+`unsafe` changes are to switch Windows logic from `SHGetFolderPathW` to
+`SHGetKnownFolderPath`. I checked that the parameters and return values were
+being handled correctly per the Windows documentation.
+"""
+
 [[audits.http-body]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -571,6 +581,11 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "0.25.2 -> 0.25.4"
 notes = "I have not checked consistency with the Mozilla IncludedCACertificateReportPEMCSV report."
+
+[[audits.which]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "6.0.1 -> 6.0.3"
 
 [[audits.winapi-util]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"

@@ -245,7 +245,7 @@ impl<V: Version> Tree<V> {
             }
         }
 
-        let mut new_root = *peaks.get(0).expect("At lest 1 elements in peaks");
+        let mut new_root = *peaks.first().expect("At lest 1 elements in peaks");
 
         for next_peak in peaks.into_iter().skip(1) {
             new_root = self.push_generated(combine_nodes(

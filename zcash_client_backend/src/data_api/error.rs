@@ -106,6 +106,8 @@ where
     FE: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use fmt::Write;
+
         match self {
             Error::DataSource(e) => {
                 write!(
@@ -153,7 +155,10 @@ where
             Error::NoSupportedReceivers(ua) => write!(
                 f,
                 "A recipient's unified address does not contain any receivers to which the wallet can send funds; required one of {}",
-                ua.receiver_types().iter().enumerate().map(|(i, tc)| format!("{}{:?}", if i > 0 { ", " } else { "" }, tc)).collect::<String>()
+                ua.receiver_types().iter().enumerate().fold(String::new(), |mut acc, (i, tc)| {
+                    let _ = write!(acc, "{}{:?}", if i > 0 { ", " } else { "" }, tc);
+                    acc
+                })
             ),
             Error::NoSpendingKey(addr) => write!(f, "No spending key available for address: {}", addr),
             Error::NoteMismatch(n) => write!(f, "A note being spent ({:?}) does not correspond to either the internal or external full viewing key for the provided spending key.", n),

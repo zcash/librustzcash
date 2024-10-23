@@ -424,15 +424,15 @@ impl<NoteRef> Step<NoteRef> {
         let transparent_input_total = transparent_inputs
             .iter()
             .map(|out| out.txout().value)
-            .fold(Ok(NonNegativeAmount::ZERO), |acc, a| {
-                (acc? + a).ok_or(ProposalError::Overflow)
+            .try_fold(NonNegativeAmount::ZERO, |acc, a| {
+                (acc + a).ok_or(ProposalError::Overflow)
             })?;
 
         let shielded_input_total = shielded_inputs
             .iter()
             .flat_map(|s_in| s_in.notes().iter())
             .map(|out| out.note().value())
-            .fold(Some(NonNegativeAmount::ZERO), |acc, a| (acc? + a))
+            .try_fold(NonNegativeAmount::ZERO, |acc, a| (acc + a))
             .ok_or(ProposalError::Overflow)?;
 
         let prior_step_input_total = prior_step_inputs
@@ -458,7 +458,7 @@ impl<NoteRef> Step<NoteRef> {
             })
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .fold(Some(NonNegativeAmount::ZERO), |acc, a| (acc? + a))
+            .try_fold(NonNegativeAmount::ZERO, |acc, a| (acc + a))
             .ok_or(ProposalError::Overflow)?;
 
         let input_total = (transparent_input_total + shielded_input_total + prior_step_input_total)

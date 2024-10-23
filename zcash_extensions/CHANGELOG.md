@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- MSRV is now 1.77.0.
+
 ## [0.1.0] - 2024-07-15
 Initial release.
 MSRV is 1.70.0.
