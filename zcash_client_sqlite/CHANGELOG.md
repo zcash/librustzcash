@@ -16,6 +16,13 @@ and this library adheres to Rust's notion of
 - Migrated from `schemer` to our fork `schemerz`.
 - Migrated to `rusqlite 0.32`.
 
+## [0.12.2] - 2024-10-21
+
+### Fixed
+- Fixes an error in determining the minimum checkpoint height to which it's
+  possible to rewind in the case of a reorg, when no other truncation height
+  information is available.
+
 ## [0.12.1] - 2024-10-10
 
 ### Fixed

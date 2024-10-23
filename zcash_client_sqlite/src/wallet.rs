@@ -2385,7 +2385,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
                 let min_checkpoint_height_query =
                     "SELECT MIN(checkpoint_id) FROM sapling_tree_checkpoints";
                 #[cfg(feature = "orchard")]
-                let min_checkpoint_height_query = "SELECT MIN(checkpoint_id) 
+                let min_checkpoint_height_query = "SELECT MIN(sc.checkpoint_id)
                      FROM sapling_tree_checkpoints sc
                      JOIN orchard_tree_checkpoints oc
                      ON oc.checkpoint_id = sc.checkpoint_id";

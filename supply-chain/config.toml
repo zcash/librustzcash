@@ -2,7 +2,7 @@
 # cargo-vet config file
 
 [cargo-vet]
-version = "0.9"
+version = "0.10"
 
 [imports.bytecode-alliance]
 url = "https://raw.githubusercontent.com/bytecodealliance/wasmtime/main/supply-chain/audits.toml"
@@ -257,10 +257,6 @@ criteria = "safe-to-run"
 [[exemptions.ciborium-ll]]
 version = "0.2.1"
 criteria = "safe-to-run"
-
-[[exemptions.cipher]]
-version = "0.4.4"
-criteria = "safe-to-deploy"
 
 [[exemptions.coarsetime]]
 version = "0.1.34"
