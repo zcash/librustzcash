@@ -1297,15 +1297,17 @@ pub(crate) mod tests {
         // resulting ratio (the number of notes in the recovery range) is zero.
         let no_recovery = Some(Ratio::new(0, 0));
 
-        // We have scan ranges and a subtree, but have scanned no blocks.
+        // We have scan ranges and a subtree, but have scanned no blocks. Given the number of
+        // blocks scanned in the previous subtree, we estimate the number of notes in the current
+        // subtree
         let summary = st.get_wallet_summary(1);
         assert_eq!(
-            summary.as_ref().and_then(|s| s.recovery_progress()),
+            summary.as_ref().and_then(|s| s.progress().recovery()),
             no_recovery,
         );
         assert_matches!(
-            summary.and_then(|s| s.scan_progress()),
-            Some(progress) if progress.numerator() == &0
+            summary.map(|s| s.progress().scan()),
+            Some(ratio) if *ratio.numerator() == 0
         );
 
         // Set up prior chain state. This simulates us having imported a wallet
@@ -1345,7 +1347,7 @@ pub(crate) mod tests {
         assert_eq!(summary.as_ref().map(|s| T::next_subtree_index(s)), Some(0));
 
         assert_eq!(
-            summary.as_ref().and_then(|s| s.recovery_progress()),
+            summary.as_ref().and_then(|s| s.progress().recovery()),
             no_recovery
         );
 
@@ -1357,7 +1359,7 @@ pub(crate) mod tests {
         let expected_denom = expected_denom * 2;
         let expected_denom = expected_denom + 1;
         assert_eq!(
-            summary.and_then(|s| s.scan_progress()),
+            summary.map(|s| s.progress().scan()),
             Some(Ratio::new(1, u64::from(expected_denom)))
         );
 
@@ -1450,7 +1452,7 @@ pub(crate) mod tests {
                     / (max_scanned - (birthday.height() - 10)));
         let summary = st.get_wallet_summary(1);
         assert_eq!(
-            summary.and_then(|s| s.scan_progress()),
+            summary.map(|s| s.progress().scan()),
             Some(Ratio::new(1, u64::from(expected_denom)))
         );
     }

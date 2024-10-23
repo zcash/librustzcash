@@ -1,9 +1,8 @@
 //! Migration that adds support for unified full viewing keys.
 use std::{collections::HashSet, rc::Rc};
 
-use rusqlite::{self, named_params, params};
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use rusqlite::{named_params, params};
+use schemerz_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
 
@@ -34,7 +33,7 @@ pub(super) struct Migration<P> {
     pub(super) seed: Option<Rc<SecretVec<u8>>>,
 }
 
-impl<P> schemer::Migration for Migration<P> {
+impl<P> schemerz::Migration<Uuid> for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

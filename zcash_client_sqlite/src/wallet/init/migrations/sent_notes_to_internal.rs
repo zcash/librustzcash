@@ -2,9 +2,7 @@
 //! on an internal address to the sent_notes table.
 use std::collections::HashSet;
 
-use rusqlite;
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use super::ufvk_support;
@@ -17,7 +15,7 @@ const DEPENDENCIES: &[Uuid] = &[ufvk_support::MIGRATION_ID];
 
 pub(super) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -17,7 +17,7 @@ const DEPENDENCIES: &[Uuid] = &[received_notes_nullable_nf::MIGRATION_ID];
 
 pub(super) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

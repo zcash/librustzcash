@@ -5,8 +5,8 @@ use crate::BlockDb;
 use {
     super::migrations,
     crate::FsBlockDb,
-    schemer::{Migrator, MigratorError},
-    schemer_rusqlite::RusqliteAdapter,
+    schemerz::{Migrator, MigratorError},
+    schemerz_rusqlite::RusqliteAdapter,
 };
 
 /// Sets up the internal structure of the cache database.
@@ -55,13 +55,15 @@ pub fn init_cache_database(db_cache: &BlockDb) -> Result<(), rusqlite::Error> {
 /// init_blockmeta_db(&mut db).unwrap();
 /// ```
 #[cfg(feature = "unstable")]
-pub fn init_blockmeta_db(db: &mut FsBlockDb) -> Result<(), MigratorError<rusqlite::Error>> {
+pub fn init_blockmeta_db(
+    db: &mut FsBlockDb,
+) -> Result<(), MigratorError<uuid::Uuid, rusqlite::Error>> {
     let adapter = RusqliteAdapter::new(&mut db.conn, Some("schemer_migrations".to_string()));
     adapter.init().expect("Migrations table setup succeeds.");
 
     let mut migrator = Migrator::new(adapter);
     migrator
-        .register_multiple(migrations::blockmeta::all_migrations())
+        .register_multiple(migrations::blockmeta::all_migrations().into_iter())
         .expect("Migration registration should have been successful.");
     migrator.up(None)?;
     Ok(())

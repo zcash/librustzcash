@@ -1,9 +1,7 @@
 //! Modifies definitions to avoid keywords that may not be available in older SQLite versions.
 use std::collections::HashSet;
 
-use rusqlite;
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use crate::wallet::init::{migrations::tx_retrieval_queue, WalletMigrationError};
@@ -14,7 +12,7 @@ const DEPENDENCIES: &[Uuid] = &[tx_retrieval_queue::MIGRATION_ID];
 
 pub(super) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

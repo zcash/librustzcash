@@ -47,12 +47,11 @@ where
 pub(crate) trait Decryptor<D: BatchDomain, Output> {
     type Memo;
 
-    // Once we reach MSRV 1.75.0, this can return `impl Iterator`.
     fn batch_decrypt<IvkTag: Clone>(
         tags: &[IvkTag],
         ivks: &[D::IncomingViewingKey],
         outputs: &[(D, Output)],
-    ) -> Vec<Option<DecryptedOutput<IvkTag, D, Self::Memo>>>;
+    ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, Self::Memo>>>;
 }
 
 /// A decryptor of outputs as encoded in transactions.
@@ -68,7 +67,7 @@ impl<D: BatchDomain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>> Decryptor<D
         tags: &[IvkTag],
         ivks: &[D::IncomingViewingKey],
         outputs: &[(D, Output)],
-    ) -> Vec<Option<DecryptedOutput<IvkTag, D, Self::Memo>>> {
+    ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, Self::Memo>>> {
         batch::try_note_decryption(ivks, outputs)
             .into_iter()
             .map(|res| {
@@ -79,7 +78,6 @@ impl<D: BatchDomain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>> Decryptor<D
                     memo,
                 })
             })
-            .collect()
     }
 }
 
@@ -95,7 +93,7 @@ impl<D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>> Decryptor<D, 
         tags: &[IvkTag],
         ivks: &[D::IncomingViewingKey],
         outputs: &[(D, Output)],
-    ) -> Vec<Option<DecryptedOutput<IvkTag, D, Self::Memo>>> {
+    ) -> impl Iterator<Item = Option<DecryptedOutput<IvkTag, D, Self::Memo>>> {
         batch::try_compact_note_decryption(ivks, outputs)
             .into_iter()
             .map(|res| {
@@ -106,7 +104,6 @@ impl<D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>> Decryptor<D, 
                     memo: (),
                 })
             })
-            .collect()
     }
 }
 
@@ -375,9 +372,7 @@ where
         assert_eq!(outputs.len(), repliers.len());
 
         let decryption_results = Dec::batch_decrypt(&tags, &ivks, &outputs);
-        for (decryption_result, OutputReplier(replier)) in
-            decryption_results.into_iter().zip(repliers.into_iter())
-        {
+        for (decryption_result, OutputReplier(replier)) in decryption_results.zip(repliers) {
             // If `decryption_result` is `None` then we will just drop `replier`,
             // indicating to the parent `BatchRunner` that this output was not for us.
             if let Some(value) = decryption_result {

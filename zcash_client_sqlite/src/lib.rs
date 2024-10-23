@@ -164,6 +164,26 @@ pub(crate) const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
 pub struct AccountId(u32);
 
+impl AccountId {
+    /// Constructs an `AccountId` from a bare `u32` value. The resulting identifier is not
+    /// guaranteed to correspond to any account stored in the database.
+    #[cfg(feature = "unstable")]
+    pub fn from_u32(value: u32) -> Self {
+        AccountId(value)
+    }
+
+    /// Unwraps a raw `accounts` table primary key value from its typesafe wrapper.
+    ///
+    /// Note that account identifiers are not guaranteed to be stable; if a wallet is restored from
+    /// seed, the account identifiers of the restored wallet are not likely to correspond to the
+    /// identifiers for the same accounts in another wallet created or restored from the same seed.
+    /// These unwrapped identifier values should therefore be treated as ephemeral.
+    #[cfg(feature = "unstable")]
+    pub fn as_u32(&self) -> u32 {
+        self.0
+    }
+}
+
 impl ConditionallySelectable for AccountId {
     fn conditional_select(a: &Self, b: &Self, choice: subtle::Choice) -> Self {
         AccountId(ConditionallySelectable::conditional_select(
@@ -606,10 +626,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         let iter = wallet::transaction_data_requests(self.conn.borrow())?.into_iter();
 
         #[cfg(feature = "transparent-inputs")]
-        let iter = iter.chain(
-            wallet::transparent::transaction_data_requests(self.conn.borrow(), &self.params)?
-                .into_iter(),
-        );
+        let iter = iter.chain(wallet::transparent::transaction_data_requests(
+            self.conn.borrow(),
+            &self.params,
+        )?);
 
         Ok(iter.collect())
     }

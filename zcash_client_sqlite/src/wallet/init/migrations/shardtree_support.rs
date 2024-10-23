@@ -5,9 +5,8 @@
 use std::collections::{BTreeSet, HashSet};
 
 use incrementalmerkletree::{Marking, Retention};
-use rusqlite::{self, named_params, params};
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use rusqlite::{named_params, params};
+use schemerz_rusqlite::RusqliteMigration;
 use shardtree::{error::ShardTreeError, store::caching::CachingShardStore, ShardTree};
 use tracing::{debug, trace};
 use uuid::Uuid;
@@ -39,7 +38,7 @@ pub(super) struct Migration<P> {
     pub(super) params: P,
 }
 
-impl<P> schemer::Migration for Migration<P> {
+impl<P> schemerz::Migration<Uuid> for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

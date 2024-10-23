@@ -7,6 +7,7 @@ members = [
     "components/zcash_protocol",
     "components/zip321",
     "devtools",
+    "pczt",
     "zcash",
     "zcash_client_backend",
     "zcash_client_sqlite",
@@ -19,7 +20,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.77"
 repository = "https://github.com/zcash/librustzcash"
 license = "MIT OR Apache-2.0"
 categories = ["cryptography::cryptocurrencies"]
@@ -122,9 +123,9 @@ subtle = "2.2.3"
 # - Warning: One of the downstream consumers requires that SQLite be available through
 #   CocoaPods, due to being bound to React Native. We need to ensure that the SQLite
 #   version required for `rusqlite` is a version that is available through CocoaPods.
-rusqlite = { version = "0.29.0", features = ["bundled"] }
-schemer = "0.2"
-schemer-rusqlite = "0.2.2"
+rusqlite = { version = "0.32", features = ["bundled"] }
+schemerz = "0.2"
+schemerz-rusqlite = "0.320"
 time = "0.3.22"
 uuid = "1.1"
 
@@ -144,9 +145,9 @@ incrementalmerkletree-testing = "0.2"
 # Tor
 # - `arti-client` depends on `rusqlite`, and a version mismatch there causes a compilation
 #   failure due to incompatible `libsqlite3-sys` versions.
-arti-client = { version = "0.11", default-features = false, features = ["compression", "rustls", "tokio"] }
+arti-client = { version = "0.23", default-features = false, features = ["compression", "rustls", "tokio"] }
 tokio = "1"
-tor-rtcompat = "0.9"
+tor-rtcompat = "0.23"
 tower = "0.4"
 
 # ZIP 32

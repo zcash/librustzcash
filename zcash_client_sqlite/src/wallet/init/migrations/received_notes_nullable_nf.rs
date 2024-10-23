@@ -3,9 +3,7 @@
 //! table prior to being mined.
 use std::collections::HashSet;
 
-use rusqlite;
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use super::v_transactions_net;
@@ -17,7 +15,7 @@ const DEPENDENCIES: &[Uuid] = &[v_transactions_net::MIGRATION_ID];
 
 pub(crate) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

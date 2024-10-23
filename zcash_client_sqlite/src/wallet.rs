@@ -69,7 +69,7 @@ use rusqlite::{self, named_params, params, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zcash_client_backend::data_api::{
-    AccountPurpose, DecryptedTransaction, TransactionDataRequest, TransactionStatus,
+    AccountPurpose, DecryptedTransaction, Progress, TransactionDataRequest, TransactionStatus,
 };
 use zip32::fingerprint::SeedFingerprint;
 
@@ -802,26 +802,6 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
     )?;
 
     accounts.next().transpose()
-}
-
-#[derive(Debug)]
-pub(crate) struct Progress {
-    scan: Ratio<u64>,
-    recovery: Option<Ratio<u64>>,
-}
-
-impl Progress {
-    pub(crate) fn new(scan: Ratio<u64>, recovery: Option<Ratio<u64>>) -> Self {
-        Self { scan, recovery }
-    }
-
-    pub(crate) fn scan(&self) -> Ratio<u64> {
-        self.scan
-    }
-
-    pub(crate) fn recovery(&self) -> Option<Ratio<u64>> {
-        self.recovery
-    }
 }
 
 pub(crate) trait ProgressEstimator {
@@ -1598,8 +1578,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         account_balances,
         chain_tip_height,
         fully_scanned_height.unwrap_or(birthday_height - 1),
-        Some(progress.scan),
-        progress.recovery,
+        progress,
         next_sapling_subtree_index,
         #[cfg(feature = "orchard")]
         next_orchard_subtree_index,
@@ -2041,7 +2020,21 @@ pub(crate) fn block_fully_scanned<P: consensus::Parameters>(
         //
         // The fully-scanned height is therefore the last height that falls within the first range in
         // the scan queue with priority "Scanned".
-        // SQL query problems.
+        let calc_fully_scanned_height = |row: &rusqlite::Row| {
+            let block_range_start = BlockHeight::from_u32(row.get(0)?);
+            let block_range_end = BlockHeight::from_u32(row.get(1)?);
+
+            // If the start of the earliest scanned range is greater than
+            // the birthday height, then there is an unscanned range between
+            // the wallet birthday and that range, so there is no fully
+            // scanned height.
+            Ok(if block_range_start <= birthday_height {
+                // Scan ranges are end-exclusive.
+                Some(block_range_end - 1)
+            } else {
+                None
+            })
+        };
         let fully_scanned_height = match conn
             .query_row(
                 "SELECT block_range_start, block_range_end
@@ -2050,21 +2043,7 @@ pub(crate) fn block_fully_scanned<P: consensus::Parameters>(
                 ORDER BY block_range_start ASC
                 LIMIT 1",
                 named_params![":priority": priority_code(&ScanPriority::Scanned)],
-                |row| {
-                    let block_range_start = BlockHeight::from_u32(row.get(0)?);
-                    let block_range_end = BlockHeight::from_u32(row.get(1)?);
-
-                    // If the start of the earliest scanned range is greater than
-                    // the birthday height, then there is an unscanned range between
-                    // the wallet birthday and that range, so there is no fully
-                    // scanned height.
-                    Ok(if block_range_start <= birthday_height {
-                        // Scan ranges are end-exclusive.
-                        Some(block_range_end - 1)
-                    } else {
-                        None
-                    })
-                },
+                calc_fully_scanned_height,
             )
             .optional()?
         {
@@ -3385,8 +3364,8 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
                     TxId::from_bytes(row.get(2)?),
                 ))
             })?
-            .fold(Ok(None), |acc: Result<_, SqliteClientError>, row| {
-                match (acc?, row?) {
+            .try_fold(None, |acc, row| -> Result<_, SqliteClientError> {
+                match (acc, row?) {
                     (None, rhs) => Ok(Some(Some(rhs))),
                     // If there was more than one row, then due to the uniqueness
                     // constraints on the `tx_locator_map` table, all of the rows conflict

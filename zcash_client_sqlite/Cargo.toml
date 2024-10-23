@@ -67,8 +67,8 @@ shardtree = { workspace = true, features = ["legacy-api"] }
 
 # - SQLite databases
 rusqlite = { workspace = true, features = ["time", "array"] }
-schemer.workspace = true
-schemer-rusqlite.workspace = true
+schemerz.workspace = true
+schemerz-rusqlite.workspace = true
 time.workspace = true
 uuid.workspace = true
 regex = "1.4"

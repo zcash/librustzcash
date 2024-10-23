@@ -1,7 +1,7 @@
 //! Adds tables for tracking transactions to be downloaded for transparent output and/or memo retrieval.
 
 use rusqlite::{named_params, Transaction};
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use std::collections::HashSet;
 use uuid::Uuid;
 use zcash_client_backend::data_api::DecryptedTransaction;
@@ -29,7 +29,7 @@ pub(super) struct Migration<P> {
     pub(super) params: P,
 }
 
-impl<P> schemer::Migration for Migration<P> {
+impl<P> schemerz::Migration<Uuid> for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

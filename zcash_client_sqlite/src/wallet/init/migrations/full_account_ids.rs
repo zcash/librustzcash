@@ -2,7 +2,7 @@ use std::{collections::HashSet, rc::Rc};
 
 use crate::wallet::{account_kind_code, init::WalletMigrationError};
 use rusqlite::{named_params, OptionalExtension, Transaction};
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
 use zcash_client_backend::{
@@ -33,7 +33,7 @@ const DEPENDENCIES: &[Uuid] = &[
     wallet_summaries::MIGRATION_ID,
 ];
 
-impl<P: consensus::Parameters> schemer::Migration for Migration<P> {
+impl<P: consensus::Parameters> schemerz::Migration<Uuid> for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }

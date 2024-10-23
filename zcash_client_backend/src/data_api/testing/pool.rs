@@ -889,13 +889,10 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     // Wallet is fully scanned
     let summary = st.get_wallet_summary(1);
     assert_eq!(
-        summary.as_ref().and_then(|s| s.recovery_progress()),
+        summary.as_ref().and_then(|s| s.progress().recovery()),
         no_recovery,
     );
-    assert_eq!(
-        summary.and_then(|s| s.scan_progress()),
-        Some(Ratio::new(1, 1))
-    );
+    assert_eq!(summary.map(|s| s.progress().scan()), Some(Ratio::new(1, 1)));
 
     // Add more funds to the wallet in a second note
     let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
@@ -910,13 +907,10 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     // Wallet is still fully scanned
     let summary = st.get_wallet_summary(1);
     assert_eq!(
-        summary.as_ref().and_then(|s| s.recovery_progress()),
+        summary.as_ref().and_then(|s| s.progress().recovery()),
         no_recovery
     );
-    assert_eq!(
-        summary.and_then(|s| s.scan_progress()),
-        Some(Ratio::new(2, 2))
-    );
+    assert_eq!(summary.map(|s| s.progress().scan()), Some(Ratio::new(2, 2)));
 
     // Spend fails because there are insufficient verified notes
     let extsk2 = T::sk(&[0xf5; 32]);
@@ -1858,7 +1852,7 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     let expected_change = (note_value - transfer_amount - expected_fee).unwrap();
     let proposed_change = step0.balance().proposed_change();
     assert_eq!(proposed_change.len(), 1);
-    let change_output = proposed_change.get(0).unwrap();
+    let change_output = proposed_change.first().unwrap();
     // Since this is a cross-pool transfer, change will be sent to the preferred pool.
     assert_eq!(
         change_output.output_pool(),
@@ -1952,7 +1946,7 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
     let expected_change = (note_value - transfer_amount - expected_fee).unwrap();
     let proposed_change = step0.balance().proposed_change();
     assert_eq!(proposed_change.len(), 1);
-    let change_output = proposed_change.get(0).unwrap();
+    let change_output = proposed_change.first().unwrap();
     // Since there are sufficient funds in either pool, change is kept in the same pool as
     // the source note (the target pool), and does not necessarily follow preference order.
     assert_eq!(
@@ -2042,7 +2036,7 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     let expected_change = (note_value - transfer_amount - expected_fee).unwrap();
     let proposed_change = step0.balance().proposed_change();
     assert_eq!(proposed_change.len(), 1);
-    let change_output = proposed_change.get(0).unwrap();
+    let change_output = proposed_change.first().unwrap();
     // Since there are sufficient funds in either pool, change is kept in the same pool as
     // the source note (the target pool), and does not necessarily follow preference order.
     // The source note will always be sapling, as we spend Sapling funds preferentially.
