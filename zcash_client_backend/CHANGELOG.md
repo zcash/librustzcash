@@ -61,6 +61,9 @@ and this library adheres to Rust's notion of
     - `fixed::SingleOutputChangeStrategy::new`
     - `standard::SingleOutputChangeStrategy::new`
     - `zip317::SingleOutputChangeStrategy::new`
+- `zcash_client_backend::proto::ProposalDecodingError` has modified variants.
+  `ProposalDecodingError::FeeRuleNotSpecified` has been removed, and
+  `ProposalDecodingError::FeeRuleNotSupported` has been added to replace it.
 
 ### Removed
 - `zcash_client_backend::data_api`:

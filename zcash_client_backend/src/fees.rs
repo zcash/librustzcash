@@ -203,33 +203,6 @@ pub enum ChangeError<E, NoteRefT> {
     BundleError(&'static str),
 }
 
-impl<E, NoteRefT> ChangeError<E, NoteRefT> {
-    pub(crate) fn map<E0, F: FnOnce(E) -> E0>(self, f: F) -> ChangeError<E0, NoteRefT> {
-        match self {
-            ChangeError::InsufficientFunds {
-                available,
-                required,
-            } => ChangeError::InsufficientFunds {
-                available,
-                required,
-            },
-            ChangeError::DustInputs {
-                transparent,
-                sapling,
-                #[cfg(feature = "orchard")]
-                orchard,
-            } => ChangeError::DustInputs {
-                transparent,
-                sapling,
-                #[cfg(feature = "orchard")]
-                orchard,
-            },
-            ChangeError::StrategyError(e) => ChangeError::StrategyError(f(e)),
-            ChangeError::BundleError(e) => ChangeError::BundleError(e),
-        }
-    }
-}
-
 impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {

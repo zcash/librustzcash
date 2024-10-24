@@ -5,21 +5,17 @@ use std::marker::PhantomData;
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    transaction::{
-        components::amount::NonNegativeAmount,
-        fees::{
-            fixed::FeeRule as FixedFeeRule,
-            transparent,
-            zip317::{FeeError as Zip317FeeError, FeeRule as Zip317FeeRule},
-            StandardFeeRule,
-        },
+    transaction::fees::{
+        transparent,
+        zip317::{FeeError as Zip317FeeError, FeeRule as Zip317FeeRule},
+        StandardFeeRule,
     },
 };
 
 use crate::{data_api::InputSource, ShieldedProtocol};
 
 use super::{
-    fixed, sapling as sapling_fees, zip317, ChangeError, ChangeStrategy, DustOutputPolicy,
+    sapling as sapling_fees, zip317, ChangeError, ChangeStrategy, DustOutputPolicy,
     EphemeralBalance, TransactionBalance,
 };
 
@@ -92,42 +88,6 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         #[allow(deprecated)]
         match self.fee_rule() {
-            StandardFeeRule::PreZip313 => fixed::SingleOutputChangeStrategy::<I>::new(
-                FixedFeeRule::non_standard(NonNegativeAmount::const_from_u64(10000)),
-                self.change_memo.clone(),
-                self.fallback_change_pool,
-                self.dust_output_policy,
-            )
-            .compute_balance(
-                params,
-                target_height,
-                transparent_inputs,
-                transparent_outputs,
-                sapling,
-                #[cfg(feature = "orchard")]
-                orchard,
-                ephemeral_balance,
-                wallet_meta,
-            )
-            .map_err(|e| e.map(Zip317FeeError::Balance)),
-            StandardFeeRule::Zip313 => fixed::SingleOutputChangeStrategy::<I>::new(
-                FixedFeeRule::non_standard(NonNegativeAmount::const_from_u64(1000)),
-                self.change_memo.clone(),
-                self.fallback_change_pool,
-                self.dust_output_policy,
-            )
-            .compute_balance(
-                params,
-                target_height,
-                transparent_inputs,
-                transparent_outputs,
-                sapling,
-                #[cfg(feature = "orchard")]
-                orchard,
-                ephemeral_balance,
-                wallet_meta,
-            )
-            .map_err(|e| e.map(Zip317FeeError::Balance)),
             StandardFeeRule::Zip317 => zip317::SingleOutputChangeStrategy::<I>::new(
                 Zip317FeeRule::standard(),
                 self.change_memo.clone(),

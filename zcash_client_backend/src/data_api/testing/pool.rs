@@ -18,8 +18,7 @@ use zcash_primitives::{
     transaction::{
         components::amount::NonNegativeAmount,
         fees::{
-            fixed::FeeRule as FixedFeeRule,
-            zip317::{FeeRule as Zip317FeeRule, MINIMUM_FEE},
+            zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
             StandardFeeRule,
         },
         Transaction,
@@ -1025,7 +1024,7 @@ where
     assert_matches!(
         st.propose_standard_transfer::<Infallible>(
             account_id,
-            StandardFeeRule::PreZip313,
+            StandardFeeRule::Zip317,
             NonZeroU32::new(1).unwrap(),
             &to,
             NonNegativeAmount::const_from_u64(1),
@@ -1592,10 +1591,8 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
     ])
     .unwrap();
 
-    #[allow(deprecated)]
-    let fee_rule = FixedFeeRule::non_standard(MINIMUM_FEE);
-    let change_strategy = fees::fixed::SingleOutputChangeStrategy::new(
-        fee_rule,
+    let change_strategy = fees::standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
         None,
         T::SHIELDED_PROTOCOL,
         DustOutputPolicy::default(),
@@ -1613,7 +1610,7 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
         )
         .unwrap()[0];
 
-    let amount_left = (value - (amount_sent + fee_rule.fixed_fee()).unwrap()).unwrap();
+    let amount_left = (value - (amount_sent + MINIMUM_FEE + MARGINAL_FEE).unwrap()).unwrap();
     let pending_change = (amount_left - amount_legacy_change).unwrap();
 
     // The "legacy change" is not counted by get_pending_change().

@@ -62,14 +62,6 @@ pub trait FutureFeeRule: FeeRule {
 /// An enumeration of the standard fee rules supported by the wallet.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum StandardFeeRule {
-    #[deprecated(
-        note = "Using this fee rule violates ZIP 317, and might cause transactions built with it to fail. Use `StandardFeeRule::Zip317` instead."
-    )]
-    PreZip313,
-    #[deprecated(
-        note = "Using this fee rule violates ZIP 317, and might cause transactions built with it to fail. Use `StandardFeeRule::Zip317` instead."
-    )]
-    Zip313,
     Zip317,
 }
 
@@ -88,8 +80,6 @@ impl FeeRule for StandardFeeRule {
     ) -> Result<NonNegativeAmount, Self::Error> {
         #[allow(deprecated)]
         match self {
-            Self::PreZip313 => Ok(zip317::MINIMUM_FEE),
-            Self::Zip313 => Ok(NonNegativeAmount::const_from_u64(1000)),
             Self::Zip317 => zip317::FeeRule::standard().fee_required(
                 params,
                 target_height,

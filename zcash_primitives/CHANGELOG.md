@@ -9,6 +9,9 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.77.0.
+- `zcash_primitives::transaction::fees`:
+  - The deprecated `PreZip313` and `Zip313` variants of `StandardFeeRule`
+    have been removed. All clients should now use `StandardFeeRule::Zip317`.
 
 ### Deprecated
 - `zcash_primitives::transaction::fees`:

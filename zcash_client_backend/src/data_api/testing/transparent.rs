@@ -1,11 +1,12 @@
 use crate::{
     data_api::{
-        testing::{AddressType, TestBuilder, TestState},
-        testing::{DataStoreFactory, ShieldedProtocol, TestCache},
+        testing::{
+            AddressType, DataStoreFactory, ShieldedProtocol, TestBuilder, TestCache, TestState,
+        },
         wallet::input_selection::GreedyInputSelector,
         Account as _, InputSource, WalletRead, WalletWrite,
     },
-    fees::{fixed, DustOutputPolicy},
+    fees::{standard, DustOutputPolicy},
     wallet::WalletTransparentOutput,
 };
 use assert_matches::assert_matches;
@@ -14,7 +15,7 @@ use zcash_primitives::{
     block::BlockHash,
     transaction::{
         components::{amount::NonNegativeAmount, OutPoint, TxOut},
-        fees::fixed::FeeRule as FixedFeeRule,
+        fees::StandardFeeRule,
     },
 };
 
@@ -198,9 +199,8 @@ where
 
     // Shield the output.
     let input_selector = GreedyInputSelector::new();
-    let change_strategy = fixed::SingleOutputChangeStrategy::new(
-        #[allow(deprecated)]
-        FixedFeeRule::non_standard(NonNegativeAmount::ZERO),
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
         None,
         ShieldedProtocol::Sapling,
         DustOutputPolicy::default(),
