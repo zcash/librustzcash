@@ -13,8 +13,13 @@ and this library adheres to Rust's notion of
   - `WalletSummary::progress`
   - `WalletMeta`
   - `impl Default for wallet::input_selection::GreedyInputSelector`
-- `zcash_client_backend::fees::SplitPolicy`
-- `zcash_client_backend::fees::zip317::MultiOutputChangeStrategy`
+- `zcash_client_backend::fees`
+  - `SplitPolicy`
+  - `StandardFeeRule` has been moved here from `zcash_primitives::fees`. Relative
+    to that type, the deprecated `PreZip313` and `Zip313` variants have been
+    removed.
+  - `zip317::{MultiOutputChangeStrategy, Zip317FeeRule}`
+  - `standard::MultiOutputChangeStrategy`
 - A new feature flag, `non-standard-fees`, has been added. This flag is now
   required in order to make use of any types or methods that enable non-standard
   fee calculation.
