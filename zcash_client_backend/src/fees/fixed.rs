@@ -1,5 +1,7 @@
 //! Change strategies designed for use with a fixed fee.
 
+use std::marker::PhantomData;
+
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
@@ -9,11 +11,12 @@ use zcash_primitives::{
     },
 };
 
-use crate::ShieldedProtocol;
+use crate::{data_api::InputSource, ShieldedProtocol};
 
 use super::{
-    common::single_change_output_balance, sapling as sapling_fees, ChangeError, ChangeStrategy,
-    DustOutputPolicy, EphemeralBalance, TransactionBalance,
+    common::{single_pool_output_balance, SinglePoolBalanceConfig},
+    sapling as sapling_fees, ChangeError, ChangeStrategy, DustOutputPolicy, EphemeralBalance,
+    SplitPolicy, TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
@@ -23,13 +26,15 @@ use super::orchard as orchard_fees;
 /// as the most current pool that avoids unnecessary pool-crossing (with a specified
 /// fallback when the transaction has no shielded inputs). Fee calculation is delegated
 /// to the provided fee rule.
-pub struct SingleOutputChangeStrategy {
+pub struct SingleOutputChangeStrategy<I> {
     fee_rule: FixedFeeRule,
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedProtocol,
+    dust_output_policy: DustOutputPolicy,
+    meta_source: PhantomData<I>,
 }
 
-impl SingleOutputChangeStrategy {
+impl<I> SingleOutputChangeStrategy<I> {
     /// Constructs a new [`SingleOutputChangeStrategy`] with the specified fee rule
     /// and change memo.
     ///
@@ -39,21 +44,35 @@ impl SingleOutputChangeStrategy {
         fee_rule: FixedFeeRule,
         change_memo: Option<MemoBytes>,
         fallback_change_pool: ShieldedProtocol,
+        dust_output_policy: DustOutputPolicy,
     ) -> Self {
         Self {
             fee_rule,
             change_memo,
             fallback_change_pool,
+            dust_output_policy,
+            meta_source: PhantomData,
         }
     }
 }
 
-impl ChangeStrategy for SingleOutputChangeStrategy {
+impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
     type FeeRule = FixedFeeRule;
     type Error = BalanceError;
+    type MetaSource = I;
+    type WalletMetaT = ();
 
     fn fee_rule(&self) -> &Self::FeeRule {
         &self.fee_rule
+    }
+
+    fn fetch_wallet_meta(
+        &self,
+        _meta_source: &Self::MetaSource,
+        _account: <Self::MetaSource as InputSource>::AccountId,
+        _exclude: &[<Self::MetaSource as crate::data_api::InputSource>::NoteRef],
+    ) -> Result<Self::WalletMetaT, <Self::MetaSource as crate::data_api::InputSource>::Error> {
+        Ok(())
     }
 
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
@@ -64,24 +83,31 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
-        dust_output_policy: &DustOutputPolicy,
         ephemeral_balance: Option<&EphemeralBalance>,
+        _wallet_meta: &Self::WalletMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
-        single_change_output_balance(
+        let split_policy = SplitPolicy::single_output();
+        let cfg = SinglePoolBalanceConfig::new(
             params,
             &self.fee_rule,
+            &self.dust_output_policy,
+            self.fee_rule.fixed_fee(),
+            &split_policy,
+            self.fallback_change_pool,
+            NonNegativeAmount::ZERO,
+            0,
+        );
+
+        single_pool_output_balance(
+            cfg,
+            None,
             target_height,
             transparent_inputs,
             transparent_outputs,
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
-            dust_output_policy,
-            self.fee_rule.fixed_fee(),
             self.change_memo.as_ref(),
-            self.fallback_change_pool,
-            NonNegativeAmount::ZERO,
-            0,
             ephemeral_balance,
         )
     }
@@ -99,7 +125,7 @@ mod tests {
 
     use super::SingleOutputChangeStrategy;
     use crate::{
-        data_api::wallet::input_selection::SaplingPayment,
+        data_api::{testing::MockWalletDb, wallet::input_selection::SaplingPayment},
         fees::{
             tests::{TestSaplingInput, TestTransparentInput},
             ChangeError, ChangeStrategy, ChangeValue, DustOutputPolicy,
@@ -114,8 +140,12 @@ mod tests {
     fn change_without_dust() {
         #[allow(deprecated)]
         let fee_rule = FixedFeeRule::standard();
-        let change_strategy =
-            SingleOutputChangeStrategy::new(fee_rule, None, ShieldedProtocol::Sapling);
+        let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
+            fee_rule,
+            None,
+            ShieldedProtocol::Sapling,
+            DustOutputPolicy::default(),
+        );
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(
@@ -137,8 +167,8 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
-            &DustOutputPolicy::default(),
             None,
+            &(),
         );
 
         assert_matches!(
@@ -153,8 +183,12 @@ mod tests {
     fn dust_change() {
         #[allow(deprecated)]
         let fee_rule = FixedFeeRule::standard();
-        let change_strategy =
-            SingleOutputChangeStrategy::new(fee_rule, None, ShieldedProtocol::Sapling);
+        let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
+            fee_rule,
+            None,
+            ShieldedProtocol::Sapling,
+            DustOutputPolicy::default(),
+        );
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(
@@ -183,8 +217,8 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
-            &DustOutputPolicy::default(),
             None,
+            &(),
         );
 
         assert_matches!(

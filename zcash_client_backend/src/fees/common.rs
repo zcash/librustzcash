@@ -1,4 +1,5 @@
 use core::cmp::{max, min};
+use std::num::{NonZeroU64, NonZeroUsize};
 
 use zcash_primitives::{
     consensus::{self, BlockHeight},
@@ -10,9 +11,11 @@ use zcash_primitives::{
 };
 use zcash_protocol::ShieldedProtocol;
 
+use crate::data_api::WalletMeta;
+
 use super::{
     sapling as sapling_fees, ChangeError, ChangeValue, DustAction, DustOutputPolicy,
-    EphemeralBalance, TransactionBalance,
+    EphemeralBalance, SplitPolicy, TransactionBalance,
 };
 
 #[cfg(feature = "orchard")]
@@ -112,55 +115,101 @@ where
 }
 
 /// Decide which shielded pool change should go to if there is any.
-pub(crate) fn single_change_output_policy(
+pub(crate) fn select_change_pool(
     _net_flows: &NetFlows,
     _fallback_change_pool: ShieldedProtocol,
-) -> (ShieldedProtocol, usize, usize) {
+) -> ShieldedProtocol {
     // TODO: implement a less naive strategy for selecting the pool to which change will be sent.
-    let change_pool = {
-        #[cfg(feature = "orchard")]
-        if _net_flows.orchard_in.is_positive() || _net_flows.orchard_out.is_positive() {
-            // Send change to Orchard if we're spending any Orchard inputs or creating any Orchard outputs.
-            ShieldedProtocol::Orchard
-        } else if _net_flows.sapling_in.is_positive() || _net_flows.sapling_out.is_positive() {
-            // Otherwise, send change to Sapling if we're spending any Sapling inputs or creating any
-            // Sapling outputs, so that we avoid pool-crossing.
-            ShieldedProtocol::Sapling
-        } else {
-            // The flows are transparent, so there may not be change. If there is, the caller
-            // gets to decide where to shield it.
-            _fallback_change_pool
-        }
-        #[cfg(not(feature = "orchard"))]
+    #[cfg(feature = "orchard")]
+    if _net_flows.orchard_in.is_positive() || _net_flows.orchard_out.is_positive() {
+        // Send change to Orchard if we're spending any Orchard inputs or creating any Orchard outputs.
+        ShieldedProtocol::Orchard
+    } else if _net_flows.sapling_in.is_positive() || _net_flows.sapling_out.is_positive() {
+        // Otherwise, send change to Sapling if we're spending any Sapling inputs or creating any
+        // Sapling outputs, so that we avoid pool-crossing.
         ShieldedProtocol::Sapling
+    } else {
+        // The flows are transparent, so there may not be change. If there is, the caller
+        // gets to decide where to shield it.
+        _fallback_change_pool
+    }
+    #[cfg(not(feature = "orchard"))]
+    ShieldedProtocol::Sapling
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct OutputManifest {
+    transparent: usize,
+    sapling: usize,
+    orchard: usize,
+}
+
+impl OutputManifest {
+    const ZERO: OutputManifest = OutputManifest {
+        transparent: 0,
+        sapling: 0,
+        orchard: 0,
     };
-    (
-        change_pool,
-        (change_pool == ShieldedProtocol::Sapling).into(),
-        (change_pool == ShieldedProtocol::Orchard).into(),
-    )
+
+    pub(crate) fn sapling(&self) -> usize {
+        self.sapling
+    }
+
+    pub(crate) fn orchard(&self) -> usize {
+        self.orchard
+    }
+
+    pub(crate) fn total_shielded(&self) -> usize {
+        self.sapling + self.orchard
+    }
+}
+
+pub(crate) struct SinglePoolBalanceConfig<'a, P, F> {
+    params: &'a P,
+    fee_rule: &'a F,
+    dust_output_policy: &'a DustOutputPolicy,
+    default_dust_threshold: NonNegativeAmount,
+    split_policy: &'a SplitPolicy,
+    fallback_change_pool: ShieldedProtocol,
+    marginal_fee: NonNegativeAmount,
+    grace_actions: usize,
+}
+
+impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        params: &'a P,
+        fee_rule: &'a F,
+        dust_output_policy: &'a DustOutputPolicy,
+        default_dust_threshold: NonNegativeAmount,
+        split_policy: &'a SplitPolicy,
+        fallback_change_pool: ShieldedProtocol,
+        marginal_fee: NonNegativeAmount,
+        grace_actions: usize,
+    ) -> Self {
+        Self {
+            params,
+            fee_rule,
+            dust_output_policy,
+            default_dust_threshold,
+            split_policy,
+            fallback_change_pool,
+            marginal_fee,
+            grace_actions,
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn single_change_output_balance<
-    P: consensus::Parameters,
-    NoteRefT: Clone,
-    F: FeeRule,
-    E,
->(
-    params: &P,
-    fee_rule: &F,
+pub(crate) fn single_pool_output_balance<P: consensus::Parameters, NoteRefT: Clone, F: FeeRule, E>(
+    cfg: SinglePoolBalanceConfig<P, F>,
+    wallet_meta: Option<&WalletMeta>,
     target_height: BlockHeight,
     transparent_inputs: &[impl transparent::InputView],
     transparent_outputs: &[impl transparent::OutputView],
     sapling: &impl sapling_fees::BundleView<NoteRefT>,
     #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
-    dust_output_policy: &DustOutputPolicy,
-    default_dust_threshold: NonNegativeAmount,
     change_memo: Option<&MemoBytes>,
-    fallback_change_pool: ShieldedProtocol,
-    marginal_fee: NonNegativeAmount,
-    grace_actions: usize,
     ephemeral_balance: Option<&EphemeralBalance>,
 ) -> Result<TransactionBalance, ChangeError<E, NoteRefT>>
 where
@@ -183,9 +232,25 @@ where
         ephemeral_balance,
     )?;
 
-    #[allow(unused_variables)]
-    let (change_pool, sapling_change, orchard_change) =
-        single_change_output_policy(&net_flows, fallback_change_pool);
+    let change_pool = select_change_pool(&net_flows, cfg.fallback_change_pool);
+    let target_change_count = wallet_meta.map_or(1, |m| {
+        usize::from(cfg.split_policy.target_output_count)
+            .saturating_sub(m.total_note_count())
+            .max(1)
+    });
+    let target_change_counts = OutputManifest {
+        transparent: 0,
+        sapling: if change_pool == ShieldedProtocol::Sapling {
+            target_change_count
+        } else {
+            0
+        },
+        orchard: if change_pool == ShieldedProtocol::Orchard {
+            target_change_count
+        } else {
+            0
+        },
+    };
 
     // We don't create a fully-transparent transaction if a change memo is used.
     let transparent = net_flows.is_transparent() && change_memo.is_none();
@@ -193,17 +258,21 @@ where
     // If we have a non-zero marginal fee, we need to check for uneconomic inputs.
     // This is basically assuming that fee rules with non-zero marginal fee are
     // "ZIP 317-like", but we can generalize later if needed.
-    if marginal_fee.is_positive() {
+    if cfg.marginal_fee.is_positive() {
         // Is it certain that there will be a change output? If it is not certain,
         // we should call `check_for_uneconomic_inputs` with `possible_change`
         // including both possibilities.
-        let possible_change =
+        let possible_change = {
             // These are the situations where we might not have a change output.
-            if transparent || (dust_output_policy.action() == DustAction::AddDustToFee && change_memo.is_none()) {
-                vec![(0, 0, 0), (0, sapling_change, orchard_change)]
+            if transparent
+                || (cfg.dust_output_policy.action() == DustAction::AddDustToFee
+                    && change_memo.is_none())
+            {
+                vec![OutputManifest::ZERO, target_change_counts]
             } else {
-                vec![(0, sapling_change, orchard_change)]
-            };
+                vec![target_change_counts]
+            }
+        };
 
         check_for_uneconomic_inputs(
             transparent_inputs,
@@ -211,8 +280,8 @@ where
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
-            marginal_fee,
-            grace_actions,
+            cfg.marginal_fee,
+            cfg.grace_actions,
             &possible_change[..],
             ephemeral_balance,
         )?;
@@ -229,35 +298,36 @@ where
         .bundle_type()
         .num_spends(sapling.inputs().len())
         .map_err(ChangeError::BundleError)?;
-    let sapling_output_count = sapling
-        .bundle_type()
-        .num_outputs(sapling.inputs().len(), sapling.outputs().len())
-        .map_err(ChangeError::BundleError)?;
-    let sapling_output_count_with_change = sapling
-        .bundle_type()
-        .num_outputs(
-            sapling.inputs().len(),
-            sapling.outputs().len() + sapling_change,
-        )
-        .map_err(ChangeError::BundleError)?;
+    let sapling_output_count = |change_count| {
+        sapling
+            .bundle_type()
+            .num_outputs(
+                sapling.inputs().len(),
+                sapling.outputs().len() + change_count,
+            )
+            .map_err(ChangeError::BundleError)
+    };
 
     #[cfg(feature = "orchard")]
-    let orchard_action_count = orchard
-        .bundle_type()
-        .num_actions(orchard.inputs().len(), orchard.outputs().len())
-        .map_err(ChangeError::BundleError)?;
-    #[cfg(feature = "orchard")]
-    let orchard_action_count_with_change = orchard
-        .bundle_type()
-        .num_actions(
-            orchard.inputs().len(),
-            orchard.outputs().len() + orchard_change,
-        )
-        .map_err(ChangeError::BundleError)?;
+    let orchard_action_count = |change_count| {
+        orchard
+            .bundle_type()
+            .num_actions(
+                orchard.inputs().len(),
+                orchard.outputs().len() + change_count,
+            )
+            .map_err(ChangeError::BundleError)
+    };
     #[cfg(not(feature = "orchard"))]
-    let orchard_action_count = 0;
-    #[cfg(not(feature = "orchard"))]
-    let orchard_action_count_with_change = 0;
+    let orchard_action_count = |change_count: usize| -> Result<usize, ChangeError<E, NoteRefT>> {
+        if change_count != 0 {
+            Err(ChangeError::BundleError(
+                "Nonzero Orchard change requested but the `orchard` feature is not enabled.",
+            ))
+        } else {
+            Ok(0)
+        }
+    };
 
     // Once we calculate the balance with and without change, there are five cases:
     //
@@ -301,29 +371,30 @@ where
                 .map(|_| P2PKH_STANDARD_OUTPUT_SIZE),
         );
 
-    let fee_without_change = fee_rule
+    let fee_without_change = cfg
+        .fee_rule
         .fee_required(
-            params,
+            cfg.params,
             target_height,
             transparent_input_sizes.clone(),
             transparent_output_sizes.clone(),
             sapling_input_count,
-            sapling_output_count,
-            orchard_action_count,
+            sapling_output_count(0)?,
+            orchard_action_count(0)?,
         )
         .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?;
 
     let fee_with_change = max(
         fee_without_change,
-        fee_rule
+        cfg.fee_rule
             .fee_required(
-                params,
+                cfg.params,
                 target_height,
-                transparent_input_sizes,
-                transparent_output_sizes,
+                transparent_input_sizes.clone(),
+                transparent_output_sizes.clone(),
                 sapling_input_count,
-                sapling_output_count_with_change,
-                orchard_action_count_with_change,
+                sapling_output_count(target_change_counts.sapling())?,
+                orchard_action_count(target_change_counts.orchard())?,
             )
             .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?,
     );
@@ -353,23 +424,84 @@ where
             // Case 3b or 3c.
             let proposed_change =
                 (total_in - total_out_plus_fee_with_change).expect("checked above");
+
+            // We obtain a split count based on the total number of notes of sufficient size
+            // available in the wallet, irrespective of pool. If we don't have any wallet metadata
+            // available, we fall back to generating a single change output.
+            let split_count = wallet_meta.map_or(NonZeroUsize::MIN, |wm| {
+                cfg.split_policy
+                    .split_count(wm.total_note_count(), proposed_change)
+            });
+            let per_output_change = proposed_change.div_with_remainder(
+                NonZeroU64::new(
+                    u64::try_from(usize::from(split_count)).expect("usize fits into u64"),
+                )
+                .unwrap(),
+            );
+
+            // If we don't have as many change outputs as we expected, recompute the fee.
+            let (fee_with_change, excess_fee) =
+                if usize::from(split_count) < target_change_counts.total_shielded() {
+                    let new_fee_with_change = cfg
+                        .fee_rule
+                        .fee_required(
+                            cfg.params,
+                            target_height,
+                            transparent_input_sizes,
+                            transparent_output_sizes,
+                            sapling_input_count,
+                            sapling_output_count(if change_pool == ShieldedProtocol::Sapling {
+                                usize::from(split_count)
+                            } else {
+                                0
+                            })?,
+                            orchard_action_count(if change_pool == ShieldedProtocol::Orchard {
+                                usize::from(split_count)
+                            } else {
+                                0
+                            })?,
+                        )
+                        .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?;
+                    (
+                        new_fee_with_change,
+                        (fee_with_change - new_fee_with_change).unwrap_or(NonNegativeAmount::ZERO),
+                    )
+                } else {
+                    (fee_with_change, NonNegativeAmount::ZERO)
+                };
+
             let simple_case = || {
                 (
-                    vec![ChangeValue::shielded(
-                        change_pool,
-                        proposed_change,
-                        change_memo.cloned(),
-                    )],
+                    (0usize..split_count.into())
+                        .map(|i| {
+                            ChangeValue::shielded(
+                                change_pool,
+                                if i == 0 {
+                                    // Add any remainder to the first output only
+                                    (*per_output_change.quotient()
+                                        + *per_output_change.remainder()
+                                        + excess_fee)
+                                        .unwrap()
+                                } else {
+                                    // For any other output, the change value will just be the
+                                    // quotient.
+                                    *per_output_change.quotient()
+                                },
+                                change_memo.cloned(),
+                            )
+                        })
+                        .collect(),
                     fee_with_change,
                 )
             };
 
-            let change_dust_threshold = dust_output_policy
+            let change_dust_threshold = cfg
+                .dust_output_policy
                 .dust_threshold()
-                .unwrap_or(default_dust_threshold);
+                .unwrap_or(cfg.default_dust_threshold);
 
-            if proposed_change < change_dust_threshold {
-                match dust_output_policy.action() {
+            if per_output_change.quotient() < &change_dust_threshold {
+                match cfg.dust_output_policy.action() {
                     DustAction::Reject => {
                         // Always allow zero-valued change even for the `Reject` policy:
                         // * it should be allowed in order to record change memos and to improve
@@ -377,11 +509,11 @@ where
                         // * this case occurs in practice when sending all funds from an account;
                         // * zero-valued notes do not require witness tracking;
                         // * the effect on trial decryption overhead is small.
-                        if proposed_change.is_zero() {
+                        if per_output_change.quotient().is_zero() {
                             simple_case()
                         } else {
-                            let shortfall =
-                                (change_dust_threshold - proposed_change).ok_or_else(underflow)?;
+                            let shortfall = (change_dust_threshold - *per_output_change.quotient())
+                                .ok_or_else(underflow)?;
 
                             return Err(ChangeError::InsufficientFunds {
                                 available: total_in,
@@ -456,7 +588,7 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
     #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
     marginal_fee: NonNegativeAmount,
     grace_actions: usize,
-    possible_change: &[(usize, usize, usize)],
+    possible_change: &[OutputManifest],
     ephemeral_balance: Option<&EphemeralBalance>,
 ) -> Result<(), ChangeError<E, NoteRefT>> {
     let mut t_dust: Vec<_> = transparent_inputs
@@ -519,7 +651,7 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
     let o_non_dust = o_inputs_len.checked_sub(o_dust.len()).unwrap();
 
     // Return the number of allowed dust inputs from each pool.
-    let allowed_dust = |(t_change, s_change, o_change): &(usize, usize, usize)| {
+    let allowed_dust = |change: &OutputManifest| {
         // Here we assume a "ZIP 317-like" fee model in which the existence of an output
         // to a given pool implies that a corresponding input from that pool can be
         // provided without increasing the fee. (This is also likely to be true for
@@ -534,15 +666,15 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
 
         let t_allowed = min(
             t_dust.len(),
-            (t_outputs_len + t_change).saturating_sub(t_non_dust),
+            (t_outputs_len + change.transparent).saturating_sub(t_non_dust),
         );
         let s_allowed = min(
             s_dust.len(),
-            (s_outputs_len + s_change).saturating_sub(s_non_dust),
+            (s_outputs_len + change.sapling).saturating_sub(s_non_dust),
         );
         let o_allowed = min(
             o_dust.len(),
-            (o_outputs_len + o_change).saturating_sub(o_non_dust),
+            (o_outputs_len + change.orchard).saturating_sub(o_non_dust),
         );
 
         // We'll be spending the non-dust and allowed dust in each pool.
@@ -566,22 +698,24 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
 
             let s_output_count = sapling
                 .bundle_type()
-                .num_outputs(s_req_inputs + s_extra, s_outputs_len + s_change)
+                .num_outputs(s_req_inputs + s_extra, s_outputs_len + change.sapling)
                 .map_err(ChangeError::BundleError)?;
 
             #[cfg(feature = "orchard")]
             let o_action_count = orchard
                 .bundle_type()
-                .num_actions(o_req_inputs + _o_extra, o_outputs_len + o_change)
+                .num_actions(o_req_inputs + _o_extra, o_outputs_len + change.orchard)
                 .map_err(ChangeError::BundleError)?;
             #[cfg(not(feature = "orchard"))]
             let o_action_count = 0;
 
             // To calculate the number of unused actions, we assume that transparent inputs
             // and outputs are P2PKH.
-            Ok(max(t_req_inputs + t_extra, t_outputs_len + t_change)
-                + max(s_spend_count, s_output_count)
-                + o_action_count)
+            Ok(
+                max(t_req_inputs + t_extra, t_outputs_len + change.transparent)
+                    + max(s_spend_count, s_output_count)
+                    + o_action_count,
+            )
         };
 
         // First calculate the baseline number of logical actions with only the definitely
@@ -606,27 +740,31 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
         } else {
             (0, 0, 0)
         };
-        Ok((
-            t_allowed + t_extra,
-            s_allowed + s_extra,
-            o_allowed + o_extra,
-        ))
+        Ok(OutputManifest {
+            transparent: t_allowed + t_extra,
+            sapling: s_allowed + s_extra,
+            orchard: o_allowed + o_extra,
+        })
     };
 
     // Find the least number of allowed dust inputs for each pool for any `possible_change`.
-    let (t_allowed, s_allowed, o_allowed) = possible_change
+    let allowed = possible_change
         .iter()
         .map(allowed_dust)
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
-        .reduce(|(a, b, c), (x, y, z)| (min(a, x), min(b, y), min(c, z)))
+        .reduce(|l, r| OutputManifest {
+            transparent: min(l.transparent, r.transparent),
+            sapling: min(l.sapling, r.sapling),
+            orchard: min(l.orchard, r.orchard),
+        })
         .expect("possible_change is nonempty");
 
     // The inputs in the tail of each list after the first `*_allowed` are returned as uneconomic.
     // The caller should order the inputs from most to least preferred to spend.
-    let t_dust = t_dust.split_off(t_allowed);
-    let s_dust = s_dust.split_off(s_allowed);
-    let o_dust = o_dust.split_off(o_allowed);
+    let t_dust = t_dust.split_off(allowed.transparent);
+    let s_dust = s_dust.split_off(allowed.sapling);
+    let o_dust = o_dust.split_off(allowed.orchard);
 
     if t_dust.is_empty() && s_dust.is_empty() && o_dust.is_empty() {
         Ok(())

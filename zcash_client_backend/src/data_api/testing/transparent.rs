@@ -197,16 +197,23 @@ where
     check_balance(&st, 0, value);
 
     // Shield the output.
-    let input_selector = GreedyInputSelector::new(
-        fixed::SingleOutputChangeStrategy::new(
-            FixedFeeRule::non_standard(NonNegativeAmount::ZERO),
-            None,
-            ShieldedProtocol::Sapling,
-        ),
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = fixed::SingleOutputChangeStrategy::new(
+        FixedFeeRule::non_standard(NonNegativeAmount::ZERO),
+        None,
+        ShieldedProtocol::Sapling,
         DustOutputPolicy::default(),
     );
     let txid = st
-        .shield_transparent_funds(&input_selector, value, account.usk(), &[*taddr], 1)
+        .shield_transparent_funds(
+            &input_selector,
+            &change_strategy,
+            value,
+            account.usk(),
+            &[*taddr],
+            account.id(),
+            1,
+        )
         .unwrap()[0];
 
     // The wallet should have zero transparent balance, because the shielding

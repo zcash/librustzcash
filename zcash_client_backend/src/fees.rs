@@ -1,17 +1,19 @@
-use std::fmt;
+use std::{
+    fmt::{self, Debug, Display},
+    num::{NonZeroU64, NonZeroUsize},
+};
 
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     transaction::{
-        components::{
-            amount::{BalanceError, NonNegativeAmount},
-            OutPoint,
-        },
+        components::{amount::NonNegativeAmount, OutPoint},
         fees::{transparent, FeeRule},
     },
 };
 use zcash_protocol::{PoolType, ShieldedProtocol};
+
+use crate::data_api::InputSource;
 
 pub(crate) mod common;
 pub mod fixed;
@@ -273,9 +275,16 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
     }
 }
 
-impl<NoteRefT> From<BalanceError> for ChangeError<BalanceError, NoteRefT> {
-    fn from(err: BalanceError) -> ChangeError<BalanceError, NoteRefT> {
-        ChangeError::StrategyError(err)
+impl<E, N> std::error::Error for ChangeError<E, N>
+where
+    E: Debug + Display + std::error::Error + 'static,
+    N: Debug + Display + 'static,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self {
+            ChangeError::StrategyError(e) => Some(e),
+            _ => None,
+        }
     }
 }
 
@@ -330,6 +339,72 @@ impl Default for DustOutputPolicy {
     }
 }
 
+/// A policy that describes how change output should be split into multiple notes for the purpose
+/// of note management.
+#[derive(Clone, Copy, Debug)]
+pub struct SplitPolicy {
+    target_output_count: NonZeroUsize,
+    min_split_output_size: NonNegativeAmount,
+}
+
+impl SplitPolicy {
+    /// Constructs a new [`SplitPolicy`] from its constituent parts.
+    pub fn new(
+        target_output_count: NonZeroUsize,
+        min_split_output_size: NonNegativeAmount,
+    ) -> Self {
+        Self {
+            target_output_count,
+            min_split_output_size,
+        }
+    }
+
+    /// Constructs a [`SplitPolicy`] that prescribes a single output (no splitting).
+    pub fn single_output() -> Self {
+        Self {
+            target_output_count: NonZeroUsize::MIN,
+            min_split_output_size: NonNegativeAmount::ZERO,
+        }
+    }
+
+    /// Returns the minimum value for a note resulting from splitting of change.
+    ///
+    /// If splitting change would result in notes of value less than the minimum split output size,
+    /// a smaller number of splits should be chosen.
+    pub fn min_split_output_size(&self) -> NonNegativeAmount {
+        self.min_split_output_size
+    }
+
+    /// Returns the number of output notes to produce from the given total change value, given the
+    /// number of existing unspent notes in the account and this policy.
+    pub fn split_count(
+        &self,
+        existing_notes: usize,
+        total_change: NonNegativeAmount,
+    ) -> NonZeroUsize {
+        let mut split_count =
+            NonZeroUsize::new(usize::from(self.target_output_count).saturating_sub(existing_notes))
+                .unwrap_or(NonZeroUsize::MIN);
+
+        loop {
+            let per_output_change = total_change.div_with_remainder(
+                NonZeroU64::new(
+                    u64::try_from(usize::from(split_count)).expect("usize fits into u64"),
+                )
+                .unwrap(),
+            );
+            if *per_output_change.quotient() >= self.min_split_output_size {
+                return split_count;
+            } else if let Some(new_count) = NonZeroUsize::new(usize::from(split_count) - 1) {
+                split_count = new_count;
+            } else {
+                // We always create at least one change output.
+                return NonZeroUsize::MIN;
+            }
+        }
+    }
+}
+
 /// `EphemeralBalance` describes the ephemeral input or output value for a transaction. It is used
 /// in fee computation for series of transactions that use an ephemeral transparent output in an
 /// intermediate step, such as when sending from a shielded pool to a [ZIP 320] "TEX" address.
@@ -368,12 +443,32 @@ impl EphemeralBalance {
 /// A trait that represents the ability to compute the suggested change and fees that must be paid
 /// by a transaction having a specified set of inputs and outputs.
 pub trait ChangeStrategy {
-    type FeeRule: FeeRule;
+    type FeeRule: FeeRule + Clone;
     type Error;
+
+    /// The type of metadata source that this change strategy requires in order to be able to
+    /// retrieve required wallet metadata. If more capabilities are required of the backend than
+    /// are exposed in the [`InputSource`] trait, the implementer of this trait should define their
+    /// own trait that descends from [`InputSource`] and adds the required capabilities there, and
+    /// then implement that trait for their desired database backend.
+    type MetaSource: InputSource;
+
+    /// Tye type of wallet metadata that this change strategy relies upon in order to compute
+    /// change.
+    type WalletMetaT;
 
     /// Returns the fee rule that this change strategy will respect when performing
     /// balance computations.
     fn fee_rule(&self) -> &Self::FeeRule;
+
+    /// Uses the provided metadata source to obtain the wallet metadata required for change
+    /// creation determinations.
+    fn fetch_wallet_meta(
+        &self,
+        meta_source: &Self::MetaSource,
+        account: <Self::MetaSource as InputSource>::AccountId,
+        exclude: &[<Self::MetaSource as InputSource>::NoteRef],
+    ) -> Result<Self::WalletMetaT, <Self::MetaSource as InputSource>::Error>;
 
     /// Computes the totals of inputs, suggested change amounts, and fees given the
     /// provided inputs and outputs being used to construct a transaction.
@@ -393,7 +488,11 @@ pub trait ChangeStrategy {
     /// - `ephemeral_balance`: if the transaction is to be constructed with either an
     ///   ephemeral transparent input or an ephemeral transparent output this argument
     ///   may be used to provide the value of that input or output. The value of this
-    ///   output should be `None` in the case that there are no such items.
+    ///   argument should be `None` in the case that there are no such items.
+    /// - `wallet_meta`: Additional wallet metadata that the change strategy may use
+    ///   in determining how to construct change outputs. This wallet metadata value
+    ///   should be computed excluding the inputs provided in the `transparent_inputs`,
+    ///   `sapling`, and `orchard` arguments.
     ///
     /// [ZIP 320]: https://zips.z.cash/zip-0320
     #[allow(clippy::too_many_arguments)]
@@ -405,8 +504,8 @@ pub trait ChangeStrategy {
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard::BundleView<NoteRefT>,
-        dust_output_policy: &DustOutputPolicy,
         ephemeral_balance: Option<&EphemeralBalance>,
+        wallet_meta: &Self::WalletMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
 }
 
