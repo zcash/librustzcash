@@ -67,7 +67,7 @@ pub(crate) fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPo
 
 #[allow(deprecated)]
 pub(crate) fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester>() {
-    zcash_client_backend::data_api::testing::pool::create_to_address_fails_on_incorrect_usk::<T>(
+    zcash_client_backend::data_api::testing::pool::create_to_address_fails_on_incorrect_usk::<T, _>(
         TestDbFactory::default(),
     )
 }
@@ -149,7 +149,7 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
 }
 
 pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
-    zcash_client_backend::data_api::testing::pool::checkpoint_gaps::<T>(
+    zcash_client_backend::data_api::testing::pool::checkpoint_gaps::<T, _>(
         TestDbFactory::default(),
         BlockCache::new(),
     )

@@ -17,6 +17,8 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::fees::zip317::MultiOutputChangeStrategy`
 
 ### Changed
+- MSRV is now 1.77.0.
+- Migrated to `arti-client 0.23`.
 - `zcash_client_backend::data_api`:
   - `InputSource` has an added method `get_wallet_metadata`
   - `error::Error` has additional variant `Error::Change`. This necessitates
@@ -60,16 +62,15 @@ and this library adheres to Rust's notion of
     - `standard::SingleOutputChangeStrategy::new`
     - `zip317::SingleOutputChangeStrategy::new`
 
-### Changed
-- MSRV is now 1.77.0.
-- Migrated to `arti-client 0.23`.
-
 ### Removed
 - `zcash_client_backend::data_api`:
   - `WalletSummary::scan_progress` and `WalletSummary::recovery_progress` have
     been removed. Use `WalletSummary::progress` instead.
   - `testing::input_selector` use explicit `InputSelector` constructors
     directly instead.
+  - The deprecated `wallet::create_spend_to_address` and `wallet::spend`
+    methods have been removed. Use `propose_transfer` and
+    `create_proposed_transaction` instead.
 - `zcash_client_backend::fees`:
   - `impl From<BalanceError> for ChangeError<...>`
 
