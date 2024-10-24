@@ -31,7 +31,7 @@ use zcash_primitives::{
     memo::Memo,
     transaction::{
         components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
-        fees::{FeeRule, StandardFeeRule},
+        fees::FeeRule,
         Transaction, TxId,
     },
 };
@@ -48,7 +48,7 @@ use crate::{
     address::UnifiedAddress,
     fees::{
         standard::{self, SingleOutputChangeStrategy},
-        ChangeStrategy, DustOutputPolicy,
+        ChangeStrategy, DustOutputPolicy, StandardFeeRule,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     proposal::Proposal,

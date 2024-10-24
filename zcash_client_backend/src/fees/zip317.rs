@@ -9,12 +9,13 @@ use std::marker::PhantomData;
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    transaction::fees::{transparent, zip317 as prim_zip317, FeeRule, StandardFeeRule},
+    transaction::fees::{transparent, zip317 as prim_zip317, FeeRule},
 };
 use zcash_protocol::value::{BalanceError, Zatoshis};
 
 use crate::{
     data_api::{InputSource, WalletMeta},
+    fees::StandardFeeRule,
     ShieldedProtocol,
 };
 

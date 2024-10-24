@@ -8,7 +8,10 @@ use zcash_primitives::{
     memo::MemoBytes,
     transaction::{
         components::{amount::NonNegativeAmount, OutPoint},
-        fees::{transparent, FeeRule},
+        fees::{
+            transparent::{self, InputSize},
+            zip317 as prim_zip317, FeeRule,
+        },
     },
 };
 use zcash_protocol::{PoolType, ShieldedProtocol};
@@ -23,6 +26,40 @@ pub mod orchard;
 pub mod sapling;
 pub mod standard;
 pub mod zip317;
+
+/// An enumeration of the standard fee rules supported by the wallet backend.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum StandardFeeRule {
+    Zip317,
+}
+
+impl FeeRule for StandardFeeRule {
+    type Error = prim_zip317::FeeError;
+
+    fn fee_required<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        target_height: BlockHeight,
+        transparent_input_sizes: impl IntoIterator<Item = InputSize>,
+        transparent_output_sizes: impl IntoIterator<Item = usize>,
+        sapling_input_count: usize,
+        sapling_output_count: usize,
+        orchard_action_count: usize,
+    ) -> Result<NonNegativeAmount, Self::Error> {
+        #[allow(deprecated)]
+        match self {
+            Self::Zip317 => prim_zip317::FeeRule::standard().fee_required(
+                params,
+                target_height,
+                transparent_input_sizes,
+                transparent_output_sizes,
+                sapling_input_count,
+                sapling_output_count,
+                orchard_action_count,
+            ),
+        }
+    }
+}
 
 /// `ChangeValue` represents either a proposed change output to a shielded pool
 /// (with an optional change memo), or if the "transparent-inputs" feature is

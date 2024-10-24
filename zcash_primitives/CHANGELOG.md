@@ -15,8 +15,6 @@ and this library adheres to Rust's notion of
 ### Changed
 - MSRV is now 1.77.0.
 - `zcash_primitives::transaction::fees`:
-  - The deprecated `PreZip313` and `Zip313` variants of `StandardFeeRule` have
-    been removed.
   - The `fixed` module has been moved behind the `non-standard-fees` feature
     flag. Using a fixed fee may result in a transaction that cannot be mined on
     the current Zcash network. To calculate the ZIP 317 fee, use
@@ -32,6 +30,9 @@ and this library adheres to Rust's notion of
 
 ### Removed
 - `zcash_primitives::transaction::fees`:
+  - `StandardFeeRule` itself has been removed; it was not used in this crate.
+    Is use in `zcash_client_backend` has been replaced with
+    `zcash_client_backend::fees::StandardFeeRule`.
   - `fixed::FeeRule::standard`. This constructor was misleadingly named: using a
     fixed fee does not conform to any current Zcash standard. To calculate the
     ZIP 317 fee, use `zip317::FeeRule::standard()`. To preserve the current

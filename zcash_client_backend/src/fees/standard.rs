@@ -1,6 +1,6 @@
 //! Change strategies designed for use with a standard fee.
 
-use zcash_primitives::transaction::fees::StandardFeeRule;
+use super::StandardFeeRule;
 
 /// A change strategy that proposes change as a single output. The output pool is chosen
 /// as the most current pool that avoids unnecessary pool-crossing (with a specified

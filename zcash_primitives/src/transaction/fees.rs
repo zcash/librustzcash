@@ -59,37 +59,3 @@ pub trait FutureFeeRule: FeeRule {
         tze_outputs: &[impl tze::OutputView],
     ) -> Result<NonNegativeAmount, Self::Error>;
 }
-
-/// An enumeration of the standard fee rules supported by the wallet.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum StandardFeeRule {
-    Zip317,
-}
-
-impl FeeRule for StandardFeeRule {
-    type Error = zip317::FeeError;
-
-    fn fee_required<P: consensus::Parameters>(
-        &self,
-        params: &P,
-        target_height: BlockHeight,
-        transparent_input_sizes: impl IntoIterator<Item = InputSize>,
-        transparent_output_sizes: impl IntoIterator<Item = usize>,
-        sapling_input_count: usize,
-        sapling_output_count: usize,
-        orchard_action_count: usize,
-    ) -> Result<NonNegativeAmount, Self::Error> {
-        #[allow(deprecated)]
-        match self {
-            Self::Zip317 => zip317::FeeRule::standard().fee_required(
-                params,
-                target_height,
-                transparent_input_sizes,
-                transparent_output_sizes,
-                sapling_input_count,
-                sapling_output_count,
-                orchard_action_count,
-            ),
-        }
-    }
-}

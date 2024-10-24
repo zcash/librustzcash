@@ -6,17 +6,14 @@ use crate::{
         wallet::input_selection::GreedyInputSelector,
         Account as _, InputSource, WalletRead, WalletWrite,
     },
-    fees::{standard, DustOutputPolicy},
+    fees::{standard, DustOutputPolicy, StandardFeeRule},
     wallet::WalletTransparentOutput,
 };
 use assert_matches::assert_matches;
 use sapling::zip32::ExtendedSpendingKey;
 use zcash_primitives::{
     block::BlockHash,
-    transaction::{
-        components::{amount::NonNegativeAmount, OutPoint, TxOut},
-        fees::StandardFeeRule,
-    },
+    transaction::components::{amount::NonNegativeAmount, OutPoint, TxOut},
 };
 
 pub fn put_received_transparent_utxo<DSF>(dsf: DSF)

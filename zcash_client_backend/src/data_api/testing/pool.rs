@@ -17,10 +17,7 @@ use zcash_primitives::{
     legacy::TransparentAddress,
     transaction::{
         components::amount::NonNegativeAmount,
-        fees::{
-            zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
-            StandardFeeRule,
-        },
+        fees::zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
         Transaction,
     },
 };
@@ -53,7 +50,7 @@ use crate::{
     fees::{
         self,
         standard::{self, SingleOutputChangeStrategy},
-        DustOutputPolicy, SplitPolicy,
+        DustOutputPolicy, SplitPolicy, StandardFeeRule,
     },
     scanning::ScanError,
     wallet::{Note, NoteId, OvkPolicy, ReceivedNote},

@@ -16,12 +16,12 @@ use zcash_primitives::{
     consensus::BlockHeight,
     memo::{self, MemoBytes},
     merkle_tree::read_commitment_tree,
-    transaction::{components::amount::NonNegativeAmount, fees::StandardFeeRule, TxId},
+    transaction::{components::amount::NonNegativeAmount, TxId},
 };
 
 use crate::{
     data_api::{chain::ChainState, InputSource},
-    fees::{ChangeValue, TransactionBalance},
+    fees::{ChangeValue, StandardFeeRule, TransactionBalance},
     proposal::{Proposal, ProposalError, ShieldedInputs, Step, StepOutput, StepOutputIndex},
     zip321::{TransactionRequest, Zip321Error},
     PoolType, ShieldedProtocol,

@@ -50,7 +50,9 @@ use crate::{
         WalletRead, WalletWrite,
     },
     decrypt_transaction,
-    fees::{standard::SingleOutputChangeStrategy, ChangeStrategy, DustOutputPolicy},
+    fees::{
+        standard::SingleOutputChangeStrategy, ChangeStrategy, DustOutputPolicy, StandardFeeRule,
+    },
     keys::UnifiedSpendingKey,
     proposal::{Proposal, ProposalError, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
@@ -62,7 +64,7 @@ use zcash_primitives::{
     transaction::{
         builder::{BuildConfig, BuildResult, Builder},
         components::{amount::NonNegativeAmount, sapling::zip212_enforcement, OutPoint},
-        fees::{FeeRule, StandardFeeRule},
+        fees::FeeRule,
         Transaction, TxId,
     },
 };
