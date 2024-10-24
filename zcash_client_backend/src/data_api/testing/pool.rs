@@ -1002,7 +1002,6 @@ pub fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester, DSF: Data
     );
 }
 
-#[allow(deprecated)]
 pub fn proposal_fails_with_no_blocks<T: ShieldedPoolTester, DSF>(ds_factory: DSF)
 where
     DSF: DataStoreFactory,
@@ -2815,7 +2814,6 @@ pub fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>(
     )])
     .unwrap();
 
-    #[allow(deprecated)]
     let input_selector = GreedyInputSelector::new();
     let change_strategy =
         single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);

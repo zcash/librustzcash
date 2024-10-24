@@ -86,7 +86,6 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         ephemeral_balance: Option<&EphemeralBalance>,
         wallet_meta: &Self::WalletMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
-        #[allow(deprecated)]
         match self.fee_rule() {
             StandardFeeRule::Zip317 => zip317::SingleOutputChangeStrategy::<I>::new(
                 Zip317FeeRule::standard(),

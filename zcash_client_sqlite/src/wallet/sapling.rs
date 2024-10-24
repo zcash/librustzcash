@@ -430,13 +430,11 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn create_to_address_fails_on_incorrect_usk() {
         testing::pool::create_to_address_fails_on_incorrect_usk::<SaplingPoolTester>()
     }
 
     #[test]
-    #[allow(deprecated)]
     fn proposal_fails_with_no_blocks() {
         testing::pool::proposal_fails_with_no_blocks::<SaplingPoolTester>()
     }

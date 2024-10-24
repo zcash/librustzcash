@@ -409,7 +409,6 @@ fn verify_sqlite_version_compatibility(
 }
 
 #[cfg(test)]
-#[allow(deprecated)]
 mod tests {
     use rusqlite::{self, named_params, Connection, ToSql};
     use secrecy::Secret;
@@ -676,6 +675,7 @@ mod tests {
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
         let secret_key = sapling::spending_key(&seed, db_data.params.coin_type(), account);
+        #[allow(deprecated)]
         let extfvk = secret_key.to_extended_full_viewing_key();
 
         init_0_3_0(&mut db_data, &extfvk, account).unwrap();
@@ -847,6 +847,7 @@ mod tests {
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
         let secret_key = sapling::spending_key(&seed, db_data.params.coin_type(), account);
+        #[allow(deprecated)]
         let extfvk = secret_key.to_extended_full_viewing_key();
 
         init_autoshielding(&mut db_data, &extfvk, account).unwrap();

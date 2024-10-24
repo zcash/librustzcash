@@ -600,7 +600,6 @@ impl proposal::Proposal {
             })
             .collect();
 
-        #[allow(deprecated)]
         proposal::Proposal {
             proto_version: PROPOSAL_SER_V1,
             fee_rule: match value.fee_rule() {
@@ -624,7 +623,6 @@ impl proposal::Proposal {
         use self::proposal::proposed_input::Value::*;
         match self.proto_version {
             PROPOSAL_SER_V1 => {
-                #[allow(deprecated)]
                 let fee_rule = match self.fee_rule() {
                     proposal::FeeRule::Zip317 => StandardFeeRule::Zip317,
                     other => {

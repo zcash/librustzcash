@@ -65,14 +65,12 @@ pub(crate) fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPo
     )
 }
 
-#[allow(deprecated)]
 pub(crate) fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::create_to_address_fails_on_incorrect_usk::<T, _>(
         TestDbFactory::default(),
     )
 }
 
-#[allow(deprecated)]
 pub(crate) fn proposal_fails_with_no_blocks<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::proposal_fails_with_no_blocks::<T, _>(
         TestDbFactory::default(),

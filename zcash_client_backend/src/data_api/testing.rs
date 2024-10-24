@@ -60,7 +60,6 @@ use crate::{
 };
 
 use super::error::Error;
-#[allow(deprecated)]
 use super::{
     chain::{scan_cached_blocks, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
     scanning::ScanRange,
@@ -877,7 +876,6 @@ where
         InputsT: InputSelector<InputSource = DbT>,
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
-        #![allow(deprecated)]
         let prover = LocalTxProver::bundled();
         let network = self.network().clone();
 
