@@ -138,7 +138,6 @@ mod tests {
 
     #[test]
     fn change_without_dust() {
-        #[allow(deprecated)]
         let fee_rule = FixedFeeRule::non_standard(MINIMUM_FEE);
         let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
             fee_rule,
@@ -181,7 +180,6 @@ mod tests {
 
     #[test]
     fn dust_change() {
-        #[allow(deprecated)]
         let fee_rule = FixedFeeRule::non_standard(MINIMUM_FEE);
         let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
             fee_rule,

@@ -874,7 +874,6 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Extensio
 mod testing {
     use rand::RngCore;
     use rand_core::CryptoRng;
-    use std::convert::Infallible;
 
     use super::{BuildResult, Builder, Error};
     use crate::{
@@ -883,13 +882,16 @@ mod testing {
             self,
             prover::mock::{MockOutputProver, MockSpendProver},
         },
-        transaction::fees::{fixed, zip317::MINIMUM_FEE},
+        transaction::fees::zip317,
     };
 
     impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
         /// Build the transaction using mocked randomness and proving capabilities.
         /// DO NOT USE EXCEPT FOR UNIT TESTING.
-        pub fn mock_build<R: RngCore>(self, rng: R) -> Result<BuildResult, Error<Infallible>> {
+        pub fn mock_build<R: RngCore>(
+            self,
+            rng: R,
+        ) -> Result<BuildResult, Error<zip317::FeeError>> {
             struct FakeCryptoRng<R: RngCore>(R);
             impl<R: RngCore> CryptoRng for FakeCryptoRng<R> {}
             impl<R: RngCore> RngCore for FakeCryptoRng<R> {
@@ -915,7 +917,7 @@ mod testing {
                 &MockSpendProver,
                 &MockOutputProver,
                 #[allow(deprecated)]
-                &fixed::FeeRule::non_standard(MINIMUM_FEE),
+                &zip317::FeeRule::standard(),
             )
         }
     }
@@ -1056,7 +1058,7 @@ mod tests {
         builder
             .add_transparent_output(
                 &TransparentAddress::PublicKeyHash([0; 20]),
-                NonNegativeAmount::const_from_u64(40000),
+                NonNegativeAmount::const_from_u64(35000),
             )
             .unwrap();
 
@@ -1170,7 +1172,7 @@ mod tests {
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKeyHash([0; 20]),
-                    NonNegativeAmount::const_from_u64(20000),
+                    NonNegativeAmount::const_from_u64(15000),
                 )
                 .unwrap();
             assert_matches!(
@@ -1189,7 +1191,7 @@ mod tests {
         let witness2 = IncrementalWitness::from_tree(tree);
 
         // Succeeds if there is sufficient input
-        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.0006 z-ZEC in
+        // 0.0003 z-ZEC out, 0.00015 t-ZEC out, 0.00015 t-ZEC fee, 0.0006 z-ZEC in
         {
             let build_config = BuildConfig::Standard {
                 sapling_anchor: Some(witness1.root().into()),
@@ -1213,12 +1215,15 @@ mod tests {
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKeyHash([0; 20]),
-                    NonNegativeAmount::const_from_u64(20000),
+                    NonNegativeAmount::const_from_u64(15000),
                 )
                 .unwrap();
-            assert_matches!(
-                builder.mock_build(OsRng),
-                Ok(res) if res.transaction().fee_paid(|_| Err(BalanceError::Overflow)).unwrap() == Amount::const_from_i64(10_000)
+            let res = builder.mock_build(OsRng).unwrap();
+            assert_eq!(
+                res.transaction()
+                    .fee_paid(|_| Err(BalanceError::Overflow))
+                    .unwrap(),
+                Amount::const_from_i64(15_000)
             );
         }
     }

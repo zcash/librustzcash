@@ -78,13 +78,7 @@ impl FeeRule {
     ///
     /// Returns `None` if either `p2pkh_standard_input_size` or `p2pkh_standard_output_size` are
     /// zero.
-    #[deprecated(
-        note = "Using this fee rule with `marginal_fee < 5000 || grace_actions < 2 \
-                 || p2pkh_standard_input_size > P2PKH_STANDARD_INPUT_SIZE \
-                 || p2pkh_standard_output_size > P2PKH_STANDARD_OUTPUT_SIZE` \
-                violates ZIP 317, and might cause transactions built with it to fail. \
-                This API is likely to be removed. Use `[FeeRule::standard]` instead."
-    )]
+    #[cfg(feature = "non-standard-fees")]
     pub fn non_standard(
         marginal_fee: NonNegativeAmount,
         grace_actions: usize,

@@ -16,10 +16,6 @@ pub struct FeeRule {
 
 impl FeeRule {
     /// Creates a new nonstandard fixed fee rule with the specified fixed fee.
-    #[deprecated(
-        note = "Using a fixed fee may result in a transaction that cannot be mined. \
-                To calculate the ZIP 317 fee, use `transaction::fees::zip317::FeeRule::standard()`."
-    )]
     pub fn non_standard(fixed_fee: NonNegativeAmount) -> Self {
         Self { fixed_fee }
     }

@@ -15,7 +15,8 @@ use zcash_protocol::{PoolType, ShieldedProtocol};
 
 use crate::data_api::InputSource;
 
-pub(crate) mod common;
+pub mod common;
+#[cfg(feature = "non-standard-fees")]
 pub mod fixed;
 #[cfg(feature = "orchard")]
 pub mod orchard;

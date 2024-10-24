@@ -5,6 +5,7 @@ use crate::{
     transaction::{components::amount::NonNegativeAmount, fees::transparent::InputSize},
 };
 
+#[cfg(feature = "non-standard-fees")]
 pub mod fixed;
 pub mod transparent;
 pub mod zip317;

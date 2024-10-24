@@ -211,6 +211,9 @@ test-dependencies = [
     "incrementalmerkletree/test-dependencies",
 ]
 
+## Exposes APIs that allow calculation of non-standard fees.
+non-standard-fees = ["zcash_primitives/non-standard-fees"]
+
 #! ### Experimental features
 
 ## Exposes unstable APIs. Their behaviour may change at any time.
