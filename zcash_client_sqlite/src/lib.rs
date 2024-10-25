@@ -1910,7 +1910,7 @@ mod tests {
     #[test]
     fn validate_seed() {
         let st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().unwrap();
@@ -1940,7 +1940,7 @@ mod tests {
     #[test]
     pub(crate) fn get_next_available_address() {
         let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().cloned().unwrap();
@@ -1962,7 +1962,7 @@ mod tests {
     #[test]
     pub(crate) fn import_account_hd_0() {
         let st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .set_account_index(zip32::AccountId::ZERO)
             .build();
@@ -1974,7 +1974,7 @@ mod tests {
     #[test]
     pub(crate) fn import_account_hd_1_then_2() {
         let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .build();
 
         let birthday = AccountBirthday::from_parts(
@@ -2065,7 +2065,7 @@ mod tests {
     #[test]
     pub(crate) fn import_account_hd_1_then_conflicts() {
         let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .build();
 
         let birthday = AccountBirthday::from_parts(
@@ -2097,7 +2097,7 @@ mod tests {
     #[test]
     pub(crate) fn import_account_ufvk_then_conflicts() {
         let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .build();
 
         let birthday = AccountBirthday::from_parts(
@@ -2142,7 +2142,7 @@ mod tests {
     #[test]
     pub(crate) fn create_account_then_conflicts() {
         let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .build();
 
         let birthday = AccountBirthday::from_parts(
@@ -2175,7 +2175,7 @@ mod tests {
 
         use crate::testing::BlockCache;
         let st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
@@ -2208,7 +2208,7 @@ mod tests {
         use crate::testing::FsBlockCache;
 
         let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(FsBlockCache::new())
             .build();
 

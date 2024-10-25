@@ -3223,9 +3223,38 @@ fn recipient_params<P: consensus::Parameters>(
     }
 }
 
+fn flag_previously_received_change(
+    conn: &rusqlite::Transaction,
+    tx_ref: TxRef,
+) -> Result<(), SqliteClientError> {
+    let flag_received_change = |table_prefix| {
+        conn.execute(
+            &format!(
+                "UPDATE {table_prefix}_received_notes 
+                 SET is_change = 1
+                 FROM sent_notes sn
+                 WHERE sn.tx = {table_prefix}_received_notes.tx
+                 AND sn.tx = :tx
+                 AND sn.from_account_id = {table_prefix}_received_notes.account_id
+                 AND {table_prefix}_received_notes.recipient_key_scope = :internal_scope"
+            ),
+            named_params! {
+                ":tx": tx_ref.0,
+                ":internal_scope": scope_code(Scope::Internal)
+            },
+        )
+    };
+
+    flag_received_change(SAPLING_TABLES_PREFIX)?;
+    #[cfg(feature = "orchard")]
+    flag_received_change(ORCHARD_TABLES_PREFIX)?;
+
+    Ok(())
+}
+
 /// Records information about a transaction output that your wallet created.
 pub(crate) fn insert_sent_output<P: consensus::Parameters>(
-    conn: &rusqlite::Connection,
+    conn: &rusqlite::Transaction,
     params: &P,
     tx_ref: TxRef,
     from_account: AccountId,
@@ -3253,6 +3282,7 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
     ];
 
     stmt_insert_sent_output.execute(sql_args)?;
+    flag_previously_received_change(conn, tx_ref)?;
 
     Ok(())
 }
@@ -3270,7 +3300,7 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
 ///   the transaction.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn put_sent_output<P: consensus::Parameters>(
-    conn: &rusqlite::Connection,
+    conn: &rusqlite::Transaction,
     params: &P,
     from_account: AccountId,
     tx_ref: TxRef,
@@ -3307,6 +3337,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
     ];
 
     stmt_upsert_sent_output.execute(sql_args)?;
+    flag_previously_received_change(conn, tx_ref)?;
 
     Ok(())
 }
@@ -3586,7 +3617,7 @@ mod tests {
     #[test]
     fn empty_database_has_no_balance() {
         let st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().unwrap();
@@ -3616,7 +3647,7 @@ mod tests {
     #[test]
     fn get_default_account_index() {
         let st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account_id = st.test_account().unwrap().id();
@@ -3632,7 +3663,7 @@ mod tests {
     #[test]
     fn get_account_ids() {
         let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
@@ -3648,7 +3679,7 @@ mod tests {
 
     #[test]
     fn block_fully_scanned() {
-        check_block_fully_scanned(TestDbFactory)
+        check_block_fully_scanned(TestDbFactory::default())
     }
 
     fn check_block_fully_scanned<DsF: DataStoreFactory>(dsf: DsF) {
@@ -3713,7 +3744,7 @@ mod tests {
     #[test]
     fn test_account_birthday() {
         let st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();

@@ -1797,6 +1797,18 @@ where
     assert_eq!(tx.received_note_count(), 0);
     assert_eq!(tx.sent_note_count(), 0);
     assert!(tx.is_shielding());
+
+    // Generate and scan the block including the transaction
+    let (h, _) = st.generate_next_block_including(*txids.first());
+    st.scan_cached_blocks(h, 1);
+
+    // Ensure that the transaction metadata is still correct after the update produced by scanning.
+    let tx = st.get_tx_from_history(*txids.first()).unwrap().unwrap();
+    assert_eq!(tx.spent_note_count(), 1);
+    assert!(tx.has_change());
+    assert_eq!(tx.received_note_count(), 0);
+    assert_eq!(tx.sent_note_count(), 0);
+    assert!(tx.is_shielding());
 }
 
 // FIXME: This requires fixes to the test framework.

@@ -2,6 +2,7 @@ use ambassador::Delegate;
 use rusqlite::Connection;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
+use uuid::Uuid;
 
 use tempfile::NamedTempFile;
 
@@ -31,7 +32,11 @@ use zcash_primitives::{
 };
 use zcash_protocol::{consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo};
 
-use crate::{error::SqliteClientError, wallet::init::init_wallet_db, AccountId, WalletDb};
+use crate::{
+    error::SqliteClientError,
+    wallet::init::{init_wallet_db, init_wallet_db_internal},
+    AccountId, WalletDb,
+};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -142,7 +147,19 @@ unsafe fn run_sqlite3<S: AsRef<OsStr>>(db_path: S, command: &str) {
     eprintln!("------");
 }
 
-pub(crate) struct TestDbFactory;
+#[derive(Default)]
+pub(crate) struct TestDbFactory {
+    target_migrations: Option<Vec<Uuid>>,
+}
+
+impl TestDbFactory {
+    #[allow(dead_code)]
+    pub(crate) fn new(target_migrations: Vec<Uuid>) -> Self {
+        Self {
+            target_migrations: Some(target_migrations),
+        }
+    }
+}
 
 impl DataStoreFactory for TestDbFactory {
     type Error = ();
@@ -154,7 +171,11 @@ impl DataStoreFactory for TestDbFactory {
     fn new_data_store(&self, network: LocalNetwork) -> Result<Self::DataStore, Self::Error> {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
-        init_wallet_db(&mut db_data, None).unwrap();
+        if let Some(migrations) = &self.target_migrations {
+            init_wallet_db_internal(&mut db_data, None, migrations, true).unwrap();
+        } else {
+            init_wallet_db(&mut db_data, None).unwrap();
+        }
         Ok(TestDb::from_parts(db_data, data_file))
     }
 }
@@ -166,7 +187,7 @@ impl Reset for TestDb {
         let network = *st.network();
         let old_db = std::mem::replace(
             st.wallet_mut(),
-            TestDbFactory.new_data_store(network).unwrap(),
+            TestDbFactory::default().new_data_store(network).unwrap(),
         );
         old_db.take_data_file()
     }

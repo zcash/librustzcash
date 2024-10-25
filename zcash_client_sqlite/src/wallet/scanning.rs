@@ -629,7 +629,7 @@ pub(crate) mod tests {
         let initial_height_offset = 310;
 
         let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
             .with_initial_chain_state(|rng, network| {
                 let sapling_activation_height =
@@ -796,7 +796,7 @@ pub(crate) mod tests {
         u32,
     ) {
         let st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
             .with_initial_chain_state(|rng, network| {
                 // We set the Sapling and Orchard frontiers at the birthday height to be
@@ -891,7 +891,7 @@ pub(crate) mod tests {
         use ScanPriority::*;
 
         let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
             .build();
         let sap_active = st.sapling_activation_height();
@@ -1044,7 +1044,7 @@ pub(crate) mod tests {
         // notes beyond the end of the first shard.
         let frontier_tree_size: u32 = (0x1 << 16) + 1234;
         let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
             .with_initial_chain_state(|rng, network| {
                 let birthday_height =
@@ -1237,7 +1237,7 @@ pub(crate) mod tests {
         // notes beyond the end of the first shard.
         let frontier_tree_size: u32 = (0x1 << 16) + 1234;
         let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
             .with_initial_chain_state(|rng, network| {
                 let birthday_height =
@@ -1462,7 +1462,7 @@ pub(crate) mod tests {
         use ScanPriority::*;
 
         let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .build();
 
         let ranges = vec![
@@ -1507,7 +1507,7 @@ pub(crate) mod tests {
         use ScanPriority::*;
 
         let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .build();
 
         let ranges = vec![
@@ -1579,7 +1579,7 @@ pub(crate) mod tests {
         // notes back from the end of the second shard.
         let birthday_tree_size: u32 = (0x1 << 17) - 50;
         let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory)
+            .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
             .with_initial_chain_state(|rng, network| {
                 let birthday_height =
