@@ -5,8 +5,7 @@ with Zcash.
 
 ## Security Warnings
 
-These libraries are currently under development and have not been
-fully-reviewed.
+These libraries are under development and have not been fully reviewed.
 
 ## License
 
