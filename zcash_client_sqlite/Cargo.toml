@@ -94,7 +94,7 @@ tempfile = "3.5.0"
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
 zcash_note_encryption.workspace = true
 zcash_proofs = { workspace = true, features = ["bundled-prover"] }
-zcash_primitives = { workspace = true, features = ["test-dependencies"] }
+zcash_primitives = { workspace = true, features = ["test-dependencies", "non-standard-fees"] }
 zcash_protocol = { workspace = true, features = ["local-consensus"] }
 zcash_client_backend = { workspace = true, features = ["test-dependencies", "unstable-serialization", "unstable-spanning-tree"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }

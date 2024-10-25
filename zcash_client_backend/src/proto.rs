@@ -16,12 +16,12 @@ use zcash_primitives::{
     consensus::BlockHeight,
     memo::{self, MemoBytes},
     merkle_tree::read_commitment_tree,
-    transaction::{components::amount::NonNegativeAmount, fees::StandardFeeRule, TxId},
+    transaction::{components::amount::NonNegativeAmount, TxId},
 };
 
 use crate::{
     data_api::{chain::ChainState, InputSource},
-    fees::{ChangeValue, TransactionBalance},
+    fees::{ChangeValue, StandardFeeRule, TransactionBalance},
     proposal::{Proposal, ProposalError, ShieldedInputs, Step, StepOutput, StepOutputIndex},
     zip321::{TransactionRequest, Zip321Error},
     PoolType, ShieldedProtocol,
@@ -356,8 +356,8 @@ pub enum ProposalDecodingError<DbError> {
     MemoInvalid(memo::Error),
     /// The serialization version returned by the protobuf was not recognized.
     VersionInvalid(u32),
-    /// The proposal did not correctly specify a standard fee rule.
-    FeeRuleNotSpecified,
+    /// The fee rule specified by the proposal is not supported by the wallet.
+    FeeRuleNotSupported(proposal::FeeRule),
     /// The proposal violated balance or structural constraints.
     ProposalInvalid(ProposalError),
     /// An inputs field for the given protocol was present, but contained no input note references.
@@ -409,8 +409,12 @@ impl<E: Display> Display for ProposalDecodingError<E> {
             ProposalDecodingError::VersionInvalid(v) => {
                 write!(f, "Unrecognized proposal version {}", v)
             }
-            ProposalDecodingError::FeeRuleNotSpecified => {
-                write!(f, "Proposal did not specify a known fee rule.")
+            ProposalDecodingError::FeeRuleNotSupported(r) => {
+                write!(
+                    f,
+                    "Fee calculation using the {:?} fee rule is not supported.",
+                    r
+                )
             }
             ProposalDecodingError::ProposalInvalid(err) => write!(f, "{}", err),
             ProposalDecodingError::EmptyShieldedInputs(protocol) => write!(
@@ -596,12 +600,9 @@ impl proposal::Proposal {
             })
             .collect();
 
-        #[allow(deprecated)]
         proposal::Proposal {
             proto_version: PROPOSAL_SER_V1,
             fee_rule: match value.fee_rule() {
-                StandardFeeRule::PreZip313 => proposal::FeeRule::PreZip313,
-                StandardFeeRule::Zip313 => proposal::FeeRule::Zip313,
                 StandardFeeRule::Zip317 => proposal::FeeRule::Zip317,
             }
             .into(),
@@ -622,13 +623,10 @@ impl proposal::Proposal {
         use self::proposal::proposed_input::Value::*;
         match self.proto_version {
             PROPOSAL_SER_V1 => {
-                #[allow(deprecated)]
                 let fee_rule = match self.fee_rule() {
-                    proposal::FeeRule::PreZip313 => StandardFeeRule::PreZip313,
-                    proposal::FeeRule::Zip313 => StandardFeeRule::Zip313,
                     proposal::FeeRule::Zip317 => StandardFeeRule::Zip317,
-                    proposal::FeeRule::NotSpecified => {
-                        return Err(ProposalDecodingError::FeeRuleNotSpecified);
+                    other => {
+                        return Err(ProposalDecodingError::FeeRuleNotSupported(other));
                     }
                 };
 

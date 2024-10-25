@@ -13,10 +13,20 @@ and this library adheres to Rust's notion of
   - `WalletSummary::progress`
   - `WalletMeta`
   - `impl Default for wallet::input_selection::GreedyInputSelector`
-- `zcash_client_backend::fees::SplitPolicy`
-- `zcash_client_backend::fees::zip317::MultiOutputChangeStrategy`
+- `zcash_client_backend::fees`
+  - `SplitPolicy`
+  - `StandardFeeRule` has been moved here from `zcash_primitives::fees`. Relative
+    to that type, the deprecated `PreZip313` and `Zip313` variants have been
+    removed.
+  - `zip317::{MultiOutputChangeStrategy, Zip317FeeRule}`
+  - `standard::MultiOutputChangeStrategy`
+- A new feature flag, `non-standard-fees`, has been added. This flag is now
+  required in order to make use of any types or methods that enable non-standard
+  fee calculation.
 
 ### Changed
+- MSRV is now 1.77.0.
+- Migrated to `arti-client 0.23`.
 - `zcash_client_backend::data_api`:
   - `InputSource` has an added method `get_wallet_metadata`
   - `error::Error` has additional variant `Error::Change`. This necessitates
@@ -54,15 +64,18 @@ and this library adheres to Rust's notion of
     and `WalletMeta`, and its `FeeRule` associated type now has an additional
     `Clone` bound. In addition, it defines a new `fetch_wallet_meta` method, and
     the arguments to `compute_balance` have changed.
+  - `zip317::SingleOutputChangeStrategy` has been made polymorphic in the fee
+    rule type, and takes an additional type parameter as a consequence.
   - The following methods now take an additional `DustOutputPolicy` argument,
     and carry an additional type parameter:
     - `fixed::SingleOutputChangeStrategy::new`
     - `standard::SingleOutputChangeStrategy::new`
     - `zip317::SingleOutputChangeStrategy::new`
-
-### Changed
-- MSRV is now 1.77.0.
-- Migrated to `arti-client 0.23`.
+- `zcash_client_backend::proto::ProposalDecodingError` has modified variants.
+  `ProposalDecodingError::FeeRuleNotSpecified` has been removed, and
+  `ProposalDecodingError::FeeRuleNotSupported` has been added to replace it.
+- `zcash_client_backend::data_api::fees::fixed` is now available only via the
+  use of the `non-standard-fees` feature flag.
 
 ### Removed
 - `zcash_client_backend::data_api`:
@@ -70,6 +83,9 @@ and this library adheres to Rust's notion of
     been removed. Use `WalletSummary::progress` instead.
   - `testing::input_selector` use explicit `InputSelector` constructors
     directly instead.
+  - The deprecated `wallet::create_spend_to_address` and `wallet::spend`
+    methods have been removed. Use `propose_transfer` and
+    `create_proposed_transaction` instead.
 - `zcash_client_backend::fees`:
   - `impl From<BalanceError> for ChangeError<...>`
 

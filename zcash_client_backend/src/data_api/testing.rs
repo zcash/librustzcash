@@ -31,7 +31,7 @@ use zcash_primitives::{
     memo::Memo,
     transaction::{
         components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
-        fees::{FeeRule, StandardFeeRule},
+        fees::FeeRule,
         Transaction, TxId,
     },
 };
@@ -48,7 +48,7 @@ use crate::{
     address::UnifiedAddress,
     fees::{
         standard::{self, SingleOutputChangeStrategy},
-        ChangeStrategy, DustOutputPolicy,
+        ChangeStrategy, DustOutputPolicy, StandardFeeRule,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     proposal::Proposal,
@@ -59,14 +59,14 @@ use crate::{
     ShieldedProtocol,
 };
 
-#[allow(deprecated)]
+use super::error::Error;
 use super::{
     chain::{scan_cached_blocks, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
     scanning::ScanRange,
     wallet::{
-        create_proposed_transactions, create_spend_to_address,
+        create_proposed_transactions,
         input_selection::{GreedyInputSelector, InputSelector},
-        propose_standard_transfer_to_address, propose_transfer, spend,
+        propose_standard_transfer_to_address, propose_transfer,
     },
     Account, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, BlockMetadata,
     DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
@@ -861,43 +861,7 @@ where
         + WalletCommitmentTrees,
     <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
 {
-    /// Invokes [`create_spend_to_address`] with the given arguments.
-    #[allow(deprecated)]
-    #[allow(clippy::type_complexity)]
-    #[allow(clippy::too_many_arguments)]
-    pub fn create_spend_to_address(
-        &mut self,
-        usk: &UnifiedSpendingKey,
-        to: &Address,
-        amount: NonNegativeAmount,
-        memo: Option<MemoBytes>,
-        ovk_policy: OvkPolicy,
-        min_confirmations: NonZeroU32,
-        change_memo: Option<MemoBytes>,
-        fallback_change_pool: ShieldedProtocol,
-    ) -> Result<
-        NonEmpty<TxId>,
-        super::wallet::TransferErrT<DbT, GreedyInputSelector<DbT>, SingleOutputChangeStrategy<DbT>>,
-    > {
-        let prover = LocalTxProver::bundled();
-        let network = self.network().clone();
-        create_spend_to_address(
-            self.wallet_mut(),
-            &network,
-            &prover,
-            &prover,
-            usk,
-            to,
-            amount,
-            memo,
-            ovk_policy,
-            min_confirmations,
-            change_memo,
-            fallback_change_pool,
-        )
-    }
-
-    /// Invokes [`spend`] with the given arguments.
+    /// Prepares and executes the given [`zip321::TransactionRequest`] in a single step.
     #[allow(clippy::type_complexity)]
     pub fn spend<InputsT, ChangeT>(
         &mut self,
@@ -912,20 +876,33 @@ where
         InputsT: InputSelector<InputSource = DbT>,
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
-        #![allow(deprecated)]
         let prover = LocalTxProver::bundled();
         let network = self.network().clone();
-        spend(
+
+        let account = self
+            .wallet()
+            .get_account_for_ufvk(&usk.to_unified_full_viewing_key())
+            .map_err(Error::DataSource)?
+            .ok_or(Error::KeyNotRecognized)?;
+
+        let proposal = propose_transfer(
+            self.wallet_mut(),
+            &network,
+            account.id(),
+            input_selector,
+            change_strategy,
+            request,
+            min_confirmations,
+        )?;
+
+        create_proposed_transactions(
             self.wallet_mut(),
             &network,
             &prover,
             &prover,
-            input_selector,
-            change_strategy,
             usk,
-            request,
             ovk_policy,
-            min_confirmations,
+            &proposal,
         )
     }
 

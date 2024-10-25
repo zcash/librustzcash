@@ -500,7 +500,7 @@ where
                 .dust_threshold()
                 .unwrap_or(cfg.default_dust_threshold);
 
-            if per_output_change.quotient() < &change_dust_threshold {
+            if proposed_change < change_dust_threshold {
                 match cfg.dust_output_policy.action() {
                     DustAction::Reject => {
                         // Always allow zero-valued change even for the `Reject` policy:
@@ -509,11 +509,11 @@ where
                         // * this case occurs in practice when sending all funds from an account;
                         // * zero-valued notes do not require witness tracking;
                         // * the effect on trial decryption overhead is small.
-                        if per_output_change.quotient().is_zero() {
+                        if proposed_change.is_zero() && excess_fee.is_zero() {
                             simple_case()
                         } else {
-                            let shortfall = (change_dust_threshold - *per_output_change.quotient())
-                                .ok_or_else(underflow)?;
+                            let shortfall =
+                                (change_dust_threshold - proposed_change).ok_or_else(underflow)?;
 
                             return Err(ChangeError::InsufficientFunds {
                                 available: total_in,

@@ -599,10 +599,10 @@ pub(crate) mod tests {
                 testing::orchard::OrchardPoolTester, wallet::input_selection::GreedyInputSelector,
                 WalletCommitmentTrees,
             },
-            fees::{standard, DustOutputPolicy},
+            fees::{standard, DustOutputPolicy, StandardFeeRule},
             wallet::OvkPolicy,
         },
-        zcash_primitives::{memo::Memo, transaction::fees::StandardFeeRule},
+        zcash_primitives::memo::Memo,
     };
 
     #[test]

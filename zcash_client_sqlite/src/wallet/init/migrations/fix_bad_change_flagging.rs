@@ -86,15 +86,12 @@ mod tests {
                 wallet::input_selection::GreedyInputSelector,
                 Account as _, WalletRead as _, WalletWrite as _,
             },
-            fees::{standard, DustOutputPolicy},
+            fees::{standard, DustOutputPolicy, StandardFeeRule},
             wallet::WalletTransparentOutput,
         },
         zcash_primitives::{
             block::BlockHash,
-            transaction::{
-                components::{OutPoint, TxOut},
-                fees::StandardFeeRule,
-            },
+            transaction::components::{OutPoint, TxOut},
         },
         zcash_protocol::value::Zatoshis,
     };

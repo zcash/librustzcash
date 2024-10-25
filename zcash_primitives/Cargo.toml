@@ -125,6 +125,10 @@ test-dependencies = [
 ## A feature used to isolate tests that are expensive to run. Test-only.
 expensive-tests = []
 
+## A feature that provides `FeeRule` implementations and constructors for
+## non-standard fees.
+non-standard-fees = []
+
 [lib]
 bench = false
 

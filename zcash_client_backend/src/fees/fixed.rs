@@ -119,7 +119,7 @@ mod tests {
         consensus::{Network, NetworkUpgrade, Parameters},
         transaction::{
             components::{amount::NonNegativeAmount, transparent::TxOut},
-            fees::fixed::FeeRule as FixedFeeRule,
+            fees::{fixed::FeeRule as FixedFeeRule, zip317::MINIMUM_FEE},
         },
     };
 
@@ -138,8 +138,7 @@ mod tests {
 
     #[test]
     fn change_without_dust() {
-        #[allow(deprecated)]
-        let fee_rule = FixedFeeRule::standard();
+        let fee_rule = FixedFeeRule::non_standard(MINIMUM_FEE);
         let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
             fee_rule,
             None,
@@ -175,14 +174,13 @@ mod tests {
             result,
             Ok(balance) if
                 balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(10000), None)] &&
-                balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
+                balance.fee_required() == MINIMUM_FEE
         );
     }
 
     #[test]
     fn dust_change() {
-        #[allow(deprecated)]
-        let fee_rule = FixedFeeRule::standard();
+        let fee_rule = FixedFeeRule::non_standard(MINIMUM_FEE);
         let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
             fee_rule,
             None,

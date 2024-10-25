@@ -2,10 +2,10 @@ use prost::Message;
 use rusqlite::params;
 use tempfile::NamedTempFile;
 
-use zcash_client_backend::data_api::testing::{NoteCommitments, TestCache};
-
-#[allow(deprecated)]
-use zcash_client_backend::proto::compact_formats::CompactBlock;
+use zcash_client_backend::{
+    data_api::testing::{NoteCommitments, TestCache},
+    proto::compact_formats::CompactBlock,
+};
 
 use crate::{chain::init::init_cache_database, error::SqliteClientError};
 

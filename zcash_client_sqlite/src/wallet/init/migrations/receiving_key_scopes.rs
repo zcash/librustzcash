@@ -405,6 +405,7 @@ mod tests {
                 OsRng,
                 &prover,
                 &prover,
+                #[allow(deprecated)]
                 &fixed::FeeRule::non_standard(NonNegativeAmount::ZERO),
             )
             .unwrap();

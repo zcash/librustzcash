@@ -320,7 +320,6 @@ where
 }
 
 #[cfg(test)]
-#[allow(deprecated)]
 mod tests {
     use zcash_client_backend::data_api::testing::sapling::SaplingPoolTester;
 
@@ -340,7 +339,6 @@ mod tests {
         testing::pool::valid_chain_states::<OrchardPoolTester>()
     }
 
-    // FIXME: This requires test framework fixes to pass.
     #[test]
     #[cfg(feature = "orchard")]
     fn invalid_chain_cache_disconnected_sapling() {

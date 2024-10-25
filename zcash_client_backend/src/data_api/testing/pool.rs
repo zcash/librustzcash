@@ -17,7 +17,7 @@ use zcash_primitives::{
     legacy::TransparentAddress,
     transaction::{
         components::amount::NonNegativeAmount,
-        fees::{fixed::FeeRule as FixedFeeRule, zip317::FeeRule as Zip317FeeRule, StandardFeeRule},
+        fees::zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
         Transaction,
     },
 };
@@ -50,7 +50,7 @@ use crate::{
     fees::{
         self,
         standard::{self, SingleOutputChangeStrategy},
-        DustOutputPolicy, SplitPolicy,
+        DustOutputPolicy, SplitPolicy, StandardFeeRule,
     },
     scanning::ScanError,
     wallet::{Note, NoteId, OvkPolicy, ReceivedNote},
@@ -961,9 +961,8 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
     );
 }
 
-#[allow(deprecated)]
-pub fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester>(
-    ds_factory: impl DataStoreFactory,
+pub fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester, DSF: DataStoreFactory>(
+    ds_factory: DSF,
 ) {
     let mut st = TestBuilder::new()
         .with_data_store_factory(ds_factory)
@@ -976,23 +975,30 @@ pub fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester>(
     let acct1 = zip32::AccountId::try_from(1).unwrap();
     let usk1 = UnifiedSpendingKey::from_seed(st.network(), &[1u8; 32], acct1).unwrap();
 
+    let input_selector = GreedyInputSelector::<DSF::DataStore>::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+
+    let req = TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        NonNegativeAmount::const_from_u64(1),
+    )])
+    .unwrap();
+
     // Attempting to spend with a USK that is not in the wallet results in an error
     assert_matches!(
-        st.create_spend_to_address(
+        st.spend(
+            &input_selector,
+            &change_strategy,
             &usk1,
-            &to,
-            NonNegativeAmount::const_from_u64(1),
-            None,
+            req,
             OvkPolicy::Sender,
             NonZeroU32::new(1).unwrap(),
-            None,
-            T::SHIELDED_PROTOCOL,
         ),
         Err(data_api::error::Error::KeyNotRecognized)
     );
 }
 
-#[allow(deprecated)]
 pub fn proposal_fails_with_no_blocks<T: ShieldedPoolTester, DSF>(ds_factory: DSF)
 where
     DSF: DataStoreFactory,
@@ -1014,7 +1020,7 @@ where
     assert_matches!(
         st.propose_standard_transfer::<Infallible>(
             account_id,
-            StandardFeeRule::PreZip313,
+            StandardFeeRule::Zip317,
             NonZeroU32::new(1).unwrap(),
             &to,
             NonNegativeAmount::const_from_u64(1),
@@ -1581,10 +1587,8 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
     ])
     .unwrap();
 
-    #[allow(deprecated)]
-    let fee_rule = FixedFeeRule::standard();
-    let change_strategy = fees::fixed::SingleOutputChangeStrategy::new(
-        fee_rule,
+    let change_strategy = fees::standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
         None,
         T::SHIELDED_PROTOCOL,
         DustOutputPolicy::default(),
@@ -1602,7 +1606,7 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
         )
         .unwrap()[0];
 
-    let amount_left = (value - (amount_sent + fee_rule.fixed_fee()).unwrap()).unwrap();
+    let amount_left = (value - (amount_sent + MINIMUM_FEE + MARGINAL_FEE).unwrap()).unwrap();
     let pending_change = (amount_left - amount_legacy_change).unwrap();
 
     // The "legacy change" is not counted by get_pending_change().
@@ -1930,8 +1934,8 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
     assert_eq!(spendable.len(), 1);
 }
 
-pub fn checkpoint_gaps<T: ShieldedPoolTester>(
-    ds_factory: impl DataStoreFactory,
+pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
+    ds_factory: DSF,
     cache: impl TestCache,
 ) {
     let mut st = TestBuilder::new()
@@ -1982,18 +1986,26 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester>(
     .unwrap();
     assert_eq!(spendable.len(), 1);
 
-    // Attempt to spend the note with 5 confirmations
+    let input_selector = GreedyInputSelector::<DSF::DataStore>::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+
     let to = T::fvk_default_address(&not_our_key);
+    let req = TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        NonNegativeAmount::const_from_u64(10000),
+    )])
+    .unwrap();
+
+    // Attempt to spend the note with 5 confirmations
     assert_matches!(
-        st.create_spend_to_address(
+        st.spend(
+            &input_selector,
+            &change_strategy,
             account.usk(),
-            &to,
-            NonNegativeAmount::const_from_u64(10000),
-            None,
+            req,
             OvkPolicy::Sender,
             NonZeroU32::new(5).unwrap(),
-            None,
-            T::SHIELDED_PROTOCOL,
         ),
         Ok(_)
     );
@@ -2799,7 +2811,6 @@ pub fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>(
     )])
     .unwrap();
 
-    #[allow(deprecated)]
     let input_selector = GreedyInputSelector::new();
     let change_strategy =
         single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);

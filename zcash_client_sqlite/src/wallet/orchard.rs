@@ -401,7 +401,7 @@ pub(crate) mod tests {
 
     #[test]
     fn send_with_multiple_change_outputs() {
-        testing::pool::send_with_multiple_change_outputs::<SaplingPoolTester>()
+        testing::pool::send_with_multiple_change_outputs::<OrchardPoolTester>()
     }
 
     #[test]
@@ -417,13 +417,11 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn create_to_address_fails_on_incorrect_usk() {
         testing::pool::create_to_address_fails_on_incorrect_usk::<OrchardPoolTester>()
     }
 
     #[test]
-    #[allow(deprecated)]
     fn proposal_fails_with_no_blocks() {
         testing::pool::proposal_fails_with_no_blocks::<OrchardPoolTester>()
     }
