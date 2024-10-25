@@ -31,7 +31,7 @@ and this library adheres to Rust's notion of
 ### Removed
 - `zcash_primitives::transaction::fees`:
   - `StandardFeeRule` itself has been removed; it was not used in this crate.
-    Is use in `zcash_client_backend` has been replaced with
+    Its use in `zcash_client_backend` has been replaced with
     `zcash_client_backend::fees::StandardFeeRule`.
   - `fixed::FeeRule::standard`. This constructor was misleadingly named: using a
     fixed fee does not conform to any current Zcash standard. To calculate the

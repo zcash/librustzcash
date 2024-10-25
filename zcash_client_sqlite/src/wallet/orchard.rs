@@ -401,7 +401,7 @@ pub(crate) mod tests {
 
     #[test]
     fn send_with_multiple_change_outputs() {
-        testing::pool::send_with_multiple_change_outputs::<SaplingPoolTester>()
+        testing::pool::send_with_multiple_change_outputs::<OrchardPoolTester>()
     }
 
     #[test]

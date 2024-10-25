@@ -64,6 +64,8 @@ and this library adheres to Rust's notion of
     and `WalletMeta`, and its `FeeRule` associated type now has an additional
     `Clone` bound. In addition, it defines a new `fetch_wallet_meta` method, and
     the arguments to `compute_balance` have changed.
+  - `zip317::SingleOutputChangeStrategy` has been made polymorphic in the fee
+    rule type, and takes an additional type parameter as a consequence.
   - The following methods now take an additional `DustOutputPolicy` argument,
     and carry an additional type parameter:
     - `fixed::SingleOutputChangeStrategy::new`
@@ -72,10 +74,8 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::proto::ProposalDecodingError` has modified variants.
   `ProposalDecodingError::FeeRuleNotSpecified` has been removed, and
   `ProposalDecodingError::FeeRuleNotSupported` has been added to replace it.
-
-### Deprecated
-- `zcash_client_backend::data_api::fees::fixed`; also, this module is now
-  available only via the use of the `non-standard-fees` feature flag.
+- `zcash_client_backend::data_api::fees::fixed` is now available only via the
+  use of the `non-standard-fees` feature flag.
 
 ### Removed
 - `zcash_client_backend::data_api`:

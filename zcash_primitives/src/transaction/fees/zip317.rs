@@ -76,6 +76,14 @@ impl FeeRule {
 
     /// Construct a new FeeRule instance with the specified parameter values.
     ///
+    /// Using this fee rule with
+    /// ```compile_fail
+    /// marginal_fee < 5000 || grace_actions < 2 \
+    ///     || p2pkh_standard_input_size > P2PKH_STANDARD_INPUT_SIZE \
+    ///     || p2pkh_standard_output_size > P2PKH_STANDARD_OUTPUT_SIZE
+    /// ```
+    /// violates ZIP 317, and might cause transactions built with it to fail.
+    ///
     /// Returns `None` if either `p2pkh_standard_input_size` or `p2pkh_standard_output_size` are
     /// zero.
     #[cfg(feature = "non-standard-fees")]
