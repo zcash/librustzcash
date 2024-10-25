@@ -1,4 +1,4 @@
-name: CI checks
+name: CI
 
 on:
   pull_request:
@@ -366,3 +366,23 @@ jobs:
           ) -eq $(
             uuidparse -n -o uuid $U4 | sort | uniq | wc -l
           )
+
+  required-checks:
+    name: Required status checks have passed
+    needs:
+      - test
+      - check-msrv
+      - build-latest
+      - build-nodefault
+      - bitrot
+      - clippy
+      - doc-links
+      - fmt
+      - protobuf
+      - uuid
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine whether all required-pass steps succeeded
+        run: |
+          echo '${{ toJSON(needs) }}' | jq -e '[ .[] | .result == "success" ] | all'
