@@ -23,6 +23,10 @@ and this library adheres to Rust's notion of
 - A new feature flag, `non-standard-fees`, has been added. This flag is now
   required in order to make use of any types or methods that enable non-standard
   fee calculation.
+- `zcash_client_backend::tor::http::cryptex`:
+  - `LocalExchange`, a variant of the `Exchange` trait without `Send` bounds.
+  - `DynExchange`
+  - `DynLocalExchange`
 
 ### Changed
 - MSRV is now 1.77.0.
@@ -76,6 +80,9 @@ and this library adheres to Rust's notion of
   `ProposalDecodingError::FeeRuleNotSupported` has been added to replace it.
 - `zcash_client_backend::data_api::fees::fixed` is now available only via the
   use of the `non-standard-fees` feature flag.
+- `zcash_client_backend::tor::http::cryptex`:
+  - The `Exchange` trait is no longer object-safe. Replace any existing uses of
+    `dyn Exchange` with `DynExchange`.
 
 ### Removed
 - `zcash_client_backend::data_api`:

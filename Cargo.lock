@@ -1296,6 +1296,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d6ef0072f8a535281e4876be788938b528e9a1d43900b82c2569af7da799125"
 
 [[package]]
+name = "dynosaur"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47baef31f408cc1a54eadcb0160ffe2b935b5963bd2b519719f3a101749af524"
+dependencies = [
+ "dynosaur_derive",
+ "trait-variant",
+]
+
+[[package]]
+name = "dynosaur_derive"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "320c6861ca45ea23faee2bd86a6c7f20ec4b7a64a2773971cd4f52ae61615463"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.63",
+]
+
+[[package]]
 name = "ecdsa"
 version = "0.16.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5374,6 +5395,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "trait-variant"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70977707304198400eb4835a78f6a9f928bf41bba420deb8fdb175cd965d77a7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.63",
+]
+
+[[package]]
 name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5993,6 +6025,7 @@ dependencies = [
  "byteorder",
  "crossbeam-channel",
  "document-features",
+ "dynosaur",
  "futures-util",
  "group",
  "gumdrop",
@@ -6029,6 +6062,7 @@ dependencies = [
  "tor-rtcompat",
  "tower",
  "tracing",
+ "trait-variant",
  "webpki-roots 0.25.4",
  "which",
  "zcash_address",
