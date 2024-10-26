@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["COIN","MAX_BALANCE","MAX_MONEY"],"enum":["BalanceError"],"mod":["testing"],"struct":["QuotRem","ZatBalance","Zatoshis"]};

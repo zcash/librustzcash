@@ -1,0 +1,185 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="`BlockCache` is a trait that extends `BlockSource` and defines methods for managing a cache of compact blocks."><title>BlockCache in zcash_client_backend::data_api::chain - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-4ee5002b.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (a93c1718c 2024-10-24)" data-channel="nightly" data-search-js="search-c5a66128.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc trait"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button></nav><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../zcash_client_backend/index.html">zcash_<wbr>client_<wbr>backend</a><span class="version">0.14.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Block<wbr>Cache</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#examples" title="Examples">Examples</a></li></ul><h3><a href="#required-methods">Required Methods</a></h3><ul class="block"><li><a href="#tymethod.delete" title="delete">delete</a></li><li><a href="#tymethod.get_tip_height" title="get_tip_height">get_tip_height</a></li><li><a href="#tymethod.insert" title="insert">insert</a></li><li><a href="#tymethod.read" title="read">read</a></li></ul><h3><a href="#provided-methods">Provided Methods</a></h3><ul class="block"><li><a href="#method.truncate" title="truncate">truncate</a></li></ul><h3><a href="#dyn-compatibility">Dyn Compatibility</a></h3><h3><a href="#implementors">Implementors</a></h3></section><div id="rustdoc-modnav"><h2><a href="index.html">In zcash_<wbr>client_<wbr>backend::<wbr>data_<wbr>api::<wbr>chain</a></h2></div></div></nav><div class="sidebar-resizer"></div><main><div class="width-limiter"><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><span class="rustdoc-breadcrumbs"><a href="../../index.html">zcash_client_backend</a>::<wbr><a href="../index.html">data_api</a>::<wbr><a href="index.html">chain</a></span><h1>Trait <span class="trait">BlockCache</span><button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/zcash_client_backend/data_api/chain.rs.html#386-434">Source</a> </span></div><pre class="rust item-decl"><code>pub trait BlockCache:
+    <a class="trait" href="trait.BlockSource.html" title="trait zcash_client_backend::data_api::chain::BlockSource">BlockSource</a>
+    + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a>
+    + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a><div class="where">where
+    Self::<a class="associatedtype" href="trait.BlockSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::chain::BlockSource::Error">Error</a>: <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a>,</div>{
+    // Required methods
+    fn <a href="#tymethod.get_tip_height" class="fn">get_tip_height</a>(
+        &amp;self,
+        range: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;&amp;<a class="struct" href="../scanning/struct.ScanRange.html" title="struct zcash_client_backend::data_api::scanning::ScanRange">ScanRange</a>&gt;,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;BlockHeight&gt;, Self::<a class="associatedtype" href="trait.BlockSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::chain::BlockSource::Error">Error</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.read" class="fn">read</a>&lt;'life0, 'life1, 'async_trait&gt;(
+        &amp;'life0 self,
+        range: &amp;'life1 <a class="struct" href="../scanning/struct.ScanRange.html" title="struct zcash_client_backend::data_api::scanning::ScanRange">ScanRange</a>,
+    ) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/nightly/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="../../proto/compact_formats/struct.CompactBlock.html" title="struct zcash_client_backend::proto::compact_formats::CompactBlock">CompactBlock</a>&gt;, Self::<a class="associatedtype" href="trait.BlockSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::chain::BlockSource::Error">Error</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt;
+       <span class="where">where Self: 'async_trait,
+             'life0: 'async_trait,
+             'life1: 'async_trait</span>;
+<span class="item-spacer"></span>    fn <a href="#tymethod.insert" class="fn">insert</a>&lt;'life0, 'async_trait&gt;(
+        &amp;'life0 self,
+        compact_blocks: <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="../../proto/compact_formats/struct.CompactBlock.html" title="struct zcash_client_backend::proto::compact_formats::CompactBlock">CompactBlock</a>&gt;,
+    ) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/nightly/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.BlockSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::chain::BlockSource::Error">Error</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt;
+       <span class="where">where Self: 'async_trait,
+             'life0: 'async_trait</span>;
+<span class="item-spacer"></span>    fn <a href="#tymethod.delete" class="fn">delete</a>&lt;'life0, 'async_trait&gt;(
+        &amp;'life0 self,
+        range: <a class="struct" href="../scanning/struct.ScanRange.html" title="struct zcash_client_backend::data_api::scanning::ScanRange">ScanRange</a>,
+    ) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/nightly/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.BlockSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::chain::BlockSource::Error">Error</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt;
+       <span class="where">where Self: 'async_trait,
+             'life0: 'async_trait</span>;
+
+    // Provided method
+    fn <a href="#method.truncate" class="fn">truncate</a>&lt;'life0, 'async_trait&gt;(
+        &amp;'life0 self,
+        block_height: BlockHeight,
+    ) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/nightly/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.BlockSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::chain::BlockSource::Error">Error</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt;
+       <span class="where">where Self: 'async_trait,
+             'life0: 'async_trait</span> { ... }
+}</code></pre><span class="item-info"><div class="stab portability">Available on <strong>crate feature <code>sync</code></strong> only.</div></span><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p><code>BlockCache</code> is a trait that extends <code>BlockSource</code> and defines methods for managing
+a cache of compact blocks.</p>
+<h2 id="examples"><a class="doc-anchor" href="#examples">§</a>Examples</h2>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code>   <span class="kw">use </span>async_trait::async_trait;
+   <span class="kw">use </span>std::sync::{Arc, Mutex};
+   <span class="kw">use </span>zcash_client_backend::data_api::{
+       chain::{error, BlockCache, BlockSource},
+       scanning::{ScanPriority, ScanRange},
+   };
+   <span class="kw">use </span>zcash_client_backend::proto::compact_formats::CompactBlock;
+   <span class="kw">use </span>zcash_primitives::consensus::BlockHeight;
+
+   <span class="kw">struct </span>ExampleBlockCache {
+       cached_blocks: Arc&lt;Mutex&lt;Vec&lt;CompactBlock&gt;&gt;&gt;,
+   }
+
+   <span class="attr">#[async_trait]
+   </span><span class="kw">impl </span>BlockCache <span class="kw">for </span>ExampleBlockCache {
+       <span class="kw">fn </span>get_tip_height(<span class="kw-2">&amp;</span><span class="self">self</span>, range: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>ScanRange&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;BlockHeight&gt;, <span class="self">Self</span>::Error&gt; {
+           <span class="kw">let </span>cached_blocks = <span class="self">self</span>.cached_blocks.lock().unwrap();
+           <span class="kw">let </span>blocks: Vec&lt;<span class="kw-2">&amp;</span>CompactBlock&gt; = <span class="kw">match </span>range {
+               <span class="prelude-val">Some</span>(range) =&gt; cached_blocks
+                   .iter()
+                   .filter(|<span class="kw-2">&amp;</span>block| {
+                       <span class="kw">let </span>block_height = BlockHeight::from_u32(block.height <span class="kw">as </span>u32);
+                       range.block_range().contains(<span class="kw-2">&amp;</span>block_height)
+                   })
+                   .collect(),
+               <span class="prelude-val">None </span>=&gt; cached_blocks.iter().collect(),
+           };
+           <span class="kw">let </span>highest_block = blocks.iter().max_by_key(|&amp;&amp;block| block.height);
+           <span class="prelude-val">Ok</span>(highest_block.map(|<span class="kw-2">&amp;</span>block| BlockHeight::from_u32(block.height <span class="kw">as </span>u32)))
+       }
+
+       <span class="kw">async fn </span>read(<span class="kw-2">&amp;</span><span class="self">self</span>, range: <span class="kw-2">&amp;</span>ScanRange) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;CompactBlock&gt;, <span class="self">Self</span>::Error&gt; {
+           <span class="prelude-val">Ok</span>(<span class="self">self
+               </span>.cached_blocks
+               .lock()
+               .unwrap()
+               .iter()
+               .filter(|block| {
+                   <span class="kw">let </span>block_height = BlockHeight::from_u32(block.height <span class="kw">as </span>u32);
+                   range.block_range().contains(<span class="kw-2">&amp;</span>block_height)
+               })
+               .cloned()
+               .collect())
+       }
+
+       <span class="kw">async fn </span>insert(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut </span>compact_blocks: Vec&lt;CompactBlock&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::Error&gt; {
+           <span class="self">self</span>.cached_blocks
+               .lock()
+               .unwrap()
+               .append(<span class="kw-2">&amp;mut </span>compact_blocks);
+           <span class="prelude-val">Ok</span>(())
+       }
+
+       <span class="kw">async fn </span>delete(<span class="kw-2">&amp;</span><span class="self">self</span>, range: ScanRange) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::Error&gt; {
+           <span class="self">self</span>.cached_blocks
+               .lock()
+               .unwrap()
+               .retain(|block| !range.block_range().contains(<span class="kw-2">&amp;</span>BlockHeight::from_u32(block.height <span class="kw">as </span>u32)));
+           <span class="prelude-val">Ok</span>(())
+       }
+   }
+
+   <span class="comment">// Example usage
+   </span><span class="kw">let </span>rt = tokio::runtime::Runtime::new().unwrap();
+   <span class="kw">let </span><span class="kw-2">mut </span>block_cache = ExampleBlockCache {
+       cached_blocks: Arc::new(Mutex::new(Vec::new())),
+   };
+   <span class="kw">let </span>range = ScanRange::from_parts(
+       BlockHeight::from_u32(<span class="number">1</span>)..BlockHeight::from_u32(<span class="number">3</span>),
+       ScanPriority::Historic,
+   );
+   <span class="kw">let </span>compact_blocks = <span class="macro">vec!</span>[compact_block1, compact_block2];
+
+   <span class="comment">// Insert blocks into the block cache
+   </span>rt.block_on(<span class="kw">async </span>{
+       block_cache.insert(compact_blocks.clone()).<span class="kw">await</span>.unwrap();
+   });
+   <span class="macro">assert_eq!</span>(block_cache.cached_blocks.lock().unwrap().len(), <span class="number">2</span>);
+
+   <span class="comment">// Find highest block in the block cache
+   </span><span class="kw">let </span>get_tip_height = block_cache.get_tip_height(<span class="prelude-val">None</span>).unwrap();
+   <span class="macro">assert_eq!</span>(get_tip_height, <span class="prelude-val">Some</span>(BlockHeight::from_u32(<span class="number">2</span>)));
+
+   <span class="comment">// Read from the block cache
+   </span>rt.block_on(<span class="kw">async </span>{
+       <span class="kw">let </span>blocks_from_cache = block_cache.read(<span class="kw-2">&amp;</span>range).<span class="kw">await</span>.unwrap();
+       <span class="macro">assert_eq!</span>(blocks_from_cache, compact_blocks);
+   });
+
+   <span class="comment">// Truncate the block cache
+   </span>rt.block_on(<span class="kw">async </span>{
+       block_cache.truncate(BlockHeight::from_u32(<span class="number">1</span>)).<span class="kw">await</span>.unwrap();
+   });
+   <span class="macro">assert_eq!</span>(block_cache.cached_blocks.lock().unwrap().len(), <span class="number">1</span>);
+   <span class="macro">assert_eq!</span>(
+       block_cache.get_tip_height(<span class="prelude-val">None</span>).unwrap(),
+       <span class="prelude-val">Some</span>(BlockHeight::from_u32(<span class="number">1</span>))
+   );
+
+   <span class="comment">// Delete blocks from the block cache
+   </span>rt.block_on(<span class="kw">async </span>{
+       block_cache.delete(range).<span class="kw">await</span>.unwrap();
+   });
+   <span class="macro">assert_eq!</span>(block_cache.cached_blocks.lock().unwrap().len(), <span class="number">0</span>);
+   <span class="macro">assert_eq!</span>(block_cache.get_tip_height(<span class="prelude-val">None</span>).unwrap(), <span class="prelude-val">None</span>);</code></pre></div>
+</div></details><h2 id="required-methods" class="section-header">Required Methods<a href="#required-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="tymethod.get_tip_height" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/chain.rs.html#394-395">Source</a><h4 class="code-header">fn <a href="#tymethod.get_tip_height" class="fn">get_tip_height</a>(
+    &amp;self,
+    range: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;&amp;<a class="struct" href="../scanning/struct.ScanRange.html" title="struct zcash_client_backend::data_api::scanning::ScanRange">ScanRange</a>&gt;,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;BlockHeight&gt;, Self::<a class="associatedtype" href="trait.BlockSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::chain::BlockSource::Error">Error</a>&gt;</h4></section></summary><div class="docblock"><p>Finds the height of the highest block known to the block cache within a specified range.</p>
+<p>If <code>range</code> is <code>None</code>, returns the tip of the entire cache.
+If no blocks are found in the cache, returns Ok(<code>None</code>).</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.read" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/chain.rs.html#406">Source</a><h4 class="code-header">fn <a href="#tymethod.read" class="fn">read</a>&lt;'life0, 'life1, 'async_trait&gt;(
+    &amp;'life0 self,
+    range: &amp;'life1 <a class="struct" href="../scanning/struct.ScanRange.html" title="struct zcash_client_backend::data_api::scanning::ScanRange">ScanRange</a>,
+) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/nightly/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="../../proto/compact_formats/struct.CompactBlock.html" title="struct zcash_client_backend::proto::compact_formats::CompactBlock">CompactBlock</a>&gt;, Self::<a class="associatedtype" href="trait.BlockSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::chain::BlockSource::Error">Error</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt;<div class="where">where
+    Self: 'async_trait,
+    'life0: 'async_trait,
+    'life1: 'async_trait,</div></h4></section></summary><div class="docblock"><p>Retrieves contiguous compact blocks specified by the given <code>range</code> from the block cache.</p>
+<p>Short reads are allowed, meaning that this method may return fewer blocks than requested
+provided that all returned blocks are contiguous and start from <code>range.block_range().start</code>.</p>
+<h5 id="errors"><a class="doc-anchor" href="#errors">§</a>Errors</h5>
+<p>This method should return an error if contiguous blocks cannot be read from the cache,
+indicating there are blocks missing.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.insert" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/chain.rs.html#411">Source</a><h4 class="code-header">fn <a href="#tymethod.insert" class="fn">insert</a>&lt;'life0, 'async_trait&gt;(
+    &amp;'life0 self,
+    compact_blocks: <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="../../proto/compact_formats/struct.CompactBlock.html" title="struct zcash_client_backend::proto::compact_formats::CompactBlock">CompactBlock</a>&gt;,
+) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/nightly/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.BlockSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::chain::BlockSource::Error">Error</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt;<div class="where">where
+    Self: 'async_trait,
+    'life0: 'async_trait,</div></h4></section></summary><div class="docblock"><p>Inserts a vec of compact blocks into the block cache.</p>
+<p>This method permits insertion of non-contiguous compact blocks.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.delete" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/chain.rs.html#433">Source</a><h4 class="code-header">fn <a href="#tymethod.delete" class="fn">delete</a>&lt;'life0, 'async_trait&gt;(
+    &amp;'life0 self,
+    range: <a class="struct" href="../scanning/struct.ScanRange.html" title="struct zcash_client_backend::data_api::scanning::ScanRange">ScanRange</a>,
+) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/nightly/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.BlockSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::chain::BlockSource::Error">Error</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt;<div class="where">where
+    Self: 'async_trait,
+    'life0: 'async_trait,</div></h4></section></summary><div class="docblock"><p>Deletes a range of compact blocks from the block cache.</p>
+<h5 id="errors-1"><a class="doc-anchor" href="#errors-1">§</a>Errors</h5>
+<p>In the case of an error, some blocks requested for deletion may remain in the block cache.</p>
+</div></details></div><h2 id="provided-methods" class="section-header">Provided Methods<a href="#provided-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="method.truncate" class="method"><a class="src rightside" href="../../../src/zcash_client_backend/data_api/chain.rs.html#414-426">Source</a><h4 class="code-header">fn <a href="#method.truncate" class="fn">truncate</a>&lt;'life0, 'async_trait&gt;(
+    &amp;'life0 self,
+    block_height: BlockHeight,
+) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/nightly/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Self::<a class="associatedtype" href="trait.BlockSource.html#associatedtype.Error" title="type zcash_client_backend::data_api::chain::BlockSource::Error">Error</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt;<div class="where">where
+    Self: 'async_trait,
+    'life0: 'async_trait,</div></h4></section></summary><div class="docblock"><p>Removes all cached blocks above a specified block height.</p>
+</div></details></div><h2 id="dyn-compatibility" class="section-header">Dyn Compatibility<a href="#dyn-compatibility" class="anchor">§</a></h2><div class="dyn-compatibility-info"><p>This trait is <b>not</b> <a href="https://doc.rust-lang.org/nightly/reference/items/traits.html#object-safety">dyn compatible</a>.</p><p><i>In older versions of Rust, dyn compatibility was called "object safety", so this trait is not object safe.</i></p></div><h2 id="implementors" class="section-header">Implementors<a href="#implementors" class="anchor">§</a></h2><div id="implementors-list"></div><script src="../../../trait.impl/zcash_client_backend/data_api/chain/trait.BlockCache.js" async></script></section></div></main></body></html>

@@ -1,264 +1,521 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/error.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>error.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script src="../../crates.js"></script><script defer src="../../main.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script>
-    <noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../zcash_client_sqlite/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div>
-        </a><h2 class="location"></h2>
-    </nav>
-    <nav class="sidebar"><a class="sidebar-logo" href="../../zcash_client_sqlite/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div>
-        </a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../zcash_client_sqlite/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><button type="button" id="help-button" title="help">?</button><div id="settings-menu" tabindex="-1">
-                                <a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div>
-                        </div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
-<span id="2">2</span>
-<span id="3">3</span>
-<span id="4">4</span>
-<span id="5">5</span>
-<span id="6">6</span>
-<span id="7">7</span>
-<span id="8">8</span>
-<span id="9">9</span>
-<span id="10">10</span>
-<span id="11">11</span>
-<span id="12">12</span>
-<span id="13">13</span>
-<span id="14">14</span>
-<span id="15">15</span>
-<span id="16">16</span>
-<span id="17">17</span>
-<span id="18">18</span>
-<span id="19">19</span>
-<span id="20">20</span>
-<span id="21">21</span>
-<span id="22">22</span>
-<span id="23">23</span>
-<span id="24">24</span>
-<span id="25">25</span>
-<span id="26">26</span>
-<span id="27">27</span>
-<span id="28">28</span>
-<span id="29">29</span>
-<span id="30">30</span>
-<span id="31">31</span>
-<span id="32">32</span>
-<span id="33">33</span>
-<span id="34">34</span>
-<span id="35">35</span>
-<span id="36">36</span>
-<span id="37">37</span>
-<span id="38">38</span>
-<span id="39">39</span>
-<span id="40">40</span>
-<span id="41">41</span>
-<span id="42">42</span>
-<span id="43">43</span>
-<span id="44">44</span>
-<span id="45">45</span>
-<span id="46">46</span>
-<span id="47">47</span>
-<span id="48">48</span>
-<span id="49">49</span>
-<span id="50">50</span>
-<span id="51">51</span>
-<span id="52">52</span>
-<span id="53">53</span>
-<span id="54">54</span>
-<span id="55">55</span>
-<span id="56">56</span>
-<span id="57">57</span>
-<span id="58">58</span>
-<span id="59">59</span>
-<span id="60">60</span>
-<span id="61">61</span>
-<span id="62">62</span>
-<span id="63">63</span>
-<span id="64">64</span>
-<span id="65">65</span>
-<span id="66">66</span>
-<span id="67">67</span>
-<span id="68">68</span>
-<span id="69">69</span>
-<span id="70">70</span>
-<span id="71">71</span>
-<span id="72">72</span>
-<span id="73">73</span>
-<span id="74">74</span>
-<span id="75">75</span>
-<span id="76">76</span>
-<span id="77">77</span>
-<span id="78">78</span>
-<span id="79">79</span>
-<span id="80">80</span>
-<span id="81">81</span>
-<span id="82">82</span>
-<span id="83">83</span>
-<span id="84">84</span>
-<span id="85">85</span>
-<span id="86">86</span>
-<span id="87">87</span>
-<span id="88">88</span>
-<span id="89">89</span>
-<span id="90">90</span>
-<span id="91">91</span>
-<span id="92">92</span>
-<span id="93">93</span>
-<span id="94">94</span>
-<span id="95">95</span>
-<span id="96">96</span>
-<span id="97">97</span>
-<span id="98">98</span>
-<span id="99">99</span>
-<span id="100">100</span>
-<span id="101">101</span>
-<span id="102">102</span>
-<span id="103">103</span>
-<span id="104">104</span>
-<span id="105">105</span>
-<span id="106">106</span>
-<span id="107">107</span>
-<span id="108">108</span>
-<span id="109">109</span>
-<span id="110">110</span>
-<span id="111">111</span>
-<span id="112">112</span>
-<span id="113">113</span>
-<span id="114">114</span>
-<span id="115">115</span>
-<span id="116">116</span>
-<span id="117">117</span>
-<span id="118">118</span>
-<span id="119">119</span>
-<span id="120">120</span>
-<span id="121">121</span>
-<span id="122">122</span>
-<span id="123">123</span>
-<span id="124">124</span>
-<span id="125">125</span>
-<span id="126">126</span>
-<span id="127">127</span>
-</pre><pre class="rust"><code><span class="doccomment">//! Error types for problems that may arise when reading or storing wallet data to SQLite.</span>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/error.rs`."><title>error.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-4ee5002b.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (a93c1718c 2024-10-24)" data-channel="nightly" data-search-js="search-c5a66128.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>error.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<a href="#1" id="1">1</a>
+<a href="#2" id="2">2</a>
+<a href="#3" id="3">3</a>
+<a href="#4" id="4">4</a>
+<a href="#5" id="5">5</a>
+<a href="#6" id="6">6</a>
+<a href="#7" id="7">7</a>
+<a href="#8" id="8">8</a>
+<a href="#9" id="9">9</a>
+<a href="#10" id="10">10</a>
+<a href="#11" id="11">11</a>
+<a href="#12" id="12">12</a>
+<a href="#13" id="13">13</a>
+<a href="#14" id="14">14</a>
+<a href="#15" id="15">15</a>
+<a href="#16" id="16">16</a>
+<a href="#17" id="17">17</a>
+<a href="#18" id="18">18</a>
+<a href="#19" id="19">19</a>
+<a href="#20" id="20">20</a>
+<a href="#21" id="21">21</a>
+<a href="#22" id="22">22</a>
+<a href="#23" id="23">23</a>
+<a href="#24" id="24">24</a>
+<a href="#25" id="25">25</a>
+<a href="#26" id="26">26</a>
+<a href="#27" id="27">27</a>
+<a href="#28" id="28">28</a>
+<a href="#29" id="29">29</a>
+<a href="#30" id="30">30</a>
+<a href="#31" id="31">31</a>
+<a href="#32" id="32">32</a>
+<a href="#33" id="33">33</a>
+<a href="#34" id="34">34</a>
+<a href="#35" id="35">35</a>
+<a href="#36" id="36">36</a>
+<a href="#37" id="37">37</a>
+<a href="#38" id="38">38</a>
+<a href="#39" id="39">39</a>
+<a href="#40" id="40">40</a>
+<a href="#41" id="41">41</a>
+<a href="#42" id="42">42</a>
+<a href="#43" id="43">43</a>
+<a href="#44" id="44">44</a>
+<a href="#45" id="45">45</a>
+<a href="#46" id="46">46</a>
+<a href="#47" id="47">47</a>
+<a href="#48" id="48">48</a>
+<a href="#49" id="49">49</a>
+<a href="#50" id="50">50</a>
+<a href="#51" id="51">51</a>
+<a href="#52" id="52">52</a>
+<a href="#53" id="53">53</a>
+<a href="#54" id="54">54</a>
+<a href="#55" id="55">55</a>
+<a href="#56" id="56">56</a>
+<a href="#57" id="57">57</a>
+<a href="#58" id="58">58</a>
+<a href="#59" id="59">59</a>
+<a href="#60" id="60">60</a>
+<a href="#61" id="61">61</a>
+<a href="#62" id="62">62</a>
+<a href="#63" id="63">63</a>
+<a href="#64" id="64">64</a>
+<a href="#65" id="65">65</a>
+<a href="#66" id="66">66</a>
+<a href="#67" id="67">67</a>
+<a href="#68" id="68">68</a>
+<a href="#69" id="69">69</a>
+<a href="#70" id="70">70</a>
+<a href="#71" id="71">71</a>
+<a href="#72" id="72">72</a>
+<a href="#73" id="73">73</a>
+<a href="#74" id="74">74</a>
+<a href="#75" id="75">75</a>
+<a href="#76" id="76">76</a>
+<a href="#77" id="77">77</a>
+<a href="#78" id="78">78</a>
+<a href="#79" id="79">79</a>
+<a href="#80" id="80">80</a>
+<a href="#81" id="81">81</a>
+<a href="#82" id="82">82</a>
+<a href="#83" id="83">83</a>
+<a href="#84" id="84">84</a>
+<a href="#85" id="85">85</a>
+<a href="#86" id="86">86</a>
+<a href="#87" id="87">87</a>
+<a href="#88" id="88">88</a>
+<a href="#89" id="89">89</a>
+<a href="#90" id="90">90</a>
+<a href="#91" id="91">91</a>
+<a href="#92" id="92">92</a>
+<a href="#93" id="93">93</a>
+<a href="#94" id="94">94</a>
+<a href="#95" id="95">95</a>
+<a href="#96" id="96">96</a>
+<a href="#97" id="97">97</a>
+<a href="#98" id="98">98</a>
+<a href="#99" id="99">99</a>
+<a href="#100" id="100">100</a>
+<a href="#101" id="101">101</a>
+<a href="#102" id="102">102</a>
+<a href="#103" id="103">103</a>
+<a href="#104" id="104">104</a>
+<a href="#105" id="105">105</a>
+<a href="#106" id="106">106</a>
+<a href="#107" id="107">107</a>
+<a href="#108" id="108">108</a>
+<a href="#109" id="109">109</a>
+<a href="#110" id="110">110</a>
+<a href="#111" id="111">111</a>
+<a href="#112" id="112">112</a>
+<a href="#113" id="113">113</a>
+<a href="#114" id="114">114</a>
+<a href="#115" id="115">115</a>
+<a href="#116" id="116">116</a>
+<a href="#117" id="117">117</a>
+<a href="#118" id="118">118</a>
+<a href="#119" id="119">119</a>
+<a href="#120" id="120">120</a>
+<a href="#121" id="121">121</a>
+<a href="#122" id="122">122</a>
+<a href="#123" id="123">123</a>
+<a href="#124" id="124">124</a>
+<a href="#125" id="125">125</a>
+<a href="#126" id="126">126</a>
+<a href="#127" id="127">127</a>
+<a href="#128" id="128">128</a>
+<a href="#129" id="129">129</a>
+<a href="#130" id="130">130</a>
+<a href="#131" id="131">131</a>
+<a href="#132" id="132">132</a>
+<a href="#133" id="133">133</a>
+<a href="#134" id="134">134</a>
+<a href="#135" id="135">135</a>
+<a href="#136" id="136">136</a>
+<a href="#137" id="137">137</a>
+<a href="#138" id="138">138</a>
+<a href="#139" id="139">139</a>
+<a href="#140" id="140">140</a>
+<a href="#141" id="141">141</a>
+<a href="#142" id="142">142</a>
+<a href="#143" id="143">143</a>
+<a href="#144" id="144">144</a>
+<a href="#145" id="145">145</a>
+<a href="#146" id="146">146</a>
+<a href="#147" id="147">147</a>
+<a href="#148" id="148">148</a>
+<a href="#149" id="149">149</a>
+<a href="#150" id="150">150</a>
+<a href="#151" id="151">151</a>
+<a href="#152" id="152">152</a>
+<a href="#153" id="153">153</a>
+<a href="#154" id="154">154</a>
+<a href="#155" id="155">155</a>
+<a href="#156" id="156">156</a>
+<a href="#157" id="157">157</a>
+<a href="#158" id="158">158</a>
+<a href="#159" id="159">159</a>
+<a href="#160" id="160">160</a>
+<a href="#161" id="161">161</a>
+<a href="#162" id="162">162</a>
+<a href="#163" id="163">163</a>
+<a href="#164" id="164">164</a>
+<a href="#165" id="165">165</a>
+<a href="#166" id="166">166</a>
+<a href="#167" id="167">167</a>
+<a href="#168" id="168">168</a>
+<a href="#169" id="169">169</a>
+<a href="#170" id="170">170</a>
+<a href="#171" id="171">171</a>
+<a href="#172" id="172">172</a>
+<a href="#173" id="173">173</a>
+<a href="#174" id="174">174</a>
+<a href="#175" id="175">175</a>
+<a href="#176" id="176">176</a>
+<a href="#177" id="177">177</a>
+<a href="#178" id="178">178</a>
+<a href="#179" id="179">179</a>
+<a href="#180" id="180">180</a>
+<a href="#181" id="181">181</a>
+<a href="#182" id="182">182</a>
+<a href="#183" id="183">183</a>
+<a href="#184" id="184">184</a>
+<a href="#185" id="185">185</a>
+<a href="#186" id="186">186</a>
+<a href="#187" id="187">187</a>
+<a href="#188" id="188">188</a>
+<a href="#189" id="189">189</a>
+<a href="#190" id="190">190</a>
+<a href="#191" id="191">191</a>
+<a href="#192" id="192">192</a>
+<a href="#193" id="193">193</a>
+<a href="#194" id="194">194</a>
+<a href="#195" id="195">195</a>
+<a href="#196" id="196">196</a>
+<a href="#197" id="197">197</a>
+<a href="#198" id="198">198</a>
+<a href="#199" id="199">199</a>
+<a href="#200" id="200">200</a>
+<a href="#201" id="201">201</a>
+<a href="#202" id="202">202</a>
+<a href="#203" id="203">203</a>
+<a href="#204" id="204">204</a>
+<a href="#205" id="205">205</a>
+<a href="#206" id="206">206</a>
+<a href="#207" id="207">207</a>
+<a href="#208" id="208">208</a>
+<a href="#209" id="209">209</a>
+<a href="#210" id="210">210</a>
+<a href="#211" id="211">211</a>
+<a href="#212" id="212">212</a>
+<a href="#213" id="213">213</a>
+<a href="#214" id="214">214</a>
+<a href="#215" id="215">215</a>
+<a href="#216" id="216">216</a>
+<a href="#217" id="217">217</a>
+<a href="#218" id="218">218</a>
+<a href="#219" id="219">219</a>
+<a href="#220" id="220">220</a>
+<a href="#221" id="221">221</a>
+<a href="#222" id="222">222</a>
+<a href="#223" id="223">223</a>
+<a href="#224" id="224">224</a>
+<a href="#225" id="225">225</a>
+<a href="#226" id="226">226</a>
+<a href="#227" id="227">227</a>
+<a href="#228" id="228">228</a>
+<a href="#229" id="229">229</a>
+<a href="#230" id="230">230</a>
+<a href="#231" id="231">231</a>
+<a href="#232" id="232">232</a>
+<a href="#233" id="233">233</a>
+<a href="#234" id="234">234</a>
+<a href="#235" id="235">235</a>
+<a href="#236" id="236">236</a>
+<a href="#237" id="237">237</a>
+<a href="#238" id="238">238</a>
+<a href="#239" id="239">239</a>
+<a href="#240" id="240">240</a>
+<a href="#241" id="241">241</a>
+<a href="#242" id="242">242</a>
+<a href="#243" id="243">243</a>
+<a href="#244" id="244">244</a>
+<a href="#245" id="245">245</a>
+<a href="#246" id="246">246</a>
+<a href="#247" id="247">247</a>
+<a href="#248" id="248">248</a>
+<a href="#249" id="249">249</a>
+<a href="#250" id="250">250</a>
+<a href="#251" id="251">251</a>
+<a href="#252" id="252">252</a>
+<a href="#253" id="253">253</a>
+<a href="#254" id="254">254</a>
+<a href="#255" id="255">255</a>
+<a href="#256" id="256">256</a>
+<a href="#257" id="257">257</a>
+<a href="#258" id="258">258</a>
+<a href="#259" id="259">259</a>
+<a href="#260" id="260">260</a></pre></div><pre class="rust"><code><span class="doccomment">//! Error types for problems that may arise when reading or storing wallet data to SQLite.
 
-<span class="kw">use</span> <span class="ident">std::error</span>;
-<span class="kw">use</span> <span class="ident">std::fmt</span>;
+</span><span class="kw">use </span>std::error;
+<span class="kw">use </span>std::fmt;
 
-<span class="kw">use</span> <span class="ident">zcash_client_backend</span>::{<span class="ident">data_api</span>, <span class="ident">encoding::TransparentCodecError</span>};
-<span class="kw">use</span> <span class="ident">zcash_primitives::consensus::BlockHeight</span>;
+<span class="kw">use </span>shardtree::error::ShardTreeError;
+<span class="kw">use </span>zcash_address::ParseError;
+<span class="kw">use </span>zcash_client_backend::PoolType;
+<span class="kw">use </span>zcash_keys::keys::AddressGenerationError;
+<span class="kw">use </span>zcash_primitives::zip32;
+<span class="kw">use </span>zcash_primitives::{consensus::BlockHeight, transaction::components::amount::BalanceError};
 
-<span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">NoteId</span>, <span class="ident">PRUNING_HEIGHT</span>};
+<span class="kw">use </span><span class="kw">crate</span>::wallet::commitment_tree;
+<span class="kw">use </span><span class="kw">crate</span>::AccountId;
 
-<span class="doccomment">/// The primary error type for the SQLite wallet backend.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">SqliteClientError</span> {
-    <span class="doccomment">/// Decoding of a stored value from its serialized form has failed.</span>
-    <span class="ident">CorruptedData</span>(<span class="ident">String</span>),
+<span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+</span><span class="kw">use </span>{
+    zcash_client_backend::encoding::TransparentCodecError,
+    zcash_primitives::{legacy::TransparentAddress, transaction::TxId},
+};
 
-    <span class="doccomment">/// Decoding of the extended full viewing key has failed (for the specified network)</span>
-    <span class="ident">IncorrectHrpExtFvk</span>,
+<span class="doccomment">/// The primary error type for the SQLite wallet backend.
+</span><span class="attr">#[derive(Debug)]
+</span><span class="kw">pub enum </span>SqliteClientError {
+    <span class="doccomment">/// Decoding of a stored value from its serialized form has failed.
+    </span>CorruptedData(String),
 
-    <span class="doccomment">/// The rcm value for a note cannot be decoded to a valid JubJub point.</span>
-    <span class="ident">InvalidNote</span>,
+    <span class="doccomment">/// An error occurred decoding a protobuf message.
+    </span>Protobuf(prost::DecodeError),
 
-    <span class="doccomment">/// The note id associated with a witness being stored corresponds to a</span>
-    <span class="doccomment">/// sent note, not a received note.</span>
-    <span class="ident">InvalidNoteId</span>,
+    <span class="doccomment">/// The rcm value for a note cannot be decoded to a valid JubJub point.
+    </span>InvalidNote,
 
-    <span class="doccomment">/// Illegal attempt to reinitialize an already-initialized wallet database.</span>
-    <span class="ident">TableNotEmpty</span>,
+    <span class="doccomment">/// Illegal attempt to reinitialize an already-initialized wallet database.
+    </span>TableNotEmpty,
 
-    <span class="doccomment">/// Bech32 decoding error</span>
-    <span class="ident">Bech32</span>(<span class="ident">bech32::Error</span>),
+    <span class="doccomment">/// A Zcash key or address decoding error
+    </span>DecodingError(ParseError),
 
-    <span class="doccomment">/// Base58 decoding error</span>
-    <span class="ident">Base58</span>(<span class="ident">bs58::decode::Error</span>),
+    <span class="doccomment">/// An error produced in legacy transparent address derivation
+    </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+    </span>TransparentDerivation(bip32::Error),
 
-    <span class="doccomment">/// Base58 decoding error</span>
-    <span class="ident">TransparentAddress</span>(<span class="ident">TransparentCodecError</span>),
+    <span class="doccomment">/// An error encountered in decoding a transparent address from its
+    /// serialized form.
+    </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+    </span>TransparentAddress(TransparentCodecError),
 
-    <span class="doccomment">/// Wrapper for rusqlite errors.</span>
-    <span class="ident">DbError</span>(<span class="ident">rusqlite::Error</span>),
+    <span class="doccomment">/// Wrapper for rusqlite errors.
+    </span>DbError(rusqlite::Error),
 
-    <span class="doccomment">/// Wrapper for errors from the IO subsystem</span>
-    <span class="ident">Io</span>(<span class="ident">std::io::Error</span>),
+    <span class="doccomment">/// Wrapper for errors from the IO subsystem
+    </span>Io(std::io::Error),
 
-    <span class="doccomment">/// A received memo cannot be interpreted as a UTF-8 string.</span>
-    <span class="ident">InvalidMemo</span>(<span class="ident">zcash_primitives::memo::Error</span>),
+    <span class="doccomment">/// A received memo cannot be interpreted as a UTF-8 string.
+    </span>InvalidMemo(zcash_primitives::memo::Error),
 
-    <span class="doccomment">/// A requested rewind would violate invariants of the</span>
-    <span class="doccomment">/// storage layer. The payload returned with this error is</span>
-    <span class="doccomment">/// (safe rewind height, requested height).</span>
-    <span class="ident">RequestedRewindInvalid</span>(<span class="ident">BlockHeight</span>, <span class="ident">BlockHeight</span>),
+    <span class="doccomment">/// An attempt to update block data would overwrite the current hash for a block with a
+    /// different hash. This indicates that a required rewind was not performed.
+    </span>BlockConflict(BlockHeight),
 
-    <span class="doccomment">/// Wrapper for errors from zcash_client_backend</span>
-    <span class="ident">BackendError</span>(<span class="ident">data_api::error::Error</span><span class="op">&lt;</span><span class="ident">NoteId</span><span class="op">&gt;</span>),
+    <span class="doccomment">/// A range of blocks provided to the database as a unit was non-sequential
+    </span>NonSequentialBlocks,
+
+    <span class="doccomment">/// A requested rewind would violate invariants of the storage layer. The payload returned with
+    /// this error is (safe rewind height, requested height). If no safe rewind height can be
+    /// determined, the safe rewind height member will be `None`.
+    </span>RequestedRewindInvalid {
+        safe_rewind_height: <span class="prelude-ty">Option</span>&lt;BlockHeight&gt;,
+        requested_height: BlockHeight,
+    },
+
+    <span class="doccomment">/// An error occurred in generating a Zcash address.
+    </span>AddressGeneration(AddressGenerationError),
+
+    <span class="doccomment">/// The account for which information was requested does not belong to the wallet.
+    </span>AccountUnknown,
+
+    <span class="doccomment">/// The account being added collides with an existing account in the wallet with the given ID.
+    /// The collision can be on the seed and ZIP-32 account index, or a shared FVK component.
+    </span>AccountCollision(AccountId),
+
+    <span class="doccomment">/// The account was imported, and ZIP-32 derivation information is not known for it.
+    </span>UnknownZip32Derivation,
+
+    <span class="doccomment">/// An error occurred deriving a spending key from a seed and a ZIP-32 account index.
+    </span>KeyDerivationError(zip32::AccountId),
+
+    <span class="doccomment">/// An error occurred while processing an account due to a failure in deriving the account's keys.
+    </span>BadAccountData(String),
+
+    <span class="doccomment">/// A caller attempted to initialize the accounts table with a discontinuous
+    /// set of account identifiers.
+    </span>AccountIdDiscontinuity,
+
+    <span class="doccomment">/// A caller attempted to construct a new account with an invalid account identifier.
+    </span>AccountIdOutOfRange,
+
+    <span class="doccomment">/// The address associated with a record being inserted was not recognized as
+    /// belonging to the wallet.
+    </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+    </span>AddressNotRecognized(TransparentAddress),
+
+    <span class="doccomment">/// An error occurred in inserting data into or accessing data from one of the wallet's note
+    /// commitment trees.
+    </span>CommitmentTree(ShardTreeError&lt;commitment_tree::Error&gt;),
+
+    <span class="doccomment">/// The block at the specified height was not available from the block cache.
+    </span>CacheMiss(BlockHeight),
+
+    <span class="doccomment">/// The height of the chain was not available; a call to [`WalletWrite::update_chain_tip`] is
+    /// required before the requested operation can succeed.
+    ///
+    /// [`WalletWrite::update_chain_tip`]:
+    /// zcash_client_backend::data_api::WalletWrite::update_chain_tip
+    </span>ChainHeightUnknown,
+
+    <span class="doccomment">/// Unsupported pool type
+    </span>UnsupportedPoolType(PoolType),
+
+    <span class="doccomment">/// An error occurred in computing wallet balance
+    </span>BalanceError(BalanceError),
+
+    <span class="doccomment">/// The proposal cannot be constructed until transactions with previously reserved
+    /// ephemeral address outputs have been mined. The parameters are the account id and
+    /// the index that could not safely be reserved.
+    </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+    </span>ReachedGapLimit(AccountId, u32),
+
+    <span class="doccomment">/// An ephemeral address would be reused. The parameters are the address in string
+    /// form, and the txid of the earliest transaction in which it is known to have been
+    /// used.
+    </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+    </span>EphemeralAddressReuse(String, TxId),
 }
 
-<span class="kw">impl</span> <span class="ident">error::Error</span> <span class="kw">for</span> <span class="ident">SqliteClientError</span> {
-    <span class="kw">fn</span> <span class="ident">source</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span>(<span class="kw">dyn</span> <span class="ident">error::Error</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>)<span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span> {
-            <span class="ident">SqliteClientError::InvalidMemo</span>(<span class="ident">e</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">e</span>),
-            <span class="ident">SqliteClientError::Bech32</span>(<span class="ident">e</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">e</span>),
-            <span class="ident">SqliteClientError::DbError</span>(<span class="ident">e</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">e</span>),
-            <span class="ident">SqliteClientError::Io</span>(<span class="ident">e</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">e</span>),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
+<span class="kw">impl </span>error::Error <span class="kw">for </span>SqliteClientError {
+    <span class="kw">fn </span>source(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>(<span class="kw">dyn </span>error::Error + <span class="lifetime">'static</span>)&gt; {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self </span>{
+            SqliteClientError::InvalidMemo(e) =&gt; <span class="prelude-val">Some</span>(e),
+            SqliteClientError::DbError(e) =&gt; <span class="prelude-val">Some</span>(e),
+            SqliteClientError::Io(e) =&gt; <span class="prelude-val">Some</span>(e),
+            SqliteClientError::BalanceError(e) =&gt; <span class="prelude-val">Some</span>(e),
+            SqliteClientError::AddressGeneration(e) =&gt; <span class="prelude-val">Some</span>(e),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">fmt::Display</span> <span class="kw">for</span> <span class="ident">SqliteClientError</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">fmt::Formatter</span>) -&gt; <span class="ident">fmt::Result</span> {
-        <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span> {
-            <span class="ident">SqliteClientError::CorruptedData</span>(<span class="ident">reason</span>) =&gt; {
-                <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Data DB is corrupted: {}&quot;</span>, <span class="ident">reason</span>)
+<span class="kw">impl </span>fmt::Display <span class="kw">for </span>SqliteClientError {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter) -&gt; fmt::Result {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self </span>{
+            SqliteClientError::CorruptedData(reason) =&gt; {
+                <span class="macro">write!</span>(f, <span class="string">"Data DB is corrupted: {}"</span>, reason)
             }
-            <span class="ident">SqliteClientError::IncorrectHrpExtFvk</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Incorrect HRP for extfvk&quot;</span>),
-            <span class="ident">SqliteClientError::InvalidNote</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Invalid note&quot;</span>),
-            <span class="ident">SqliteClientError::InvalidNoteId</span> =&gt;
-                <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;The note ID associated with an inserted witness must correspond to a received note.&quot;</span>),
-            <span class="ident">SqliteClientError::RequestedRewindInvalid</span>(<span class="ident">h</span>, <span class="ident">r</span>) =&gt;
-                <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;A rewind must be either of less than {} blocks, or at least back to block {} for your wallet; the requested height was {}.&quot;</span>, <span class="ident">PRUNING_HEIGHT</span>, <span class="ident">h</span>, <span class="ident">r</span>),
-            <span class="ident">SqliteClientError::Bech32</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">e</span>),
-            <span class="ident">SqliteClientError::Base58</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">e</span>),
-            <span class="ident">SqliteClientError::TransparentAddress</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">e</span>),
-            <span class="ident">SqliteClientError::TableNotEmpty</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Table is not empty&quot;</span>),
-            <span class="ident">SqliteClientError::DbError</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">e</span>),
-            <span class="ident">SqliteClientError::Io</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">e</span>),
-            <span class="ident">SqliteClientError::InvalidMemo</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">e</span>),
-            <span class="ident">SqliteClientError::BackendError</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">e</span>),
+            SqliteClientError::Protobuf(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"Failed to parse protobuf-encoded record: {}"</span>, e),
+            SqliteClientError::InvalidNote =&gt; <span class="macro">write!</span>(f, <span class="string">"Invalid note"</span>),
+            SqliteClientError::RequestedRewindInvalid { safe_rewind_height,  requested_height } =&gt; <span class="macro">write!</span>(
+                f,
+                <span class="string">"A rewind for your wallet may only target height {} or greater; the requested height was {}."</span>,
+                safe_rewind_height.map_or(<span class="string">"&lt;unavailable&gt;"</span>.to_owned(), |h0| <span class="macro">format!</span>(<span class="string">"{}"</span>, h0)),
+               requested_height
+            ),
+            SqliteClientError::DecodingError(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"{}"</span>, e),
+            <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+            </span>SqliteClientError::TransparentDerivation(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"{:?}"</span>, e),
+            <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+            </span>SqliteClientError::TransparentAddress(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"{}"</span>, e),
+            SqliteClientError::TableNotEmpty =&gt; <span class="macro">write!</span>(f, <span class="string">"Table is not empty"</span>),
+            SqliteClientError::DbError(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"{}"</span>, e),
+            SqliteClientError::Io(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"{}"</span>, e),
+            SqliteClientError::InvalidMemo(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"{}"</span>, e),
+            SqliteClientError::BlockConflict(h) =&gt; <span class="macro">write!</span>(f, <span class="string">"A block hash conflict occurred at height {}; rewind required."</span>, u32::from(<span class="kw-2">*</span>h)),
+            SqliteClientError::NonSequentialBlocks =&gt; <span class="macro">write!</span>(f, <span class="string">"`put_blocks` requires that the provided block range be sequential"</span>),
+            SqliteClientError::AddressGeneration(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"{}"</span>, e),
+            SqliteClientError::AccountUnknown =&gt; <span class="macro">write!</span>(f, <span class="string">"The account with the given ID does not belong to this wallet."</span>),
+            SqliteClientError::UnknownZip32Derivation =&gt; <span class="macro">write!</span>(f, <span class="string">"ZIP-32 derivation information is not known for this account."</span>),
+            SqliteClientError::KeyDerivationError(acct_id) =&gt; <span class="macro">write!</span>(f, <span class="string">"Key derivation failed for account {}"</span>, u32::from(<span class="kw-2">*</span>acct_id)),
+            SqliteClientError::BadAccountData(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"Failed to add account: {}"</span>, e),
+            SqliteClientError::AccountIdDiscontinuity =&gt; <span class="macro">write!</span>(f, <span class="string">"Wallet account identifiers must be sequential."</span>),
+            SqliteClientError::AccountIdOutOfRange =&gt; <span class="macro">write!</span>(f, <span class="string">"Wallet account identifiers must be less than 0x7FFFFFFF."</span>),
+            SqliteClientError::AccountCollision(id) =&gt; <span class="macro">write!</span>(f, <span class="string">"An account corresponding to the data provided already exists in the wallet with internal identifier {}."</span>, id.<span class="number">0</span>),
+            <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+            </span>SqliteClientError::AddressNotRecognized(<span class="kw">_</span>) =&gt; <span class="macro">write!</span>(f, <span class="string">"The address associated with a received txo is not identifiable as belonging to the wallet."</span>),
+            SqliteClientError::CommitmentTree(err) =&gt; <span class="macro">write!</span>(f, <span class="string">"An error occurred accessing or updating note commitment tree data: {}."</span>, err),
+            SqliteClientError::CacheMiss(height) =&gt; <span class="macro">write!</span>(f, <span class="string">"Requested height {} does not exist in the block cache."</span>, height),
+            SqliteClientError::ChainHeightUnknown =&gt; <span class="macro">write!</span>(f, <span class="string">"Chain height unknown; please call `update_chain_tip`"</span>),
+            SqliteClientError::UnsupportedPoolType(t) =&gt; <span class="macro">write!</span>(f, <span class="string">"Pool type is not currently supported: {}"</span>, t),
+            SqliteClientError::BalanceError(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"Balance error: {}"</span>, e),
+            <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+            </span>SqliteClientError::ReachedGapLimit(account_id, bad_index) =&gt; <span class="macro">write!</span>(f,
+                <span class="string">"The proposal cannot be constructed until transactions with previously reserved ephemeral address outputs have been mined. \
+                 The ephemeral address in account {account_id:?} at index {bad_index} could not be safely reserved."</span>,
+            ),
+            <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+            </span>SqliteClientError::EphemeralAddressReuse(address_str, txid) =&gt; <span class="macro">write!</span>(f, <span class="string">"The ephemeral address {address_str} previously used in txid {txid} would be reused."</span>),
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">rusqlite::Error</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">SqliteClientError</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">rusqlite::Error</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">SqliteClientError::DbError</span>(<span class="ident">e</span>)
+<span class="kw">impl </span>From&lt;rusqlite::Error&gt; <span class="kw">for </span>SqliteClientError {
+    <span class="kw">fn </span>from(e: rusqlite::Error) -&gt; <span class="self">Self </span>{
+        SqliteClientError::DbError(e)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">std::io::Error</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">SqliteClientError</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">std::io::Error</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">SqliteClientError::Io</span>(<span class="ident">e</span>)
+<span class="kw">impl </span>From&lt;std::io::Error&gt; <span class="kw">for </span>SqliteClientError {
+    <span class="kw">fn </span>from(e: std::io::Error) -&gt; <span class="self">Self </span>{
+        SqliteClientError::Io(e)
+    }
+}
+<span class="kw">impl </span>From&lt;ParseError&gt; <span class="kw">for </span>SqliteClientError {
+    <span class="kw">fn </span>from(e: ParseError) -&gt; <span class="self">Self </span>{
+        SqliteClientError::DecodingError(e)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">bech32::Error</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">SqliteClientError</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">bech32::Error</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">SqliteClientError::Bech32</span>(<span class="ident">e</span>)
+<span class="kw">impl </span>From&lt;prost::DecodeError&gt; <span class="kw">for </span>SqliteClientError {
+    <span class="kw">fn </span>from(e: prost::DecodeError) -&gt; <span class="self">Self </span>{
+        SqliteClientError::Protobuf(e)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">bs58::decode::Error</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">SqliteClientError</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">bs58::decode::Error</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">SqliteClientError::Base58</span>(<span class="ident">e</span>)
+<span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+</span><span class="kw">impl </span>From&lt;bip32::Error&gt; <span class="kw">for </span>SqliteClientError {
+    <span class="kw">fn </span>from(e: bip32::Error) -&gt; <span class="self">Self </span>{
+        SqliteClientError::TransparentDerivation(e)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">zcash_primitives::memo::Error</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">SqliteClientError</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">zcash_primitives::memo::Error</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">SqliteClientError::InvalidMemo</span>(<span class="ident">e</span>)
+<span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+</span><span class="kw">impl </span>From&lt;TransparentCodecError&gt; <span class="kw">for </span>SqliteClientError {
+    <span class="kw">fn </span>from(e: TransparentCodecError) -&gt; <span class="self">Self </span>{
+        SqliteClientError::TransparentAddress(e)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">data_api::error::Error</span><span class="op">&lt;</span><span class="ident">NoteId</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">SqliteClientError</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">data_api::error::Error</span><span class="op">&lt;</span><span class="ident">NoteId</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">SqliteClientError::BackendError</span>(<span class="ident">e</span>)
+<span class="kw">impl </span>From&lt;zcash_primitives::memo::Error&gt; <span class="kw">for </span>SqliteClientError {
+    <span class="kw">fn </span>from(e: zcash_primitives::memo::Error) -&gt; <span class="self">Self </span>{
+        SqliteClientError::InvalidMemo(e)
     }
 }
-</code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="zcash_client_sqlite" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.63.0-nightly (76761db59 2022-05-24)" ></div>
-</body></html>
+
+<span class="kw">impl </span>From&lt;ShardTreeError&lt;commitment_tree::Error&gt;&gt; <span class="kw">for </span>SqliteClientError {
+    <span class="kw">fn </span>from(e: ShardTreeError&lt;commitment_tree::Error&gt;) -&gt; <span class="self">Self </span>{
+        SqliteClientError::CommitmentTree(e)
+    }
+}
+
+<span class="kw">impl </span>From&lt;BalanceError&gt; <span class="kw">for </span>SqliteClientError {
+    <span class="kw">fn </span>from(e: BalanceError) -&gt; <span class="self">Self </span>{
+        SqliteClientError::BalanceError(e)
+    }
+}
+
+<span class="kw">impl </span>From&lt;AddressGenerationError&gt; <span class="kw">for </span>SqliteClientError {
+    <span class="kw">fn </span>from(e: AddressGenerationError) -&gt; <span class="self">Self </span>{
+        SqliteClientError::AddressGeneration(e)
+    }
+}
+</code></pre></div></section></main></body></html>

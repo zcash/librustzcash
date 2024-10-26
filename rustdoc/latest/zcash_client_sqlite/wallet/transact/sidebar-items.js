@@ -1,1 +1,0 @@
-initSidebarItems({"fn":[["get_spendable_sapling_notes",""],["select_spendable_sapling_notes",""]]});

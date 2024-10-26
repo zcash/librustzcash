@@ -1,1 +1,1 @@
-initSidebarItems({"fn":[["arb_amount",""],["arb_nonnegative_amount",""],["arb_positive_amount",""]]});
+window.SIDEBAR_ITEMS = {"fn":["arb_amount","arb_nonnegative_amount","arb_positive_amount"]};

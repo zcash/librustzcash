@@ -1,1 +1,1 @@
-initSidebarItems({"constant":[["VALID_OPCODES",""]],"fn":[["arb_bundle",""],["arb_outpoint",""],["arb_script",""],["arb_txin",""],["arb_txout",""]]});
+window.SIDEBAR_ITEMS = {"constant":["VALID_OPCODES"],"fn":["arb_bundle","arb_outpoint","arb_script","arb_txin","arb_txout"]};

@@ -1,1 +1,1 @@
-initSidebarItems({"mod":[["sha256d",""]]});
+window.SIDEBAR_ITEMS = {"mod":["sha256d"]};

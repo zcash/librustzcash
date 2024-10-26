@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ChangeError","DustAction","EphemeralBalance","StandardFeeRule"],"mod":["common","sapling","standard","zip317"],"struct":["ChangeValue","DustOutputPolicy","SplitPolicy","TransactionBalance"],"trait":["ChangeStrategy"]};

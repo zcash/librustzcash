@@ -1,1 +1,1 @@
-initSidebarItems({"struct":[["MockBlockSource",""],["MockWalletDb",""]]});
+window.SIDEBAR_ITEMS = {"enum":["AddressType"],"fn":["single_output_change_strategy"],"mod":["pool","sapling","transparent"],"struct":["CachedBlock","FakeCompactOutput","InitialChainState","MockWalletDb","NoteCommitments","TestAccount","TestBuilder","TestState","TransactionSummary"],"trait":["DataStoreFactory","Reset","TestCache","TestFvk"]};

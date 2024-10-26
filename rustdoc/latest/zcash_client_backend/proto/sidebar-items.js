@@ -1,1 +1,1 @@
-initSidebarItems({"mod":[["compact_formats","Generated file from `compact_formats.proto`"]]});
+window.SIDEBAR_ITEMS = {"constant":["PROPOSAL_SER_V1"],"enum":["ProposalDecodingError"],"mod":["compact_formats","proposal","service"]};

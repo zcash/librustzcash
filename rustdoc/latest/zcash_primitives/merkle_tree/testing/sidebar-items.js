@@ -1,1 +1,1 @@
-initSidebarItems({"fn":[["arb_commitment_tree",""]]});
+window.SIDEBAR_ITEMS = {};

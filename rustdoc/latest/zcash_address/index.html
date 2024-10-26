@@ -1,20 +1,107 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `zcash_address` crate."><meta name="keywords" content="rust, rustlang, rust-lang, zcash_address"><title>zcash_address - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../normalize.css"><link rel="stylesheet" type="text/css" href="../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../dark.css" disabled><link rel="stylesheet" type="text/css" href="../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../storage.js"></script><script src="../crates.js"></script><script defer src="../main.js"></script>
-    <noscript><link rel="stylesheet" href="../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../favicon.svg"></head><body class="rustdoc mod crate"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../zcash_address/index.html"><div class="logo-container"><img class="rust-logo" src="../rust-logo.svg" alt="logo"></div>
-        </a><h2 class="location"></h2>
-    </nav>
-    <nav class="sidebar"><a class="sidebar-logo" href="../zcash_address/index.html"><div class="logo-container"><img class="rust-logo" src="../rust-logo.svg" alt="logo"></div>
-        </a><h2 class="location"><a href="#">Crate zcash_address</a></h2><div class="sidebar-elems"><div class="block"><ul><li class="version">Version 0.1.0</li><li><a id="all-types" href="all.html">All Items</a></li></div></ul><section><div class="block"><ul><li><a href="#modules">Modules</a></li><li><a href="#structs">Structs</a></li><li><a href="#enums">Enums</a></li><li><a href="#traits">Traits</a></li></ul></div></section><div id="sidebar-vars" data-name="zcash_address" data-ty="mod" data-relpath=""></div><script defer src="sidebar-items.js"></script></div></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../zcash_address/index.html"><img class="rust-logo" src="../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><button type="button" id="help-button" title="help">?</button><div id="settings-menu" tabindex="-1">
-                                <a href="../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../wheel.svg"></a></div>
-                        </div></form></nav></div><section id="main-content" class="content"><div class="main-heading">
-    <h1 class="fqn"><span class="in-band">Crate <a class="mod" href="#">zcash_address</a><button id="copy-path" onclick="copy_path(this)" title="Copy item path to clipboard"><img src="../clipboard.svg" width="19" height="18" alt="Copy item path"></button></span></h1><span class="out-of-band"><a class="srclink" href="../src/zcash_address/lib.rs.html#1-107">source</a> · <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class="inner">&#x2212;</span>]</a></span></div><h2 id="modules" class="small-section-header"><a href="#modules">Modules</a></h2>
-<div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="mod" href="unified/index.html" title="zcash_address::unified mod">unified</a></div><div class="item-right docblock-short"></div></div></div><h2 id="structs" class="small-section-header"><a href="#structs">Structs</a></h2>
-<div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.UnsupportedAddress.html" title="zcash_address::UnsupportedAddress struct">UnsupportedAddress</a></div><div class="item-right docblock-short"><p>An address type is not supported for conversion.</p>
-</div></div><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.ZcashAddress.html" title="zcash_address::ZcashAddress struct">ZcashAddress</a></div><div class="item-right docblock-short"><p>A Zcash address.</p>
-</div></div></div><h2 id="enums" class="small-section-header"><a href="#enums">Enums</a></h2>
-<div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="enum" href="enum.Network.html" title="zcash_address::Network enum">Network</a></div><div class="item-right docblock-short"><p>The Zcash network for which an address is encoded.</p>
-</div></div><div class="item-row"><div class="item-left module-item"><a class="enum" href="enum.ParseError.html" title="zcash_address::ParseError enum">ParseError</a></div><div class="item-right docblock-short"><p>An error while attempting to parse a string as a Zcash address.</p>
-</div></div></div><h2 id="traits" class="small-section-header"><a href="#traits">Traits</a></h2>
-<div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="trait" href="trait.FromAddress.html" title="zcash_address::FromAddress trait">FromAddress</a></div><div class="item-right docblock-short"><p>A helper trait for converting a <a href="struct.ZcashAddress.html"><code>ZcashAddress</code></a> into another type.</p>
-</div></div><div class="item-row"><div class="item-left module-item"><a class="trait" href="trait.ToAddress.html" title="zcash_address::ToAddress trait">ToAddress</a></div><div class="item-right docblock-short"><p>A helper trait for converting another type into a <a href="struct.ZcashAddress.html"><code>ZcashAddress</code></a>.</p>
-</div></div></div></section></div></main><div id="rustdoc-vars" data-root-path="../" data-current-crate="zcash_address" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.63.0-nightly (76761db59 2022-05-24)" ></div>
-</body></html>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Parser for all defined Zcash address types."><title>zcash_address - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-4ee5002b.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="zcash_address" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (a93c1718c 2024-10-24)" data-channel="nightly" data-search-js="search-c5a66128.js" data-settings-js="settings-0f613d39.js" ><script src="../static.files/storage-59e33391.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button></nav><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../zcash_address/index.html">zcash_<wbr>address</a><span class="version">0.6.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#using-this-crate" title="Using this crate">Using this crate</a><ul><li><a href="#i-just-need-to-validate-zcash-addresses" title="I just need to validate Zcash addresses">I just need to validate Zcash addresses</a></li><li><a href="#i-want-to-parse-zcash-addresses-in-a-rust-wallet-app-that-uses-the-zcash_primitives-transaction-builder" title="I want to parse Zcash addresses in a Rust wallet app that uses the `zcash_primitives` transaction builder">I want to parse Zcash addresses in a Rust wallet app that uses the <code>zcash_primitives</code> transaction builder</a></li><li><a href="#i-want-to-parse-unified-addresses" title="I want to parse Unified Addresses">I want to parse Unified Addresses</a></li><li><a href="#i-want-to-parse-mainnet-zcash-addresses-in-a-language-that-supports-c-ffi" title="I want to parse mainnet Zcash addresses in a language that supports C FFI">I want to parse mainnet Zcash addresses in a language that supports C FFI</a></li></ul></li></ul><h3><a href="#modules">Crate Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#traits" title="Traits">Traits</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer"></div><main><div class="width-limiter"><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1>Crate <span>zcash_address</span><button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/zcash_address/lib.rs.html#1-383">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p><em>Parser for all defined Zcash address types.</em></p>
+<p>This crate implements address parsing as a two-phase process, built around the opaque
+<a href="struct.ZcashAddress.html" title="struct zcash_address::ZcashAddress"><code>ZcashAddress</code></a> type.</p>
+<ul>
+<li><a href="struct.ZcashAddress.html" title="struct zcash_address::ZcashAddress"><code>ZcashAddress</code></a> can be parsed from, and encoded to, strings.</li>
+<li><a href="struct.ZcashAddress.html#method.convert" title="method zcash_address::ZcashAddress::convert"><code>ZcashAddress::convert</code></a> or <a href="struct.ZcashAddress.html#method.convert_if_network" title="method zcash_address::ZcashAddress::convert_if_network"><code>ZcashAddress::convert_if_network</code></a> can be used to
+convert a parsed address into custom types that implement the <a href="trait.TryFromAddress.html" title="trait zcash_address::TryFromAddress"><code>TryFromAddress</code></a> or
+<a href="trait.TryFromRawAddress.html" title="trait zcash_address::TryFromRawAddress"><code>TryFromRawAddress</code></a> traits.</li>
+<li>Custom types can be converted into a <a href="struct.ZcashAddress.html" title="struct zcash_address::ZcashAddress"><code>ZcashAddress</code></a> via its implementation of the
+<a href="trait.ToAddress.html" title="trait zcash_address::ToAddress"><code>ToAddress</code></a> trait.</li>
+</ul>
+<div class="example-wrap"><pre class="language-text"><code>        s.parse()              .convert()
+        --------&gt;              ---------&gt;
+Strings           ZcashAddress            Custom types
+        &lt;--------              &lt;---------
+        .encode()              ToAddress</code></pre></div>
+<p>It is important to note that this crate does not depend on any of the Zcash protocol
+crates (e.g. <code>sapling-crypto</code> or <code>orchard</code>). This crate has minimal dependencies by
+design; it focuses solely on parsing, handling those concerns for you, while exposing
+APIs that enable you to convert the parsed data into the Rust types you want to use.</p>
+<h2 id="using-this-crate"><a class="doc-anchor" href="#using-this-crate">§</a>Using this crate</h2><h3 id="i-just-need-to-validate-zcash-addresses"><a class="doc-anchor" href="#i-just-need-to-validate-zcash-addresses">§</a>I just need to validate Zcash addresses</h3>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">fn </span>is_valid_zcash_address(addr_string: <span class="kw-2">&amp;</span>str) -&gt; bool {
+    addr_string.parse::&lt;ZcashAddress&gt;().is_ok()
+}</code></pre></div>
+<h3 id="i-want-to-parse-zcash-addresses-in-a-rust-wallet-app-that-uses-the-zcash_primitives-transaction-builder"><a class="doc-anchor" href="#i-want-to-parse-zcash-addresses-in-a-rust-wallet-app-that-uses-the-zcash_primitives-transaction-builder">§</a>I want to parse Zcash addresses in a Rust wallet app that uses the <code>zcash_primitives</code> transaction builder</h3>
+<p>Use <code>zcash_client_backend::address::RecipientAddress</code>, which implements the traits in
+this crate to parse address strings into protocol types that work with the transaction
+builder in the <code>zcash_primitives</code> crate (as well as the wallet functionality in the
+<code>zcash_client_backend</code> crate itself).</p>
+<blockquote>
+<p>We intend to refactor the key and address types from the <code>zcash_client_backend</code> and
+<code>zcash_primitives</code> crates into a separate crate focused on dealing with Zcash key
+material. That crate will then be what you should use.</p>
+</blockquote>
+<h3 id="i-want-to-parse-unified-addresses"><a class="doc-anchor" href="#i-want-to-parse-unified-addresses">§</a>I want to parse Unified Addresses</h3>
+<p>See the <a href="unified/struct.Address.html" title="struct zcash_address::unified::Address"><code>unified::Address</code></a> documentation for examples.</p>
+<p>While the <a href="unified/struct.Address.html" title="struct zcash_address::unified::Address"><code>unified::Address</code></a> type does have parsing methods, you should still parse
+your address strings with <a href="struct.ZcashAddress.html" title="struct zcash_address::ZcashAddress"><code>ZcashAddress</code></a> and then convert; this will ensure that for
+other Zcash address types you get a <a href="enum.ConversionError.html#variant.Unsupported" title="variant zcash_address::ConversionError::Unsupported"><code>ConversionError::Unsupported</code></a>, which is a
+better error for your users.</p>
+<h3 id="i-want-to-parse-mainnet-zcash-addresses-in-a-language-that-supports-c-ffi"><a class="doc-anchor" href="#i-want-to-parse-mainnet-zcash-addresses-in-a-language-that-supports-c-ffi">§</a>I want to parse mainnet Zcash addresses in a language that supports C FFI</h3>
+<p>As an example, you could use static functions to create the address types in the
+target language from the parsed data.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>std::ffi::{CStr, c_char, c_void};
+<span class="kw">use </span>std::ptr;
+
+<span class="kw">use </span>zcash_address::{ConversionError, Network, TryFromRawAddress, ZcashAddress};
+
+<span class="comment">// Functions that return a pointer to a heap-allocated address of the given kind in
+// the target language. These should be augmented to return any relevant errors.
+</span><span class="kw">extern </span>{
+    <span class="kw">fn </span>addr_from_sapling(data: <span class="kw-2">*const </span>u8) -&gt; <span class="kw-2">*mut </span>c_void;
+    <span class="kw">fn </span>addr_from_transparent_p2pkh(data: <span class="kw-2">*const </span>u8) -&gt; <span class="kw-2">*mut </span>c_void;
+}
+
+<span class="kw">struct </span>ParsedAddress(<span class="kw-2">*mut </span>c_void);
+
+<span class="kw">impl </span>TryFromRawAddress <span class="kw">for </span>ParsedAddress {
+    <span class="kw">type </span>Error = <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str;
+
+    <span class="kw">fn </span>try_from_raw_sapling(
+        data: [u8; <span class="number">43</span>],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, ConversionError&lt;<span class="self">Self</span>::Error&gt;&gt; {
+        <span class="kw">let </span>parsed = <span class="kw">unsafe </span>{ addr_from_sapling(data[..].as_ptr()) };
+        <span class="kw">if </span>parsed.is_null() {
+            <span class="prelude-val">Err</span>(<span class="string">"Reason for the failure"</span>.into())
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(<span class="self">Self</span>(parsed))
+        }
+    }
+
+    <span class="kw">fn </span>try_from_raw_transparent_p2pkh(
+        data: [u8; <span class="number">20</span>],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, ConversionError&lt;<span class="self">Self</span>::Error&gt;&gt; {
+        <span class="kw">let </span>parsed = <span class="kw">unsafe </span>{ addr_from_transparent_p2pkh(data[..].as_ptr()) };
+        <span class="kw">if </span>parsed.is_null() {
+            <span class="prelude-val">Err</span>(<span class="string">"Reason for the failure"</span>.into())
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(<span class="self">Self</span>(parsed))
+        }
+    }
+}
+
+<span class="kw">pub extern </span><span class="string">"C" </span><span class="kw">fn </span>parse_zcash_address(encoded: <span class="kw-2">*const </span>c_char) -&gt; <span class="kw-2">*mut </span>c_void {
+    <span class="kw">let </span>encoded = <span class="kw">unsafe </span>{ CStr::from_ptr(encoded) }.to_str().expect(<span class="string">"valid"</span>);
+
+    <span class="kw">let </span>addr = <span class="kw">match </span>ZcashAddress::try_from_encoded(encoded) {
+        <span class="prelude-val">Ok</span>(addr) =&gt; addr,
+        <span class="prelude-val">Err</span>(e) =&gt; {
+            <span class="comment">// This was either an invalid address encoding, or not a Zcash address.
+            // You should pass this error back across the FFI.
+            </span><span class="kw">return </span>ptr::null_mut();
+        }
+    };
+
+    <span class="kw">match </span>addr.convert_if_network::&lt;ParsedAddress&gt;(Network::Main) {
+        <span class="prelude-val">Ok</span>(parsed) =&gt; parsed.<span class="number">0</span>,
+        <span class="prelude-val">Err</span>(e) =&gt; {
+            <span class="comment">// We didn't implement all of the methods of `TryFromRawAddress`, so if an
+            // address with one of those kinds is parsed, it will result in an error
+            // here that should be passed back across the FFI.
+            </span>ptr::null_mut()
+        }
+    }
+}</code></pre></div>
+</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><ul class="item-table"><li><div class="item-name"><a class="mod" href="test_vectors/index.html" title="mod zcash_address::test_vectors">test_<wbr>vectors</a><wbr><span class="stab portability" title="Available on crate feature `test-dependencies` only"><code>test-dependencies</code></span></div></li><li><div class="item-name"><a class="mod" href="testing/index.html" title="mod zcash_address::testing">testing</a><wbr><span class="stab portability" title="Available on crate feature `test-dependencies` only"><code>test-dependencies</code></span></div></li><li><div class="item-name"><a class="mod" href="unified/index.html" title="mod zcash_address::unified">unified</a></div><div class="desc docblock-short">Implementation of <a href="https://zips.z.cash/zip-0316">ZIP 316</a> Unified Addresses and Viewing Keys.</div></li></ul><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><ul class="item-table"><li><div class="item-name"><a class="struct" href="struct.UnsupportedAddress.html" title="struct zcash_address::UnsupportedAddress">Unsupported<wbr>Address</a></div><div class="desc docblock-short">An error indicating that an address type is not supported for conversion.</div></li><li><div class="item-name"><a class="struct" href="struct.ZcashAddress.html" title="struct zcash_address::ZcashAddress">Zcash<wbr>Address</a></div><div class="desc docblock-short">A Zcash address.</div></li></ul><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><ul class="item-table"><li><div class="item-name"><a class="enum" href="enum.ConversionError.html" title="enum zcash_address::ConversionError">Conversion<wbr>Error</a></div><div class="desc docblock-short">An error encountered while converting a parsed <a href="struct.ZcashAddress.html" title="struct zcash_address::ZcashAddress"><code>ZcashAddress</code></a> into another type.</div></li><li><div class="item-name"><a class="enum" href="enum.Network.html" title="enum zcash_address::Network">Network</a></div><div class="desc docblock-short">The enumeration of known Zcash network types.</div></li><li><div class="item-name"><a class="enum" href="enum.ParseError.html" title="enum zcash_address::ParseError">Parse<wbr>Error</a></div><div class="desc docblock-short">An error while attempting to parse a string as a Zcash address.</div></li></ul><h2 id="traits" class="section-header">Traits<a href="#traits" class="anchor">§</a></h2><ul class="item-table"><li><div class="item-name"><a class="trait" href="trait.ToAddress.html" title="trait zcash_address::ToAddress">ToAddress</a></div><div class="desc docblock-short">A helper trait for converting another type into a <a href="struct.ZcashAddress.html" title="struct zcash_address::ZcashAddress"><code>ZcashAddress</code></a>.</div></li><li><div class="item-name"><a class="trait" href="trait.TryFromAddress.html" title="trait zcash_address::TryFromAddress">TryFrom<wbr>Address</a></div><div class="desc docblock-short">A helper trait for converting a <a href="struct.ZcashAddress.html" title="struct zcash_address::ZcashAddress"><code>ZcashAddress</code></a> into another type.</div></li><li><div class="item-name"><a class="trait" href="trait.TryFromRawAddress.html" title="trait zcash_address::TryFromRawAddress">TryFrom<wbr>RawAddress</a></div><div class="desc docblock-short">A helper trait for converting a <a href="struct.ZcashAddress.html" title="struct zcash_address::ZcashAddress"><code>ZcashAddress</code></a> into a network-agnostic type.</div></li></ul></section></div></main></body></html>

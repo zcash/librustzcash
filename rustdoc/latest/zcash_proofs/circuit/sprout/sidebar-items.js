@@ -1,1 +1,1 @@
-initSidebarItems({"constant":[["TREE_DEPTH",""]],"struct":[["CommitmentRandomness",""],["JoinSplit",""],["JsInput",""],["JsOutput",""],["NoteValue",""],["PayingKey",""],["SpendingKey",""],["UniqueRandomness",""]]});
+window.SIDEBAR_ITEMS = {"constant":["TREE_DEPTH"],"struct":["CommitmentRandomness","JoinSplit","JsInput","JsOutput","NoteValue","PayingKey","SpendingKey","UniqueRandomness"]};

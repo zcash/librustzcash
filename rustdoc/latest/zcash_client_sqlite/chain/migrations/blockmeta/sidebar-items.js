@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["all_migrations"],"mod":["init"]};

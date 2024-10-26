@@ -1,1 +1,1 @@
-initSidebarItems({"fn":[["with_blocks","Implements a traversal of `limit` blocks of the block cache database."]],"mod":[["init","Functions for initializing the various databases."]]});
+window.SIDEBAR_ITEMS = {"mod":["init","migrations"],"struct":["BlockMeta"]};

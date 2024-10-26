@@ -1,1 +1,1 @@
-initSidebarItems({"struct":[["Bundle",""],["JsDescription",""]]});
+window.SIDEBAR_ITEMS = {"struct":["Bundle","JsDescription"]};

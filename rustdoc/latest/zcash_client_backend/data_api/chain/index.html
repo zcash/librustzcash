@@ -1,79 +1,141 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Tools for blockchain validation &amp; scanning"><meta name="keywords" content="rust, rustlang, rust-lang, chain"><title>zcash_client_backend::data_api::chain - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script src="../../../crates.js"></script><script defer src="../../../main.js"></script>
-    <noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc mod"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../zcash_client_backend/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div>
-        </a><h2 class="location"></h2>
-    </nav>
-    <nav class="sidebar"><a class="sidebar-logo" href="../../../zcash_client_backend/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div>
-        </a><h2 class="location"><a href="#">Module chain</a></h2><div class="sidebar-elems"><section><div class="block"><ul><li><a href="#functions">Functions</a></li></ul></div></section><div id="sidebar-vars" data-name="chain" data-ty="mod" data-relpath="./"></div><script defer src="./sidebar-items.js"></script></div></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../zcash_client_backend/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><button type="button" id="help-button" title="help">?</button><div id="settings-menu" tabindex="-1">
-                                <a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div>
-                        </div></form></nav></div><section id="main-content" class="content"><div class="main-heading">
-    <h1 class="fqn"><span class="in-band">Module <a href="../../index.html">zcash_client_backend</a>::<wbr><a href="../index.html">data_api</a>::<wbr><a class="mod" href="#">chain</a><button id="copy-path" onclick="copy_path(this)" title="Copy item path to clipboard"><img src="../../../clipboard.svg" width="19" height="18" alt="Copy item path"></button></span></h1><span class="out-of-band"><a class="srclink" href="../../../src/zcash_client_backend/data_api/chain.rs.html#1-307">source</a> · <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class="inner">&#x2212;</span>]</a></span></div><details class="rustdoc-toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Tools for blockchain validation &amp; scanning</p>
-<h2 id="examples"><a href="#examples">Examples</a></h2>
-<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use</span> <span class="ident">zcash_primitives</span>::{
-    <span class="ident">consensus</span>::{<span class="ident">BlockHeight</span>, <span class="ident">Network</span>, <span class="ident">Parameters</span>}
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Tools for blockchain validation &#38; scanning"><title>zcash_client_backend::data_api::chain - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-4ee5002b.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (a93c1718c 2024-10-24)" data-channel="nightly" data-search-js="search-c5a66128.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button></nav><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../zcash_client_backend/index.html">zcash_<wbr>client_<wbr>backend</a><span class="version">0.14.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module chain</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#examples" title="Examples">Examples</a></li></ul><h3><a href="#modules">Module Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#traits" title="Traits">Traits</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In zcash_<wbr>client_<wbr>backend::<wbr>data_<wbr>api</a></h2></div></div></nav><div class="sidebar-resizer"></div><main><div class="width-limiter"><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><span class="rustdoc-breadcrumbs"><a href="../../index.html">zcash_client_backend</a>::<wbr><a href="../index.html">data_api</a></span><h1>Module <span>chain</span><button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/zcash_client_backend/data_api/chain.rs.html#1-727">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Tools for blockchain validation &amp; scanning</p>
+<h2 id="examples"><a class="doc-anchor" href="#examples">§</a>Examples</h2>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>zcash_primitives::{
+    consensus::{BlockHeight, Network, Parameters},
 };
 
-<span class="kw">use</span> <span class="ident">zcash_client_backend</span>::{
-    <span class="ident">data_api</span>::{
-        <span class="ident">BlockSource</span>, <span class="ident">WalletRead</span>, <span class="ident">WalletWrite</span>,
-        <span class="ident">chain</span>::{
-            <span class="ident">validate_chain</span>,
-            <span class="ident">scan_cached_blocks</span>,
+<span class="kw">use </span>zcash_client_backend::{
+    data_api::{
+        WalletRead, WalletWrite, WalletCommitmentTrees,
+        chain::{
+            BlockSource,
+            CommitmentTreeRoot,
+            error::Error,
+            scan_cached_blocks,
+            testing <span class="kw">as </span>chain_testing,
         },
-        <span class="ident">error::Error</span>,
-        <span class="ident">testing</span>,
+        scanning::ScanPriority,
+        testing,
     },
 };
 
-<span class="kw">let</span> <span class="ident">network</span> <span class="op">=</span> <span class="ident">Network::TestNetwork</span>;
-<span class="kw">let</span> <span class="ident">db_cache</span> <span class="op">=</span> <span class="ident">testing::MockBlockSource</span> {};
-<span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">db_data</span> <span class="op">=</span> <span class="ident">testing::MockWalletDb</span> {};
 
-<span class="comment">// 1) Download new CompactBlocks into db_cache.</span>
+<span class="kw">let </span>network = Network::TestNetwork;
+<span class="kw">let </span>block_source = chain_testing::MockBlockSource;
+<span class="kw">let </span><span class="kw-2">mut </span>wallet_db = testing::MockWalletDb::new(Network::TestNetwork);
 
-<span class="comment">// 2) Run the chain validator on the received blocks.</span>
-<span class="comment">//</span>
-<span class="comment">// Given that we assume the server always gives us correct-at-the-time blocks, any</span>
-<span class="comment">// errors are in the blocks we have previously cached or scanned.</span>
-<span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="ident">validate_chain</span>(<span class="kw-2">&amp;</span><span class="ident">network</span>, <span class="kw-2">&amp;</span><span class="ident">db_cache</span>, <span class="ident">db_data</span>.<span class="ident">get_max_height_hash</span>()<span class="question-mark">?</span>) {
-    <span class="kw">match</span> <span class="ident">e</span> {
-        <span class="ident">Error::InvalidChain</span>(<span class="ident">lower_bound</span>, <span class="kw">_</span>) =&gt; {
-            <span class="comment">// a) Pick a height to rewind to.</span>
-            <span class="comment">//</span>
-            <span class="comment">// This might be informed by some external chain reorg information, or</span>
-            <span class="comment">// heuristics such as the platform, available bandwidth, size of recent</span>
-            <span class="comment">// CompactBlocks, etc.</span>
-            <span class="kw">let</span> <span class="ident">rewind_height</span> <span class="op">=</span> <span class="ident">lower_bound</span> <span class="op">-</span> <span class="number">10</span>;
+<span class="comment">// 1) Download note commitment tree data from lightwalletd
+</span><span class="kw">let </span>roots: Vec&lt;CommitmentTreeRoot&lt;sapling::Node&gt;&gt; = <span class="macro">unimplemented!</span>();
 
-            <span class="comment">// b) Rewind scanned block information.</span>
-            <span class="ident">db_data</span>.<span class="ident">rewind_to_height</span>(<span class="ident">rewind_height</span>);
+<span class="comment">// 2) Pass the commitment tree data to the database.
+</span>wallet_db.put_sapling_subtree_roots(<span class="number">0</span>, <span class="kw-2">&amp;</span>roots).unwrap();
 
-            <span class="comment">// c) Delete cached blocks from rewind_height onwards.</span>
-            <span class="comment">//</span>
-            <span class="comment">// This does imply that assumed-valid blocks will be re-downloaded, but it</span>
-            <span class="comment">// is also possible that in the intervening time, a chain reorg has</span>
-            <span class="comment">// occurred that orphaned some of those blocks.</span>
+<span class="comment">// 3) Download chain tip metadata from lightwalletd
+</span><span class="kw">let </span>tip_height: BlockHeight = <span class="macro">unimplemented!</span>();
 
-            <span class="comment">// d) If there is some separate thread or service downloading</span>
-            <span class="comment">// CompactBlocks, tell it to go back and download from rewind_height</span>
-            <span class="comment">// onwards.</span>
-        },
-        <span class="ident">e</span> =&gt; {
-            <span class="comment">// handle or return other errors</span>
+<span class="comment">// 4) Notify the wallet of the updated chain tip.
+</span>wallet_db.update_chain_tip(tip_height).map_err(Error::Wallet)<span class="question-mark">?</span>;
 
+<span class="comment">// 5) Get the suggested scan ranges from the wallet database
+</span><span class="kw">let </span><span class="kw-2">mut </span>scan_ranges = wallet_db.suggest_scan_ranges().map_err(Error::Wallet)<span class="question-mark">?</span>;
+
+<span class="comment">// 6) Run the following loop until the wallet's view of the chain tip as of the previous wallet
+//    session is valid.
+</span><span class="kw">loop </span>{
+    <span class="comment">// If there is a range of blocks that needs to be verified, it will always be returned as
+    // the first element of the vector of suggested ranges.
+    </span><span class="kw">match </span>scan_ranges.first() {
+        <span class="prelude-val">Some</span>(scan_range) <span class="kw">if </span>scan_range.priority() == ScanPriority::Verify =&gt; {
+            <span class="comment">// Download the chain state for the block prior to the start of the range you want
+            // to scan.
+            </span><span class="kw">let </span>chain_state = <span class="macro">unimplemented!</span>(<span class="string">"get_chain_state(scan_range.block_range().start - 1)?;"</span>);
+            <span class="comment">// Download the blocks in `scan_range` into the block source, overwriting any
+            // existing blocks in this range.
+            </span><span class="macro">unimplemented!</span>(<span class="string">"cache_blocks(scan_range)?;"</span>);
+
+            <span class="comment">// Scan the downloaded blocks
+            </span><span class="kw">let </span>scan_result = scan_cached_blocks(
+                <span class="kw-2">&amp;</span>network,
+                <span class="kw-2">&amp;</span>block_source,
+                <span class="kw-2">&amp;mut </span>wallet_db,
+                scan_range.block_range().start,
+                chain_state,
+                scan_range.len()
+            );
+
+            <span class="comment">// Check for scanning errors that indicate that the wallet's chain tip is out of
+            // sync with blockchain history.
+            </span><span class="kw">match </span>scan_result {
+                <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; {
+                    <span class="comment">// At this point, the cache and scanned data are locally consistent (though
+                    // not necessarily consistent with the latest chain tip - this would be
+                    // discovered the next time this codepath is executed after new blocks are
+                    // received) so we can break out of the loop.
+                    </span><span class="kw">break</span>;
+                }
+                <span class="prelude-val">Err</span>(Error::Scan(err)) <span class="kw">if </span>err.is_continuity_error() =&gt; {
+                    <span class="comment">// Pick a height to rewind to, which must be at least one block before
+                    // the height at which the error occurred, but may be an earlier height
+                    // determined based on heuristics such as the platform, available bandwidth,
+                    // size of recent CompactBlocks, etc.
+                    </span><span class="kw">let </span>rewind_height = err.at_height().saturating_sub(<span class="number">10</span>);
+
+                    <span class="comment">// Rewind to the chosen height.
+                    </span>wallet_db.truncate_to_height(rewind_height).map_err(Error::Wallet)<span class="question-mark">?</span>;
+
+                    <span class="comment">// Delete cached blocks from rewind_height onwards.
+                    //
+                    // This does imply that assumed-valid blocks will be re-downloaded, but it
+                    // is also possible that in the intervening time, a chain reorg has
+                    // occurred that orphaned some of those blocks.
+                    </span><span class="macro">unimplemented!</span>();
+                }
+                <span class="prelude-val">Err</span>(other) =&gt; {
+                    <span class="comment">// Handle or return other errors
+                </span>}
+            }
+
+            <span class="comment">// In case we updated the suggested scan ranges, now re-request.
+            </span>scan_ranges = wallet_db.suggest_scan_ranges().map_err(Error::Wallet)<span class="question-mark">?</span>;
+        }
+        <span class="kw">_ </span>=&gt; {
+            <span class="comment">// Nothing to verify; break out of the loop
+            </span><span class="kw">break</span>;
         }
     }
 }
 
-<span class="comment">// 3) Scan (any remaining) cached blocks.</span>
-<span class="comment">//</span>
-<span class="comment">// At this point, the cache and scanned data are locally consistent (though not</span>
-<span class="comment">// necessarily consistent with the latest chain tip - this would be discovered the</span>
-<span class="comment">// next time this codepath is executed after new blocks are received).</span>
-<span class="ident">scan_cached_blocks</span>(<span class="kw-2">&amp;</span><span class="ident">network</span>, <span class="kw-2">&amp;</span><span class="ident">db_cache</span>, <span class="kw-2">&amp;mut</span> <span class="ident">db_data</span>, <span class="prelude-val">None</span>)</code></pre></div>
-</div></details><h2 id="functions" class="small-section-header"><a href="#functions">Functions</a></h2>
-<div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="fn" href="fn.scan_cached_blocks.html" title="zcash_client_backend::data_api::chain::scan_cached_blocks fn">scan_cached_blocks</a></div><div class="item-right docblock-short"><p>Scans at most <code>limit</code> new blocks added to the cache for any transactions received by
-the tracked accounts.</p>
-</div></div><div class="item-row"><div class="item-left module-item"><a class="fn" href="fn.validate_chain.html" title="zcash_client_backend::data_api::chain::validate_chain fn">validate_chain</a></div><div class="item-right docblock-short"><p>Checks that the scanned blocks in the data database, when combined with the recent
-<code>CompactBlock</code>s in the cache database, form a valid chain.</p>
-</div></div></div></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_client_backend" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.63.0-nightly (76761db59 2022-05-24)" ></div>
-</body></html>
+<span class="comment">// 7) Loop over the remaining suggested scan ranges, retrieving the requested data and calling
+//    `scan_cached_blocks` on each range. Periodically, or if a continuity error is
+//    encountered, this process should be repeated starting at step (3).
+</span><span class="kw">let </span>scan_ranges = wallet_db.suggest_scan_ranges().map_err(Error::Wallet)<span class="question-mark">?</span>;
+<span class="kw">for </span>scan_range <span class="kw">in </span>scan_ranges {
+    <span class="comment">// Download the chain state for the block prior to the start of the range you want
+    // to scan.
+    </span><span class="kw">let </span>chain_state = <span class="macro">unimplemented!</span>(<span class="string">"get_chain_state(scan_range.block_range().start - 1)?;"</span>);
+    <span class="comment">// Download the blocks in `scan_range` into the block source. While in this example this
+    // step is performed in-line, it's fine for the download of scan ranges to be asynchronous
+    // and for the scanner to process the downloaded ranges as they become available in a
+    // separate thread. The scan ranges should also be broken down into smaller chunks as
+    // appropriate, and for ranges with priority `Historic` it can be useful to download and
+    // scan the range in reverse order (to discover more recent unspent notes sooner), or from
+    // the start and end of the range inwards.
+    </span><span class="macro">unimplemented!</span>(<span class="string">"cache_blocks(scan_range)?;"</span>);
+
+    <span class="comment">// Scan the downloaded blocks.
+    </span><span class="kw">let </span>scan_result = scan_cached_blocks(
+        <span class="kw-2">&amp;</span>network,
+        <span class="kw-2">&amp;</span>block_source,
+        <span class="kw-2">&amp;mut </span>wallet_db,
+        scan_range.block_range().start,
+        chain_state,
+        scan_range.len()
+    )<span class="question-mark">?</span>;
+
+    <span class="comment">// Handle scan errors, etc.
+</span>}</code></pre></div>
+</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><ul class="item-table"><li><div class="item-name"><a class="mod" href="error/index.html" title="mod zcash_client_backend::data_api::chain::error">error</a></div><div class="desc docblock-short">Types for chain scanning error handling.</div></li><li><div class="item-name"><a class="mod" href="testing/index.html" title="mod zcash_client_backend::data_api::chain::testing">testing</a><wbr><span class="stab portability" title="Available on crate feature `test-dependencies` only"><code>test-dependencies</code></span></div></li></ul><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><ul class="item-table"><li><div class="item-name"><a class="struct" href="struct.ChainState.html" title="struct zcash_client_backend::data_api::chain::ChainState">Chain<wbr>State</a></div><div class="desc docblock-short">The final note commitment tree state for each shielded pool, as of a particular block height.</div></li><li><div class="item-name"><a class="struct" href="struct.CommitmentTreeRoot.html" title="struct zcash_client_backend::data_api::chain::CommitmentTreeRoot">Commitment<wbr>Tree<wbr>Root</a></div><div class="desc docblock-short">A struct containing metadata about a subtree root of the note commitment tree.</div></li><li><div class="item-name"><a class="struct" href="struct.ScanSummary.html" title="struct zcash_client_backend::data_api::chain::ScanSummary">Scan<wbr>Summary</a></div><div class="desc docblock-short">Metadata about modifications to the wallet state made in the course of scanning a set of
+blocks.</div></li></ul><h2 id="traits" class="section-header">Traits<a href="#traits" class="anchor">§</a></h2><ul class="item-table"><li><div class="item-name"><a class="trait" href="trait.BlockCache.html" title="trait zcash_client_backend::data_api::chain::BlockCache">Block<wbr>Cache</a><wbr><span class="stab portability" title="Available on crate feature `sync` only"><code>sync</code></span></div><div class="desc docblock-short"><code>BlockCache</code> is a trait that extends <code>BlockSource</code> and defines methods for managing
+a cache of compact blocks.</div></li><li><div class="item-name"><a class="trait" href="trait.BlockSource.html" title="trait zcash_client_backend::data_api::chain::BlockSource">Block<wbr>Source</a></div><div class="desc docblock-short">This trait provides sequential access to raw blockchain data via a callback-oriented
+API.</div></li></ul><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><ul class="item-table"><li><div class="item-name"><a class="fn" href="fn.scan_cached_blocks.html" title="fn zcash_client_backend::data_api::chain::scan_cached_blocks">scan_<wbr>cached_<wbr>blocks</a></div><div class="desc docblock-short">Scans at most <code>limit</code> blocks from the provided block source for in order to find transactions
+received by the accounts tracked in the provided wallet database.</div></li></ul></section></div></main></body></html>

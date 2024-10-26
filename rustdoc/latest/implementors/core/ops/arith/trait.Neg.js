@@ -1,3 +1,0 @@
-(function() {var implementors = {};
-implementors["zcash_primitives"] = [{"text":"impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/ops/arith/trait.Neg.html\" title=\"trait core::ops::arith::Neg\">Neg</a> for <a class=\"struct\" href=\"zcash_primitives/transaction/components/amount/struct.Amount.html\" title=\"struct zcash_primitives::transaction::components::amount::Amount\">Amount</a>","synthetic":false,"types":["zcash_primitives::transaction::components::amount::Amount"]}];
-if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

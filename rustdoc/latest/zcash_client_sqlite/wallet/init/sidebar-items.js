@@ -1,1 +1,1 @@
-initSidebarItems({"fn":[["init_accounts_table","Initialises the data database with the given [`UnifiedFullViewingKey`]s."],["init_blocks_table","Initialises the data database with the given block."],["init_wallet_db","Sets up the internal structure of the data database."]]});
+window.SIDEBAR_ITEMS = {"enum":["WalletMigrationError"],"fn":["init_wallet_db"]};

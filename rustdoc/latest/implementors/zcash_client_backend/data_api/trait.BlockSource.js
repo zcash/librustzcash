@@ -1,4 +1,0 @@
-(function() {var implementors = {};
-implementors["zcash_client_backend"] = [];
-implementors["zcash_client_sqlite"] = [{"text":"impl <a class=\"trait\" href=\"zcash_client_backend/data_api/trait.BlockSource.html\" title=\"trait zcash_client_backend::data_api::BlockSource\">BlockSource</a> for <a class=\"struct\" href=\"zcash_client_sqlite/struct.BlockDb.html\" title=\"struct zcash_client_sqlite::BlockDb\">BlockDb</a>","synthetic":false,"types":["zcash_client_sqlite::BlockDb"]}];
-if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

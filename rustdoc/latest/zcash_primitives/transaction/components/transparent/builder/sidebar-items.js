@@ -1,1 +1,1 @@
-initSidebarItems({"enum":[["Error",""]],"struct":[["TransparentBuilder",""],["Unauthorized",""]]});
+window.SIDEBAR_ITEMS = {"enum":["Error"],"struct":["TransparentBuilder","TransparentInputInfo","Unauthorized"]};

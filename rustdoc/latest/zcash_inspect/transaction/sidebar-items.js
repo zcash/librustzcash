@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["extract_height_from_coinbase","inspect","is_coinbase","render_memo","render_value"],"struct":["MapTransparent","PrecomputedAuth","TransparentAuth"]};

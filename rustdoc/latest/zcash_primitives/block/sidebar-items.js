@@ -1,1 +1,1 @@
-initSidebarItems({"struct":[["BlockHash",""],["BlockHeader","A Zcash block header."],["BlockHeaderData",""]]});
+window.SIDEBAR_ITEMS = {"struct":["BlockHash","BlockHeader","BlockHeaderData"]};

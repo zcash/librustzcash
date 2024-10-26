@@ -1,1 +1,1 @@
-initSidebarItems({"fn":[["arb_bundle",""],["arb_bundle_for_version",""]]});
+window.SIDEBAR_ITEMS = {"fn":["arb_bundle","arb_bundle_for_version"]};

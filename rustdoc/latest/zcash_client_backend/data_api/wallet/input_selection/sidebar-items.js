@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["GreedyInputSelectorError","InputSelectorError"],"struct":["GreedyInputSelector"],"trait":["InputSelector","ShieldingSelector"]};

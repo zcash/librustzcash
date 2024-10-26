@@ -1,0 +1,1 @@
+searchState.loadedDescShard("equihash", 0, "Equihash is a Proof-of-Work algorithm, based on a …\nAn Equihash solution failed to verify.\nReturns the argument unchanged.\nCalls <code>U::from(self)</code>.\nChecks whether <code>soln</code> is a valid solution for <code>(input, nonce)</code> …")

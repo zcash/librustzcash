@@ -1,29 +1,53 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Sets up the internal structure of the data database."><meta name="keywords" content="rust, rustlang, rust-lang, init_wallet_db"><title>init_wallet_db in zcash_client_sqlite::wallet::init - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script src="../../../crates.js"></script><script defer src="../../../main.js"></script>
-    <noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc fn"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../zcash_client_sqlite/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div>
-        </a><h2 class="location"></h2>
-    </nav>
-    <nav class="sidebar"><a class="sidebar-logo" href="../../../zcash_client_sqlite/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div>
-        </a><div class="sidebar-elems"><h2 class="location"><a href="index.html">In zcash_client_sqlite::wallet::init</a></h2><div id="sidebar-vars" data-name="init_wallet_db" data-ty="fn" data-relpath=""></div><script defer src="sidebar-items.js"></script></div></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../zcash_client_sqlite/index.html"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><button type="button" id="help-button" title="help">?</button><div id="settings-menu" tabindex="-1">
-                                <a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div>
-                        </div></form></nav></div><section id="main-content" class="content"><div class="main-heading">
-    <h1 class="fqn"><span class="in-band">Function <a href="../../index.html">zcash_client_sqlite</a>::<wbr><a href="../index.html">wallet</a>::<wbr><a href="index.html">init</a>::<wbr><a class="fn" href="#">init_wallet_db</a><button id="copy-path" onclick="copy_path(this)" title="Copy item path to clipboard"><img src="../../../clipboard.svg" width="19" height="18" alt="Copy item path"></button></span></h1><span class="out-of-band"><a class="srclink" href="../../../src/zcash_client_sqlite/wallet/init.rs.html#46-142">source</a> · <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class="inner">&#x2212;</span>]</a></span></div><div class="docblock item-decl"><pre class="rust fn"><code>pub fn init_wallet_db&lt;P&gt;(wdb: &amp;<a class="struct" href="../../struct.WalletDb.html" title="struct zcash_client_sqlite::WalletDb">WalletDb</a>&lt;P&gt;) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, Error&gt;</code></pre></div><details class="rustdoc-toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Sets up the internal structure of the data database.</p>
-<p>It is safe to use a wallet database created without the ability to create transparent spends
-with a build that enables transparent spends via use of the <code>transparent-inputs</code> feature flag.
-The reverse is unsafe, as wallet balance calculations would ignore the transparent UTXOs
-controlled by the wallet. Note that this currently applies only to wallet databases created
-with the same <em>version</em> of the wallet software; database migration operations currently must
-be manually performed to update the structure of the database when changing versions.
-Integrated migration utilities will be provided by a future version of this library.</p>
-<h2 id="examples"><a href="#examples">Examples</a></h2>
-<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use</span> <span class="ident">tempfile::NamedTempFile</span>;
-<span class="kw">use</span> <span class="ident">zcash_primitives::consensus::Network</span>;
-<span class="kw">use</span> <span class="ident">zcash_client_sqlite</span>::{
-    <span class="ident">WalletDb</span>,
-    <span class="ident">wallet::init::init_wallet_db</span>,
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Sets up the internal structure of the data database."><title>init_wallet_db in zcash_client_sqlite::wallet::init - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-4ee5002b.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (a93c1718c 2024-10-24)" data-channel="nightly" data-search-js="search-c5a66128.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc fn"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button></nav><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../zcash_client_sqlite/index.html">zcash_<wbr>client_<wbr>sqlite</a><span class="version">0.12.2</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">init_<wbr>wallet_<wbr>db</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#examples" title="Examples">Examples</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="index.html">In zcash_<wbr>client_<wbr>sqlite::<wbr>wallet::<wbr>init</a></h2></div></div></nav><div class="sidebar-resizer"></div><main><div class="width-limiter"><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><span class="rustdoc-breadcrumbs"><a href="../../index.html">zcash_client_sqlite</a>::<wbr><a href="../index.html">wallet</a>::<wbr><a href="index.html">init</a></span><h1>Function <span class="fn">init_wallet_db</span><button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/zcash_client_sqlite/wallet/init.rs.html#308-313">Source</a> </span></div><pre class="rust item-decl"><code>pub fn init_wallet_db&lt;P: <a class="trait" href="../../../zcash_protocol/consensus/trait.Parameters.html" title="trait zcash_protocol::consensus::Parameters">Parameters</a> + 'static&gt;(
+    wdb: &amp;mut <a class="struct" href="../../struct.WalletDb.html" title="struct zcash_client_sqlite::WalletDb">WalletDb</a>&lt;Connection, P&gt;,
+    seed: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="type" href="https://docs.rs/secrecy/0.8.0/secrecy/vec/type.SecretVec.html" title="type secrecy::vec::SecretVec">SecretVec</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>&gt;&gt;,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, MigratorError&lt;<a class="struct" href="https://docs.rs/uuid/1.8.0/uuid/struct.Uuid.html" title="struct uuid::Uuid">Uuid</a>, <a class="enum" href="enum.WalletMigrationError.html" title="enum zcash_client_sqlite::wallet::init::WalletMigrationError">WalletMigrationError</a>&gt;&gt;</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Sets up the internal structure of the data database.</p>
+<p>This procedure will automatically perform migration operations to update the wallet database to
+the database structure required by the current version of this library, and should be invoked
+at least once any time a client program upgrades to a new version of this library.  The
+operation of this procedure is idempotent, so it is safe (though not required) to invoke this
+operation every time the wallet is opened.</p>
+<p>In order to correctly apply migrations to accounts derived from a seed, sometimes the
+optional <code>seed</code> argument is required. This function should first be invoked with
+<code>seed</code> set to <code>None</code>; if a pending migration requires the seed, the function returns
+<code>Err(schemerz::MigratorError::Migration { error: WalletMigrationError::SeedRequired, .. })</code>.
+The caller can then re-call this function with the necessary seed.</p>
+<blockquote>
+<p>Note that currently only one seed can be provided; as such, wallets containing
+accounts derived from several different seeds are unsupported, and will result in an
+error. Support for multi-seed wallets is being tracked in <a href="https://github.com/zcash/librustzcash/issues/1284">zcash/librustzcash#1284</a>.</p>
+</blockquote>
+<p>When the <code>seed</code> argument is provided, the seed is checked against the database for
+<em>relevance</em>: if any account in the wallet for which <a href="../../../zcash_client_backend/data_api/trait.Account.html#tymethod.source" title="method zcash_client_backend::data_api::Account::source"><code>Account::source</code></a> is
+<a href="../../../zcash_client_backend/data_api/enum.AccountSource.html#variant.Derived" title="variant zcash_client_backend::data_api::AccountSource::Derived"><code>AccountSource::Derived</code></a> can be derived from the given seed, the seed is relevant to
+the wallet. If the given seed is not relevant, the function returns
+<code>Err(schemerz::MigratorError::Migration { error: WalletMigrationError::SeedNotRelevant, .. })</code>
+or <code>Err(schemerz::MigratorError::Adapter(WalletMigrationError::SeedNotRelevant))</code>.</p>
+<p>We do not check whether the seed is relevant to any imported account, because that
+would require brute-forcing the ZIP 32 account index space. Consequentially, imported
+accounts are not migrated.</p>
+<p>It is safe to use a wallet database previously created without the ability to create
+transparent spends with a build that enables transparent spends (via use of the
+<code>transparent-inputs</code> feature flag.) The reverse is unsafe, as wallet balance calculations would
+ignore the transparent UTXOs already controlled by the wallet.</p>
+<h2 id="examples"><a class="doc-anchor" href="#examples">§</a>Examples</h2>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>zcash_primitives::consensus::Network;
+<span class="kw">use </span>zcash_client_sqlite::{
+    WalletDb,
+    wallet::init::{WalletMigrationError, init_wallet_db},
 };
 
-<span class="kw">let</span> <span class="ident">data_file</span> <span class="op">=</span> <span class="ident">NamedTempFile::new</span>().<span class="ident">unwrap</span>();
-<span class="kw">let</span> <span class="ident">db</span> <span class="op">=</span> <span class="ident">WalletDb::for_path</span>(<span class="ident">data_file</span>.<span class="ident">path</span>(), <span class="ident">Network::TestNetwork</span>).<span class="ident">unwrap</span>();
-<span class="ident">init_wallet_db</span>(<span class="kw-2">&amp;</span><span class="ident">db</span>).<span class="ident">unwrap</span>();</code></pre></div>
-</div></details></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_client_sqlite" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.63.0-nightly (76761db59 2022-05-24)" ></div>
-</body></html>
+<span class="kw">let </span><span class="kw-2">mut </span>db = WalletDb::for_path(get_data_db_path(), Network::TestNetwork)<span class="question-mark">?</span>;
+<span class="kw">match </span>init_wallet_db(<span class="kw-2">&amp;mut </span>db, <span class="prelude-val">None</span>) {
+    <span class="prelude-val">Err</span>(e)
+        <span class="kw">if </span><span class="macro">matches!</span>(
+            e.source().and_then(|e| e.downcast_ref()),
+            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>WalletMigrationError::SeedRequired)
+        ) =&gt;
+    {
+        <span class="kw">let </span>seed = load_seed()<span class="question-mark">?</span>;
+        init_wallet_db(<span class="kw-2">&amp;mut </span>db, <span class="prelude-val">Some</span>(seed))
+    }
+    res =&gt; res,
+}<span class="question-mark">?</span>;</code></pre></div>
+</div></details></section></div></main></body></html>

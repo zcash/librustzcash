@@ -1,3 +1,0 @@
-(function() {var implementors = {};
-implementors["zcash_primitives"] = [{"text":"impl Hashable for <a class=\"struct\" href=\"zcash_primitives/sapling/struct.Node.html\" title=\"struct zcash_primitives::sapling::Node\">Node</a>","synthetic":false,"types":["zcash_primitives::sapling::Node"]}];
-if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

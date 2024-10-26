@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["MultiOutputChangeStrategy","SingleOutputChangeStrategy"],"trait":["Zip317FeeRule"]};

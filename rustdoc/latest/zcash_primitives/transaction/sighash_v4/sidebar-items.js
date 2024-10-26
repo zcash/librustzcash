@@ -1,1 +1,1 @@
-initSidebarItems({"fn":[["v4_signature_hash",""]]});
+window.SIDEBAR_ITEMS = {"fn":["v4_signature_hash"]};

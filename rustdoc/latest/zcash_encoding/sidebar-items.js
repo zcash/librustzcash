@@ -1,1 +1,1 @@
-initSidebarItems({"constant":[["MAX_COMPACT_SIZE","The maximum allowed value representable as a `[CompactSize]`"]],"struct":[["Array","Namespace for functions that perform encoding of array contents."],["CompactSize","Namespace for functions for compact encoding of integers."],["Optional","Namespace for functions that perform encoding of [`Option`] values."],["Vector","Namespace for functions that perform encoding of vectors."]]});
+window.SIDEBAR_ITEMS = {"constant":["MAX_COMPACT_SIZE"],"struct":["Array","CompactSize","Optional","Vector"]};

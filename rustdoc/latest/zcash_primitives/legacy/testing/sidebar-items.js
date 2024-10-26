@@ -1,1 +1,1 @@
-initSidebarItems({"fn":[["arb_transparent_addr",""]]});
+window.SIDEBAR_ITEMS = {"fn":["arb_transparent_addr"]};

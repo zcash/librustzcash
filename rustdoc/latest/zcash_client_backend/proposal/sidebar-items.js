@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ProposalError","StepOutputIndex"],"struct":["Proposal","ShieldedInputs","Step","StepOutput"]};

@@ -1,1 +1,1 @@
-initSidebarItems({"fn":[["file_descriptor_proto",""]],"struct":[["CompactBlock","Generated files are compatible only with the same version of protobuf runtime."],["CompactOrchardAction",""],["CompactSaplingOutput",""],["CompactSaplingSpend",""],["CompactTx",""]]});
+window.SIDEBAR_ITEMS = {"struct":["ChainMetadata","CompactBlock","CompactOrchardAction","CompactSaplingOutput","CompactSaplingSpend","CompactTx"]};

@@ -1,1 +1,0 @@
-initSidebarItems({"mod":[["builder","Types and functions for building TZE transaction components"],["testing",""]],"struct":[["Authorized",""],["Bundle",""],["OutPoint",""],["TzeIn",""],["TzeOut",""]],"trait":[["Authorization",""],["MapAuth",""]]});

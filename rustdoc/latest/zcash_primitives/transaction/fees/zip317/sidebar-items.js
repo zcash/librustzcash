@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GRACE_ACTIONS","MARGINAL_FEE","MINIMUM_FEE","P2PKH_STANDARD_INPUT_SIZE","P2PKH_STANDARD_OUTPUT_SIZE"],"enum":["FeeError"],"struct":["FeeRule"]};

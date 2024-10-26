@@ -1,1 +1,1 @@
-initSidebarItems({"mod":[["builder","Types and functions for building transparent transaction components."],["testing",""]],"struct":[["Authorized",""],["Bundle",""],["OutPoint",""],["TxIn",""],["TxOut",""]],"trait":[["Authorization",""],["MapAuth",""]]});
+window.SIDEBAR_ITEMS = {"mod":["builder","testing"],"struct":["Authorized","Bundle","OutPoint","TxIn","TxOut"],"trait":["Authorization","MapAuth"]};

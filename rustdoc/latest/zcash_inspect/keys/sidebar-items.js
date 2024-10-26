@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["inspect_mnemonic","inspect_sapling_extsk"],"mod":["view"]};
