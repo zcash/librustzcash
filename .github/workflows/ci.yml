@@ -23,7 +23,7 @@ jobs:
         state:
           - NOT_A_PUZZLE
           - Orchard
-          - NU6
+          - NU7
 
         include:
           - target: Linux
@@ -35,12 +35,12 @@ jobs:
 
           - state: Orchard
             extra_flags: orchard
-          - state: NU6
-            rustflags: '--cfg zcash_unstable="nu6"'
+          - state: NU7
+            rustflags: '--cfg zcash_unstable="nu7"'
 
         exclude:
           - target: macOS
-            state: NU6
+            state: NU7
 
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
