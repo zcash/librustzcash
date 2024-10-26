@@ -1,6 +1,5 @@
 //! Cryptocurrency exchange rate APIs.
 
-use async_trait::async_trait;
 use futures_util::{future::join_all, join};
 use rand::{seq::IteratorRandom, thread_rng};
 use rust_decimal::Decimal;
@@ -26,8 +25,10 @@ pub mod exchanges {
 }
 
 /// An exchange that can be queried for ZEC data.
-#[async_trait]
-pub trait Exchange: 'static {
+#[trait_variant::make(Exchange: Send)]
+#[dynosaur::dynosaur(DynExchange = dyn Exchange)]
+#[dynosaur::dynosaur(DynLocalExchange = dyn LocalExchange)]
+pub trait LocalExchange {
     /// Queries data about the USD/ZEC pair.
     ///
     /// The returned bid and ask data must be denominated in USD, i.e. the latest bid and
@@ -55,8 +56,8 @@ impl ExchangeData {
 
 /// A set of [`Exchange`]s that can be queried for ZEC data.
 pub struct Exchanges {
-    trusted: Box<dyn Exchange>,
-    others: Vec<Box<dyn Exchange>>,
+    trusted: Box<DynExchange<'static>>,
+    others: Vec<Box<DynExchange<'static>>>,
 }
 
 impl Exchanges {
@@ -78,7 +79,7 @@ impl Exchanges {
     ///
     /// The `trusted` exchange will always have its data used, _if_ data is successfully
     /// obtained via Tor (i.e. no transient failures).
-    pub fn builder(trusted: impl Exchange) -> ExchangesBuilder {
+    pub fn builder(trusted: impl Exchange + 'static) -> ExchangesBuilder {
         ExchangesBuilder::new(trusted)
     }
 }
@@ -105,16 +106,16 @@ impl ExchangesBuilder {
     ///
     /// The `trusted` exchange will always have its data used, _if_ data is successfully
     /// obtained via Tor (i.e. no transient failures).
-    pub fn new(trusted: impl Exchange) -> Self {
+    pub fn new(trusted: impl Exchange + 'static) -> Self {
         Self(Exchanges {
-            trusted: Box::new(trusted),
+            trusted: DynExchange::boxed(trusted),
             others: vec![],
         })
     }
 
     /// Adds another [`Exchange`] as a data source.
-    pub fn with(mut self, other: impl Exchange) -> Self {
-        self.0.others.push(Box::new(other));
+    pub fn with(mut self, other: impl Exchange + 'static) -> Self {
+        self.0.others.push(DynExchange::boxed(other));
         self
     }
 

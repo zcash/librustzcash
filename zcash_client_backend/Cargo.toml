@@ -95,8 +95,10 @@ nom = "7"
 #    `hyper::Error`, `hyper::http::Error`, `serde_json::Error`. We could avoid this with
 #    changes to error handling.
 arti-client = { workspace = true, optional = true }
+dynosaur = { workspace = true, optional = true }
 hyper = { workspace = true, optional = true, features = ["client", "http1"] }
 serde_json = { workspace = true, optional = true }
+trait-variant = { workspace = true, optional = true }
 
 # - Currency conversion
 rust_decimal = { workspace = true, optional = true }
@@ -179,7 +181,7 @@ sync = [
 ## operations.
 tor = [
     "dep:arti-client",
-    "dep:async-trait",
+    "dep:dynosaur",
     "dep:futures-util",
     "dep:http-body-util",
     "dep:hyper",
@@ -191,6 +193,7 @@ tor = [
     "dep:tokio",
     "dep:tokio-rustls",
     "dep:tor-rtcompat",
+    "dep:trait-variant",
     "dep:tower",
     "dep:webpki-roots",
 ]

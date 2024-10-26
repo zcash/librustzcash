@@ -414,6 +414,14 @@ criteria = "safe-to-deploy"
 version = "1.0.17"
 criteria = "safe-to-deploy"
 
+[[exemptions.dynosaur]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.dynosaur_derive]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.ecdsa]]
 version = "0.16.9"
 criteria = "safe-to-deploy"
@@ -1404,6 +1412,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tracing-test-macro]]
 version = "0.2.5"
+criteria = "safe-to-deploy"
+
+[[exemptions.trait-variant]]
+version = "0.1.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.typed-index-collections]]

@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use hyper::StatusCode;
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -32,7 +31,6 @@ struct GateIoData {
     low_24h: Decimal,
 }
 
-#[async_trait]
 impl Exchange for GateIo {
     async fn query_zec_to_usd(&self, client: &Client) -> Result<ExchangeData, Error> {
         // API documentation:

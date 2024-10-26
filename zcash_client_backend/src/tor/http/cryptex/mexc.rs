@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
@@ -39,7 +38,6 @@ struct MexcData {
     closeTime: u64,
 }
 
-#[async_trait]
 impl Exchange for Mexc {
     async fn query_zec_to_usd(&self, client: &Client) -> Result<ExchangeData, Error> {
         // API documentation:
