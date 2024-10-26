@@ -167,9 +167,7 @@ use crate::{
 };
 
 #[cfg(feature = "sync")]
-use {
-    super::scanning::ScanPriority, crate::data_api::scanning::ScanRange, async_trait::async_trait,
-};
+use {super::scanning::ScanPriority, crate::data_api::scanning::ScanRange};
 
 pub mod error;
 use error::Error;
@@ -239,10 +237,9 @@ pub trait BlockSource {
 /// # Examples
 ///
 /// ```
-///    use async_trait::async_trait;
 ///    use std::sync::{Arc, Mutex};
 ///    use zcash_client_backend::data_api::{
-///        chain::{error, BlockCache, BlockSource},
+///        chain::{error, truncate_block_cache, BlockCache, BlockSource},
 ///        scanning::{ScanPriority, ScanRange},
 ///    };
 ///    use zcash_client_backend::proto::compact_formats::CompactBlock;
@@ -268,7 +265,6 @@ pub trait BlockSource {
 /// #        }
 /// #    }
 /// #
-///    #[async_trait]
 ///    impl BlockCache for ExampleBlockCache {
 ///        fn get_tip_height(&self, range: Option<&ScanRange>) -> Result<Option<BlockHeight>, Self::Error> {
 ///            let cached_blocks = self.cached_blocks.lock().unwrap();
@@ -366,7 +362,7 @@ pub trait BlockSource {
 ///
 ///    // Truncate the block cache
 ///    rt.block_on(async {
-///        block_cache.truncate(BlockHeight::from_u32(1)).await.unwrap();
+///        truncate_block_cache(&block_cache, BlockHeight::from_u32(1)).await.unwrap();
 ///    });
 ///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 1);
 ///    assert_eq!(
@@ -382,11 +378,8 @@ pub trait BlockSource {
 ///    assert_eq!(block_cache.get_tip_height(None).unwrap(), None);
 /// ```
 #[cfg(feature = "sync")]
-#[async_trait]
-pub trait BlockCache: BlockSource + Send + Sync
-where
-    Self::Error: Send,
-{
+#[trait_variant::make(Send)]
+pub trait BlockCache: BlockSource + Sync {
     /// Finds the height of the highest block known to the block cache within a specified range.
     ///
     /// If `range` is `None`, returns the tip of the entire cache.
@@ -410,10 +403,27 @@ where
     /// This method permits insertion of non-contiguous compact blocks.
     async fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error>;
 
-    /// Removes all cached blocks above a specified block height.
-    async fn truncate(&self, block_height: BlockHeight) -> Result<(), Self::Error> {
-        if let Some(latest) = self.get_tip_height(None)? {
-            self.delete(ScanRange::from_parts(
+    /// Deletes a range of compact blocks from the block cache.
+    ///
+    /// # Errors
+    ///
+    /// In the case of an error, some blocks requested for deletion may remain in the block cache.
+    async fn delete(&self, range: ScanRange) -> Result<(), Self::Error>;
+}
+
+/// Removes all cached blocks above a specified block height.
+#[cfg(feature = "sync")]
+pub async fn truncate_block_cache<Cache>(
+    block_cache: &Cache,
+    block_height: BlockHeight,
+) -> Result<(), Cache::Error>
+where
+    Cache: BlockCache,
+    Cache::Error: Send,
+{
+    if let Some(latest) = block_cache.get_tip_height(None)? {
+        block_cache
+            .delete(ScanRange::from_parts(
                 Range {
                     start: block_height + 1,
                     end: latest + 1,
@@ -421,16 +431,8 @@ where
                 ScanPriority::Ignored,
             ))
             .await?;
-        }
-        Ok(())
     }
-
-    /// Deletes a range of compact blocks from the block cache.
-    ///
-    /// # Errors
-    ///
-    /// In the case of an error, some blocks requested for deletion may remain in the block cache.
-    async fn delete(&self, range: ScanRange) -> Result<(), Self::Error>;
+    Ok(())
 }
 
 /// Metadata about modifications to the wallet state made in the course of scanning a set of

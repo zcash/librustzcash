@@ -71,7 +71,6 @@ orchard = { workspace = true, optional = true }
 sapling.workspace = true
 
 # - Sync engine
-async-trait = { version = "0.1", optional = true }
 futures-util = { version = "0.3", optional = true }
 
 # - Note commitment trees
@@ -173,8 +172,8 @@ orchard = ["dep:orchard", "dep:pasta_curves", "zcash_keys/orchard"]
 ## Exposes a wallet synchronization function that implements the necessary state machine.
 sync = [
     "lightwalletd-tonic",
-    "dep:async-trait",
     "dep:futures-util",
+    "dep:trait-variant",
 ]
 
 ## Exposes a Tor client for hiding a wallet's IP address while performing certain wallet

@@ -6016,7 +6016,6 @@ dependencies = [
  "ambassador",
  "arti-client",
  "assert_matches",
- "async-trait",
  "base64",
  "bech32",
  "bip32",

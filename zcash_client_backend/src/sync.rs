@@ -28,8 +28,8 @@ use zcash_primitives::{
 use crate::{
     data_api::{
         chain::{
-            error::Error as ChainError, scan_cached_blocks, BlockCache, ChainState,
-            CommitmentTreeRoot,
+            error::Error as ChainError, scan_cached_blocks, truncate_block_cache, BlockCache,
+            ChainState, CommitmentTreeRoot,
         },
         scanning::{ScanPriority, ScanRange},
         WalletCommitmentTrees, WalletRead, WalletWrite,
@@ -443,8 +443,7 @@ where
             // This does imply that assumed-valid blocks will be re-downloaded, but it is
             // also possible that in the intervening time, a chain reorg has occurred that
             // orphaned some of those blocks.
-            db_cache
-                .truncate(rewind_height)
+            truncate_block_cache(db_cache, rewind_height)
                 .await
                 .map_err(Error::Cache)?;
 

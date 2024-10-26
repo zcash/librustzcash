@@ -12,6 +12,7 @@ and this library adheres to Rust's notion of
   - `Progress`
   - `WalletSummary::progress`
   - `WalletMeta`
+  - `chain::truncate_block_cache` (behind the `sync` feature flag).
   - `impl Default for wallet::input_selection::GreedyInputSelector`
 - `zcash_client_backend::fees`
   - `SplitPolicy`
@@ -88,6 +89,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api`:
   - `WalletSummary::scan_progress` and `WalletSummary::recovery_progress` have
     been removed. Use `WalletSummary::progress` instead.
+  - `chain::BlockCache::truncate` (use `chain::truncate_block_cache` instead).
   - `testing::input_selector` use explicit `InputSelector` constructors
     directly instead.
   - The deprecated `wallet::create_spend_to_address` and `wallet::spend`
