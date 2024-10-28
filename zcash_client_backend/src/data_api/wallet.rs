@@ -977,6 +977,7 @@ where
                             orchard_external_ovk.clone(),
                             *ua.orchard().expect("The mapping between payment pool and receiver is checked in step construction"),
                             payment.amount().into(),
+                            orchard::note::AssetBase::native(),
                             memo.clone(),
                         )?;
                         orchard_output_meta.push((
@@ -1081,6 +1082,7 @@ where
                         orchard_internal_ovk(),
                         orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal),
                         change_value.value().into(),
+                        orchard::note::AssetBase::native(),
                         memo.clone(),
                     )?;
                     orchard_output_meta.push((

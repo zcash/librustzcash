@@ -32,6 +32,7 @@ use crate::{
 #[cfg(feature = "orchard")]
 use orchard::{
     note_encryption::{CompactAction, OrchardDomain},
+    orchard_flavor::OrchardVanilla,
     tree::MerkleHashOrchard,
 };
 
@@ -161,7 +162,7 @@ impl<AccountId> ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>
 }
 
 #[cfg(feature = "orchard")]
-impl<AccountId> ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>
+impl<AccountId> ScanningKeyOps<OrchardDomain<OrchardVanilla>, AccountId, orchard::note::Nullifier>
     for ScanningKey<orchard::keys::IncomingViewingKey, orchard::keys::FullViewingKey, AccountId>
 {
     fn prepare(&self) -> orchard::keys::PreparedIncomingViewingKey {
@@ -191,7 +192,7 @@ pub struct ScanningKeys<AccountId, IvkTag> {
     #[cfg(feature = "orchard")]
     orchard: HashMap<
         IvkTag,
-        Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
+        Box<dyn ScanningKeyOps<OrchardDomain<OrchardVanilla>, AccountId, orchard::note::Nullifier>>,
     >,
 }
 
@@ -204,7 +205,13 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
         >,
         #[cfg(feature = "orchard")] orchard: HashMap<
             IvkTag,
-            Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
+            Box<
+                dyn ScanningKeyOps<
+                    OrchardDomain<OrchardVanilla>,
+                    AccountId,
+                    orchard::note::Nullifier,
+                >,
+            >,
         >,
     ) -> Self {
         Self {
@@ -235,8 +242,10 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
     #[cfg(feature = "orchard")]
     pub fn orchard(
         &self,
-    ) -> &HashMap<IvkTag, Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>>
-    {
+    ) -> &HashMap<
+        IvkTag,
+        Box<dyn ScanningKeyOps<OrchardDomain<OrchardVanilla>, AccountId, orchard::note::Nullifier>>,
+    > {
         &self.orchard
     }
 }
@@ -256,7 +265,13 @@ impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, 
         #[cfg(feature = "orchard")]
         let mut orchard: HashMap<
             (AccountId, Scope),
-            Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
+            Box<
+                dyn ScanningKeyOps<
+                    OrchardDomain<OrchardVanilla>,
+                    AccountId,
+                    orchard::note::Nullifier,
+                >,
+            >,
         > = HashMap::new();
 
         for (account_id, ufvk) in ufvks {
@@ -519,13 +534,17 @@ type TaggedSaplingBatchRunner<IvkTag, Tasks> = BatchRunner<
 >;
 
 #[cfg(feature = "orchard")]
-type TaggedOrchardBatch<IvkTag> =
-    Batch<IvkTag, OrchardDomain, orchard::note_encryption::CompactAction, CompactDecryptor>;
+type TaggedOrchardBatch<IvkTag> = Batch<
+    IvkTag,
+    OrchardDomain<OrchardVanilla>,
+    orchard::note_encryption::CompactAction<OrchardVanilla>,
+    CompactDecryptor,
+>;
 #[cfg(feature = "orchard")]
 type TaggedOrchardBatchRunner<IvkTag, Tasks> = BatchRunner<
     IvkTag,
-    OrchardDomain,
-    orchard::note_encryption::CompactAction,
+    OrchardDomain<OrchardVanilla>,
+    orchard::note_encryption::CompactAction<OrchardVanilla>,
     CompactDecryptor,
     Tasks,
 >;
@@ -1038,7 +1057,7 @@ fn find_received<
     Nf,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
     SK: ScanningKeyOps<D, AccountId, Nf>,
-    Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>,
+    Output: ShieldedOutput<D>,
     NoteCommitment,
 >(
     block_height: BlockHeight,
@@ -1155,13 +1174,13 @@ pub mod testing {
     use rand_core::{OsRng, RngCore};
     use sapling::{
         constants::SPENDING_KEY_GENERATOR,
-        note_encryption::{sapling_note_encryption, SaplingDomain},
+        note_encryption::{sapling_note_encryption, SaplingDomain, COMPACT_NOTE_SIZE},
         util::generate_random_rseed,
         value::NoteValue,
         zip32::DiversifiableFullViewingKey,
         Nullifier,
     };
-    use zcash_note_encryption::{Domain, COMPACT_NOTE_SIZE};
+    use zcash_note_encryption::Domain;
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network},

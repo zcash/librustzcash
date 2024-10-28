@@ -468,7 +468,7 @@ where
                 ),
                 #[cfg(feature = "orchard")]
                 &(
-                    ::orchard::builder::BundleType::DEFAULT,
+                    ::orchard::builder::BundleType::DEFAULT_VANILLA,
                     &orchard_inputs[..],
                     &orchard_outputs[..],
                 ),
@@ -594,7 +594,7 @@ where
             ),
             #[cfg(feature = "orchard")]
             &(
-                orchard::builder::BundleType::DEFAULT,
+                orchard::builder::BundleType::DEFAULT_VANILLA,
                 &Vec::<Infallible>::new()[..],
                 &Vec::<Infallible>::new()[..],
             ),
@@ -619,7 +619,7 @@ where
                     ),
                     #[cfg(feature = "orchard")]
                     &(
-                        orchard::builder::BundleType::DEFAULT,
+                        orchard::builder::BundleType::DEFAULT_VANILLA,
                         &Vec::<Infallible>::new()[..],
                         &Vec::<Infallible>::new()[..],
                     ),

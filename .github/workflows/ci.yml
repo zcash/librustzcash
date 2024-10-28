@@ -193,9 +193,9 @@ jobs:
       - name: Add zcash_proofs as a dependency of the synthetic crate
         working-directory: ./ci-build
         run: cargo add --no-default-features --path ../crates/zcash_proofs
-#      - name: Add zcash_client_backend as a dependency of the synthetic crate
-#        working-directory: ./ci-build
-#        run: cargo add --features lightwalletd-tonic --path ../crates/zcash_client_backend
+      - name: Add zcash_client_backend as a dependency of the synthetic crate
+        working-directory: ./ci-build
+        run: cargo add --features lightwalletd-tonic --path ../crates/zcash_client_backend
       - name: Copy pinned dependencies into synthetic crate
         run: cp crates/Cargo.lock ci-build/
       - name: Add target

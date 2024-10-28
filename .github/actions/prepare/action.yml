@@ -31,6 +31,7 @@ runs:
         transparent-inputs
         sapling
         unstable
+        unstable-spanning-tree
         ${{ inputs.extra-features }}
         ${{ steps.test.outputs.feature }}
         '" >> $GITHUB_OUTPUT

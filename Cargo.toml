@@ -6,7 +6,8 @@ members = [
     "components/zcash_encoding",
     "components/zcash_protocol",
     "components/zip321",
-#    "zcash_client_backend",
+    # zcash_client_backend and zcash_client_sqlite are not compatible with OrchardZSA
+    "zcash_client_backend",
 #    "zcash_client_sqlite",
     "zcash_extensions",
     "zcash_history",
@@ -31,7 +32,7 @@ categories = ["cryptography::cryptocurrencies"]
 # Intra-workspace dependencies
 equihash = { version = "0.2", path = "components/equihash" }
 zcash_address = { version = "0.3", path = "components/zcash_address" }
-#zcash_client_backend = { version = "0.12", path = "zcash_client_backend" }
+zcash_client_backend = { version = "0.12", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.2", path = "components/zcash_encoding" }
 zcash_keys = { version = "0.2", path = "zcash_keys" }
 zcash_protocol = { version = "0.1", path = "components/zcash_protocol" }
@@ -58,7 +59,7 @@ sapling = { package = "sapling-crypto", version = "0.1.3" }
 
 # - Orchard
 nonempty = "0.7"
-orchard = { version = "0.8.0", default-features = false, git = "https://github.com/QED-it/orchard", branch = "zsa1" }
+orchard = { version = "0.8.0", default-features = false }
 pasta_curves = "0.5"
 
 # - Transparent
@@ -95,7 +96,7 @@ maybe-rayon = { version = "0.1.0", default-features = false }
 rayon = "1.5"
 
 # Protobuf and gRPC
-prost = "=0.12.3"
+prost = "0.12"
 tonic = { version = "0.10", default-features = false }
 tonic-build = { version = "0.10", default-features = false }
 
@@ -126,3 +127,4 @@ codegen-units = 1
 [patch.crates-io]
 zcash_note_encryption = { version = "0.4", git = "https://github.com/QED-it/zcash_note_encryption", branch = "zsa1" }
 sapling = { package = "sapling-crypto", version = "0.1.3", git = "https://github.com/QED-it/sapling-crypto", branch = "zsa1" }
+orchard = { version = "0.8.0", git = "https://github.com/QED-it/orchard", branch = "zsa1" }

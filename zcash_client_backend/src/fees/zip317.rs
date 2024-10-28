@@ -268,7 +268,7 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &(
-                orchard::builder::BundleType::DEFAULT,
+                orchard::builder::BundleType::DEFAULT_VANILLA,
                 &Vec::<Infallible>::new()[..],
                 &Vec::<Infallible>::new()[..],
             ),
@@ -309,7 +309,7 @@ mod tests {
                 &Vec::<Infallible>::new()[..],
             ),
             &(
-                orchard::builder::BundleType::DEFAULT,
+                orchard::builder::BundleType::DEFAULT_VANILLA,
                 &Vec::<Infallible>::new()[..],
                 &[OrchardPayment::new(NonNegativeAmount::const_from_u64(
                     30000,
@@ -355,7 +355,7 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &(
-                orchard::builder::BundleType::DEFAULT,
+                orchard::builder::BundleType::DEFAULT_VANILLA,
                 &Vec::<Infallible>::new()[..],
                 &Vec::<Infallible>::new()[..],
             ),
@@ -403,7 +403,7 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &(
-                orchard::builder::BundleType::DEFAULT,
+                orchard::builder::BundleType::DEFAULT_VANILLA,
                 &Vec::<Infallible>::new()[..],
                 &Vec::<Infallible>::new()[..],
             ),
@@ -455,7 +455,7 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &(
-                orchard::builder::BundleType::DEFAULT,
+                orchard::builder::BundleType::DEFAULT_VANILLA,
                 &Vec::<Infallible>::new()[..],
                 &Vec::<Infallible>::new()[..],
             ),

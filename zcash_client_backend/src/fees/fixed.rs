@@ -131,7 +131,7 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &(
-                orchard::builder::BundleType::DEFAULT,
+                orchard::builder::BundleType::DEFAULT_VANILLA,
                 &[] as &[Infallible],
                 &[] as &[Infallible],
             ),
@@ -180,7 +180,7 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &(
-                orchard::builder::BundleType::DEFAULT,
+                orchard::builder::BundleType::DEFAULT_VANILLA,
                 &[] as &[Infallible],
                 &[] as &[Infallible],
             ),

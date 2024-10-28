@@ -9,8 +9,8 @@ use std::{
     io,
 };
 
-use sapling::{self, note::ExtractedNoteCommitment, Node};
-use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
+use sapling::{self, note::ExtractedNoteCommitment, note_encryption::COMPACT_NOTE_SIZE, Node};
+use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     consensus::BlockHeight,
@@ -150,7 +150,7 @@ impl<Proof> From<&sapling::bundle::OutputDescription<Proof>>
         compact_formats::CompactSaplingOutput {
             cmu: out.cmu().to_bytes().to_vec(),
             ephemeral_key: out.ephemeral_key().as_ref().to_vec(),
-            ciphertext: out.enc_ciphertext()[..COMPACT_NOTE_SIZE].to_vec(),
+            ciphertext: out.enc_ciphertext().as_ref()[..COMPACT_NOTE_SIZE].to_vec(),
         }
     }
 }
@@ -186,7 +186,9 @@ impl compact_formats::CompactSaplingSpend {
 }
 
 #[cfg(feature = "orchard")]
-impl TryFrom<&compact_formats::CompactOrchardAction> for orchard::note_encryption::CompactAction {
+impl TryFrom<&compact_formats::CompactOrchardAction>
+    for orchard::note_encryption::CompactAction<orchard::orchard_flavor::OrchardVanilla>
+{
     type Error = ();
 
     fn try_from(value: &compact_formats::CompactOrchardAction) -> Result<Self, Self::Error> {
@@ -194,7 +196,9 @@ impl TryFrom<&compact_formats::CompactOrchardAction> for orchard::note_encryptio
             value.nf()?,
             value.cmx()?,
             value.ephemeral_key()?,
-            value.ciphertext[..].try_into().map_err(|_| ())?,
+            zcash_note_encryption::note_bytes::NoteBytesData(
+                value.ciphertext[..].try_into().map_err(|_| ())?,
+            ),
         ))
     }
 }
@@ -247,13 +251,18 @@ impl<A: sapling::bundle::Authorization> From<&sapling::bundle::SpendDescription<
 }
 
 #[cfg(feature = "orchard")]
-impl<SpendAuth> From<&orchard::Action<SpendAuth>> for compact_formats::CompactOrchardAction {
-    fn from(action: &orchard::Action<SpendAuth>) -> compact_formats::CompactOrchardAction {
+impl<SpendAuth> From<&orchard::Action<SpendAuth, orchard::orchard_flavor::OrchardVanilla>>
+    for compact_formats::CompactOrchardAction
+{
+    fn from(
+        action: &orchard::Action<SpendAuth, orchard::orchard_flavor::OrchardVanilla>,
+    ) -> compact_formats::CompactOrchardAction {
         compact_formats::CompactOrchardAction {
             nullifier: action.nullifier().to_bytes().to_vec(),
             cmx: action.cmx().to_bytes().to_vec(),
             ephemeral_key: action.encrypted_note().epk_bytes.to_vec(),
-            ciphertext: action.encrypted_note().enc_ciphertext[..COMPACT_NOTE_SIZE].to_vec(),
+            ciphertext: action.encrypted_note().enc_ciphertext.as_ref()[..COMPACT_NOTE_SIZE]
+                .to_vec(),
         }
     }
 }
