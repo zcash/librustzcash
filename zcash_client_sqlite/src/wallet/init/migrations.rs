@@ -31,9 +31,11 @@ mod wallet_summaries;
 
 use std::rc::Rc;
 
+use rusqlite::{named_params, OptionalExtension};
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::SecretVec;
 use uuid::Uuid;
+use zcash_address::unified::{Encoding as _, Ufvk};
 use zcash_protocol::consensus;
 
 use super::WalletMigrationError;
@@ -201,6 +203,52 @@ const V_0_11_0: &[Uuid] = &[
 
 /// Leaf migrations in the 0.11.1 release.
 const V_0_11_1: &[Uuid] = &[tx_retrieval_queue::MIGRATION_ID];
+
+pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+) -> Result<(), WalletMigrationError> {
+    // Ensure that the `ufvk_support` migration has been applied; if it hasn't, we won't be able to
+    // validate that the UFVKs in the wallet correspond to the network type that the wallet is
+    // being migrated for.
+    let has_ufvk = conn
+        .query_row(
+            &format!(
+                "SELECT 1 FROM {} WHERE id = :migration_id",
+                super::MIGRATIONS_TABLE
+            ),
+            named_params![":migration_id": &ufvk_support::MIGRATION_ID.as_bytes()[..]],
+            |row| row.get::<_, bool>(0),
+        )
+        .optional()?
+        == Some(true);
+
+    if has_ufvk {
+        let mut fvks_stmt = conn.prepare("SELECT ufvk FROM accounts")?;
+        let mut rows = fvks_stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let ufvk_str = row.get::<_, String>(0)?;
+            let (network, _) = Ufvk::decode(&ufvk_str).map_err(|e| {
+                WalletMigrationError::CorruptedData(format!("Unable to parse UFVK: {e}"))
+            })?;
+
+            if network != params.network_type() {
+                let network_name = |n| match n {
+                    consensus::NetworkType::Main => "mainnet",
+                    consensus::NetworkType::Test => "testnet",
+                    consensus::NetworkType::Regtest => "regtest",
+                };
+                return Err(WalletMigrationError::CorruptedData(format!(
+                    "Network type mismatch: account UFVK is for {} but attempting to initialize for {}.",
+                    network_name(network),
+                    network_name(params.network_type())
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
