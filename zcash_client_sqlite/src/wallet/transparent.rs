@@ -142,9 +142,16 @@ pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
         let (network, uivk) = Uivk::decode(&uivk_str)
             .map_err(|e| SqliteClientError::CorruptedData(format!("Unable to parse UIVK: {e}")))?;
         if params.network_type() != network {
-            return Err(SqliteClientError::CorruptedData(
-                "Network type mismatch".to_owned(),
-            ));
+            let network_name = |n| match n {
+                consensus::NetworkType::Main => "mainnet",
+                consensus::NetworkType::Test => "testnet",
+                consensus::NetworkType::Regtest => "regtest",
+            };
+            return Err(SqliteClientError::CorruptedData(format!(
+                "Network type mismatch: account UIVK is for {} but a {} address was requested.",
+                network_name(network),
+                network_name(params.network_type())
+            )));
         }
 
         // Derive the default transparent address (if it wasn't already part of a derived UA).
