@@ -5,7 +5,7 @@ use rusqlite::{named_params, types::Value, Connection, Row};
 use std::{num::NonZeroU64, rc::Rc};
 
 use zcash_client_backend::{
-    data_api::{NoteFilter, PoolMeta, TargetValue},
+    data_api::{NoteFilter, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT},
     wallet::ReceivedNote,
 };
 use zcash_primitives::transaction::TxId;
@@ -21,19 +21,47 @@ use crate::{
 };
 
 #[cfg(feature = "orchard")]
-use crate::ORCHARD_TABLES_PREFIX;
+use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT};
 
-pub(crate) fn per_protocol_names(
-    protocol: ShieldedProtocol,
-) -> (&'static str, &'static str, &'static str) {
-    match protocol {
-        ShieldedProtocol::Sapling => (SAPLING_TABLES_PREFIX, "output_index", "rcm"),
+pub(crate) struct TableConstants {
+    pub(crate) table_prefix: &'static str,
+    pub(crate) output_index_col: &'static str,
+    pub(crate) output_count_col: &'static str,
+    pub(crate) note_reconstruction_cols: &'static str,
+    pub(crate) shard_height: u8,
+}
+
+const SAPLING_TABLE_CONSTANTS: TableConstants = TableConstants {
+    table_prefix: SAPLING_TABLES_PREFIX,
+    output_index_col: "output_index",
+    output_count_col: "sapling_output_count",
+    note_reconstruction_cols: "rcm",
+    shard_height: SAPLING_SHARD_HEIGHT,
+};
+
+#[cfg(feature = "orchard")]
+const ORCHARD_TABLE_CONSTANTS: TableConstants = TableConstants {
+    table_prefix: ORCHARD_TABLES_PREFIX,
+    output_index_col: "action_index",
+    output_count_col: "orchard_action_count",
+    note_reconstruction_cols: "rho, rseed",
+    shard_height: ORCHARD_SHARD_HEIGHT,
+};
+
+#[allow(dead_code)]
+pub(crate) trait ErrUnsupportedPool {
+    fn unsupported_pool_type(pool_type: PoolType) -> Self;
+}
+
+pub(crate) fn table_constants<E: ErrUnsupportedPool>(
+    shielded_protocol: ShieldedProtocol,
+) -> Result<TableConstants, E> {
+    match shielded_protocol {
+        ShieldedProtocol::Sapling => Ok(SAPLING_TABLE_CONSTANTS),
         #[cfg(feature = "orchard")]
-        ShieldedProtocol::Orchard => (ORCHARD_TABLES_PREFIX, "action_index", "rho, rseed"),
+        ShieldedProtocol::Orchard => Ok(ORCHARD_TABLE_CONSTANTS),
         #[cfg(not(feature = "orchard"))]
-        ShieldedProtocol::Orchard => {
-            unreachable!("Should never be called unless the `orchard` feature is enabled")
-        }
+        ShieldedProtocol::Orchard => Err(E::unsupported_pool_type(PoolType::ORCHARD)),
     }
 }
 
@@ -74,10 +102,16 @@ pub(crate) fn get_spendable_note<P: consensus::Parameters, F, Note>(
 where
     F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
-    let (table_prefix, index_col, note_reconstruction_cols) = per_protocol_names(protocol);
+    let TableConstants {
+        table_prefix,
+        output_index_col,
+        note_reconstruction_cols,
+        ..
+    } = table_constants::<SqliteClientError>(protocol)?;
+
     let result = conn.query_row_and_then(
         &format!(
-            "SELECT rn.id, txid, {index_col},
+            "SELECT rn.id, txid, {output_index_col},
                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                 accounts.ufvk, recipient_key_scope
              FROM {table_prefix}_received_notes rn
@@ -85,7 +119,7 @@ where
              INNER JOIN transactions ON transactions.id_tx = rn.tx
              WHERE txid = :txid
              AND transactions.block IS NOT NULL
-             AND {index_col} = :output_index
+             AND {output_index_col} = :output_index
              AND accounts.ufvk IS NOT NULL
              AND recipient_key_scope IS NOT NULL
              AND nf IS NOT NULL
@@ -165,7 +199,12 @@ where
         }
     };
 
-    let (table_prefix, index_col, note_reconstruction_cols) = per_protocol_names(protocol);
+    let TableConstants {
+        table_prefix,
+        output_index_col,
+        note_reconstruction_cols,
+        ..
+    } = table_constants::<SqliteClientError>(protocol)?;
     if unscanned_tip_exists(conn, anchor_height, table_prefix)? {
         return Ok(vec![]);
     }
@@ -188,7 +227,7 @@ where
         &format!(
             "WITH eligible AS (
                  SELECT
-                     {table_prefix}_received_notes.id AS id, txid, {index_col},
+                     {table_prefix}_received_notes.id AS id, txid, {output_index_col},
                      diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                      SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
                      accounts.ufvk as ufvk, recipient_key_scope
@@ -225,12 +264,12 @@ where
                     AND unscanned.block_range_end > :wallet_birthday
                  )
              )
-             SELECT id, txid, {index_col},
+             SELECT id, txid, {output_index_col},
                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                     ufvk, recipient_key_scope
              FROM eligible WHERE so_far < :target_value
              UNION
-             SELECT id, txid, {index_col},
+             SELECT id, txid, {output_index_col},
                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                     ufvk, recipient_key_scope
              FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
@@ -303,13 +342,18 @@ pub(crate) fn select_unspent_note_meta(
     chain_tip_height: BlockHeight,
     wallet_birthday: BlockHeight,
 ) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
-    let (table_prefix, index_col, _) = per_protocol_names(protocol);
+    let TableConstants {
+        table_prefix,
+        output_index_col,
+        ..
+    } = table_constants::<SqliteClientError>(protocol)?;
+
     // This query is effectively the same as the internal `eligible` subquery
     // used in `select_spendable_notes`.
     //
     // TODO: Deduplicate this in the future by introducing a view?
     let mut stmt = conn.prepare_cached(&format!("
-        SELECT {table_prefix}_received_notes.id AS id, txid, {index_col},
+        SELECT {table_prefix}_received_notes.id AS id, txid, {output_index_col},
                commitment_tree_position, value
         FROM {table_prefix}_received_notes
         INNER JOIN transactions
@@ -348,7 +392,7 @@ pub(crate) fn select_unspent_note_meta(
                 Ok(UnspentNoteMeta {
                     note_id: row.get("id").map(|id| ReceivedNoteId(protocol, id))?,
                     txid: row.get("txid").map(TxId::from_bytes)?,
-                    output_index: row.get(index_col)?,
+                    output_index: row.get(output_index_col)?,
                     commitment_tree_position: row
                         .get::<_, u64>("commitment_tree_position")
                         .map(Position::from)?,
@@ -369,7 +413,7 @@ pub(crate) fn spendable_notes_meta(
     filter: &NoteFilter,
     exclude: &[ReceivedNoteId],
 ) -> Result<Option<PoolMeta>, SqliteClientError> {
-    let (table_prefix, _, _) = per_protocol_names(protocol);
+    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
 
     let excluded: Vec<Value> = exclude
         .iter()
