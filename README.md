@@ -24,4 +24,4 @@ be dual licensed as above, without any additional terms or conditions.
 
 ### Testing
 
-Use `cargo test` to test the code in this repository.
+Use `cargo test --release --all-features` to test the code in this repository before merging.
