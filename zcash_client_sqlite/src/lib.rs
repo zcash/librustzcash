@@ -1635,16 +1635,18 @@ impl BlockDb {
 impl BlockSource for BlockDb {
     type Error = SqliteClientError;
 
-    fn with_blocks<F, DbErrT>(
+    fn with_blocks<E, F, G>(
         &self,
         from_height: Option<BlockHeight>,
         limit: Option<usize>,
         with_row: F,
-    ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
+        map_err: G,
+    ) -> Result<(), E>
     where
-        F: FnMut(CompactBlock) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>,
+        F: FnMut(CompactBlock) -> Result<(), E>,
+        G: Fn(Self::Error) -> E,
     {
-        chain::blockdb_with_blocks(self, from_height, limit, with_row)
+        chain::blockdb_with_blocks(self, from_height, limit, with_row, map_err)
     }
 }
 
@@ -1815,16 +1817,18 @@ impl FsBlockDb {
 impl BlockSource for FsBlockDb {
     type Error = FsBlockDbError;
 
-    fn with_blocks<F, DbErrT>(
+    fn with_blocks<E, F, G>(
         &self,
         from_height: Option<BlockHeight>,
         limit: Option<usize>,
         with_row: F,
-    ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
+        map_err: G,
+    ) -> Result<(), E>
     where
-        F: FnMut(CompactBlock) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>,
+        F: FnMut(CompactBlock) -> Result<(), E>,
+        G: Fn(Self::Error) -> E,
     {
-        fsblockdb_with_blocks(self, from_height, limit, with_row)
+        fsblockdb_with_blocks(self, from_height, limit, with_row, map_err)
     }
 }
 

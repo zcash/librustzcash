@@ -221,14 +221,16 @@ pub trait BlockSource {
     ///   as part of processing each row.
     /// * `NoteRefT`: the type of note identifiers in the wallet data store, for use in
     ///   reporting errors related to specific notes.
-    fn with_blocks<F, WalletErrT>(
+    fn with_blocks<E, F, G>(
         &self,
         from_height: Option<BlockHeight>,
         limit: Option<usize>,
         with_block: F,
-    ) -> Result<(), error::Error<WalletErrT, Self::Error>>
+        map_err: G,
+    ) -> Result<(), E>
     where
-        F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error>>;
+        F: FnMut(CompactBlock) -> Result<(), E>,
+        G: Fn(Self::Error) -> E;
 }
 
 /// `BlockCache` is a trait that extends `BlockSource` and defines methods for managing
@@ -239,7 +241,7 @@ pub trait BlockSource {
 /// ```
 ///    use std::sync::{Arc, Mutex};
 ///    use zcash_client_backend::data_api::{
-///        chain::{error, truncate_block_cache, BlockCache, BlockSource},
+///        chain::{truncate_block_cache, BlockCache, BlockSource},
 ///        scanning::{ScanPriority, ScanRange},
 ///    };
 ///    use zcash_client_backend::proto::compact_formats::CompactBlock;
@@ -252,14 +254,16 @@ pub trait BlockSource {
 /// #    impl BlockSource for ExampleBlockCache {
 /// #        type Error = ();
 /// #
-/// #        fn with_blocks<F, WalletErrT>(
+/// #        fn with_blocks<E, F, G>(
 /// #            &self,
 /// #            _from_height: Option<BlockHeight>,
 /// #            _limit: Option<usize>,
 /// #            _with_block: F,
-/// #        ) -> Result<(), error::Error<WalletErrT, Self::Error>>
+/// #            _map_err: G,
+/// #        ) -> Result<(), E>
 /// #        where
-/// #            F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error>>,
+/// #            F: FnMut(CompactBlock) -> Result<(), E>,
+/// #            G: Fn(Self::Error) -> E,
 /// #        {
 /// #            Ok(())
 /// #        }
@@ -608,9 +612,12 @@ where
     let scanning_keys = ScanningKeys::from_account_ufvks(account_ufvks);
     let mut runners = BatchRunners::<_, (), ()>::for_keys(100, &scanning_keys);
 
-    block_source.with_blocks::<_, DbT::Error>(Some(from_height), Some(limit), |block| {
-        runners.add_block(params, block).map_err(|e| e.into())
-    })?;
+    block_source.with_blocks(
+        Some(from_height),
+        Some(limit),
+        |block| runners.add_block(params, block).map_err(|e| e.into()),
+        Error::BlockSource,
+    )?;
     runners.flush();
 
     let mut prior_block_metadata = if from_height > BlockHeight::from(0) {
@@ -634,7 +641,7 @@ where
 
     let mut scanned_blocks = vec![];
     let mut scan_summary = ScanSummary::for_range(from_height..from_height);
-    block_source.with_blocks::<_, DbT::Error>(
+    block_source.with_blocks(
         Some(from_height),
         Some(limit),
         |block: CompactBlock| {
@@ -692,6 +699,7 @@ where
 
             Ok(())
         },
+        Error::BlockSource,
     )?;
 
     data_db
@@ -707,21 +715,23 @@ pub mod testing {
 
     use crate::proto::compact_formats::CompactBlock;
 
-    use super::{error::Error, BlockSource};
+    use super::BlockSource;
 
     pub struct MockBlockSource;
 
     impl BlockSource for MockBlockSource {
         type Error = Infallible;
 
-        fn with_blocks<F, DbErrT>(
+        fn with_blocks<E, F, G>(
             &self,
             _from_height: Option<BlockHeight>,
             _limit: Option<usize>,
             _with_row: F,
-        ) -> Result<(), Error<DbErrT, Infallible>>
+            _map_err: G,
+        ) -> Result<(), E>
         where
-            F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, Infallible>>,
+            F: FnMut(CompactBlock) -> Result<(), E>,
+            G: Fn(Self::Error) -> E,
         {
             Ok(())
         }
