@@ -5,7 +5,7 @@ use rusqlite::params;
 
 use zcash_primitives::consensus::BlockHeight;
 
-use zcash_client_backend::{data_api::chain::error::Error, proto::compact_formats::CompactBlock};
+use zcash_client_backend::proto::compact_formats::CompactBlock;
 
 use crate::{error::SqliteClientError, BlockDb};
 
@@ -26,28 +26,27 @@ pub mod migrations;
 /// Starting at `from_height`, the `with_row` callback is invoked with each block retrieved from
 /// the backing store. If the `limit` value provided is `None`, all blocks are traversed up to the
 /// maximum height.
-pub(crate) fn blockdb_with_blocks<F, DbErrT>(
+pub(crate) async fn blockdb_with_blocks<E, F, G>(
     block_source: &BlockDb,
     from_height: Option<BlockHeight>,
     limit: Option<usize>,
     mut with_row: F,
-) -> Result<(), Error<DbErrT, SqliteClientError>>
+    to_chain_error: G,
+) -> Result<(), E>
 where
-    F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, SqliteClientError>>,
+    F: FnMut(CompactBlock) -> Result<(), E>,
+    G: Fn(SqliteClientError) -> E,
 {
-    fn to_chain_error<D, E: Into<SqliteClientError>>(err: E) -> Error<D, SqliteClientError> {
-        Error::BlockSource(err.into())
-    }
-
     // Fetch the CompactBlocks we need to scan
-    let mut stmt_blocks = block_source
-        .0
+    let connector = block_source.0.lock().await;
+    let mut stmt_blocks = connector
         .prepare(
             "SELECT height, data FROM compactblocks
             WHERE height >= ?
             ORDER BY height ASC LIMIT ?",
         )
-        .map_err(to_chain_error)?;
+        .map_err(SqliteClientError::from)
+        .map_err(&to_chain_error)?;
 
     let mut rows = stmt_blocks
         .query(params![
@@ -56,12 +55,21 @@ where
                 .and_then(|l| u32::try_from(l).ok())
                 .unwrap_or(u32::MAX)
         ])
-        .map_err(to_chain_error)?;
+        .map_err(SqliteClientError::from)
+        .map_err(&to_chain_error)?;
 
     // Only look for the `from_height` in the scanned blocks if it is set.
     let mut from_height_found = from_height.is_none();
-    while let Some(row) = rows.next().map_err(to_chain_error)? {
-        let height = BlockHeight::from_u32(row.get(0).map_err(to_chain_error)?);
+    while let Some(row) = rows
+        .next()
+        .map_err(SqliteClientError::from)
+        .map_err(&to_chain_error)?
+    {
+        let height = BlockHeight::from_u32(
+            row.get(0)
+                .map_err(SqliteClientError::from)
+                .map_err(&to_chain_error)?,
+        );
         if !from_height_found {
             // We will only perform this check on the first row.
             let from_height = from_height.expect("can only reach here if set");
@@ -72,8 +80,13 @@ where
             }
         }
 
-        let data: Vec<u8> = row.get(1).map_err(to_chain_error)?;
-        let block = CompactBlock::decode(&data[..]).map_err(to_chain_error)?;
+        let data: Vec<u8> = row
+            .get(1)
+            .map_err(SqliteClientError::from)
+            .map_err(&to_chain_error)?;
+        let block = CompactBlock::decode(&data[..])
+            .map_err(SqliteClientError::from)
+            .map_err(&to_chain_error)?;
         if block.height() != height {
             return Err(to_chain_error(SqliteClientError::CorruptedData(format!(
                 "Block height {} did not match row's height field value {}",
@@ -233,29 +246,28 @@ pub(crate) fn blockmetadb_find_block(
 /// the backing store. If the `limit` value provided is `None`, all blocks are traversed up to the
 /// maximum height for which metadata is available.
 #[cfg(feature = "unstable")]
-pub(crate) fn fsblockdb_with_blocks<F, DbErrT>(
+pub(crate) async fn fsblockdb_with_blocks<E, F, G>(
     cache: &FsBlockDb,
     from_height: Option<BlockHeight>,
     limit: Option<usize>,
     mut with_block: F,
-) -> Result<(), Error<DbErrT, FsBlockDbError>>
+    to_chain_error: G,
+) -> Result<(), E>
 where
-    F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, FsBlockDbError>>,
+    F: FnMut(CompactBlock) -> Result<(), E>,
+    G: Fn(FsBlockDbError) -> E,
 {
-    fn to_chain_error<D, E: Into<FsBlockDbError>>(err: E) -> Error<D, FsBlockDbError> {
-        Error::BlockSource(err.into())
-    }
-
     // Fetch the CompactBlocks we need to scan
-    let mut stmt_blocks = cache
-        .conn
+    let connector = cache.conn.lock().await;
+    let mut stmt_blocks = connector
         .prepare(
             "SELECT height, blockhash, time, sapling_outputs_count, orchard_actions_count
              FROM compactblocks_meta
              WHERE height >= ?
              ORDER BY height ASC LIMIT ?",
         )
-        .map_err(to_chain_error)?;
+        .map_err(FsBlockDbError::from)
+        .map_err(&to_chain_error)?;
 
     let rows = stmt_blocks
         .query_map(
@@ -275,12 +287,15 @@ where
                 })
             },
         )
-        .map_err(to_chain_error)?;
+        .map_err(FsBlockDbError::from)
+        .map_err(&to_chain_error)?;
 
     // Only look for the `from_height` in the scanned blocks if it is set.
     let mut from_height_found = from_height.is_none();
     for row_result in rows {
-        let cbr = row_result.map_err(to_chain_error)?;
+        let cbr = row_result
+            .map_err(FsBlockDbError::from)
+            .map_err(&to_chain_error)?;
         if !from_height_found {
             // We will only perform this check on the first row.
             let from_height = from_height.expect("can only reach here if set");
@@ -291,14 +306,18 @@ where
             }
         }
 
-        let mut block_file =
-            File::open(cbr.block_file_path(&cache.blocks_dir)).map_err(to_chain_error)?;
+        let mut block_file = File::open(cbr.block_file_path(cache.blocks_dir.as_ref()))
+            .map_err(FsBlockDbError::from)
+            .map_err(&to_chain_error)?;
         let mut block_data = vec![];
         block_file
             .read_to_end(&mut block_data)
-            .map_err(to_chain_error)?;
+            .map_err(FsBlockDbError::from)
+            .map_err(&to_chain_error)?;
 
-        let block = CompactBlock::decode(&block_data[..]).map_err(to_chain_error)?;
+        let block = CompactBlock::decode(&block_data[..])
+            .map_err(FsBlockDbError::from)
+            .map_err(&to_chain_error)?;
 
         if block.height() != cbr.height {
             return Err(to_chain_error(FsBlockDbError::CorruptedData(format!(
@@ -328,92 +347,92 @@ mod tests {
     #[cfg(feature = "orchard")]
     use zcash_client_backend::data_api::testing::orchard::OrchardPoolTester;
 
-    #[test]
-    fn valid_chain_states_sapling() {
-        testing::pool::valid_chain_states::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn valid_chain_states_sapling() {
+        testing::pool::valid_chain_states::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn valid_chain_states_orchard() {
-        testing::pool::valid_chain_states::<OrchardPoolTester>()
+    async fn valid_chain_states_orchard() {
+        testing::pool::valid_chain_states::<OrchardPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn invalid_chain_cache_disconnected_sapling() {
-        testing::pool::invalid_chain_cache_disconnected::<SaplingPoolTester>()
+    async fn invalid_chain_cache_disconnected_sapling() {
+        testing::pool::invalid_chain_cache_disconnected::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn invalid_chain_cache_disconnected_orchard() {
-        testing::pool::invalid_chain_cache_disconnected::<OrchardPoolTester>()
+    async fn invalid_chain_cache_disconnected_orchard() {
+        testing::pool::invalid_chain_cache_disconnected::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn data_db_truncation_sapling() {
-        testing::pool::data_db_truncation::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn data_db_truncation_sapling() {
+        testing::pool::data_db_truncation::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn data_db_truncation_orchard() {
-        testing::pool::data_db_truncation::<OrchardPoolTester>()
+    async fn data_db_truncation_orchard() {
+        testing::pool::data_db_truncation::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn reorg_to_checkpoint_sapling() {
-        testing::pool::reorg_to_checkpoint::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn reorg_to_checkpoint_sapling() {
+        testing::pool::reorg_to_checkpoint::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn reorg_to_checkpoint_orchard() {
-        testing::pool::reorg_to_checkpoint::<OrchardPoolTester>()
+    async fn reorg_to_checkpoint_orchard() {
+        testing::pool::reorg_to_checkpoint::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn scan_cached_blocks_allows_blocks_out_of_order_sapling() {
-        testing::pool::scan_cached_blocks_allows_blocks_out_of_order::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn scan_cached_blocks_allows_blocks_out_of_order_sapling() {
+        testing::pool::scan_cached_blocks_allows_blocks_out_of_order::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn scan_cached_blocks_allows_blocks_out_of_order_orchard() {
-        testing::pool::scan_cached_blocks_allows_blocks_out_of_order::<OrchardPoolTester>()
+    async fn scan_cached_blocks_allows_blocks_out_of_order_orchard() {
+        testing::pool::scan_cached_blocks_allows_blocks_out_of_order::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn scan_cached_blocks_finds_received_notes_sapling() {
-        testing::pool::scan_cached_blocks_finds_received_notes::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn scan_cached_blocks_finds_received_notes_sapling() {
+        testing::pool::scan_cached_blocks_finds_received_notes::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn scan_cached_blocks_finds_received_notes_orchard() {
-        testing::pool::scan_cached_blocks_finds_received_notes::<OrchardPoolTester>()
+    async fn scan_cached_blocks_finds_received_notes_orchard() {
+        testing::pool::scan_cached_blocks_finds_received_notes::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn scan_cached_blocks_finds_change_notes_sapling() {
-        testing::pool::scan_cached_blocks_finds_change_notes::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn scan_cached_blocks_finds_change_notes_sapling() {
+        testing::pool::scan_cached_blocks_finds_change_notes::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn scan_cached_blocks_finds_change_notes_orchard() {
-        testing::pool::scan_cached_blocks_finds_change_notes::<OrchardPoolTester>()
+    async fn scan_cached_blocks_finds_change_notes_orchard() {
+        testing::pool::scan_cached_blocks_finds_change_notes::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn scan_cached_blocks_detects_spends_out_of_order_sapling() {
-        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn scan_cached_blocks_detects_spends_out_of_order_sapling() {
+        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn scan_cached_blocks_detects_spends_out_of_order_orchard() {
-        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<OrchardPoolTester>()
+    async fn scan_cached_blocks_detects_spends_out_of_order_orchard() {
+        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<OrchardPoolTester>().await
     }
 }

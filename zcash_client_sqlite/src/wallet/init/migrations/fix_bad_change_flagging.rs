@@ -102,9 +102,9 @@ mod tests {
     }
 
     #[cfg(feature = "transparent-inputs")]
-    fn shield_transparent<T: ShieldedPoolTester>() {
+    async fn shield_transparent<T: ShieldedPoolTester>() {
         let ds_factory = TestDbFactory::new(super::DEPENDENCIES.to_vec());
-        let cache = BlockCache::new();
+        let cache = BlockCache::new().await;
         let mut st = TestBuilder::new()
             .with_data_store_factory(ds_factory)
             .with_block_cache(cache)
@@ -122,12 +122,14 @@ mod tests {
         let taddr = uaddr.transparent().unwrap();
 
         // Ensure that the wallet has at least one block
-        let (h, _, _) = st.generate_next_block(
-            &dfvk,
-            AddressType::Internal,
-            Zatoshis::const_from_u64(50000),
-        );
-        st.scan_cached_blocks(h, 1);
+        let (h, _, _) = st
+            .generate_next_block(
+                &dfvk,
+                AddressType::Internal,
+                Zatoshis::const_from_u64(50000),
+            )
+            .await;
+        st.scan_cached_blocks(h, 1).await;
 
         let utxo = WalletTransparentOutput::from_parts(
             OutPoint::fake(),
@@ -175,8 +177,8 @@ mod tests {
         // Prior to the fix that removes the source of the error this migration is addressing,
         // this scanning will result in a state where `tx.is_shielding() == false`. However,
         // we can't validate that here, because after that fix, this test would fail.
-        let (h, _) = st.generate_next_block_including(*txids.first());
-        st.scan_cached_blocks(h, 1);
+        let (h, _) = st.generate_next_block_including(*txids.first()).await;
+        st.scan_cached_blocks(h, 1).await;
 
         // Complete the migration to resolve the incorrect change flag value.
         init_wallet_db(st.wallet_mut().db_mut(), None).unwrap();
@@ -189,17 +191,17 @@ mod tests {
         assert!(tx.is_shielding());
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "transparent-inputs")]
-    fn sapling_shield_transparent() {
-        shield_transparent::<SaplingPoolTester>();
+    async fn sapling_shield_transparent() {
+        shield_transparent::<SaplingPoolTester>().await;
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
-    fn orchard_shield_transparent() {
+    async fn orchard_shield_transparent() {
         use zcash_client_backend::data_api::testing::orchard::OrchardPoolTester;
 
-        shield_transparent::<OrchardPoolTester>();
+        shield_transparent::<OrchardPoolTester>().await;
     }
 }

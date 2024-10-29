@@ -12,6 +12,7 @@ and this library adheres to Rust's notion of
   - `Progress`
   - `WalletSummary::progress`
   - `WalletMeta`
+  - `chain::truncate_block_cache` (behind the `sync` feature flag).
   - `impl Default for wallet::input_selection::GreedyInputSelector`
 - `zcash_client_backend::fees`
   - `SplitPolicy`
@@ -80,6 +81,14 @@ and this library adheres to Rust's notion of
   `ProposalDecodingError::FeeRuleNotSupported` has been added to replace it.
 - `zcash_client_backend::data_api::fees::fixed` is now available only via the
   use of the `non-standard-fees` feature flag.
+- zcash_client_backend::data_api::chain:
+  - `BlockSource` added Send + Sync trait bounds
+  - `BlockSource::with_blocks` changed to async fn
+  - Changes to `BlockCache` trait:
+    - removed `sync` feature flag so it can be used in `scan_cached_blocks`
+    - all trait methods now return `zcash_client_backend::data_api::chain::error::Error`
+      so implementations may call `BlockSource::with_blocks` and propagate errors correctly.
+  - `scan_cached_blocks` now takes a block cache and a scan range for scanning.
 - `zcash_client_backend::tor::http::cryptex`:
   - The `Exchange` trait is no longer object-safe. Replace any existing uses of
     `dyn Exchange` with `DynExchange`.
@@ -88,6 +97,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api`:
   - `WalletSummary::scan_progress` and `WalletSummary::recovery_progress` have
     been removed. Use `WalletSummary::progress` instead.
+  - `chain::BlockCache::truncate` (use `chain::truncate_block_cache` instead).
   - `testing::input_selector` use explicit `InputSelector` constructors
     directly instead.
   - The deprecated `wallet::create_spend_to_address` and `wallet::spend`

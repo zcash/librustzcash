@@ -407,26 +407,27 @@ pub(crate) mod tests {
     #[cfg(feature = "orchard")]
     use zcash_client_backend::data_api::testing::orchard::OrchardPoolTester;
 
-    #[test]
-    fn send_single_step_proposed_transfer() {
-        testing::pool::send_single_step_proposed_transfer::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn send_single_step_proposed_transfer() {
+        testing::pool::send_single_step_proposed_transfer::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn send_with_multiple_change_outputs() {
-        testing::pool::send_with_multiple_change_outputs::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn send_with_multiple_change_outputs() {
+        testing::pool::send_with_multiple_change_outputs::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "transparent-inputs")]
-    fn send_multi_step_proposed_transfer() {
-        testing::pool::send_multi_step_proposed_transfer::<SaplingPoolTester>()
+    async fn send_multi_step_proposed_transfer() {
+        testing::pool::send_multi_step_proposed_transfer::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "transparent-inputs")]
-    fn proposal_fails_if_not_all_ephemeral_outputs_consumed() {
+    async fn proposal_fails_if_not_all_ephemeral_outputs_consumed() {
         testing::pool::proposal_fails_if_not_all_ephemeral_outputs_consumed::<SaplingPoolTester>()
+            .await
     }
 
     #[test]
@@ -439,93 +440,95 @@ pub(crate) mod tests {
         testing::pool::proposal_fails_with_no_blocks::<SaplingPoolTester>()
     }
 
-    #[test]
-    fn spend_fails_on_unverified_notes() {
-        testing::pool::spend_fails_on_unverified_notes::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn spend_fails_on_unverified_notes() {
+        testing::pool::spend_fails_on_unverified_notes::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn spend_fails_on_locked_notes() {
-        testing::pool::spend_fails_on_locked_notes::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn spend_fails_on_locked_notes() {
+        testing::pool::spend_fails_on_locked_notes::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn ovk_policy_prevents_recovery_from_chain() {
-        testing::pool::ovk_policy_prevents_recovery_from_chain::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn ovk_policy_prevents_recovery_from_chain() {
+        testing::pool::ovk_policy_prevents_recovery_from_chain::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn spend_succeeds_to_t_addr_zero_change() {
-        testing::pool::spend_succeeds_to_t_addr_zero_change::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn spend_succeeds_to_t_addr_zero_change() {
+        testing::pool::spend_succeeds_to_t_addr_zero_change::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn change_note_spends_succeed() {
-        testing::pool::change_note_spends_succeed::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn change_note_spends_succeed() {
+        testing::pool::change_note_spends_succeed::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn external_address_change_spends_detected_in_restore_from_seed() {
+    #[tokio::test]
+    async fn external_address_change_spends_detected_in_restore_from_seed() {
         testing::pool::external_address_change_spends_detected_in_restore_from_seed::<
             SaplingPoolTester,
         >()
+        .await
     }
 
-    #[test]
+    #[tokio::test]
     #[ignore] // FIXME: #1316 This requires support for dust outputs.
     #[cfg(not(feature = "expensive-tests"))]
-    fn zip317_spend() {
-        testing::pool::zip317_spend::<SaplingPoolTester>()
+    async fn zip317_spend() {
+        testing::pool::zip317_spend::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "transparent-inputs")]
-    fn shield_transparent() {
-        testing::pool::shield_transparent::<SaplingPoolTester>()
+    async fn shield_transparent() {
+        testing::pool::shield_transparent::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn birthday_in_anchor_shard() {
-        testing::pool::birthday_in_anchor_shard::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn birthday_in_anchor_shard() {
+        testing::pool::birthday_in_anchor_shard::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn checkpoint_gaps() {
-        testing::pool::checkpoint_gaps::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn checkpoint_gaps() {
+        testing::pool::checkpoint_gaps::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn scan_cached_blocks_detects_spends_out_of_order() {
-        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn scan_cached_blocks_detects_spends_out_of_order() {
+        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn pool_crossing_required() {
-        testing::pool::pool_crossing_required::<SaplingPoolTester, OrchardPoolTester>()
+    async fn pool_crossing_required() {
+        testing::pool::pool_crossing_required::<SaplingPoolTester, OrchardPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn fully_funded_fully_private() {
-        testing::pool::fully_funded_fully_private::<SaplingPoolTester, OrchardPoolTester>()
+    async fn fully_funded_fully_private() {
+        testing::pool::fully_funded_fully_private::<SaplingPoolTester, OrchardPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
-    fn fully_funded_send_to_t() {
-        testing::pool::fully_funded_send_to_t::<SaplingPoolTester, OrchardPoolTester>()
+    async fn fully_funded_send_to_t() {
+        testing::pool::fully_funded_send_to_t::<SaplingPoolTester, OrchardPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn multi_pool_checkpoint() {
-        testing::pool::multi_pool_checkpoint::<SaplingPoolTester, OrchardPoolTester>()
+    async fn multi_pool_checkpoint() {
+        testing::pool::multi_pool_checkpoint::<SaplingPoolTester, OrchardPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn multi_pool_checkpoints_with_pruning() {
+    async fn multi_pool_checkpoints_with_pruning() {
         testing::pool::multi_pool_checkpoints_with_pruning::<SaplingPoolTester, OrchardPoolTester>()
+            .await
     }
 }

@@ -831,11 +831,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn transparent_balance_across_shielding() {
+    #[tokio::test]
+    async fn transparent_balance_across_shielding() {
         zcash_client_backend::data_api::testing::transparent::transparent_balance_across_shielding(
             TestDbFactory::default(),
-            BlockCache::new(),
-        );
+            BlockCache::new().await,
+        )
+        .await;
     }
 }
