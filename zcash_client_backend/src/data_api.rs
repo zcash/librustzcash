@@ -297,7 +297,7 @@ impl AccountBalance {
         &self.unshielded_balance
     }
 
-    /// Provides a `mutable reference to the [`Balance`] of transparent funds in the account
+    /// Provides a mutable reference to the [`Balance`] of transparent funds in the account
     /// to the specified callback, checking invariants after the callback's action has been
     /// evaluated.
     pub fn with_unshielded_balance_mut<A, E: From<BalanceError>>(
