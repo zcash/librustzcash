@@ -12,7 +12,7 @@ rust-version = "1.56.1"
 [features]
 default = []
 
-## Builds the C++ tromp solver and Rust FFI layer.
+# Experimental tromp solver support, builds the C++ tromp solver and Rust FFI layer.
 solver = ["dep:cc"]
 
 [dependencies]
