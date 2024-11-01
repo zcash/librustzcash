@@ -75,9 +75,12 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::named_params;
     use secrecy::Secret;
     use tempfile::NamedTempFile;
+    use zcash_keys::keys::UnifiedSpendingKey;
     use zcash_protocol::consensus::Network;
+    use zip32::AccountId;
 
     use super::{DEPENDENCIES, MIGRATION_ID};
     use crate::{wallet::init::init_wallet_db_internal, WalletDb};
@@ -85,7 +88,8 @@ mod tests {
     #[test]
     fn migrate() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let network = Network::TestNetwork;
+        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
 
         let seed_bytes = vec![0xab; 32];
         init_wallet_db_internal(
@@ -96,9 +100,16 @@ mod tests {
         )
         .unwrap();
 
+        let usk =
+            UnifiedSpendingKey::from_seed(&network, &seed_bytes[..], AccountId::ZERO).unwrap();
+        let ufvk_str = usk.to_unified_full_viewing_key().encode(&network);
+
         db_data
             .conn
-            .execute_batch(r#"INSERT INTO accounts (account, ufvk) VALUES (0, 'not_a_real_ufvk');"#)
+            .execute(
+                "INSERT INTO accounts (account, ufvk) VALUES (0, :ufvk_str)",
+                named_params![":ufvk_str": ufvk_str],
+            )
             .unwrap();
         db_data
             .conn
