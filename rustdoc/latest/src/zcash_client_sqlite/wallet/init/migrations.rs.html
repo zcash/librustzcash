@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations.rs`."><title>migrations.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-4ee5002b.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (c1db4dc24 2024-10-25)" data-channel="nightly" data-search-js="search-c5a66128.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/</div>migrations.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations.rs`."><title>migrations.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-590a400c.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (a0d98ff0e 2024-10-31)" data-channel="nightly" data-search-js="search-c5a66128.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/</div>migrations.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -287,7 +287,55 @@
 <a href="#286" id="286">286</a>
 <a href="#287" id="287">287</a>
 <a href="#288" id="288">288</a>
-<a href="#289" id="289">289</a></pre></div><pre class="rust"><code><span class="kw">mod </span>add_account_birthdays;
+<a href="#289" id="289">289</a>
+<a href="#290" id="290">290</a>
+<a href="#291" id="291">291</a>
+<a href="#292" id="292">292</a>
+<a href="#293" id="293">293</a>
+<a href="#294" id="294">294</a>
+<a href="#295" id="295">295</a>
+<a href="#296" id="296">296</a>
+<a href="#297" id="297">297</a>
+<a href="#298" id="298">298</a>
+<a href="#299" id="299">299</a>
+<a href="#300" id="300">300</a>
+<a href="#301" id="301">301</a>
+<a href="#302" id="302">302</a>
+<a href="#303" id="303">303</a>
+<a href="#304" id="304">304</a>
+<a href="#305" id="305">305</a>
+<a href="#306" id="306">306</a>
+<a href="#307" id="307">307</a>
+<a href="#308" id="308">308</a>
+<a href="#309" id="309">309</a>
+<a href="#310" id="310">310</a>
+<a href="#311" id="311">311</a>
+<a href="#312" id="312">312</a>
+<a href="#313" id="313">313</a>
+<a href="#314" id="314">314</a>
+<a href="#315" id="315">315</a>
+<a href="#316" id="316">316</a>
+<a href="#317" id="317">317</a>
+<a href="#318" id="318">318</a>
+<a href="#319" id="319">319</a>
+<a href="#320" id="320">320</a>
+<a href="#321" id="321">321</a>
+<a href="#322" id="322">322</a>
+<a href="#323" id="323">323</a>
+<a href="#324" id="324">324</a>
+<a href="#325" id="325">325</a>
+<a href="#326" id="326">326</a>
+<a href="#327" id="327">327</a>
+<a href="#328" id="328">328</a>
+<a href="#329" id="329">329</a>
+<a href="#330" id="330">330</a>
+<a href="#331" id="331">331</a>
+<a href="#332" id="332">332</a>
+<a href="#333" id="333">333</a>
+<a href="#334" id="334">334</a>
+<a href="#335" id="335">335</a>
+<a href="#336" id="336">336</a>
+<a href="#337" id="337">337</a></pre></div><pre class="rust"><code><span class="kw">mod </span>add_account_birthdays;
 <span class="kw">mod </span>add_transaction_views;
 <span class="kw">mod </span>add_utxo_account;
 <span class="kw">mod </span>addresses_table;
@@ -321,9 +369,11 @@
 
 <span class="kw">use </span>std::rc::Rc;
 
+<span class="kw">use </span>rusqlite::{named_params, OptionalExtension};
 <span class="kw">use </span>schemerz_rusqlite::RusqliteMigration;
 <span class="kw">use </span>secrecy::SecretVec;
 <span class="kw">use </span>uuid::Uuid;
+<span class="kw">use </span>zcash_address::unified::{Encoding <span class="kw">as _</span>, Ufvk};
 <span class="kw">use </span>zcash_protocol::consensus;
 
 <span class="kw">use </span><span class="kw">super</span>::WalletMigrationError;
@@ -494,6 +544,52 @@
 
 <span class="doccomment">/// Leaf migrations in the 0.11.1 release.
 </span><span class="kw">const </span>V_0_11_1: <span class="kw-2">&amp;</span>[Uuid] = <span class="kw-2">&amp;</span>[tx_retrieval_queue::MIGRATION_ID];
+
+<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>verify_network_compatibility&lt;P: consensus::Parameters&gt;(
+    conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
+    params: <span class="kw-2">&amp;</span>P,
+) -&gt; <span class="prelude-ty">Result</span>&lt;(), WalletMigrationError&gt; {
+    <span class="comment">// Ensure that the `ufvk_support` migration has been applied; if it hasn't, we won't be able to
+    // validate that the UFVKs in the wallet correspond to the network type that the wallet is
+    // being migrated for.
+    </span><span class="kw">let </span>has_ufvk = conn
+        .query_row(
+            <span class="kw-2">&amp;</span><span class="macro">format!</span>(
+                <span class="string">"SELECT 1 FROM {} WHERE id = :migration_id"</span>,
+                <span class="kw">super</span>::MIGRATIONS_TABLE
+            ),
+            <span class="macro">named_params!</span>[<span class="string">":migration_id"</span>: <span class="kw-2">&amp;</span>ufvk_support::MIGRATION_ID.as_bytes()[..]],
+            |row| row.get::&lt;<span class="kw">_</span>, bool&gt;(<span class="number">0</span>),
+        )
+        .optional()<span class="question-mark">?
+        </span>== <span class="prelude-val">Some</span>(<span class="bool-val">true</span>);
+
+    <span class="kw">if </span>has_ufvk {
+        <span class="kw">let </span><span class="kw-2">mut </span>fvks_stmt = conn.prepare(<span class="string">"SELECT ufvk FROM accounts"</span>)<span class="question-mark">?</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>rows = fvks_stmt.query([])<span class="question-mark">?</span>;
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
+            <span class="kw">let </span>ufvk_str = row.get::&lt;<span class="kw">_</span>, String&gt;(<span class="number">0</span>)<span class="question-mark">?</span>;
+            <span class="kw">let </span>(network, <span class="kw">_</span>) = Ufvk::decode(<span class="kw-2">&amp;</span>ufvk_str).map_err(|e| {
+                WalletMigrationError::CorruptedData(<span class="macro">format!</span>(<span class="string">"Unable to parse UFVK: {e}"</span>))
+            })<span class="question-mark">?</span>;
+
+            <span class="kw">if </span>network != params.network_type() {
+                <span class="kw">let </span>network_name = |n| <span class="kw">match </span>n {
+                    consensus::NetworkType::Main =&gt; <span class="string">"mainnet"</span>,
+                    consensus::NetworkType::Test =&gt; <span class="string">"testnet"</span>,
+                    consensus::NetworkType::Regtest =&gt; <span class="string">"regtest"</span>,
+                };
+                <span class="kw">return </span><span class="prelude-val">Err</span>(WalletMigrationError::CorruptedData(<span class="macro">format!</span>(
+                    <span class="string">"Network type mismatch: account UFVK is for {} but attempting to initialize for {}."</span>,
+                    network_name(network),
+                    network_name(params.network_type())
+                )));
+            }
+        }
+    }
+
+    <span class="prelude-val">Ok</span>(())
+}
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init.rs`."><title>init.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-4ee5002b.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (c1db4dc24 2024-10-25)" data-channel="nightly" data-search-js="search-c5a66128.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>init.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init.rs`."><title>init.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-590a400c.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (a0d98ff0e 2024-10-31)" data-channel="nightly" data-search-js="search-c5a66128.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>init.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -1104,7 +1104,30 @@
 <a href="#1103" id="1103">1103</a>
 <a href="#1104" id="1104">1104</a>
 <a href="#1105" id="1105">1105</a>
-<a href="#1106" id="1106">1106</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for initializing the various databases.
+<a href="#1106" id="1106">1106</a>
+<a href="#1107" id="1107">1107</a>
+<a href="#1108" id="1108">1108</a>
+<a href="#1109" id="1109">1109</a>
+<a href="#1110" id="1110">1110</a>
+<a href="#1111" id="1111">1111</a>
+<a href="#1112" id="1112">1112</a>
+<a href="#1113" id="1113">1113</a>
+<a href="#1114" id="1114">1114</a>
+<a href="#1115" id="1115">1115</a>
+<a href="#1116" id="1116">1116</a>
+<a href="#1117" id="1117">1117</a>
+<a href="#1118" id="1118">1118</a>
+<a href="#1119" id="1119">1119</a>
+<a href="#1120" id="1120">1120</a>
+<a href="#1121" id="1121">1121</a>
+<a href="#1122" id="1122">1122</a>
+<a href="#1123" id="1123">1123</a>
+<a href="#1124" id="1124">1124</a>
+<a href="#1125" id="1125">1125</a>
+<a href="#1126" id="1126">1126</a>
+<a href="#1127" id="1127">1127</a>
+<a href="#1128" id="1128">1128</a>
+<a href="#1129" id="1129">1129</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for initializing the various databases.
 
 </span><span class="kw">use </span>std::fmt;
 <span class="kw">use </span>std::rc::Rc;
@@ -1122,6 +1145,8 @@
 };
 <span class="kw">use </span>zcash_primitives::{consensus, transaction::components::amount::BalanceError};
 
+<span class="kw">use </span><span class="self">self</span>::migrations::verify_network_compatibility;
+
 <span class="kw">use </span><span class="kw">super</span>::commitment_tree;
 <span class="kw">use crate</span>::{error::SqliteClientError, WalletDb};
 
@@ -1129,6 +1154,8 @@
 
 <span class="kw">const </span>SQLITE_MAJOR_VERSION: u32 = <span class="number">3</span>;
 <span class="kw">const </span>MIN_SQLITE_MINOR_VERSION: u32 = <span class="number">35</span>;
+
+<span class="kw">const </span>MIGRATIONS_TABLE: <span class="kw-2">&amp;</span>str = <span class="string">"schemer_migrations"</span>;
 
 <span class="attr">#[derive(Debug)]
 </span><span class="kw">pub enum </span>WalletMigrationError {
@@ -1436,9 +1463,28 @@
     </span>wdb.conn
         .execute_batch(<span class="string">"PRAGMA foreign_keys = OFF;"</span>)
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))<span class="question-mark">?</span>;
-    <span class="kw">let </span>adapter = RusqliteAdapter::new(<span class="kw-2">&amp;mut </span>wdb.conn, <span class="prelude-val">Some</span>(<span class="string">"schemer_migrations"</span>.to_string()));
-    adapter.init().expect(<span class="string">"Migrations table setup succeeds."</span>);
 
+    <span class="comment">// Temporarily take ownership of the connection in a wrapper to perform the initial migration
+    // table setup. This extra adapter creation could be omitted if `RusqliteAdapter` provided an
+    // accessor for the connection that it wraps, or if it provided a mechanism to query to
+    // determine whether a given migration has been applied. (see
+    // https://github.com/zcash/schemerz/issues/6)
+    </span>{
+        <span class="kw">let </span>adapter = RusqliteAdapter::&lt;<span class="lifetime">'_</span>, WalletMigrationError&gt;::new(
+            <span class="kw-2">&amp;mut </span>wdb.conn,
+            <span class="prelude-val">Some</span>(MIGRATIONS_TABLE.to_string()),
+        );
+        adapter.init().expect(<span class="string">"Migrations table setup succeeds."</span>);
+    }
+
+    <span class="comment">// Now that we are certain that the migrations table exists, verify that if the database
+    // already contains account data, any stored UFVKs correspond to the same network that the
+    // migrations are being run for.
+    </span>verify_network_compatibility(<span class="kw-2">&amp;</span>wdb.conn, <span class="kw-2">&amp;</span>wdb.params).map_err(MigratorError::Adapter)<span class="question-mark">?</span>;
+
+    <span class="comment">// Now create the adapter that we're actually going to use to perform the migrations, and
+    // proceed.
+    </span><span class="kw">let </span>adapter = RusqliteAdapter::new(<span class="kw-2">&amp;mut </span>wdb.conn, <span class="prelude-val">Some</span>(MIGRATIONS_TABLE.to_string()));
     <span class="kw">let </span><span class="kw-2">mut </span>migrator = Migrator::new(adapter);
     migrator
         .register_multiple(migrations::all_migrations(<span class="kw-2">&amp;</span>wdb.params, seed.clone()).into_iter())
