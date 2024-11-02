@@ -64,13 +64,11 @@ jobs:
       - name: Run tests
         run: >
           cargo test
-          --release
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
       - name: Run slow tests
         run: >
           cargo test
-          --release
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
           --features expensive-tests
