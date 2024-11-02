@@ -887,7 +887,7 @@ mod tests {
 
     #[test]
     fn transparent_balance_spendability() {
-        zcash_client_backend::data_api::testing::transparent::transparent_balance_across_shielding(
+        zcash_client_backend::data_api::testing::transparent::transparent_balance_spendability(
             TestDbFactory::default(),
             BlockCache::new(),
         );
