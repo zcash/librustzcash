@@ -64,7 +64,6 @@ jobs:
       - name: Run tests
         run: >
           cargo test
-          --release
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
         env:
@@ -72,7 +71,6 @@ jobs:
       - name: Run slow tests
         run: >
           cargo test
-          --release
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
           --features expensive-tests
