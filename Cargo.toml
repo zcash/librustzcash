@@ -160,5 +160,22 @@ lto = true
 panic = 'abort'
 codegen-units = 1
 
+[profile.test]
+# Since we have many computationally expensive tests, this changes the test profile to
+# compile with optimizations by default, but keep full debug info.
+#
+# This differs from the release profile in the following ways:
+# - it does not set `lto = true`, which increases compile times without substantially
+#   speeding up tests;
+# - it does not set `codegen-units = 1`, which increases compile times and is only
+#   useful to improve determinism of release builds;
+# - it does not set `panic = 'abort'`, which is in any case ignored for tests.
+#
+# To get results as close as possible to a release build, use `cargo test --release`.
+# To speed up compilation and avoid optimizations potentially resulting in lower-quality
+# debug info, use `cargo test --profile=dev`.
+opt-level = 3
+debug = true
+
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
