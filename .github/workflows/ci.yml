@@ -66,8 +66,6 @@ jobs:
           cargo test
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
-        env:
-          RUST_BACKTRACE: 1
       - name: Run slow tests
         run: >
           cargo test
@@ -75,8 +73,6 @@ jobs:
           ${{ steps.prepare.outputs.feature-flags }}
           --features expensive-tests
           -- --ignored
-        env:
-          RUST_BACKTRACE: 1
       - name: Verify working directory is clean
         run: git diff --exit-code
 
