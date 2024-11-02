@@ -20,6 +20,8 @@ and this library adheres to Rust's notion of
 - `zcash_client_sqlite::WalletDb`'s implementation of
   `zcash_client_backend::data_api::WalletRead::get_wallet_summary` has been
   fixed to take account of `min_confirmations` for transparent balances.
+  (Previously, it would treat transparent balances as though
+  `min_confirmations` were `1` even if it was set to a higher value.)
   Note that this implementation treats `min_confirmations == 0` the same
   as `min_confirmations == 1` for both shielded and transparent TXOs.
   It also does not currently distinguish between pending change and
