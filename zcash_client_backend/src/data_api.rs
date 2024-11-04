@@ -1209,7 +1209,8 @@ pub trait WalletRead {
     /// the maximum index).
     ///
     /// If `index_range` is some `Range`, it limits the result to addresses with indices
-    /// in that range.
+    /// in that range. An `index_range` of `None` is defined to be equivalent to
+    /// `0..(1u32 << 31)`.
     ///
     /// Wallets should scan the chain for UTXOs sent to these ephemeral transparent
     /// receivers, but do not need to do so regularly. Under expected usage, outputs
@@ -1245,9 +1246,8 @@ pub trait WalletRead {
     }
 
     /// If a given ephemeral address might have been reserved, i.e. would be included in
-    /// the map returned by `get_known_ephemeral_addresses(account_id, false)` for any
-    /// of the wallet's accounts, then return `Ok(Some(account_id))`. Otherwise return
-    /// `Ok(None)`.
+    /// the result of `get_known_ephemeral_addresses(account_id, None)` for any of the
+    /// wallet's accounts, then return `Ok(Some(account_id))`. Otherwise return `Ok(None)`.
     ///
     /// This is equivalent to (but may be implemented more efficiently than):
     /// ```compile_fail
