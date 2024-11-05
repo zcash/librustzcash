@@ -1215,6 +1215,7 @@ pub mod testing {
     #[cfg(zcash_unstable = "zfuture")]
     use super::components::tze::testing::{self as tze};
 
+    #[cfg(not(zcash_unstable = "zfuture"))]
     use crate::transaction::components::issuance;
 
     pub fn arb_txid() -> impl Strategy<Value = TxId> {

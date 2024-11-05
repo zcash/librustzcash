@@ -396,13 +396,45 @@ impl Parameters for TestNetwork {
     }
 }
 
-/// The enumeration of known Zcash networks.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// Marker struct for the regtest network.
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+pub struct RegtestNetwork;
+
+memuse::impl_no_dynamic_usage!(RegtestNetwork);
+
+pub const REGTEST_NETWORK: RegtestNetwork = RegtestNetwork;
+
+impl Parameters for RegtestNetwork {
+    fn network_type(&self) -> NetworkType {
+        NetworkType::Regtest
+    }
+
+    fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight> {
+        match nu {
+            NetworkUpgrade::Overwinter => Some(BlockHeight(1)),
+            NetworkUpgrade::Sapling => Some(BlockHeight(1)),
+            NetworkUpgrade::Blossom => Some(BlockHeight(1)),
+            NetworkUpgrade::Heartwood => Some(BlockHeight(1)),
+            NetworkUpgrade::Canopy => Some(BlockHeight(1)),
+            NetworkUpgrade::Nu5 => Some(BlockHeight(1)),
+            #[cfg(zcash_unstable = "nu6")]
+            NetworkUpgrade::Nu6 => Some(BlockHeight(1)),
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+            NetworkUpgrade::Nu7 => Some(BlockHeight(1)),
+            #[cfg(zcash_unstable = "zfuture")]
+            NetworkUpgrade::ZFuture => None,
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Copy, Clone, Debug, Hash)]
 pub enum Network {
     /// Zcash Mainnet.
     MainNetwork,
     /// Zcash Testnet.
     TestNetwork,
+    /// Zcash Regtest.
+    RegtestNetwork,
 }
 
 memuse::impl_no_dynamic_usage!(Network);
@@ -412,6 +444,7 @@ impl Parameters for Network {
         match self {
             Network::MainNetwork => NetworkType::Main,
             Network::TestNetwork => NetworkType::Test,
+            Network::RegtestNetwork => NetworkType::Regtest,
         }
     }
 
@@ -419,6 +452,7 @@ impl Parameters for Network {
         match self {
             Network::MainNetwork => MAIN_NETWORK.activation_height(nu),
             Network::TestNetwork => TEST_NETWORK.activation_height(nu),
+            Network::RegtestNetwork => REGTEST_NETWORK.activation_height(nu),
         }
     }
 }
