@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::Pczt;
 
 pub struct Combiner {
@@ -48,6 +50,29 @@ pub(crate) fn merge_optional<T: PartialEq>(lhs: &mut Option<T>, rhs: Option<T>) 
         (Some(lhs), Some(rhs)) if lhs == &rhs => (),
         // If both are present and are not equal, fail. Here we differ from BIP 174.
         (Some(_), Some(_)) => return false,
+    }
+
+    // Success!
+    true
+}
+
+/// Merges two maps together.
+///
+/// Returns `false` if the values cannot be merged.
+pub(crate) fn merge_map<K: Ord, V: PartialEq>(
+    lhs: &mut BTreeMap<K, V>,
+    rhs: BTreeMap<K, V>,
+) -> bool {
+    for (key, rhs_value) in rhs.into_iter() {
+        if let Some(lhs_value) = lhs.get_mut(&key) {
+            // If the key is present in both maps, and their values are not equal, fail.
+            // Here we differ from BIP 174.
+            if lhs_value != &rhs_value {
+                return false;
+            }
+        } else {
+            lhs.insert(key, rhs_value);
+        }
     }
 
     // Success!

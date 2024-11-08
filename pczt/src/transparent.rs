@@ -1,4 +1,6 @@
-use crate::roles::combiner::merge_optional;
+use std::collections::BTreeMap;
+
+use crate::roles::combiner::{merge_map, merge_optional};
 
 #[cfg(feature = "transparent")]
 use {
@@ -58,6 +60,51 @@ pub(crate) struct Input {
     // needed for computing the binding signatures.
     pub(crate) value: u64,
     pub(crate) script_pubkey: Vec<u8>,
+
+    /// The script required to spend this output, if it is P2SH.
+    ///
+    /// Set to `None` if this is a P2PKH output.
+    pub(crate) redeem_script: Option<Vec<u8>>,
+
+    /// A map from a pubkey to a signature created by it.
+    ///
+    /// - Each pubkey should appear in `script_pubkey` or `redeem_script`.
+    /// - Each entry is set by a Signer, and should contain an ECDSA signature that is
+    ///   valid under the corresponding pubkey.
+    /// - These are required by the Spend Finalizer to assemble `script_sig`.
+    pub(crate) partial_signatures: BTreeMap<[u8; 33], Vec<u8>>,
+
+    /// The sighash type to be used for this input.
+    ///
+    /// - Signers must use this sighash type to produce their signatures. Signers that
+    ///   cannot produce signatures for this sighash type must not provide a signature.
+    /// - Spend Finalizers must fail to finalize inputs which have signatures not matching
+    ///   this sighash type.
+    pub(crate) sighash_type: u8,
+
+    /// Mappings of the form `key = RIPEMD160(value)`.
+    ///
+    /// - These may be used by the Signer to inspect parts of `script_pubkey` or
+    ///   `redeem_script`.
+    pub(crate) ripemd160_preimages: BTreeMap<[u8; 20], Vec<u8>>,
+
+    /// Mappings of the form `key = SHA256(value)`.
+    ///
+    /// - These may be used by the Signer to inspect parts of `script_pubkey` or
+    ///   `redeem_script`.
+    pub(crate) sha256_preimages: BTreeMap<[u8; 32], Vec<u8>>,
+
+    /// Mappings of the form `key = RIPEMD160(SHA256(value))`.
+    ///
+    /// - These may be used by the Signer to inspect parts of `script_pubkey` or
+    ///   `redeem_script`.
+    pub(crate) hash160_preimages: BTreeMap<[u8; 20], Vec<u8>>,
+
+    /// Mappings of the form `key = SHA256(SHA256(value))`.
+    ///
+    /// - These may be used by the Signer to inspect parts of `script_pubkey` or
+    ///   `redeem_script`.
+    pub(crate) hash256_preimages: BTreeMap<[u8; 32], Vec<u8>>,
 }
 
 #[derive(Clone, Debug)]
@@ -70,6 +117,11 @@ pub(crate) struct Output {
     //
     pub(crate) value: u64,
     pub(crate) script_pubkey: Vec<u8>,
+
+    /// The script required to spend this output, if it is P2SH.
+    ///
+    /// Set to `None` if this is a P2PKH output.
+    pub(crate) redeem_script: Option<Vec<u8>>,
 }
 
 impl Bundle {
@@ -101,12 +153,20 @@ impl Bundle {
                 script_sig,
                 value,
                 script_pubkey,
+                redeem_script,
+                partial_signatures,
+                sighash_type,
+                ripemd160_preimages,
+                sha256_preimages,
+                hash160_preimages,
+                hash256_preimages,
             } = rhs;
 
             if lhs.prevout_txid != prevout_txid
                 || lhs.prevout_index != prevout_index
                 || lhs.value != value
                 || lhs.script_pubkey != script_pubkey
+                || lhs.sighash_type != sighash_type
             {
                 return None;
             }
@@ -117,7 +177,13 @@ impl Bundle {
                     &mut lhs.required_height_lock_time,
                     required_height_lock_time,
                 )
-                && merge_optional(&mut lhs.script_sig, script_sig))
+                && merge_optional(&mut lhs.script_sig, script_sig)
+                && merge_optional(&mut lhs.redeem_script, redeem_script)
+                && merge_map(&mut lhs.partial_signatures, partial_signatures)
+                && merge_map(&mut lhs.ripemd160_preimages, ripemd160_preimages)
+                && merge_map(&mut lhs.sha256_preimages, sha256_preimages)
+                && merge_map(&mut lhs.hash160_preimages, hash160_preimages)
+                && merge_map(&mut lhs.hash256_preimages, hash256_preimages))
             {
                 return None;
             }
@@ -128,9 +194,14 @@ impl Bundle {
             let Output {
                 value,
                 script_pubkey,
+                redeem_script,
             } = rhs;
 
             if lhs.value != value || lhs.script_pubkey != script_pubkey {
+                return None;
+            }
+
+            if !merge_optional(&mut lhs.redeem_script, redeem_script) {
                 return None;
             }
         }
