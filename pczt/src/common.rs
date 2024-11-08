@@ -120,6 +120,24 @@ impl Global {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Zip32Derivation {
+    /// The [ZIP 32 seed fingerprint](https://zips.z.cash/zip-0032#seed-fingerprints).
+    pub(crate) seed_fingerprint: [u8; 32],
+
+    /// The sequence of indices corresponding to the shielded HD path.
+    ///
+    /// Indices can be hardened or non-hardened (i.e. the hardened flag bit may be set).
+    /// When used with a Sapling or Orchard spend, the derivation path will generally be
+    /// entirely hardened; when used with a transparent spend, the derivation path will
+    /// generally include a non-hardened section matching either the [BIP 44] path, or the
+    /// path at which ephemeral addresses are derived for [ZIP 320] transactions.
+    ///
+    /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
+    /// [ZIP 320]: https://zips.z.cash/zip-0320
+    pub(crate) derivation_path: Vec<u32>,
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;

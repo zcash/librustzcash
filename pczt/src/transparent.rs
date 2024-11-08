@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
-use crate::roles::combiner::{merge_map, merge_optional};
+use crate::{
+    common::Zip32Derivation,
+    roles::combiner::{merge_map, merge_optional},
+};
 
 #[cfg(feature = "transparent")]
 use {
@@ -82,6 +85,16 @@ pub(crate) struct Input {
     ///   this sighash type.
     pub(crate) sighash_type: u8,
 
+    /// A map from a pubkey to the BIP 32 derivation path at which its corresponding
+    /// spending key can be found.
+    ///
+    /// - The pubkeys should appear in `script_pubkey` or `redeem_script`.
+    /// - Each entry is set by an Updater.
+    /// - Individual entries may be required by a Signer.
+    /// - It is not required that the map include entries for all of the used pubkeys.
+    ///   In particular, it is not possible to include entries for non-BIP-32 pubkeys.
+    pub(crate) bip32_derivation: BTreeMap<[u8; 33], Zip32Derivation>,
+
     /// Mappings of the form `key = RIPEMD160(value)`.
     ///
     /// - These may be used by the Signer to inspect parts of `script_pubkey` or
@@ -122,6 +135,16 @@ pub(crate) struct Output {
     ///
     /// Set to `None` if this is a P2PKH output.
     pub(crate) redeem_script: Option<Vec<u8>>,
+
+    /// A map from a pubkey to the BIP 32 derivation path at which its corresponding
+    /// spending key can be found.
+    ///
+    /// - The pubkeys should appear in `script_pubkey` or `redeem_script`.
+    /// - Each entry is set by an Updater.
+    /// - Individual entries may be required by a Signer.
+    /// - It is not required that the map include entries for all of the used pubkeys.
+    ///   In particular, it is not possible to include entries for non-BIP-32 pubkeys.
+    pub(crate) bip32_derivation: BTreeMap<[u8; 33], Zip32Derivation>,
 }
 
 impl Bundle {
@@ -156,6 +179,7 @@ impl Bundle {
                 redeem_script,
                 partial_signatures,
                 sighash_type,
+                bip32_derivation,
                 ripemd160_preimages,
                 sha256_preimages,
                 hash160_preimages,
@@ -180,6 +204,7 @@ impl Bundle {
                 && merge_optional(&mut lhs.script_sig, script_sig)
                 && merge_optional(&mut lhs.redeem_script, redeem_script)
                 && merge_map(&mut lhs.partial_signatures, partial_signatures)
+                && merge_map(&mut lhs.bip32_derivation, bip32_derivation)
                 && merge_map(&mut lhs.ripemd160_preimages, ripemd160_preimages)
                 && merge_map(&mut lhs.sha256_preimages, sha256_preimages)
                 && merge_map(&mut lhs.hash160_preimages, hash160_preimages)
@@ -195,13 +220,16 @@ impl Bundle {
                 value,
                 script_pubkey,
                 redeem_script,
+                bip32_derivation,
             } = rhs;
 
             if lhs.value != value || lhs.script_pubkey != script_pubkey {
                 return None;
             }
 
-            if !merge_optional(&mut lhs.redeem_script, redeem_script) {
+            if !(merge_optional(&mut lhs.redeem_script, redeem_script)
+                && merge_map(&mut lhs.bip32_derivation, bip32_derivation))
+            {
                 return None;
             }
         }

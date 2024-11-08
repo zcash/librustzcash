@@ -1,4 +1,4 @@
-use crate::{roles::combiner::merge_optional, IgnoreMissing};
+use crate::{common::Zip32Derivation, roles::combiner::merge_optional, IgnoreMissing};
 
 #[cfg(feature = "orchard")]
 use {
@@ -145,6 +145,10 @@ pub(crate) struct Spend {
     /// - After `zkproof` / `spend_auth_sig` has been set, this can be redacted.
     pub(crate) alpha: Option<[u8; 32]>,
 
+    /// The ZIP 32 derivation path at which the spending key can be found for the note
+    /// being spent.
+    pub(crate) zip32_derivation: Option<Zip32Derivation>,
+
     /// The spending key for this spent note, if it is a dummy note.
     ///
     /// - This is chosen by the Constructor.
@@ -206,6 +210,9 @@ pub(crate) struct Output {
     /// This may be `None` if the Constructor added the output using an OVK policy of
     /// "None", to make the output unrecoverable from the chain by the sender.
     pub(crate) ock: Option<[u8; 32]>,
+
+    /// The ZIP 32 derivation path at which the spending key can be found for the output.
+    pub(crate) zip32_derivation: Option<Zip32Derivation>,
 }
 
 impl Bundle {
@@ -278,6 +285,7 @@ impl Bundle {
                         fvk,
                         witness,
                         alpha,
+                        zip32_derivation: spend_zip32_derivation,
                         dummy_sk,
                     },
                 output:
@@ -290,6 +298,7 @@ impl Bundle {
                         value: output_value,
                         rseed: output_rseed,
                         ock,
+                        zip32_derivation: output_zip32_derivation,
                     },
                 rcv,
             } = rhs;
@@ -313,11 +322,13 @@ impl Bundle {
                 && merge_optional(&mut lhs.spend.fvk, fvk)
                 && merge_optional(&mut lhs.spend.witness, witness)
                 && merge_optional(&mut lhs.spend.alpha, alpha)
+                && merge_optional(&mut lhs.spend.zip32_derivation, spend_zip32_derivation)
                 && merge_optional(&mut lhs.spend.dummy_sk, dummy_sk)
                 && merge_optional(&mut lhs.output.recipient, output_recipient)
                 && merge_optional(&mut lhs.output.value, output_value)
                 && merge_optional(&mut lhs.output.rseed, output_rseed)
                 && merge_optional(&mut lhs.output.ock, ock)
+                && merge_optional(&mut lhs.output.zip32_derivation, output_zip32_derivation)
                 && merge_optional(&mut lhs.rcv, rcv))
             {
                 return None;
