@@ -1,6 +1,11 @@
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 
-use crate::{common::Zip32Derivation, roles::combiner::merge_optional, IgnoreMissing};
+use crate::{
+    common::Zip32Derivation,
+    roles::combiner::{merge_map, merge_optional},
+    IgnoreMissing,
+};
 
 #[cfg(feature = "sapling")]
 use {
@@ -137,6 +142,9 @@ pub(crate) struct Spend {
     /// - This is required by the IO Finalizer, and is cleared by it once used.
     /// - Signers MUST reject PCZTs that contain `dummy_ask` values.
     pub(crate) dummy_ask: Option<[u8; 32]>,
+
+    /// Proprietary fields related to the note being spent.
+    pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
 /// Information about a Sapling output within a transaction.
@@ -214,6 +222,9 @@ pub(crate) struct Output {
 
     /// The ZIP 32 derivation path at which the spending key can be found for the output.
     pub(crate) zip32_derivation: Option<Zip32Derivation>,
+
+    /// Proprietary fields related to the note being spent.
+    pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
 impl Bundle {
@@ -303,6 +314,7 @@ impl Bundle {
                 alpha,
                 zip32_derivation,
                 dummy_ask,
+                proprietary,
             } = rhs;
 
             if lhs.cv != cv || lhs.nullifier != nullifier || lhs.rk != rk {
@@ -320,7 +332,8 @@ impl Bundle {
                 && merge_optional(&mut lhs.witness, witness)
                 && merge_optional(&mut lhs.alpha, alpha)
                 && merge_optional(&mut lhs.zip32_derivation, zip32_derivation)
-                && merge_optional(&mut lhs.dummy_ask, dummy_ask))
+                && merge_optional(&mut lhs.dummy_ask, dummy_ask)
+                && merge_map(&mut lhs.proprietary, proprietary))
             {
                 return None;
             }
@@ -341,6 +354,7 @@ impl Bundle {
                 rcv,
                 ock,
                 zip32_derivation,
+                proprietary,
             } = rhs;
 
             if lhs.cv != cv
@@ -358,7 +372,8 @@ impl Bundle {
                 && merge_optional(&mut lhs.rseed, rseed)
                 && merge_optional(&mut lhs.rcv, rcv)
                 && merge_optional(&mut lhs.ock, ock)
-                && merge_optional(&mut lhs.zip32_derivation, zip32_derivation))
+                && merge_optional(&mut lhs.zip32_derivation, zip32_derivation)
+                && merge_map(&mut lhs.proprietary, proprietary))
             {
                 return None;
             }

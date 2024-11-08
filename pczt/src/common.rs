@@ -1,3 +1,7 @@
+use std::collections::BTreeMap;
+
+use crate::roles::combiner::merge_map;
+
 pub(crate) const FLAG_INPUTS_MODIFIABLE: u8 = 0b0000_0001;
 pub(crate) const FLAG_OUTPUTS_MODIFIABLE: u8 = 0b0000_0010;
 pub(crate) const FLAG_HAS_SIGHASH_SINGLE: u8 = 0b0000_0100;
@@ -75,10 +79,13 @@ pub(crate) struct Global {
     ///   - The Combiner merges this bit towards `true`.
     /// - Bits 3-7 must be 0.
     pub(crate) tx_modifiable: u8,
+
+    /// Proprietary fields related to the overall transaction.
+    pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
 impl Global {
-    pub(crate) fn merge(self, other: Self) -> Option<Self> {
+    pub(crate) fn merge(mut self, other: Self) -> Option<Self> {
         let Self {
             tx_version,
             version_group_id,
@@ -87,6 +94,7 @@ impl Global {
             expiry_height,
             coin_type,
             tx_modifiable,
+            proprietary,
         } = other;
 
         if self.tx_version != tx_version
@@ -113,6 +121,10 @@ impl Global {
         }
         // - Bits 3-7 must be 0.
         if (self.tx_modifiable >> 3) != 0 || (tx_modifiable >> 3) != 0 {
+            return None;
+        }
+
+        if !merge_map(&mut self.proprietary, proprietary) {
             return None;
         }
 

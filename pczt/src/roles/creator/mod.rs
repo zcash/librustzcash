@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::{
     common::{FLAG_INPUTS_MODIFIABLE, FLAG_OUTPUTS_MODIFIABLE},
     Pczt, V5_TX_VERSION, V5_VERSION_GROUP_ID,
@@ -61,6 +63,7 @@ impl Creator {
                 coin_type: self.coin_type,
                 // Spends and outputs modifiable, no SIGHASH_SINGLE.
                 tx_modifiable: FLAG_INPUTS_MODIFIABLE | FLAG_OUTPUTS_MODIFIABLE,
+                proprietary: BTreeMap::new(),
             },
             transparent: crate::transparent::Bundle {
                 inputs: vec![],
