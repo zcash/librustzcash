@@ -5,7 +5,7 @@ use orchard::{
     note::{ExtractedNoteCommitment, Nullifier, RandomSeed, Rho},
     primitives::redpallas,
     tree::{MerkleHashOrchard, MerklePath},
-    value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
+    value::{NoteValue, ValueCommitment},
     Address, Anchor, Note,
 };
 use rand_core::OsRng;
@@ -83,12 +83,7 @@ impl super::Prover {
                 };
 
                 let alpha = action.spend.alpha_from_field()?;
-
-                let rcv = ValueCommitTrapdoor::from_bytes(
-                    action.rcv.ok_or(OrchardError::MissingValueCommitTrapdoor)?,
-                )
-                .into_option()
-                .ok_or(OrchardError::InvalidValueCommitTrapdoor)?;
+                let rcv = action.rcv_from_field()?;
 
                 Ok(Circuit::from_action_context(spend, output_note, alpha, rcv)
                     .expect("rho should match nf by construction above")) // TODO: Check if this changes

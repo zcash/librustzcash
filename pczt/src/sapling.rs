@@ -11,7 +11,8 @@ use crate::{
 use {
     ff::PrimeField,
     sapling::{
-        keys::SpendValidatingKey, value::NoteValue, MerklePath, Node, Note, PaymentAddress, Rseed,
+        keys::SpendValidatingKey, value::NoteValue, value::ValueCommitTrapdoor, MerklePath, Node,
+        Note, PaymentAddress, Rseed,
     },
 };
 
@@ -507,6 +508,12 @@ impl Spend {
         ))
     }
 
+    pub(crate) fn rcv_from_field(&self) -> Result<ValueCommitTrapdoor, Error> {
+        ValueCommitTrapdoor::from_bytes(self.rcv.ok_or(Error::MissingValueCommitTrapdoor)?)
+            .into_option()
+            .ok_or(Error::InvalidValueCommitTrapdoor)
+    }
+
     pub(crate) fn proof_generation_key_from_field(
         &self,
     ) -> Result<sapling::ProofGenerationKey, Error> {
@@ -547,6 +554,15 @@ impl Spend {
 }
 
 #[cfg(feature = "sapling")]
+impl Output {
+    pub(crate) fn rcv_from_field(&self) -> Result<ValueCommitTrapdoor, Error> {
+        ValueCommitTrapdoor::from_bytes(self.rcv.ok_or(Error::MissingValueCommitTrapdoor)?)
+            .into_option()
+            .ok_or(Error::InvalidValueCommitTrapdoor)
+    }
+}
+
+#[cfg(feature = "sapling")]
 #[derive(Debug)]
 pub enum Error {
     InvalidAnchor,
@@ -559,12 +575,14 @@ pub enum Error {
     InvalidSpendAuthRandomizer,
     InvalidValueBalance(zcash_protocol::value::BalanceError),
     InvalidValueCommitment,
+    InvalidValueCommitTrapdoor,
     InvalidWitness,
     MissingProofGenerationKey,
     MissingRandomSeed,
     MissingRecipient,
     MissingSpendAuthRandomizer,
     MissingValue,
+    MissingValueCommitTrapdoor,
     MissingWitness,
 }
 
@@ -580,6 +598,7 @@ impl<V> IgnoreMissing for Result<V, Error> {
             | Error::MissingRecipient
             | Error::MissingSpendAuthRandomizer
             | Error::MissingValue
+            | Error::MissingValueCommitTrapdoor
             | Error::MissingWitness => Ok(None),
             _ => Err(e),
         })

@@ -10,6 +10,9 @@
 //!     `Global.tx_modifiable` field. Inputs may only be added if the Inputs Modifiable
 //!     flag is True. Outputs may only be added if the Outputs Modifiable flag is True.
 //!   - A single entity is likely to be both a Creator and Constructor.
+//! - IO Finalizer (anyone can execute)
+//!   - Sets the appropriate bits in `Global.tx_modifiable` to 0.
+//!   - Updates the various bsk values using the rcv information from spends and outputs.
 //! - Prover (capability holders can contribute)
 //!   - Needs all private information for a single spend or output.
 //!   - In practice, the Updater that adds a given spend or output will either act as

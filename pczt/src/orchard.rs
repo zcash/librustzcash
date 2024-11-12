@@ -10,7 +10,7 @@ use crate::{
 use {
     orchard::{
         note::{RandomSeed, Rho},
-        value::NoteValue,
+        value::{NoteValue, ValueCommitTrapdoor},
         Address, Note,
     },
     pasta_curves::{group::ff::PrimeField, pallas},
@@ -451,6 +451,14 @@ impl Bundle {
     }
 }
 
+impl Action {
+    pub(crate) fn rcv_from_field(&self) -> Result<ValueCommitTrapdoor, Error> {
+        ValueCommitTrapdoor::from_bytes(self.rcv.ok_or(Error::MissingValueCommitTrapdoor)?)
+            .into_option()
+            .ok_or(Error::InvalidValueCommitTrapdoor)
+    }
+}
+
 #[cfg(feature = "orchard")]
 impl Spend {
     /// Parses a [`Note`] from the explicit fields of this spend.
@@ -528,12 +536,14 @@ pub enum Error {
     InvalidSpendRecipient,
     InvalidValueBalance(zcash_protocol::value::BalanceError),
     InvalidValueCommitment,
+    InvalidValueCommitTrapdoor,
     MissingFullViewingKey,
     MissingRandomSeed,
     MissingRho,
     MissingSpendAuthRandomizer,
     MissingSpendRecipient,
     MissingValue,
+    MissingValueCommitTrapdoor,
     UnexpectedFlagBitsSet,
 }
 
@@ -549,7 +559,8 @@ impl<V> IgnoreMissing for Result<V, Error> {
             | Error::MissingRho
             | Error::MissingSpendAuthRandomizer
             | Error::MissingSpendRecipient
-            | Error::MissingValue => Ok(None),
+            | Error::MissingValue
+            | Error::MissingValueCommitTrapdoor => Ok(None),
             _ => Err(e),
         })
     }

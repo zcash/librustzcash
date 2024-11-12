@@ -1,7 +1,7 @@
 use rand_core::OsRng;
 use sapling::{
     prover::{OutputProver, SpendProver},
-    value::{NoteValue, ValueCommitTrapdoor},
+    value::NoteValue,
     Note, PaymentAddress,
 };
 
@@ -25,13 +25,7 @@ impl super::Prover {
             let proof_generation_key = spend.proof_generation_key_from_field()?;
             let note = spend.note_from_fields()?;
             let alpha = spend.alpha_from_field()?;
-
-            let rcv = ValueCommitTrapdoor::from_bytes(
-                spend.rcv.ok_or(SaplingError::MissingValueCommitTrapdoor)?,
-            )
-            .into_option()
-            .ok_or(SaplingError::InvalidValueCommitTrapdoor)?;
-
+            let rcv = spend.rcv_from_field()?;
             let merkle_path = spend.witness_from_field()?;
 
             let circuit = S::prepare_circuit(
@@ -69,11 +63,7 @@ impl super::Prover {
             let esk = note.generate_or_derive_esk(&mut rng);
             let rcm = note.rcm();
 
-            let rcv = ValueCommitTrapdoor::from_bytes(
-                output.rcv.ok_or(SaplingError::MissingValueCommitTrapdoor)?,
-            )
-            .into_option()
-            .ok_or(SaplingError::InvalidValueCommitTrapdoor)?;
+            let rcv = output.rcv_from_field()?;
 
             let circuit = O::prepare_circuit(&esk, recipient, rcm, value, rcv);
             let proof = output_prover.create_proof(circuit, &mut rng);
