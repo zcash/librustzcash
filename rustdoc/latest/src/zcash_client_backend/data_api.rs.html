@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api.rs`."><title>data_api.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-590a400c.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (b8c8287a2 2024-11-03)" data-channel="nightly" data-search-js="search-c5a66128.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>data_api.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api.rs`."><title>data_api.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-42caa33d.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (f7273e004 2024-11-12)" data-channel="nightly" data-search-js="search-853ef39b.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>data_api.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -2288,7 +2288,166 @@
 <a href="#2287" id="2287">2287</a>
 <a href="#2288" id="2288">2288</a>
 <a href="#2289" id="2289">2289</a>
-<a href="#2290" id="2290">2290</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Utilities for Zcash wallet construction
+<a href="#2290" id="2290">2290</a>
+<a href="#2291" id="2291">2291</a>
+<a href="#2292" id="2292">2292</a>
+<a href="#2293" id="2293">2293</a>
+<a href="#2294" id="2294">2294</a>
+<a href="#2295" id="2295">2295</a>
+<a href="#2296" id="2296">2296</a>
+<a href="#2297" id="2297">2297</a>
+<a href="#2298" id="2298">2298</a>
+<a href="#2299" id="2299">2299</a>
+<a href="#2300" id="2300">2300</a>
+<a href="#2301" id="2301">2301</a>
+<a href="#2302" id="2302">2302</a>
+<a href="#2303" id="2303">2303</a>
+<a href="#2304" id="2304">2304</a>
+<a href="#2305" id="2305">2305</a>
+<a href="#2306" id="2306">2306</a>
+<a href="#2307" id="2307">2307</a>
+<a href="#2308" id="2308">2308</a>
+<a href="#2309" id="2309">2309</a>
+<a href="#2310" id="2310">2310</a>
+<a href="#2311" id="2311">2311</a>
+<a href="#2312" id="2312">2312</a>
+<a href="#2313" id="2313">2313</a>
+<a href="#2314" id="2314">2314</a>
+<a href="#2315" id="2315">2315</a>
+<a href="#2316" id="2316">2316</a>
+<a href="#2317" id="2317">2317</a>
+<a href="#2318" id="2318">2318</a>
+<a href="#2319" id="2319">2319</a>
+<a href="#2320" id="2320">2320</a>
+<a href="#2321" id="2321">2321</a>
+<a href="#2322" id="2322">2322</a>
+<a href="#2323" id="2323">2323</a>
+<a href="#2324" id="2324">2324</a>
+<a href="#2325" id="2325">2325</a>
+<a href="#2326" id="2326">2326</a>
+<a href="#2327" id="2327">2327</a>
+<a href="#2328" id="2328">2328</a>
+<a href="#2329" id="2329">2329</a>
+<a href="#2330" id="2330">2330</a>
+<a href="#2331" id="2331">2331</a>
+<a href="#2332" id="2332">2332</a>
+<a href="#2333" id="2333">2333</a>
+<a href="#2334" id="2334">2334</a>
+<a href="#2335" id="2335">2335</a>
+<a href="#2336" id="2336">2336</a>
+<a href="#2337" id="2337">2337</a>
+<a href="#2338" id="2338">2338</a>
+<a href="#2339" id="2339">2339</a>
+<a href="#2340" id="2340">2340</a>
+<a href="#2341" id="2341">2341</a>
+<a href="#2342" id="2342">2342</a>
+<a href="#2343" id="2343">2343</a>
+<a href="#2344" id="2344">2344</a>
+<a href="#2345" id="2345">2345</a>
+<a href="#2346" id="2346">2346</a>
+<a href="#2347" id="2347">2347</a>
+<a href="#2348" id="2348">2348</a>
+<a href="#2349" id="2349">2349</a>
+<a href="#2350" id="2350">2350</a>
+<a href="#2351" id="2351">2351</a>
+<a href="#2352" id="2352">2352</a>
+<a href="#2353" id="2353">2353</a>
+<a href="#2354" id="2354">2354</a>
+<a href="#2355" id="2355">2355</a>
+<a href="#2356" id="2356">2356</a>
+<a href="#2357" id="2357">2357</a>
+<a href="#2358" id="2358">2358</a>
+<a href="#2359" id="2359">2359</a>
+<a href="#2360" id="2360">2360</a>
+<a href="#2361" id="2361">2361</a>
+<a href="#2362" id="2362">2362</a>
+<a href="#2363" id="2363">2363</a>
+<a href="#2364" id="2364">2364</a>
+<a href="#2365" id="2365">2365</a>
+<a href="#2366" id="2366">2366</a>
+<a href="#2367" id="2367">2367</a>
+<a href="#2368" id="2368">2368</a>
+<a href="#2369" id="2369">2369</a>
+<a href="#2370" id="2370">2370</a>
+<a href="#2371" id="2371">2371</a>
+<a href="#2372" id="2372">2372</a>
+<a href="#2373" id="2373">2373</a>
+<a href="#2374" id="2374">2374</a>
+<a href="#2375" id="2375">2375</a>
+<a href="#2376" id="2376">2376</a>
+<a href="#2377" id="2377">2377</a>
+<a href="#2378" id="2378">2378</a>
+<a href="#2379" id="2379">2379</a>
+<a href="#2380" id="2380">2380</a>
+<a href="#2381" id="2381">2381</a>
+<a href="#2382" id="2382">2382</a>
+<a href="#2383" id="2383">2383</a>
+<a href="#2384" id="2384">2384</a>
+<a href="#2385" id="2385">2385</a>
+<a href="#2386" id="2386">2386</a>
+<a href="#2387" id="2387">2387</a>
+<a href="#2388" id="2388">2388</a>
+<a href="#2389" id="2389">2389</a>
+<a href="#2390" id="2390">2390</a>
+<a href="#2391" id="2391">2391</a>
+<a href="#2392" id="2392">2392</a>
+<a href="#2393" id="2393">2393</a>
+<a href="#2394" id="2394">2394</a>
+<a href="#2395" id="2395">2395</a>
+<a href="#2396" id="2396">2396</a>
+<a href="#2397" id="2397">2397</a>
+<a href="#2398" id="2398">2398</a>
+<a href="#2399" id="2399">2399</a>
+<a href="#2400" id="2400">2400</a>
+<a href="#2401" id="2401">2401</a>
+<a href="#2402" id="2402">2402</a>
+<a href="#2403" id="2403">2403</a>
+<a href="#2404" id="2404">2404</a>
+<a href="#2405" id="2405">2405</a>
+<a href="#2406" id="2406">2406</a>
+<a href="#2407" id="2407">2407</a>
+<a href="#2408" id="2408">2408</a>
+<a href="#2409" id="2409">2409</a>
+<a href="#2410" id="2410">2410</a>
+<a href="#2411" id="2411">2411</a>
+<a href="#2412" id="2412">2412</a>
+<a href="#2413" id="2413">2413</a>
+<a href="#2414" id="2414">2414</a>
+<a href="#2415" id="2415">2415</a>
+<a href="#2416" id="2416">2416</a>
+<a href="#2417" id="2417">2417</a>
+<a href="#2418" id="2418">2418</a>
+<a href="#2419" id="2419">2419</a>
+<a href="#2420" id="2420">2420</a>
+<a href="#2421" id="2421">2421</a>
+<a href="#2422" id="2422">2422</a>
+<a href="#2423" id="2423">2423</a>
+<a href="#2424" id="2424">2424</a>
+<a href="#2425" id="2425">2425</a>
+<a href="#2426" id="2426">2426</a>
+<a href="#2427" id="2427">2427</a>
+<a href="#2428" id="2428">2428</a>
+<a href="#2429" id="2429">2429</a>
+<a href="#2430" id="2430">2430</a>
+<a href="#2431" id="2431">2431</a>
+<a href="#2432" id="2432">2432</a>
+<a href="#2433" id="2433">2433</a>
+<a href="#2434" id="2434">2434</a>
+<a href="#2435" id="2435">2435</a>
+<a href="#2436" id="2436">2436</a>
+<a href="#2437" id="2437">2437</a>
+<a href="#2438" id="2438">2438</a>
+<a href="#2439" id="2439">2439</a>
+<a href="#2440" id="2440">2440</a>
+<a href="#2441" id="2441">2441</a>
+<a href="#2442" id="2442">2442</a>
+<a href="#2443" id="2443">2443</a>
+<a href="#2444" id="2444">2444</a>
+<a href="#2445" id="2445">2445</a>
+<a href="#2446" id="2446">2446</a>
+<a href="#2447" id="2447">2447</a>
+<a href="#2448" id="2448">2448</a>
+<a href="#2449" id="2449">2449</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Utilities for Zcash wallet construction
 //!
 //! This module defines a set of APIs for wallet data persistence, and provides a suite of methods
 //! based upon these APIs that can be used to implement a fully functional Zcash wallet. At
@@ -3084,6 +3243,35 @@
     }
 }
 
+<span class="doccomment">/// Metadata about the structure of unspent outputs in a single pool within a wallet account.
+///
+/// This type is often used to represent a filtered view of outputs in the account that were
+/// selected according to the conditions imposed by a [`NoteFilter`].
+</span><span class="attr">#[derive(Debug, Clone)]
+</span><span class="kw">pub struct </span>PoolMeta {
+    note_count: usize,
+    value: NonNegativeAmount,
+}
+
+<span class="kw">impl </span>PoolMeta {
+    <span class="doccomment">/// Constructs a new [`PoolMeta`] value from its constituent parts.
+    </span><span class="kw">pub fn </span>new(note_count: usize, value: NonNegativeAmount) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{ note_count, value }
+    }
+
+    <span class="doccomment">/// Returns the number of unspent outputs in the account, potentially selected in accordance
+    /// with some [`NoteFilter`].
+    </span><span class="kw">pub fn </span>note_count(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.note_count
+    }
+
+    <span class="doccomment">/// Returns the total value of unspent outputs in the account that are accounted for in
+    /// [`Self::note_count`].
+    </span><span class="kw">pub fn </span>value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; NonNegativeAmount {
+        <span class="self">self</span>.value
+    }
+}
+
 <span class="doccomment">/// Metadata about the structure of the wallet for a particular account.
 ///
 /// At present this just contains counts of unspent outputs in each pool, but it may be extended in
@@ -3092,58 +3280,185 @@
 /// Values of this type are intended to be used in selection of change output values. A value of
 /// this type may represent filtered data, and may therefore not count all of the unspent notes in
 /// the wallet.
-</span><span class="kw">pub struct </span>WalletMeta {
-    sapling_note_count: usize,
-    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-    </span>orchard_note_count: usize,
+///
+/// A [`AccountMeta`] value is normally produced by querying the wallet database via passing a
+/// [`NoteFilter`] to [`InputSource::get_account_metadata`].
+</span><span class="attr">#[derive(Debug, Clone)]
+</span><span class="kw">pub struct </span>AccountMeta {
+    sapling: <span class="prelude-ty">Option</span>&lt;PoolMeta&gt;,
+    orchard: <span class="prelude-ty">Option</span>&lt;PoolMeta&gt;,
 }
 
-<span class="kw">impl </span>WalletMeta {
-    <span class="doccomment">/// Constructs a new [`WalletMeta`] value from its constituent parts.
-    </span><span class="kw">pub fn </span>new(
-        sapling_note_count: usize,
-        <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)] </span>orchard_note_count: usize,
-    ) -&gt; <span class="self">Self </span>{
-        <span class="self">Self </span>{
-            sapling_note_count,
-            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-            </span>orchard_note_count,
-        }
+<span class="kw">impl </span>AccountMeta {
+    <span class="doccomment">/// Constructs a new [`AccountMeta`] value from its constituent parts.
+    </span><span class="kw">pub fn </span>new(sapling: <span class="prelude-ty">Option</span>&lt;PoolMeta&gt;, orchard: <span class="prelude-ty">Option</span>&lt;PoolMeta&gt;) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{ sapling, orchard }
+    }
+
+    <span class="doccomment">/// Returns metadata about Sapling notes belonging to the account for which this was generated.
+    ///
+    /// Returns [`None`] if no metadata is available or it was not possible to evaluate the query
+    /// described by a [`NoteFilter`] given the available wallet data.
+    </span><span class="kw">pub fn </span>sapling(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>PoolMeta&gt; {
+        <span class="self">self</span>.sapling.as_ref()
+    }
+
+    <span class="doccomment">/// Returns metadata about Orchard notes belonging to the account for which this was generated.
+    ///
+    /// Returns [`None`] if no metadata is available or it was not possible to evaluate the query
+    /// described by a [`NoteFilter`] given the available wallet data.
+    </span><span class="kw">pub fn </span>orchard(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>PoolMeta&gt; {
+        <span class="self">self</span>.orchard.as_ref()
+    }
+
+    <span class="kw">fn </span>sapling_note_count(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;usize&gt; {
+        <span class="self">self</span>.sapling.as_ref().map(|m| m.note_count)
+    }
+
+    <span class="kw">fn </span>orchard_note_count(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;usize&gt; {
+        <span class="self">self</span>.orchard.as_ref().map(|m| m.note_count)
     }
 
     <span class="doccomment">/// Returns the number of unspent notes in the wallet for the given shielded protocol.
-    </span><span class="kw">pub fn </span>note_count(<span class="kw-2">&amp;</span><span class="self">self</span>, protocol: ShieldedProtocol) -&gt; usize {
+    </span><span class="kw">pub fn </span>note_count(<span class="kw-2">&amp;</span><span class="self">self</span>, protocol: ShieldedProtocol) -&gt; <span class="prelude-ty">Option</span>&lt;usize&gt; {
         <span class="kw">match </span>protocol {
-            ShieldedProtocol::Sapling =&gt; <span class="self">self</span>.sapling_note_count,
-            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-            </span>ShieldedProtocol::Orchard =&gt; <span class="self">self</span>.orchard_note_count,
-            <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
-            </span>ShieldedProtocol::Orchard =&gt; <span class="number">0</span>,
+            ShieldedProtocol::Sapling =&gt; <span class="self">self</span>.sapling_note_count(),
+            ShieldedProtocol::Orchard =&gt; <span class="self">self</span>.orchard_note_count(),
         }
-    }
-
-    <span class="doccomment">/// Returns the number of unspent Sapling notes belonging to the account for which this was
-    /// generated.
-    </span><span class="kw">pub fn </span>sapling_note_count(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-        <span class="self">self</span>.sapling_note_count
-    }
-
-    <span class="doccomment">/// Returns the number of unspent Orchard notes belonging to the account for which this was
-    /// generated.
-    </span><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-    </span><span class="kw">pub fn </span>orchard_note_count(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-        <span class="self">self</span>.orchard_note_count
     }
 
     <span class="doccomment">/// Returns the total number of unspent shielded notes belonging to the account for which this
     /// was generated.
-    </span><span class="kw">pub fn </span>total_note_count(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-        <span class="self">self</span>.sapling_note_count + <span class="self">self</span>.note_count(ShieldedProtocol::Orchard)
+    ///
+    /// Returns [`None`] if no metadata is available or it was not possible to evaluate the query
+    /// described by a [`NoteFilter`] given the available wallet data. If metadata is available
+    /// only for a single pool, the metadata for that pool will be returned.
+    </span><span class="kw">pub fn </span>total_note_count(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;usize&gt; {
+        <span class="kw">let </span>s = <span class="self">self</span>.sapling_note_count();
+        <span class="kw">let </span>o = <span class="self">self</span>.orchard_note_count();
+        s.zip(o).map(|(s, o)| s + o).or(s).or(o)
+    }
+
+    <span class="kw">fn </span>sapling_value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;NonNegativeAmount&gt; {
+        <span class="self">self</span>.sapling.as_ref().map(|m| m.value)
+    }
+
+    <span class="kw">fn </span>orchard_value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;NonNegativeAmount&gt; {
+        <span class="self">self</span>.orchard.as_ref().map(|m| m.value)
+    }
+
+    <span class="doccomment">/// Returns the total value of shielded notes represented by [`Self::total_note_count`]
+    ///
+    /// Returns [`None`] if no metadata is available or it was not possible to evaluate the query
+    /// described by a [`NoteFilter`] given the available wallet data. If metadata is available
+    /// only for a single pool, the metadata for that pool will be returned.
+    </span><span class="kw">pub fn </span>total_value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;NonNegativeAmount&gt; {
+        <span class="kw">let </span>s = <span class="self">self</span>.sapling_value();
+        <span class="kw">let </span>o = <span class="self">self</span>.orchard_value();
+        s.zip(o)
+            .map(|(s, o)| (s + o).expect(<span class="string">"Does not overflow Zcash maximum value."</span>))
+            .or(s)
+            .or(o)
+    }
+}
+
+<span class="doccomment">/// A `u8` value in the range 0..=MAX
+</span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+</span><span class="kw">pub struct </span>BoundedU8&lt;<span class="kw">const </span>MAX: u8&gt;(u8);
+
+<span class="kw">impl</span>&lt;<span class="kw">const </span>MAX: u8&gt; BoundedU8&lt;MAX&gt; {
+    <span class="doccomment">/// Creates a constant `BoundedU8` from a [`u8`] value.
+    ///
+    /// Panics: if the value is outside the range `0..=MAX`.
+    </span><span class="kw">pub const fn </span>new_const(value: u8) -&gt; <span class="self">Self </span>{
+        <span class="macro">assert!</span>(value &lt;= MAX);
+        <span class="self">Self</span>(value)
+    }
+
+    <span class="doccomment">/// Creates a `BoundedU8` from a [`u8`] value.
+    ///
+    /// Returns `None` if the provided value is outside the range `0..=MAX`.
+    </span><span class="kw">pub fn </span>new(value: u8) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
+        <span class="kw">if </span>value &lt;= MAX {
+            <span class="prelude-val">Some</span>(<span class="self">Self</span>(value))
+        } <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>}
+    }
+
+    <span class="doccomment">/// Returns the wrapped [`u8`] value.
+    </span><span class="kw">pub fn </span>value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u8 {
+        <span class="self">self</span>.<span class="number">0
+    </span>}
+}
+
+<span class="kw">impl</span>&lt;<span class="kw">const </span>MAX: u8&gt; From&lt;BoundedU8&lt;MAX&gt;&gt; <span class="kw">for </span>u8 {
+    <span class="kw">fn </span>from(value: BoundedU8&lt;MAX&gt;) -&gt; <span class="self">Self </span>{
+        value.<span class="number">0
+    </span>}
+}
+
+<span class="kw">impl</span>&lt;<span class="kw">const </span>MAX: u8&gt; From&lt;BoundedU8&lt;MAX&gt;&gt; <span class="kw">for </span>usize {
+    <span class="kw">fn </span>from(value: BoundedU8&lt;MAX&gt;) -&gt; <span class="self">Self </span>{
+        usize::from(value.<span class="number">0</span>)
+    }
+}
+
+<span class="doccomment">/// A small query language for filtering notes belonging to an account.
+///
+/// A filter described using this language is applied to notes individually. It is primarily
+/// intended for retrieval of account metadata in service of making determinations for how to
+/// allocate change notes, and is not currently intended for use in broader note selection
+/// contexts.
+</span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq)]
+</span><span class="kw">pub enum </span>NoteFilter {
+    <span class="doccomment">/// Selects notes having value greater than or equal to the provided value.
+    </span>ExceedsMinValue(NonNegativeAmount),
+    <span class="doccomment">/// Selects notes having value greater than or equal to approximately the n'th percentile of
+    /// previously sent notes in the account, irrespective of pool. The wrapped value must be in
+    /// the range `1..=99`. The value `n` is respected in a best-effort fashion; results are likely
+    /// to be inaccurate if the account has not yet completed scanning or if insufficient send data
+    /// is available to establish a distribution.
+    </span><span class="comment">// TODO: it might be worthwhile to add an optional parameter here that can be used to ignore
+    // low-valued (test/memo-only) sends when constructing the distribution to be drawn from.
+    </span>ExceedsPriorSendPercentile(BoundedU8&lt;<span class="number">99</span>&gt;),
+    <span class="doccomment">/// Selects notes having value greater than or equal to the specified percentage of the account
+    /// balance across all shielded pools. The wrapped value must be in the range `1..=99`
+    </span>ExceedsBalancePercentage(BoundedU8&lt;<span class="number">99</span>&gt;),
+    <span class="doccomment">/// A note will be selected if it satisfies both of the specified conditions.
+    ///
+    /// If it is not possible to evaluate one of the conditions (for example,
+    /// [`NoteFilter::ExceedsPriorSendPercentile`] cannot be evaluated if no sends have been
+    /// performed) then that condition will be ignored. If neither condition can be evaluated,
+    /// then the entire condition cannot be evaluated.
+    </span>Combine(Box&lt;NoteFilter&gt;, Box&lt;NoteFilter&gt;),
+    <span class="doccomment">/// A note will be selected if it satisfies the first condition; if it is not possible to
+    /// evaluate that condition (for example, [`NoteFilter::ExceedsPriorSendPercentile`] cannot
+    /// be evaluated if no sends have been performed) then the second condition will be used for
+    /// evaluation.
+    </span>Attempt {
+        condition: Box&lt;NoteFilter&gt;,
+        fallback: Box&lt;NoteFilter&gt;,
+    },
+}
+
+<span class="kw">impl </span>NoteFilter {
+    <span class="doccomment">/// Constructs a [`NoteFilter::Combine`] query node.
+    </span><span class="kw">pub fn </span>combine(l: NoteFilter, r: NoteFilter) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::Combine(Box::new(l), Box::new(r))
+    }
+
+    <span class="doccomment">/// Constructs a [`NoteFilter::Attempt`] query node.
+    </span><span class="kw">pub fn </span>attempt(condition: NoteFilter, fallback: NoteFilter) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::Attempt {
+            condition: Box::new(condition),
+            fallback: Box::new(fallback),
+        }
     }
 }
 
 <span class="doccomment">/// A trait representing the capability to query a data store for unspent transaction outputs
-/// belonging to a wallet.
+/// belonging to a account.
 </span><span class="attr">#[cfg_attr(feature = <span class="string">"test-dependencies"</span>, delegatable_trait)]
 </span><span class="kw">pub trait </span>InputSource {
     <span class="doccomment">/// The type of errors produced by a wallet backend.
@@ -3190,14 +3505,17 @@
     ///
     /// The returned metadata value must exclude:
     /// - spent notes;
-    /// - unspent notes having value less than the specified minimum value;
+    /// - unspent notes excluded by the provided selector;
     /// - unspent notes identified in the given `exclude` list.
-    </span><span class="kw">fn </span>get_wallet_metadata(
+    ///
+    /// Implementations of this method may limit the complexity of supported queries. Such
+    /// limitations should be clearly documented for the implementing type.
+    </span><span class="kw">fn </span>get_account_metadata(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         account: <span class="self">Self</span>::AccountId,
-        min_value: NonNegativeAmount,
+        selector: <span class="kw-2">&amp;</span>NoteFilter,
         exclude: <span class="kw-2">&amp;</span>[<span class="self">Self</span>::NoteRef],
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;WalletMeta, <span class="self">Self</span>::Error&gt;;
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;AccountMeta, <span class="self">Self</span>::Error&gt;;
 
     <span class="doccomment">/// Fetches the transparent output corresponding to the provided `outpoint`.
     ///

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/testing/pool.rs`."><title>pool.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-590a400c.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (b8c8287a2 2024-11-03)" data-channel="nightly" data-search-js="search-c5a66128.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/testing/</div>pool.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/testing/pool.rs`."><title>pool.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-42caa33d.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (f7273e004 2024-11-12)" data-channel="nightly" data-search-js="search-853ef39b.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/testing/</div>pool.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -2972,11 +2972,97 @@
 <a href="#2971" id="2971">2971</a>
 <a href="#2972" id="2972">2972</a>
 <a href="#2973" id="2973">2973</a>
-<a href="#2974" id="2974">2974</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::{
+<a href="#2974" id="2974">2974</a>
+<a href="#2975" id="2975">2975</a>
+<a href="#2976" id="2976">2976</a>
+<a href="#2977" id="2977">2977</a>
+<a href="#2978" id="2978">2978</a>
+<a href="#2979" id="2979">2979</a>
+<a href="#2980" id="2980">2980</a>
+<a href="#2981" id="2981">2981</a>
+<a href="#2982" id="2982">2982</a>
+<a href="#2983" id="2983">2983</a>
+<a href="#2984" id="2984">2984</a>
+<a href="#2985" id="2985">2985</a>
+<a href="#2986" id="2986">2986</a>
+<a href="#2987" id="2987">2987</a>
+<a href="#2988" id="2988">2988</a>
+<a href="#2989" id="2989">2989</a>
+<a href="#2990" id="2990">2990</a>
+<a href="#2991" id="2991">2991</a>
+<a href="#2992" id="2992">2992</a>
+<a href="#2993" id="2993">2993</a>
+<a href="#2994" id="2994">2994</a>
+<a href="#2995" id="2995">2995</a>
+<a href="#2996" id="2996">2996</a>
+<a href="#2997" id="2997">2997</a>
+<a href="#2998" id="2998">2998</a>
+<a href="#2999" id="2999">2999</a>
+<a href="#3000" id="3000">3000</a>
+<a href="#3001" id="3001">3001</a>
+<a href="#3002" id="3002">3002</a>
+<a href="#3003" id="3003">3003</a>
+<a href="#3004" id="3004">3004</a>
+<a href="#3005" id="3005">3005</a>
+<a href="#3006" id="3006">3006</a>
+<a href="#3007" id="3007">3007</a>
+<a href="#3008" id="3008">3008</a>
+<a href="#3009" id="3009">3009</a>
+<a href="#3010" id="3010">3010</a>
+<a href="#3011" id="3011">3011</a>
+<a href="#3012" id="3012">3012</a>
+<a href="#3013" id="3013">3013</a>
+<a href="#3014" id="3014">3014</a>
+<a href="#3015" id="3015">3015</a>
+<a href="#3016" id="3016">3016</a>
+<a href="#3017" id="3017">3017</a>
+<a href="#3018" id="3018">3018</a>
+<a href="#3019" id="3019">3019</a>
+<a href="#3020" id="3020">3020</a>
+<a href="#3021" id="3021">3021</a>
+<a href="#3022" id="3022">3022</a>
+<a href="#3023" id="3023">3023</a>
+<a href="#3024" id="3024">3024</a>
+<a href="#3025" id="3025">3025</a>
+<a href="#3026" id="3026">3026</a>
+<a href="#3027" id="3027">3027</a>
+<a href="#3028" id="3028">3028</a>
+<a href="#3029" id="3029">3029</a>
+<a href="#3030" id="3030">3030</a>
+<a href="#3031" id="3031">3031</a>
+<a href="#3032" id="3032">3032</a>
+<a href="#3033" id="3033">3033</a>
+<a href="#3034" id="3034">3034</a>
+<a href="#3035" id="3035">3035</a>
+<a href="#3036" id="3036">3036</a>
+<a href="#3037" id="3037">3037</a>
+<a href="#3038" id="3038">3038</a>
+<a href="#3039" id="3039">3039</a>
+<a href="#3040" id="3040">3040</a>
+<a href="#3041" id="3041">3041</a>
+<a href="#3042" id="3042">3042</a>
+<a href="#3043" id="3043">3043</a>
+<a href="#3044" id="3044">3044</a>
+<a href="#3045" id="3045">3045</a>
+<a href="#3046" id="3046">3046</a>
+<a href="#3047" id="3047">3047</a>
+<a href="#3048" id="3048">3048</a>
+<a href="#3049" id="3049">3049</a>
+<a href="#3050" id="3050">3050</a>
+<a href="#3051" id="3051">3051</a>
+<a href="#3052" id="3052">3052</a>
+<a href="#3053" id="3053">3053</a>
+<a href="#3054" id="3054">3054</a>
+<a href="#3055" id="3055">3055</a>
+<a href="#3056" id="3056">3056</a>
+<a href="#3057" id="3057">3057</a>
+<a href="#3058" id="3058">3058</a>
+<a href="#3059" id="3059">3059</a>
+<a href="#3060" id="3060">3060</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::{
     cmp::Eq,
     convert::Infallible,
     hash::Hash,
-    num::{NonZeroU32, NonZeroU8, NonZeroUsize},
+    num::{NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize},
 };
 
 <span class="kw">use </span>assert_matches::assert_matches;
@@ -3017,8 +3103,8 @@
         wallet::{
             decrypt_and_store_transaction, input_selection::GreedyInputSelector, TransferErrT,
         },
-        Account <span class="kw">as _</span>, AccountBirthday, DecryptedTransaction, InputSource, Ratio,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
+        Account <span class="kw">as _</span>, AccountBirthday, BoundedU8, DecryptedTransaction, InputSource, NoteFilter,
+        Ratio, WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
     },
     decrypt_transaction,
     fees::{
@@ -3336,7 +3422,7 @@
         <span class="prelude-val">Some</span>(change_memo.clone().into()),
         T::SHIELDED_PROTOCOL,
         DustOutputPolicy::default(),
-        SplitPolicy::new(
+        SplitPolicy::with_min_output_value(
             NonZeroUsize::new(<span class="number">2</span>).unwrap(),
             NonNegativeAmount::const_from_u64(<span class="number">100_0000</span>),
         ),
@@ -3439,7 +3525,7 @@
         <span class="prelude-val">Some</span>(change_memo.into()),
         T::SHIELDED_PROTOCOL,
         DustOutputPolicy::default(),
-        SplitPolicy::new(
+        SplitPolicy::with_min_output_value(
             NonZeroUsize::new(<span class="number">8</span>).unwrap(),
             NonNegativeAmount::const_from_u64(<span class="number">10_0000</span>),
         ),
@@ -3504,7 +3590,7 @@
         <span class="comment">// Add funds to the wallet.
         </span>add_funds(st, value);
 
-        <span class="kw">let </span>expected_step0_fee = (zip317::MARGINAL_FEE * <span class="number">3</span>).unwrap();
+        <span class="kw">let </span>expected_step0_fee = (zip317::MARGINAL_FEE * <span class="number">3u64</span>).unwrap();
         <span class="kw">let </span>expected_step1_fee = zip317::MINIMUM_FEE;
         <span class="kw">let </span>expected_ephemeral = (transfer_amount + expected_step1_fee).unwrap();
         <span class="kw">let </span>expected_step0_change =
@@ -4097,7 +4183,7 @@
     st.scan_cached_blocks(h2 + <span class="number">1</span>, <span class="number">8</span>);
 
     <span class="comment">// Total balance is value * number of blocks scanned (10).
-    </span><span class="macro">assert_eq!</span>(st.get_total_balance(account_id), (value * <span class="number">10</span>).unwrap());
+    </span><span class="macro">assert_eq!</span>(st.get_total_balance(account_id), (value * <span class="number">10u64</span>).unwrap());
 
     <span class="comment">// Spend still fails
     </span><span class="macro">assert_matches!</span>(
@@ -4124,15 +4210,15 @@
     st.scan_cached_blocks(h11, <span class="number">1</span>);
 
     <span class="comment">// Total balance is value * number of blocks scanned (11).
-    </span><span class="macro">assert_eq!</span>(st.get_total_balance(account_id), (value * <span class="number">11</span>).unwrap());
+    </span><span class="macro">assert_eq!</span>(st.get_total_balance(account_id), (value * <span class="number">11u64</span>).unwrap());
     <span class="comment">// Spendable balance at 10 confirmations is value * 2.
     </span><span class="macro">assert_eq!</span>(
         st.get_spendable_balance(account_id, <span class="number">10</span>),
-        (value * <span class="number">2</span>).unwrap()
+        (value * <span class="number">2u64</span>).unwrap()
     );
     <span class="macro">assert_eq!</span>(
         st.get_pending_shielded_balance(account_id, <span class="number">10</span>),
-        (value * <span class="number">9</span>).unwrap()
+        (value * <span class="number">9u64</span>).unwrap()
     );
 
     <span class="comment">// Should now be able to generate a proposal
@@ -4166,7 +4252,7 @@
     <span class="comment">// TODO: send to an account so that we can check its balance.
     </span><span class="macro">assert_eq!</span>(
         st.get_total_balance(account_id),
-        ((value * <span class="number">11</span>).unwrap()
+        ((value * <span class="number">11u64</span>).unwrap()
             - (amount_sent + NonNegativeAmount::from_u64(<span class="number">10000</span>).unwrap()).unwrap())
         .unwrap()
     );
@@ -5098,7 +5184,7 @@
     st.generate_next_block(<span class="kw-2">&amp;</span>p1_fvk, AddressType::DefaultExternal, note_value);
     st.scan_cached_blocks(account.birthday().height(), <span class="number">2</span>);
 
-    <span class="kw">let </span>initial_balance = (note_value * <span class="number">2</span>).unwrap();
+    <span class="kw">let </span>initial_balance = (note_value * <span class="number">2u64</span>).unwrap();
     <span class="macro">assert_eq!</span>(st.get_total_balance(account.id()), initial_balance);
     <span class="macro">assert_eq!</span>(st.get_spendable_balance(account.id(), <span class="number">1</span>), initial_balance);
 
@@ -5188,7 +5274,7 @@
     st.generate_next_block(<span class="kw-2">&amp;</span>p1_fvk, AddressType::DefaultExternal, note_value);
     st.scan_cached_blocks(account.birthday().height(), <span class="number">2</span>);
 
-    <span class="kw">let </span>initial_balance = (note_value * <span class="number">2</span>).unwrap();
+    <span class="kw">let </span>initial_balance = (note_value * <span class="number">2u64</span>).unwrap();
     <span class="macro">assert_eq!</span>(st.get_total_balance(account.id()), initial_balance);
     <span class="macro">assert_eq!</span>(st.get_spendable_balance(account.id(), <span class="number">1</span>), initial_balance);
 
@@ -5281,7 +5367,7 @@
 
     <span class="kw">let </span>next_to_scan = scanned.scanned_range().end;
 
-    <span class="kw">let </span>initial_balance = (note_value * <span class="number">3</span>).unwrap();
+    <span class="kw">let </span>initial_balance = (note_value * <span class="number">3u64</span>).unwrap();
     <span class="macro">assert_eq!</span>(st.get_total_balance(acct_id), initial_balance);
     <span class="macro">assert_eq!</span>(st.get_spendable_balance(acct_id, <span class="number">1</span>), initial_balance);
 
@@ -5326,7 +5412,7 @@
     <span class="kw">let </span>expected_change = (note_value - transfer_amount - expected_fee).unwrap();
     <span class="macro">assert_eq!</span>(
         st.get_total_balance(acct_id),
-        ((note_value * <span class="number">2</span>).unwrap() + expected_change).unwrap()
+        ((note_value * <span class="number">2u64</span>).unwrap() + expected_change).unwrap()
     );
     <span class="macro">assert_eq!</span>(st.get_pending_change(acct_id, <span class="number">1</span>), expected_change);
 
@@ -5370,8 +5456,8 @@
     );
 
     <span class="kw">let </span>expected_final = (initial_balance + note_value
-        - (transfer_amount * <span class="number">3</span>).unwrap()
-        - (expected_fee * <span class="number">3</span>).unwrap())
+        - (transfer_amount * <span class="number">3u64</span>).unwrap()
+        - (expected_fee * <span class="number">3u64</span>).unwrap())
     .unwrap();
     <span class="macro">assert_eq!</span>(st.get_total_balance(acct_id), expected_final);
 
@@ -5944,6 +6030,92 @@
     </span><span class="macro">assert_eq!</span>(
         st.get_total_balance(account.id()),
         (value - value2).unwrap()
+    );
+}
+
+<span class="kw">pub fn </span>metadata_queries_exclude_unwanted_notes&lt;T: ShieldedPoolTester, DSF, TC&gt;(
+    ds_factory: DSF,
+    cache: TC,
+) <span class="kw">where
+    </span>DSF: DataStoreFactory,
+    &lt;DSF <span class="kw">as </span>DataStoreFactory&gt;::AccountId: std::fmt::Debug,
+    TC: TestCache,
+{
+    <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
+        .build();
+
+    <span class="kw">let </span>account = st.test_account().cloned().unwrap();
+    <span class="kw">let </span>dfvk = T::test_account_fvk(<span class="kw-2">&amp;</span>st);
+
+    <span class="comment">// Create 10 blocks with successively increasing value
+    </span><span class="kw">let </span>value = NonNegativeAmount::const_from_u64(<span class="number">100_0000</span>);
+    <span class="kw">let </span>(h0, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value);
+    <span class="kw">let </span><span class="kw-2">mut </span>note_values = <span class="macro">vec!</span>[value];
+    <span class="kw">for </span>i <span class="kw">in </span><span class="number">2</span>..=<span class="number">10 </span>{
+        <span class="kw">let </span>value = NonNegativeAmount::const_from_u64(i * <span class="number">100_0000</span>);
+        st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value);
+        note_values.push(value);
+    }
+    st.scan_cached_blocks(h0, <span class="number">10</span>);
+
+    <span class="kw">let </span>test_meta = |st: <span class="kw-2">&amp;</span>TestState&lt;TC, DSF::DataStore, LocalNetwork&gt;, query, expected_count| {
+        <span class="kw">let </span>metadata = st
+            .wallet()
+            .get_account_metadata(account.id(), <span class="kw-2">&amp;</span>query, <span class="kw-2">&amp;</span>[])
+            .unwrap();
+
+        <span class="macro">assert_eq!</span>(metadata.note_count(T::SHIELDED_PROTOCOL), expected_count);
+    };
+
+    test_meta(
+        <span class="kw-2">&amp;</span>st,
+        NoteFilter::ExceedsMinValue(NonNegativeAmount::const_from_u64(<span class="number">1000_0000</span>)),
+        <span class="prelude-val">Some</span>(<span class="number">1</span>),
+    );
+    test_meta(
+        <span class="kw-2">&amp;</span>st,
+        NoteFilter::ExceedsMinValue(NonNegativeAmount::const_from_u64(<span class="number">500_0000</span>)),
+        <span class="prelude-val">Some</span>(<span class="number">6</span>),
+    );
+    test_meta(
+        <span class="kw-2">&amp;</span>st,
+        NoteFilter::ExceedsBalancePercentage(BoundedU8::new_const(<span class="number">10</span>)),
+        <span class="prelude-val">Some</span>(<span class="number">5</span>),
+    );
+
+    <span class="comment">// We haven't sent any funds yet, so we can't evaluate this query
+    </span>test_meta(
+        <span class="kw-2">&amp;</span>st,
+        NoteFilter::ExceedsPriorSendPercentile(BoundedU8::new_const(<span class="number">50</span>)),
+        <span class="prelude-val">None</span>,
+    );
+
+    <span class="comment">// Spend half of each one of our notes, so that we can get a distribution of sent note values.
+    // FIXME: This test is currently excessively specialized to the `zcash_client_sqlite::WalletDb`
+    // implmentation of the `InputSource` trait. A better approach would be to create a test input
+    // source that can select a set of notes directly based upon their nullifiers.
+    </span><span class="kw">let </span>not_our_key = T::sk_to_fvk(<span class="kw-2">&amp;</span>T::sk(<span class="kw-2">&amp;</span>[<span class="number">0xf5</span>; <span class="number">32</span>]));
+    <span class="kw">let </span>to = T::fvk_default_address(<span class="kw-2">&amp;</span>not_our_key).to_zcash_address(st.network());
+    <span class="kw">let </span>nz2 = NonZeroU64::new(<span class="number">2</span>).unwrap();
+
+    <span class="kw">for </span>value <span class="kw">in </span><span class="kw-2">&amp;</span>note_values {
+        <span class="kw">let </span>txids = st
+            .create_standard_transaction(<span class="kw-2">&amp;</span>account, to.clone(), <span class="kw-2">*</span>value / nz2)
+            .unwrap();
+        st.generate_next_block_including(txids.head);
+    }
+    st.scan_cached_blocks(h0 + <span class="number">10</span>, <span class="number">10</span>);
+
+    <span class="comment">// Since we've spent half our notes, our remaining notes each have approximately half their
+    // original value. The 50th percentile of our spends should be 250_0000 ZAT, and half of our
+    // remaining notes should have value greater than that.
+    </span>test_meta(
+        <span class="kw-2">&amp;</span>st,
+        NoteFilter::ExceedsPriorSendPercentile(BoundedU8::new_const(<span class="number">50</span>)),
+        <span class="prelude-val">Some</span>(<span class="number">5</span>),
     );
 }
 </code></pre></div></section></main></body></html>

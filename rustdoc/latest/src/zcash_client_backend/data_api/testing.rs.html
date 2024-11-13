@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/testing.rs`."><title>testing.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-590a400c.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (b8c8287a2 2024-11-03)" data-channel="nightly" data-search-js="search-c5a66128.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/</div>testing.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/testing.rs`."><title>testing.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-42caa33d.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (f7273e004 2024-11-12)" data-channel="nightly" data-search-js="search-853ef39b.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/</div>testing.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -2721,7 +2721,52 @@
 <a href="#2720" id="2720">2720</a>
 <a href="#2721" id="2721">2721</a>
 <a href="#2722" id="2722">2722</a>
-<a href="#2723" id="2723">2723</a></pre></div><pre class="rust"><code><span class="doccomment">//! Utilities for testing wallets based upon the [`crate::data_api`] traits.
+<a href="#2723" id="2723">2723</a>
+<a href="#2724" id="2724">2724</a>
+<a href="#2725" id="2725">2725</a>
+<a href="#2726" id="2726">2726</a>
+<a href="#2727" id="2727">2727</a>
+<a href="#2728" id="2728">2728</a>
+<a href="#2729" id="2729">2729</a>
+<a href="#2730" id="2730">2730</a>
+<a href="#2731" id="2731">2731</a>
+<a href="#2732" id="2732">2732</a>
+<a href="#2733" id="2733">2733</a>
+<a href="#2734" id="2734">2734</a>
+<a href="#2735" id="2735">2735</a>
+<a href="#2736" id="2736">2736</a>
+<a href="#2737" id="2737">2737</a>
+<a href="#2738" id="2738">2738</a>
+<a href="#2739" id="2739">2739</a>
+<a href="#2740" id="2740">2740</a>
+<a href="#2741" id="2741">2741</a>
+<a href="#2742" id="2742">2742</a>
+<a href="#2743" id="2743">2743</a>
+<a href="#2744" id="2744">2744</a>
+<a href="#2745" id="2745">2745</a>
+<a href="#2746" id="2746">2746</a>
+<a href="#2747" id="2747">2747</a>
+<a href="#2748" id="2748">2748</a>
+<a href="#2749" id="2749">2749</a>
+<a href="#2750" id="2750">2750</a>
+<a href="#2751" id="2751">2751</a>
+<a href="#2752" id="2752">2752</a>
+<a href="#2753" id="2753">2753</a>
+<a href="#2754" id="2754">2754</a>
+<a href="#2755" id="2755">2755</a>
+<a href="#2756" id="2756">2756</a>
+<a href="#2757" id="2757">2757</a>
+<a href="#2758" id="2758">2758</a>
+<a href="#2759" id="2759">2759</a>
+<a href="#2760" id="2760">2760</a>
+<a href="#2761" id="2761">2761</a>
+<a href="#2762" id="2762">2762</a>
+<a href="#2763" id="2763">2763</a>
+<a href="#2764" id="2764">2764</a>
+<a href="#2765" id="2765">2765</a>
+<a href="#2766" id="2766">2766</a>
+<a href="#2767" id="2767">2767</a>
+<a href="#2768" id="2768">2768</a></pre></div><pre class="rust"><code><span class="doccomment">//! Utilities for testing wallets based upon the [`crate::data_api`] traits.
 
 </span><span class="kw">use </span>std::{
     collections::{BTreeMap, HashMap},
@@ -2746,6 +2791,7 @@
 <span class="kw">use </span>shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 <span class="kw">use </span>subtle::ConditionallySelectable;
 
+<span class="kw">use </span>zcash_address::ZcashAddress;
 <span class="kw">use </span>zcash_keys::address::Address;
 <span class="kw">use </span>zcash_note_encryption::Domain;
 <span class="kw">use </span>zcash_primitives::{
@@ -2766,6 +2812,7 @@
     value::{ZatBalance, Zatoshis},
 };
 <span class="kw">use </span>zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
+<span class="kw">use </span>zip321::Payment;
 
 <span class="kw">use crate</span>::{
     address::UnifiedAddress,
@@ -2782,7 +2829,6 @@
     ShieldedProtocol,
 };
 
-<span class="kw">use </span><span class="kw">super</span>::error::Error;
 <span class="kw">use super</span>::{
     chain::{scan_cached_blocks, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
     scanning::ScanRange,
@@ -2791,12 +2837,13 @@
         input_selection::{GreedyInputSelector, InputSelector},
         propose_standard_transfer_to_address, propose_transfer,
     },
-    Account, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, BlockMetadata,
-    DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
+    Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
+    BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
     SentTransaction, SpendableNotes, TransactionDataRequest, TransactionStatus,
-    WalletCommitmentTrees, WalletMeta, WalletRead, WalletSummary, WalletTest, WalletWrite,
+    WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
     SAPLING_SHARD_HEIGHT,
 };
+<span class="kw">use super</span>::{error::Error, NoteFilter};
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">use </span>{
@@ -3584,6 +3631,49 @@
         + WalletCommitmentTrees,
     &lt;DbT <span class="kw">as </span>WalletRead&gt;::AccountId: ConditionallySelectable + Default + Send + <span class="lifetime">'static</span>,
 {
+    <span class="comment">// Creates a transaction that sends the specified value from the given account to
+    // the provided recipient address, using a greedy input selector and the default
+    // mutli-output change strategy.
+    </span><span class="kw">pub fn </span>create_standard_transaction(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        from_account: <span class="kw-2">&amp;</span>TestAccount&lt;DbT::Account&gt;,
+        to: ZcashAddress,
+        value: NonNegativeAmount,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;
+        NonEmpty&lt;TxId&gt;,
+        <span class="kw">super</span>::wallet::TransferErrT&lt;
+            DbT,
+            GreedyInputSelector&lt;DbT&gt;,
+            standard::MultiOutputChangeStrategy&lt;DbT&gt;,
+        &gt;,
+    &gt; {
+        <span class="kw">let </span>input_selector = GreedyInputSelector::new();
+
+        <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
+        </span><span class="kw">let </span>fallback_change_pool = ShieldedProtocol::Sapling;
+        <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+        </span><span class="kw">let </span>fallback_change_pool = ShieldedProtocol::Orchard;
+
+        <span class="kw">let </span>change_strategy = standard::SingleOutputChangeStrategy::new(
+            StandardFeeRule::Zip317,
+            <span class="prelude-val">None</span>,
+            fallback_change_pool,
+            DustOutputPolicy::default(),
+        );
+
+        <span class="kw">let </span>request =
+            zip321::TransactionRequest::new(<span class="macro">vec!</span>[Payment::without_memo(to, value)]).unwrap();
+
+        <span class="self">self</span>.spend(
+            <span class="kw-2">&amp;</span>input_selector,
+            <span class="kw-2">&amp;</span>change_strategy,
+            from_account.usk(),
+            request,
+            OvkPolicy::Sender,
+            NonZeroU32::MIN,
+        )
+    }
+
     <span class="doccomment">/// Prepares and executes the given [`zip321::TransactionRequest`] in a single step.
     </span><span class="attr">#[allow(clippy::type_complexity)]
     </span><span class="kw">pub fn </span>spend&lt;InputsT, ChangeT&gt;(
@@ -5074,12 +5164,12 @@
         <span class="prelude-val">Ok</span>(SpendableNotes::empty())
     }
 
-    <span class="kw">fn </span>get_wallet_metadata(
+    <span class="kw">fn </span>get_account_metadata(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         _account: <span class="self">Self</span>::AccountId,
-        _min_value: NonNegativeAmount,
+        _selector: <span class="kw-2">&amp;</span>NoteFilter,
         _exclude: <span class="kw-2">&amp;</span>[<span class="self">Self</span>::NoteRef],
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;WalletMeta, <span class="self">Self</span>::Error&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;AccountMeta, <span class="self">Self</span>::Error&gt; {
         <span class="prelude-val">Err</span>(())
     }
 }

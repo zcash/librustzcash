@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/fees/zip317.rs`."><title>zip317.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-590a400c.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (b8c8287a2 2024-11-03)" data-channel="nightly" data-search-js="search-c5a66128.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/fees/</div>zip317.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/fees/zip317.rs`."><title>zip317.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-42caa33d.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (f7273e004 2024-11-12)" data-channel="nightly" data-search-js="search-853ef39b.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/fees/</div>zip317.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -794,7 +794,10 @@
 <a href="#793" id="793">793</a>
 <a href="#794" id="794">794</a>
 <a href="#795" id="795">795</a>
-<a href="#796" id="796">796</a></pre></div><pre class="rust"><code><span class="doccomment">//! Change strategies designed to implement the ZIP 317 fee rules.
+<a href="#796" id="796">796</a>
+<a href="#797" id="797">797</a>
+<a href="#798" id="798">798</a>
+<a href="#799" id="799">799</a></pre></div><pre class="rust"><code><span class="doccomment">//! Change strategies designed to implement the ZIP 317 fee rules.
 //!
 //! Change selection in ZIP 317 requires careful handling of low-valued inputs
 //! to ensure that inputs added to a transaction do not cause fees to rise by
@@ -810,7 +813,7 @@
 <span class="kw">use </span>zcash_protocol::value::{BalanceError, Zatoshis};
 
 <span class="kw">use crate</span>::{
-    data_api::{InputSource, WalletMeta},
+    data_api::{AccountMeta, InputSource, NoteFilter},
     fees::StandardFeeRule,
     ShieldedProtocol,
 };
@@ -897,7 +900,7 @@
     <span class="kw">type </span>FeeRule = R;
     <span class="kw">type </span>Error = &lt;R <span class="kw">as </span>FeeRule&gt;::Error;
     <span class="kw">type </span>MetaSource = I;
-    <span class="kw">type </span>WalletMetaT = ();
+    <span class="kw">type </span>AccountMetaT = ();
 
     <span class="kw">fn </span>fee_rule(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="self">Self</span>::FeeRule {
         <span class="kw-2">&amp;</span><span class="self">self</span>.fee_rule
@@ -908,7 +911,7 @@
         _meta_source: <span class="kw-2">&amp;</span><span class="self">Self</span>::MetaSource,
         _account: &lt;<span class="self">Self</span>::MetaSource <span class="kw">as </span>InputSource&gt;::AccountId,
         _exclude: <span class="kw-2">&amp;</span>[&lt;<span class="self">Self</span>::MetaSource <span class="kw">as </span>InputSource&gt;::NoteRef],
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::WalletMetaT, &lt;<span class="self">Self</span>::MetaSource <span class="kw">as </span>InputSource&gt;::Error&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::AccountMetaT, &lt;<span class="self">Self</span>::MetaSource <span class="kw">as </span>InputSource&gt;::Error&gt; {
         <span class="prelude-val">Ok</span>(())
     }
 
@@ -921,7 +924,7 @@
         sapling: <span class="kw-2">&amp;</span><span class="kw">impl </span>sapling_fees::BundleView&lt;NoteRefT&gt;,
         <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)] </span>orchard: <span class="kw-2">&amp;</span><span class="kw">impl </span>orchard_fees::BundleView&lt;NoteRefT&gt;,
         ephemeral_balance: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>EphemeralBalance&gt;,
-        _wallet_meta: <span class="kw-2">&amp;</span><span class="self">Self</span>::WalletMetaT,
+        _wallet_meta: <span class="kw-2">&amp;</span><span class="self">Self</span>::AccountMetaT,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;TransactionBalance, ChangeError&lt;<span class="self">Self</span>::Error, NoteRefT&gt;&gt; {
         <span class="kw">let </span>split_policy = SplitPolicy::single_output();
         <span class="kw">let </span>cfg = SinglePoolBalanceConfig::new(
@@ -1000,7 +1003,7 @@
     <span class="kw">type </span>FeeRule = R;
     <span class="kw">type </span>Error = &lt;R <span class="kw">as </span>FeeRule&gt;::Error;
     <span class="kw">type </span>MetaSource = I;
-    <span class="kw">type </span>WalletMetaT = WalletMeta;
+    <span class="kw">type </span>AccountMetaT = AccountMeta;
 
     <span class="kw">fn </span>fee_rule(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="self">Self</span>::FeeRule {
         <span class="kw-2">&amp;</span><span class="self">self</span>.fee_rule
@@ -1011,8 +1014,14 @@
         meta_source: <span class="kw-2">&amp;</span><span class="self">Self</span>::MetaSource,
         account: &lt;<span class="self">Self</span>::MetaSource <span class="kw">as </span>InputSource&gt;::AccountId,
         exclude: <span class="kw-2">&amp;</span>[&lt;<span class="self">Self</span>::MetaSource <span class="kw">as </span>InputSource&gt;::NoteRef],
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::WalletMetaT, &lt;<span class="self">Self</span>::MetaSource <span class="kw">as </span>InputSource&gt;::Error&gt; {
-        meta_source.get_wallet_metadata(account, <span class="self">self</span>.split_policy.min_split_output_size(), exclude)
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::AccountMetaT, &lt;<span class="self">Self</span>::MetaSource <span class="kw">as </span>InputSource&gt;::Error&gt; {
+        <span class="kw">let </span>note_selector = NoteFilter::ExceedsMinValue(
+            <span class="self">self</span>.split_policy
+                .min_split_output_value()
+                .unwrap_or(SplitPolicy::MIN_NOTE_VALUE),
+        );
+
+        meta_source.get_account_metadata(account, <span class="kw-2">&amp;</span>note_selector, exclude)
     }
 
     <span class="kw">fn </span>compute_balance&lt;P: consensus::Parameters, NoteRefT: Clone&gt;(
@@ -1024,7 +1033,7 @@
         sapling: <span class="kw-2">&amp;</span><span class="kw">impl </span>sapling_fees::BundleView&lt;NoteRefT&gt;,
         <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)] </span>orchard: <span class="kw-2">&amp;</span><span class="kw">impl </span>orchard_fees::BundleView&lt;NoteRefT&gt;,
         ephemeral_balance: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>EphemeralBalance&gt;,
-        wallet_meta: <span class="kw-2">&amp;</span><span class="self">Self</span>::WalletMetaT,
+        wallet_meta: <span class="kw-2">&amp;</span><span class="self">Self</span>::AccountMetaT,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;TransactionBalance, ChangeError&lt;<span class="self">Self</span>::Error, NoteRefT&gt;&gt; {
         <span class="kw">let </span>cfg = SinglePoolBalanceConfig::new(
             params,
@@ -1067,7 +1076,9 @@
 
     <span class="kw">use </span><span class="kw">super</span>::SingleOutputChangeStrategy;
     <span class="kw">use crate</span>::{
-        data_api::{testing::MockWalletDb, wallet::input_selection::SaplingPayment, WalletMeta},
+        data_api::{
+            testing::MockWalletDb, wallet::input_selection::SaplingPayment, AccountMeta, PoolMeta,
+        },
         fees::{
             tests::{TestSaplingInput, TestTransparentInput},
             zip317::MultiOutputChangeStrategy,
@@ -1130,7 +1141,7 @@
             <span class="prelude-val">None</span>,
             ShieldedProtocol::Sapling,
             DustOutputPolicy::default(),
-            SplitPolicy::new(
+            SplitPolicy::with_min_output_value(
                 NonZeroUsize::new(<span class="number">5</span>).unwrap(),
                 NonNegativeAmount::const_from_u64(<span class="number">100_0000</span>),
             ),
@@ -1138,7 +1149,7 @@
 
         {
             <span class="comment">// spend a single Sapling note and produce 5 outputs
-            </span><span class="kw">let </span>balance = |existing_notes| {
+            </span><span class="kw">let </span>balance = |existing_notes, total| {
                 change_strategy.compute_balance(
                     <span class="kw-2">&amp;</span>Network::TestNetwork,
                     Network::TestNetwork
@@ -1159,16 +1170,12 @@
                     <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
                     </span><span class="kw-2">&amp;</span>orchard_fees::EmptyBundleView,
                     <span class="prelude-val">None</span>,
-                    <span class="kw-2">&amp;</span>WalletMeta::new(
-                        existing_notes,
-                        <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-                        </span><span class="number">0</span>,
-                    ),
+                    <span class="kw-2">&amp;</span>AccountMeta::new(<span class="prelude-val">Some</span>(PoolMeta::new(existing_notes, total)), <span class="prelude-val">None</span>),
                 )
             };
 
             <span class="macro">assert_matches!</span>(
-                balance(<span class="number">0</span>),
+                balance(<span class="number">0</span>, NonNegativeAmount::ZERO),
                 <span class="prelude-val">Ok</span>(balance) <span class="kw">if
                     </span>balance.proposed_change() == [
                         ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">129_4000</span>), <span class="prelude-val">None</span>),
@@ -1181,7 +1188,7 @@
             );
 
             <span class="macro">assert_matches!</span>(
-                balance(<span class="number">2</span>),
+                balance(<span class="number">2</span>, NonNegativeAmount::const_from_u64(<span class="number">100_0000</span>)),
                 <span class="prelude-val">Ok</span>(balance) <span class="kw">if
                     </span>balance.proposed_change() == [
                         ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">216_0000</span>), <span class="prelude-val">None</span>),
@@ -1215,10 +1222,9 @@
                 <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
                 </span><span class="kw-2">&amp;</span>orchard_fees::EmptyBundleView,
                 <span class="prelude-val">None</span>,
-                <span class="kw-2">&amp;</span>WalletMeta::new(
-                    <span class="number">0</span>,
-                    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-                    </span><span class="number">0</span>,
+                <span class="kw-2">&amp;</span>AccountMeta::new(
+                    <span class="prelude-val">Some</span>(PoolMeta::new(<span class="number">0</span>, NonNegativeAmount::ZERO)),
+                    <span class="prelude-val">Some</span>(PoolMeta::new(<span class="number">0</span>, NonNegativeAmount::ZERO)),
                 ),
             );
 

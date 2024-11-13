@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `components/zcash_protocol/src/value.rs`."><title>value.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-590a400c.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_protocol" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (b8c8287a2 2024-11-03)" data-channel="nightly" data-search-js="search-c5a66128.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_protocol/</div>value.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `components/zcash_protocol/src/value.rs`."><title>value.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-42caa33d.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_protocol" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (f7273e004 2024-11-12)" data-channel="nightly" data-search-js="search-853ef39b.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_protocol/</div>value.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -547,11 +547,31 @@
 <a href="#546" id="546">546</a>
 <a href="#547" id="547">547</a>
 <a href="#548" id="548">548</a>
-<a href="#549" id="549">549</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::convert::{Infallible, TryFrom};
+<a href="#549" id="549">549</a>
+<a href="#550" id="550">550</a>
+<a href="#551" id="551">551</a>
+<a href="#552" id="552">552</a>
+<a href="#553" id="553">553</a>
+<a href="#554" id="554">554</a>
+<a href="#555" id="555">555</a>
+<a href="#556" id="556">556</a>
+<a href="#557" id="557">557</a>
+<a href="#558" id="558">558</a>
+<a href="#559" id="559">559</a>
+<a href="#560" id="560">560</a>
+<a href="#561" id="561">561</a>
+<a href="#562" id="562">562</a>
+<a href="#563" id="563">563</a>
+<a href="#564" id="564">564</a>
+<a href="#565" id="565">565</a>
+<a href="#566" id="566">566</a>
+<a href="#567" id="567">567</a>
+<a href="#568" id="568">568</a>
+<a href="#569" id="569">569</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::convert::{Infallible, TryFrom};
 <span class="kw">use </span>std::error;
 <span class="kw">use </span>std::iter::Sum;
 <span class="kw">use </span>std::num::NonZeroU64;
-<span class="kw">use </span>std::ops::{Add, Mul, Neg, Sub};
+<span class="kw">use </span>std::ops::{Add, Div, Mul, Neg, Sub};
 
 <span class="kw">use </span>memuse::DynamicUsage;
 
@@ -870,7 +890,9 @@
     <span class="doccomment">/// Divides this `Zatoshis` value by the given divisor and returns the quotient and remainder.
     </span><span class="kw">pub fn </span>div_with_remainder(<span class="kw-2">&amp;</span><span class="self">self</span>, divisor: NonZeroU64) -&gt; QuotRem&lt;Zatoshis&gt; {
         <span class="kw">let </span>divisor = u64::from(divisor);
-        QuotRem {
+        <span class="comment">// `self` is already bounds-checked, and both the quotient and remainder
+        // are &lt;= self, so we don't need to re-check them in division.
+        </span>QuotRem {
             quotient: Zatoshis(<span class="self">self</span>.<span class="number">0 </span>/ divisor),
             remainder: Zatoshis(<span class="self">self</span>.<span class="number">0 </span>% divisor),
         }
@@ -943,12 +965,20 @@
     }
 }
 
+<span class="kw">impl </span>Mul&lt;u64&gt; <span class="kw">for </span>Zatoshis {
+    <span class="kw">type </span>Output = <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt;;
+
+    <span class="kw">fn </span>mul(<span class="self">self</span>, rhs: u64) -&gt; <span class="prelude-ty">Option</span>&lt;Zatoshis&gt; {
+        Zatoshis::from_u64(<span class="self">self</span>.<span class="number">0</span>.checked_mul(rhs)<span class="question-mark">?</span>).ok()
+    }
+}
+
 <span class="kw">impl </span>Mul&lt;usize&gt; <span class="kw">for </span>Zatoshis {
     <span class="kw">type </span>Output = <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt;;
 
     <span class="kw">fn </span>mul(<span class="self">self</span>, rhs: usize) -&gt; <span class="prelude-ty">Option</span>&lt;Zatoshis&gt; {
-        Zatoshis::from_u64(<span class="self">self</span>.<span class="number">0</span>.checked_mul(u64::try_from(rhs).ok()<span class="question-mark">?</span>)<span class="question-mark">?</span>).ok()
-    }
+        <span class="self">self </span>* u64::try_from(rhs).ok()<span class="question-mark">?
+    </span>}
 }
 
 <span class="kw">impl </span>Sum&lt;Zatoshis&gt; <span class="kw">for </span><span class="prelude-ty">Option</span>&lt;Zatoshis&gt; {
@@ -960,6 +990,16 @@
 <span class="kw">impl</span>&lt;<span class="lifetime">'a</span>&gt; Sum&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>Zatoshis&gt; <span class="kw">for </span><span class="prelude-ty">Option</span>&lt;Zatoshis&gt; {
     <span class="kw">fn </span>sum&lt;I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Zatoshis&gt;&gt;(<span class="kw-2">mut </span>iter: I) -&gt; <span class="self">Self </span>{
         iter.try_fold(Zatoshis::ZERO, |acc, a| acc + <span class="kw-2">*</span>a)
+    }
+}
+
+<span class="kw">impl </span>Div&lt;NonZeroU64&gt; <span class="kw">for </span>Zatoshis {
+    <span class="kw">type </span>Output = Zatoshis;
+
+    <span class="kw">fn </span>div(<span class="self">self</span>, rhs: NonZeroU64) -&gt; Zatoshis {
+        <span class="comment">// `self` is already bounds-checked and the quotient is &lt;= self, so
+        // we don't need to re-check it
+        </span>Zatoshis(<span class="self">self</span>.<span class="number">0 </span>/ u64::from(rhs))
     }
 }
 

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/fees.rs`."><title>fees.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-590a400c.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (b8c8287a2 2024-11-03)" data-channel="nightly" data-search-js="search-c5a66128.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>fees.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/fees.rs`."><title>fees.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-42caa33d.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (f7273e004 2024-11-12)" data-channel="nightly" data-search-js="search-853ef39b.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>fees.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -561,7 +561,48 @@
 <a href="#560" id="560">560</a>
 <a href="#561" id="561">561</a>
 <a href="#562" id="562">562</a>
-<a href="#563" id="563">563</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::{
+<a href="#563" id="563">563</a>
+<a href="#564" id="564">564</a>
+<a href="#565" id="565">565</a>
+<a href="#566" id="566">566</a>
+<a href="#567" id="567">567</a>
+<a href="#568" id="568">568</a>
+<a href="#569" id="569">569</a>
+<a href="#570" id="570">570</a>
+<a href="#571" id="571">571</a>
+<a href="#572" id="572">572</a>
+<a href="#573" id="573">573</a>
+<a href="#574" id="574">574</a>
+<a href="#575" id="575">575</a>
+<a href="#576" id="576">576</a>
+<a href="#577" id="577">577</a>
+<a href="#578" id="578">578</a>
+<a href="#579" id="579">579</a>
+<a href="#580" id="580">580</a>
+<a href="#581" id="581">581</a>
+<a href="#582" id="582">582</a>
+<a href="#583" id="583">583</a>
+<a href="#584" id="584">584</a>
+<a href="#585" id="585">585</a>
+<a href="#586" id="586">586</a>
+<a href="#587" id="587">587</a>
+<a href="#588" id="588">588</a>
+<a href="#589" id="589">589</a>
+<a href="#590" id="590">590</a>
+<a href="#591" id="591">591</a>
+<a href="#592" id="592">592</a>
+<a href="#593" id="593">593</a>
+<a href="#594" id="594">594</a>
+<a href="#595" id="595">595</a>
+<a href="#596" id="596">596</a>
+<a href="#597" id="597">597</a>
+<a href="#598" id="598">598</a>
+<a href="#599" id="599">599</a>
+<a href="#600" id="600">600</a>
+<a href="#601" id="601">601</a>
+<a href="#602" id="602">602</a>
+<a href="#603" id="603">603</a>
+<a href="#604" id="604">604</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::{
     fmt::{<span class="self">self</span>, Debug, Display},
     num::{NonZeroU64, NonZeroUsize},
 };
@@ -573,7 +614,8 @@
         components::{amount::NonNegativeAmount, OutPoint},
         fees::{
             transparent::{<span class="self">self</span>, InputSize},
-            zip317 <span class="kw">as </span>prim_zip317, FeeRule,
+            zip317::{<span class="self">self </span><span class="kw">as </span>prim_zip317},
+            FeeRule,
         },
     },
 };
@@ -915,21 +957,34 @@
 
 <span class="doccomment">/// A policy that describes how change output should be split into multiple notes for the purpose
 /// of note management.
+///
+/// If an account contains at least [`Self::target_output_count`] notes having at least value
+/// [`Self::min_split_output_value`], this policy will recommend a single output; if the account
+/// contains fewer such notes, this policy will recommend that multiple outputs be produced in
+/// order to achieve the target.
 </span><span class="attr">#[derive(Clone, Copy, Debug)]
 </span><span class="kw">pub struct </span>SplitPolicy {
     target_output_count: NonZeroUsize,
-    min_split_output_size: NonNegativeAmount,
+    min_split_output_value: <span class="prelude-ty">Option</span>&lt;NonNegativeAmount&gt;,
 }
 
 <span class="kw">impl </span>SplitPolicy {
-    <span class="doccomment">/// Constructs a new [`SplitPolicy`] from its constituent parts.
-    </span><span class="kw">pub fn </span>new(
+    <span class="doccomment">/// In the case that no other conditions provided by the user are available to fall back on,
+    /// a default value of [`MARGINAL_FEE`] * 100 will be used as the "minimum usable note value"
+    /// when retrieving wallet metadata.
+    ///
+    /// [`MARGINAL_FEE`]: zcash_primitives::transaction::fees::zip317::MARGINAL_FEE
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>MIN_NOTE_VALUE: NonNegativeAmount = NonNegativeAmount::const_from_u64(<span class="number">500000</span>);
+
+    <span class="doccomment">/// Constructs a new [`SplitPolicy`] that splits change to ensure the given number of spendable
+    /// outputs exists within an account, each having at least the specified minimum note value.
+    </span><span class="kw">pub fn </span>with_min_output_value(
         target_output_count: NonZeroUsize,
-        min_split_output_size: NonNegativeAmount,
+        min_split_output_value: NonNegativeAmount,
     ) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             target_output_count,
-            min_split_output_size,
+            min_split_output_value: <span class="prelude-val">Some</span>(min_split_output_value),
         }
     }
 
@@ -937,44 +992,71 @@
     </span><span class="kw">pub fn </span>single_output() -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             target_output_count: NonZeroUsize::MIN,
-            min_split_output_size: NonNegativeAmount::ZERO,
+            min_split_output_value: <span class="prelude-val">None</span>,
         }
     }
 
+    <span class="doccomment">/// Returns the number of outputs that this policy will attempt to ensure that the wallet has
+    /// available for spending.
+    </span><span class="kw">pub fn </span>target_output_count(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; NonZeroUsize {
+        <span class="self">self</span>.target_output_count
+    }
+
     <span class="doccomment">/// Returns the minimum value for a note resulting from splitting of change.
-    ///
-    /// If splitting change would result in notes of value less than the minimum split output size,
-    /// a smaller number of splits should be chosen.
-    </span><span class="kw">pub fn </span>min_split_output_size(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; NonNegativeAmount {
-        <span class="self">self</span>.min_split_output_size
+    </span><span class="kw">pub fn </span>min_split_output_value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;NonNegativeAmount&gt; {
+        <span class="self">self</span>.min_split_output_value
     }
 
     <span class="doccomment">/// Returns the number of output notes to produce from the given total change value, given the
-    /// number of existing unspent notes in the account and this policy.
+    /// total value and number of existing unspent notes in the account and this policy.
+    ///
+    /// If splitting change to produce [`Self::target_output_count`] would result in notes of value
+    /// less than [`Self::min_split_output_value`], then this will suggest a smaller number of
+    /// splits so that each resulting change note has sufficient value.
     </span><span class="kw">pub fn </span>split_count(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        existing_notes: usize,
+        existing_notes: <span class="prelude-ty">Option</span>&lt;usize&gt;,
+        existing_notes_total: <span class="prelude-ty">Option</span>&lt;NonNegativeAmount&gt;,
         total_change: NonNegativeAmount,
     ) -&gt; NonZeroUsize {
-        <span class="kw">let </span><span class="kw-2">mut </span>split_count =
-            NonZeroUsize::new(usize::from(<span class="self">self</span>.target_output_count).saturating_sub(existing_notes))
-                .unwrap_or(NonZeroUsize::MIN);
+        <span class="kw">fn </span>to_nonzero_u64(value: usize) -&gt; NonZeroU64 {
+            NonZeroU64::new(u64::try_from(value).expect(<span class="string">"usize fits into u64"</span>))
+                .expect(<span class="string">"NonZeroU64 input derived from NonZeroUsize"</span>)
+        }
 
-        <span class="kw">loop </span>{
-            <span class="kw">let </span>per_output_change = total_change.div_with_remainder(
-                NonZeroU64::new(
-                    u64::try_from(usize::from(split_count)).expect(<span class="string">"usize fits into u64"</span>),
-                )
-                .unwrap(),
-            );
-            <span class="kw">if </span><span class="kw-2">*</span>per_output_change.quotient() &gt;= <span class="self">self</span>.min_split_output_size {
-                <span class="kw">return </span>split_count;
-            } <span class="kw">else if let </span><span class="prelude-val">Some</span>(new_count) = NonZeroUsize::new(usize::from(split_count) - <span class="number">1</span>) {
-                split_count = new_count;
-            } <span class="kw">else </span>{
-                <span class="comment">// We always create at least one change output.
-                </span><span class="kw">return </span>NonZeroUsize::MIN;
+        <span class="kw">let </span><span class="kw-2">mut </span>split_count = NonZeroUsize::new(
+            usize::from(<span class="self">self</span>.target_output_count)
+                .saturating_sub(existing_notes.unwrap_or(usize::MAX)),
+        )
+        .unwrap_or(NonZeroUsize::MIN);
+
+        <span class="kw">let </span>min_split_output_value = <span class="self">self</span>.min_split_output_value.or_else(|| {
+            <span class="comment">// If no minimum split output size is set, we choose the minimum split size to be a
+            // quarter of the average value of notes in the wallet after the transaction.
+            </span>(existing_notes_total + total_change).map(|total| {
+                <span class="kw-2">*</span>total
+                    .div_with_remainder(to_nonzero_u64(
+                        usize::from(<span class="self">self</span>.target_output_count).saturating_mul(<span class="number">4</span>),
+                    ))
+                    .quotient()
+            })
+        });
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(min_split_output_value) = min_split_output_value {
+            <span class="kw">loop </span>{
+                <span class="kw">let </span>per_output_change =
+                    total_change.div_with_remainder(to_nonzero_u64(usize::from(split_count)));
+                <span class="kw">if </span><span class="kw-2">*</span>per_output_change.quotient() &gt;= min_split_output_value {
+                    <span class="kw">return </span>split_count;
+                } <span class="kw">else if let </span><span class="prelude-val">Some</span>(new_count) = NonZeroUsize::new(usize::from(split_count) - <span class="number">1</span>) {
+                    split_count = new_count;
+                } <span class="kw">else </span>{
+                    <span class="comment">// We always create at least one change output.
+                    </span><span class="kw">return </span>NonZeroUsize::MIN;
+                }
             }
+        } <span class="kw">else </span>{
+            NonZeroUsize::MIN
         }
     }
 }
@@ -1029,7 +1111,7 @@
 
     <span class="doccomment">/// Tye type of wallet metadata that this change strategy relies upon in order to compute
     /// change.
-    </span><span class="kw">type </span>WalletMetaT;
+    </span><span class="kw">type </span>AccountMetaT;
 
     <span class="doccomment">/// Returns the fee rule that this change strategy will respect when performing
     /// balance computations.
@@ -1042,7 +1124,7 @@
         meta_source: <span class="kw-2">&amp;</span><span class="self">Self</span>::MetaSource,
         account: &lt;<span class="self">Self</span>::MetaSource <span class="kw">as </span>InputSource&gt;::AccountId,
         exclude: <span class="kw-2">&amp;</span>[&lt;<span class="self">Self</span>::MetaSource <span class="kw">as </span>InputSource&gt;::NoteRef],
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::WalletMetaT, &lt;<span class="self">Self</span>::MetaSource <span class="kw">as </span>InputSource&gt;::Error&gt;;
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::AccountMetaT, &lt;<span class="self">Self</span>::MetaSource <span class="kw">as </span>InputSource&gt;::Error&gt;;
 
     <span class="doccomment">/// Computes the totals of inputs, suggested change amounts, and fees given the
     /// provided inputs and outputs being used to construct a transaction.
@@ -1079,7 +1161,7 @@
         sapling: <span class="kw-2">&amp;</span><span class="kw">impl </span>sapling::BundleView&lt;NoteRefT&gt;,
         <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)] </span>orchard: <span class="kw-2">&amp;</span><span class="kw">impl </span>orchard::BundleView&lt;NoteRefT&gt;,
         ephemeral_balance: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>EphemeralBalance&gt;,
-        wallet_meta: <span class="kw-2">&amp;</span><span class="self">Self</span>::WalletMetaT,
+        wallet_meta: <span class="kw-2">&amp;</span><span class="self">Self</span>::AccountMetaT,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;TransactionBalance, ChangeError&lt;<span class="self">Self</span>::Error, NoteRefT&gt;&gt;;
 }
 
