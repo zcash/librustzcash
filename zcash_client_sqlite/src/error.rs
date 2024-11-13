@@ -5,6 +5,7 @@ use std::fmt;
 
 use shardtree::error::ShardTreeError;
 use zcash_address::ParseError;
+use zcash_client_backend::data_api::NoteFilter;
 use zcash_client_backend::PoolType;
 use zcash_keys::keys::AddressGenerationError;
 use zcash_primitives::zip32;
@@ -121,6 +122,9 @@ pub enum SqliteClientError {
     /// An error occurred in computing wallet balance
     BalanceError(BalanceError),
 
+    /// A note selection query contained an invalid constant or was otherwise not supported.
+    NoteFilterInvalid(NoteFilter),
+
     /// The proposal cannot be constructed until transactions with previously reserved
     /// ephemeral address outputs have been mined. The parameters are the account id and
     /// the index that could not safely be reserved.
@@ -187,6 +191,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::ChainHeightUnknown => write!(f, "Chain height unknown; please call `update_chain_tip`"),
             SqliteClientError::UnsupportedPoolType(t) => write!(f, "Pool type is not currently supported: {}", t),
             SqliteClientError::BalanceError(e) => write!(f, "Balance error: {}", e),
+            SqliteClientError::NoteFilterInvalid(s) => write!(f, "Could not evaluate filter query: {:?}", s),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::ReachedGapLimit(account_id, bad_index) => write!(f,
                 "The proposal cannot be constructed until transactions with previously reserved ephemeral address outputs have been mined. \

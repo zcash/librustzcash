@@ -254,3 +254,10 @@ pub(crate) fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTest
         _,
     >(TestDbFactory::default(), BlockCache::new())
 }
+
+pub(crate) fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::metadata_queries_exclude_unwanted_notes::<T, _, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}

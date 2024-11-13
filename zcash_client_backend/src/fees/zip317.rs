@@ -14,7 +14,7 @@ use zcash_primitives::{
 use zcash_protocol::value::{BalanceError, Zatoshis};
 
 use crate::{
-    data_api::{InputSource, WalletMeta},
+    data_api::{AccountMeta, InputSource, NoteFilter},
     fees::StandardFeeRule,
     ShieldedProtocol,
 };
@@ -101,7 +101,7 @@ where
     type FeeRule = R;
     type Error = <R as FeeRule>::Error;
     type MetaSource = I;
-    type WalletMetaT = ();
+    type AccountMetaT = ();
 
     fn fee_rule(&self) -> &Self::FeeRule {
         &self.fee_rule
@@ -112,7 +112,7 @@ where
         _meta_source: &Self::MetaSource,
         _account: <Self::MetaSource as InputSource>::AccountId,
         _exclude: &[<Self::MetaSource as InputSource>::NoteRef],
-    ) -> Result<Self::WalletMetaT, <Self::MetaSource as InputSource>::Error> {
+    ) -> Result<Self::AccountMetaT, <Self::MetaSource as InputSource>::Error> {
         Ok(())
     }
 
@@ -125,7 +125,7 @@ where
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         ephemeral_balance: Option<&EphemeralBalance>,
-        _wallet_meta: &Self::WalletMetaT,
+        _wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         let split_policy = SplitPolicy::single_output();
         let cfg = SinglePoolBalanceConfig::new(
@@ -204,7 +204,7 @@ where
     type FeeRule = R;
     type Error = <R as FeeRule>::Error;
     type MetaSource = I;
-    type WalletMetaT = WalletMeta;
+    type AccountMetaT = AccountMeta;
 
     fn fee_rule(&self) -> &Self::FeeRule {
         &self.fee_rule
@@ -215,8 +215,14 @@ where
         meta_source: &Self::MetaSource,
         account: <Self::MetaSource as InputSource>::AccountId,
         exclude: &[<Self::MetaSource as InputSource>::NoteRef],
-    ) -> Result<Self::WalletMetaT, <Self::MetaSource as InputSource>::Error> {
-        meta_source.get_wallet_metadata(account, self.split_policy.min_split_output_size(), exclude)
+    ) -> Result<Self::AccountMetaT, <Self::MetaSource as InputSource>::Error> {
+        let note_selector = NoteFilter::ExceedsMinValue(
+            self.split_policy
+                .min_split_output_value()
+                .unwrap_or(SplitPolicy::MIN_NOTE_VALUE),
+        );
+
+        meta_source.get_account_metadata(account, &note_selector, exclude)
     }
 
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
@@ -228,7 +234,7 @@ where
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         ephemeral_balance: Option<&EphemeralBalance>,
-        wallet_meta: &Self::WalletMetaT,
+        wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         let cfg = SinglePoolBalanceConfig::new(
             params,
@@ -271,7 +277,9 @@ mod tests {
 
     use super::SingleOutputChangeStrategy;
     use crate::{
-        data_api::{testing::MockWalletDb, wallet::input_selection::SaplingPayment, WalletMeta},
+        data_api::{
+            testing::MockWalletDb, wallet::input_selection::SaplingPayment, AccountMeta, PoolMeta,
+        },
         fees::{
             tests::{TestSaplingInput, TestTransparentInput},
             zip317::MultiOutputChangeStrategy,
@@ -334,7 +342,7 @@ mod tests {
             None,
             ShieldedProtocol::Sapling,
             DustOutputPolicy::default(),
-            SplitPolicy::new(
+            SplitPolicy::with_min_output_value(
                 NonZeroUsize::new(5).unwrap(),
                 NonNegativeAmount::const_from_u64(100_0000),
             ),
@@ -342,7 +350,7 @@ mod tests {
 
         {
             // spend a single Sapling note and produce 5 outputs
-            let balance = |existing_notes| {
+            let balance = |existing_notes, total| {
                 change_strategy.compute_balance(
                     &Network::TestNetwork,
                     Network::TestNetwork
@@ -363,16 +371,12 @@ mod tests {
                     #[cfg(feature = "orchard")]
                     &orchard_fees::EmptyBundleView,
                     None,
-                    &WalletMeta::new(
-                        existing_notes,
-                        #[cfg(feature = "orchard")]
-                        0,
-                    ),
+                    &AccountMeta::new(Some(PoolMeta::new(existing_notes, total)), None),
                 )
             };
 
             assert_matches!(
-                balance(0),
+                balance(0, NonNegativeAmount::ZERO),
                 Ok(balance) if
                     balance.proposed_change() == [
                         ChangeValue::sapling(NonNegativeAmount::const_from_u64(129_4000), None),
@@ -385,7 +389,7 @@ mod tests {
             );
 
             assert_matches!(
-                balance(2),
+                balance(2, NonNegativeAmount::const_from_u64(100_0000)),
                 Ok(balance) if
                     balance.proposed_change() == [
                         ChangeValue::sapling(NonNegativeAmount::const_from_u64(216_0000), None),
@@ -419,10 +423,9 @@ mod tests {
                 #[cfg(feature = "orchard")]
                 &orchard_fees::EmptyBundleView,
                 None,
-                &WalletMeta::new(
-                    0,
-                    #[cfg(feature = "orchard")]
-                    0,
+                &AccountMeta::new(
+                    Some(PoolMeta::new(0, NonNegativeAmount::ZERO)),
+                    Some(PoolMeta::new(0, NonNegativeAmount::ZERO)),
                 ),
             );
 

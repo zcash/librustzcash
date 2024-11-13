@@ -11,7 +11,7 @@ use zcash_primitives::{
 };
 use zcash_protocol::ShieldedProtocol;
 
-use crate::data_api::WalletMeta;
+use crate::data_api::AccountMeta;
 
 use super::{
     sapling as sapling_fees, ChangeError, ChangeValue, DustAction, DustOutputPolicy,
@@ -203,7 +203,7 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn single_pool_output_balance<P: consensus::Parameters, NoteRefT: Clone, F: FeeRule, E>(
     cfg: SinglePoolBalanceConfig<P, F>,
-    wallet_meta: Option<&WalletMeta>,
+    wallet_meta: Option<&AccountMeta>,
     target_height: BlockHeight,
     transparent_inputs: &[impl transparent::InputView],
     transparent_outputs: &[impl transparent::OutputView],
@@ -235,7 +235,8 @@ where
     let change_pool = select_change_pool(&net_flows, cfg.fallback_change_pool);
     let target_change_count = wallet_meta.map_or(1, |m| {
         usize::from(cfg.split_policy.target_output_count)
-            .saturating_sub(m.total_note_count())
+            // If we cannot determine a total note count, fall back to a single output
+            .saturating_sub(m.total_note_count().unwrap_or(usize::MAX))
             .max(1)
     });
     let target_change_counts = OutputManifest {
@@ -429,8 +430,11 @@ where
             // available in the wallet, irrespective of pool. If we don't have any wallet metadata
             // available, we fall back to generating a single change output.
             let split_count = wallet_meta.map_or(NonZeroUsize::MIN, |wm| {
-                cfg.split_policy
-                    .split_count(wm.total_note_count(), proposed_change)
+                cfg.split_policy.split_count(
+                    wm.total_note_count(),
+                    wm.total_value(),
+                    proposed_change,
+                )
             });
             let per_output_change = proposed_change.div_with_remainder(
                 NonZeroU64::new(
@@ -531,8 +535,8 @@ where
                         // We can add a change output if necessary.
                         assert!(fee_with_change <= fee_with_dust);
 
-                        let reasonable_fee =
-                            (fee_with_change + (MINIMUM_FEE * 10).unwrap()).ok_or_else(overflow)?;
+                        let reasonable_fee = (fee_with_change + (MINIMUM_FEE * 10u64).unwrap())
+                            .ok_or_else(overflow)?;
 
                         if fee_with_dust > reasonable_fee {
                             // Defend against losing money by using AddDustToFee with a too-high

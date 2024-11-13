@@ -11,8 +11,11 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api`:
   - `Progress`
   - `WalletSummary::progress`
-  - `WalletMeta`
+  - `PoolMeta`
+  - `AccountMeta`
   - `impl Default for wallet::input_selection::GreedyInputSelector`
+  - `BoundedU8`
+  - `NoteFilter`
 - `zcash_client_backend::fees`
   - `SplitPolicy`
   - `StandardFeeRule` has been moved here from `zcash_primitives::fees`. Relative
@@ -32,7 +35,7 @@ and this library adheres to Rust's notion of
 - MSRV is now 1.77.0.
 - Migrated to `arti-client 0.23`.
 - `zcash_client_backend::data_api`:
-  - `InputSource` has an added method `get_wallet_metadata`
+  - `InputSource` has an added method `get_account_metadata`
   - `error::Error` has additional variant `Error::Change`. This necessitates
     the addition of two type parameters to the `Error` type,
     `ChangeErrT` and `NoteRefT`.
@@ -65,7 +68,7 @@ and this library adheres to Rust's notion of
     changed.
 - `zcash_client_backend::fees`:
   - `ChangeStrategy` has changed. It has two new associated types, `MetaSource`
-    and `WalletMeta`, and its `FeeRule` associated type now has an additional
+    and `AccountMetaT`, and its `FeeRule` associated type now has an additional
     `Clone` bound. In addition, it defines a new `fetch_wallet_meta` method, and
     the arguments to `compute_balance` have changed.
   - `zip317::SingleOutputChangeStrategy` has been made polymorphic in the fee

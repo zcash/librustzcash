@@ -10,6 +10,8 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_protocol::value::QuotRem`
 - `zcash_protocol::value::Zatoshis::div_with_remainder`
+- `impl Mul<u64> for zcash_protocol::value::Zatoshis`
+- `impl Div<NonZeroU64> for zcash_protocol::value::Zatoshis`
 
 ### Changed
 - MSRV is now 1.77.0.

@@ -23,6 +23,7 @@ use secrecy::{ExposeSecret, Secret, SecretVec};
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 use subtle::ConditionallySelectable;
 
+use zcash_address::ZcashAddress;
 use zcash_keys::address::Address;
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
@@ -43,6 +44,7 @@ use zcash_protocol::{
     value::{ZatBalance, Zatoshis},
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
+use zip321::Payment;
 
 use crate::{
     address::UnifiedAddress,
@@ -59,7 +61,6 @@ use crate::{
     ShieldedProtocol,
 };
 
-use super::error::Error;
 use super::{
     chain::{scan_cached_blocks, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
     scanning::ScanRange,
@@ -68,12 +69,13 @@ use super::{
         input_selection::{GreedyInputSelector, InputSelector},
         propose_standard_transfer_to_address, propose_transfer,
     },
-    Account, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, BlockMetadata,
-    DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
+    Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
+    BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
     SentTransaction, SpendableNotes, TransactionDataRequest, TransactionStatus,
-    WalletCommitmentTrees, WalletMeta, WalletRead, WalletSummary, WalletTest, WalletWrite,
+    WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
     SAPLING_SHARD_HEIGHT,
 };
+use super::{error::Error, NoteFilter};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -861,6 +863,49 @@ where
         + WalletCommitmentTrees,
     <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
 {
+    // Creates a transaction that sends the specified value from the given account to
+    // the provided recipient address, using a greedy input selector and the default
+    // mutli-output change strategy.
+    pub fn create_standard_transaction(
+        &mut self,
+        from_account: &TestAccount<DbT::Account>,
+        to: ZcashAddress,
+        value: NonNegativeAmount,
+    ) -> Result<
+        NonEmpty<TxId>,
+        super::wallet::TransferErrT<
+            DbT,
+            GreedyInputSelector<DbT>,
+            standard::MultiOutputChangeStrategy<DbT>,
+        >,
+    > {
+        let input_selector = GreedyInputSelector::new();
+
+        #[cfg(not(feature = "orchard"))]
+        let fallback_change_pool = ShieldedProtocol::Sapling;
+        #[cfg(feature = "orchard")]
+        let fallback_change_pool = ShieldedProtocol::Orchard;
+
+        let change_strategy = standard::SingleOutputChangeStrategy::new(
+            StandardFeeRule::Zip317,
+            None,
+            fallback_change_pool,
+            DustOutputPolicy::default(),
+        );
+
+        let request =
+            zip321::TransactionRequest::new(vec![Payment::without_memo(to, value)]).unwrap();
+
+        self.spend(
+            &input_selector,
+            &change_strategy,
+            from_account.usk(),
+            request,
+            OvkPolicy::Sender,
+            NonZeroU32::MIN,
+        )
+    }
+
     /// Prepares and executes the given [`zip321::TransactionRequest`] in a single step.
     #[allow(clippy::type_complexity)]
     pub fn spend<InputsT, ChangeT>(
@@ -2351,12 +2396,12 @@ impl InputSource for MockWalletDb {
         Ok(SpendableNotes::empty())
     }
 
-    fn get_wallet_metadata(
+    fn get_account_metadata(
         &self,
         _account: Self::AccountId,
-        _min_value: NonNegativeAmount,
+        _selector: &NoteFilter,
         _exclude: &[Self::NoteRef],
-    ) -> Result<WalletMeta, Self::Error> {
+    ) -> Result<AccountMeta, Self::Error> {
         Err(())
     }
 }

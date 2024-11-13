@@ -2,7 +2,7 @@ use std::{
     cmp::Eq,
     convert::Infallible,
     hash::Hash,
-    num::{NonZeroU32, NonZeroU8, NonZeroUsize},
+    num::{NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize},
 };
 
 use assert_matches::assert_matches;
@@ -43,8 +43,8 @@ use crate::{
         wallet::{
             decrypt_and_store_transaction, input_selection::GreedyInputSelector, TransferErrT,
         },
-        Account as _, AccountBirthday, DecryptedTransaction, InputSource, Ratio,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
+        Account as _, AccountBirthday, BoundedU8, DecryptedTransaction, InputSource, NoteFilter,
+        Ratio, WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
     },
     decrypt_transaction,
     fees::{
@@ -362,7 +362,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
         Some(change_memo.clone().into()),
         T::SHIELDED_PROTOCOL,
         DustOutputPolicy::default(),
-        SplitPolicy::new(
+        SplitPolicy::with_min_output_value(
             NonZeroUsize::new(2).unwrap(),
             NonNegativeAmount::const_from_u64(100_0000),
         ),
@@ -465,7 +465,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
         Some(change_memo.into()),
         T::SHIELDED_PROTOCOL,
         DustOutputPolicy::default(),
-        SplitPolicy::new(
+        SplitPolicy::with_min_output_value(
             NonZeroUsize::new(8).unwrap(),
             NonNegativeAmount::const_from_u64(10_0000),
         ),
@@ -530,7 +530,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         // Add funds to the wallet.
         add_funds(st, value);
 
-        let expected_step0_fee = (zip317::MARGINAL_FEE * 3).unwrap();
+        let expected_step0_fee = (zip317::MARGINAL_FEE * 3u64).unwrap();
         let expected_step1_fee = zip317::MINIMUM_FEE;
         let expected_ephemeral = (transfer_amount + expected_step1_fee).unwrap();
         let expected_step0_change =
@@ -1123,7 +1123,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     st.scan_cached_blocks(h2 + 1, 8);
 
     // Total balance is value * number of blocks scanned (10).
-    assert_eq!(st.get_total_balance(account_id), (value * 10).unwrap());
+    assert_eq!(st.get_total_balance(account_id), (value * 10u64).unwrap());
 
     // Spend still fails
     assert_matches!(
@@ -1150,15 +1150,15 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     st.scan_cached_blocks(h11, 1);
 
     // Total balance is value * number of blocks scanned (11).
-    assert_eq!(st.get_total_balance(account_id), (value * 11).unwrap());
+    assert_eq!(st.get_total_balance(account_id), (value * 11u64).unwrap());
     // Spendable balance at 10 confirmations is value * 2.
     assert_eq!(
         st.get_spendable_balance(account_id, 10),
-        (value * 2).unwrap()
+        (value * 2u64).unwrap()
     );
     assert_eq!(
         st.get_pending_shielded_balance(account_id, 10),
-        (value * 9).unwrap()
+        (value * 9u64).unwrap()
     );
 
     // Should now be able to generate a proposal
@@ -1192,7 +1192,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     // TODO: send to an account so that we can check its balance.
     assert_eq!(
         st.get_total_balance(account_id),
-        ((value * 11).unwrap()
+        ((value * 11u64).unwrap()
             - (amount_sent + NonNegativeAmount::from_u64(10000).unwrap()).unwrap())
         .unwrap()
     );
@@ -2124,7 +2124,7 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
     st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
     st.scan_cached_blocks(account.birthday().height(), 2);
 
-    let initial_balance = (note_value * 2).unwrap();
+    let initial_balance = (note_value * 2u64).unwrap();
     assert_eq!(st.get_total_balance(account.id()), initial_balance);
     assert_eq!(st.get_spendable_balance(account.id(), 1), initial_balance);
 
@@ -2214,7 +2214,7 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
     st.scan_cached_blocks(account.birthday().height(), 2);
 
-    let initial_balance = (note_value * 2).unwrap();
+    let initial_balance = (note_value * 2u64).unwrap();
     assert_eq!(st.get_total_balance(account.id()), initial_balance);
     assert_eq!(st.get_spendable_balance(account.id(), 1), initial_balance);
 
@@ -2307,7 +2307,7 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
 
     let next_to_scan = scanned.scanned_range().end;
 
-    let initial_balance = (note_value * 3).unwrap();
+    let initial_balance = (note_value * 3u64).unwrap();
     assert_eq!(st.get_total_balance(acct_id), initial_balance);
     assert_eq!(st.get_spendable_balance(acct_id, 1), initial_balance);
 
@@ -2352,7 +2352,7 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     let expected_change = (note_value - transfer_amount - expected_fee).unwrap();
     assert_eq!(
         st.get_total_balance(acct_id),
-        ((note_value * 2).unwrap() + expected_change).unwrap()
+        ((note_value * 2u64).unwrap() + expected_change).unwrap()
     );
     assert_eq!(st.get_pending_change(acct_id, 1), expected_change);
 
@@ -2396,8 +2396,8 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     );
 
     let expected_final = (initial_balance + note_value
-        - (transfer_amount * 3).unwrap()
-        - (expected_fee * 3).unwrap())
+        - (transfer_amount * 3u64).unwrap()
+        - (expected_fee * 3u64).unwrap())
     .unwrap();
     assert_eq!(st.get_total_balance(acct_id), expected_final);
 
@@ -2970,5 +2970,91 @@ pub fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester, DSF
     assert_eq!(
         st.get_total_balance(account.id()),
         (value - value2).unwrap()
+    );
+}
+
+pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, DSF, TC>(
+    ds_factory: DSF,
+    cache: TC,
+) where
+    DSF: DataStoreFactory,
+    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+    TC: TestCache,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let dfvk = T::test_account_fvk(&st);
+
+    // Create 10 blocks with successively increasing value
+    let value = NonNegativeAmount::const_from_u64(100_0000);
+    let (h0, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let mut note_values = vec![value];
+    for i in 2..=10 {
+        let value = NonNegativeAmount::const_from_u64(i * 100_0000);
+        st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        note_values.push(value);
+    }
+    st.scan_cached_blocks(h0, 10);
+
+    let test_meta = |st: &TestState<TC, DSF::DataStore, LocalNetwork>, query, expected_count| {
+        let metadata = st
+            .wallet()
+            .get_account_metadata(account.id(), &query, &[])
+            .unwrap();
+
+        assert_eq!(metadata.note_count(T::SHIELDED_PROTOCOL), expected_count);
+    };
+
+    test_meta(
+        &st,
+        NoteFilter::ExceedsMinValue(NonNegativeAmount::const_from_u64(1000_0000)),
+        Some(1),
+    );
+    test_meta(
+        &st,
+        NoteFilter::ExceedsMinValue(NonNegativeAmount::const_from_u64(500_0000)),
+        Some(6),
+    );
+    test_meta(
+        &st,
+        NoteFilter::ExceedsBalancePercentage(BoundedU8::new_const(10)),
+        Some(5),
+    );
+
+    // We haven't sent any funds yet, so we can't evaluate this query
+    test_meta(
+        &st,
+        NoteFilter::ExceedsPriorSendPercentile(BoundedU8::new_const(50)),
+        None,
+    );
+
+    // Spend half of each one of our notes, so that we can get a distribution of sent note values.
+    // FIXME: This test is currently excessively specialized to the `zcash_client_sqlite::WalletDb`
+    // implmentation of the `InputSource` trait. A better approach would be to create a test input
+    // source that can select a set of notes directly based upon their nullifiers.
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let to = T::fvk_default_address(&not_our_key).to_zcash_address(st.network());
+    let nz2 = NonZeroU64::new(2).unwrap();
+
+    for value in &note_values {
+        let txids = st
+            .create_standard_transaction(&account, to.clone(), *value / nz2)
+            .unwrap();
+        st.generate_next_block_including(txids.head);
+    }
+    st.scan_cached_blocks(h0 + 10, 10);
+
+    // Since we've spent half our notes, our remaining notes each have approximately half their
+    // original value. The 50th percentile of our spends should be 250_0000 ZAT, and half of our
+    // remaining notes should have value greater than that.
+    test_meta(
+        &st,
+        NoteFilter::ExceedsPriorSendPercentile(BoundedU8::new_const(50)),
+        Some(5),
     );
 }
