@@ -241,7 +241,7 @@ pub(crate) fn spendable_notes_meta(
     protocol: ShieldedProtocol,
     chain_tip_height: BlockHeight,
     account: AccountId,
-    selector: &NoteFilter,
+    filter: &NoteFilter,
     exclude: &[ReceivedNoteId],
 ) -> Result<Option<PoolMeta>, SqliteClientError> {
     let (table_prefix, _, _) = per_protocol_names(protocol);
@@ -304,12 +304,11 @@ pub(crate) fn spendable_notes_meta(
     // determine the minimum value of notes to be produced by note splitting.
     fn min_note_value(
         conn: &rusqlite::Connection,
-        table_prefix: &str,
         account: AccountId,
-        selector: &NoteFilter,
+        filter: &NoteFilter,
         chain_tip_height: BlockHeight,
     ) -> Result<Option<NonNegativeAmount>, SqliteClientError> {
-        match selector {
+        match filter {
             NoteFilter::ExceedsMinValue(v) => Ok(Some(*v)),
             NoteFilter::ExceedsPriorSendPercentile(n) => {
                 let mut bucket_query = conn.prepare(
@@ -351,27 +350,24 @@ pub(crate) fn spendable_notes_meta(
             }
             NoteFilter::ExceedsBalancePercentage(p) => {
                 let balance = conn.query_row_and_then::<_, SqliteClientError, _, _>(
-                    &format!(
-                        "SELECT SUM(rn.value)
-                         FROM v_received_outputs rn
-                         INNER JOIN accounts a ON a.id = rn.account_id
-                         INNER JOIN transactions ON transactions.id_tx = rn.transaction_id
-                         WHERE rn.account_id = :account_id
-                         AND a.ufvk IS NOT NULL
-                         AND transactions.mined_height IS NOT NULL
-                         AND rn.pool != :transparent_pool
-                         AND rn.id_within_pool_table NOT IN (
-                           SELECT rns.received_output_id
-                           FROM v_received_output_spends rns
-                           JOIN transactions stx ON stx.id_tx = rns.transaction_id
-                           WHERE rns.pool == rn.pool
-                           AND (
-                               stx.block IS NOT NULL -- the spending tx is mined
-                               OR stx.expiry_height IS NULL -- the spending tx will not expire
-                               OR stx.expiry_height > :chain_tip_height -- the spending tx is unexpired
-                           )
-                         )"
-                    ),
+                    "SELECT SUM(rn.value)
+                     FROM v_received_outputs rn
+                     INNER JOIN accounts a ON a.id = rn.account_id
+                     INNER JOIN transactions ON transactions.id_tx = rn.transaction_id
+                     WHERE rn.account_id = :account_id
+                     AND a.ufvk IS NOT NULL
+                     AND transactions.mined_height IS NOT NULL
+                     AND rn.pool != :transparent_pool
+                     AND (rn.pool, rn.id_within_pool_table) NOT IN (
+                       SELECT rns.pool, rns.received_output_id
+                       FROM v_received_output_spends rns
+                       JOIN transactions stx ON stx.id_tx = rns.transaction_id
+                       WHERE (
+                           stx.block IS NOT NULL -- the spending tx is mined
+                           OR stx.expiry_height IS NULL -- the spending tx will not expire
+                           OR stx.expiry_height > :chain_tip_height -- the spending tx is unexpired
+                       )
+                     )",
                     named_params![
                         ":account_id": account.0,
                         ":chain_tip_height": u32::from(chain_tip_height),
@@ -391,10 +387,8 @@ pub(crate) fn spendable_notes_meta(
             NoteFilter::Combine(a, b) => {
                 // All the existing note selectors set lower bounds on note value, so the "and"
                 // operation is just taking the maximum of the two lower bounds.
-                let a_min_value =
-                    min_note_value(conn, table_prefix, account, a.as_ref(), chain_tip_height)?;
-                let b_min_value =
-                    min_note_value(conn, table_prefix, account, b.as_ref(), chain_tip_height)?;
+                let a_min_value = min_note_value(conn, account, a.as_ref(), chain_tip_height)?;
+                let b_min_value = min_note_value(conn, account, b.as_ref(), chain_tip_height)?;
                 Ok(a_min_value
                     .zip(b_min_value)
                     .map(|(av, bv)| std::cmp::max(av, bv))
@@ -405,15 +399,9 @@ pub(crate) fn spendable_notes_meta(
                 condition,
                 fallback,
             } => {
-                let cond = min_note_value(
-                    conn,
-                    table_prefix,
-                    account,
-                    condition.as_ref(),
-                    chain_tip_height,
-                )?;
+                let cond = min_note_value(conn, account, condition.as_ref(), chain_tip_height)?;
                 if cond.is_none() {
-                    min_note_value(conn, table_prefix, account, fallback, chain_tip_height)
+                    min_note_value(conn, account, fallback, chain_tip_height)
                 } else {
                     Ok(cond)
                 }
@@ -423,9 +411,7 @@ pub(crate) fn spendable_notes_meta(
 
     // TODO: Simplify the query before executing it. Not worrying about this now because queries
     // will be developer-configured, not end-user defined.
-    if let Some(min_value) =
-        min_note_value(conn, table_prefix, account, selector, chain_tip_height)?
-    {
+    if let Some(min_value) = min_note_value(conn, account, filter, chain_tip_height)? {
         let (note_count, total_value) = run_selection(min_value)?;
 
         Ok(Some(PoolMeta::new(

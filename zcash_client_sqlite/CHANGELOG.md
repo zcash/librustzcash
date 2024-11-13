@@ -15,7 +15,7 @@ and this library adheres to Rust's notion of
 - MSRV is now 1.77.0.
 - Migrated from `schemer` to our fork `schemerz`.
 - Migrated to `rusqlite 0.32`.
-- `error::SqliteClientError` has additional variant `NoteSelectorInvalid`
+- `error::SqliteClientError` has additional variant `NoteFilterInvalid`
 
 ## [0.12.2] - 2024-10-21
 

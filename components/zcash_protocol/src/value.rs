@@ -321,7 +321,8 @@ impl Zatoshis {
     /// Divides this `Zatoshis` value by the given divisor and returns the quotient and remainder.
     pub fn div_with_remainder(&self, divisor: NonZeroU64) -> QuotRem<Zatoshis> {
         let divisor = u64::from(divisor);
-        // `self` is already bounds-checked, so we don't need to re-check it in division
+        // `self` is already bounds-checked, and both the quotient and remainder
+        // are <= self, so we don't need to re-check them in division.
         QuotRem {
             quotient: Zatoshis(self.0 / divisor),
             remainder: Zatoshis(self.0 % divisor),
@@ -427,7 +428,8 @@ impl Div<NonZeroU64> for Zatoshis {
     type Output = Zatoshis;
 
     fn div(self, rhs: NonZeroU64) -> Zatoshis {
-        // `self` is already bounds-checked, so we don't need to re-check it
+        // `self` is already bounds-checked and the quotient is <= self, so
+        // we don't need to re-check it
         Zatoshis(self.0 / u64::from(rhs))
     }
 }

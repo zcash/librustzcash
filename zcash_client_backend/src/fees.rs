@@ -368,6 +368,8 @@ impl SplitPolicy {
     /// In the case that no other conditions provided by the user are available to fall back on,
     /// a default value of [`MARGINAL_FEE`] * 100 will be used as the "minimum usable note value"
     /// when retrieving wallet metadata.
+    ///
+    /// [`MARGINAL_FEE`]: zcash_primitives::transaction::fees::zip317::MARGINAL_FEE
     pub(crate) const MIN_NOTE_VALUE: NonNegativeAmount = NonNegativeAmount::const_from_u64(500000);
 
     /// Constructs a new [`SplitPolicy`] that splits change to ensure the given number of spendable
@@ -404,9 +406,9 @@ impl SplitPolicy {
     /// Returns the number of output notes to produce from the given total change value, given the
     /// total value and number of existing unspent notes in the account and this policy.
     ///
-    /// If splitting change to produce [`Self::target_output_count`] would result in notes of value less than
-    /// [`Self::min_split_output_value`], then this will produce
-    ///
+    /// If splitting change to produce [`Self::target_output_count`] would result in notes of value
+    /// less than [`Self::min_split_output_value`], then this will suggest a smaller number of
+    /// splits so that each resulting change note has sufficient value.
     pub fn split_count(
         &self,
         existing_notes: Option<usize>,

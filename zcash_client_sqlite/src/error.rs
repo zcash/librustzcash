@@ -191,7 +191,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::ChainHeightUnknown => write!(f, "Chain height unknown; please call `update_chain_tip`"),
             SqliteClientError::UnsupportedPoolType(t) => write!(f, "Pool type is not currently supported: {}", t),
             SqliteClientError::BalanceError(e) => write!(f, "Balance error: {}", e),
-            SqliteClientError::NoteFilterInvalid(s) => write!(f, "Could not evaluate selection query: {:?}", s),
+            SqliteClientError::NoteFilterInvalid(s) => write!(f, "Could not evaluate filter query: {:?}", s),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::ReachedGapLimit(account_id, bad_index) => write!(f,
                 "The proposal cannot be constructed until transactions with previously reserved ephemeral address outputs have been mined. \
