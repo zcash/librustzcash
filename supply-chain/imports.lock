@@ -307,11 +307,11 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_primitives]]
-version = "0.19.0"
-when = "2024-10-02"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.20.0"
+when = "2024-11-14"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_proofs]]
 version = "0.19.0"
