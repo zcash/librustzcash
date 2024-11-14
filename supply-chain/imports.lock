@@ -259,8 +259,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_client_backend]]
-version = "0.14.0"
-when = "2024-10-04"
+version = "0.15.0"
+when = "2024-11-14"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -293,8 +293,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_keys]]
-version = "0.4.0"
-when = "2024-10-04"
+version = "0.5.0"
+when = "2024-11-14"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -307,18 +307,18 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_primitives]]
-version = "0.19.0"
-when = "2024-10-02"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.20.0"
+when = "2024-11-14"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_proofs]]
-version = "0.19.0"
-when = "2024-10-02"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.20.0"
+when = "2024-11-14"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_protocol]]
 version = "0.4.1"
