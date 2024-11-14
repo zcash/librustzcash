@@ -36,7 +36,7 @@ equihash = { version = "0.2", path = "components/equihash" }
 zcash_address = { version = "0.6", path = "components/zcash_address" }
 zcash_client_backend = { version = "0.14", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.2.1", path = "components/zcash_encoding" }
-zcash_keys = { version = "0.4", path = "zcash_keys" }
+zcash_keys = { version = "0.5", path = "zcash_keys" }
 zcash_protocol = { version = "0.4.1", path = "components/zcash_protocol" }
 zip321 = { version = "0.2", path = "components/zip321" }
 
