@@ -159,7 +159,7 @@ pub(crate) const UA_TRANSPARENT: bool = false;
 pub(crate) const UA_TRANSPARENT: bool = true;
 
 pub(crate) const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
-    UnifiedAddressRequest::unsafe_new(UA_ORCHARD, true, UA_TRANSPARENT);
+    UnifiedAddressRequest::unsafe_new_without_expiry(UA_ORCHARD, true, UA_TRANSPARENT);
 
 /// The ID type for accounts.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]

@@ -155,7 +155,11 @@ pub(crate) fn inspect_mnemonic(mnemonic: bip0039::Mnemonic, context: Option<Cont
                 .collect();
 
             eprintln!("   - Unified ({}):", item_names.join(", "));
-            let ufvk = unified::Ufvk::try_from_items(items).unwrap();
+            let ufvk = unified::Ufvk::try_from_items(
+                unified::Revision::R0,
+                items.into_iter().map(unified::Item::Data).collect(),
+            )
+            .unwrap();
             eprintln!("     - UFVK: {}", ufvk.encode(&addr_net));
         }
         seed.zeroize();
@@ -221,7 +225,9 @@ pub(crate) fn inspect_sapling_extsk(
                 eprintln!("- UFVK: {encoded_ufvk}");
 
                 let (default_ua, _) = ufvk
-                    .default_address(UnifiedAddressRequest::unsafe_new(false, true, false))
+                    .default_address(UnifiedAddressRequest::unsafe_new_without_expiry(
+                        false, true, false,
+                    ))
                     .expect("should exist");
                 let encoded_ua = match network {
                     NetworkType::Main => default_ua.encode(&Network::MainNetwork),

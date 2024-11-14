@@ -606,7 +606,7 @@ pub(crate) fn get_current_address<P: consensus::Parameters>(
                 SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
             })
             .and_then(|addr| match addr {
-                Address::Unified(ua) => Ok(ua),
+                Address::Unified(ua) => Ok(*ua),
                 _ => Err(SqliteClientError::CorruptedData(format!(
                     "Addresses table contains {} which is not a unified address",
                     addr_str,
@@ -3032,7 +3032,7 @@ pub(crate) fn select_receiving_address<P: consensus::Parameters>(
                  FROM addresses
                  WHERE cached_transparent_receiver_address = :taddr",
                 named_params! {
-                    ":taddr": Address::Transparent(*taddr).encode(_params)
+                    ":taddr": Address::Transparent(Box::new(*taddr)).encode(_params)
                 },
                 |row| row.get::<_, String>(0),
             )

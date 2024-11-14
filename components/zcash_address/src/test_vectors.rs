@@ -8,6 +8,7 @@ use {
         unified::{
             self,
             address::{test_vectors::TEST_VECTORS, Receiver},
+            Item, Revision,
         },
         Network, ToAddress, ZcashAddress,
     },
@@ -36,9 +37,16 @@ fn unified() {
                     data: data.to_vec(),
                 })
             }))
+            .map(Item::Data)
             .collect();
 
-        let expected_addr = ZcashAddress::from_unified(Network::Main, unified::Address(receivers));
+        let expected_addr = ZcashAddress::from_unified(
+            Network::Main,
+            unified::Address {
+                revision: Revision::R0,
+                receivers,
+            },
+        );
 
         // Test parsing
         let addr: ZcashAddress = tv.unified_addr.parse().unwrap();
