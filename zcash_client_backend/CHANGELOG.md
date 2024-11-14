@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.15.0] - 2024-11-14
+
 ### Added
 - `zcash_client_backend::data_api`:
   - `Progress`
@@ -33,6 +35,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.77.0.
+- Migrated to `zcash_primitives 0.20.0`, `zcash_keys 0.5.0`.
 - Migrated to `arti-client 0.23`.
 - `zcash_client_backend::data_api`:
   - `InputSource` has an added method `get_account_metadata`
