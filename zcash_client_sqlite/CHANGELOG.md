@@ -7,12 +7,16 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.13.0] - 2024-11-14
+
 ### Added
 - Exposed `AccountId::from_u32` and `AccountId::as_u32` conversions under the
   `unstable` feature flag.
 
 ### Changed
 - MSRV is now 1.77.0.
+- Migrated to `zcash_primitives 0.20`, `zcash_keys 0.5`, 
+  `zcash_client_backend 0.15`.
 - Migrated from `schemer` to our fork `schemerz`.
 - Migrated to `rusqlite 0.32`.
 - `error::SqliteClientError` has additional variant `NoteFilterInvalid`
