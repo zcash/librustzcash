@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.20.0] - 2024-11-14
+
 ### Added
 - A new feature flag, `non-standard-fees`, has been added. This flag is now
   required in order to make use of any types or methods that enable non-standard
