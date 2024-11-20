@@ -25,7 +25,8 @@ pub mod memo;
 pub mod value;
 
 /// A Zcash shielded transfer protocol.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ShieldedProtocol {
     /// The Sapling protocol
     Sapling,
@@ -34,7 +35,8 @@ pub enum ShieldedProtocol {
 }
 
 /// A value pool in the Zcash protocol.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PoolType {
     /// The transparent value pool
     Transparent,

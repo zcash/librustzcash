@@ -11,7 +11,7 @@ repository.workspace = true
 readme = "README.md"
 license.workspace = true
 edition.workspace = true
-rust-version = "1.70"
+rust-version.workspace = true
 categories = ["cryptography::cryptocurrencies"]
 keywords = ["zcash"]
 
@@ -22,6 +22,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 # - Logging and metrics
 memuse.workspace = true
+serde = { workspace = true, optional = true }
+serde_with = { workspace = true, optional = true }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
@@ -44,6 +46,8 @@ test-dependencies = [
     "dep:proptest",
     "incrementalmerkletree?/test-dependencies",
 ]
+
+serde = ["dep:serde", "dep:serde_with"]
 
 ## Exposes support for working with a local consensus (e.g. regtest).
 local-consensus = []

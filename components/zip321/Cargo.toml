@@ -2,9 +2,7 @@
 name = "zip321"
 description = "Parsing functions and data types for Zcash ZIP 321 Payment Request URIs"
 version = "0.2.0"
-authors = [
-    "Kris Nuttycombe <kris@electriccoin.co>"
-]
+authors = ["Kris Nuttycombe <kris@electriccoin.co>"]
 homepage = "https://github.com/zcash/librustzcash"
 repository.workspace = true
 readme = "README.md"
@@ -21,6 +19,7 @@ zcash_protocol.workspace = true
 nom = "7"
 base64.workspace = true
 percent-encoding.workspace = true
+serde = { workspace = true, optional = true }
 
 # - Test dependencies
 proptest = { workspace = true, optional = true }
@@ -33,3 +32,5 @@ proptest.workspace = true
 [features]
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = ["dep:proptest"]
+
+serde = ["dep:serde", "zcash_protocol/serde", "zcash_address/serde"]

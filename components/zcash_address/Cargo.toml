@@ -2,9 +2,7 @@
 name = "zcash_address"
 description = "Zcash address parsing and serialization"
 version = "0.6.0"
-authors = [
-    "Jack Grigg <jack@electriccoin.co>",
-]
+authors = ["Jack Grigg <jack@electriccoin.co>"]
 homepage = "https://github.com/zcash/librustzcash"
 repository = "https://github.com/zcash/librustzcash"
 readme = "README.md"
@@ -25,12 +23,16 @@ f4jumble = { version = "0.1", path = "../f4jumble" }
 zcash_protocol.workspace = true
 zcash_encoding.workspace = true
 proptest = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_with = { workspace = true, optional = true }
+cfg_eval = { workspace = true, optional = true }
 
 [dev-dependencies]
 assert_matches.workspace = true
 proptest.workspace = true
 
 [features]
+serde = ["dep:serde", "dep:serde_with", "dep:cfg_eval"]
 test-dependencies = ["dep:proptest"]
 
 [lib]

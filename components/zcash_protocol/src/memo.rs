@@ -77,6 +77,39 @@ impl Ord for MemoBytes {
     }
 }
 
+// Custom serializer and deserializer for `MemoBytes`
+#[cfg(feature = "serde")]
+impl serde::Serialize for MemoBytes {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.as_ref().serialize(serializer) // Serialize the inner array
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for MemoBytes {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Deserialize a Vec<u8> first, then check its size and convert it to a Box<[u8; 512]>
+        let vec = Vec::<u8>::deserialize(deserializer)?;
+        if vec.len() != 512 {
+            return Err(serde::de::Error::custom(format!(
+                "Expected a byte array of length 512, but got length {}",
+                vec.len()
+            )));
+        }
+        // Convert Vec<u8> into a boxed array Box<[u8; 512]>
+        let boxed_array: Box<[u8; 512]> = vec.into_boxed_slice().try_into().map_err(|_| {
+            serde::de::Error::custom("Failed to convert Vec<u8> into Box<[u8; 512]>")
+        })?;
+        Ok(MemoBytes(boxed_array))
+    }
+}
+
 impl MemoBytes {
     /// Creates a `MemoBytes` indicating that no memo is present.
     pub fn empty() -> Self {

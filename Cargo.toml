@@ -66,7 +66,9 @@ orchard = { version = "0.10", default-features = false }
 pasta_curves = "0.5"
 
 # - Transparent
-bip32 = { version = "0.5", default-features = false, features = ["secp256k1-ffi"] }
+bip32 = { version = "0.5", default-features = false, features = [
+    "secp256k1-ffi",
+] }
 ripemd = "0.1"
 secp256k1 = "0.27"
 
@@ -75,7 +77,9 @@ rand = "0.8"
 rand_core = "0.6"
 
 # Currency conversions
-rust_decimal = { version = "1.35", default-features = false, features = ["serde"] }
+rust_decimal = { version = "1.35", default-features = false, features = [
+    "serde",
+] }
 
 # Digests
 blake2b_simd = "1"
@@ -93,6 +97,8 @@ hex = "0.4"
 percent-encoding = "2.1.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_with = "3.9.0"
+cfg_eval = "0.1.2"
 
 # HTTP
 hyper = "1"
@@ -145,7 +151,11 @@ incrementalmerkletree-testing = "0.2"
 # Tor
 # - `arti-client` depends on `rusqlite`, and a version mismatch there causes a compilation
 #   failure due to incompatible `libsqlite3-sys` versions.
-arti-client = { version = "0.23", default-features = false, features = ["compression", "rustls", "tokio"] }
+arti-client = { version = "0.23", default-features = false, features = [
+    "compression",
+    "rustls",
+    "tokio",
+] }
 dynosaur = "0.1.1"
 tokio = "1"
 tor-rtcompat = "0.23"
@@ -180,4 +190,6 @@ opt-level = 3
 debug = true
 
 [workspace.lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(zcash_unstable, values("zfuture"))',
+] }

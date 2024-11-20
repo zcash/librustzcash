@@ -6,9 +6,11 @@ use std::convert::{TryFrom, TryInto};
 
 /// The set of known Receivers for Unified Addresses.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", cfg_eval::cfg_eval, serde_with::serde_as)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Receiver {
-    Orchard([u8; 43]),
-    Sapling([u8; 43]),
+    Orchard(#[cfg_attr(feature = "serde", serde_as(as = "[_; 43]"))] [u8; 43]),
+    Sapling(#[cfg_attr(feature = "serde", serde_as(as = "[_; 43]"))] [u8; 43]),
     P2pkh([u8; 20]),
     P2sh([u8; 20]),
     Unknown { typecode: u32, data: Vec<u8> },
@@ -101,6 +103,7 @@ impl SealedItem for Receiver {
 /// # }
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Address(pub(crate) Vec<Receiver>);
 
 impl Address {
@@ -384,7 +387,7 @@ mod tests {
     #[test]
     fn only_transparent() {
         // Encoding of `Address(vec![Receiver::P2pkh([0; 20])])`.
-        let encoded = [
+        let encoded = vec![
             0xf0, 0x9e, 0x9d, 0x6e, 0xf5, 0xa6, 0xac, 0x16, 0x50, 0xf0, 0xdb, 0xe1, 0x2c, 0xa5,
             0x36, 0x22, 0xa2, 0x04, 0x89, 0x86, 0xe9, 0x6a, 0x9b, 0xf3, 0xff, 0x6d, 0x2f, 0xe6,
             0xea, 0xdb, 0xc5, 0x20, 0x62, 0xf9, 0x6f, 0xa9, 0x86, 0xcc,
