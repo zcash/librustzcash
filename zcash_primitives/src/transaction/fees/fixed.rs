@@ -10,6 +10,7 @@ use crate::transaction::fees::tze;
 /// A fee rule that always returns a fixed fee, irrespective of the structure of
 /// the transaction being constructed.
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FeeRule {
     fixed_fee: NonNegativeAmount,
 }

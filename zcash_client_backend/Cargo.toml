@@ -2,10 +2,7 @@
 name = "zcash_client_backend"
 description = "APIs for creating shielded Zcash light clients"
 version = "0.15.0"
-authors = [
-    "Jack Grigg <jack@z.cash>",
-    "Kris Nuttycombe <kris@electriccoin.co>"
-]
+authors = ["Jack Grigg <jack@z.cash>", "Kris Nuttycombe <kris@electriccoin.co>"]
 homepage = "https://github.com/zcash/librustzcash"
 repository.workspace = true
 readme = "README.md"
@@ -37,7 +34,7 @@ zip321.workspace = true
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - Data Access API
-time = "0.3.22"
+time = { version = "0.3.22", default-features = false }
 nonempty.workspace = true
 
 # - CSPRNG
@@ -151,11 +148,16 @@ zcash_proofs = { workspace = true, features = ["bundled-prover"] }
 zcash_protocol = { workspace = true, features = ["local-consensus"] }
 
 [features]
+default = ["time/default"]
+
 ## Enables the `tonic` gRPC client bindings for connecting to a `lightwalletd` server.
 lightwalletd-tonic = ["dep:tonic", "hyper-util?/tokio"]
 
 ## Enables the `tls-webpki-roots` feature of `tonic`.
-lightwalletd-tonic-tls-webpki-roots = ["lightwalletd-tonic", "tonic?/tls-webpki-roots"]
+lightwalletd-tonic-tls-webpki-roots = [
+    "lightwalletd-tonic",
+    "tonic?/tls-webpki-roots",
+]
 
 ## Enables the `transport` feature of `tonic` producing a fully-featured client and server implementation
 lightwalletd-tonic-transport = ["lightwalletd-tonic", "tonic?/transport"]
@@ -171,11 +173,7 @@ transparent-inputs = [
 orchard = ["dep:orchard", "dep:pasta_curves", "zcash_keys/orchard"]
 
 ## Exposes a wallet synchronization function that implements the necessary state machine.
-sync = [
-    "lightwalletd-tonic",
-    "dep:async-trait",
-    "dep:futures-util",
-]
+sync = ["lightwalletd-tonic", "dep:async-trait", "dep:futures-util"]
 
 ## Exposes a Tor client for hiding a wallet's IP address while performing certain wallet
 ## operations.
@@ -197,6 +195,9 @@ tor = [
     "dep:tower",
     "dep:webpki-roots",
 ]
+
+## enable feature when building for Wasm using wasm-bindgen
+wasm-bindgen = ["time/wasm-bindgen"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [

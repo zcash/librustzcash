@@ -228,6 +228,7 @@ impl Mul<usize> for ZatBalance {
 /// A Zatoshis can only be constructed from an integer that is within the valid monetary
 /// range of `{0..MAX_MONEY}` (where `MAX_MONEY` = 21,000,000 × 10⁸ zatoshis).
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Zatoshis(u64);
 
 /// A struct that provides both the quotient and remainder of a division operation.

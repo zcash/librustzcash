@@ -93,6 +93,7 @@ impl<A: Authorization> Bundle<A> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OutPoint {
     hash: TxId,
     n: u32,

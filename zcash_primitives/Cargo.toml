@@ -2,10 +2,7 @@
 name = "zcash_primitives"
 description = "Rust implementations of the Zcash primitives"
 version = "0.20.0"
-authors = [
-    "Jack Grigg <jack@z.cash>",
-    "Kris Nuttycombe <kris@electriccoin.co>"
-]
+authors = ["Jack Grigg <jack@z.cash>", "Kris Nuttycombe <kris@electriccoin.co>"]
 homepage = "https://github.com/zcash/librustzcash"
 repository.workspace = true
 readme = "README.md"
@@ -83,6 +80,8 @@ ripemd = { workspace = true, optional = true }
 aes.workspace = true
 fpe.workspace = true
 
+serde = { workspace = true, optional = true }
+
 [dependencies.zcash_note_encryption]
 workspace = true
 features = ["pre-zip-212"]
@@ -90,7 +89,10 @@ features = ["pre-zip-212"]
 [dev-dependencies]
 chacha20poly1305 = "0.10"
 criterion.workspace = true
-incrementalmerkletree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
+incrementalmerkletree = { workspace = true, features = [
+    "legacy-api",
+    "test-dependencies",
+] }
 proptest.workspace = true
 assert_matches.workspace = true
 rand_xorshift.workspace = true
@@ -128,6 +130,8 @@ expensive-tests = []
 ## A feature that provides `FeeRule` implementations and constructors for
 ## non-standard fees.
 non-standard-fees = []
+
+serde = ["dep:serde", "zcash_protocol/serde"]
 
 [lib]
 bench = false
