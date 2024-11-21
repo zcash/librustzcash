@@ -157,7 +157,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
 /// included.
 #[allow(dead_code)]
 const PUBLIC_MIGRATION_STATES: &[&[Uuid]] = &[
-    V_0_4_0, V_0_6_0, V_0_8_0, V_0_9_0, V_0_10_0, V_0_10_3, V_0_11_0, V_0_11_1,
+    V_0_4_0, V_0_6_0, V_0_8_0, V_0_9_0, V_0_10_0, V_0_10_3, V_0_11_0, V_0_11_1, V_0_11_2, V_0_12_0,
+    V_0_13_0,
 ];
 
 /// Leaf migrations in the 0.4.0 release.
@@ -207,6 +208,15 @@ const V_0_11_0: &[Uuid] = &[
 
 /// Leaf migrations in the 0.11.1 release.
 const V_0_11_1: &[Uuid] = &[tx_retrieval_queue::MIGRATION_ID];
+
+/// Leaf migrations in the 0.11.2 release.
+const V_0_11_2: &[Uuid] = &[support_legacy_sqlite::MIGRATION_ID];
+
+/// Leaf migrations in the 0.12.0 release.
+const V_0_12_0: &[Uuid] = &[fix_broken_commitment_trees::MIGRATION_ID];
+
+/// Leaf migrations in the 0.13.0 release.
+const V_0_13_0: &[Uuid] = &[fix_bad_change_flagging::MIGRATION_ID];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
