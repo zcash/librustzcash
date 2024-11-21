@@ -1,4 +1,5 @@
 mod add_account_birthdays;
+mod add_account_uuids;
 mod add_transaction_views;
 mod add_utxo_account;
 mod addresses_table;
@@ -81,10 +82,10 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //              ------------------------------ tx_retrieval_queue ----------------------------
     //                                                     |
     //                                            support_legacy_sqlite
-    //                                                     |
-    //                                         fix_broken_commitment_trees
-    //                                                     |
-    //                                          fix_bad_change_flagging
+    //                                               /           \
+    //                         fix_broken_commitment_trees      add_account_uuids
+    //                                     |
+    //                          fix_bad_change_flagging
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -147,6 +148,7 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
             params: params.clone(),
         }),
         Box::new(fix_bad_change_flagging::Migration),
+        Box::new(add_account_uuids::Migration),
     ]
 }
 

@@ -69,6 +69,7 @@ use incrementalmerkletree::{Marking, Retention};
 use rusqlite::{self, named_params, params, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
+use uuid::Uuid;
 use zcash_client_backend::data_api::{
     AccountPurpose, DecryptedTransaction, Progress, TransactionDataRequest, TransactionStatus,
 };
@@ -404,6 +405,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         .query_row(
             r#"
             INSERT INTO accounts (
+                uuid,
                 account_kind, hd_seed_fingerprint, hd_account_index,
                 ufvk, uivk,
                 orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
@@ -412,6 +414,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 has_spend_key
             )
             VALUES (
+                :uuid,
                 :account_kind, :hd_seed_fingerprint, :hd_account_index,
                 :ufvk, :uivk,
                 :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
@@ -422,6 +425,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             RETURNING id;
             "#,
             named_params![
+                ":uuid": Uuid::new_v4(),
                 ":account_kind": account_kind_code(kind),
                 ":hd_seed_fingerprint": hd_seed_fingerprint.as_ref().map(|fp| fp.to_bytes()),
                 ":hd_account_index": hd_account_index.map(u32::from),
@@ -3526,8 +3530,9 @@ pub mod testing {
         conn: &rusqlite::Connection,
     ) -> Result<Vec<TransactionSummary<AccountId>>, SqliteClientError> {
         let mut stmt = conn.prepare_cached(
-            "SELECT *
+            "SELECT accounts.id as account_id, v_transactions.*
              FROM v_transactions
+             JOIN accounts ON accounts.uuid = v_transactions.account_uuid
              ORDER BY mined_height DESC, tx_index DESC",
         )?;
 

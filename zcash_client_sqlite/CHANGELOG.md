@@ -7,6 +7,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- The `v_transactions` view has been modified:
+  - The `account_id` column has been replaced with `account_uuid`.
+- The `v_tx_outputs` view has been modified:
+  - The `from_account_id` column has been replaced with `from_account_uuid`.
+  - The `to_account_id` column has been replaced with `to_account_uuid`.
+
 ## [0.13.0] - 2024-11-14
 
 ### Added

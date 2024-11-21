@@ -529,6 +529,7 @@ mod tests {
         let expected_indices = vec![
             db::INDEX_ACCOUNTS_UFVK,
             db::INDEX_ACCOUNTS_UIVK,
+            db::INDEX_ACCOUNTS_UUID,
             db::INDEX_HD_ACCOUNT,
             db::INDEX_ADDRESSES_ACCOUNTS,
             db::INDEX_NF_MAP_LOCATOR_IDX,
