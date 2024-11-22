@@ -7,12 +7,21 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_sqlite::AccountUuid`
+- `zcash_client_sqlite::Account::uuid`
+- `zcash_client_sqlite::WalletDb::get_account_for_uuid`
+
 ### Changed
 - The `v_transactions` view has been modified:
   - The `account_id` column has been replaced with `account_uuid`.
 - The `v_tx_outputs` view has been modified:
   - The `from_account_id` column has been replaced with `from_account_uuid`.
   - The `to_account_id` column has been replaced with `to_account_uuid`.
+
+### Removed
+- `zcash_client_sqlite::AccountId::{from_u32, as_u32}` (use `AccountUuid` and
+  its methods instead).
 
 ## [0.13.0] - 2024-11-14
 

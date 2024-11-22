@@ -120,7 +120,7 @@ use crate::{
     AccountId, SqlTransaction, TransferType, WalletCommitmentTrees, WalletDb, DEFAULT_UA_REQUEST,
     PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
 };
-use crate::{TxRef, VERIFY_LOOKAHEAD};
+use crate::{AccountUuid, TxRef, VERIFY_LOOKAHEAD};
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::transaction::components::TxOut;
@@ -201,11 +201,17 @@ pub(crate) enum ViewingKey {
 #[derive(Debug, Clone)]
 pub struct Account {
     account_id: AccountId,
+    uuid: AccountUuid,
     kind: AccountSource,
     viewing_key: ViewingKey,
 }
 
 impl Account {
+    /// Returns the "one-way stable" identifier for this account within its [`WalletDb`].
+    pub fn uuid(&self) -> AccountUuid {
+        self.uuid
+    }
+
     /// Returns the default Unified Address for the account,
     /// along with the diversifier index that generated it.
     ///
@@ -368,6 +374,8 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     }
     // TODO(#1490): check for IVK collisions.
 
+    let uuid = AccountUuid(Uuid::new_v4());
+
     let (hd_seed_fingerprint, hd_account_index, spending_key_available) = match kind {
         AccountSource::Derived {
             seed_fingerprint,
@@ -425,7 +433,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             RETURNING id;
             "#,
             named_params![
-                ":uuid": Uuid::new_v4(),
+                ":uuid": uuid.0,
                 ":account_kind": account_kind_code(kind),
                 ":hd_seed_fingerprint": hd_seed_fingerprint.as_ref().map(|fp| fp.to_bytes()),
                 ":hd_account_index": hd_account_index.map(u32::from),
@@ -465,6 +473,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
 
     let account = Account {
         account_id,
+        uuid,
         kind,
         viewing_key,
     };
@@ -709,7 +718,7 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     let transparent_item: Option<Vec<u8>> = None;
 
     let mut stmt = conn.prepare(
-        "SELECT id, account_kind, hd_seed_fingerprint, hd_account_index, ufvk, has_spend_key
+        "SELECT id, uuid, account_kind, hd_seed_fingerprint, hd_account_index, ufvk, has_spend_key
         FROM accounts
         WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
            OR sapling_fvk_item_cache = :sapling_fvk_item_cache
@@ -725,6 +734,7 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
             ],
             |row| {
                 let account_id = row.get::<_, u32>("id").map(AccountId)?;
+                let uuid = AccountUuid(row.get("uuid")?);
                 let kind = parse_account_source(
                     row.get("account_kind")?,
                     row.get("hd_seed_fingerprint")?,
@@ -746,6 +756,7 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
 
                 Ok(Account {
                     account_id,
+                    uuid,
                     kind,
                     viewing_key,
                 })
@@ -771,7 +782,7 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
     account_index: zip32::AccountId,
 ) -> Result<Option<Account>, SqliteClientError> {
     let mut stmt = conn.prepare(
-        "SELECT id, ufvk
+        "SELECT id, uuid, ufvk
         FROM accounts
         WHERE hd_seed_fingerprint = :hd_seed_fingerprint
           AND hd_account_index = :account_id",
@@ -783,8 +794,9 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
             ":hd_account_index": u32::from(account_index),
         ],
         |row| {
-            let account_id = row.get::<_, u32>(0).map(AccountId)?;
-            let ufvk = match row.get::<_, Option<String>>(1)? {
+            let account_id = row.get::<_, u32>("id").map(AccountId)?;
+            let uuid = AccountUuid(row.get("uuid")?);
+            let ufvk = match row.get::<_, Option<String>>("ufvk")? {
                 None => Err(SqliteClientError::CorruptedData(format!(
                     "Missing unified full viewing key for derived account {:?}",
                     account_id,
@@ -798,6 +810,7 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
             }?;
             Ok(Account {
                 account_id,
+                uuid,
                 kind: AccountSource::Derived {
                     seed_fingerprint: *seed,
                     account_index,
@@ -1833,6 +1846,30 @@ pub(crate) fn block_height_extrema(
     })
 }
 
+pub(crate) fn get_account_for_uuid<P: Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    account_uuid: AccountUuid,
+) -> Result<Option<Account>, SqliteClientError> {
+    match conn
+        .query_row(
+            "SELECT id FROM accounts WHERE uuid = :uuid",
+            named_params! {":uuid": account_uuid.0},
+            |row| row.get("id").map(AccountId),
+        )
+        .optional()?
+    {
+        None => Ok(None),
+        Some(account_id) => Ok(Some(
+            // TODO: `get_account` should return a non-optional value now that `AccountId`
+            // is guaranteed to exist (because it can't be externally constructed), but
+            // the `WalletRead::AccountId` associated type is permitted to not exist, and
+            // I don't want to deal with the refactor right now.
+            get_account(conn, params, account_id)?.expect("account_id exists"),
+        )),
+    }
+}
+
 pub(crate) fn get_account<P: Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -1840,7 +1877,7 @@ pub(crate) fn get_account<P: Parameters>(
 ) -> Result<Option<Account>, SqliteClientError> {
     let mut sql = conn.prepare_cached(
         r#"
-        SELECT account_kind, hd_seed_fingerprint, hd_account_index, ufvk, uivk, has_spend_key
+        SELECT uuid, account_kind, hd_seed_fingerprint, hd_account_index, ufvk, uivk, has_spend_key
         FROM accounts
         WHERE id = :account_id
         "#,
@@ -1850,6 +1887,8 @@ pub(crate) fn get_account<P: Parameters>(
     let row = result.next()?;
     match row {
         Some(row) => {
+            let uuid = AccountUuid(row.get("uuid")?);
+
             let kind = parse_account_source(
                 row.get("account_kind")?,
                 row.get("hd_seed_fingerprint")?,
@@ -1873,6 +1912,7 @@ pub(crate) fn get_account<P: Parameters>(
 
             Ok(Some(Account {
                 account_id,
+                uuid,
                 kind,
                 viewing_key,
             }))

@@ -43,6 +43,7 @@ use std::{
 };
 use subtle::ConditionallySelectable;
 use tracing::{debug, trace, warn};
+use uuid::Uuid;
 
 use zcash_client_backend::{
     address::UnifiedAddress,
@@ -161,29 +162,47 @@ pub(crate) const UA_TRANSPARENT: bool = true;
 pub(crate) const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
     UnifiedAddressRequest::unsafe_new(UA_ORCHARD, true, UA_TRANSPARENT);
 
-/// The ID type for accounts.
+/// Unique identifier for a specific account tracked by a [`WalletDb`].
+///
+/// Account identifiers are "one-way stable": a given identifier always points to a
+/// specific viewing key within a specific [`WalletDb`] instance, but the same viewing key
+/// may have multiple account identifiers over time. In particular, this crate upholds the
+/// following properties:
+///
+/// - When an account starts being tracked within a [`WalletDb`] instance (via APIs like
+///   [`WalletWrite::create_account`], [`WalletWrite::import_account_hd`], or
+///   [`WalletWrite::import_account_ufvk`]), a new `AccountUuid` is generated.
+/// - If an `AccountUuid` is present within a [`WalletDb`], it always points to the same
+///   account.
+///
+/// What this means is that account identifiers are not stable across "wallet recreation
+/// events". Examples of these include:
+/// - Restoring a wallet from a backed-up seed.
+/// - Importing the same viewing key into two different wallet instances.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
-pub struct AccountId(u32);
+pub struct AccountUuid(Uuid);
 
-impl AccountId {
-    /// Constructs an `AccountId` from a bare `u32` value. The resulting identifier is not
-    /// guaranteed to correspond to any account stored in the database.
-    #[cfg(feature = "unstable")]
-    pub fn from_u32(value: u32) -> Self {
-        AccountId(value)
+impl AccountUuid {
+    /// Constructs an `AccountUuid` from a bare [`Uuid`] value.
+    ///
+    /// The resulting identifier is not guaranteed to correspond to any account stored in
+    /// a [`WalletDb`]. Callers should use [`WalletDb::get_account_for_uuid`]
+    pub fn from_uuid(value: Uuid) -> Self {
+        AccountUuid(value)
     }
 
-    /// Unwraps a raw `accounts` table primary key value from its typesafe wrapper.
-    ///
-    /// Note that account identifiers are not guaranteed to be stable; if a wallet is restored from
-    /// seed, the account identifiers of the restored wallet are not likely to correspond to the
-    /// identifiers for the same accounts in another wallet created or restored from the same seed.
-    /// These unwrapped identifier values should therefore be treated as ephemeral.
-    #[cfg(feature = "unstable")]
-    pub fn as_u32(&self) -> u32 {
+    /// Exposes the opaque account identifier from its typesafe wrapper.
+    pub fn expose_uuid(&self) -> Uuid {
         self.0
     }
 }
+
+/// The local identifier for an account.
+///
+/// This is an ephemeral value for efficiently and generically working with accounts in a
+/// [`WalletDb`]. To reference accounts in external contexts, use [`AccountUuid`].
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+pub struct AccountId(u32);
 
 impl ConditionallySelectable for AccountId {
     fn conditional_select(a: &Self, b: &Self, choice: subtle::Choice) -> Self {
@@ -217,6 +236,17 @@ struct TxRef(pub i64);
 pub struct WalletDb<C, P> {
     conn: C,
     params: P,
+}
+
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletDb<C, P> {
+    /// Returns the account with the given "one-way stable" identifier, if it was created
+    /// by this wallet instance.
+    pub fn get_account_for_uuid(
+        &self,
+        account_uuid: AccountUuid,
+    ) -> Result<Option<wallet::Account>, SqliteClientError> {
+        wallet::get_account_for_uuid(self.conn.borrow(), &self.params, account_uuid)
+    }
 }
 
 /// A wrapper for a SQLite transaction affecting the wallet database.
