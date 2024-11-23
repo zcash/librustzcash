@@ -149,7 +149,10 @@ mod tests {
     use tempfile::NamedTempFile;
     use zcash_primitives::{
         legacy::{Script, TransparentAddress},
-        transaction::{components::transparent, Authorized, TransactionData, TxVersion},
+        transaction::{
+            components::{transparent, AllBundles},
+            Authorized, TransactionData, TxVersion,
+        },
     };
     use zcash_protocol::{
         consensus::{BranchId, Network},
@@ -185,7 +188,7 @@ mod tests {
         .unwrap();
 
         // Add transactions to the wallet that exercise the data migration.
-        let add_tx_to_wallet = |tx: TransactionData<Authorized>| {
+        let add_tx_to_wallet = |tx: TransactionData<AllBundles<Authorized>>| {
             let tx = tx.freeze().unwrap();
             let txid = tx.txid();
             let mut raw_tx = vec![];

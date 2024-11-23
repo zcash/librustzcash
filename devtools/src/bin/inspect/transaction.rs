@@ -19,7 +19,9 @@ use zcash_primitives::{
     legacy::{keys::pubkey_to_address, Script, TransparentAddress},
     memo::{Memo, MemoBytes},
     transaction::{
-        components::{amount::NonNegativeAmount, sapling as sapling_serialization, transparent},
+        components::{
+            amount::NonNegativeAmount, sapling as sapling_serialization, transparent, AllBundles,
+        },
         sighash::{signature_hash, SignableInput, TransparentAuthorizingContext},
         txid::TxIdDigester,
         Authorization, Transaction, TransactionData, TxId, TxVersion,
@@ -207,7 +209,7 @@ pub(crate) fn inspect(
         tx.write(&mut buf).unwrap();
         let tx = Transaction::read(&buf[..], tx.consensus_branch_id()).unwrap();
 
-        let tx: TransactionData<PrecomputedAuth> = tx.into_data().map_authorization(
+        let tx: TransactionData<AllBundles<PrecomputedAuth>> = tx.into_data().map_authorization(
             f_transparent,
             (),
             (),
