@@ -141,7 +141,7 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         }),
         Box::new(spend_key_available::Migration),
         Box::new(tx_retrieval_queue::Migration {
-            params: params.clone(),
+            _params: params.clone(),
         }),
         Box::new(support_legacy_sqlite::Migration),
         Box::new(fix_broken_commitment_trees::Migration {

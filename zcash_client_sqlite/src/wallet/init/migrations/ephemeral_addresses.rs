@@ -8,7 +8,7 @@ use zcash_protocol::consensus;
 use crate::wallet::init::WalletMigrationError;
 
 #[cfg(feature = "transparent-inputs")]
-use crate::wallet::{self, init, transparent::ephemeral};
+use crate::{wallet::transparent::ephemeral, AccountId};
 
 use super::utxos_to_txos;
 
@@ -65,9 +65,13 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         // Make sure that at least `GAP_LIMIT` ephemeral transparent addresses are
         // stored in each account.
         #[cfg(feature = "transparent-inputs")]
-        for account_id in wallet::get_account_ids(transaction)? {
-            ephemeral::init_account(transaction, &self.params, account_id)
-                .map_err(init::sqlite_client_error_to_wallet_migration_error)?;
+        {
+            let mut stmt = transaction.prepare("SELECT id FROM accounts")?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let account_id = AccountId(row.get(0)?);
+                ephemeral::init_account(transaction, &self.params, account_id)?;
+            }
         }
         Ok(())
     }
@@ -124,7 +128,10 @@ mod tests {
                     )
                 })?;
             let account_index = wallet::max_zip32_account_index(wdb.conn.0, &seed_fingerprint)?
-                .map(|a| a.next().ok_or(SqliteClientError::AccountIdOutOfRange))
+                .map(|a| {
+                    a.next()
+                        .ok_or(SqliteClientError::Zip32AccountIndexOutOfRange)
+                })
                 .transpose()?
                 .unwrap_or(zip32::AccountId::ZERO);
 

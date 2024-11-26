@@ -182,11 +182,19 @@ pub(crate) const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
 pub struct AccountUuid(Uuid);
 
+impl ConditionallySelectable for AccountUuid {
+    fn conditional_select(a: &Self, b: &Self, choice: subtle::Choice) -> Self {
+        AccountUuid(Uuid::from_u128(
+            ConditionallySelectable::conditional_select(&a.0.as_u128(), &b.0.as_u128(), choice),
+        ))
+    }
+}
+
 impl AccountUuid {
     /// Constructs an `AccountUuid` from a bare [`Uuid`] value.
     ///
     /// The resulting identifier is not guaranteed to correspond to any account stored in
-    /// a [`WalletDb`]. Callers should use [`WalletDb::get_account_for_uuid`]
+    /// a [`WalletDb`].
     pub fn from_uuid(value: Uuid) -> Self {
         AccountUuid(value)
     }
@@ -202,8 +210,10 @@ impl AccountUuid {
 /// This is an ephemeral value for efficiently and generically working with accounts in a
 /// [`WalletDb`]. To reference accounts in external contexts, use [`AccountUuid`].
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
-pub struct AccountId(u32);
+pub(crate) struct AccountId(u32);
 
+/// This implementation is retained under `#[cfg(test)]` for pre-AccountUuid testing.
+#[cfg(test)]
 impl ConditionallySelectable for AccountId {
     fn conditional_select(a: &Self, b: &Self, choice: subtle::Choice) -> Self {
         AccountId(ConditionallySelectable::conditional_select(
@@ -236,17 +246,6 @@ struct TxRef(pub i64);
 pub struct WalletDb<C, P> {
     conn: C,
     params: P,
-}
-
-impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletDb<C, P> {
-    /// Returns the account with the given "one-way stable" identifier, if it was created
-    /// by this wallet instance.
-    pub fn get_account_for_uuid(
-        &self,
-        account_uuid: AccountUuid,
-    ) -> Result<Option<wallet::Account>, SqliteClientError> {
-        wallet::get_account_for_uuid(self.conn.borrow(), &self.params, account_uuid)
-    }
 }
 
 /// A wrapper for a SQLite transaction affecting the wallet database.
@@ -285,7 +284,7 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for WalletDb<C, P> {
     type Error = SqliteClientError;
     type NoteRef = ReceivedNoteId;
-    type AccountId = AccountId;
+    type AccountId = AccountUuid;
 
     fn get_spendable_note(
         &self,
@@ -319,7 +318,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
 
     fn select_spendable_notes(
         &self,
-        account: AccountId,
+        account: Self::AccountId,
         target_value: NonNegativeAmount,
         sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
@@ -415,10 +414,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
 
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for WalletDb<C, P> {
     type Error = SqliteClientError;
-    type AccountId = AccountId;
+    type AccountId = AccountUuid;
     type Account = wallet::Account;
 
-    fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error> {
+    fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error> {
         Ok(wallet::get_account_ids(self.conn.borrow())?)
     }
 
@@ -522,13 +521,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
 
     fn get_current_address(
         &self,
-        account: AccountId,
+        account: Self::AccountId,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         wallet::get_current_address(self.conn.borrow(), &self.params, account)
             .map(|res| res.map(|(addr, _)| addr))
     }
 
-    fn get_account_birthday(&self, account: AccountId) -> Result<BlockHeight, Self::Error> {
+    fn get_account_birthday(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
         wallet::account_birthday(self.conn.borrow(), account).map_err(SqliteClientError::from)
     }
 
@@ -593,7 +592,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
 
     fn get_unified_full_viewing_keys(
         &self,
-    ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
+    ) -> Result<HashMap<Self::AccountId, UnifiedFullViewingKey>, Self::Error> {
         wallet::get_unified_full_viewing_keys(self.conn.borrow(), &self.params)
     }
 
@@ -614,7 +613,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     fn get_sapling_nullifiers(
         &self,
         query: NullifierQuery,
-    ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error> {
+    ) -> Result<Vec<(Self::AccountId, sapling::Nullifier)>, Self::Error> {
         wallet::sapling::get_sapling_nullifiers(self.conn.borrow(), query)
     }
 
@@ -622,14 +621,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     fn get_orchard_nullifiers(
         &self,
         query: NullifierQuery,
-    ) -> Result<Vec<(AccountId, orchard::note::Nullifier)>, Self::Error> {
+    ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error> {
         wallet::orchard::get_orchard_nullifiers(self.conn.borrow(), query)
     }
 
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
         &self,
-        account: AccountId,
+        account: Self::AccountId,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         wallet::transparent::get_transparent_receivers(self.conn.borrow(), &self.params, account)
     }
@@ -637,7 +636,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
         &self,
-        account: AccountId,
+        account: Self::AccountId,
         max_height: BlockHeight,
     ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
         wallet::transparent::get_transparent_balances(
@@ -668,10 +667,11 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         account: Self::AccountId,
         index_range: Option<Range<u32>>,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        let account_id = wallet::get_account_id(self.conn.borrow(), account)?;
         wallet::transparent::ephemeral::get_known_ephemeral_addresses(
             self.conn.borrow(),
             &self.params,
-            account,
+            account_id,
             index_range,
         )
     }
@@ -839,7 +839,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         &mut self,
         seed: &SecretVec<u8>,
         birthday: &AccountBirthday,
-    ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
+    ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
             let seed_fingerprint =
                 SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
@@ -848,7 +848,10 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     )
                 })?;
             let account_index = wallet::max_zip32_account_index(wdb.conn.0, &seed_fingerprint)?
-                .map(|a| a.next().ok_or(SqliteClientError::AccountIdOutOfRange))
+                .map(|a| {
+                    a.next()
+                        .ok_or(SqliteClientError::Zip32AccountIndexOutOfRange)
+                })
                 .transpose()?
                 .unwrap_or(zip32::AccountId::ZERO);
 
@@ -925,14 +928,14 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
     fn get_next_available_address(
         &mut self,
-        account: AccountId,
+        account_uuid: Self::AccountId,
         request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         self.transactionally(
-            |wdb| match wdb.get_unified_full_viewing_keys()?.get(&account) {
+            |wdb| match wdb.get_unified_full_viewing_keys()?.get(&account_uuid) {
                 Some(ufvk) => {
                     let search_from =
-                        match wallet::get_current_address(wdb.conn.0, &wdb.params, account)? {
+                        match wallet::get_current_address(wdb.conn.0, &wdb.params, account_uuid)? {
                             Some((_, mut last_diversifier_index)) => {
                                 last_diversifier_index.increment().map_err(|_| {
                                     AddressGenerationError::DiversifierSpaceExhausted
@@ -944,10 +947,11 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                     let (addr, diversifier_index) = ufvk.find_address(search_from, request)?;
 
+                    let account_id = wallet::get_account_id(wdb.conn.0, account_uuid)?;
                     wallet::insert_address(
                         wdb.conn.0,
                         &wdb.params,
-                        account,
+                        account_id,
                         diversifier_index,
                         &addr,
                     )?;
@@ -1413,14 +1417,14 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
     fn store_decrypted_tx(
         &mut self,
-        d_tx: DecryptedTransaction<AccountId>,
+        d_tx: DecryptedTransaction<Self::AccountId>,
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| wallet::store_decrypted_tx(wdb.conn.0, &wdb.params, d_tx))
     }
 
     fn store_transactions_to_be_sent(
         &mut self,
-        transactions: &[SentTransaction<AccountId>],
+        transactions: &[SentTransaction<Self::AccountId>],
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             for sent_tx in transactions {
@@ -1441,6 +1445,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         n: usize,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         self.transactionally(|wdb| {
+            let account_id = wallet::get_account_id(wdb.conn.0, account_id)?;
             wallet::transparent::ephemeral::reserve_next_n_ephemeral_addresses(
                 wdb.conn.0,
                 &wdb.params,
@@ -1916,6 +1921,7 @@ extern crate assert_matches;
 #[cfg(test)]
 mod tests {
     use secrecy::{ExposeSecret, Secret, SecretVec};
+    use uuid::Uuid;
     use zcash_client_backend::data_api::{
         chain::ChainState,
         testing::{TestBuilder, TestState},
@@ -1927,7 +1933,7 @@ mod tests {
     use zcash_protocol::consensus;
 
     use crate::{
-        error::SqliteClientError, testing::db::TestDbFactory, AccountId, DEFAULT_UA_REQUEST,
+        error::SqliteClientError, testing::db::TestDbFactory, AccountUuid, DEFAULT_UA_REQUEST,
     };
 
     #[cfg(feature = "unstable")]
@@ -1952,9 +1958,9 @@ mod tests {
 
         // check that passing an invalid account results in a failure
         assert!({
-            let wrong_account_index = AccountId(3);
+            let wrong_account_uuid = AccountUuid(Uuid::nil());
             !st.wallet()
-                .validate_seed(wrong_account_index, st.test_seed().unwrap())
+                .validate_seed(wrong_account_uuid, st.test_seed().unwrap())
                 .unwrap()
         });
 

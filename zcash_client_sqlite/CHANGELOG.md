@@ -9,8 +9,6 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `zcash_client_sqlite::AccountUuid`
-- `zcash_client_sqlite::Account::uuid`
-- `zcash_client_sqlite::WalletDb::get_account_for_uuid`
 
 ### Changed
 - The `v_transactions` view has been modified:
@@ -18,10 +16,18 @@ and this library adheres to Rust's notion of
 - The `v_tx_outputs` view has been modified:
   - The `from_account_id` column has been replaced with `from_account_uuid`.
   - The `to_account_id` column has been replaced with `to_account_uuid`.
+- The `WalletRead` and `InputSource` impls for `WalletDb` now set the `AccountId`
+  associated type to `AccountUuid`.
+- Variants of `SqliteClientError` have changed:
+  - The `AccountCollision` and `ReachedGapLimit` now carry `AccountUuid` values
+    instead of `AccountId`s.
+  - `SqliteClientError::AccountIdDiscontinuity` has been removed as it is now
+    unused.
+  - `SqliteClientError::AccountIdOutOfRange` has been renamed to
+    `Zip32AccountIndexOutOfRange`.
 
 ### Removed
-- `zcash_client_sqlite::AccountId::{from_u32, as_u32}` (use `AccountUuid` and
-  its methods instead).
+- `zcash_client_sqlite::AccountId` (use `AccountUuid` instead).
 
 ## [0.13.0] - 2024-11-14
 
@@ -31,7 +37,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.77.0.
-- Migrated to `zcash_primitives 0.20`, `zcash_keys 0.5`, 
+- Migrated to `zcash_primitives 0.20`, `zcash_keys 0.5`,
   `zcash_client_backend 0.15`.
 - Migrated from `schemer` to our fork `schemerz`.
 - Migrated to `rusqlite 0.32`.
@@ -51,7 +57,7 @@ and this library adheres to Rust's notion of
   summary information is now only returned in the case that some note
   commitment tree size information can be determined, either from subtree root
   download or from downloaded block data. NOTE: The recovery progress ratio may
-  be present as `0:0` in the case that the recovery range contains no notes; 
+  be present as `0:0` in the case that the recovery range contains no notes;
   this was not adequately documented in the previous release.
 
 ## [0.12.0] - 2024-10-04

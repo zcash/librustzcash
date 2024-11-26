@@ -413,7 +413,7 @@ mod tests {
         (ufvk0, height, res)
     }
 
-    fn put_received_note_before_migration<T: ReceivedSaplingOutput>(
+    fn put_received_note_before_migration<T: ReceivedSaplingOutput<AccountId = AccountId>>(
         conn: &Connection,
         output: &T,
         tx_ref: i64,

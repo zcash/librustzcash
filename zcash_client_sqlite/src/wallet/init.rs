@@ -203,8 +203,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         | SqliteClientError::NonSequentialBlocks
         | SqliteClientError::RequestedRewindInvalid { .. }
         | SqliteClientError::KeyDerivationError(_)
-        | SqliteClientError::AccountIdDiscontinuity
-        | SqliteClientError::AccountIdOutOfRange
+        | SqliteClientError::Zip32AccountIndexOutOfRange
         | SqliteClientError::AccountCollision(_)
         | SqliteClientError::CacheMiss(_) => {
             unreachable!("we only call WalletRead methods; mutations can't occur")

@@ -66,7 +66,7 @@
 
 use incrementalmerkletree::{Marking, Retention};
 
-use rusqlite::{self, named_params, params, OptionalExtension};
+use rusqlite::{self, named_params, params, Connection, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use uuid::Uuid;
@@ -200,18 +200,12 @@ pub(crate) enum ViewingKey {
 /// An account stored in a `zcash_client_sqlite` database.
 #[derive(Debug, Clone)]
 pub struct Account {
-    account_id: AccountId,
     uuid: AccountUuid,
     kind: AccountSource,
     viewing_key: ViewingKey,
 }
 
 impl Account {
-    /// Returns the "one-way stable" identifier for this account within its [`WalletDb`].
-    pub fn uuid(&self) -> AccountUuid {
-        self.uuid
-    }
-
     /// Returns the default Unified Address for the account,
     /// along with the diversifier index that generated it.
     ///
@@ -226,10 +220,10 @@ impl Account {
 }
 
 impl zcash_client_backend::data_api::Account for Account {
-    type AccountId = AccountId;
+    type AccountId = AccountUuid;
 
-    fn id(&self) -> AccountId {
-        self.account_id
+    fn id(&self) -> AccountUuid {
+        self.uuid
     }
 
     fn source(&self) -> AccountSource {
@@ -350,11 +344,10 @@ pub(crate) fn max_zip32_account_index(
         "SELECT MAX(hd_account_index) FROM accounts WHERE hd_seed_fingerprint = :hd_seed",
         [seed_id.to_bytes()],
         |row| {
-            let account_id: Option<u32> = row.get(0)?;
-            account_id
+            row.get::<_, Option<u32>>(0)?
                 .map(zip32::AccountId::try_from)
                 .transpose()
-                .map_err(|_| SqliteClientError::AccountIdOutOfRange)
+                .map_err(|_| SqliteClientError::Zip32AccountIndexOutOfRange)
         },
     )
 }
@@ -374,7 +367,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     }
     // TODO(#1490): check for IVK collisions.
 
-    let uuid = AccountUuid(Uuid::new_v4());
+    let account_uuid = AccountUuid(Uuid::new_v4());
 
     let (hd_seed_fingerprint, hd_account_index, spending_key_available) = match kind {
         AccountSource::Derived {
@@ -409,7 +402,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     let birthday_orchard_tree_size: Option<u64> = None;
 
     let ufvk_encoded = viewing_key.ufvk().map(|ufvk| ufvk.encode(params));
-    let account_id: AccountId = conn
+    let account_id = conn
         .query_row(
             r#"
             INSERT INTO accounts (
@@ -430,10 +423,10 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 :recover_until_height,
                 :has_spend_key
             )
-            RETURNING id;
+            RETURNING id
             "#,
             named_params![
-                ":uuid": uuid.0,
+                ":uuid": account_uuid.0,
                 ":account_kind": account_kind_code(kind),
                 ":hd_seed_fingerprint": hd_seed_fingerprint.as_ref().map(|fp| fp.to_bytes()),
                 ":hd_account_index": hd_account_index.map(u32::from),
@@ -448,7 +441,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ":recover_until_height": birthday.recover_until().map(u32::from),
                 ":has_spend_key": spending_key_available as i64,
             ],
-            |row| Ok(AccountId(row.get(0)?)),
+            |row| row.get(0).map(AccountId),
         )
         .map_err(|e| match e {
             rusqlite::Error::SqliteFailure(f, s)
@@ -458,12 +451,12 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 // the check using `get_account_for_ufvk` above, but in case it wasn't,
                 // make a best effort to determine the AccountId of the pre-existing row
                 // and provide that to our caller.
-                if let Ok(id) = conn.query_row(
-                    "SELECT id FROM accounts WHERE ufvk = ?",
+                if let Ok(colliding_uuid) = conn.query_row(
+                    "SELECT uuid FROM accounts WHERE ufvk = ?",
                     params![ufvk_encoded],
-                    |row| Ok(AccountId(row.get(0)?)),
+                    |row| Ok(AccountUuid(row.get(0)?)),
                 ) {
-                    return SqliteClientError::AccountCollision(id);
+                    return SqliteClientError::AccountCollision(colliding_uuid);
                 }
 
                 SqliteClientError::from(rusqlite::Error::SqliteFailure(f, s))
@@ -472,8 +465,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         })?;
 
     let account = Account {
-        account_id,
-        uuid,
+        uuid: account_uuid,
         kind,
         viewing_key,
     };
@@ -594,16 +586,18 @@ pub(crate) fn add_account<P: consensus::Parameters>(
 pub(crate) fn get_current_address<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    account_id: AccountId,
+    account_uuid: AccountUuid,
 ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, SqliteClientError> {
     // This returns the most recently generated address.
     let addr: Option<(String, Vec<u8>)> = conn
         .query_row(
             "SELECT address, diversifier_index_be
-            FROM addresses WHERE account_id = :account_id
-            ORDER BY diversifier_index_be DESC
-            LIMIT 1",
-            named_params![":account_id": account_id.0],
+             FROM addresses
+             JOIN accounts ON addresses.account_id = accounts.id
+             WHERE accounts.uuid = :account_uuid
+             ORDER BY diversifier_index_be DESC
+             LIMIT 1",
+            named_params![":account_uuid": account_uuid.0],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
@@ -636,10 +630,10 @@ pub(crate) fn get_current_address<P: consensus::Parameters>(
 pub(crate) fn insert_address<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    account: AccountId,
+    account_id: AccountId,
     diversifier_index: DiversifierIndex,
     address: &UnifiedAddress,
-) -> Result<(), rusqlite::Error> {
+) -> Result<(), SqliteClientError> {
     let mut stmt = conn.prepare_cached(
         "INSERT INTO addresses (
             account_id,
@@ -648,7 +642,7 @@ pub(crate) fn insert_address<P: consensus::Parameters>(
             cached_transparent_receiver_address
         )
         VALUES (
-            :account,
+            :account_id,
             :diversifier_index_be,
             :address,
             :cached_transparent_receiver_address
@@ -659,7 +653,7 @@ pub(crate) fn insert_address<P: consensus::Parameters>(
     let mut di_be = *diversifier_index.as_bytes();
     di_be.reverse();
     stmt.execute(named_params![
-        ":account": account.0,
+        ":account_id": account_id.0,
         ":diversifier_index_be": &di_be[..],
         ":address": &address.encode(params),
         ":cached_transparent_receiver_address": &address.transparent().map(|r| r.encode(params)),
@@ -672,23 +666,22 @@ pub(crate) fn insert_address<P: consensus::Parameters>(
 pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, SqliteClientError> {
+) -> Result<HashMap<AccountUuid, UnifiedFullViewingKey>, SqliteClientError> {
     // Fetch the UnifiedFullViewingKeys we are tracking
-    let mut stmt_fetch_accounts = conn.prepare("SELECT id, ufvk FROM accounts")?;
+    let mut stmt_fetch_accounts = conn.prepare("SELECT uuid, ufvk FROM accounts")?;
 
     let rows = stmt_fetch_accounts.query_map([], |row| {
-        let acct: u32 = row.get(0)?;
         let ufvk_str: Option<String> = row.get(1)?;
         if let Some(ufvk_str) = ufvk_str {
             let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
                 .map_err(SqliteClientError::CorruptedData);
-            Ok(Some((AccountId(acct), ufvk)))
+            Ok(Some((AccountUuid(row.get(0)?), ufvk)))
         } else {
             Ok(None)
         }
     })?;
 
-    let mut res: HashMap<AccountId, UnifiedFullViewingKey> = HashMap::new();
+    let mut res: HashMap<AccountUuid, UnifiedFullViewingKey> = HashMap::new();
     for row in rows {
         if let Some((account_id, ufvkr)) = row? {
             res.insert(account_id, ufvkr?);
@@ -718,11 +711,11 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     let transparent_item: Option<Vec<u8>> = None;
 
     let mut stmt = conn.prepare(
-        "SELECT id, uuid, account_kind, hd_seed_fingerprint, hd_account_index, ufvk, has_spend_key
-        FROM accounts
-        WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
-           OR sapling_fvk_item_cache = :sapling_fvk_item_cache
-           OR p2pkh_fvk_item_cache = :p2pkh_fvk_item_cache",
+        "SELECT uuid, account_kind, hd_seed_fingerprint, hd_account_index, ufvk, has_spend_key
+         FROM accounts
+         WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
+            OR sapling_fvk_item_cache = :sapling_fvk_item_cache
+            OR p2pkh_fvk_item_cache = :p2pkh_fvk_item_cache",
     )?;
 
     let accounts = stmt
@@ -733,8 +726,7 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
                 ":p2pkh_fvk_item_cache": transparent_item,
             ],
             |row| {
-                let account_id = row.get::<_, u32>("id").map(AccountId)?;
-                let uuid = AccountUuid(row.get("uuid")?);
+                let account_uuid = AccountUuid(row.get("uuid")?);
                 let kind = parse_account_source(
                     row.get("account_kind")?,
                     row.get("hd_seed_fingerprint")?,
@@ -748,15 +740,14 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
                 let viewing_key = ViewingKey::Full(Box::new(
                     UnifiedFullViewingKey::decode(params, &ufvk_str).map_err(|e| {
                         SqliteClientError::CorruptedData(format!(
-                            "Could not decode unified full viewing key for account {:?}: {}",
-                            account_id, e
+                            "Could not decode unified full viewing key for account {}: {}",
+                            account_uuid.0, e
                         ))
                     })?,
                 ));
 
                 Ok(Account {
-                    account_id,
-                    uuid,
+                    uuid: account_uuid,
                     kind,
                     viewing_key,
                 })
@@ -778,41 +769,39 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
 pub(crate) fn get_derived_account<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    seed: &SeedFingerprint,
+    seed_fp: &SeedFingerprint,
     account_index: zip32::AccountId,
 ) -> Result<Option<Account>, SqliteClientError> {
     let mut stmt = conn.prepare(
-        "SELECT id, uuid, ufvk
-        FROM accounts
-        WHERE hd_seed_fingerprint = :hd_seed_fingerprint
-          AND hd_account_index = :account_id",
+        "SELECT uuid, ufvk
+         FROM accounts
+         WHERE hd_seed_fingerprint = :hd_seed_fingerprint
+         AND hd_account_index = :hd_account_index",
     )?;
 
     let mut accounts = stmt.query_and_then::<_, SqliteClientError, _, _>(
         named_params![
-            ":hd_seed_fingerprint": seed.to_bytes(),
+            ":hd_seed_fingerprint": seed_fp.to_bytes(),
             ":hd_account_index": u32::from(account_index),
         ],
         |row| {
-            let account_id = row.get::<_, u32>("id").map(AccountId)?;
-            let uuid = AccountUuid(row.get("uuid")?);
+            let account_uuid = AccountUuid(row.get("uuid")?);
             let ufvk = match row.get::<_, Option<String>>("ufvk")? {
                 None => Err(SqliteClientError::CorruptedData(format!(
-                    "Missing unified full viewing key for derived account {:?}",
-                    account_id,
+                    "Missing unified full viewing key for derived account {}",
+                    account_uuid.0,
                 ))),
                 Some(ufvk_str) => UnifiedFullViewingKey::decode(params, &ufvk_str).map_err(|e| {
                     SqliteClientError::CorruptedData(format!(
-                        "Could not decode unified full viewing key for account {:?}: {}",
-                        account_id, e
+                        "Could not decode unified full viewing key for account {}: {}",
+                        account_uuid.0, e
                     ))
                 }),
             }?;
             Ok(Account {
-                account_id,
-                uuid,
+                uuid: account_uuid,
                 kind: AccountSource::Derived {
-                    seed_fingerprint: *seed,
+                    seed_fingerprint: *seed_fp,
                     account_index,
                 },
                 viewing_key: ViewingKey::Full(Box::new(ufvk)),
@@ -1306,7 +1295,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     params: &P,
     min_confirmations: u32,
     progress: &impl ProgressEstimator,
-) -> Result<Option<WalletSummary<AccountId>>, SqliteClientError> {
+) -> Result<Option<WalletSummary<AccountUuid>>, SqliteClientError> {
     let chain_tip_height = match chain_tip_height(tx)? {
         Some(h) => h,
         None => {
@@ -1377,18 +1366,18 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         None => return Ok(None),
     };
 
-    let mut stmt_accounts = tx.prepare_cached("SELECT id FROM accounts")?;
+    let mut stmt_accounts = tx.prepare_cached("SELECT uuid FROM accounts")?;
     let mut account_balances = stmt_accounts
         .query([])?
         .and_then(|row| {
-            Ok::<_, SqliteClientError>((AccountId(row.get::<_, u32>(0)?), AccountBalance::ZERO))
+            Ok::<_, SqliteClientError>((AccountUuid(row.get::<_, Uuid>(0)?), AccountBalance::ZERO))
         })
-        .collect::<Result<HashMap<AccountId, AccountBalance>, _>>()?;
+        .collect::<Result<HashMap<AccountUuid, AccountBalance>, _>>()?;
 
     fn count_notes<F>(
         tx: &rusqlite::Transaction,
         summary_height: BlockHeight,
-        account_balances: &mut HashMap<AccountId, AccountBalance>,
+        account_balances: &mut HashMap<AccountUuid, AccountBalance>,
         table_prefix: &'static str,
         with_pool_balance: F,
     ) -> Result<(), SqliteClientError>
@@ -1426,8 +1415,9 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
         let any_spendable = is_any_spendable(tx, summary_height, table_prefix)?;
         let mut stmt_select_notes = tx.prepare_cached(&format!(
-            "SELECT n.account_id, n.value, n.is_change, scan_state.max_priority, t.block
+            "SELECT a.uuid, n.value, n.is_change, scan_state.max_priority, t.block
              FROM {table_prefix}_received_notes n
+             JOIN accounts a ON a.id = n.account_id
              JOIN transactions t ON t.id_tx = n.tx
              LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
                 ON n.commitment_tree_position >= scan_state.start_position
@@ -1451,7 +1441,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         let mut rows =
             stmt_select_notes.query(named_params![":summary_height": u32::from(summary_height)])?;
         while let Some(row) = rows.next()? {
-            let account = AccountId(row.get::<_, u32>(0)?);
+            let account = AccountUuid(row.get::<_, Uuid>(0)?);
 
             let value_raw = row.get::<_, i64>(1)?;
             let value = NonNegativeAmount::from_nonnegative_i64(value_raw).map_err(|_| {
@@ -1723,7 +1713,7 @@ pub(crate) fn get_transaction<P: Parameters>(
 pub(crate) fn get_funding_accounts(
     conn: &rusqlite::Connection,
     tx: &Transaction,
-) -> Result<HashSet<AccountId>, rusqlite::Error> {
+) -> Result<HashSet<AccountUuid>, rusqlite::Error> {
     let mut funding_accounts = HashSet::new();
     #[cfg(feature = "transparent-inputs")]
     funding_accounts.extend(transparent::detect_spending_accounts(
@@ -1805,13 +1795,13 @@ pub(crate) fn wallet_birthday(
 
 pub(crate) fn account_birthday(
     conn: &rusqlite::Connection,
-    account: AccountId,
+    account_uuid: AccountUuid,
 ) -> Result<BlockHeight, SqliteClientError> {
     conn.query_row(
         "SELECT birthday_height
          FROM accounts
-         WHERE id = :account_id",
-        named_params![":account_id": account.0],
+         WHERE uuid = :account_uuid",
+        named_params![":account_uuid": account_uuid.0],
         |row| row.get::<_, u32>(0).map(BlockHeight::from),
     )
     .optional()
@@ -1846,49 +1836,50 @@ pub(crate) fn block_height_extrema(
     })
 }
 
-pub(crate) fn get_account_for_uuid<P: Parameters>(
+pub(crate) fn get_account_id(
     conn: &rusqlite::Connection,
-    params: &P,
     account_uuid: AccountUuid,
-) -> Result<Option<Account>, SqliteClientError> {
-    match conn
-        .query_row(
-            "SELECT id FROM accounts WHERE uuid = :uuid",
-            named_params! {":uuid": account_uuid.0},
-            |row| row.get("id").map(AccountId),
-        )
-        .optional()?
-    {
-        None => Ok(None),
-        Some(account_id) => Ok(Some(
-            // TODO: `get_account` should return a non-optional value now that `AccountId`
-            // is guaranteed to exist (because it can't be externally constructed), but
-            // the `WalletRead::AccountId` associated type is permitted to not exist, and
-            // I don't want to deal with the refactor right now.
-            get_account(conn, params, account_id)?.expect("account_id exists"),
-        )),
-    }
+) -> Result<AccountId, SqliteClientError> {
+    conn.query_row(
+        "SELECT id FROM accounts WHERE uuid = :account_uuid",
+        named_params! {":account_uuid": account_uuid.0},
+        |row| row.get("id").map(AccountId),
+    )
+    .optional()?
+    .ok_or(SqliteClientError::AccountUnknown)
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn get_account_uuid(
+    conn: &rusqlite::Connection,
+    account_id: AccountId,
+) -> Result<AccountUuid, SqliteClientError> {
+    conn.query_row(
+        "SELECT uuid FROM accounts WHERE id = :account_id",
+        named_params! {":account_id": account_id.0},
+        |row| row.get("uuid").map(AccountUuid),
+    )
+    .optional()?
+    .ok_or(SqliteClientError::AccountUnknown)
 }
 
 pub(crate) fn get_account<P: Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    account_id: AccountId,
+    account_uuid: AccountUuid,
 ) -> Result<Option<Account>, SqliteClientError> {
     let mut sql = conn.prepare_cached(
         r#"
-        SELECT uuid, account_kind, hd_seed_fingerprint, hd_account_index, ufvk, uivk, has_spend_key
+        SELECT account_kind, hd_seed_fingerprint, hd_account_index, ufvk, uivk, has_spend_key
         FROM accounts
-        WHERE id = :account_id
+        WHERE uuid = :account_uuid
         "#,
     )?;
 
-    let mut result = sql.query(named_params![":account_id": account_id.0])?;
+    let mut result = sql.query(named_params![":account_uuid": account_uuid.0])?;
     let row = result.next()?;
     match row {
         Some(row) => {
-            let uuid = AccountUuid(row.get("uuid")?);
-
             let kind = parse_account_source(
                 row.get("account_kind")?,
                 row.get("hd_seed_fingerprint")?,
@@ -1911,8 +1902,7 @@ pub(crate) fn get_account<P: Parameters>(
             };
 
             Ok(Some(Account {
-                account_id,
-                uuid,
+                uuid: account_uuid,
                 kind,
                 viewing_key,
             }))
@@ -2182,7 +2172,7 @@ pub(crate) fn get_max_height_hash(
 
 pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
     wdb: &mut WalletDb<SqlTransaction<'_>, P>,
-    sent_tx: &SentTransaction<AccountId>,
+    sent_tx: &SentTransaction<AccountUuid>,
 ) -> Result<(), SqliteClientError> {
     let tx_ref = put_tx_data(
         wdb.conn.0,
@@ -2553,12 +2543,12 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
 /// Note that this is called from db migration code.
 pub(crate) fn get_account_ids(
     conn: &rusqlite::Connection,
-) -> Result<Vec<AccountId>, rusqlite::Error> {
-    let mut stmt = conn.prepare("SELECT id FROM accounts")?;
+) -> Result<Vec<AccountUuid>, rusqlite::Error> {
+    let mut stmt = conn.prepare("SELECT uuid FROM accounts")?;
     let mut rows = stmt.query([])?;
     let mut result = Vec::new();
     while let Some(row) = rows.next()? {
-        let id = AccountId(row.get(0)?);
+        let id = AccountUuid(row.get(0)?);
         result.push(id);
     }
     Ok(result)
@@ -2668,7 +2658,7 @@ pub(crate) fn put_block(
 pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
-    d_tx: DecryptedTransaction<AccountId>,
+    d_tx: DecryptedTransaction<AccountUuid>,
 ) -> Result<(), SqliteClientError> {
     let tx_ref = put_tx_data(conn, d_tx.tx(), None, None, None)?;
     if let Some(height) = d_tx.mined_height() {
@@ -2904,14 +2894,14 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
 
                 // If the output belongs to the wallet, add it to `transparent_received_outputs`.
                 #[cfg(feature = "transparent-inputs")]
-                if let Some(account_id) =
-                    transparent::find_account_for_transparent_address(conn, params, &address)?
+                if let Some(account_uuid) =
+                    transparent::find_account_uuid_for_transparent_address(conn, params, &address)?
                 {
                     debug!(
                         "{:?} output {} belongs to account {:?}",
                         d_tx.tx().txid(),
                         output_index,
-                        account_id
+                        account_uuid
                     );
                     transparent::put_transparent_output(
                         conn,
@@ -2923,7 +2913,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                         txout,
                         d_tx.mined_height(),
                         &address,
-                        account_id,
+                        account_uuid,
                         false,
                     )?;
 
@@ -2954,12 +2944,12 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                 // If a transaction we observe contains spends from our wallet, we will
                 // store its transparent outputs in the same way they would be stored by
                 // create_spend_to_address.
-                if let Some(account_id) = funding_account {
+                if let Some(account_uuid) = funding_account {
                     let receiver = Receiver::Transparent(address);
 
                     #[cfg(feature = "transparent-inputs")]
                     let recipient_addr =
-                        select_receiving_address(params, conn, account_id, &receiver)?
+                        select_receiving_address(params, conn, account_uuid, &receiver)?
                             .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
 
                     #[cfg(not(feature = "transparent-inputs"))]
@@ -2970,7 +2960,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                     put_sent_output(
                         conn,
                         params,
-                        account_id,
+                        account_uuid,
                         tx_ref,
                         output_index,
                         &recipient,
@@ -3001,14 +2991,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     // part) by this wallet.
     #[cfg(feature = "transparent-inputs")]
     if tx_has_wallet_outputs {
-        if let Some(b) = d_tx.tx().transparent_bundle() {
-            // queue the transparent inputs for enhancement
-            queue_tx_retrieval(
-                conn,
-                b.vin.iter().map(|txin| *txin.prevout.txid()),
-                Some(tx_ref),
-            )?;
-        }
+        queue_transparent_input_retrieval(conn, tx_ref, &d_tx)?
     }
 
     notify_tx_retrieved(conn, d_tx.tx().txid())?;
@@ -3016,16 +2999,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     // If the decrypted transaction is unmined and has no shielded components, add it to
     // the queue for status retrieval.
     #[cfg(feature = "transparent-inputs")]
-    {
-        let detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
-        #[cfg(feature = "orchard")]
-        let detectable_via_scanning =
-            detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
-
-        if d_tx.mined_height().is_none() && !detectable_via_scanning {
-            queue_tx_retrieval(conn, std::iter::once(d_tx.tx().txid()), None)?;
-        }
-    }
+    queue_unmined_tx_retrieval(conn, &d_tx)?;
 
     Ok(())
 }
@@ -3034,7 +3008,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
 /// contain a note related to this wallet into the database.
 pub(crate) fn put_tx_meta(
     conn: &rusqlite::Connection,
-    tx: &WalletTx<AccountId>,
+    tx: &WalletTx<AccountUuid>,
     height: BlockHeight,
 ) -> Result<TxRef, SqliteClientError> {
     // It isn't there, so insert our transaction into the database.
@@ -3065,7 +3039,7 @@ pub(crate) fn put_tx_meta(
 pub(crate) fn select_receiving_address<P: consensus::Parameters>(
     _params: &P,
     conn: &rusqlite::Connection,
-    account: AccountId,
+    account: AccountUuid,
     receiver: &Receiver,
 ) -> Result<Option<ZcashAddress>, SqliteClientError> {
     match receiver {
@@ -3085,10 +3059,14 @@ pub(crate) fn select_receiving_address<P: consensus::Parameters>(
             .transpose()
             .map_err(SqliteClientError::from),
         receiver => {
-            let mut stmt =
-                conn.prepare_cached("SELECT address FROM addresses WHERE account_id = :account")?;
+            let mut stmt = conn.prepare_cached(
+                "SELECT address
+                    FROM addresses
+                    JOIN accounts ON accounts.id = addresses.account_id
+                    WHERE accounts.uuid = :account_uuid",
+            )?;
 
-            let mut result = stmt.query(named_params! { ":account": account.0 })?;
+            let mut result = stmt.query(named_params! { ":account_uuid": account.0 })?;
             while let Some(row) = result.next()? {
                 let addr_str = row.get::<_, String>(0)?;
                 let decoded = addr_str.parse::<ZcashAddress>()?;
@@ -3159,6 +3137,40 @@ impl TxQueryType {
             _ => None,
         }
     }
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn queue_transparent_input_retrieval<AccountId>(
+    conn: &rusqlite::Transaction<'_>,
+    tx_ref: TxRef,
+    d_tx: &DecryptedTransaction<'_, AccountId>,
+) -> Result<(), SqliteClientError> {
+    if let Some(b) = d_tx.tx().transparent_bundle() {
+        // queue the transparent inputs for enhancement
+        queue_tx_retrieval(
+            conn,
+            b.vin.iter().map(|txin| *txin.prevout.txid()),
+            Some(tx_ref),
+        )?;
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn queue_unmined_tx_retrieval<AccountId>(
+    conn: &rusqlite::Transaction<'_>,
+    d_tx: &DecryptedTransaction<'_, AccountId>,
+) -> Result<(), SqliteClientError> {
+    let detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
+    #[cfg(feature = "orchard")]
+    let detectable_via_scanning = detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
+
+    if d_tx.mined_height().is_none() && !detectable_via_scanning {
+        queue_tx_retrieval(conn, std::iter::once(d_tx.tx().txid()), None)?
+    }
+
+    Ok(())
 }
 
 pub(crate) fn queue_tx_retrieval(
@@ -3241,29 +3253,40 @@ pub(crate) fn notify_tx_retrieved(
 // A utility function for creation of parameters for use in `insert_sent_output`
 // and `put_sent_output`
 fn recipient_params<P: consensus::Parameters>(
+    conn: &Connection,
     params: &P,
-    to: &Recipient<AccountId, Note, OutPoint>,
-) -> (Option<String>, Option<AccountId>, PoolType) {
+    from: AccountUuid,
+    to: &Recipient<AccountUuid, Note, OutPoint>,
+) -> Result<(AccountId, Option<String>, Option<AccountId>, PoolType), SqliteClientError> {
+    let from_account_id = get_account_id(conn, from)?;
     match to {
-        Recipient::External(addr, pool) => (Some(addr.encode()), None, *pool),
+        Recipient::External(addr, pool) => Ok((from_account_id, Some(addr.encode()), None, *pool)),
         Recipient::EphemeralTransparent {
             receiving_account,
             ephemeral_address,
             ..
-        } => (
-            Some(ephemeral_address.encode(params)),
-            Some(*receiving_account),
-            PoolType::TRANSPARENT,
-        ),
+        } => {
+            let to_account = get_account_id(conn, *receiving_account)?;
+            Ok((
+                from_account_id,
+                Some(ephemeral_address.encode(params)),
+                Some(to_account),
+                PoolType::TRANSPARENT,
+            ))
+        }
         Recipient::InternalAccount {
             receiving_account,
             external_address,
             note,
-        } => (
-            external_address.as_ref().map(|a| a.encode()),
-            Some(*receiving_account),
-            PoolType::Shielded(note.protocol()),
-        ),
+        } => {
+            let to_account = get_account_id(conn, *receiving_account)?;
+            Ok((
+                from_account_id,
+                external_address.as_ref().map(|a| a.encode()),
+                Some(to_account),
+                PoolType::Shielded(note.protocol()),
+            ))
+        }
     }
 }
 
@@ -3274,7 +3297,7 @@ fn flag_previously_received_change(
     let flag_received_change = |table_prefix| {
         conn.execute(
             &format!(
-                "UPDATE {table_prefix}_received_notes 
+                "UPDATE {table_prefix}_received_notes
                  SET is_change = 1
                  FROM sent_notes sn
                  WHERE sn.tx = {table_prefix}_received_notes.tx
@@ -3301,24 +3324,25 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     tx_ref: TxRef,
-    from_account: AccountId,
-    output: &SentTransactionOutput<AccountId>,
+    from_account_uuid: AccountUuid,
+    output: &SentTransactionOutput<AccountUuid>,
 ) -> Result<(), SqliteClientError> {
     let mut stmt_insert_sent_output = conn.prepare_cached(
         "INSERT INTO sent_notes (
             tx, output_pool, output_index, from_account_id,
             to_address, to_account_id, value, memo)
-        VALUES (
+         VALUES (
             :tx, :output_pool, :output_index, :from_account_id,
             :to_address, :to_account_id, :value, :memo)",
     )?;
 
-    let (to_address, to_account_id, pool_type) = recipient_params(params, output.recipient());
+    let (from_account_id, to_address, to_account_id, pool_type) =
+        recipient_params(conn, params, from_account_uuid, output.recipient())?;
     let sql_args = named_params![
         ":tx": tx_ref.0,
         ":output_pool": &pool_code(pool_type),
         ":output_index": &i64::try_from(output.output_index()).unwrap(),
-        ":from_account_id": from_account.0,
+        ":from_account_id": from_account_id.0,
         ":to_address": &to_address,
         ":to_account_id": to_account_id.map(|a| a.0),
         ":value": &i64::from(Amount::from(output.value())),
@@ -3346,10 +3370,10 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
 pub(crate) fn put_sent_output<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
-    from_account: AccountId,
+    from_account_uuid: AccountUuid,
     tx_ref: TxRef,
     output_index: usize,
-    recipient: &Recipient<AccountId, Note, OutPoint>,
+    recipient: &Recipient<AccountUuid, Note, OutPoint>,
     value: NonNegativeAmount,
     memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
@@ -3368,12 +3392,13 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
             memo = IFNULL(:memo, memo)",
     )?;
 
-    let (to_address, to_account_id, pool_type) = recipient_params(params, recipient);
+    let (from_account_id, to_address, to_account_id, pool_type) =
+        recipient_params(conn, params, from_account_uuid, recipient)?;
     let sql_args = named_params![
         ":tx": tx_ref.0,
         ":output_pool": &pool_code(pool_type),
         ":output_index": &i64::try_from(output_index).unwrap(),
-        ":from_account_id": from_account.0,
+        ":from_account_id": from_account_id.0,
         ":to_address": &to_address,
         ":to_account_id": &to_account_id.map(|a| a.0),
         ":value": &i64::from(Amount::from(value)),
@@ -3561,25 +3586,25 @@ pub mod testing {
         ShieldedProtocol,
     };
 
-    use crate::{error::SqliteClientError, AccountId, SAPLING_TABLES_PREFIX};
+    use crate::{error::SqliteClientError, AccountUuid, SAPLING_TABLES_PREFIX};
 
     #[cfg(feature = "orchard")]
     use crate::ORCHARD_TABLES_PREFIX;
 
     pub(crate) fn get_tx_history(
         conn: &rusqlite::Connection,
-    ) -> Result<Vec<TransactionSummary<AccountId>>, SqliteClientError> {
+    ) -> Result<Vec<TransactionSummary<AccountUuid>>, SqliteClientError> {
         let mut stmt = conn.prepare_cached(
-            "SELECT accounts.id as account_id, v_transactions.*
+            "SELECT accounts.uuid as account_uuid, v_transactions.*
              FROM v_transactions
              JOIN accounts ON accounts.uuid = v_transactions.account_uuid
              ORDER BY mined_height DESC, tx_index DESC",
         )?;
 
         let results = stmt
-            .query_and_then::<TransactionSummary<AccountId>, SqliteClientError, _, _>([], |row| {
+            .query_and_then::<_, SqliteClientError, _, _>([], |row| {
                 Ok(TransactionSummary::from_parts(
-                    AccountId(row.get("account_id")?),
+                    AccountUuid(row.get("account_uuid")?),
                     TxId::from_bytes(row.get("txid")?),
                     row.get::<_, Option<u32>>("expiry_height")?
                         .map(BlockHeight::from),
@@ -3646,6 +3671,7 @@ mod tests {
 
     use sapling::zip32::ExtendedSpendingKey;
     use secrecy::{ExposeSecret, SecretVec};
+    use uuid::Uuid;
     use zcash_client_backend::data_api::{
         testing::{AddressType, DataStoreFactory, FakeCompactOutput, TestBuilder, TestState},
         Account as _, AccountSource, WalletRead, WalletWrite,
@@ -3654,7 +3680,7 @@ mod tests {
 
     use crate::{
         testing::{db::TestDbFactory, BlockCache},
-        AccountId,
+        AccountUuid,
     };
 
     use super::account_birthday;
@@ -3683,8 +3709,7 @@ mod tests {
 
         // No default address is set for an un-initialized account
         assert_matches!(
-            st.wallet()
-                .get_current_address(AccountId(account.id().0 + 1)),
+            st.wallet().get_current_address(AccountUuid(Uuid::nil())),
             Ok(None)
         );
     }
