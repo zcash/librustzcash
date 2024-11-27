@@ -117,7 +117,7 @@ use zip32::{self, DiversifierIndex, Scope};
 use crate::{
     error::SqliteClientError,
     wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
-    AccountId, SqlTransaction, TransferType, WalletCommitmentTrees, WalletDb, DEFAULT_UA_REQUEST,
+    AccountRef, SqlTransaction, TransferType, WalletCommitmentTrees, WalletDb, DEFAULT_UA_REQUEST,
     PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
 };
 use crate::{AccountUuid, TxRef, VERIFY_LOOKAHEAD};
@@ -441,7 +441,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ":recover_until_height": birthday.recover_until().map(u32::from),
                 ":has_spend_key": spending_key_available as i64,
             ],
-            |row| row.get(0).map(AccountId),
+            |row| row.get(0).map(AccountRef),
         )
         .map_err(|e| match e {
             rusqlite::Error::SqliteFailure(f, s)
@@ -449,7 +449,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             {
                 // An account conflict occurred. This should already have been caught by
                 // the check using `get_account_for_ufvk` above, but in case it wasn't,
-                // make a best effort to determine the AccountId of the pre-existing row
+                // make a best effort to determine the AccountRef of the pre-existing row
                 // and provide that to our caller.
                 if let Ok(colliding_uuid) = conn.query_row(
                     "SELECT uuid FROM accounts WHERE ufvk = ?",
@@ -630,7 +630,7 @@ pub(crate) fn get_current_address<P: consensus::Parameters>(
 pub(crate) fn insert_address<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    account_id: AccountId,
+    account_id: AccountRef,
     diversifier_index: DiversifierIndex,
     address: &UnifiedAddress,
 ) -> Result<(), SqliteClientError> {
@@ -1836,14 +1836,14 @@ pub(crate) fn block_height_extrema(
     })
 }
 
-pub(crate) fn get_account_id(
+pub(crate) fn get_account_ref(
     conn: &rusqlite::Connection,
     account_uuid: AccountUuid,
-) -> Result<AccountId, SqliteClientError> {
+) -> Result<AccountRef, SqliteClientError> {
     conn.query_row(
         "SELECT id FROM accounts WHERE uuid = :account_uuid",
         named_params! {":account_uuid": account_uuid.0},
-        |row| row.get("id").map(AccountId),
+        |row| row.get("id").map(AccountRef),
     )
     .optional()?
     .ok_or(SqliteClientError::AccountUnknown)
@@ -1852,7 +1852,7 @@ pub(crate) fn get_account_id(
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn get_account_uuid(
     conn: &rusqlite::Connection,
-    account_id: AccountId,
+    account_id: AccountRef,
 ) -> Result<AccountUuid, SqliteClientError> {
     conn.query_row(
         "SELECT uuid FROM accounts WHERE id = :account_id",
@@ -3257,8 +3257,8 @@ fn recipient_params<P: consensus::Parameters>(
     params: &P,
     from: AccountUuid,
     to: &Recipient<AccountUuid, Note, OutPoint>,
-) -> Result<(AccountId, Option<String>, Option<AccountId>, PoolType), SqliteClientError> {
-    let from_account_id = get_account_id(conn, from)?;
+) -> Result<(AccountRef, Option<String>, Option<AccountRef>, PoolType), SqliteClientError> {
+    let from_account_id = get_account_ref(conn, from)?;
     match to {
         Recipient::External(addr, pool) => Ok((from_account_id, Some(addr.encode()), None, *pool)),
         Recipient::EphemeralTransparent {
@@ -3266,7 +3266,7 @@ fn recipient_params<P: consensus::Parameters>(
             ephemeral_address,
             ..
         } => {
-            let to_account = get_account_id(conn, *receiving_account)?;
+            let to_account = get_account_ref(conn, *receiving_account)?;
             Ok((
                 from_account_id,
                 Some(ephemeral_address.encode(params)),
@@ -3279,7 +3279,7 @@ fn recipient_params<P: consensus::Parameters>(
             external_address,
             note,
         } => {
-            let to_account = get_account_id(conn, *receiving_account)?;
+            let to_account = get_account_ref(conn, *receiving_account)?;
             Ok((
                 from_account_id,
                 external_address.as_ref().map(|a| a.encode()),

@@ -205,18 +205,18 @@ impl AccountUuid {
     }
 }
 
-/// The local identifier for an account.
+/// A typesafe wrapper for the primary key identifier for a row in the `accounts` table.
 ///
 /// This is an ephemeral value for efficiently and generically working with accounts in a
 /// [`WalletDb`]. To reference accounts in external contexts, use [`AccountUuid`].
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
-pub(crate) struct AccountId(u32);
+pub(crate) struct AccountRef(u32);
 
 /// This implementation is retained under `#[cfg(test)]` for pre-AccountUuid testing.
 #[cfg(test)]
-impl ConditionallySelectable for AccountId {
+impl ConditionallySelectable for AccountRef {
     fn conditional_select(a: &Self, b: &Self, choice: subtle::Choice) -> Self {
-        AccountId(ConditionallySelectable::conditional_select(
+        AccountRef(ConditionallySelectable::conditional_select(
             &a.0, &b.0, choice,
         ))
     }
@@ -667,7 +667,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         account: Self::AccountId,
         index_range: Option<Range<u32>>,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
-        let account_id = wallet::get_account_id(self.conn.borrow(), account)?;
+        let account_id = wallet::get_account_ref(self.conn.borrow(), account)?;
         wallet::transparent::ephemeral::get_known_ephemeral_addresses(
             self.conn.borrow(),
             &self.params,
@@ -947,7 +947,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                     let (addr, diversifier_index) = ufvk.find_address(search_from, request)?;
 
-                    let account_id = wallet::get_account_id(wdb.conn.0, account_uuid)?;
+                    let account_id = wallet::get_account_ref(wdb.conn.0, account_uuid)?;
                     wallet::insert_address(
                         wdb.conn.0,
                         &wdb.params,
@@ -1445,7 +1445,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         n: usize,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         self.transactionally(|wdb| {
-            let account_id = wallet::get_account_id(wdb.conn.0, account_id)?;
+            let account_id = wallet::get_account_ref(wdb.conn.0, account_id)?;
             wallet::transparent::ephemeral::reserve_next_n_ephemeral_addresses(
                 wdb.conn.0,
                 &wdb.params,

@@ -24,7 +24,7 @@ use {
             queue_transparent_input_retrieval, queue_unmined_tx_retrieval,
             transparent::{queue_transparent_spend_detection, uivk_legacy_transparent_address},
         },
-        AccountId, TxRef,
+        AccountRef, TxRef,
     },
     rusqlite::OptionalExtension as _,
     std::convert::Infallible,
@@ -147,16 +147,16 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                                      SELECT account_id from ephemeral_addresses
                                      WHERE address = :address",
                                     named_params![":address": address.encode(&self._params)],
-                                    |row| row.get(0).map(AccountId),
+                                    |row| row.get(0).map(AccountRef),
                                 )
                                 .optional()
                             };
                             let find_legacy_address_account =
-                                || -> Result<Option<AccountId>, SqliteClientError> {
+                                || -> Result<Option<AccountRef>, SqliteClientError> {
                                     let mut stmt = conn.prepare("SELECT id, uivk FROM accounts")?;
                                     let mut rows = stmt.query([])?;
                                     while let Some(row) = rows.next()? {
-                                        let account_id = row.get(0).map(AccountId)?;
+                                        let account_id = row.get(0).map(AccountRef)?;
                                         let uivk_str = row.get::<_, String>(1)?;
 
                                         if let Some((legacy_taddr, _)) =

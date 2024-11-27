@@ -23,7 +23,7 @@ use zip32::Scope;
 
 use crate::{error::SqliteClientError, AccountUuid, ReceivedNoteId, TxRef};
 
-use super::{get_account_id, memo_repr, parse_scope, scope_code};
+use super::{get_account_ref, memo_repr, parse_scope, scope_code};
 
 /// This trait provides a generalization over shielded output representations.
 pub(crate) trait ReceivedOrchardOutput {
@@ -236,7 +236,7 @@ pub(crate) fn put_received_note<T: ReceivedOrchardOutput<AccountId = AccountUuid
     tx_ref: TxRef,
     spent_in: Option<TxRef>,
 ) -> Result<(), SqliteClientError> {
-    let account_id = get_account_id(conn, output.account_id())?;
+    let account_id = get_account_ref(conn, output.account_id())?;
     let mut stmt_upsert_received_note = conn.prepare_cached(
         "INSERT INTO orchard_received_notes
         (

@@ -8,7 +8,7 @@ use zcash_protocol::consensus;
 use crate::wallet::init::WalletMigrationError;
 
 #[cfg(feature = "transparent-inputs")]
-use crate::{wallet::transparent::ephemeral, AccountId};
+use crate::{wallet::transparent::ephemeral, AccountRef};
 
 use super::utxos_to_txos;
 
@@ -69,7 +69,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             let mut stmt = transaction.prepare("SELECT id FROM accounts")?;
             let mut rows = stmt.query([])?;
             while let Some(row) = rows.next()? {
-                let account_id = AccountId(row.get(0)?);
+                let account_id = AccountRef(row.get(0)?);
                 ephemeral::init_account(transaction, &self.params, account_id)?;
             }
         }
@@ -107,7 +107,7 @@ mod tests {
             wallet::{
                 self, account_kind_code, init::init_wallet_db_internal, transparent::ephemeral,
             },
-            AccountId, WalletDb,
+            AccountRef, WalletDb,
         },
         zcash_client_backend::data_api::GAP_LIMIT,
     };
@@ -119,7 +119,7 @@ mod tests {
         wdb: &mut WalletDb<Connection, Network>,
         seed: &SecretVec<u8>,
         birthday: &AccountBirthday,
-    ) -> Result<(AccountId, UnifiedSpendingKey), SqliteClientError> {
+    ) -> Result<(AccountRef, UnifiedSpendingKey), SqliteClientError> {
         wdb.transactionally(|wdb| {
             let seed_fingerprint =
                 SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
@@ -158,7 +158,7 @@ mod tests {
             #[cfg(not(feature = "orchard"))]
             let birthday_orchard_tree_size: Option<u64> = None;
 
-            let account_id: AccountId = wdb.conn.0.query_row(
+            let account_id: AccountRef = wdb.conn.0.query_row(
                 r#"
                 INSERT INTO accounts (
                     account_kind, hd_seed_fingerprint, hd_account_index,
@@ -190,7 +190,7 @@ mod tests {
                     ":birthday_orchard_tree_size": birthday_orchard_tree_size,
                     ":recover_until_height": birthday.recover_until().map(u32::from)
                 ],
-                |row| Ok(AccountId(row.get(0)?)),
+                |row| Ok(AccountRef(row.get(0)?)),
             )?;
 
             // Initialize the `ephemeral_addresses` table.
@@ -232,7 +232,7 @@ mod tests {
             account_index: account0_index,
         });
         assert_eq!(u32::from(account0_index), 0);
-        let account0_id = crate::AccountId(0);
+        let account0_id = AccountRef(0);
 
         let usk0 = UnifiedSpendingKey::from_seed(&network, &seed0, account0_index).unwrap();
         let ufvk0 = usk0.to_unified_full_viewing_key();

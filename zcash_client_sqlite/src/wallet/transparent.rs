@@ -22,7 +22,7 @@ use zcash_primitives::{
 };
 use zcash_protocol::consensus::{self, BlockHeight};
 
-use super::{chain_tip_height, get_account_id, get_account_ids};
+use super::{chain_tip_height, get_account_ids};
 use crate::AccountUuid;
 use crate::{error::SqliteClientError, TxRef, UtxoId};
 
@@ -696,7 +696,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     known_unspent: bool,
 ) -> Result<UtxoId, SqliteClientError> {
     let output_height = output_height.map(u32::from);
-    let receiving_account_id = get_account_id(conn, receiving_account_uuid)?;
+    let receiving_account_id = super::get_account_ref(conn, receiving_account_uuid)?;
 
     // Check whether we have an entry in the blocks table for the output height;
     // if not, the transaction will be updated with its mined height when the
