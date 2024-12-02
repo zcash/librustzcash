@@ -847,17 +847,21 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         "Seed must be between 32 and 252 bytes in length.".to_owned(),
                     )
                 })?;
-            let account_index = wallet::max_zip32_account_index(wdb.conn.0, &seed_fingerprint)?
-                .map(|a| {
-                    a.next()
-                        .ok_or(SqliteClientError::Zip32AccountIndexOutOfRange)
-                })
-                .transpose()?
-                .unwrap_or(zip32::AccountId::ZERO);
+            let zip32_account_index =
+                wallet::max_zip32_account_index(wdb.conn.0, &seed_fingerprint)?
+                    .map(|a| {
+                        a.next()
+                            .ok_or(SqliteClientError::Zip32AccountIndexOutOfRange)
+                    })
+                    .transpose()?
+                    .unwrap_or(zip32::AccountId::ZERO);
 
-            let usk =
-                UnifiedSpendingKey::from_seed(&wdb.params, seed.expose_secret(), account_index)
-                    .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
+            let usk = UnifiedSpendingKey::from_seed(
+                &wdb.params,
+                seed.expose_secret(),
+                zip32_account_index,
+            )
+            .map_err(|_| SqliteClientError::KeyDerivationError(zip32_account_index))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
             let account = wallet::add_account(
@@ -865,7 +869,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 &wdb.params,
                 AccountSource::Derived {
                     seed_fingerprint,
-                    account_index,
+                    account_index: zip32_account_index,
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
                 birthday,

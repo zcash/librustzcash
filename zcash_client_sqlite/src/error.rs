@@ -121,7 +121,7 @@ pub enum SqliteClientError {
     NoteFilterInvalid(NoteFilter),
 
     /// The proposal cannot be constructed until transactions with previously reserved
-    /// ephemeral address outputs have been mined. The parameters are the account id and
+    /// ephemeral address outputs have been mined. The parameters are the account UUID and
     /// the index that could not safely be reserved.
     #[cfg(feature = "transparent-inputs")]
     ReachedGapLimit(AccountUuid, u32),
@@ -174,10 +174,10 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::AddressGeneration(e) => write!(f, "{}", e),
             SqliteClientError::AccountUnknown => write!(f, "The account with the given ID does not belong to this wallet."),
             SqliteClientError::UnknownZip32Derivation => write!(f, "ZIP-32 derivation information is not known for this account."),
-            SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {}", u32::from(*acct_id)),
+            SqliteClientError::KeyDerivationError(zip32_index) => write!(f, "Key derivation failed for ZIP 32 account index {}", u32::from(*zip32_index)),
             SqliteClientError::BadAccountData(e) => write!(f, "Failed to add account: {}", e),
             SqliteClientError::Zip32AccountIndexOutOfRange => write!(f, "ZIP 32 account identifiers must be less than 0x7FFFFFFF."),
-            SqliteClientError::AccountCollision(id) => write!(f, "An account corresponding to the data provided already exists in the wallet with internal identifier {}.", id.0),
+            SqliteClientError::AccountCollision(account_uuid) => write!(f, "An account corresponding to the data provided already exists in the wallet with UUID {account_uuid:?}."),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::AddressNotRecognized(_) => write!(f, "The address associated with a received txo is not identifiable as belonging to the wallet."),
             SqliteClientError::CommitmentTree(err) => write!(f, "An error occurred accessing or updating note commitment tree data: {}.", err),

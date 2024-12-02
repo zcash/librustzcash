@@ -3061,9 +3061,9 @@ pub(crate) fn select_receiving_address<P: consensus::Parameters>(
         receiver => {
             let mut stmt = conn.prepare_cached(
                 "SELECT address
-                    FROM addresses
-                    JOIN accounts ON accounts.id = addresses.account_id
-                    WHERE accounts.uuid = :account_uuid",
+                 FROM addresses
+                 JOIN accounts ON accounts.id = addresses.account_id
+                 WHERE accounts.uuid = :account_uuid",
             )?;
 
             let mut result = stmt.query(named_params! { ":account_uuid": account.0 })?;
