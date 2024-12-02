@@ -60,7 +60,7 @@ use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        data_api::{TransactionDataRequest, TransactionStatus},
+        data_api::TransactionDataRequest,
         fees::ChangeValue,
         proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex},
         wallet::{TransparentAddressMetadata, WalletTransparentOutput},
@@ -85,6 +85,11 @@ use zcash_protocol::PoolType;
 
 #[cfg(feature = "pczt")]
 use pczt::roles::{prover::Prover, signer::Signer};
+
+/// The number of ephemeral addresses that can be safely reserved without observing any
+/// of them to be mined.
+#[cfg(feature = "transparent-inputs")]
+pub const EPHEMERAL_ADDR_GAP_LIMIT: usize = 5;
 
 /// Trait that exposes the pool-specific types and operations necessary to run the
 /// single-shielded-pool tests on a given pool.
@@ -533,7 +538,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 {
     use ::transparent::builder::TransparentSigningSet;
 
-    use crate::data_api::{OutputOfSentTx, GAP_LIMIT};
+    use crate::data_api::OutputOfSentTx;
 
     let mut st = TestBuilder::new()
         .with_data_store_factory(ds_factory)
@@ -558,23 +563,29 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
                 .block_height(),
             h
         );
-        assert_eq!(st.get_spendable_balance(account_id, 1), value);
         h
     };
 
     let value = Zatoshis::const_from_u64(100000);
     let transfer_amount = Zatoshis::const_from_u64(50000);
 
-    let run_test = |st: &mut TestState<_, DSF::DataStore, _>, expected_index| {
+    let run_test = |st: &mut TestState<_, DSF::DataStore, _>, expected_index, prior_balance| {
         // Add funds to the wallet.
         add_funds(st, value);
+        let initial_balance: Option<Zatoshis> = prior_balance + value;
+        assert_eq!(
+            st.get_spendable_balance(account_id, 1),
+            initial_balance.unwrap()
+        );
 
         let expected_step0_fee = (zip317::MARGINAL_FEE * 3u64).unwrap();
         let expected_step1_fee = zip317::MINIMUM_FEE;
         let expected_ephemeral = (transfer_amount + expected_step1_fee).unwrap();
         let expected_step0_change =
-            (value - expected_ephemeral - expected_step0_fee).expect("sufficient funds");
+            (initial_balance - expected_ephemeral - expected_step0_fee).expect("sufficient funds");
         assert!(expected_step0_change.is_positive());
+
+        let total_sent = (expected_step0_fee + expected_step1_fee + transfer_amount).unwrap();
 
         // Generate a ZIP 320 proposal, sending to the wallet's default transparent address
         // expressed as a TEX address.
@@ -620,6 +631,12 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         );
         assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 2);
         let txids = create_proposed_result.unwrap();
+
+        // Mine the created transactions.
+        for txid in txids.iter() {
+            let (h, _) = st.generate_next_block_including(*txid);
+            st.scan_cached_blocks(h, 1);
+        }
 
         // Check that there are sent outputs with the correct values.
         let confirmed_sent: Vec<Vec<_>> = txids
@@ -684,12 +701,15 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
             -ZatBalance::from(expected_ephemeral),
         );
 
-        (ephemeral_address.unwrap().0, txids)
+        let ending_balance = st.get_spendable_balance(account_id, 1);
+        assert_eq!(initial_balance - total_sent, ending_balance.into());
+
+        (ephemeral_address.unwrap().0, txids, ending_balance)
     };
 
     // Each transfer should use a different ephemeral address.
-    let (ephemeral0, txids0) = run_test(&mut st, 0);
-    let (ephemeral1, txids1) = run_test(&mut st, 1);
+    let (ephemeral0, _, bal_0) = run_test(&mut st, 0, Zatoshis::ZERO);
+    let (ephemeral1, _, _) = run_test(&mut st, 1, bal_0);
     assert_ne!(ephemeral0, ephemeral1);
 
     let height = add_funds(&mut st, value);
@@ -730,7 +750,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         .wallet()
         .get_known_ephemeral_addresses(account_id, None)
         .unwrap();
-    assert_eq!(known_addrs.len(), (GAP_LIMIT as usize) + 2);
+    assert_eq!(known_addrs.len(), EPHEMERAL_ADDR_GAP_LIMIT + 2);
 
     // Check that the addresses are all distinct.
     let known_set: HashSet<_> = known_addrs.iter().map(|(addr, _)| addr).collect();
@@ -755,7 +775,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         },
     );
     let mut transparent_signing_set = TransparentSigningSet::new();
-    let (colliding_addr, _) = &known_addrs[10];
+    let (colliding_addr, _) = &known_addrs[EPHEMERAL_ADDR_GAP_LIMIT - 1];
     let utxo_value = (value - zip317::MINIMUM_FEE).unwrap();
     assert_matches!(
         builder.add_transparent_output(colliding_addr, utxo_value),
@@ -796,9 +816,15 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         )
         .unwrap();
     let txid = build_result.transaction().txid();
+
+    // Now, store the transaction, pretending it has been mined (we will actually mine the block
+    // next). This will cause the the gap start to move & a new `EPHEMERAL_ADDR_GAP_LIMIT` of
+
+    // addresses to be created.
+    let target_height = st.latest_cached_block().unwrap().height() + 1;
     st.wallet_mut()
         .store_decrypted_tx(DecryptedTransaction::new(
-            None,
+            Some(target_height),
             build_result.transaction(),
             vec![],
             #[cfg(feature = "orchard")]
@@ -806,25 +832,20 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         ))
         .unwrap();
 
-    // Verify that storing the fully transparent transaction causes a transaction
-    // status request to be generated.
-    let tx_data_requests = st.wallet().transaction_data_requests().unwrap();
-    assert!(tx_data_requests.contains(&TransactionDataRequest::GetStatus(txid)));
+    // Mine the transaction & scan it so that it is will be detected as mined. Note that
+    // `generate_next_block_including` does not actually do anything with fully-transparent
+    // transactions; we're doing this just to get the mined block that we added via
+    // `store_decrypted_tx` into the database.
+    let (h, _) = st.generate_next_block_including(txid);
+    st.scan_cached_blocks(h, 1);
 
-    // We call get_transparent_output with `allow_unspendable = true` to verify
-    // storage because the decrypted transaction has not yet been mined.
-    let utxo = st
-        .wallet()
-        .get_transparent_output(&OutPoint::new(txid.into(), 0), true)
-        .unwrap();
-    assert_matches!(utxo, Some(v) if v.value() == utxo_value);
-
-    // That should have advanced the start of the gap to index 11.
+    // At this point the start of the gap should be at index `EPHEMERAL_ADDR_GAP_LIMIT` and the new
+    // size of the known address set should be `EPHEMERAL_ADDR_GAP_LIMIT * 2`.
     let new_known_addrs = st
         .wallet()
         .get_known_ephemeral_addresses(account_id, None)
         .unwrap();
-    assert_eq!(new_known_addrs.len(), (GAP_LIMIT as usize) + 11);
+    assert_eq!(new_known_addrs.len(), EPHEMERAL_ADDR_GAP_LIMIT * 2);
     assert!(new_known_addrs.starts_with(&known_addrs));
 
     let reservation_should_succeed = |st: &mut TestState<_, DSF::DataStore, _>, n| {
@@ -844,85 +865,20 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         };
 
     let next_reserved = reservation_should_succeed(&mut st, 1);
-    assert_eq!(next_reserved[0], known_addrs[11]);
+    assert_eq!(next_reserved[0], known_addrs[EPHEMERAL_ADDR_GAP_LIMIT]);
 
-    // Calling `reserve_next_n_ephemeral_addresses(account_id, 1)` will have advanced
-    // the start of the gap to index 12. This also tests the `index_range` parameter.
-    let newer_known_addrs = st
-        .wallet()
-        .get_known_ephemeral_addresses(
-            account_id,
-            Some(
-                NonHardenedChildIndex::from_index(5).unwrap()
-                    ..NonHardenedChildIndex::from_index(100).unwrap(),
-            ),
-        )
-        .unwrap();
-    assert_eq!(newer_known_addrs.len(), (GAP_LIMIT as usize) + 12 - 5);
-    assert!(newer_known_addrs.starts_with(&new_known_addrs[5..]));
-
-    // None of the five transactions created above (two from each proposal and the
-    // one built manually) have been mined yet. So, the range of address indices
-    // that are safe to reserve is still 0..20, and we have already reserved 12
-    // addresses, so trying to reserve another 9 should fail.
-    reservation_should_fail(&mut st, 9, 20);
-    reservation_should_succeed(&mut st, 8);
-    reservation_should_fail(&mut st, 1, 20);
-
-    // Now mine the transaction with the ephemeral output at index 1.
-    // We already reserved 20 addresses, so this should allow 2 more (..22).
-    // It does not matter that the transaction with ephemeral output at index 0
-    // remains unmined.
-    let (h, _) = st.generate_next_block_including(txids1.head);
-    st.scan_cached_blocks(h, 1);
-    reservation_should_succeed(&mut st, 2);
-    reservation_should_fail(&mut st, 1, 22);
-
-    // Mining the transaction with the ephemeral output at index 0 at this point
-    // should make no difference.
-    let (h, _) = st.generate_next_block_including(txids0.head);
-    st.scan_cached_blocks(h, 1);
-    reservation_should_fail(&mut st, 1, 22);
-
-    // Now mine the transaction with the ephemeral output at index 10.
-    let tx = build_result.transaction();
-    let tx_index = 1;
-    let (h, _) = st.generate_next_block_from_tx(tx_index, tx);
-    st.scan_cached_blocks(h, 1);
-
-    // The above `scan_cached_blocks` does not detect `tx` as interesting to the
-    // wallet. If a transaction is in the database with a null `mined_height`,
-    // as in this case, its `mined_height` will remain null unless either
-    // `put_tx_meta` or `set_transaction_status` is called on it. The former
-    // is normally called internally via `put_blocks` as a result of scanning,
-    // but not for the case of a fully transparent transaction. The latter is
-    // called by the wallet implementation in response to processing the
-    // `transaction_data_requests` queue.
-
-    // The reservation should fail because `tx` is not yet seen as mined.
-    reservation_should_fail(&mut st, 1, 22);
-
-    // Simulate the wallet processing the `transaction_data_requests` queue.
-    let tx_data_requests = st.wallet().transaction_data_requests().unwrap();
-    assert!(tx_data_requests.contains(&TransactionDataRequest::GetStatus(tx.txid())));
-
-    // Respond to the GetStatus request.
-    st.wallet_mut()
-        .set_transaction_status(tx.txid(), TransactionStatus::Mined(h))
-        .unwrap();
-
-    // We already reserved 22 addresses, so mining the transaction with the
-    // ephemeral output at index 10 should allow 9 more (..31).
-    reservation_should_succeed(&mut st, 9);
-    reservation_should_fail(&mut st, 1, 31);
-
-    let newest_known_addrs = st
-        .wallet()
-        .get_known_ephemeral_addresses(account_id, None)
-        .unwrap();
-    assert_eq!(newest_known_addrs.len(), (GAP_LIMIT as usize) + 31);
-    assert!(newest_known_addrs.starts_with(&known_addrs));
-    assert!(newest_known_addrs[5..].starts_with(&newer_known_addrs));
+    // The range of address indices that are safe to reserve now is
+    // 0..(EPHEMERAL_ADDR_GAP_LIMIT * 2 - 1)`, and we have already reserved or used
+    // `EPHEMERAL_ADDR_GAP_LIMIT + 1`, addresses, so trying to reserve another
+    // `EPHEMERAL_ADDR_GAP_LIMIT` should fail.
+    reservation_should_fail(
+        &mut st,
+        EPHEMERAL_ADDR_GAP_LIMIT,
+        (EPHEMERAL_ADDR_GAP_LIMIT * 2) as u32,
+    );
+    reservation_should_succeed(&mut st, EPHEMERAL_ADDR_GAP_LIMIT - 1);
+    // Now we've reserved everything we can, we can't reserve one more
+    reservation_should_fail(&mut st, 1, (EPHEMERAL_ADDR_GAP_LIMIT * 2) as u32);
 }
 
 #[cfg(feature = "transparent-inputs")]

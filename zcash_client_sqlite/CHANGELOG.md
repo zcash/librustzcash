@@ -18,6 +18,14 @@ and this library adheres to Rust's notion of
   generic parameter, enabling it to be used with wallets constructed via
   `WalletDb::from_connection`.
 - The `v_transactions` view has added columns `total_spent` and `total_received`.
+- `zcash_client_sqlite::error::SqliteClientError` variants have changed:
+  - The `EphemeralAddressReuse` variant has been removed and replaced
+    by a new generalized `AddressReuse` error variant.
+  - The `ReachedGapLimit` variant no longer includes the account UUID
+    for the account that reached the limit in its payload.
+  - Each row returned from the `v_received_outputs` view now exposes an
+    internal identifier for the address that received that output. This should
+    be ignored by external consumers of this view.
 
 ## [0.14.0] - 2024-12-16
 
