@@ -13,6 +13,11 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `zcash_transparent::pczt::Bip32Derivation::extract_bip_44_fields`
+- `zcash_transparent::keys::NonHardenedChildIndex::saturating_sub`
+- `zcash_transparent::keys::NonHardenedChildIndex::saturating_add`
+- `zcash_transparent::keys::NonHardenedChildIndex::MAX`
+- `impl From<NonHardenedChildIndex> for zip32::DiversifierIndex`
+- `impl TryFrom<zip32::DiversifierIndex> for NonHardenedChildIndex`
 
 ## [0.1.0] - 2024-12-16
 

@@ -3,19 +3,18 @@
 use std::error;
 use std::fmt;
 
+use nonempty::NonEmpty;
 use shardtree::error::ShardTreeError;
+
 use zcash_address::ParseError;
 use zcash_client_backend::data_api::NoteFilter;
 use zcash_keys::keys::AddressGenerationError;
-use zcash_protocol::{consensus::BlockHeight, value::BalanceError, PoolType};
+use zcash_protocol::{consensus::BlockHeight, value::BalanceError, PoolType, TxId};
 
 use crate::{wallet::commitment_tree, AccountUuid};
 
 #[cfg(feature = "transparent-inputs")]
-use {
-    ::transparent::address::TransparentAddress, zcash_keys::encoding::TransparentCodecError,
-    zcash_primitives::transaction::TxId,
-};
+use {::transparent::address::TransparentAddress, zcash_keys::encoding::TransparentCodecError};
 
 /// The primary error type for the SQLite wallet backend.
 #[derive(Debug)]
@@ -119,16 +118,16 @@ pub enum SqliteClientError {
     NoteFilterInvalid(NoteFilter),
 
     /// The proposal cannot be constructed until transactions with previously reserved
-    /// ephemeral address outputs have been mined. The parameters are the account UUID and
-    /// the index that could not safely be reserved.
+    /// ephemeral address outputs have been mined. The error contains the index that could not
+    /// safely be reserved.
     #[cfg(feature = "transparent-inputs")]
-    ReachedGapLimit(AccountUuid, u32),
+    ReachedGapLimit(u32),
 
-    /// An ephemeral address would be reused. The parameters are the address in string
-    /// form, and the txid of the earliest transaction in which it is known to have been
-    /// used.
-    #[cfg(feature = "transparent-inputs")]
-    EphemeralAddressReuse(String, TxId),
+    /// The wallet attempted to create a transaction that would use of one of the wallet's
+    /// previously-used addresses, potentially creating a problem with on-chain transaction
+    /// linkability. The returned value contains the string encoding of the address and the txid(s)
+    /// of the transactions in which it is known to have been used.
+    AddressReuse(String, NonEmpty<TxId>),
 }
 
 impl error::Error for SqliteClientError {
@@ -185,12 +184,13 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::BalanceError(e) => write!(f, "Balance error: {}", e),
             SqliteClientError::NoteFilterInvalid(s) => write!(f, "Could not evaluate filter query: {:?}", s),
             #[cfg(feature = "transparent-inputs")]
-            SqliteClientError::ReachedGapLimit(account_id, bad_index) => write!(f,
-                "The proposal cannot be constructed until transactions with previously reserved ephemeral address outputs have been mined. \
-                 The ephemeral address in account {account_id:?} at index {bad_index} could not be safely reserved.",
+            SqliteClientError::ReachedGapLimit(bad_index) => write!(f,
+                "The proposal cannot be constructed until transactions with outputs to previously reserved ephemeral addresses have been mined. \
+                 The ephemeral address at index {bad_index} could not be safely reserved.",
             ),
-            #[cfg(feature = "transparent-inputs")]
-            SqliteClientError::EphemeralAddressReuse(address_str, txid) => write!(f, "The ephemeral address {address_str} previously used in txid {txid} would be reused."),
+            SqliteClientError::AddressReuse(address_str, txids) => {
+                write!(f, "The address {address_str} previously used in txid(s) {:?} would be reused.", txids)
+            }
         }
     }
 }
