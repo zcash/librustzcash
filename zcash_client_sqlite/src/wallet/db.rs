@@ -13,9 +13,7 @@
 // from showing up in `cargo doc --document-private-items`.
 #![allow(dead_code)]
 
-use static_assertions::const_assert_eq;
-
-use zcash_client_backend::data_api::{scanning::ScanPriority, GAP_LIMIT};
+use zcash_client_backend::data_api::scanning::ScanPriority;
 use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
 
 use crate::wallet::scanning::priority_code;
@@ -63,85 +61,57 @@ pub(super) const INDEX_ACCOUNTS_UIVK: &str =
 pub(super) const INDEX_HD_ACCOUNT: &str =
     r#"CREATE UNIQUE INDEX hd_account ON accounts (hd_seed_fingerprint, hd_account_index)"#;
 
-/// Stores diversified Unified Addresses that have been generated from accounts in the
-/// wallet.
-///
-/// - The `cached_transparent_receiver_address` column contains the transparent receiver component
-///   of the UA. It is cached directly in the table to make account lookups for transparent outputs
-///   more efficient, enabling joins to [`TABLE_TRANSPARENT_RECEIVED_OUTPUTS`].
-pub(super) const TABLE_ADDRESSES: &str = r#"
-CREATE TABLE "addresses" (
-    account_id INTEGER NOT NULL,
-    diversifier_index_be BLOB NOT NULL,
-    address TEXT NOT NULL,
-    cached_transparent_receiver_address TEXT,
-    FOREIGN KEY (account_id) REFERENCES accounts(id),
-    CONSTRAINT diversification UNIQUE (account_id, diversifier_index_be)
-)"#;
-pub(super) const INDEX_ADDRESSES_ACCOUNTS: &str = r#"
-CREATE INDEX "addresses_accounts" ON "addresses" (
-    "account_id" ASC
-)"#;
-
-/// Stores ephemeral transparent addresses used for ZIP 320.
-///
-/// For each account, these addresses are allocated sequentially by address index under scope 2
-/// (`TransparentKeyScope::EPHEMERAL`) at the "change" level of the BIP 32 address hierarchy.
-/// The ephemeral addresses stored in the table are exactly the "reserved" ephemeral addresses
-/// (that is addresses that have been allocated for use in a ZIP 320 transaction proposal), plus
-/// the addresses at the next [`GAP_LIMIT`] indices.
-///
-/// Addresses are never removed. New ones should only be reserved via the
-/// `WalletWrite::reserve_next_n_ephemeral_addresses` API. All of the addresses in the table
-/// should be scanned for incoming funds.
+/// Stores addresses that have been generated from accounts in the wallet.
 ///
 /// ### Columns
-/// - `address` contains the string (Base58Check) encoding of a transparent P2PKH address.
-/// - `used_in_tx` indicates that the address has been used by this wallet in a transaction (which
-///   has not necessarily been mined yet). This should only be set once, when the txid is known.
-/// - `seen_in_tx` is non-null iff an output to the address has been seed in a transaction observed
-///   on the network and passed to `store_decrypted_tx`. The transaction may have been sent by this
-//    wallet or another one using the same seed, or by a TEX address recipient sending back the
-///   funds. This is used to advance the "gap", as well as to heuristically reduce the chance of
-///   address reuse collisions with another wallet using the same seed.
 ///
-/// It is an external invariant that within each account:
-/// - the address indices are contiguous and start from 0;
-/// - the last [`GAP_LIMIT`] addresses have `used_in_tx` and `seen_in_tx` both NULL.
-///
-/// All but the last [`GAP_LIMIT`] addresses are defined to be "reserved" addresses. Since the next
-/// index to reserve is determined by dead reckoning from the last stored address, we use dummy
-/// entries having `NULL` for the value of the `address` column after the maximum valid index in
-/// order to allow the last [`GAP_LIMIT`] addresses at the end of the index range to be used.
-///
-/// Note that the fact that `used_in_tx` references a specific transaction is just a debugging aid.
-/// The same is mostly true of `seen_in_tx`, but we also take into account whether the referenced
-/// transaction is unmined in order to determine the last index that is safe to reserve.
-pub(super) const TABLE_EPHEMERAL_ADDRESSES: &str = r#"
-CREATE TABLE ephemeral_addresses (
+/// - `account_id`: the account whose IVK was used to derive this address.
+/// - `diversifier_index_be`: the diversifier index at which this address was derived.
+/// - `key_scope`: the key scope for which this address was derived.
+/// - `address`: The Unified, Sapling, or transparent address. For Unified and Sapling addresses,
+///   only external-key scoped addresses should be stored in this table; for purely transparent
+///   addresses, this may be an internal-scope (change) address, so that we can provide
+///   compatibility with HD-derived change addresses produced by transparent-only wallets.
+/// - `transparent_child_index`: the diversifier index, if it is in the range of a non-hardened
+///   transparent address index. This is used for gap limit handling and is always populated if the
+///   diversifier index is in that range; since the diversifier index is stored as a byte array we
+///   cannot use SQL integer operations on it and thus need it as an integer as well.
+/// - `cached_transparent_receiver_address`: the transparent receiver component of address (which
+///   may be the same as `address` in the case of an internal-scope transparent change address or a
+///   ZIP 320 interstitial address). It is cached directly in the table to make account lookups for
+///   transparent outputs more efficient, enabling joins to [`TABLE_TRANSPARENT_RECEIVED_OUTPUTS`].
+/// - `exposed_at_height`: The chain tip height at the time that the address was generated by an
+///   explicit request by the user or reserved for use in a ZIP 320 transaction. In the case of an
+///   address with its first use discovered in a transaction obtained by scanning the chain, this
+///   will be set to the mined height of that transaction.
+pub(super) const TABLE_ADDRESSES: &str = r#"
+CREATE TABLE "addresses" (
+    id INTEGER NOT NULL PRIMARY KEY,
     account_id INTEGER NOT NULL,
-    address_index INTEGER NOT NULL,
-    -- nullability of this column is controlled by the index_range_and_address_nullity check
-    address TEXT,
-    used_in_tx INTEGER,
-    seen_in_tx INTEGER,
+    key_scope INTEGER NOT NULL DEFAULT 0,
+    diversifier_index_be BLOB NOT NULL,
+    address TEXT NOT NULL,
+    transparent_child_index INTEGER,
+    cached_transparent_receiver_address TEXT,
+    exposed_at_height INTEGER,
     FOREIGN KEY (account_id) REFERENCES accounts(id),
-    FOREIGN KEY (used_in_tx) REFERENCES transactions(id_tx),
-    FOREIGN KEY (seen_in_tx) REFERENCES transactions(id_tx),
-    PRIMARY KEY (account_id, address_index),
-    CONSTRAINT ephemeral_addr_uniq UNIQUE (address),
-    CONSTRAINT used_implies_seen CHECK (
-        used_in_tx IS NULL OR seen_in_tx IS NOT NULL
-    ),
-    CONSTRAINT index_range_and_address_nullity CHECK (
-        (address_index BETWEEN 0 AND 0x7FFFFFFF AND address IS NOT NULL) OR
-        (address_index BETWEEN 0x80000000 AND 0x7FFFFFFF + 20 AND address IS NULL AND used_in_tx IS NULL AND seen_in_tx IS NULL)
+    CONSTRAINT diversification UNIQUE (account_id, key_scope, diversifier_index_be),
+    CONSTRAINT transparent_index_consistency CHECK (
+        (transparent_child_index IS NOT NULL) == (cached_transparent_receiver_address IS NOT NULL)
     )
-) WITHOUT ROWID"#;
-// Hexadecimal integer literals were added in SQLite version 3.8.6 (2014-08-15).
-// libsqlite3-sys requires at least version 3.14.0.
-// "WITHOUT ROWID" tells SQLite to use a clustered index on the (composite) primary key.
-const_assert_eq!(GAP_LIMIT, 20);
+)"#;
+pub(super) const INDEX_ADDRESSES_ACCOUNTS: &str = r#"
+CREATE INDEX idx_addresses_accounts ON addresses (
+    account_id ASC
+)"#;
+pub(super) const INDEX_ADDRESSES_INDICES: &str = r#"
+CREATE INDEX idx_addresses_indices ON addresses (
+    diversifier_index_be ASC
+)"#;
+pub(super) const INDEX_ADDRESSES_T_INDICES: &str = r#"
+CREATE INDEX idx_addresses_t_indices ON addresses (
+    transparent_child_index ASC
+)"#;
 
 /// Stores information about every block that the wallet has scanned.
 ///
@@ -216,6 +186,7 @@ CREATE TABLE "sapling_received_notes" (
     memo BLOB,
     commitment_tree_position INTEGER,
     recipient_key_scope INTEGER,
+    address_id INTEGER REFERENCES addresses(id),
     FOREIGN KEY (tx) REFERENCES transactions(id_tx),
     FOREIGN KEY (account_id) REFERENCES accounts(id),
     CONSTRAINT tx_output UNIQUE (tx, output_index)
@@ -269,6 +240,7 @@ CREATE TABLE orchard_received_notes (
     memo BLOB,
     commitment_tree_position INTEGER,
     recipient_key_scope INTEGER,
+    address_id INTEGER REFERENCES addresses(id),
     FOREIGN KEY (tx) REFERENCES transactions(id_tx),
     FOREIGN KEY (account_id) REFERENCES accounts(id),
     CONSTRAINT tx_output UNIQUE (tx, action_index)
@@ -339,6 +311,7 @@ CREATE TABLE transparent_received_outputs (
     script BLOB NOT NULL,
     value_zat INTEGER NOT NULL,
     max_observed_unspent_height INTEGER,
+    address_id INTEGER REFERENCES addresses(id),
     FOREIGN KEY (transaction_id) REFERENCES transactions(id_tx),
     FOREIGN KEY (account_id) REFERENCES accounts(id),
     CONSTRAINT transparent_output_unique UNIQUE (transaction_id, output_index)
@@ -690,7 +663,8 @@ CREATE VIEW v_received_outputs AS
         sapling_received_notes.value,
         is_change,
         sapling_received_notes.memo,
-        sent_notes.id AS sent_note_id
+        sent_notes.id AS sent_note_id,
+        sapling_received_notes.address_id
     FROM sapling_received_notes
     LEFT JOIN sent_notes
     ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
@@ -705,7 +679,8 @@ UNION
         orchard_received_notes.value,
         is_change,
         orchard_received_notes.memo,
-        sent_notes.id AS sent_note_id
+        sent_notes.id AS sent_note_id,
+        orchard_received_notes.address_id
     FROM orchard_received_notes
     LEFT JOIN sent_notes
     ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
@@ -720,7 +695,8 @@ UNION
         u.value_zat AS value,
         0 AS is_change,
         NULL AS memo,
-        sent_notes.id AS sent_note_id
+        sent_notes.id AS sent_note_id,
+        u.address_id
     FROM transparent_received_outputs u
     LEFT JOIN sent_notes
     ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
@@ -1078,3 +1054,37 @@ GROUP BY
     subtree_start_height,
     subtree_end_height,
     contains_marked";
+
+pub(super) const VIEW_ADDRESS_USES: &str = "
+CREATE VIEW v_address_uses AS
+    SELECT orn.address_id, orn.account_id, orn.tx AS transaction_id, t.mined_height,
+           a.key_scope, a.diversifier_index_be, a.transparent_child_index
+    FROM orchard_received_notes orn
+    JOIN addresses a ON a.id = orn.address_id
+    JOIN transactions t ON t.id_tx = orn.tx
+UNION
+    SELECT srn.address_id, srn.account_id, srn.tx AS transaction_id, t.mined_height,
+           a.key_scope, a.diversifier_index_be, a.transparent_child_index
+    FROM sapling_received_notes srn
+    JOIN addresses a ON a.id = srn.address_id
+    JOIN transactions t ON t.id_tx = srn.tx
+UNION
+    SELECT tro.address_id, tro.account_id, tro.transaction_id, t.mined_height,
+           a.key_scope, a.diversifier_index_be, a.transparent_child_index
+    FROM transparent_received_outputs tro
+    JOIN addresses a ON a.id = tro.address_id
+    JOIN transactions t ON t.id_tx = tro.transaction_id";
+
+pub(super) const VIEW_ADDRESS_FIRST_USE: &str = "
+    CREATE VIEW v_address_first_use AS
+    SELECT
+        address_id,
+        account_id,
+        key_scope,
+        diversifier_index_be,
+        transparent_child_index,
+        MIN(mined_height) AS first_use_height
+    FROM v_address_uses
+    GROUP BY
+        address_id, account_id, key_scope,
+        diversifier_index_be, transparent_child_index";

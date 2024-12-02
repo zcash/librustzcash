@@ -221,12 +221,11 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
             unreachable!("we don't call methods that require a known chain height")
         }
         #[cfg(feature = "transparent-inputs")]
-        SqliteClientError::ReachedGapLimit(_, _) => {
+        SqliteClientError::ReachedGapLimit(_) => {
             unreachable!("we don't do ephemeral address tracking")
         }
-        #[cfg(feature = "transparent-inputs")]
-        SqliteClientError::EphemeralAddressReuse(_, _) => {
-            unreachable!("we don't do ephemeral address tracking")
+        SqliteClientError::AddressReuse(_, _) => {
+            unreachable!("we don't create transactions in migrations")
         }
         SqliteClientError::NoteFilterInvalid(_) => {
             unreachable!("we don't do note selection in migrations")
@@ -493,7 +492,6 @@ mod tests {
             db::TABLE_ACCOUNTS,
             db::TABLE_ADDRESSES,
             db::TABLE_BLOCKS,
-            db::TABLE_EPHEMERAL_ADDRESSES,
             db::TABLE_NULLIFIER_MAP,
             db::TABLE_ORCHARD_RECEIVED_NOTE_SPENDS,
             db::TABLE_ORCHARD_RECEIVED_NOTES,
@@ -535,6 +533,8 @@ mod tests {
             db::INDEX_ACCOUNTS_UUID,
             db::INDEX_HD_ACCOUNT,
             db::INDEX_ADDRESSES_ACCOUNTS,
+            db::INDEX_ADDRESSES_INDICES,
+            db::INDEX_ADDRESSES_T_INDICES,
             db::INDEX_NF_MAP_LOCATOR_IDX,
             db::INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT,
             db::INDEX_ORCHARD_RECEIVED_NOTES_TX,
@@ -563,6 +563,8 @@ mod tests {
         }
 
         let expected_views = vec![
+            db::VIEW_ADDRESS_FIRST_USE.to_owned(),
+            db::VIEW_ADDRESS_USES.to_owned(),
             db::view_orchard_shard_scan_ranges(st.network()),
             db::view_orchard_shard_unscanned_ranges(),
             db::VIEW_ORCHARD_SHARDS_SCAN_STATE.to_owned(),
@@ -1085,6 +1087,11 @@ mod tests {
         let (account_id, _usk) = db_data
             .create_account("", &Secret::new(seed.to_vec()), &birthday, None)
             .unwrap();
+
+        // We have to have the chain tip height in order to allocate new addresses, to record the
+        // exposed-at height.
+        db_data.update_chain_tip(birthday.height()).unwrap();
+
         assert_matches!(
             db_data.get_account(account_id),
             Ok(Some(account)) if matches!(

@@ -135,7 +135,7 @@ where
             "Refreshing UTXOs for {:?} from height {}",
             account_id, start_height,
         );
-        refresh_utxos(params, client, db_data, account_id, start_height).await?;
+        refresh_utxos(params, client, db_data, account_id, start_height, false).await?;
     }
 
     // 5) Get the suggested scan ranges from the wallet database
@@ -495,6 +495,7 @@ async fn refresh_utxos<P, ChT, DbT, CaErr, TrErr>(
     db_data: &mut DbT,
     account_id: DbT::AccountId,
     start_height: BlockHeight,
+    include_ephemeral: bool,
 ) -> Result<(), Error<CaErr, <DbT as WalletRead>::Error, TrErr>>
 where
     P: Parameters + Send + 'static,
@@ -507,7 +508,7 @@ where
 {
     let request = service::GetAddressUtxosArg {
         addresses: db_data
-            .get_transparent_receivers(account_id)
+            .get_transparent_receivers(account_id, true, include_ephemeral)
             .map_err(Error::Wallet)?
             .into_keys()
             .map(|addr| addr.encode(params))

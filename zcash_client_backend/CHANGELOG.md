@@ -7,6 +7,21 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- `zcash_client_backend::data_api::WalletRead`:
+    - `get_transparent_receivers` now takes additional `include_change` and
+      `include_ephemeral` arguments.
+    - `get_known_ephemeral_addresses` now takes a
+      `Range<zcash_transparent::keys::NonHardenedChildIndex>` as its argument
+      instead of a `Range<u32>`
+- `zcash_client_backend::data_api::WalletWrite` has an added method
+  `get_address_for_index`
+
+### Removed
+- `zcash_client_backend::data_api::GAP_LIMIT` gap limits are now configured
+  based upon the key scope that they're associated with; there is no longer a
+  globally applicable gap limit.
+
 ## [0.17.0] - 2025-02-21
 
 ### Added
@@ -32,9 +47,6 @@ and this library adheres to Rust's notion of
     `map_internal_account_note` and `map_ephemeral_transparent_outpoint` and
     `internal_account_note_transpose_option` methods have consequently been
     removed.
-- `zcash_client_backend::data_api::WalletRead::get_known_ephemeral_addresses`
-  now takes a `Range<zcash_transparent::keys::NonHardenedChildIndex>` as its
-  argument instead of a `Range<u32>`
 - `zcash_client_backend::data_api::testing::TransactionSummary::from_parts`
   has been modified; it now requires additional `total_spent` and `total_received`
   arguments.

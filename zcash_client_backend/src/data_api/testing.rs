@@ -2616,6 +2616,8 @@ impl WalletRead for MockWalletDb {
     fn get_transparent_receivers(
         &self,
         _account: Self::AccountId,
+        _include_change: bool,
+        _include_ephemeral: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         Ok(HashMap::new())
     }
@@ -2701,6 +2703,15 @@ impl WalletWrite for MockWalletDb {
     fn get_next_available_address(
         &mut self,
         _account: Self::AccountId,
+        _request: Option<UnifiedAddressRequest>,
+    ) -> Result<Option<UnifiedAddress>, Self::Error> {
+        Ok(None)
+    }
+
+    fn get_address_for_index(
+        &mut self,
+        _account: Self::AccountId,
+        _diversifier_index: DiversifierIndex,
         _request: Option<UnifiedAddressRequest>,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         Ok(None)

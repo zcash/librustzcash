@@ -81,7 +81,7 @@ use zcash_protocol::{
     value::{BalanceError, Zatoshis},
     ShieldedProtocol, TxId,
 };
-use zip32::fingerprint::SeedFingerprint;
+use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use self::{
     chain::{ChainState, CommitmentTreeRoot},
@@ -126,10 +126,6 @@ pub const SAPLING_SHARD_HEIGHT: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH / 2;
 /// `lightwalletd` when using the `GetSubtreeRoots` GRPC call.
 #[cfg(feature = "orchard")]
 pub const ORCHARD_SHARD_HEIGHT: u8 = { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 } / 2;
-
-/// The number of ephemeral addresses that can be safely reserved without observing any
-/// of them to be mined. This is the same as the gap limit in Bitcoin.
-pub const GAP_LIMIT: u32 = 20;
 
 /// An enumeration of constraints that can be applied when querying for nullifiers for notes
 /// belonging to the wallet.
@@ -1369,6 +1365,8 @@ pub trait WalletRead {
     fn get_transparent_receivers(
         &self,
         _account: Self::AccountId,
+        _include_change: bool,
+        _include_ephemeral: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         Ok(HashMap::new())
     }
@@ -1393,7 +1391,7 @@ pub trait WalletRead {
     /// This is equivalent to (but may be implemented more efficiently than):
     /// ```compile_fail
     /// Ok(
-    ///     if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
+    ///     if let Some(result) = self.get_transparent_receivers(account, true, true)?.get(address) {
     ///         result.clone()
     ///     } else {
     ///         self.get_known_ephemeral_addresses(account, None)?
@@ -1414,7 +1412,10 @@ pub trait WalletRead {
     ) -> Result<Option<TransparentAddressMetadata>, Self::Error> {
         // This should be overridden.
         Ok(
-            if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
+            if let Some(result) = self
+                .get_transparent_receivers(account, true, true)?
+                .get(address)
+            {
                 result.clone()
             } else {
                 self.get_known_ephemeral_addresses(account, None)?
@@ -1427,8 +1428,8 @@ pub trait WalletRead {
 
     /// Returns a vector of ephemeral transparent addresses associated with the given
     /// account controlled by this wallet, along with their metadata. The result includes
-    /// reserved addresses, and addresses for [`GAP_LIMIT`] additional indices (capped to
-    /// the maximum index).
+    /// reserved addresses, and addresses for the backend's configured gap limit worth
+    /// of additional indices (capped to the maximum index).
     ///
     /// If `index_range` is some `Range`, it limits the result to addresses with indices
     /// in that range. An `index_range` of `None` is defined to be equivalent to
@@ -2360,15 +2361,34 @@ pub trait WalletWrite: WalletRead {
         key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error>;
 
-    /// Generates and persists the next available diversified address for the specified account,
-    /// given the current addresses known to the wallet. If the `request` parameter is `None`,
-    /// an address should be generated using all of the available receivers for the account's UFVK.
+    /// Generates, persists, and marks as exposed the next available diversified address for the
+    /// specified account, given the current addresses known to the wallet. If the `request`
+    /// parameter is `None`, an address should be generated using all of the available receivers
+    /// for the account's UFVK.
     ///
     /// Returns `Ok(None)` if the account identifier does not correspond to a known
     /// account.
     fn get_next_available_address(
         &mut self,
         account: Self::AccountId,
+        request: Option<UnifiedAddressRequest>,
+    ) -> Result<Option<UnifiedAddress>, Self::Error>;
+
+    /// Generates, persists, and marks as exposed a diversified address for the specified account
+    /// at the provided diversifier index. If the `request` parameter is `None`, an address should
+    /// be generated using all of the available receivers for the account's UFVK.
+    ///
+    /// In the case that the diversifier index is outside of the range of valid transparent address
+    /// indexes, no transparent receiver should be generated in the resulting unified address. If a
+    /// transparent receiver is specifically requested for such a diversifier index,
+    /// implementations of this method should return an error.
+    ///
+    /// Address generation should fail if a transparent receiver would be generated that violates
+    /// the backend's internally configured gap limit for HD-seed-based recovery.
+    fn get_address_for_index(
+        &mut self,
+        account: Self::AccountId,
+        diversifier_index: DiversifierIndex,
         request: Option<UnifiedAddressRequest>,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
 

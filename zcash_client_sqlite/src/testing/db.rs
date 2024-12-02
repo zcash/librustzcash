@@ -9,7 +9,6 @@ use tempfile::NamedTempFile;
 use rusqlite::{self};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, ShardTree};
-use zip32::fingerprint::SeedFingerprint;
 
 use zcash_client_backend::{
     data_api::{
@@ -32,6 +31,7 @@ use zcash_protocol::{
     consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo, value::Zatoshis,
     ShieldedProtocol,
 };
+use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{
     error::SqliteClientError,
@@ -152,15 +152,6 @@ unsafe fn run_sqlite3<S: AsRef<OsStr>>(db_path: S, command: &str) {
 #[derive(Default)]
 pub(crate) struct TestDbFactory {
     target_migrations: Option<Vec<Uuid>>,
-}
-
-impl TestDbFactory {
-    #[allow(dead_code)]
-    pub(crate) fn new(target_migrations: Vec<Uuid>) -> Self {
-        Self {
-            target_migrations: Some(target_migrations),
-        }
-    }
 }
 
 impl DataStoreFactory for TestDbFactory {
