@@ -36,21 +36,25 @@ impl RusqliteMigration for Migration {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
-        let account_kind_derived = account_kind_code(AccountSource::Derived {
+        let account_kind_derived = account_kind_code(&AccountSource::Derived {
             seed_fingerprint: SeedFingerprint::from_bytes([0; 32]),
             account_index: zip32::AccountId::ZERO,
+            key_source: None,
         });
-        let account_kind_imported = account_kind_code(AccountSource::Imported {
+        let account_kind_imported = account_kind_code(&AccountSource::Imported {
             // the purpose here is irrelevant; we just use it to get the correct code
             // for the account kind
             purpose: AccountPurpose::ViewOnly,
+            key_source: None,
         });
         transaction.execute_batch(&format!(
             r#"
             CREATE TABLE accounts_new (
                 id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
                 uuid BLOB NOT NULL,
                 account_kind INTEGER NOT NULL DEFAULT {account_kind_derived},
+                key_source TEXT,
                 hd_seed_fingerprint BLOB,
                 hd_account_index INTEGER,
                 ufvk TEXT,

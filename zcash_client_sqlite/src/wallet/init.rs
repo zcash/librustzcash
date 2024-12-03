@@ -1079,7 +1079,7 @@ mod tests {
 
         let birthday = AccountBirthday::from_sapling_activation(&network, BlockHash([0; 32]));
         let (account_id, _usk) = db_data
-            .create_account(&Secret::new(seed.to_vec()), &birthday)
+            .create_account("", &Secret::new(seed.to_vec()), &birthday, None)
             .unwrap();
         assert_matches!(
             db_data.get_account(account_id),

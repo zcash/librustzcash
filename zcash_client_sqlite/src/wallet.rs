@@ -148,6 +148,7 @@ fn parse_account_source(
     hd_seed_fingerprint: Option<[u8; 32]>,
     hd_account_index: Option<u32>,
     spending_key_available: bool,
+    key_source: Option<String>,
 ) -> Result<AccountSource, SqliteClientError> {
     match (account_kind, hd_seed_fingerprint, hd_account_index) {
         (0, Some(seed_fp), Some(account_index)) => Ok(AccountSource::Derived {
@@ -157,6 +158,7 @@ fn parse_account_source(
                     "ZIP-32 account ID from wallet DB is out of range.".to_string(),
                 )
             })?,
+            key_source,
         }),
         (1, None, None) => Ok(AccountSource::Imported {
             purpose: if spending_key_available {
@@ -164,6 +166,7 @@ fn parse_account_source(
             } else {
                 AccountPurpose::ViewOnly
             },
+            key_source,
         }),
         (0, None, None) | (1, Some(_), Some(_)) => Err(SqliteClientError::CorruptedData(
             "Wallet DB account_kind constraint violated".to_string(),
@@ -174,7 +177,7 @@ fn parse_account_source(
     }
 }
 
-fn account_kind_code(value: AccountSource) -> u32 {
+fn account_kind_code(value: &AccountSource) -> u32 {
     match value {
         AccountSource::Derived { .. } => 0,
         AccountSource::Imported { .. } => 1,
@@ -201,6 +204,7 @@ pub(crate) enum ViewingKey {
 #[derive(Debug, Clone)]
 pub struct Account {
     uuid: AccountUuid,
+    name: Option<String>,
     kind: AccountSource,
     viewing_key: ViewingKey,
 }
@@ -226,8 +230,12 @@ impl zcash_client_backend::data_api::Account for Account {
         self.uuid
     }
 
-    fn source(&self) -> AccountSource {
-        self.kind
+    fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    fn source(&self) -> &AccountSource {
+        &self.kind
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
@@ -355,7 +363,8 @@ pub(crate) fn max_zip32_account_index(
 pub(crate) fn add_account<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
-    kind: AccountSource,
+    account_name: &str,
+    kind: &AccountSource,
     viewing_key: ViewingKey,
     birthday: &AccountBirthday,
 ) -> Result<Account, SqliteClientError> {
@@ -369,12 +378,21 @@ pub(crate) fn add_account<P: consensus::Parameters>(
 
     let account_uuid = AccountUuid(Uuid::new_v4());
 
-    let (hd_seed_fingerprint, hd_account_index, spending_key_available) = match kind {
+    let (hd_seed_fingerprint, hd_account_index, spending_key_available, key_source) = match kind {
         AccountSource::Derived {
             seed_fingerprint,
             account_index,
-        } => (Some(seed_fingerprint), Some(account_index), true),
-        AccountSource::Imported { purpose } => (None, None, purpose == AccountPurpose::Spending),
+            key_source,
+        } => (
+            Some(seed_fingerprint),
+            Some(account_index),
+            true,
+            key_source,
+        ),
+        AccountSource::Imported {
+            purpose,
+            key_source,
+        } => (None, None, *purpose == AccountPurpose::Spending, key_source),
     };
 
     #[cfg(feature = "orchard")]
@@ -406,8 +424,9 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         .query_row(
             r#"
             INSERT INTO accounts (
+                name,
                 uuid,
-                account_kind, hd_seed_fingerprint, hd_account_index,
+                account_kind, hd_seed_fingerprint, hd_account_index, key_source,
                 ufvk, uivk,
                 orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
                 birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
@@ -415,8 +434,9 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 has_spend_key
             )
             VALUES (
+                :account_name,
                 :uuid,
-                :account_kind, :hd_seed_fingerprint, :hd_account_index,
+                :account_kind, :hd_seed_fingerprint, :hd_account_index, :key_source,
                 :ufvk, :uivk,
                 :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
                 :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
@@ -426,10 +446,12 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             RETURNING id
             "#,
             named_params![
+                ":account_name": account_name,
                 ":uuid": account_uuid.0,
                 ":account_kind": account_kind_code(kind),
                 ":hd_seed_fingerprint": hd_seed_fingerprint.as_ref().map(|fp| fp.to_bytes()),
-                ":hd_account_index": hd_account_index.map(u32::from),
+                ":hd_account_index": hd_account_index.map(|i| u32::from(*i)),
+                ":key_source": key_source,
                 ":ufvk": ufvk_encoded,
                 ":uivk": viewing_key.uivk().encode(params),
                 ":orchard_fvk_item_cache": orchard_item,
@@ -465,8 +487,9 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         })?;
 
     let account = Account {
+        name: Some(account_name.to_owned()),
         uuid: account_uuid,
-        kind,
+        kind: kind.clone(),
         viewing_key,
     };
 
@@ -711,7 +734,9 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     let transparent_item: Option<Vec<u8>> = None;
 
     let mut stmt = conn.prepare(
-        "SELECT uuid, account_kind, hd_seed_fingerprint, hd_account_index, ufvk, has_spend_key
+        "SELECT name, uuid, account_kind, 
+                hd_seed_fingerprint, hd_account_index, key_source, 
+                ufvk, has_spend_key
          FROM accounts
          WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
             OR sapling_fvk_item_cache = :sapling_fvk_item_cache
@@ -726,12 +751,14 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
                 ":p2pkh_fvk_item_cache": transparent_item,
             ],
             |row| {
+                let account_name = row.get("name")?;
                 let account_uuid = AccountUuid(row.get("uuid")?);
                 let kind = parse_account_source(
                     row.get("account_kind")?,
                     row.get("hd_seed_fingerprint")?,
                     row.get("hd_account_index")?,
                     row.get("has_spend_key")?,
+                    row.get("key_source")?,
                 )?;
 
                 // We looked up the account by FVK components, so the UFVK column must be
@@ -747,6 +774,7 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
                 ));
 
                 Ok(Account {
+                    name: account_name,
                     uuid: account_uuid,
                     kind,
                     viewing_key,
@@ -773,7 +801,7 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
     account_index: zip32::AccountId,
 ) -> Result<Option<Account>, SqliteClientError> {
     let mut stmt = conn.prepare(
-        "SELECT uuid, ufvk
+        "SELECT name, key_source, uuid, ufvk
          FROM accounts
          WHERE hd_seed_fingerprint = :hd_seed_fingerprint
          AND hd_account_index = :hd_account_index",
@@ -785,6 +813,8 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
             ":hd_account_index": u32::from(account_index),
         ],
         |row| {
+            let account_name = row.get("name")?;
+            let key_source = row.get("key_source")?;
             let account_uuid = AccountUuid(row.get("uuid")?);
             let ufvk = match row.get::<_, Option<String>>("ufvk")? {
                 None => Err(SqliteClientError::CorruptedData(format!(
@@ -799,10 +829,12 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
                 }),
             }?;
             Ok(Account {
+                name: account_name,
                 uuid: account_uuid,
                 kind: AccountSource::Derived {
                     seed_fingerprint: *seed_fp,
                     account_index,
+                    key_source,
                 },
                 viewing_key: ViewingKey::Full(Box::new(ufvk)),
             })
@@ -1870,7 +1902,7 @@ pub(crate) fn get_account<P: Parameters>(
 ) -> Result<Option<Account>, SqliteClientError> {
     let mut sql = conn.prepare_cached(
         r#"
-        SELECT account_kind, hd_seed_fingerprint, hd_account_index, ufvk, uivk, has_spend_key
+        SELECT name, account_kind, hd_seed_fingerprint, hd_account_index, key_source, ufvk, uivk, has_spend_key
         FROM accounts
         WHERE uuid = :account_uuid
         "#,
@@ -1880,11 +1912,13 @@ pub(crate) fn get_account<P: Parameters>(
     let row = result.next()?;
     match row {
         Some(row) => {
+            let account_name = row.get("name")?;
             let kind = parse_account_source(
                 row.get("account_kind")?,
                 row.get("hd_seed_fingerprint")?,
                 row.get("hd_account_index")?,
                 row.get("has_spend_key")?,
+                row.get("key_source")?,
             )?;
 
             let ufvk_str: Option<String> = row.get("ufvk")?;
@@ -1902,6 +1936,7 @@ pub(crate) fn get_account<P: Parameters>(
             };
 
             Ok(Some(Account {
+                name: account_name,
                 uuid: account_uuid,
                 kind,
                 viewing_key,
@@ -3740,7 +3775,9 @@ mod tests {
         let seed = SecretVec::new(st.test_seed().unwrap().expose_secret().clone());
         let birthday = st.test_account().unwrap().birthday().clone();
 
-        st.wallet_mut().create_account(&seed, &birthday).unwrap();
+        st.wallet_mut()
+            .create_account("", &seed, &birthday, None)
+            .unwrap();
 
         for acct_id in st.wallet().get_account_ids().unwrap() {
             assert_matches!(st.wallet().get_account(acct_id), Ok(Some(_)))

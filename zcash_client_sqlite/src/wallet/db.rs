@@ -24,8 +24,10 @@ use crate::wallet::scanning::priority_code;
 pub(super) const TABLE_ACCOUNTS: &str = r#"
 CREATE TABLE "accounts" (
     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
     uuid BLOB NOT NULL,
     account_kind INTEGER NOT NULL DEFAULT 0,
+    key_source TEXT,
     hd_seed_fingerprint BLOB,
     hd_account_index INTEGER,
     ufvk TEXT,

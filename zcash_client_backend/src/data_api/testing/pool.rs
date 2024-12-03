@@ -1559,10 +1559,16 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
     // Add two accounts to the wallet.
     let seed = Secret::new([0u8; 32].to_vec());
     let birthday = AccountBirthday::from_sapling_activation(st.network(), BlockHash([0; 32]));
-    let (account1, usk) = st.wallet_mut().create_account(&seed, &birthday).unwrap();
+    let (account1, usk) = st
+        .wallet_mut()
+        .create_account("account1", &seed, &birthday, None)
+        .unwrap();
     let dfvk = T::sk_to_fvk(T::usk_to_sk(&usk));
 
-    let (account2, usk2) = st.wallet_mut().create_account(&seed, &birthday).unwrap();
+    let (account2, usk2) = st
+        .wallet_mut()
+        .create_account("account2", &seed, &birthday, None)
+        .unwrap();
     let dfvk2 = T::sk_to_fvk(T::usk_to_sk(&usk2));
 
     // Add funds to the wallet in a single note
@@ -1623,13 +1629,19 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
     st.reset();
 
     // Account creation and DFVK derivation should be deterministic.
-    let (account1, restored_usk) = st.wallet_mut().create_account(&seed, &birthday).unwrap();
+    let (account1, restored_usk) = st
+        .wallet_mut()
+        .create_account("account1_restored", &seed, &birthday, None)
+        .unwrap();
     assert!(T::fvks_equal(
         &T::sk_to_fvk(T::usk_to_sk(&restored_usk)),
         &dfvk,
     ));
 
-    let (account2, restored_usk2) = st.wallet_mut().create_account(&seed, &birthday).unwrap();
+    let (account2, restored_usk2) = st
+        .wallet_mut()
+        .create_account("account2_restored", &seed, &birthday, None)
+        .unwrap();
     assert!(T::fvks_equal(
         &T::sk_to_fvk(T::usk_to_sk(&restored_usk2)),
         &dfvk2,

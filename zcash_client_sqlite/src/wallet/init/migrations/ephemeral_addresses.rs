@@ -227,9 +227,10 @@ mod tests {
         // Simulate creating an account prior to this migration.
         let account0_index = Zip32AccountId::ZERO;
         let account0_seed_fp = [0u8; 32];
-        let account0_kind = account_kind_code(AccountSource::Derived {
+        let account0_kind = account_kind_code(&AccountSource::Derived {
             seed_fingerprint: SeedFingerprint::from_seed(&account0_seed_fp).unwrap(),
             account_index: account0_index,
+            key_source: None,
         });
         assert_eq!(u32::from(account0_index), 0);
         let account0_id = AccountRef(0);

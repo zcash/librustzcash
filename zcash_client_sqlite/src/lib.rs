@@ -445,13 +445,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
             if let AccountSource::Derived {
                 seed_fingerprint,
                 account_index,
+                ..
             } = account.source()
             {
                 wallet::seed_matches_derived_account(
                     &self.params,
                     seed,
-                    &seed_fingerprint,
-                    account_index,
+                    seed_fingerprint,
+                    *account_index,
                     &account.uivk(),
                 )
             } else {
@@ -482,6 +483,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
             if let AccountSource::Derived {
                 seed_fingerprint,
                 account_index,
+                ..
             } = account.source()
             {
                 has_derived = true;
@@ -489,8 +491,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
                 if wallet::seed_matches_derived_account(
                     &self.params,
                     seed,
-                    &seed_fingerprint,
-                    account_index,
+                    seed_fingerprint,
+                    *account_index,
                     &account.uivk(),
                 )? {
                     // The seed is relevant to this account.
@@ -837,8 +839,10 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
     fn create_account(
         &mut self,
+        account_name: &str,
         seed: &SecretVec<u8>,
         birthday: &AccountBirthday,
+        key_source: Option<&str>,
     ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
             let seed_fingerprint =
@@ -867,9 +871,11 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             let account = wallet::add_account(
                 wdb.conn.0,
                 &wdb.params,
-                AccountSource::Derived {
+                account_name,
+                &AccountSource::Derived {
                     seed_fingerprint,
                     account_index: zip32_account_index,
+                    key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
                 birthday,
@@ -881,9 +887,11 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
     fn import_account_hd(
         &mut self,
+        account_name: &str,
         seed: &SecretVec<u8>,
         account_index: zip32::AccountId,
         birthday: &AccountBirthday,
+        key_source: Option<&str>,
     ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
             let seed_fingerprint =
@@ -901,9 +909,11 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             let account = wallet::add_account(
                 wdb.conn.0,
                 &wdb.params,
-                AccountSource::Derived {
+                account_name,
+                &AccountSource::Derived {
                     seed_fingerprint,
                     account_index,
+                    key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
                 birthday,
@@ -915,15 +925,21 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
     fn import_account_ufvk(
         &mut self,
+        account_name: &str,
         ufvk: &UnifiedFullViewingKey,
         birthday: &AccountBirthday,
         purpose: AccountPurpose,
+        key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error> {
         self.transactionally(|wdb| {
             wallet::add_account(
                 wdb.conn.0,
                 &wdb.params,
-                AccountSource::Imported { purpose },
+                account_name,
+                &AccountSource::Imported {
+                    purpose,
+                    key_source: key_source.map(|s| s.to_owned()),
+                },
                 wallet::ViewingKey::Full(Box::new(ufvk.to_owned())),
                 birthday,
             )
@@ -2007,7 +2023,7 @@ mod tests {
             .build();
         assert_matches!(
             st.test_account().unwrap().account().source(),
-            AccountSource::Derived { seed_fingerprint: _, account_index } if account_index == zip32::AccountId::ZERO);
+            AccountSource::Derived { account_index, .. } if *account_index == zip32::AccountId::ZERO);
     }
 
     #[test]
@@ -2026,20 +2042,20 @@ mod tests {
 
         let first = st
             .wallet_mut()
-            .import_account_hd(&seed, zip32_index_1, &birthday)
+            .import_account_hd("", &seed, zip32_index_1, &birthday, None)
             .unwrap();
         assert_matches!(
             first.0.source(),
-            AccountSource::Derived { seed_fingerprint: _, account_index } if account_index == zip32_index_1);
+            AccountSource::Derived { account_index, .. } if *account_index == zip32_index_1);
 
         let zip32_index_2 = zip32_index_1.next().unwrap();
         let second = st
             .wallet_mut()
-            .import_account_hd(&seed, zip32_index_2, &birthday)
+            .import_account_hd("", &seed, zip32_index_2, &birthday, None)
             .unwrap();
         assert_matches!(
             second.0.source(),
-            AccountSource::Derived { seed_fingerprint: _, account_index } if account_index == zip32_index_2);
+            AccountSource::Derived { account_index, .. } if *account_index == zip32_index_2);
     }
 
     fn check_collisions<C, DbT: WalletTest + WalletWrite, P: consensus::Parameters>(
@@ -2052,7 +2068,7 @@ mod tests {
     {
         assert_matches!(
             st.wallet_mut()
-                .import_account_ufvk(ufvk, birthday, AccountPurpose::Spending),
+                .import_account_ufvk("", ufvk, birthday, AccountPurpose::Spending, None),
             Err(e) if is_account_collision(&e)
         );
 
@@ -2070,9 +2086,11 @@ mod tests {
             .unwrap();
             assert_matches!(
                 st.wallet_mut().import_account_ufvk(
+                    "",
                     &subset_ufvk,
                     birthday,
-                    AccountPurpose::Spending
+                    AccountPurpose::Spending,
+                    None,
                 ),
                 Err(e) if is_account_collision(&e)
             );
@@ -2092,9 +2110,11 @@ mod tests {
             .unwrap();
             assert_matches!(
                 st.wallet_mut().import_account_ufvk(
+                    "",
                     &subset_ufvk,
                     birthday,
-                    AccountPurpose::Spending
+                    AccountPurpose::Spending,
+                    None,
                 ),
                 Err(e) if is_account_collision(&e)
             );
@@ -2117,12 +2137,12 @@ mod tests {
 
         let (first_account, _) = st
             .wallet_mut()
-            .import_account_hd(&seed, zip32_index_1, &birthday)
+            .import_account_hd("", &seed, zip32_index_1, &birthday, None)
             .unwrap();
         let ufvk = first_account.ufvk().unwrap();
 
         assert_matches!(
-            st.wallet_mut().import_account_hd(&seed, zip32_index_1, &birthday),
+            st.wallet_mut().import_account_hd("", &seed, zip32_index_1, &birthday, None),
             Err(SqliteClientError::AccountCollision(id)) if id == first_account.id());
 
         check_collisions(
@@ -2152,7 +2172,7 @@ mod tests {
 
         let account = st
             .wallet_mut()
-            .import_account_ufvk(&ufvk, &birthday, AccountPurpose::Spending)
+            .import_account_ufvk("", &ufvk, &birthday, AccountPurpose::Spending, None)
             .unwrap();
         assert_eq!(
             ufvk.encode(st.network()),
@@ -2162,12 +2182,13 @@ mod tests {
         assert_matches!(
             account.source(),
             AccountSource::Imported {
-                purpose: AccountPurpose::Spending
+                purpose: AccountPurpose::Spending,
+                ..
             }
         );
 
         assert_matches!(
-            st.wallet_mut().import_account_hd(&seed, zip32_index_0, &birthday),
+            st.wallet_mut().import_account_hd("", &seed, zip32_index_0, &birthday, None),
             Err(SqliteClientError::AccountCollision(id)) if id == account.id());
 
         check_collisions(
@@ -2191,12 +2212,15 @@ mod tests {
 
         let seed = Secret::new(vec![0u8; 32]);
         let zip32_index_0 = zip32::AccountId::ZERO;
-        let seed_based = st.wallet_mut().create_account(&seed, &birthday).unwrap();
+        let seed_based = st
+            .wallet_mut()
+            .create_account("", &seed, &birthday, None)
+            .unwrap();
         let seed_based_account = st.wallet().get_account(seed_based.0).unwrap().unwrap();
         let ufvk = seed_based_account.ufvk().unwrap();
 
         assert_matches!(
-            st.wallet_mut().import_account_hd(&seed, zip32_index_0, &birthday),
+            st.wallet_mut().import_account_hd("", &seed, zip32_index_0, &birthday, None),
             Err(SqliteClientError::AccountCollision(id)) if id == seed_based.0);
 
         check_collisions(

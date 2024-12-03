@@ -7,6 +7,19 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- `zcash_client_backend::data_api::WalletRead`:
+  - The `create_account`, `import_account_hd`, and `import_account_ufvk`
+    methods now each take additional `account_name` and `key_source` arguments.
+    These allow the wallet backend to store additional metadata that is useful
+    to applications managing these accounts.
+- `zcash_client_backend::data_api::AccountSource`:
+  - Both the `Derived` and `Importants` now have an additional `key_source`
+    property that is used to convey application-specific key source metadata.
+  - The `Copy` impl for this type has been removed.
+- `zcash_client_backend::data_api::Account` has an additional `name` method
+  that returns the human-readable name of the account, if any.
+
 ## [0.15.0] - 2024-11-14
 
 ### Added
