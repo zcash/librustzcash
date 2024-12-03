@@ -10,6 +10,8 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_primitives::transaction`
   - `TransactionData::try_map_bundles`
+  - `builder::{PcztResult, PcztParts}`
+  - `builder::Builder::build_for_pczt`
   - `components::transparent`:
     - `pczt` module.
     - `EffectsOnly`

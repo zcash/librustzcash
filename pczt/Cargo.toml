@@ -52,6 +52,7 @@ sapling = [
     "dep:zcash_protocol",
 ]
 transparent = ["dep:secp256k1", "dep:zcash_primitives", "dep:zcash_protocol"]
+zcp-builder = ["dep:zcash_primitives", "dep:zcash_protocol"]
 io-finalizer = ["orchard", "sapling"]
 prover = ["dep:rand_core", "sapling?/temporary-zcashd"]
 signer = ["dep:blake2b_simd", "dep:rand_core", "orchard", "sapling", "transparent"]

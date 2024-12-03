@@ -86,4 +86,79 @@ impl Creator {
             },
         }
     }
+
+    /// Builds a PCZT from the output of a [`Builder`].
+    ///
+    /// Returns `None` if the `TxVersion` is incompatible with PCZTs.
+    ///
+    /// [`Builder`]: zcash_primitives::transaction::builder::Builder
+    #[cfg(feature = "zcp-builder")]
+    pub fn build_from_parts<P: zcash_protocol::consensus::Parameters>(
+        parts: zcash_primitives::transaction::builder::PcztParts<P>,
+    ) -> Option<Pczt> {
+        use zcash_primitives::transaction::sighash::SighashType;
+        use zcash_protocol::consensus::NetworkConstants;
+
+        use crate::{common::FLAG_HAS_SIGHASH_SINGLE, SAPLING_TX_VERSION};
+
+        let tx_version = match parts.version {
+            zcash_primitives::transaction::TxVersion::Sprout(_)
+            | zcash_primitives::transaction::TxVersion::Overwinter => None,
+            zcash_primitives::transaction::TxVersion::Sapling => Some(SAPLING_TX_VERSION),
+            zcash_primitives::transaction::TxVersion::Zip225 => Some(V5_TX_VERSION),
+        }?;
+
+        // Spends and outputs not modifiable.
+        let mut tx_modifiable = 0b0000_0000;
+        // Check if any input is using `SIGHASH_SINGLE`.
+        if parts.transparent.as_ref().map_or(false, |bundle| {
+            bundle
+                .inputs()
+                .iter()
+                .any(|input| input.sighash_type() == &SighashType::SINGLE)
+        }) {
+            tx_modifiable |= FLAG_HAS_SIGHASH_SINGLE;
+        }
+
+        Some(Pczt {
+            global: crate::common::Global {
+                tx_version,
+                version_group_id: parts.version.version_group_id(),
+                consensus_branch_id: parts.consensus_branch_id.into(),
+                fallback_lock_time: Some(parts.lock_time),
+                expiry_height: parts.expiry_height.into(),
+                coin_type: parts.params.network_type().coin_type(),
+                tx_modifiable,
+                proprietary: BTreeMap::new(),
+            },
+            transparent: parts
+                .transparent
+                .map(crate::transparent::Bundle::serialize_from)
+                .unwrap_or_else(|| crate::transparent::Bundle {
+                    inputs: vec![],
+                    outputs: vec![],
+                }),
+            sapling: parts
+                .sapling
+                .map(crate::sapling::Bundle::serialize_from)
+                .unwrap_or_else(|| crate::sapling::Bundle {
+                    spends: vec![],
+                    outputs: vec![],
+                    value_sum: 0,
+                    anchor: sapling::Anchor::empty_tree().to_bytes(),
+                    bsk: None,
+                }),
+            orchard: parts
+                .orchard
+                .map(crate::orchard::Bundle::serialize_from)
+                .unwrap_or_else(|| crate::orchard::Bundle {
+                    actions: vec![],
+                    flags: ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
+                    value_sum: (0, true),
+                    anchor: orchard::Anchor::empty_tree().to_bytes(),
+                    zkproof: None,
+                    bsk: None,
+                }),
+        })
+    }
 }
