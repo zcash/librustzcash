@@ -52,14 +52,16 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
-        let account_kind_derived = account_kind_code(AccountSource::Derived {
+        let account_kind_derived = account_kind_code(&AccountSource::Derived {
             seed_fingerprint: SeedFingerprint::from_bytes([0; 32]),
             account_index: zip32::AccountId::ZERO,
+            key_source: None,
         });
-        let account_kind_imported = account_kind_code(AccountSource::Imported {
+        let account_kind_imported = account_kind_code(&AccountSource::Imported {
             // the purpose here is irrelevant; we just use it to get the correct code
             // for the account kind
             purpose: AccountPurpose::ViewOnly,
+            key_source: None,
         });
         transaction.execute_batch(&format!(
             r#"

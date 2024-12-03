@@ -343,7 +343,7 @@ jobs:
         run: |
           {
             echo 'UUIDS<<EOF'
-            git grep -h "Uuid::from_u128" zcash_client_sqlite/ |
+            git grep -h "const MIGRATION_ID: Uuid = Uuid::from_u128" zcash_client_sqlite/ |
               sed -e "s,.*Uuid::from_u128(0x,," -e "s,_,-,g" -e "s,);,,"
             echo EOF
           } >> "$GITHUB_OUTPUT"

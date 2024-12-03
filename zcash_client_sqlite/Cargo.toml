@@ -66,11 +66,11 @@ incrementalmerkletree.workspace = true
 shardtree = { workspace = true, features = ["legacy-api"] }
 
 # - SQLite databases
-rusqlite = { workspace = true, features = ["time", "array"] }
+rusqlite = { workspace = true, features = ["time", "array", "uuid"] }
 schemerz.workspace = true
 schemerz-rusqlite.workspace = true
 time.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = ["v4"] }
 regex = "1.4"
 
 # Dependencies used internally:

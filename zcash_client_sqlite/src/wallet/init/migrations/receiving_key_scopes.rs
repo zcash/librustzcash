@@ -324,7 +324,7 @@ mod tests {
             memo_repr, parse_scope,
             sapling::ReceivedSaplingOutput,
         },
-        AccountId, TxRef, WalletDb,
+        AccountRef, TxRef, WalletDb,
     };
 
     // These must be different.
@@ -413,7 +413,7 @@ mod tests {
         (ufvk0, height, res)
     }
 
-    fn put_received_note_before_migration<T: ReceivedSaplingOutput>(
+    fn put_received_note_before_migration<T: ReceivedSaplingOutput<AccountId = AccountRef>>(
         conn: &Connection,
         output: &T,
         tx_ref: i64,
@@ -529,7 +529,7 @@ mod tests {
 
         let (ufvk0, height, res) = prepare_wallet_state(&mut db_data);
         let tx = res.transaction();
-        let account_id = AccountId(0);
+        let account_id = AccountRef(0);
 
         // We can't use `decrypt_and_store_transaction` because we haven't migrated yet.
         // Replicate its relevant innards here.
@@ -544,7 +544,7 @@ mod tests {
             .transactionally::<_, _, rusqlite::Error>(|wdb| {
                 let tx_ref = put_tx_data(wdb.conn.0, d_tx.tx(), None, None).unwrap();
 
-                let mut spending_account_id: Option<AccountId> = None;
+                let mut spending_account_id: Option<AccountRef> = None;
 
                 // Orchard outputs were not supported as of the wallet states that could require this
                 // migration.
@@ -644,7 +644,7 @@ mod tests {
             ..Default::default()
         };
         block.vtx.push(compact_tx);
-        let scanning_keys = ScanningKeys::from_account_ufvks([(AccountId(0), ufvk0)]);
+        let scanning_keys = ScanningKeys::from_account_ufvks([(AccountRef(0), ufvk0)]);
 
         let scanned_block = scan_block(
             &params,
@@ -875,7 +875,7 @@ mod tests {
     /// updates to the database schema require incompatible changes to `put_tx_meta`.
     pub(crate) fn put_tx_meta(
         conn: &rusqlite::Connection,
-        tx: &WalletTx<AccountId>,
+        tx: &WalletTx<AccountRef>,
         height: BlockHeight,
     ) -> Result<i64, SqliteClientError> {
         // It isn't there, so insert our transaction into the database.

@@ -912,11 +912,13 @@ pub(crate) mod tests {
         let wallet_birthday = sap_active + 500;
         st.wallet_mut()
             .create_account(
+                "",
                 &SecretVec::new(vec![0; 32]),
                 &AccountBirthday::from_parts(
                     ChainState::empty(wallet_birthday - 1, BlockHash([0; 32])),
                     None,
                 ),
+                None,
             )
             .unwrap();
 

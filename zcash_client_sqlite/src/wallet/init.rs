@@ -203,8 +203,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         | SqliteClientError::NonSequentialBlocks
         | SqliteClientError::RequestedRewindInvalid { .. }
         | SqliteClientError::KeyDerivationError(_)
-        | SqliteClientError::AccountIdDiscontinuity
-        | SqliteClientError::AccountIdOutOfRange
+        | SqliteClientError::Zip32AccountIndexOutOfRange
         | SqliteClientError::AccountCollision(_)
         | SqliteClientError::CacheMiss(_) => {
             unreachable!("we only call WalletRead methods; mutations can't occur")
@@ -529,6 +528,7 @@ mod tests {
         let expected_indices = vec![
             db::INDEX_ACCOUNTS_UFVK,
             db::INDEX_ACCOUNTS_UIVK,
+            db::INDEX_ACCOUNTS_UUID,
             db::INDEX_HD_ACCOUNT,
             db::INDEX_ADDRESSES_ACCOUNTS,
             db::INDEX_NF_MAP_LOCATOR_IDX,
@@ -1079,7 +1079,7 @@ mod tests {
 
         let birthday = AccountBirthday::from_sapling_activation(&network, BlockHash([0; 32]));
         let (account_id, _usk) = db_data
-            .create_account(&Secret::new(seed.to_vec()), &birthday)
+            .create_account("", &Secret::new(seed.to_vec()), &birthday, None)
             .unwrap();
         assert_matches!(
             db_data.get_account(account_id),

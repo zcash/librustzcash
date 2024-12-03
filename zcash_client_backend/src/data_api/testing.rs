@@ -374,7 +374,11 @@ impl<A: Account> Account for TestAccount<A> {
         self.account.id()
     }
 
-    fn source(&self) -> AccountSource {
+    fn name(&self) -> Option<&str> {
+        self.account.name()
+    }
+
+    fn source(&self) -> &AccountSource {
         self.account.source()
     }
 
@@ -796,7 +800,8 @@ where
     <Cache::BlockSource as BlockSource>::Error: fmt::Debug,
     ParamsT: consensus::Parameters + Send + 'static,
     DbT: InputSource + WalletTest + WalletWrite + WalletCommitmentTrees,
-    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
+    <DbT as WalletRead>::AccountId:
+        std::fmt::Debug + ConditionallySelectable + Default + Send + 'static,
 {
     /// Invokes [`scan_cached_blocks`] with the given arguments, expecting success.
     pub fn scan_cached_blocks(&mut self, from_height: BlockHeight, limit: usize) -> ScanSummary {
@@ -855,7 +860,7 @@ where
 impl<Cache, DbT, ParamsT, AccountIdT, ErrT> TestState<Cache, DbT, ParamsT>
 where
     ParamsT: consensus::Parameters + Send + 'static,
-    AccountIdT: std::cmp::Eq + std::hash::Hash,
+    AccountIdT: std::fmt::Debug + std::cmp::Eq + std::hash::Hash,
     ErrT: std::fmt::Debug,
     DbT: InputSource<AccountId = AccountIdT, Error = ErrT>
         + WalletTest
@@ -1286,7 +1291,7 @@ pub struct InitialChainState {
 /// Trait representing the ability to construct a new data store for use in a test.
 pub trait DataStoreFactory {
     type Error: core::fmt::Debug;
-    type AccountId: ConditionallySelectable + Default + Hash + Eq + Send + 'static;
+    type AccountId: std::fmt::Debug + ConditionallySelectable + Default + Hash + Eq + Send + 'static;
     type Account: Account<AccountId = Self::AccountId> + Clone;
     type DsError: core::fmt::Debug;
     type DataStore: InputSource<AccountId = Self::AccountId, Error = Self::DsError>
@@ -1593,10 +1598,12 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
             let seed = Secret::new(vec![0u8; 32]);
             let (account, usk) = match self.account_index {
                 Some(index) => wallet_data
-                    .import_account_hd(&seed, index, &birthday)
+                    .import_account_hd("", &seed, index, &birthday, None)
                     .unwrap(),
                 None => {
-                    let result = wallet_data.create_account(&seed, &birthday).unwrap();
+                    let result = wallet_data
+                        .create_account("", &seed, &birthday, None)
+                        .unwrap();
                     (
                         wallet_data.get_account(result.0).unwrap().unwrap(),
                         result.1,
@@ -2595,8 +2602,10 @@ impl WalletWrite for MockWalletDb {
 
     fn create_account(
         &mut self,
+        _account_name: &str,
         seed: &SecretVec<u8>,
         _birthday: &AccountBirthday,
+        _key_source: Option<&str>,
     ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
         let account = zip32::AccountId::ZERO;
         UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account)
@@ -2606,18 +2615,22 @@ impl WalletWrite for MockWalletDb {
 
     fn import_account_hd(
         &mut self,
+        _account_name: &str,
         _seed: &SecretVec<u8>,
         _account_index: zip32::AccountId,
         _birthday: &AccountBirthday,
+        _key_source: Option<&str>,
     ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error> {
         todo!()
     }
 
     fn import_account_ufvk(
         &mut self,
+        _account_name: &str,
         _unified_key: &UnifiedFullViewingKey,
         _birthday: &AccountBirthday,
         _purpose: AccountPurpose,
+        _key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error> {
         todo!()
     }

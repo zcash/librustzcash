@@ -103,7 +103,14 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     fn shield_transparent<T: ShieldedPoolTester>() {
-        let ds_factory = TestDbFactory::new(super::DEPENDENCIES.to_vec());
+        let ds_factory = TestDbFactory::new(
+            super::DEPENDENCIES
+                .iter()
+                .copied()
+                // Pull in the account UUID migration so `TestBuilder::build` works.
+                .chain(Some(super::super::add_account_uuids::MIGRATION_ID))
+                .collect(),
+        );
         let cache = BlockCache::new();
         let mut st = TestBuilder::new()
             .with_data_store_factory(ds_factory)

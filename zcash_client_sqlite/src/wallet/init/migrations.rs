@@ -1,4 +1,5 @@
 mod add_account_birthdays;
+mod add_account_uuids;
 mod add_transaction_views;
 mod add_utxo_account;
 mod addresses_table;
@@ -81,10 +82,10 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //              ------------------------------ tx_retrieval_queue ----------------------------
     //                                                     |
     //                                            support_legacy_sqlite
-    //                                                     |
-    //                                         fix_broken_commitment_trees
-    //                                                     |
-    //                                          fix_bad_change_flagging
+    //                                               /           \
+    //                         fix_broken_commitment_trees      add_account_uuids
+    //                                     |
+    //                          fix_bad_change_flagging
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -140,13 +141,14 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         }),
         Box::new(spend_key_available::Migration),
         Box::new(tx_retrieval_queue::Migration {
-            params: params.clone(),
+            _params: params.clone(),
         }),
         Box::new(support_legacy_sqlite::Migration),
         Box::new(fix_broken_commitment_trees::Migration {
             params: params.clone(),
         }),
         Box::new(fix_bad_change_flagging::Migration),
+        Box::new(add_account_uuids::Migration),
     ]
 }
 
@@ -157,7 +159,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
 /// included.
 #[allow(dead_code)]
 const PUBLIC_MIGRATION_STATES: &[&[Uuid]] = &[
-    V_0_4_0, V_0_6_0, V_0_8_0, V_0_9_0, V_0_10_0, V_0_10_3, V_0_11_0, V_0_11_1,
+    V_0_4_0, V_0_6_0, V_0_8_0, V_0_9_0, V_0_10_0, V_0_10_3, V_0_11_0, V_0_11_1, V_0_11_2, V_0_12_0,
+    V_0_13_0,
 ];
 
 /// Leaf migrations in the 0.4.0 release.
@@ -207,6 +210,15 @@ const V_0_11_0: &[Uuid] = &[
 
 /// Leaf migrations in the 0.11.1 release.
 const V_0_11_1: &[Uuid] = &[tx_retrieval_queue::MIGRATION_ID];
+
+/// Leaf migrations in the 0.11.2 release.
+const V_0_11_2: &[Uuid] = &[support_legacy_sqlite::MIGRATION_ID];
+
+/// Leaf migrations in the 0.12.0 release.
+const V_0_12_0: &[Uuid] = &[fix_broken_commitment_trees::MIGRATION_ID];
+
+/// Leaf migrations in the 0.13.0 release.
+const V_0_13_0: &[Uuid] = &[fix_bad_change_flagging::MIGRATION_ID];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
     conn: &rusqlite::Connection,

@@ -7,7 +7,7 @@ use zcash_client_backend::data_api::TransactionDataRequest;
 use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
 use zip32::{DiversifierIndex, Scope};
 
-use zcash_address::unified::{Encoding, Ivk, Uivk};
+use zcash_address::unified::{Ivk, Uivk};
 use zcash_client_backend::{
     data_api::AccountBalance,
     wallet::{TransparentAddressMetadata, WalletTransparentOutput},
@@ -23,17 +23,19 @@ use zcash_primitives::{
 use zcash_protocol::consensus::{self, BlockHeight};
 
 use super::{chain_tip_height, get_account_ids};
-use crate::{error::SqliteClientError, AccountId, TxRef, UtxoId};
+use crate::AccountUuid;
+use crate::{error::SqliteClientError, TxRef, UtxoId};
 
 pub(crate) mod ephemeral;
 
 pub(crate) fn detect_spending_accounts<'a>(
     conn: &Connection,
     spent: impl Iterator<Item = &'a OutPoint>,
-) -> Result<HashSet<AccountId>, rusqlite::Error> {
+) -> Result<HashSet<AccountUuid>, rusqlite::Error> {
     let mut account_q = conn.prepare_cached(
-        "SELECT account_id
+        "SELECT accounts.uuid
         FROM transparent_received_outputs o
+        JOIN accounts ON accounts.id = o.account_id
         JOIN transactions t ON t.id_tx = o.transaction_id
         WHERE t.txid = :prevout_txid
         AND o.output_index = :prevout_idx",
@@ -46,7 +48,7 @@ pub(crate) fn detect_spending_accounts<'a>(
                 ":prevout_txid": prevout.hash(),
                 ":prevout_idx": prevout.n()
             ],
-            |row| row.get::<_, u32>(0).map(AccountId),
+            |row| row.get(0).map(AccountUuid),
         )? {
             acc.insert(account?);
         }
@@ -80,15 +82,18 @@ fn address_index_from_diversifier_index_be(
 pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    account: AccountId,
+    account_uuid: AccountUuid,
 ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, SqliteClientError> {
     let mut ret: HashMap<TransparentAddress, Option<TransparentAddressMetadata>> = HashMap::new();
 
     // Get all UAs derived
     let mut ua_query = conn.prepare(
-        "SELECT address, diversifier_index_be FROM addresses WHERE account_id = :account",
+        "SELECT address, diversifier_index_be 
+         FROM addresses 
+         JOIN accounts ON accounts.id = addresses.account_id
+         WHERE accounts.uuid = :account_uuid",
     )?;
-    let mut rows = ua_query.query(named_params![":account": account.0])?;
+    let mut rows = ua_query.query(named_params![":account_uuid": account_uuid.0])?;
 
     while let Some(row) = rows.next()? {
         let ua_str: String = row.get(0)?;
@@ -113,7 +118,9 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
         }
     }
 
-    if let Some((taddr, address_index)) = get_legacy_transparent_address(params, conn, account)? {
+    if let Some((taddr, address_index)) =
+        get_legacy_transparent_address(params, conn, account_uuid)?
+    {
         let metadata = TransparentAddressMetadata::new(Scope::External.into(), address_index);
         ret.insert(taddr, Some(metadata));
     }
@@ -121,46 +128,56 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     Ok(ret)
 }
 
+pub(crate) fn uivk_legacy_transparent_address<P: consensus::Parameters>(
+    params: &P,
+    uivk_str: &str,
+) -> Result<Option<(TransparentAddress, NonHardenedChildIndex)>, SqliteClientError> {
+    use zcash_address::unified::{Container as _, Encoding as _};
+    use zcash_primitives::legacy::keys::ExternalIvk;
+
+    let (network, uivk) = Uivk::decode(uivk_str)
+        .map_err(|e| SqliteClientError::CorruptedData(format!("Unable to parse UIVK: {e}")))?;
+
+    if params.network_type() != network {
+        let network_name = |n| match n {
+            consensus::NetworkType::Main => "mainnet",
+            consensus::NetworkType::Test => "testnet",
+            consensus::NetworkType::Regtest => "regtest",
+        };
+        return Err(SqliteClientError::CorruptedData(format!(
+            "Network type mismatch: account UIVK is for {} but a {} address was requested.",
+            network_name(network),
+            network_name(params.network_type())
+        )));
+    }
+
+    // Derive the default transparent address (if it wasn't already part of a derived UA).
+    for item in uivk.items() {
+        if let Ivk::P2pkh(tivk_bytes) = item {
+            let tivk = ExternalIvk::deserialize(&tivk_bytes)?;
+            return Ok(Some(tivk.default_address()));
+        }
+    }
+
+    Ok(None)
+}
+
 pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
     params: &P,
     conn: &rusqlite::Connection,
-    account_id: AccountId,
+    account_uuid: AccountUuid,
 ) -> Result<Option<(TransparentAddress, NonHardenedChildIndex)>, SqliteClientError> {
-    use zcash_address::unified::Container;
-    use zcash_primitives::legacy::keys::ExternalIvk;
-
     // Get the UIVK for the account.
     let uivk_str: Option<String> = conn
         .query_row(
-            "SELECT uivk FROM accounts WHERE id = :account",
-            [account_id.0],
+            "SELECT uivk FROM accounts WHERE uuid = :account_uuid",
+            named_params![":account_uuid": account_uuid.0],
             |row| row.get(0),
         )
         .optional()?;
 
     if let Some(uivk_str) = uivk_str {
-        let (network, uivk) = Uivk::decode(&uivk_str)
-            .map_err(|e| SqliteClientError::CorruptedData(format!("Unable to parse UIVK: {e}")))?;
-        if params.network_type() != network {
-            let network_name = |n| match n {
-                consensus::NetworkType::Main => "mainnet",
-                consensus::NetworkType::Test => "testnet",
-                consensus::NetworkType::Regtest => "regtest",
-            };
-            return Err(SqliteClientError::CorruptedData(format!(
-                "Network type mismatch: account UIVK is for {} but a {} address was requested.",
-                network_name(network),
-                network_name(params.network_type())
-            )));
-        }
-
-        // Derive the default transparent address (if it wasn't already part of a derived UA).
-        for item in uivk.items() {
-            if let Ivk::P2pkh(tivk_bytes) = item {
-                let tivk = ExternalIvk::deserialize(&tivk_bytes)?;
-                return Ok(Some(tivk.default_address()));
-            }
-        }
+        return uivk_legacy_transparent_address(params, &uivk_str);
     }
 
     Ok(None)
@@ -334,7 +351,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
 pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    account: AccountId,
+    account_uuid: AccountUuid,
     summary_height: BlockHeight,
 ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, SqliteClientError> {
     let chain_tip_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
@@ -342,9 +359,9 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     let mut stmt_address_balances = conn.prepare(
         "SELECT u.address, SUM(u.value_zat)
          FROM transparent_received_outputs u
-         JOIN transactions t
-         ON t.id_tx = u.transaction_id
-         WHERE u.account_id = :account_id
+         JOIN accounts ON accounts.id = u.account_id
+         JOIN transactions t ON t.id_tx = u.transaction_id
+         WHERE accounts.uuid = :account_uuid
          -- the transaction that created the output is mined or is definitely unexpired
          AND (
             t.mined_height <= :summary_height -- tx is mined
@@ -370,7 +387,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
 
     let mut res = HashMap::new();
     let mut rows = stmt_address_balances.query(named_params![
-        ":account_id": account.0,
+        ":account_uuid": account_uuid.0,
         ":summary_height": u32::from(summary_height),
         ":chain_tip_height": u32::from(chain_tip_height),
         ":spend_expiry_height": u32::from(std::cmp::min(summary_height, chain_tip_height + 1)),
@@ -390,13 +407,13 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
 pub(crate) fn add_transparent_account_balances(
     conn: &rusqlite::Connection,
     mempool_height: BlockHeight,
-    account_balances: &mut HashMap<AccountId, AccountBalance>,
+    account_balances: &mut HashMap<AccountUuid, AccountBalance>,
 ) -> Result<(), SqliteClientError> {
     let mut stmt_account_balances = conn.prepare(
-        "SELECT u.account_id, SUM(u.value_zat)
+        "SELECT a.uuid, SUM(u.value_zat)
          FROM transparent_received_outputs u
-         JOIN transactions t
-         ON t.id_tx = u.transaction_id
+         JOIN accounts a ON a.id = u.account_id
+         JOIN transactions t ON t.id_tx = u.transaction_id
          -- the transaction that created the output is mined or is definitely unexpired
          WHERE (
             t.mined_height < :mempool_height -- tx is mined
@@ -413,13 +430,13 @@ pub(crate) fn add_transparent_account_balances(
            OR tx.expiry_height = 0 -- the spending tx will not expire
            OR tx.expiry_height >= :mempool_height -- the spending tx is unexpired
          )
-         GROUP BY u.account_id",
+         GROUP BY a.uuid",
     )?;
     let mut rows = stmt_account_balances
         .query(named_params![":mempool_height": u32::from(mempool_height),])?;
 
     while let Some(row) = rows.next()? {
-        let account = AccountId(row.get(0)?);
+        let account = AccountUuid(row.get(0)?);
         let raw_value = row.get(1)?;
         let value = NonNegativeAmount::from_nonnegative_i64(raw_value).map_err(|_| {
             SqliteClientError::CorruptedData(format!("Negative UTXO value {:?}", raw_value))
@@ -501,7 +518,9 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     output: &WalletTransparentOutput,
 ) -> Result<UtxoId, SqliteClientError> {
     let address = output.recipient_address();
-    if let Some(receiving_account) = find_account_for_transparent_address(conn, params, address)? {
+    if let Some(receiving_account) =
+        find_account_uuid_for_transparent_address(conn, params, address)?
+    {
         put_transparent_output(
             conn,
             params,
@@ -565,7 +584,7 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
 pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    account_id: AccountId,
+    account_uuid: AccountUuid,
     address: &TransparentAddress,
 ) -> Result<Option<TransparentAddressMetadata>, SqliteClientError> {
     let address_str = address.encode(params);
@@ -573,8 +592,10 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
     if let Some(di_vec) = conn
         .query_row(
             "SELECT diversifier_index_be FROM addresses
-             WHERE account_id = :account_id AND cached_transparent_receiver_address = :address",
-            named_params![":account_id": account_id.0, ":address": &address_str],
+             JOIN accounts ON addresses.account_id = accounts.id
+             WHERE accounts.uuid = :account_uuid 
+             AND cached_transparent_receiver_address = :address",
+            named_params![":account_uuid": account_uuid.0, ":address": &address_str],
             |row| row.get::<_, Vec<u8>>(0),
         )
         .optional()?
@@ -585,7 +606,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
     }
 
     if let Some((legacy_taddr, address_index)) =
-        get_legacy_transparent_address(params, conn, account_id)?
+        get_legacy_transparent_address(params, conn, account_uuid)?
     {
         if &legacy_taddr == address {
             let metadata = TransparentAddressMetadata::new(Scope::External.into(), address_index);
@@ -595,7 +616,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
 
     // Search known ephemeral addresses.
     if let Some(address_index) =
-        ephemeral::find_index_for_ephemeral_address_str(conn, account_id, &address_str)?
+        ephemeral::find_index_for_ephemeral_address_str(conn, account_uuid, &address_str)?
     {
         return Ok(Some(ephemeral::metadata(address_index)));
     }
@@ -613,18 +634,21 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
 ///
 /// Returns `Ok(None)` if the transparent output's recipient address is not in any of the
 /// above locations. This means the wallet considers the output "not interesting".
-pub(crate) fn find_account_for_transparent_address<P: consensus::Parameters>(
+pub(crate) fn find_account_uuid_for_transparent_address<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     address: &TransparentAddress,
-) -> Result<Option<AccountId>, SqliteClientError> {
+) -> Result<Option<AccountUuid>, SqliteClientError> {
     let address_str = address.encode(params);
 
     if let Some(account_id) = conn
         .query_row(
-            "SELECT account_id FROM addresses WHERE cached_transparent_receiver_address = :address",
+            "SELECT accounts.uuid 
+             FROM addresses 
+             JOIN accounts ON accounts.id = addresses.account_id
+             WHERE cached_transparent_receiver_address = :address",
             named_params![":address": &address_str],
-            |row| Ok(AccountId(row.get(0)?)),
+            |row| Ok(AccountUuid(row.get(0)?)),
         )
         .optional()?
     {
@@ -668,10 +692,11 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     txout: &TxOut,
     output_height: Option<BlockHeight>,
     address: &TransparentAddress,
-    receiving_account: AccountId,
+    receiving_account_uuid: AccountUuid,
     known_unspent: bool,
 ) -> Result<UtxoId, SqliteClientError> {
     let output_height = output_height.map(u32::from);
+    let receiving_account_id = super::get_account_ref(conn, receiving_account_uuid)?;
 
     // Check whether we have an entry in the blocks table for the output height;
     // if not, the transaction will be updated with its mined height when the
@@ -759,7 +784,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     let sql_args = named_params![
         ":transaction_id": id_tx,
         ":output_index": &outpoint.n(),
-        ":account_id": receiving_account.0,
+        ":account_id": receiving_account_id.0,
         ":address": &address.encode(params),
         ":script": &txout.script_pubkey.0,
         ":value_zat": &i64::from(Amount::from(txout.value)),

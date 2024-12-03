@@ -24,7 +24,10 @@ use crate::wallet::scanning::priority_code;
 pub(super) const TABLE_ACCOUNTS: &str = r#"
 CREATE TABLE "accounts" (
     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    uuid BLOB NOT NULL,
     account_kind INTEGER NOT NULL DEFAULT 0,
+    key_source TEXT,
     hd_seed_fingerprint BLOB,
     hd_account_index INTEGER,
     ufvk TEXT,
@@ -52,12 +55,14 @@ CREATE TABLE "accounts" (
         )
     )
 )"#;
+pub(super) const INDEX_ACCOUNTS_UUID: &str =
+    r#"CREATE UNIQUE INDEX accounts_uuid ON accounts (uuid)"#;
 pub(super) const INDEX_ACCOUNTS_UFVK: &str =
-    r#"CREATE UNIQUE INDEX accounts_ufvk ON "accounts" (ufvk)"#;
+    r#"CREATE UNIQUE INDEX accounts_ufvk ON accounts (ufvk)"#;
 pub(super) const INDEX_ACCOUNTS_UIVK: &str =
-    r#"CREATE UNIQUE INDEX accounts_uivk ON "accounts" (uivk)"#;
+    r#"CREATE UNIQUE INDEX accounts_uivk ON accounts (uivk)"#;
 pub(super) const INDEX_HD_ACCOUNT: &str =
-    r#"CREATE UNIQUE INDEX hd_account ON "accounts" (hd_seed_fingerprint, hd_account_index)"#;
+    r#"CREATE UNIQUE INDEX hd_account ON accounts (hd_seed_fingerprint, hd_account_index)"#;
 
 /// Stores diversified Unified Addresses that have been generated from accounts in the
 /// wallet.
@@ -825,7 +830,7 @@ sent_note_counts AS (
 blocks_max_height AS (
     SELECT MAX(blocks.height) AS max_height FROM blocks
 )
-SELECT notes.account_id             AS account_id,
+SELECT accounts.uuid                AS account_uuid,
        notes.mined_height           AS mined_height,
        notes.txid                   AS txid,
        transactions.tx_index        AS tx_index,
@@ -855,6 +860,7 @@ SELECT notes.account_id             AS account_id,
             AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
        ) AS is_shielding
 FROM notes
+JOIN accounts ON accounts.id = notes.account_id
 LEFT JOIN transactions
      ON notes.txid = transactions.txid
 JOIN blocks_max_height
@@ -883,8 +889,8 @@ CREATE VIEW v_tx_outputs AS
 SELECT transactions.txid            AS txid,
        ro.pool                      AS output_pool,
        ro.output_index              AS output_index,
-       sent_notes.from_account_id   AS from_account_id,
-       ro.account_id                AS to_account_id,
+       from_account.uuid            AS from_account_uuid,
+       to_account.uuid              AS to_account_uuid,
        NULL                         AS to_address,
        ro.value                     AS value,
        ro.is_change                 AS is_change,
@@ -894,13 +900,16 @@ JOIN transactions
     ON transactions.id_tx = ro.transaction_id
 -- join to the sent_notes table to obtain `from_account_id`
 LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
+-- join on the accounts table to obtain account UUIDs
+JOIN accounts from_account ON accounts.id = sent_notes.from_account_id
+JOIN accounts to_account ON accounts.id = ro.account_id
 UNION
 -- select all outputs sent from the wallet to external recipients
 SELECT transactions.txid            AS txid,
        sent_notes.output_pool       AS output_pool,
        sent_notes.output_index      AS output_index,
-       sent_notes.from_account_id   AS from_account_id,
-       NULL                         AS to_account_id,
+       from_account.uuid            AS from_account_uuid,
+       NULL                         AS to_account_uuid,
        sent_notes.to_address        AS to_address,
        sent_notes.value             AS value,
        0                            AS is_change,
@@ -909,6 +918,8 @@ FROM sent_notes
 JOIN transactions
     ON transactions.id_tx = sent_notes.tx
 LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
+-- join on the accounts table to obtain account UUIDs
+JOIN accounts from_account ON accounts.id = sent_notes.from_account_id
 -- exclude any sent notes for which a row exists in the v_received_outputs view
 WHERE ro.account_id IS NULL";
 
