@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/error.rs`."><title>error.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-42caa33d.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (90ab8eaed 2024-11-14)" data-channel="nightly" data-search-js="search-6851d9ab.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>error.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/error.rs`."><title>error.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-dbdb5eec.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (d49be02cf 2024-12-02)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>error.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -257,13 +257,7 @@
 <a href="#256" id="256">256</a>
 <a href="#257" id="257">257</a>
 <a href="#258" id="258">258</a>
-<a href="#259" id="259">259</a>
-<a href="#260" id="260">260</a>
-<a href="#261" id="261">261</a>
-<a href="#262" id="262">262</a>
-<a href="#263" id="263">263</a>
-<a href="#264" id="264">264</a>
-<a href="#265" id="265">265</a></pre></div><pre class="rust"><code><span class="doccomment">//! Error types for problems that may arise when reading or storing wallet data to SQLite.
+<a href="#259" id="259">259</a></pre></div><pre class="rust"><code><span class="doccomment">//! Error types for problems that may arise when reading or storing wallet data to SQLite.
 
 </span><span class="kw">use </span>std::error;
 <span class="kw">use </span>std::fmt;
@@ -276,8 +270,7 @@
 <span class="kw">use </span>zcash_primitives::zip32;
 <span class="kw">use </span>zcash_primitives::{consensus::BlockHeight, transaction::components::amount::BalanceError};
 
-<span class="kw">use </span><span class="kw">crate</span>::wallet::commitment_tree;
-<span class="kw">use </span><span class="kw">crate</span>::AccountId;
+<span class="kw">use crate</span>::{wallet::commitment_tree, AccountUuid};
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">use </span>{
@@ -344,7 +337,7 @@
 
     <span class="doccomment">/// The account being added collides with an existing account in the wallet with the given ID.
     /// The collision can be on the seed and ZIP-32 account index, or a shared FVK component.
-    </span>AccountCollision(AccountId),
+    </span>AccountCollision(AccountUuid),
 
     <span class="doccomment">/// The account was imported, and ZIP-32 derivation information is not known for it.
     </span>UnknownZip32Derivation,
@@ -355,12 +348,8 @@
     <span class="doccomment">/// An error occurred while processing an account due to a failure in deriving the account's keys.
     </span>BadAccountData(String),
 
-    <span class="doccomment">/// A caller attempted to initialize the accounts table with a discontinuous
-    /// set of account identifiers.
-    </span>AccountIdDiscontinuity,
-
-    <span class="doccomment">/// A caller attempted to construct a new account with an invalid account identifier.
-    </span>AccountIdOutOfRange,
+    <span class="doccomment">/// A caller attempted to construct a new account with an invalid ZIP 32 account identifier.
+    </span>Zip32AccountIndexOutOfRange,
 
     <span class="doccomment">/// The address associated with a record being inserted was not recognized as
     /// belonging to the wallet.
@@ -391,10 +380,10 @@
     </span>NoteFilterInvalid(NoteFilter),
 
     <span class="doccomment">/// The proposal cannot be constructed until transactions with previously reserved
-    /// ephemeral address outputs have been mined. The parameters are the account id and
+    /// ephemeral address outputs have been mined. The parameters are the account UUID and
     /// the index that could not safely be reserved.
     </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-    </span>ReachedGapLimit(AccountId, u32),
+    </span>ReachedGapLimit(AccountUuid, u32),
 
     <span class="doccomment">/// An ephemeral address would be reused. The parameters are the address in string
     /// form, and the txid of the earliest transaction in which it is known to have been
@@ -444,11 +433,10 @@
             SqliteClientError::AddressGeneration(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"{}"</span>, e),
             SqliteClientError::AccountUnknown =&gt; <span class="macro">write!</span>(f, <span class="string">"The account with the given ID does not belong to this wallet."</span>),
             SqliteClientError::UnknownZip32Derivation =&gt; <span class="macro">write!</span>(f, <span class="string">"ZIP-32 derivation information is not known for this account."</span>),
-            SqliteClientError::KeyDerivationError(acct_id) =&gt; <span class="macro">write!</span>(f, <span class="string">"Key derivation failed for account {}"</span>, u32::from(<span class="kw-2">*</span>acct_id)),
+            SqliteClientError::KeyDerivationError(zip32_index) =&gt; <span class="macro">write!</span>(f, <span class="string">"Key derivation failed for ZIP 32 account index {}"</span>, u32::from(<span class="kw-2">*</span>zip32_index)),
             SqliteClientError::BadAccountData(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"Failed to add account: {}"</span>, e),
-            SqliteClientError::AccountIdDiscontinuity =&gt; <span class="macro">write!</span>(f, <span class="string">"Wallet account identifiers must be sequential."</span>),
-            SqliteClientError::AccountIdOutOfRange =&gt; <span class="macro">write!</span>(f, <span class="string">"Wallet account identifiers must be less than 0x7FFFFFFF."</span>),
-            SqliteClientError::AccountCollision(id) =&gt; <span class="macro">write!</span>(f, <span class="string">"An account corresponding to the data provided already exists in the wallet with internal identifier {}."</span>, id.<span class="number">0</span>),
+            SqliteClientError::Zip32AccountIndexOutOfRange =&gt; <span class="macro">write!</span>(f, <span class="string">"ZIP 32 account identifiers must be less than 0x7FFFFFFF."</span>),
+            SqliteClientError::AccountCollision(account_uuid) =&gt; <span class="macro">write!</span>(f, <span class="string">"An account corresponding to the data provided already exists in the wallet with UUID {account_uuid:?}."</span>),
             <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
             </span>SqliteClientError::AddressNotRecognized(<span class="kw">_</span>) =&gt; <span class="macro">write!</span>(f, <span class="string">"The address associated with a received txo is not identifiable as belonging to the wallet."</span>),
             SqliteClientError::CommitmentTree(err) =&gt; <span class="macro">write!</span>(f, <span class="string">"An error occurred accessing or updating note commitment tree data: {}."</span>, err),

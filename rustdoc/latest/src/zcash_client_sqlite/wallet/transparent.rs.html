@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/transparent.rs`."><title>transparent.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-42caa33d.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (90ab8eaed 2024-11-14)" data-channel="nightly" data-search-js="search-6851d9ab.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>transparent.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/transparent.rs`."><title>transparent.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-dbdb5eec.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (d49be02cf 2024-12-02)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>transparent.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -846,7 +846,32 @@
 <a href="#845" id="845">845</a>
 <a href="#846" id="846">846</a>
 <a href="#847" id="847">847</a>
-<a href="#848" id="848">848</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for transparent input support in the wallet.
+<a href="#848" id="848">848</a>
+<a href="#849" id="849">849</a>
+<a href="#850" id="850">850</a>
+<a href="#851" id="851">851</a>
+<a href="#852" id="852">852</a>
+<a href="#853" id="853">853</a>
+<a href="#854" id="854">854</a>
+<a href="#855" id="855">855</a>
+<a href="#856" id="856">856</a>
+<a href="#857" id="857">857</a>
+<a href="#858" id="858">858</a>
+<a href="#859" id="859">859</a>
+<a href="#860" id="860">860</a>
+<a href="#861" id="861">861</a>
+<a href="#862" id="862">862</a>
+<a href="#863" id="863">863</a>
+<a href="#864" id="864">864</a>
+<a href="#865" id="865">865</a>
+<a href="#866" id="866">866</a>
+<a href="#867" id="867">867</a>
+<a href="#868" id="868">868</a>
+<a href="#869" id="869">869</a>
+<a href="#870" id="870">870</a>
+<a href="#871" id="871">871</a>
+<a href="#872" id="872">872</a>
+<a href="#873" id="873">873</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for transparent input support in the wallet.
 </span><span class="kw">use </span>std::collections::{HashMap, HashSet};
 
 <span class="kw">use </span>rusqlite::OptionalExtension;
@@ -855,7 +880,7 @@
 <span class="kw">use </span>zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
 <span class="kw">use </span>zip32::{DiversifierIndex, Scope};
 
-<span class="kw">use </span>zcash_address::unified::{Encoding, Ivk, Uivk};
+<span class="kw">use </span>zcash_address::unified::{Ivk, Uivk};
 <span class="kw">use </span>zcash_client_backend::{
     data_api::AccountBalance,
     wallet::{TransparentAddressMetadata, WalletTransparentOutput},
@@ -871,17 +896,19 @@
 <span class="kw">use </span>zcash_protocol::consensus::{<span class="self">self</span>, BlockHeight};
 
 <span class="kw">use super</span>::{chain_tip_height, get_account_ids};
-<span class="kw">use crate</span>::{error::SqliteClientError, AccountId, TxRef, UtxoId};
+<span class="kw">use </span><span class="kw">crate</span>::AccountUuid;
+<span class="kw">use crate</span>::{error::SqliteClientError, TxRef, UtxoId};
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>ephemeral;
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>detect_spending_accounts&lt;<span class="lifetime">'a</span>&gt;(
     conn: <span class="kw-2">&amp;</span>Connection,
     spent: <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">'a </span>OutPoint&gt;,
-) -&gt; <span class="prelude-ty">Result</span>&lt;HashSet&lt;AccountId&gt;, rusqlite::Error&gt; {
+) -&gt; <span class="prelude-ty">Result</span>&lt;HashSet&lt;AccountUuid&gt;, rusqlite::Error&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>account_q = conn.prepare_cached(
-        <span class="string">"SELECT account_id
+        <span class="string">"SELECT accounts.uuid
         FROM transparent_received_outputs o
+        JOIN accounts ON accounts.id = o.account_id
         JOIN transactions t ON t.id_tx = o.transaction_id
         WHERE t.txid = :prevout_txid
         AND o.output_index = :prevout_idx"</span>,
@@ -894,7 +921,7 @@
                 <span class="string">":prevout_txid"</span>: prevout.hash(),
                 <span class="string">":prevout_idx"</span>: prevout.n()
             ],
-            |row| row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">0</span>).map(AccountId),
+            |row| row.get(<span class="number">0</span>).map(AccountUuid),
         )<span class="question-mark">? </span>{
             acc.insert(account<span class="question-mark">?</span>);
         }
@@ -928,15 +955,18 @@
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_transparent_receivers&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
     params: <span class="kw-2">&amp;</span>P,
-    account: AccountId,
+    account_uuid: AccountUuid,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;HashMap&lt;TransparentAddress, <span class="prelude-ty">Option</span>&lt;TransparentAddressMetadata&gt;&gt;, SqliteClientError&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>ret: HashMap&lt;TransparentAddress, <span class="prelude-ty">Option</span>&lt;TransparentAddressMetadata&gt;&gt; = HashMap::new();
 
     <span class="comment">// Get all UAs derived
     </span><span class="kw">let </span><span class="kw-2">mut </span>ua_query = conn.prepare(
-        <span class="string">"SELECT address, diversifier_index_be FROM addresses WHERE account_id = :account"</span>,
+        <span class="string">"SELECT address, diversifier_index_be 
+         FROM addresses 
+         JOIN accounts ON accounts.id = addresses.account_id
+         WHERE accounts.uuid = :account_uuid"</span>,
     )<span class="question-mark">?</span>;
-    <span class="kw">let </span><span class="kw-2">mut </span>rows = ua_query.query(<span class="macro">named_params!</span>[<span class="string">":account"</span>: account.<span class="number">0</span>])<span class="question-mark">?</span>;
+    <span class="kw">let </span><span class="kw-2">mut </span>rows = ua_query.query(<span class="macro">named_params!</span>[<span class="string">":account_uuid"</span>: account_uuid.<span class="number">0</span>])<span class="question-mark">?</span>;
 
     <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
         <span class="kw">let </span>ua_str: String = row.get(<span class="number">0</span>)<span class="question-mark">?</span>;
@@ -961,7 +991,9 @@
         }
     }
 
-    <span class="kw">if let </span><span class="prelude-val">Some</span>((taddr, address_index)) = get_legacy_transparent_address(params, conn, account)<span class="question-mark">? </span>{
+    <span class="kw">if let </span><span class="prelude-val">Some</span>((taddr, address_index)) =
+        get_legacy_transparent_address(params, conn, account_uuid)<span class="question-mark">?
+    </span>{
         <span class="kw">let </span>metadata = TransparentAddressMetadata::new(Scope::External.into(), address_index);
         ret.insert(taddr, <span class="prelude-val">Some</span>(metadata));
     }
@@ -969,46 +1001,56 @@
     <span class="prelude-val">Ok</span>(ret)
 }
 
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>uivk_legacy_transparent_address&lt;P: consensus::Parameters&gt;(
+    params: <span class="kw-2">&amp;</span>P,
+    uivk_str: <span class="kw-2">&amp;</span>str,
+) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(TransparentAddress, NonHardenedChildIndex)&gt;, SqliteClientError&gt; {
+    <span class="kw">use </span>zcash_address::unified::{Container <span class="kw">as _</span>, Encoding <span class="kw">as _</span>};
+    <span class="kw">use </span>zcash_primitives::legacy::keys::ExternalIvk;
+
+    <span class="kw">let </span>(network, uivk) = Uivk::decode(uivk_str)
+        .map_err(|e| SqliteClientError::CorruptedData(<span class="macro">format!</span>(<span class="string">"Unable to parse UIVK: {e}"</span>)))<span class="question-mark">?</span>;
+
+    <span class="kw">if </span>params.network_type() != network {
+        <span class="kw">let </span>network_name = |n| <span class="kw">match </span>n {
+            consensus::NetworkType::Main =&gt; <span class="string">"mainnet"</span>,
+            consensus::NetworkType::Test =&gt; <span class="string">"testnet"</span>,
+            consensus::NetworkType::Regtest =&gt; <span class="string">"regtest"</span>,
+        };
+        <span class="kw">return </span><span class="prelude-val">Err</span>(SqliteClientError::CorruptedData(<span class="macro">format!</span>(
+            <span class="string">"Network type mismatch: account UIVK is for {} but a {} address was requested."</span>,
+            network_name(network),
+            network_name(params.network_type())
+        )));
+    }
+
+    <span class="comment">// Derive the default transparent address (if it wasn't already part of a derived UA).
+    </span><span class="kw">for </span>item <span class="kw">in </span>uivk.items() {
+        <span class="kw">if let </span>Ivk::P2pkh(tivk_bytes) = item {
+            <span class="kw">let </span>tivk = ExternalIvk::deserialize(<span class="kw-2">&amp;</span>tivk_bytes)<span class="question-mark">?</span>;
+            <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(tivk.default_address()));
+        }
+    }
+
+    <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)
+}
+
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_legacy_transparent_address&lt;P: consensus::Parameters&gt;(
     params: <span class="kw-2">&amp;</span>P,
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
-    account_id: AccountId,
+    account_uuid: AccountUuid,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(TransparentAddress, NonHardenedChildIndex)&gt;, SqliteClientError&gt; {
-    <span class="kw">use </span>zcash_address::unified::Container;
-    <span class="kw">use </span>zcash_primitives::legacy::keys::ExternalIvk;
-
     <span class="comment">// Get the UIVK for the account.
     </span><span class="kw">let </span>uivk_str: <span class="prelude-ty">Option</span>&lt;String&gt; = conn
         .query_row(
-            <span class="string">"SELECT uivk FROM accounts WHERE id = :account"</span>,
-            [account_id.<span class="number">0</span>],
+            <span class="string">"SELECT uivk FROM accounts WHERE uuid = :account_uuid"</span>,
+            <span class="macro">named_params!</span>[<span class="string">":account_uuid"</span>: account_uuid.<span class="number">0</span>],
             |row| row.get(<span class="number">0</span>),
         )
         .optional()<span class="question-mark">?</span>;
 
     <span class="kw">if let </span><span class="prelude-val">Some</span>(uivk_str) = uivk_str {
-        <span class="kw">let </span>(network, uivk) = Uivk::decode(<span class="kw-2">&amp;</span>uivk_str)
-            .map_err(|e| SqliteClientError::CorruptedData(<span class="macro">format!</span>(<span class="string">"Unable to parse UIVK: {e}"</span>)))<span class="question-mark">?</span>;
-        <span class="kw">if </span>params.network_type() != network {
-            <span class="kw">let </span>network_name = |n| <span class="kw">match </span>n {
-                consensus::NetworkType::Main =&gt; <span class="string">"mainnet"</span>,
-                consensus::NetworkType::Test =&gt; <span class="string">"testnet"</span>,
-                consensus::NetworkType::Regtest =&gt; <span class="string">"regtest"</span>,
-            };
-            <span class="kw">return </span><span class="prelude-val">Err</span>(SqliteClientError::CorruptedData(<span class="macro">format!</span>(
-                <span class="string">"Network type mismatch: account UIVK is for {} but a {} address was requested."</span>,
-                network_name(network),
-                network_name(params.network_type())
-            )));
-        }
-
-        <span class="comment">// Derive the default transparent address (if it wasn't already part of a derived UA).
-        </span><span class="kw">for </span>item <span class="kw">in </span>uivk.items() {
-            <span class="kw">if let </span>Ivk::P2pkh(tivk_bytes) = item {
-                <span class="kw">let </span>tivk = ExternalIvk::deserialize(<span class="kw-2">&amp;</span>tivk_bytes)<span class="question-mark">?</span>;
-                <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(tivk.default_address()));
-            }
-        }
+        <span class="kw">return </span>uivk_legacy_transparent_address(params, <span class="kw-2">&amp;</span>uivk_str);
     }
 
     <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)
@@ -1182,7 +1224,7 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_transparent_balances&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
     params: <span class="kw-2">&amp;</span>P,
-    account: AccountId,
+    account_uuid: AccountUuid,
     summary_height: BlockHeight,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;HashMap&lt;TransparentAddress, NonNegativeAmount&gt;, SqliteClientError&gt; {
     <span class="kw">let </span>chain_tip_height = chain_tip_height(conn)<span class="question-mark">?</span>.ok_or(SqliteClientError::ChainHeightUnknown)<span class="question-mark">?</span>;
@@ -1190,9 +1232,9 @@
     <span class="kw">let </span><span class="kw-2">mut </span>stmt_address_balances = conn.prepare(
         <span class="string">"SELECT u.address, SUM(u.value_zat)
          FROM transparent_received_outputs u
-         JOIN transactions t
-         ON t.id_tx = u.transaction_id
-         WHERE u.account_id = :account_id
+         JOIN accounts ON accounts.id = u.account_id
+         JOIN transactions t ON t.id_tx = u.transaction_id
+         WHERE accounts.uuid = :account_uuid
          -- the transaction that created the output is mined or is definitely unexpired
          AND (
             t.mined_height &lt;= :summary_height -- tx is mined
@@ -1218,7 +1260,7 @@
 
     <span class="kw">let </span><span class="kw-2">mut </span>res = HashMap::new();
     <span class="kw">let </span><span class="kw-2">mut </span>rows = stmt_address_balances.query(<span class="macro">named_params!</span>[
-        <span class="string">":account_id"</span>: account.<span class="number">0</span>,
+        <span class="string">":account_uuid"</span>: account_uuid.<span class="number">0</span>,
         <span class="string">":summary_height"</span>: u32::from(summary_height),
         <span class="string">":chain_tip_height"</span>: u32::from(chain_tip_height),
         <span class="string">":spend_expiry_height"</span>: u32::from(std::cmp::min(summary_height, chain_tip_height + <span class="number">1</span>)),
@@ -1238,13 +1280,13 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_transparent_account_balances(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
     mempool_height: BlockHeight,
-    account_balances: <span class="kw-2">&amp;mut </span>HashMap&lt;AccountId, AccountBalance&gt;,
+    account_balances: <span class="kw-2">&amp;mut </span>HashMap&lt;AccountUuid, AccountBalance&gt;,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>stmt_account_balances = conn.prepare(
-        <span class="string">"SELECT u.account_id, SUM(u.value_zat)
+        <span class="string">"SELECT a.uuid, SUM(u.value_zat)
          FROM transparent_received_outputs u
-         JOIN transactions t
-         ON t.id_tx = u.transaction_id
+         JOIN accounts a ON a.id = u.account_id
+         JOIN transactions t ON t.id_tx = u.transaction_id
          -- the transaction that created the output is mined or is definitely unexpired
          WHERE (
             t.mined_height &lt; :mempool_height -- tx is mined
@@ -1261,13 +1303,13 @@
            OR tx.expiry_height = 0 -- the spending tx will not expire
            OR tx.expiry_height &gt;= :mempool_height -- the spending tx is unexpired
          )
-         GROUP BY u.account_id"</span>,
+         GROUP BY a.uuid"</span>,
     )<span class="question-mark">?</span>;
     <span class="kw">let </span><span class="kw-2">mut </span>rows = stmt_account_balances
         .query(<span class="macro">named_params!</span>[<span class="string">":mempool_height"</span>: u32::from(mempool_height),])<span class="question-mark">?</span>;
 
     <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
-        <span class="kw">let </span>account = AccountId(row.get(<span class="number">0</span>)<span class="question-mark">?</span>);
+        <span class="kw">let </span>account = AccountUuid(row.get(<span class="number">0</span>)<span class="question-mark">?</span>);
         <span class="kw">let </span>raw_value = row.get(<span class="number">1</span>)<span class="question-mark">?</span>;
         <span class="kw">let </span>value = NonNegativeAmount::from_nonnegative_i64(raw_value).map_err(|<span class="kw">_</span>| {
             SqliteClientError::CorruptedData(<span class="macro">format!</span>(<span class="string">"Negative UTXO value {:?}"</span>, raw_value))
@@ -1349,7 +1391,9 @@
     output: <span class="kw-2">&amp;</span>WalletTransparentOutput,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;UtxoId, SqliteClientError&gt; {
     <span class="kw">let </span>address = output.recipient_address();
-    <span class="kw">if let </span><span class="prelude-val">Some</span>(receiving_account) = find_account_for_transparent_address(conn, params, address)<span class="question-mark">? </span>{
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(receiving_account) =
+        find_account_uuid_for_transparent_address(conn, params, address)<span class="question-mark">?
+    </span>{
         put_transparent_output(
             conn,
             params,
@@ -1413,7 +1457,7 @@
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_transparent_address_metadata&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
     params: <span class="kw-2">&amp;</span>P,
-    account_id: AccountId,
+    account_uuid: AccountUuid,
     address: <span class="kw-2">&amp;</span>TransparentAddress,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;TransparentAddressMetadata&gt;, SqliteClientError&gt; {
     <span class="kw">let </span>address_str = address.encode(params);
@@ -1421,8 +1465,10 @@
     <span class="kw">if let </span><span class="prelude-val">Some</span>(di_vec) = conn
         .query_row(
             <span class="string">"SELECT diversifier_index_be FROM addresses
-             WHERE account_id = :account_id AND cached_transparent_receiver_address = :address"</span>,
-            <span class="macro">named_params!</span>[<span class="string">":account_id"</span>: account_id.<span class="number">0</span>, <span class="string">":address"</span>: <span class="kw-2">&amp;</span>address_str],
+             JOIN accounts ON addresses.account_id = accounts.id
+             WHERE accounts.uuid = :account_uuid 
+             AND cached_transparent_receiver_address = :address"</span>,
+            <span class="macro">named_params!</span>[<span class="string">":account_uuid"</span>: account_uuid.<span class="number">0</span>, <span class="string">":address"</span>: <span class="kw-2">&amp;</span>address_str],
             |row| row.get::&lt;<span class="kw">_</span>, Vec&lt;u8&gt;&gt;(<span class="number">0</span>),
         )
         .optional()<span class="question-mark">?
@@ -1433,7 +1479,7 @@
     }
 
     <span class="kw">if let </span><span class="prelude-val">Some</span>((legacy_taddr, address_index)) =
-        get_legacy_transparent_address(params, conn, account_id)<span class="question-mark">?
+        get_legacy_transparent_address(params, conn, account_uuid)<span class="question-mark">?
     </span>{
         <span class="kw">if </span><span class="kw-2">&amp;</span>legacy_taddr == address {
             <span class="kw">let </span>metadata = TransparentAddressMetadata::new(Scope::External.into(), address_index);
@@ -1443,7 +1489,7 @@
 
     <span class="comment">// Search known ephemeral addresses.
     </span><span class="kw">if let </span><span class="prelude-val">Some</span>(address_index) =
-        ephemeral::find_index_for_ephemeral_address_str(conn, account_id, <span class="kw-2">&amp;</span>address_str)<span class="question-mark">?
+        ephemeral::find_index_for_ephemeral_address_str(conn, account_uuid, <span class="kw-2">&amp;</span>address_str)<span class="question-mark">?
     </span>{
         <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(ephemeral::metadata(address_index)));
     }
@@ -1461,18 +1507,21 @@
 ///
 /// Returns `Ok(None)` if the transparent output's recipient address is not in any of the
 /// above locations. This means the wallet considers the output "not interesting".
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>find_account_for_transparent_address&lt;P: consensus::Parameters&gt;(
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>find_account_uuid_for_transparent_address&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
     params: <span class="kw-2">&amp;</span>P,
     address: <span class="kw-2">&amp;</span>TransparentAddress,
-) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;AccountId&gt;, SqliteClientError&gt; {
+) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;AccountUuid&gt;, SqliteClientError&gt; {
     <span class="kw">let </span>address_str = address.encode(params);
 
     <span class="kw">if let </span><span class="prelude-val">Some</span>(account_id) = conn
         .query_row(
-            <span class="string">"SELECT account_id FROM addresses WHERE cached_transparent_receiver_address = :address"</span>,
+            <span class="string">"SELECT accounts.uuid 
+             FROM addresses 
+             JOIN accounts ON accounts.id = addresses.account_id
+             WHERE cached_transparent_receiver_address = :address"</span>,
             <span class="macro">named_params!</span>[<span class="string">":address"</span>: <span class="kw-2">&amp;</span>address_str],
-            |row| <span class="prelude-val">Ok</span>(AccountId(row.get(<span class="number">0</span>)<span class="question-mark">?</span>)),
+            |row| <span class="prelude-val">Ok</span>(AccountUuid(row.get(<span class="number">0</span>)<span class="question-mark">?</span>)),
         )
         .optional()<span class="question-mark">?
     </span>{
@@ -1516,10 +1565,11 @@
     txout: <span class="kw-2">&amp;</span>TxOut,
     output_height: <span class="prelude-ty">Option</span>&lt;BlockHeight&gt;,
     address: <span class="kw-2">&amp;</span>TransparentAddress,
-    receiving_account: AccountId,
+    receiving_account_uuid: AccountUuid,
     known_unspent: bool,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;UtxoId, SqliteClientError&gt; {
     <span class="kw">let </span>output_height = output_height.map(u32::from);
+    <span class="kw">let </span>receiving_account_id = <span class="kw">super</span>::get_account_ref(conn, receiving_account_uuid)<span class="question-mark">?</span>;
 
     <span class="comment">// Check whether we have an entry in the blocks table for the output height;
     // if not, the transaction will be updated with its mined height when the
@@ -1607,7 +1657,7 @@
     <span class="kw">let </span>sql_args = <span class="macro">named_params!</span>[
         <span class="string">":transaction_id"</span>: id_tx,
         <span class="string">":output_index"</span>: <span class="kw-2">&amp;</span>outpoint.n(),
-        <span class="string">":account_id"</span>: receiving_account.<span class="number">0</span>,
+        <span class="string">":account_id"</span>: receiving_account_id.<span class="number">0</span>,
         <span class="string">":address"</span>: <span class="kw-2">&amp;</span>address.encode(params),
         <span class="string">":script"</span>: <span class="kw-2">&amp;</span>txout.script_pubkey.<span class="number">0</span>,
         <span class="string">":value_zat"</span>: <span class="kw-2">&amp;</span>i64::from(Amount::from(txout.value)),

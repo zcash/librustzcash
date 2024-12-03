@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/sapling.rs`."><title>sapling.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-42caa33d.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (90ab8eaed 2024-11-14)" data-channel="nightly" data-search-js="search-6851d9ab.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>sapling.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/sapling.rs`."><title>sapling.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-dbdb5eec.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (d49be02cf 2024-12-02)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>sapling.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -534,7 +534,17 @@
 <a href="#533" id="533">533</a>
 <a href="#534" id="534">534</a>
 <a href="#535" id="535">535</a>
-<a href="#536" id="536">536</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for Sapling support in the wallet.
+<a href="#536" id="536">536</a>
+<a href="#537" id="537">537</a>
+<a href="#538" id="538">538</a>
+<a href="#539" id="539">539</a>
+<a href="#540" id="540">540</a>
+<a href="#541" id="541">541</a>
+<a href="#542" id="542">542</a>
+<a href="#543" id="543">543</a>
+<a href="#544" id="544">544</a>
+<a href="#545" id="545">545</a>
+<a href="#546" id="546">546</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for Sapling support in the wallet.
 
 </span><span class="kw">use </span>std::{collections::HashSet, rc::Rc};
 
@@ -556,14 +566,16 @@
 };
 <span class="kw">use </span>zip32::Scope;
 
-<span class="kw">use crate</span>::{error::SqliteClientError, AccountId, ReceivedNoteId, TxRef};
+<span class="kw">use crate</span>::{error::SqliteClientError, AccountUuid, ReceivedNoteId, TxRef};
 
-<span class="kw">use super</span>::{memo_repr, parse_scope, scope_code};
+<span class="kw">use super</span>::{get_account_ref, memo_repr, parse_scope, scope_code};
 
 <span class="doccomment">/// This trait provides a generalization over shielded output representations.
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait </span>ReceivedSaplingOutput {
+    <span class="kw">type </span>AccountId;
+
     <span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize;
-    <span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; AccountId;
+    <span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::AccountId;
     <span class="kw">fn </span>note(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>sapling::Note;
     <span class="kw">fn </span>memo(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt;;
     <span class="kw">fn </span>is_change(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool;
@@ -572,11 +584,13 @@
     <span class="kw">fn </span>recipient_key_scope(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Scope&gt;;
 }
 
-<span class="kw">impl </span>ReceivedSaplingOutput <span class="kw">for </span>WalletSaplingOutput&lt;AccountId&gt; {
+<span class="kw">impl</span>&lt;AccountId: Copy&gt; ReceivedSaplingOutput <span class="kw">for </span>WalletSaplingOutput&lt;AccountId&gt; {
+    <span class="kw">type </span>AccountId = AccountId;
+
     <span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
         <span class="self">self</span>.index()
     }
-    <span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; AccountId {
+    <span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::AccountId {
         <span class="kw-2">*</span>WalletSaplingOutput::account_id(<span class="self">self</span>)
     }
     <span class="kw">fn </span>note(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>sapling::Note {
@@ -599,11 +613,13 @@
     }
 }
 
-<span class="kw">impl </span>ReceivedSaplingOutput <span class="kw">for </span>DecryptedOutput&lt;sapling::Note, AccountId&gt; {
+<span class="kw">impl</span>&lt;AccountId: Copy&gt; ReceivedSaplingOutput <span class="kw">for </span>DecryptedOutput&lt;sapling::Note, AccountId&gt; {
+    <span class="kw">type </span>AccountId = AccountId;
+
     <span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
         <span class="self">self</span>.index()
     }
-    <span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; AccountId {
+    <span class="kw">fn </span>account_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::AccountId {
         <span class="kw-2">*</span><span class="self">self</span>.account()
     }
     <span class="kw">fn </span>note(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>sapling::Note {
@@ -748,7 +764,7 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>select_spendable_sapling_notes&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>Connection,
     params: <span class="kw-2">&amp;</span>P,
-    account: AccountId,
+    account: AccountUuid,
     target_value: NonNegativeAmount,
     anchor_height: BlockHeight,
     exclude: <span class="kw-2">&amp;</span>[ReceivedNoteId],
@@ -774,12 +790,13 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_sapling_nullifiers(
     conn: <span class="kw-2">&amp;</span>Connection,
     query: NullifierQuery,
-) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(AccountId, Nullifier)&gt;, SqliteClientError&gt; {
+) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(AccountUuid, Nullifier)&gt;, SqliteClientError&gt; {
     <span class="comment">// Get the nullifiers for the notes we are tracking
     </span><span class="kw">let </span><span class="kw-2">mut </span>stmt_fetch_nullifiers = <span class="kw">match </span>query {
         NullifierQuery::Unspent =&gt; conn.prepare(
-            <span class="string">"SELECT rn.account_id, rn.nf
+            <span class="string">"SELECT a.uuid, rn.nf
              FROM sapling_received_notes rn
+             JOIN accounts a ON a.id = rn.account_id
              JOIN transactions tx ON tx.id_tx = rn.tx
              WHERE rn.nf IS NOT NULL
              AND tx.block IS NOT NULL
@@ -792,14 +809,15 @@
              )"</span>,
         ),
         NullifierQuery::All =&gt; conn.prepare(
-            <span class="string">"SELECT rn.account_id, rn.nf
+            <span class="string">"SELECT a.uuid, rn.nf
              FROM sapling_received_notes rn
+             JOIN accounts a ON a.id = rn.account_id
              WHERE nf IS NOT NULL"</span>,
         ),
     }<span class="question-mark">?</span>;
 
     <span class="kw">let </span>nullifiers = stmt_fetch_nullifiers.query_and_then([], |row| {
-        <span class="kw">let </span>account = AccountId(row.get(<span class="number">0</span>)<span class="question-mark">?</span>);
+        <span class="kw">let </span>account = AccountUuid(row.get(<span class="number">0</span>)<span class="question-mark">?</span>);
         <span class="kw">let </span>nf_bytes: Vec&lt;u8&gt; = row.get(<span class="number">1</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, rusqlite::Error&gt;((account, sapling::Nullifier::from_slice(<span class="kw-2">&amp;</span>nf_bytes).unwrap()))
     })<span class="question-mark">?</span>;
@@ -811,10 +829,11 @@
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>detect_spending_accounts&lt;<span class="lifetime">'a</span>&gt;(
     conn: <span class="kw-2">&amp;</span>Connection,
     nfs: <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Nullifier&gt;,
-) -&gt; <span class="prelude-ty">Result</span>&lt;HashSet&lt;AccountId&gt;, rusqlite::Error&gt; {
+) -&gt; <span class="prelude-ty">Result</span>&lt;HashSet&lt;AccountUuid&gt;, rusqlite::Error&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>account_q = conn.prepare_cached(
-        <span class="string">"SELECT rn.account_id
+        <span class="string">"SELECT accounts.uuid
         FROM sapling_received_notes rn
+        JOIN accounts ON accounts.id = rn.account_id
         WHERE rn.nf IN rarray(:nf_ptr)"</span>,
     )<span class="question-mark">?</span>;
 
@@ -822,7 +841,7 @@
     <span class="kw">let </span>nf_ptr = Rc::new(nf_values);
     <span class="kw">let </span>res = account_q
         .query_and_then(<span class="macro">named_params!</span>[<span class="string">":nf_ptr"</span>: <span class="kw-2">&amp;</span>nf_ptr], |row| {
-            row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">0</span>).map(AccountId)
+            row.get(<span class="number">0</span>).map(AccountUuid)
         })<span class="question-mark">?
         </span>.collect::&lt;<span class="prelude-ty">Result</span>&lt;HashSet&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
 
@@ -860,12 +879,13 @@
 /// This implementation relies on the facts that:
 /// - A transaction will not contain more than 2^63 shielded outputs.
 /// - A note value will never exceed 2^63 zatoshis.
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>put_received_note&lt;T: ReceivedSaplingOutput&gt;(
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>put_received_note&lt;T: ReceivedSaplingOutput&lt;AccountId = AccountUuid&gt;&gt;(
     conn: <span class="kw-2">&amp;</span>Transaction,
     output: <span class="kw-2">&amp;</span>T,
     tx_ref: TxRef,
     spent_in: <span class="prelude-ty">Option</span>&lt;TxRef&gt;,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
+    <span class="kw">let </span>account_id = get_account_ref(conn, output.account_id())<span class="question-mark">?</span>;
     <span class="kw">let </span><span class="kw-2">mut </span>stmt_upsert_received_note = conn.prepare_cached(
         <span class="string">"INSERT INTO sapling_received_notes
         (tx, output_index, account_id, diversifier, value, rcm, memo, nf,
@@ -904,7 +924,7 @@
     <span class="kw">let </span>sql_args = <span class="macro">named_params!</span>[
         <span class="string">":tx"</span>: tx_ref.<span class="number">0</span>,
         <span class="string">":output_index"</span>: i64::try_from(output.index()).expect(<span class="string">"output indices are representable as i64"</span>),
-        <span class="string">":account_id"</span>: output.account_id().<span class="number">0</span>,
+        <span class="string">":account_id"</span>: account_id.<span class="number">0</span>,
         <span class="string">":diversifier"</span>: <span class="kw-2">&amp;</span>diversifier.<span class="number">0</span>.as_ref(),
         <span class="string">":value"</span>: output.note().value().inner(),
         <span class="string">":rcm"</span>: <span class="kw-2">&amp;</span>rcm.as_ref(),

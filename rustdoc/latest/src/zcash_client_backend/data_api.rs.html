@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api.rs`."><title>data_api.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-42caa33d.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (90ab8eaed 2024-11-14)" data-channel="nightly" data-search-js="search-6851d9ab.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>data_api.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api.rs`."><title>data_api.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-dbdb5eec.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (d49be02cf 2024-12-02)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>data_api.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -2447,7 +2447,61 @@
 <a href="#2446" id="2446">2446</a>
 <a href="#2447" id="2447">2447</a>
 <a href="#2448" id="2448">2448</a>
-<a href="#2449" id="2449">2449</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Utilities for Zcash wallet construction
+<a href="#2449" id="2449">2449</a>
+<a href="#2450" id="2450">2450</a>
+<a href="#2451" id="2451">2451</a>
+<a href="#2452" id="2452">2452</a>
+<a href="#2453" id="2453">2453</a>
+<a href="#2454" id="2454">2454</a>
+<a href="#2455" id="2455">2455</a>
+<a href="#2456" id="2456">2456</a>
+<a href="#2457" id="2457">2457</a>
+<a href="#2458" id="2458">2458</a>
+<a href="#2459" id="2459">2459</a>
+<a href="#2460" id="2460">2460</a>
+<a href="#2461" id="2461">2461</a>
+<a href="#2462" id="2462">2462</a>
+<a href="#2463" id="2463">2463</a>
+<a href="#2464" id="2464">2464</a>
+<a href="#2465" id="2465">2465</a>
+<a href="#2466" id="2466">2466</a>
+<a href="#2467" id="2467">2467</a>
+<a href="#2468" id="2468">2468</a>
+<a href="#2469" id="2469">2469</a>
+<a href="#2470" id="2470">2470</a>
+<a href="#2471" id="2471">2471</a>
+<a href="#2472" id="2472">2472</a>
+<a href="#2473" id="2473">2473</a>
+<a href="#2474" id="2474">2474</a>
+<a href="#2475" id="2475">2475</a>
+<a href="#2476" id="2476">2476</a>
+<a href="#2477" id="2477">2477</a>
+<a href="#2478" id="2478">2478</a>
+<a href="#2479" id="2479">2479</a>
+<a href="#2480" id="2480">2480</a>
+<a href="#2481" id="2481">2481</a>
+<a href="#2482" id="2482">2482</a>
+<a href="#2483" id="2483">2483</a>
+<a href="#2484" id="2484">2484</a>
+<a href="#2485" id="2485">2485</a>
+<a href="#2486" id="2486">2486</a>
+<a href="#2487" id="2487">2487</a>
+<a href="#2488" id="2488">2488</a>
+<a href="#2489" id="2489">2489</a>
+<a href="#2490" id="2490">2490</a>
+<a href="#2491" id="2491">2491</a>
+<a href="#2492" id="2492">2492</a>
+<a href="#2493" id="2493">2493</a>
+<a href="#2494" id="2494">2494</a>
+<a href="#2495" id="2495">2495</a>
+<a href="#2496" id="2496">2496</a>
+<a href="#2497" id="2497">2497</a>
+<a href="#2498" id="2498">2498</a>
+<a href="#2499" id="2499">2499</a>
+<a href="#2500" id="2500">2500</a>
+<a href="#2501" id="2501">2501</a>
+<a href="#2502" id="2502">2502</a>
+<a href="#2503" id="2503">2503</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Utilities for Zcash wallet construction
 //!
 //! This module defines a set of APIs for wallet data persistence, and provides a suite of methods
 //! based upon these APIs that can be used to implement a fully functional Zcash wallet. At
@@ -2792,16 +2846,20 @@
 }
 
 <span class="doccomment">/// The kinds of accounts supported by `zcash_client_backend`.
-</span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+</span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 </span><span class="kw">pub enum </span>AccountSource {
     <span class="doccomment">/// An account derived from a known seed.
     </span>Derived {
         seed_fingerprint: SeedFingerprint,
         account_index: zip32::AccountId,
+        key_source: <span class="prelude-ty">Option</span>&lt;String&gt;,
     },
 
     <span class="doccomment">/// An account imported from a viewing key.
-    </span>Imported { purpose: AccountPurpose },
+    </span>Imported {
+        purpose: AccountPurpose,
+        key_source: <span class="prelude-ty">Option</span>&lt;String&gt;,
+    },
 }
 
 <span class="doccomment">/// A set of capabilities that a client account must provide.
@@ -2811,15 +2869,18 @@
     <span class="doccomment">/// Returns the unique identifier for the account.
     </span><span class="kw">fn </span>id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::AccountId;
 
+    <span class="doccomment">/// Returns the human-readable name for the account, if any has been configured.
+    </span><span class="kw">fn </span>name(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;;
+
     <span class="doccomment">/// Returns whether this account is derived or imported, and the derivation parameters
     /// if applicable.
-    </span><span class="kw">fn </span>source(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; AccountSource;
+    </span><span class="kw">fn </span>source(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>AccountSource;
 
     <span class="doccomment">/// Returns whether the account is a spending account or a view-only account.
     </span><span class="kw">fn </span>purpose(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; AccountPurpose {
         <span class="kw">match </span><span class="self">self</span>.source() {
             AccountSource::Derived { .. } =&gt; AccountPurpose::Spending,
-            AccountSource::Imported { purpose } =&gt; purpose,
+            AccountSource::Imported { purpose, .. } =&gt; <span class="kw-2">*</span>purpose,
         }
     }
 
@@ -2845,9 +2906,10 @@
         <span class="self">self</span>.<span class="number">0
     </span>}
 
-    <span class="kw">fn </span>source(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; AccountSource {
-        AccountSource::Imported {
+    <span class="kw">fn </span>source(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>AccountSource {
+        <span class="kw-2">&amp;</span>AccountSource::Imported {
             purpose: AccountPurpose::ViewOnly,
+            key_source: <span class="prelude-val">None</span>,
         }
     }
 
@@ -2858,6 +2920,10 @@
     <span class="kw">fn </span>uivk(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; UnifiedIncomingViewingKey {
         <span class="self">self</span>.<span class="number">1</span>.to_unified_incoming_viewing_key()
     }
+
+    <span class="kw">fn </span>name(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt; {
+        <span class="prelude-val">None
+    </span>}
 }
 
 <span class="attr">#[cfg(any(test, feature = <span class="string">"test-dependencies"</span>))]
@@ -2868,9 +2934,14 @@
         <span class="self">self</span>.<span class="number">0
     </span>}
 
-    <span class="kw">fn </span>source(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; AccountSource {
-        AccountSource::Imported {
+    <span class="kw">fn </span>name(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt; {
+        <span class="prelude-val">None
+    </span>}
+
+    <span class="kw">fn </span>source(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>AccountSource {
+        <span class="kw-2">&amp;</span>AccountSource::Imported {
             purpose: AccountPurpose::ViewOnly,
+            key_source: <span class="prelude-val">None</span>,
         }
     }
 
@@ -4643,6 +4714,15 @@
     ///
     /// The [`WalletWrite`] trait documentation has more details about account creation and import.
     ///
+    /// # Arguments
+    /// - `account_name`: A human-readable name for the account.
+    /// - `seed`: The 256-byte (at least) HD seed from which to derive the account UFVK.
+    /// - `birthday`: Metadata about where to start scanning blocks to find transactions intended
+    ///   for the account.
+    /// - `key_source`: A string identifier or other metadata describing the source of the seed.
+    ///   This is treated as opaque metadata by the wallet backend; it is provided for use by
+    ///   applications which need to track additional identifying information for an account.
+    ///
     /// # Implementation notes
     ///
     /// Implementations of this method **MUST NOT** "fill in gaps" by selecting an account index
@@ -4656,8 +4736,10 @@
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     </span><span class="kw">fn </span>create_account(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        account_name: <span class="kw-2">&amp;</span>str,
         seed: <span class="kw-2">&amp;</span>SecretVec&lt;u8&gt;,
         birthday: <span class="kw-2">&amp;</span>AccountBirthday,
+        key_source: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(<span class="self">Self</span>::AccountId, UnifiedSpendingKey), <span class="self">Self</span>::Error&gt;;
 
     <span class="doccomment">/// Tells the wallet to track a specific account index for a given seed.
@@ -4674,6 +4756,17 @@
     ///
     /// The [`WalletWrite`] trait documentation has more details about account creation and import.
     ///
+    /// # Arguments
+    /// - `account_name`: A human-readable name for the account.
+    /// - `seed`: The 256-byte (at least) HD seed from which to derive the account UFVK.
+    /// - `account_index`: The ZIP 32 account-level component of the HD derivation path at
+    ///   which to derive the account's UFVK.
+    /// - `birthday`: Metadata about where to start scanning blocks to find transactions intended
+    ///   for the account.
+    /// - `key_source`: A string identifier or other metadata describing the source of the seed.
+    ///   This is treated as opaque metadata by the wallet backend; it is provided for use by
+    ///   applications which need to track additional identifying information for an account.
+    ///
     /// # Panics
     ///
     /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
@@ -4681,9 +4774,11 @@
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     </span><span class="kw">fn </span>import_account_hd(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        account_name: <span class="kw-2">&amp;</span>str,
         seed: <span class="kw-2">&amp;</span>SecretVec&lt;u8&gt;,
         account_index: zip32::AccountId,
         birthday: <span class="kw-2">&amp;</span>AccountBirthday,
+        key_source: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(<span class="self">Self</span>::Account, UnifiedSpendingKey), <span class="self">Self</span>::Error&gt;;
 
     <span class="doccomment">/// Tells the wallet to track an account using a unified full viewing key.
@@ -4699,14 +4794,27 @@
     ///
     /// The [`WalletWrite`] trait documentation has more details about account creation and import.
     ///
+    /// # Arguments
+    /// - `account_name`: A human-readable name for the account.
+    /// - `unified_key`: The UFVK used to detect transactions involving the account.
+    /// - `birthday`: Metadata about where to start scanning blocks to find transactions intended
+    ///   for the account.
+    /// - `purpose`: Metadata describing whether or not data required for spending should be
+    ///   tracked by the wallet.
+    /// - `key_source`: A string identifier or other metadata describing the source of the seed.
+    ///   This is treated as opaque metadata by the wallet backend; it is provided for use by
+    ///   applications which need to track additional identifying information for an account.
+    ///
     /// # Panics
     ///
     /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
     </span><span class="kw">fn </span>import_account_ufvk(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        account_name: <span class="kw-2">&amp;</span>str,
         unified_key: <span class="kw-2">&amp;</span>UnifiedFullViewingKey,
         birthday: <span class="kw-2">&amp;</span>AccountBirthday,
         purpose: AccountPurpose,
+        key_source: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Account, <span class="self">Self</span>::Error&gt;;
 
     <span class="doccomment">/// Generates and persists the next available diversified address, given the current

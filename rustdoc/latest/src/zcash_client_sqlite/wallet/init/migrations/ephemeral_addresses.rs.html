@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/ephemeral_addresses.rs`."><title>ephemeral_addresses.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-42caa33d.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (90ab8eaed 2024-11-14)" data-channel="nightly" data-search-js="search-6851d9ab.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>ephemeral_addresses.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/ephemeral_addresses.rs`."><title>ephemeral_addresses.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-dbdb5eec.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (d49be02cf 2024-12-02)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>ephemeral_addresses.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -289,7 +289,15 @@
 <a href="#288" id="288">288</a>
 <a href="#289" id="289">289</a>
 <a href="#290" id="290">290</a>
-<a href="#291" id="291">291</a></pre></div><pre class="rust"><code><span class="doccomment">//! The migration that records ephemeral addresses for each account.
+<a href="#291" id="291">291</a>
+<a href="#292" id="292">292</a>
+<a href="#293" id="293">293</a>
+<a href="#294" id="294">294</a>
+<a href="#295" id="295">295</a>
+<a href="#296" id="296">296</a>
+<a href="#297" id="297">297</a>
+<a href="#298" id="298">298</a>
+<a href="#299" id="299">299</a></pre></div><pre class="rust"><code><span class="doccomment">//! The migration that records ephemeral addresses for each account.
 </span><span class="kw">use </span>std::collections::HashSet;
 
 <span class="kw">use </span>schemerz_rusqlite::RusqliteMigration;
@@ -299,7 +307,7 @@
 <span class="kw">use </span><span class="kw">crate</span>::wallet::init::WalletMigrationError;
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-</span><span class="kw">use </span><span class="kw">crate</span>::wallet::{<span class="self">self</span>, init, transparent::ephemeral};
+</span><span class="kw">use crate</span>::{wallet::transparent::ephemeral, AccountRef};
 
 <span class="kw">use </span><span class="kw">super</span>::utxos_to_txos;
 
@@ -356,9 +364,13 @@
         <span class="comment">// Make sure that at least `GAP_LIMIT` ephemeral transparent addresses are
         // stored in each account.
         </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-        </span><span class="kw">for </span>account_id <span class="kw">in </span>wallet::get_account_ids(transaction)<span class="question-mark">? </span>{
-            ephemeral::init_account(transaction, <span class="kw-2">&amp;</span><span class="self">self</span>.params, account_id)
-                .map_err(init::sqlite_client_error_to_wallet_migration_error)<span class="question-mark">?</span>;
+        </span>{
+            <span class="kw">let </span><span class="kw-2">mut </span>stmt = transaction.prepare(<span class="string">"SELECT id FROM accounts"</span>)<span class="question-mark">?</span>;
+            <span class="kw">let </span><span class="kw-2">mut </span>rows = stmt.query([])<span class="question-mark">?</span>;
+            <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
+                <span class="kw">let </span>account_id = AccountRef(row.get(<span class="number">0</span>)<span class="question-mark">?</span>);
+                ephemeral::init_account(transaction, <span class="kw-2">&amp;</span><span class="self">self</span>.params, account_id)<span class="question-mark">?</span>;
+            }
         }
         <span class="prelude-val">Ok</span>(())
     }
@@ -394,7 +406,7 @@
             wallet::{
                 <span class="self">self</span>, account_kind_code, init::init_wallet_db_internal, transparent::ephemeral,
             },
-            AccountId, WalletDb,
+            AccountRef, WalletDb,
         },
         zcash_client_backend::data_api::GAP_LIMIT,
     };
@@ -406,7 +418,7 @@
         wdb: <span class="kw-2">&amp;mut </span>WalletDb&lt;Connection, Network&gt;,
         seed: <span class="kw-2">&amp;</span>SecretVec&lt;u8&gt;,
         birthday: <span class="kw-2">&amp;</span>AccountBirthday,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(AccountId, UnifiedSpendingKey), SqliteClientError&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(AccountRef, UnifiedSpendingKey), SqliteClientError&gt; {
         wdb.transactionally(|wdb| {
             <span class="kw">let </span>seed_fingerprint =
                 SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
@@ -415,7 +427,10 @@
                     )
                 })<span class="question-mark">?</span>;
             <span class="kw">let </span>account_index = wallet::max_zip32_account_index(wdb.conn.<span class="number">0</span>, <span class="kw-2">&amp;</span>seed_fingerprint)<span class="question-mark">?
-                </span>.map(|a| a.next().ok_or(SqliteClientError::AccountIdOutOfRange))
+                </span>.map(|a| {
+                    a.next()
+                        .ok_or(SqliteClientError::Zip32AccountIndexOutOfRange)
+                })
                 .transpose()<span class="question-mark">?
                 </span>.unwrap_or(zip32::AccountId::ZERO);
 
@@ -442,7 +457,7 @@
             <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
             </span><span class="kw">let </span>birthday_orchard_tree_size: <span class="prelude-ty">Option</span>&lt;u64&gt; = <span class="prelude-val">None</span>;
 
-            <span class="kw">let </span>account_id: AccountId = wdb.conn.<span class="number">0</span>.query_row(
+            <span class="kw">let </span>account_id: AccountRef = wdb.conn.<span class="number">0</span>.query_row(
                 <span class="string">r#"
                 INSERT INTO accounts (
                     account_kind, hd_seed_fingerprint, hd_account_index,
@@ -474,7 +489,7 @@
                     <span class="string">":birthday_orchard_tree_size"</span>: birthday_orchard_tree_size,
                     <span class="string">":recover_until_height"</span>: birthday.recover_until().map(u32::from)
                 ],
-                |row| <span class="prelude-val">Ok</span>(AccountId(row.get(<span class="number">0</span>)<span class="question-mark">?</span>)),
+                |row| <span class="prelude-val">Ok</span>(AccountRef(row.get(<span class="number">0</span>)<span class="question-mark">?</span>)),
             )<span class="question-mark">?</span>;
 
             <span class="comment">// Initialize the `ephemeral_addresses` table.
@@ -511,12 +526,13 @@
         <span class="comment">// Simulate creating an account prior to this migration.
         </span><span class="kw">let </span>account0_index = Zip32AccountId::ZERO;
         <span class="kw">let </span>account0_seed_fp = [<span class="number">0u8</span>; <span class="number">32</span>];
-        <span class="kw">let </span>account0_kind = account_kind_code(AccountSource::Derived {
+        <span class="kw">let </span>account0_kind = account_kind_code(<span class="kw-2">&amp;</span>AccountSource::Derived {
             seed_fingerprint: SeedFingerprint::from_seed(<span class="kw-2">&amp;</span>account0_seed_fp).unwrap(),
             account_index: account0_index,
+            key_source: <span class="prelude-val">None</span>,
         });
         <span class="macro">assert_eq!</span>(u32::from(account0_index), <span class="number">0</span>);
-        <span class="kw">let </span>account0_id = <span class="kw">crate</span>::AccountId(<span class="number">0</span>);
+        <span class="kw">let </span>account0_id = AccountRef(<span class="number">0</span>);
 
         <span class="kw">let </span>usk0 = UnifiedSpendingKey::from_seed(<span class="kw-2">&amp;</span>network, <span class="kw-2">&amp;</span>seed0, account0_index).unwrap();
         <span class="kw">let </span>ufvk0 = usk0.to_unified_full_viewing_key();

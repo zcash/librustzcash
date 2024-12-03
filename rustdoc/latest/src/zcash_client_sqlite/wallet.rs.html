@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet.rs`."><title>wallet.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-42caa33d.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (90ab8eaed 2024-11-14)" data-channel="nightly" data-search-js="search-6851d9ab.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>wallet.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet.rs`."><title>wallet.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-dbdb5eec.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (d49be02cf 2024-12-02)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>wallet.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -3756,7 +3756,114 @@
 <a href="#3755" id="3755">3755</a>
 <a href="#3756" id="3756">3756</a>
 <a href="#3757" id="3757">3757</a>
-<a href="#3758" id="3758">3758</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for querying information in the wallet database.
+<a href="#3758" id="3758">3758</a>
+<a href="#3759" id="3759">3759</a>
+<a href="#3760" id="3760">3760</a>
+<a href="#3761" id="3761">3761</a>
+<a href="#3762" id="3762">3762</a>
+<a href="#3763" id="3763">3763</a>
+<a href="#3764" id="3764">3764</a>
+<a href="#3765" id="3765">3765</a>
+<a href="#3766" id="3766">3766</a>
+<a href="#3767" id="3767">3767</a>
+<a href="#3768" id="3768">3768</a>
+<a href="#3769" id="3769">3769</a>
+<a href="#3770" id="3770">3770</a>
+<a href="#3771" id="3771">3771</a>
+<a href="#3772" id="3772">3772</a>
+<a href="#3773" id="3773">3773</a>
+<a href="#3774" id="3774">3774</a>
+<a href="#3775" id="3775">3775</a>
+<a href="#3776" id="3776">3776</a>
+<a href="#3777" id="3777">3777</a>
+<a href="#3778" id="3778">3778</a>
+<a href="#3779" id="3779">3779</a>
+<a href="#3780" id="3780">3780</a>
+<a href="#3781" id="3781">3781</a>
+<a href="#3782" id="3782">3782</a>
+<a href="#3783" id="3783">3783</a>
+<a href="#3784" id="3784">3784</a>
+<a href="#3785" id="3785">3785</a>
+<a href="#3786" id="3786">3786</a>
+<a href="#3787" id="3787">3787</a>
+<a href="#3788" id="3788">3788</a>
+<a href="#3789" id="3789">3789</a>
+<a href="#3790" id="3790">3790</a>
+<a href="#3791" id="3791">3791</a>
+<a href="#3792" id="3792">3792</a>
+<a href="#3793" id="3793">3793</a>
+<a href="#3794" id="3794">3794</a>
+<a href="#3795" id="3795">3795</a>
+<a href="#3796" id="3796">3796</a>
+<a href="#3797" id="3797">3797</a>
+<a href="#3798" id="3798">3798</a>
+<a href="#3799" id="3799">3799</a>
+<a href="#3800" id="3800">3800</a>
+<a href="#3801" id="3801">3801</a>
+<a href="#3802" id="3802">3802</a>
+<a href="#3803" id="3803">3803</a>
+<a href="#3804" id="3804">3804</a>
+<a href="#3805" id="3805">3805</a>
+<a href="#3806" id="3806">3806</a>
+<a href="#3807" id="3807">3807</a>
+<a href="#3808" id="3808">3808</a>
+<a href="#3809" id="3809">3809</a>
+<a href="#3810" id="3810">3810</a>
+<a href="#3811" id="3811">3811</a>
+<a href="#3812" id="3812">3812</a>
+<a href="#3813" id="3813">3813</a>
+<a href="#3814" id="3814">3814</a>
+<a href="#3815" id="3815">3815</a>
+<a href="#3816" id="3816">3816</a>
+<a href="#3817" id="3817">3817</a>
+<a href="#3818" id="3818">3818</a>
+<a href="#3819" id="3819">3819</a>
+<a href="#3820" id="3820">3820</a>
+<a href="#3821" id="3821">3821</a>
+<a href="#3822" id="3822">3822</a>
+<a href="#3823" id="3823">3823</a>
+<a href="#3824" id="3824">3824</a>
+<a href="#3825" id="3825">3825</a>
+<a href="#3826" id="3826">3826</a>
+<a href="#3827" id="3827">3827</a>
+<a href="#3828" id="3828">3828</a>
+<a href="#3829" id="3829">3829</a>
+<a href="#3830" id="3830">3830</a>
+<a href="#3831" id="3831">3831</a>
+<a href="#3832" id="3832">3832</a>
+<a href="#3833" id="3833">3833</a>
+<a href="#3834" id="3834">3834</a>
+<a href="#3835" id="3835">3835</a>
+<a href="#3836" id="3836">3836</a>
+<a href="#3837" id="3837">3837</a>
+<a href="#3838" id="3838">3838</a>
+<a href="#3839" id="3839">3839</a>
+<a href="#3840" id="3840">3840</a>
+<a href="#3841" id="3841">3841</a>
+<a href="#3842" id="3842">3842</a>
+<a href="#3843" id="3843">3843</a>
+<a href="#3844" id="3844">3844</a>
+<a href="#3845" id="3845">3845</a>
+<a href="#3846" id="3846">3846</a>
+<a href="#3847" id="3847">3847</a>
+<a href="#3848" id="3848">3848</a>
+<a href="#3849" id="3849">3849</a>
+<a href="#3850" id="3850">3850</a>
+<a href="#3851" id="3851">3851</a>
+<a href="#3852" id="3852">3852</a>
+<a href="#3853" id="3853">3853</a>
+<a href="#3854" id="3854">3854</a>
+<a href="#3855" id="3855">3855</a>
+<a href="#3856" id="3856">3856</a>
+<a href="#3857" id="3857">3857</a>
+<a href="#3858" id="3858">3858</a>
+<a href="#3859" id="3859">3859</a>
+<a href="#3860" id="3860">3860</a>
+<a href="#3861" id="3861">3861</a>
+<a href="#3862" id="3862">3862</a>
+<a href="#3863" id="3863">3863</a>
+<a href="#3864" id="3864">3864</a>
+<a href="#3865" id="3865">3865</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for querying information in the wallet database.
 //!
 //! These functions should generally not be used directly; instead,
 //! their functionality is available via the [`WalletRead`] and
@@ -3824,9 +3931,10 @@
 
 </span><span class="kw">use </span>incrementalmerkletree::{Marking, Retention};
 
-<span class="kw">use </span>rusqlite::{<span class="self">self</span>, named_params, params, OptionalExtension};
+<span class="kw">use </span>rusqlite::{<span class="self">self</span>, named_params, params, Connection, OptionalExtension};
 <span class="kw">use </span>secrecy::{ExposeSecret, SecretVec};
 <span class="kw">use </span>shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
+<span class="kw">use </span>uuid::Uuid;
 <span class="kw">use </span>zcash_client_backend::data_api::{
     AccountPurpose, DecryptedTransaction, Progress, TransactionDataRequest, TransactionStatus,
 };
@@ -3874,10 +3982,10 @@
 <span class="kw">use crate</span>::{
     error::SqliteClientError,
     wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
-    AccountId, SqlTransaction, TransferType, WalletCommitmentTrees, WalletDb, DEFAULT_UA_REQUEST,
+    AccountRef, SqlTransaction, TransferType, WalletCommitmentTrees, WalletDb, DEFAULT_UA_REQUEST,
     PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
 };
-<span class="kw">use crate</span>::{TxRef, VERIFY_LOOKAHEAD};
+<span class="kw">use crate</span>::{AccountUuid, TxRef, VERIFY_LOOKAHEAD};
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">use </span>zcash_primitives::transaction::components::TxOut;
@@ -3905,6 +4013,7 @@
     hd_seed_fingerprint: <span class="prelude-ty">Option</span>&lt;[u8; <span class="number">32</span>]&gt;,
     hd_account_index: <span class="prelude-ty">Option</span>&lt;u32&gt;,
     spending_key_available: bool,
+    key_source: <span class="prelude-ty">Option</span>&lt;String&gt;,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;AccountSource, SqliteClientError&gt; {
     <span class="kw">match </span>(account_kind, hd_seed_fingerprint, hd_account_index) {
         (<span class="number">0</span>, <span class="prelude-val">Some</span>(seed_fp), <span class="prelude-val">Some</span>(account_index)) =&gt; <span class="prelude-val">Ok</span>(AccountSource::Derived {
@@ -3914,6 +4023,7 @@
                     <span class="string">"ZIP-32 account ID from wallet DB is out of range."</span>.to_string(),
                 )
             })<span class="question-mark">?</span>,
+            key_source,
         }),
         (<span class="number">1</span>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; <span class="prelude-val">Ok</span>(AccountSource::Imported {
             purpose: <span class="kw">if </span>spending_key_available {
@@ -3921,6 +4031,7 @@
             } <span class="kw">else </span>{
                 AccountPurpose::ViewOnly
             },
+            key_source,
         }),
         (<span class="number">0</span>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>) | (<span class="number">1</span>, <span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">Some</span>(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Err</span>(SqliteClientError::CorruptedData(
             <span class="string">"Wallet DB account_kind constraint violated"</span>.to_string(),
@@ -3931,7 +4042,7 @@
     }
 }
 
-<span class="kw">fn </span>account_kind_code(value: AccountSource) -&gt; u32 {
+<span class="kw">fn </span>account_kind_code(value: <span class="kw-2">&amp;</span>AccountSource) -&gt; u32 {
     <span class="kw">match </span>value {
         AccountSource::Derived { .. } =&gt; <span class="number">0</span>,
         AccountSource::Imported { .. } =&gt; <span class="number">1</span>,
@@ -3957,7 +4068,8 @@
 <span class="doccomment">/// An account stored in a `zcash_client_sqlite` database.
 </span><span class="attr">#[derive(Debug, Clone)]
 </span><span class="kw">pub struct </span>Account {
-    account_id: AccountId,
+    uuid: AccountUuid,
+    name: <span class="prelude-ty">Option</span>&lt;String&gt;,
     kind: AccountSource,
     viewing_key: ViewingKey,
 }
@@ -3977,14 +4089,18 @@
 }
 
 <span class="kw">impl </span>zcash_client_backend::data_api::Account <span class="kw">for </span>Account {
-    <span class="kw">type </span>AccountId = AccountId;
+    <span class="kw">type </span>AccountId = AccountUuid;
 
-    <span class="kw">fn </span>id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; AccountId {
-        <span class="self">self</span>.account_id
+    <span class="kw">fn </span>id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; AccountUuid {
+        <span class="self">self</span>.uuid
     }
 
-    <span class="kw">fn </span>source(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; AccountSource {
-        <span class="self">self</span>.kind
+    <span class="kw">fn </span>name(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt; {
+        <span class="self">self</span>.name.as_deref()
+    }
+
+    <span class="kw">fn </span>source(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>AccountSource {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.kind
     }
 
     <span class="kw">fn </span>ufvk(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>UnifiedFullViewingKey&gt; {
@@ -4101,11 +4217,10 @@
         <span class="string">"SELECT MAX(hd_account_index) FROM accounts WHERE hd_seed_fingerprint = :hd_seed"</span>,
         [seed_id.to_bytes()],
         |row| {
-            <span class="kw">let </span>account_id: <span class="prelude-ty">Option</span>&lt;u32&gt; = row.get(<span class="number">0</span>)<span class="question-mark">?</span>;
-            account_id
-                .map(zip32::AccountId::try_from)
+            row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="number">0</span>)<span class="question-mark">?
+                </span>.map(zip32::AccountId::try_from)
                 .transpose()
-                .map_err(|<span class="kw">_</span>| SqliteClientError::AccountIdOutOfRange)
+                .map_err(|<span class="kw">_</span>| SqliteClientError::Zip32AccountIndexOutOfRange)
         },
     )
 }
@@ -4113,7 +4228,8 @@
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_account&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Transaction,
     params: <span class="kw-2">&amp;</span>P,
-    kind: AccountSource,
+    account_name: <span class="kw-2">&amp;</span>str,
+    kind: <span class="kw-2">&amp;</span>AccountSource,
     viewing_key: ViewingKey,
     birthday: <span class="kw-2">&amp;</span>AccountBirthday,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;Account, SqliteClientError&gt; {
@@ -4125,12 +4241,23 @@
     }
     <span class="comment">// TODO(#1490): check for IVK collisions.
 
-    </span><span class="kw">let </span>(hd_seed_fingerprint, hd_account_index, spending_key_available) = <span class="kw">match </span>kind {
+    </span><span class="kw">let </span>account_uuid = AccountUuid(Uuid::new_v4());
+
+    <span class="kw">let </span>(hd_seed_fingerprint, hd_account_index, spending_key_available, key_source) = <span class="kw">match </span>kind {
         AccountSource::Derived {
             seed_fingerprint,
             account_index,
-        } =&gt; (<span class="prelude-val">Some</span>(seed_fingerprint), <span class="prelude-val">Some</span>(account_index), <span class="bool-val">true</span>),
-        AccountSource::Imported { purpose } =&gt; (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>, purpose == AccountPurpose::Spending),
+            key_source,
+        } =&gt; (
+            <span class="prelude-val">Some</span>(seed_fingerprint),
+            <span class="prelude-val">Some</span>(account_index),
+            <span class="bool-val">true</span>,
+            key_source,
+        ),
+        AccountSource::Imported {
+            purpose,
+            key_source,
+        } =&gt; (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>, <span class="kw-2">*</span>purpose == AccountPurpose::Spending, key_source),
     };
 
     <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
@@ -4158,11 +4285,13 @@
     </span><span class="kw">let </span>birthday_orchard_tree_size: <span class="prelude-ty">Option</span>&lt;u64&gt; = <span class="prelude-val">None</span>;
 
     <span class="kw">let </span>ufvk_encoded = viewing_key.ufvk().map(|ufvk| ufvk.encode(params));
-    <span class="kw">let </span>account_id: AccountId = conn
+    <span class="kw">let </span>account_id = conn
         .query_row(
             <span class="string">r#"
             INSERT INTO accounts (
-                account_kind, hd_seed_fingerprint, hd_account_index,
+                name,
+                uuid,
+                account_kind, hd_seed_fingerprint, hd_account_index, key_source,
                 ufvk, uivk,
                 orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
                 birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
@@ -4170,19 +4299,24 @@
                 has_spend_key
             )
             VALUES (
-                :account_kind, :hd_seed_fingerprint, :hd_account_index,
+                :account_name,
+                :uuid,
+                :account_kind, :hd_seed_fingerprint, :hd_account_index, :key_source,
                 :ufvk, :uivk,
                 :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
                 :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
                 :recover_until_height,
                 :has_spend_key
             )
-            RETURNING id;
+            RETURNING id
             "#</span>,
             <span class="macro">named_params!</span>[
+                <span class="string">":account_name"</span>: account_name,
+                <span class="string">":uuid"</span>: account_uuid.<span class="number">0</span>,
                 <span class="string">":account_kind"</span>: account_kind_code(kind),
                 <span class="string">":hd_seed_fingerprint"</span>: hd_seed_fingerprint.as_ref().map(|fp| fp.to_bytes()),
-                <span class="string">":hd_account_index"</span>: hd_account_index.map(u32::from),
+                <span class="string">":hd_account_index"</span>: hd_account_index.map(|i| u32::from(<span class="kw-2">*</span>i)),
+                <span class="string">":key_source"</span>: key_source,
                 <span class="string">":ufvk"</span>: ufvk_encoded,
                 <span class="string">":uivk"</span>: viewing_key.uivk().encode(params),
                 <span class="string">":orchard_fvk_item_cache"</span>: orchard_item,
@@ -4194,7 +4328,7 @@
                 <span class="string">":recover_until_height"</span>: birthday.recover_until().map(u32::from),
                 <span class="string">":has_spend_key"</span>: spending_key_available <span class="kw">as </span>i64,
             ],
-            |row| <span class="prelude-val">Ok</span>(AccountId(row.get(<span class="number">0</span>)<span class="question-mark">?</span>)),
+            |row| row.get(<span class="number">0</span>).map(AccountRef),
         )
         .map_err(|e| <span class="kw">match </span>e {
             rusqlite::Error::SqliteFailure(f, s)
@@ -4202,14 +4336,14 @@
             {
                 <span class="comment">// An account conflict occurred. This should already have been caught by
                 // the check using `get_account_for_ufvk` above, but in case it wasn't,
-                // make a best effort to determine the AccountId of the pre-existing row
+                // make a best effort to determine the AccountRef of the pre-existing row
                 // and provide that to our caller.
-                </span><span class="kw">if let </span><span class="prelude-val">Ok</span>(id) = conn.query_row(
-                    <span class="string">"SELECT id FROM accounts WHERE ufvk = ?"</span>,
+                </span><span class="kw">if let </span><span class="prelude-val">Ok</span>(colliding_uuid) = conn.query_row(
+                    <span class="string">"SELECT uuid FROM accounts WHERE ufvk = ?"</span>,
                     <span class="macro">params!</span>[ufvk_encoded],
-                    |row| <span class="prelude-val">Ok</span>(AccountId(row.get(<span class="number">0</span>)<span class="question-mark">?</span>)),
+                    |row| <span class="prelude-val">Ok</span>(AccountUuid(row.get(<span class="number">0</span>)<span class="question-mark">?</span>)),
                 ) {
-                    <span class="kw">return </span>SqliteClientError::AccountCollision(id);
+                    <span class="kw">return </span>SqliteClientError::AccountCollision(colliding_uuid);
                 }
 
                 SqliteClientError::from(rusqlite::Error::SqliteFailure(f, s))
@@ -4218,8 +4352,9 @@
         })<span class="question-mark">?</span>;
 
     <span class="kw">let </span>account = Account {
-        account_id,
-        kind,
+        name: <span class="prelude-val">Some</span>(account_name.to_owned()),
+        uuid: account_uuid,
+        kind: kind.clone(),
         viewing_key,
     };
 
@@ -4339,16 +4474,18 @@
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_current_address&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
     params: <span class="kw-2">&amp;</span>P,
-    account_id: AccountId,
+    account_uuid: AccountUuid,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(UnifiedAddress, DiversifierIndex)&gt;, SqliteClientError&gt; {
     <span class="comment">// This returns the most recently generated address.
     </span><span class="kw">let </span>addr: <span class="prelude-ty">Option</span>&lt;(String, Vec&lt;u8&gt;)&gt; = conn
         .query_row(
             <span class="string">"SELECT address, diversifier_index_be
-            FROM addresses WHERE account_id = :account_id
-            ORDER BY diversifier_index_be DESC
-            LIMIT 1"</span>,
-            <span class="macro">named_params!</span>[<span class="string">":account_id"</span>: account_id.<span class="number">0</span>],
+             FROM addresses
+             JOIN accounts ON addresses.account_id = accounts.id
+             WHERE accounts.uuid = :account_uuid
+             ORDER BY diversifier_index_be DESC
+             LIMIT 1"</span>,
+            <span class="macro">named_params!</span>[<span class="string">":account_uuid"</span>: account_uuid.<span class="number">0</span>],
             |row| <span class="prelude-val">Ok</span>((row.get(<span class="number">0</span>)<span class="question-mark">?</span>, row.get(<span class="number">1</span>)<span class="question-mark">?</span>)),
         )
         .optional()<span class="question-mark">?</span>;
@@ -4381,10 +4518,10 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert_address&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
     params: <span class="kw-2">&amp;</span>P,
-    account: AccountId,
+    account_id: AccountRef,
     diversifier_index: DiversifierIndex,
     address: <span class="kw-2">&amp;</span>UnifiedAddress,
-) -&gt; <span class="prelude-ty">Result</span>&lt;(), rusqlite::Error&gt; {
+) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>stmt = conn.prepare_cached(
         <span class="string">"INSERT INTO addresses (
             account_id,
@@ -4393,7 +4530,7 @@
             cached_transparent_receiver_address
         )
         VALUES (
-            :account,
+            :account_id,
             :diversifier_index_be,
             :address,
             :cached_transparent_receiver_address
@@ -4404,7 +4541,7 @@
     </span><span class="kw">let </span><span class="kw-2">mut </span>di_be = <span class="kw-2">*</span>diversifier_index.as_bytes();
     di_be.reverse();
     stmt.execute(<span class="macro">named_params!</span>[
-        <span class="string">":account"</span>: account.<span class="number">0</span>,
+        <span class="string">":account_id"</span>: account_id.<span class="number">0</span>,
         <span class="string">":diversifier_index_be"</span>: <span class="kw-2">&amp;</span>di_be[..],
         <span class="string">":address"</span>: <span class="kw-2">&amp;</span>address.encode(params),
         <span class="string">":cached_transparent_receiver_address"</span>: <span class="kw-2">&amp;</span>address.transparent().map(|r| r.encode(params)),
@@ -4417,23 +4554,22 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_unified_full_viewing_keys&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
     params: <span class="kw-2">&amp;</span>P,
-) -&gt; <span class="prelude-ty">Result</span>&lt;HashMap&lt;AccountId, UnifiedFullViewingKey&gt;, SqliteClientError&gt; {
+) -&gt; <span class="prelude-ty">Result</span>&lt;HashMap&lt;AccountUuid, UnifiedFullViewingKey&gt;, SqliteClientError&gt; {
     <span class="comment">// Fetch the UnifiedFullViewingKeys we are tracking
-    </span><span class="kw">let </span><span class="kw-2">mut </span>stmt_fetch_accounts = conn.prepare(<span class="string">"SELECT id, ufvk FROM accounts"</span>)<span class="question-mark">?</span>;
+    </span><span class="kw">let </span><span class="kw-2">mut </span>stmt_fetch_accounts = conn.prepare(<span class="string">"SELECT uuid, ufvk FROM accounts"</span>)<span class="question-mark">?</span>;
 
     <span class="kw">let </span>rows = stmt_fetch_accounts.query_map([], |row| {
-        <span class="kw">let </span>acct: u32 = row.get(<span class="number">0</span>)<span class="question-mark">?</span>;
         <span class="kw">let </span>ufvk_str: <span class="prelude-ty">Option</span>&lt;String&gt; = row.get(<span class="number">1</span>)<span class="question-mark">?</span>;
         <span class="kw">if let </span><span class="prelude-val">Some</span>(ufvk_str) = ufvk_str {
             <span class="kw">let </span>ufvk = UnifiedFullViewingKey::decode(params, <span class="kw-2">&amp;</span>ufvk_str)
                 .map_err(SqliteClientError::CorruptedData);
-            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>((AccountId(acct), ufvk)))
+            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>((AccountUuid(row.get(<span class="number">0</span>)<span class="question-mark">?</span>), ufvk)))
         } <span class="kw">else </span>{
             <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)
         }
     })<span class="question-mark">?</span>;
 
-    <span class="kw">let </span><span class="kw-2">mut </span>res: HashMap&lt;AccountId, UnifiedFullViewingKey&gt; = HashMap::new();
+    <span class="kw">let </span><span class="kw-2">mut </span>res: HashMap&lt;AccountUuid, UnifiedFullViewingKey&gt; = HashMap::new();
     <span class="kw">for </span>row <span class="kw">in </span>rows {
         <span class="kw">if let </span><span class="prelude-val">Some</span>((account_id, ufvkr)) = row<span class="question-mark">? </span>{
             res.insert(account_id, ufvkr<span class="question-mark">?</span>);
@@ -4463,11 +4599,13 @@
     </span><span class="kw">let </span>transparent_item: <span class="prelude-ty">Option</span>&lt;Vec&lt;u8&gt;&gt; = <span class="prelude-val">None</span>;
 
     <span class="kw">let </span><span class="kw-2">mut </span>stmt = conn.prepare(
-        <span class="string">"SELECT id, account_kind, hd_seed_fingerprint, hd_account_index, ufvk, has_spend_key
-        FROM accounts
-        WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
-           OR sapling_fvk_item_cache = :sapling_fvk_item_cache
-           OR p2pkh_fvk_item_cache = :p2pkh_fvk_item_cache"</span>,
+        <span class="string">"SELECT name, uuid, account_kind, 
+                hd_seed_fingerprint, hd_account_index, key_source, 
+                ufvk, has_spend_key
+         FROM accounts
+         WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
+            OR sapling_fvk_item_cache = :sapling_fvk_item_cache
+            OR p2pkh_fvk_item_cache = :p2pkh_fvk_item_cache"</span>,
     )<span class="question-mark">?</span>;
 
     <span class="kw">let </span>accounts = stmt
@@ -4478,12 +4616,14 @@
                 <span class="string">":p2pkh_fvk_item_cache"</span>: transparent_item,
             ],
             |row| {
-                <span class="kw">let </span>account_id = row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="string">"id"</span>).map(AccountId)<span class="question-mark">?</span>;
+                <span class="kw">let </span>account_name = row.get(<span class="string">"name"</span>)<span class="question-mark">?</span>;
+                <span class="kw">let </span>account_uuid = AccountUuid(row.get(<span class="string">"uuid"</span>)<span class="question-mark">?</span>);
                 <span class="kw">let </span>kind = parse_account_source(
                     row.get(<span class="string">"account_kind"</span>)<span class="question-mark">?</span>,
                     row.get(<span class="string">"hd_seed_fingerprint"</span>)<span class="question-mark">?</span>,
                     row.get(<span class="string">"hd_account_index"</span>)<span class="question-mark">?</span>,
                     row.get(<span class="string">"has_spend_key"</span>)<span class="question-mark">?</span>,
+                    row.get(<span class="string">"key_source"</span>)<span class="question-mark">?</span>,
                 )<span class="question-mark">?</span>;
 
                 <span class="comment">// We looked up the account by FVK components, so the UFVK column must be
@@ -4492,14 +4632,15 @@
                 <span class="kw">let </span>viewing_key = ViewingKey::Full(Box::new(
                     UnifiedFullViewingKey::decode(params, <span class="kw-2">&amp;</span>ufvk_str).map_err(|e| {
                         SqliteClientError::CorruptedData(<span class="macro">format!</span>(
-                            <span class="string">"Could not decode unified full viewing key for account {:?}: {}"</span>,
-                            account_id, e
+                            <span class="string">"Could not decode unified full viewing key for account {}: {}"</span>,
+                            account_uuid.<span class="number">0</span>, e
                         ))
                     })<span class="question-mark">?</span>,
                 ));
 
                 <span class="prelude-val">Ok</span>(Account {
-                    account_id,
+                    name: account_name,
+                    uuid: account_uuid,
                     kind,
                     viewing_key,
                 })
@@ -4521,40 +4662,44 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_derived_account&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
     params: <span class="kw-2">&amp;</span>P,
-    seed: <span class="kw-2">&amp;</span>SeedFingerprint,
+    seed_fp: <span class="kw-2">&amp;</span>SeedFingerprint,
     account_index: zip32::AccountId,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;Account&gt;, SqliteClientError&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>stmt = conn.prepare(
-        <span class="string">"SELECT id, ufvk
-        FROM accounts
-        WHERE hd_seed_fingerprint = :hd_seed_fingerprint
-          AND hd_account_index = :account_id"</span>,
+        <span class="string">"SELECT name, key_source, uuid, ufvk
+         FROM accounts
+         WHERE hd_seed_fingerprint = :hd_seed_fingerprint
+         AND hd_account_index = :hd_account_index"</span>,
     )<span class="question-mark">?</span>;
 
     <span class="kw">let </span><span class="kw-2">mut </span>accounts = stmt.query_and_then::&lt;<span class="kw">_</span>, SqliteClientError, <span class="kw">_</span>, <span class="kw">_</span>&gt;(
         <span class="macro">named_params!</span>[
-            <span class="string">":hd_seed_fingerprint"</span>: seed.to_bytes(),
+            <span class="string">":hd_seed_fingerprint"</span>: seed_fp.to_bytes(),
             <span class="string">":hd_account_index"</span>: u32::from(account_index),
         ],
         |row| {
-            <span class="kw">let </span>account_id = row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">0</span>).map(AccountId)<span class="question-mark">?</span>;
-            <span class="kw">let </span>ufvk = <span class="kw">match </span>row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;String&gt;&gt;(<span class="number">1</span>)<span class="question-mark">? </span>{
+            <span class="kw">let </span>account_name = row.get(<span class="string">"name"</span>)<span class="question-mark">?</span>;
+            <span class="kw">let </span>key_source = row.get(<span class="string">"key_source"</span>)<span class="question-mark">?</span>;
+            <span class="kw">let </span>account_uuid = AccountUuid(row.get(<span class="string">"uuid"</span>)<span class="question-mark">?</span>);
+            <span class="kw">let </span>ufvk = <span class="kw">match </span>row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;String&gt;&gt;(<span class="string">"ufvk"</span>)<span class="question-mark">? </span>{
                 <span class="prelude-val">None </span>=&gt; <span class="prelude-val">Err</span>(SqliteClientError::CorruptedData(<span class="macro">format!</span>(
-                    <span class="string">"Missing unified full viewing key for derived account {:?}"</span>,
-                    account_id,
+                    <span class="string">"Missing unified full viewing key for derived account {}"</span>,
+                    account_uuid.<span class="number">0</span>,
                 ))),
                 <span class="prelude-val">Some</span>(ufvk_str) =&gt; UnifiedFullViewingKey::decode(params, <span class="kw-2">&amp;</span>ufvk_str).map_err(|e| {
                     SqliteClientError::CorruptedData(<span class="macro">format!</span>(
-                        <span class="string">"Could not decode unified full viewing key for account {:?}: {}"</span>,
-                        account_id, e
+                        <span class="string">"Could not decode unified full viewing key for account {}: {}"</span>,
+                        account_uuid.<span class="number">0</span>, e
                     ))
                 }),
             }<span class="question-mark">?</span>;
             <span class="prelude-val">Ok</span>(Account {
-                account_id,
+                name: account_name,
+                uuid: account_uuid,
                 kind: AccountSource::Derived {
-                    seed_fingerprint: <span class="kw-2">*</span>seed,
+                    seed_fingerprint: <span class="kw-2">*</span>seed_fp,
                     account_index,
+                    key_source,
                 },
                 viewing_key: ViewingKey::Full(Box::new(ufvk)),
             })
@@ -5047,7 +5192,7 @@
     params: <span class="kw-2">&amp;</span>P,
     min_confirmations: u32,
     progress: <span class="kw-2">&amp;</span><span class="kw">impl </span>ProgressEstimator,
-) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;WalletSummary&lt;AccountId&gt;&gt;, SqliteClientError&gt; {
+) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;WalletSummary&lt;AccountUuid&gt;&gt;, SqliteClientError&gt; {
     <span class="kw">let </span>chain_tip_height = <span class="kw">match </span>chain_tip_height(tx)<span class="question-mark">? </span>{
         <span class="prelude-val">Some</span>(h) =&gt; h,
         <span class="prelude-val">None </span>=&gt; {
@@ -5118,18 +5263,18 @@
         <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
     };
 
-    <span class="kw">let </span><span class="kw-2">mut </span>stmt_accounts = tx.prepare_cached(<span class="string">"SELECT id FROM accounts"</span>)<span class="question-mark">?</span>;
+    <span class="kw">let </span><span class="kw-2">mut </span>stmt_accounts = tx.prepare_cached(<span class="string">"SELECT uuid FROM accounts"</span>)<span class="question-mark">?</span>;
     <span class="kw">let </span><span class="kw-2">mut </span>account_balances = stmt_accounts
         .query([])<span class="question-mark">?
         </span>.and_then(|row| {
-            <span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, SqliteClientError&gt;((AccountId(row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">0</span>)<span class="question-mark">?</span>), AccountBalance::ZERO))
+            <span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, SqliteClientError&gt;((AccountUuid(row.get::&lt;<span class="kw">_</span>, Uuid&gt;(<span class="number">0</span>)<span class="question-mark">?</span>), AccountBalance::ZERO))
         })
-        .collect::&lt;<span class="prelude-ty">Result</span>&lt;HashMap&lt;AccountId, AccountBalance&gt;, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
+        .collect::&lt;<span class="prelude-ty">Result</span>&lt;HashMap&lt;AccountUuid, AccountBalance&gt;, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
 
     <span class="kw">fn </span>count_notes&lt;F&gt;(
         tx: <span class="kw-2">&amp;</span>rusqlite::Transaction,
         summary_height: BlockHeight,
-        account_balances: <span class="kw-2">&amp;mut </span>HashMap&lt;AccountId, AccountBalance&gt;,
+        account_balances: <span class="kw-2">&amp;mut </span>HashMap&lt;AccountUuid, AccountBalance&gt;,
         table_prefix: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
         with_pool_balance: F,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt;
@@ -5167,8 +5312,9 @@
 
         <span class="kw">let </span>any_spendable = is_any_spendable(tx, summary_height, table_prefix)<span class="question-mark">?</span>;
         <span class="kw">let </span><span class="kw-2">mut </span>stmt_select_notes = tx.prepare_cached(<span class="kw-2">&amp;</span><span class="macro">format!</span>(
-            <span class="string">"SELECT n.account_id, n.value, n.is_change, scan_state.max_priority, t.block
+            <span class="string">"SELECT a.uuid, n.value, n.is_change, scan_state.max_priority, t.block
              FROM {table_prefix}_received_notes n
+             JOIN accounts a ON a.id = n.account_id
              JOIN transactions t ON t.id_tx = n.tx
              LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
                 ON n.commitment_tree_position &gt;= scan_state.start_position
@@ -5192,7 +5338,7 @@
         <span class="kw">let </span><span class="kw-2">mut </span>rows =
             stmt_select_notes.query(<span class="macro">named_params!</span>[<span class="string">":summary_height"</span>: u32::from(summary_height)])<span class="question-mark">?</span>;
         <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
-            <span class="kw">let </span>account = AccountId(row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">0</span>)<span class="question-mark">?</span>);
+            <span class="kw">let </span>account = AccountUuid(row.get::&lt;<span class="kw">_</span>, Uuid&gt;(<span class="number">0</span>)<span class="question-mark">?</span>);
 
             <span class="kw">let </span>value_raw = row.get::&lt;<span class="kw">_</span>, i64&gt;(<span class="number">1</span>)<span class="question-mark">?</span>;
             <span class="kw">let </span>value = NonNegativeAmount::from_nonnegative_i64(value_raw).map_err(|<span class="kw">_</span>| {
@@ -5464,7 +5610,7 @@
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_funding_accounts(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
     tx: <span class="kw-2">&amp;</span>Transaction,
-) -&gt; <span class="prelude-ty">Result</span>&lt;HashSet&lt;AccountId&gt;, rusqlite::Error&gt; {
+) -&gt; <span class="prelude-ty">Result</span>&lt;HashSet&lt;AccountUuid&gt;, rusqlite::Error&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>funding_accounts = HashSet::new();
     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     </span>funding_accounts.extend(transparent::detect_spending_accounts(
@@ -5546,13 +5692,13 @@
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>account_birthday(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
-    account: AccountId,
+    account_uuid: AccountUuid,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;BlockHeight, SqliteClientError&gt; {
     conn.query_row(
         <span class="string">"SELECT birthday_height
          FROM accounts
-         WHERE id = :account_id"</span>,
-        <span class="macro">named_params!</span>[<span class="string">":account_id"</span>: account.<span class="number">0</span>],
+         WHERE uuid = :account_uuid"</span>,
+        <span class="macro">named_params!</span>[<span class="string">":account_uuid"</span>: account_uuid.<span class="number">0</span>],
         |row| row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">0</span>).map(BlockHeight::from),
     )
     .optional()
@@ -5587,28 +5733,57 @@
     })
 }
 
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_account_ref(
+    conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
+    account_uuid: AccountUuid,
+) -&gt; <span class="prelude-ty">Result</span>&lt;AccountRef, SqliteClientError&gt; {
+    conn.query_row(
+        <span class="string">"SELECT id FROM accounts WHERE uuid = :account_uuid"</span>,
+        <span class="macro">named_params!</span> {<span class="string">":account_uuid"</span>: account_uuid.<span class="number">0</span>},
+        |row| row.get(<span class="string">"id"</span>).map(AccountRef),
+    )
+    .optional()<span class="question-mark">?
+    </span>.ok_or(SqliteClientError::AccountUnknown)
+}
+
+<span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_account_uuid(
+    conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
+    account_id: AccountRef,
+) -&gt; <span class="prelude-ty">Result</span>&lt;AccountUuid, SqliteClientError&gt; {
+    conn.query_row(
+        <span class="string">"SELECT uuid FROM accounts WHERE id = :account_id"</span>,
+        <span class="macro">named_params!</span> {<span class="string">":account_id"</span>: account_id.<span class="number">0</span>},
+        |row| row.get(<span class="string">"uuid"</span>).map(AccountUuid),
+    )
+    .optional()<span class="question-mark">?
+    </span>.ok_or(SqliteClientError::AccountUnknown)
+}
+
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_account&lt;P: Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
     params: <span class="kw-2">&amp;</span>P,
-    account_id: AccountId,
+    account_uuid: AccountUuid,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;Account&gt;, SqliteClientError&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>sql = conn.prepare_cached(
         <span class="string">r#"
-        SELECT account_kind, hd_seed_fingerprint, hd_account_index, ufvk, uivk, has_spend_key
+        SELECT name, account_kind, hd_seed_fingerprint, hd_account_index, key_source, ufvk, uivk, has_spend_key
         FROM accounts
-        WHERE id = :account_id
+        WHERE uuid = :account_uuid
         "#</span>,
     )<span class="question-mark">?</span>;
 
-    <span class="kw">let </span><span class="kw-2">mut </span>result = sql.query(<span class="macro">named_params!</span>[<span class="string">":account_id"</span>: account_id.<span class="number">0</span>])<span class="question-mark">?</span>;
+    <span class="kw">let </span><span class="kw-2">mut </span>result = sql.query(<span class="macro">named_params!</span>[<span class="string">":account_uuid"</span>: account_uuid.<span class="number">0</span>])<span class="question-mark">?</span>;
     <span class="kw">let </span>row = result.next()<span class="question-mark">?</span>;
     <span class="kw">match </span>row {
         <span class="prelude-val">Some</span>(row) =&gt; {
+            <span class="kw">let </span>account_name = row.get(<span class="string">"name"</span>)<span class="question-mark">?</span>;
             <span class="kw">let </span>kind = parse_account_source(
                 row.get(<span class="string">"account_kind"</span>)<span class="question-mark">?</span>,
                 row.get(<span class="string">"hd_seed_fingerprint"</span>)<span class="question-mark">?</span>,
                 row.get(<span class="string">"hd_account_index"</span>)<span class="question-mark">?</span>,
                 row.get(<span class="string">"has_spend_key"</span>)<span class="question-mark">?</span>,
+                row.get(<span class="string">"key_source"</span>)<span class="question-mark">?</span>,
             )<span class="question-mark">?</span>;
 
             <span class="kw">let </span>ufvk_str: <span class="prelude-ty">Option</span>&lt;String&gt; = row.get(<span class="string">"ufvk"</span>)<span class="question-mark">?</span>;
@@ -5626,7 +5801,8 @@
             };
 
             <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(Account {
-                account_id,
+                name: account_name,
+                uuid: account_uuid,
                 kind,
                 viewing_key,
             }))
@@ -5896,7 +6072,7 @@
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>store_transaction_to_be_sent&lt;P: consensus::Parameters&gt;(
     wdb: <span class="kw-2">&amp;mut </span>WalletDb&lt;SqlTransaction&lt;<span class="lifetime">'_</span>&gt;, P&gt;,
-    sent_tx: <span class="kw-2">&amp;</span>SentTransaction&lt;AccountId&gt;,
+    sent_tx: <span class="kw-2">&amp;</span>SentTransaction&lt;AccountUuid&gt;,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
     <span class="kw">let </span>tx_ref = put_tx_data(
         wdb.conn.<span class="number">0</span>,
@@ -6267,12 +6443,12 @@
 /// Note that this is called from db migration code.
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_account_ids(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
-) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;AccountId&gt;, rusqlite::Error&gt; {
-    <span class="kw">let </span><span class="kw-2">mut </span>stmt = conn.prepare(<span class="string">"SELECT id FROM accounts"</span>)<span class="question-mark">?</span>;
+) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;AccountUuid&gt;, rusqlite::Error&gt; {
+    <span class="kw">let </span><span class="kw-2">mut </span>stmt = conn.prepare(<span class="string">"SELECT uuid FROM accounts"</span>)<span class="question-mark">?</span>;
     <span class="kw">let </span><span class="kw-2">mut </span>rows = stmt.query([])<span class="question-mark">?</span>;
     <span class="kw">let </span><span class="kw-2">mut </span>result = Vec::new();
     <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
-        <span class="kw">let </span>id = AccountId(row.get(<span class="number">0</span>)<span class="question-mark">?</span>);
+        <span class="kw">let </span>id = AccountUuid(row.get(<span class="number">0</span>)<span class="question-mark">?</span>);
         result.push(id);
     }
     <span class="prelude-val">Ok</span>(result)
@@ -6382,7 +6558,7 @@
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>store_decrypted_tx&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Transaction,
     params: <span class="kw-2">&amp;</span>P,
-    d_tx: DecryptedTransaction&lt;AccountId&gt;,
+    d_tx: DecryptedTransaction&lt;AccountUuid&gt;,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
     <span class="kw">let </span>tx_ref = put_tx_data(conn, d_tx.tx(), <span class="prelude-val">None</span>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>)<span class="question-mark">?</span>;
     <span class="kw">if let </span><span class="prelude-val">Some</span>(height) = d_tx.mined_height() {
@@ -6618,14 +6794,14 @@
 
                 <span class="comment">// If the output belongs to the wallet, add it to `transparent_received_outputs`.
                 </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-                </span><span class="kw">if let </span><span class="prelude-val">Some</span>(account_id) =
-                    transparent::find_account_for_transparent_address(conn, params, <span class="kw-2">&amp;</span>address)<span class="question-mark">?
+                </span><span class="kw">if let </span><span class="prelude-val">Some</span>(account_uuid) =
+                    transparent::find_account_uuid_for_transparent_address(conn, params, <span class="kw-2">&amp;</span>address)<span class="question-mark">?
                 </span>{
                     <span class="macro">debug!</span>(
                         <span class="string">"{:?} output {} belongs to account {:?}"</span>,
                         d_tx.tx().txid(),
                         output_index,
-                        account_id
+                        account_uuid
                     );
                     transparent::put_transparent_output(
                         conn,
@@ -6637,7 +6813,7 @@
                         txout,
                         d_tx.mined_height(),
                         <span class="kw-2">&amp;</span>address,
-                        account_id,
+                        account_uuid,
                         <span class="bool-val">false</span>,
                     )<span class="question-mark">?</span>;
 
@@ -6668,12 +6844,12 @@
                 <span class="comment">// If a transaction we observe contains spends from our wallet, we will
                 // store its transparent outputs in the same way they would be stored by
                 // create_spend_to_address.
-                </span><span class="kw">if let </span><span class="prelude-val">Some</span>(account_id) = funding_account {
+                </span><span class="kw">if let </span><span class="prelude-val">Some</span>(account_uuid) = funding_account {
                     <span class="kw">let </span>receiver = Receiver::Transparent(address);
 
                     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
                     </span><span class="kw">let </span>recipient_addr =
-                        select_receiving_address(params, conn, account_id, <span class="kw-2">&amp;</span>receiver)<span class="question-mark">?
+                        select_receiving_address(params, conn, account_uuid, <span class="kw-2">&amp;</span>receiver)<span class="question-mark">?
                             </span>.unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
 
                     <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
@@ -6684,7 +6860,7 @@
                     put_sent_output(
                         conn,
                         params,
-                        account_id,
+                        account_uuid,
                         tx_ref,
                         output_index,
                         <span class="kw-2">&amp;</span>recipient,
@@ -6715,31 +6891,15 @@
     // part) by this wallet.
     </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     </span><span class="kw">if </span>tx_has_wallet_outputs {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(b) = d_tx.tx().transparent_bundle() {
-            <span class="comment">// queue the transparent inputs for enhancement
-            </span>queue_tx_retrieval(
-                conn,
-                b.vin.iter().map(|txin| <span class="kw-2">*</span>txin.prevout.txid()),
-                <span class="prelude-val">Some</span>(tx_ref),
-            )<span class="question-mark">?</span>;
-        }
-    }
+        queue_transparent_input_retrieval(conn, tx_ref, <span class="kw-2">&amp;</span>d_tx)<span class="question-mark">?
+    </span>}
 
     notify_tx_retrieved(conn, d_tx.tx().txid())<span class="question-mark">?</span>;
 
     <span class="comment">// If the decrypted transaction is unmined and has no shielded components, add it to
     // the queue for status retrieval.
     </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-    </span>{
-        <span class="kw">let </span>detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
-        <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-        </span><span class="kw">let </span>detectable_via_scanning =
-            detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
-
-        <span class="kw">if </span>d_tx.mined_height().is_none() &amp;&amp; !detectable_via_scanning {
-            queue_tx_retrieval(conn, std::iter::once(d_tx.tx().txid()), <span class="prelude-val">None</span>)<span class="question-mark">?</span>;
-        }
-    }
+    </span>queue_unmined_tx_retrieval(conn, <span class="kw-2">&amp;</span>d_tx)<span class="question-mark">?</span>;
 
     <span class="prelude-val">Ok</span>(())
 }
@@ -6748,7 +6908,7 @@
 /// contain a note related to this wallet into the database.
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>put_tx_meta(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
-    tx: <span class="kw-2">&amp;</span>WalletTx&lt;AccountId&gt;,
+    tx: <span class="kw-2">&amp;</span>WalletTx&lt;AccountUuid&gt;,
     height: BlockHeight,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;TxRef, SqliteClientError&gt; {
     <span class="comment">// It isn't there, so insert our transaction into the database.
@@ -6779,7 +6939,7 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>select_receiving_address&lt;P: consensus::Parameters&gt;(
     _params: <span class="kw-2">&amp;</span>P,
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
-    account: AccountId,
+    account: AccountUuid,
     receiver: <span class="kw-2">&amp;</span>Receiver,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;ZcashAddress&gt;, SqliteClientError&gt; {
     <span class="kw">match </span>receiver {
@@ -6799,10 +6959,14 @@
             .transpose()
             .map_err(SqliteClientError::from),
         receiver =&gt; {
-            <span class="kw">let </span><span class="kw-2">mut </span>stmt =
-                conn.prepare_cached(<span class="string">"SELECT address FROM addresses WHERE account_id = :account"</span>)<span class="question-mark">?</span>;
+            <span class="kw">let </span><span class="kw-2">mut </span>stmt = conn.prepare_cached(
+                <span class="string">"SELECT address
+                 FROM addresses
+                 JOIN accounts ON accounts.id = addresses.account_id
+                 WHERE accounts.uuid = :account_uuid"</span>,
+            )<span class="question-mark">?</span>;
 
-            <span class="kw">let </span><span class="kw-2">mut </span>result = stmt.query(<span class="macro">named_params!</span> { <span class="string">":account"</span>: account.<span class="number">0 </span>})<span class="question-mark">?</span>;
+            <span class="kw">let </span><span class="kw-2">mut </span>result = stmt.query(<span class="macro">named_params!</span> { <span class="string">":account_uuid"</span>: account.<span class="number">0 </span>})<span class="question-mark">?</span>;
             <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = result.next()<span class="question-mark">? </span>{
                 <span class="kw">let </span>addr_str = row.get::&lt;<span class="kw">_</span>, String&gt;(<span class="number">0</span>)<span class="question-mark">?</span>;
                 <span class="kw">let </span>decoded = addr_str.parse::&lt;ZcashAddress&gt;()<span class="question-mark">?</span>;
@@ -6873,6 +7037,40 @@
             <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
+}
+
+<span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>queue_transparent_input_retrieval&lt;AccountId&gt;(
+    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction&lt;<span class="lifetime">'_</span>&gt;,
+    tx_ref: TxRef,
+    d_tx: <span class="kw-2">&amp;</span>DecryptedTransaction&lt;<span class="lifetime">'_</span>, AccountId&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(b) = d_tx.tx().transparent_bundle() {
+        <span class="comment">// queue the transparent inputs for enhancement
+        </span>queue_tx_retrieval(
+            conn,
+            b.vin.iter().map(|txin| <span class="kw-2">*</span>txin.prevout.txid()),
+            <span class="prelude-val">Some</span>(tx_ref),
+        )<span class="question-mark">?</span>;
+    }
+
+    <span class="prelude-val">Ok</span>(())
+}
+
+<span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>queue_unmined_tx_retrieval&lt;AccountId&gt;(
+    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction&lt;<span class="lifetime">'_</span>&gt;,
+    d_tx: <span class="kw-2">&amp;</span>DecryptedTransaction&lt;<span class="lifetime">'_</span>, AccountId&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
+    <span class="kw">let </span>detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
+    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+    </span><span class="kw">let </span>detectable_via_scanning = detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
+
+    <span class="kw">if </span>d_tx.mined_height().is_none() &amp;&amp; !detectable_via_scanning {
+        queue_tx_retrieval(conn, std::iter::once(d_tx.tx().txid()), <span class="prelude-val">None</span>)<span class="question-mark">?
+    </span>}
+
+    <span class="prelude-val">Ok</span>(())
 }
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>queue_tx_retrieval(
@@ -6955,29 +7153,40 @@
 <span class="comment">// A utility function for creation of parameters for use in `insert_sent_output`
 // and `put_sent_output`
 </span><span class="kw">fn </span>recipient_params&lt;P: consensus::Parameters&gt;(
+    conn: <span class="kw-2">&amp;</span>Connection,
     params: <span class="kw-2">&amp;</span>P,
-    to: <span class="kw-2">&amp;</span>Recipient&lt;AccountId, Note, OutPoint&gt;,
-) -&gt; (<span class="prelude-ty">Option</span>&lt;String&gt;, <span class="prelude-ty">Option</span>&lt;AccountId&gt;, PoolType) {
+    from: AccountUuid,
+    to: <span class="kw-2">&amp;</span>Recipient&lt;AccountUuid, Note, OutPoint&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;(AccountRef, <span class="prelude-ty">Option</span>&lt;String&gt;, <span class="prelude-ty">Option</span>&lt;AccountRef&gt;, PoolType), SqliteClientError&gt; {
+    <span class="kw">let </span>from_account_id = get_account_ref(conn, from)<span class="question-mark">?</span>;
     <span class="kw">match </span>to {
-        Recipient::External(addr, pool) =&gt; (<span class="prelude-val">Some</span>(addr.encode()), <span class="prelude-val">None</span>, <span class="kw-2">*</span>pool),
+        Recipient::External(addr, pool) =&gt; <span class="prelude-val">Ok</span>((from_account_id, <span class="prelude-val">Some</span>(addr.encode()), <span class="prelude-val">None</span>, <span class="kw-2">*</span>pool)),
         Recipient::EphemeralTransparent {
             receiving_account,
             ephemeral_address,
             ..
-        } =&gt; (
-            <span class="prelude-val">Some</span>(ephemeral_address.encode(params)),
-            <span class="prelude-val">Some</span>(<span class="kw-2">*</span>receiving_account),
-            PoolType::TRANSPARENT,
-        ),
+        } =&gt; {
+            <span class="kw">let </span>to_account = get_account_ref(conn, <span class="kw-2">*</span>receiving_account)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>((
+                from_account_id,
+                <span class="prelude-val">Some</span>(ephemeral_address.encode(params)),
+                <span class="prelude-val">Some</span>(to_account),
+                PoolType::TRANSPARENT,
+            ))
+        }
         Recipient::InternalAccount {
             receiving_account,
             external_address,
             note,
-        } =&gt; (
-            external_address.as_ref().map(|a| a.encode()),
-            <span class="prelude-val">Some</span>(<span class="kw-2">*</span>receiving_account),
-            PoolType::Shielded(note.protocol()),
-        ),
+        } =&gt; {
+            <span class="kw">let </span>to_account = get_account_ref(conn, <span class="kw-2">*</span>receiving_account)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>((
+                from_account_id,
+                external_address.as_ref().map(|a| a.encode()),
+                <span class="prelude-val">Some</span>(to_account),
+                PoolType::Shielded(note.protocol()),
+            ))
+        }
     }
 }
 
@@ -6988,7 +7197,7 @@
     <span class="kw">let </span>flag_received_change = |table_prefix| {
         conn.execute(
             <span class="kw-2">&amp;</span><span class="macro">format!</span>(
-                <span class="string">"UPDATE {table_prefix}_received_notes 
+                <span class="string">"UPDATE {table_prefix}_received_notes
                  SET is_change = 1
                  FROM sent_notes sn
                  WHERE sn.tx = {table_prefix}_received_notes.tx
@@ -7015,24 +7224,25 @@
     conn: <span class="kw-2">&amp;</span>rusqlite::Transaction,
     params: <span class="kw-2">&amp;</span>P,
     tx_ref: TxRef,
-    from_account: AccountId,
-    output: <span class="kw-2">&amp;</span>SentTransactionOutput&lt;AccountId&gt;,
+    from_account_uuid: AccountUuid,
+    output: <span class="kw-2">&amp;</span>SentTransactionOutput&lt;AccountUuid&gt;,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>stmt_insert_sent_output = conn.prepare_cached(
         <span class="string">"INSERT INTO sent_notes (
             tx, output_pool, output_index, from_account_id,
             to_address, to_account_id, value, memo)
-        VALUES (
+         VALUES (
             :tx, :output_pool, :output_index, :from_account_id,
             :to_address, :to_account_id, :value, :memo)"</span>,
     )<span class="question-mark">?</span>;
 
-    <span class="kw">let </span>(to_address, to_account_id, pool_type) = recipient_params(params, output.recipient());
+    <span class="kw">let </span>(from_account_id, to_address, to_account_id, pool_type) =
+        recipient_params(conn, params, from_account_uuid, output.recipient())<span class="question-mark">?</span>;
     <span class="kw">let </span>sql_args = <span class="macro">named_params!</span>[
         <span class="string">":tx"</span>: tx_ref.<span class="number">0</span>,
         <span class="string">":output_pool"</span>: <span class="kw-2">&amp;</span>pool_code(pool_type),
         <span class="string">":output_index"</span>: <span class="kw-2">&amp;</span>i64::try_from(output.output_index()).unwrap(),
-        <span class="string">":from_account_id"</span>: from_account.<span class="number">0</span>,
+        <span class="string">":from_account_id"</span>: from_account_id.<span class="number">0</span>,
         <span class="string">":to_address"</span>: <span class="kw-2">&amp;</span>to_address,
         <span class="string">":to_account_id"</span>: to_account_id.map(|a| a.<span class="number">0</span>),
         <span class="string">":value"</span>: <span class="kw-2">&amp;</span>i64::from(Amount::from(output.value())),
@@ -7060,10 +7270,10 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>put_sent_output&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Transaction,
     params: <span class="kw-2">&amp;</span>P,
-    from_account: AccountId,
+    from_account_uuid: AccountUuid,
     tx_ref: TxRef,
     output_index: usize,
-    recipient: <span class="kw-2">&amp;</span>Recipient&lt;AccountId, Note, OutPoint&gt;,
+    recipient: <span class="kw-2">&amp;</span>Recipient&lt;AccountUuid, Note, OutPoint&gt;,
     value: NonNegativeAmount,
     memo: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt;,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
@@ -7082,12 +7292,13 @@
             memo = IFNULL(:memo, memo)"</span>,
     )<span class="question-mark">?</span>;
 
-    <span class="kw">let </span>(to_address, to_account_id, pool_type) = recipient_params(params, recipient);
+    <span class="kw">let </span>(from_account_id, to_address, to_account_id, pool_type) =
+        recipient_params(conn, params, from_account_uuid, recipient)<span class="question-mark">?</span>;
     <span class="kw">let </span>sql_args = <span class="macro">named_params!</span>[
         <span class="string">":tx"</span>: tx_ref.<span class="number">0</span>,
         <span class="string">":output_pool"</span>: <span class="kw-2">&amp;</span>pool_code(pool_type),
         <span class="string">":output_index"</span>: <span class="kw-2">&amp;</span>i64::try_from(output_index).unwrap(),
-        <span class="string">":from_account_id"</span>: from_account.<span class="number">0</span>,
+        <span class="string">":from_account_id"</span>: from_account_id.<span class="number">0</span>,
         <span class="string">":to_address"</span>: <span class="kw-2">&amp;</span>to_address,
         <span class="string">":to_account_id"</span>: <span class="kw-2">&amp;</span>to_account_id.map(|a| a.<span class="number">0</span>),
         <span class="string">":value"</span>: <span class="kw-2">&amp;</span>i64::from(Amount::from(value)),
@@ -7275,24 +7486,25 @@
         ShieldedProtocol,
     };
 
-    <span class="kw">use crate</span>::{error::SqliteClientError, AccountId, SAPLING_TABLES_PREFIX};
+    <span class="kw">use crate</span>::{error::SqliteClientError, AccountUuid, SAPLING_TABLES_PREFIX};
 
     <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
     </span><span class="kw">use </span><span class="kw">crate</span>::ORCHARD_TABLES_PREFIX;
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_tx_history(
         conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;TransactionSummary&lt;AccountId&gt;&gt;, SqliteClientError&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;TransactionSummary&lt;AccountUuid&gt;&gt;, SqliteClientError&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>stmt = conn.prepare_cached(
-            <span class="string">"SELECT *
+            <span class="string">"SELECT accounts.uuid as account_uuid, v_transactions.*
              FROM v_transactions
+             JOIN accounts ON accounts.uuid = v_transactions.account_uuid
              ORDER BY mined_height DESC, tx_index DESC"</span>,
         )<span class="question-mark">?</span>;
 
         <span class="kw">let </span>results = stmt
-            .query_and_then::&lt;TransactionSummary&lt;AccountId&gt;, SqliteClientError, <span class="kw">_</span>, <span class="kw">_</span>&gt;([], |row| {
+            .query_and_then::&lt;<span class="kw">_</span>, SqliteClientError, <span class="kw">_</span>, <span class="kw">_</span>&gt;([], |row| {
                 <span class="prelude-val">Ok</span>(TransactionSummary::from_parts(
-                    AccountId(row.get(<span class="string">"account_id"</span>)<span class="question-mark">?</span>),
+                    AccountUuid(row.get(<span class="string">"account_uuid"</span>)<span class="question-mark">?</span>),
                     TxId::from_bytes(row.get(<span class="string">"txid"</span>)<span class="question-mark">?</span>),
                     row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="string">"expiry_height"</span>)<span class="question-mark">?
                         </span>.map(BlockHeight::from),
@@ -7359,6 +7571,7 @@
 
     <span class="kw">use </span>sapling::zip32::ExtendedSpendingKey;
     <span class="kw">use </span>secrecy::{ExposeSecret, SecretVec};
+    <span class="kw">use </span>uuid::Uuid;
     <span class="kw">use </span>zcash_client_backend::data_api::{
         testing::{AddressType, DataStoreFactory, FakeCompactOutput, TestBuilder, TestState},
         Account <span class="kw">as _</span>, AccountSource, WalletRead, WalletWrite,
@@ -7367,7 +7580,7 @@
 
     <span class="kw">use crate</span>::{
         testing::{db::TestDbFactory, BlockCache},
-        AccountId,
+        AccountUuid,
     };
 
     <span class="kw">use </span><span class="kw">super</span>::account_birthday;
@@ -7396,8 +7609,7 @@
 
         <span class="comment">// No default address is set for an un-initialized account
         </span><span class="macro">assert_matches!</span>(
-            st.wallet()
-                .get_current_address(AccountId(account.id().<span class="number">0 </span>+ <span class="number">1</span>)),
+            st.wallet().get_current_address(AccountUuid(Uuid::nil())),
             <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)
         );
     }
@@ -7428,7 +7640,9 @@
         <span class="kw">let </span>seed = SecretVec::new(st.test_seed().unwrap().expose_secret().clone());
         <span class="kw">let </span>birthday = st.test_account().unwrap().birthday().clone();
 
-        st.wallet_mut().create_account(<span class="kw-2">&amp;</span>seed, <span class="kw-2">&amp;</span>birthday).unwrap();
+        st.wallet_mut()
+            .create_account(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>)
+            .unwrap();
 
         <span class="kw">for </span>acct_id <span class="kw">in </span>st.wallet().get_account_ids().unwrap() {
             <span class="macro">assert_matches!</span>(st.wallet().get_account(acct_id), <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="kw">_</span>)))

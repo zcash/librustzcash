@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/testing.rs`."><title>testing.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-42caa33d.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (90ab8eaed 2024-11-14)" data-channel="nightly" data-search-js="search-6851d9ab.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/</div>testing.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/testing.rs`."><title>testing.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-dbdb5eec.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (d49be02cf 2024-12-02)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/</div>testing.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -2766,7 +2766,20 @@
 <a href="#2765" id="2765">2765</a>
 <a href="#2766" id="2766">2766</a>
 <a href="#2767" id="2767">2767</a>
-<a href="#2768" id="2768">2768</a></pre></div><pre class="rust"><code><span class="doccomment">//! Utilities for testing wallets based upon the [`crate::data_api`] traits.
+<a href="#2768" id="2768">2768</a>
+<a href="#2769" id="2769">2769</a>
+<a href="#2770" id="2770">2770</a>
+<a href="#2771" id="2771">2771</a>
+<a href="#2772" id="2772">2772</a>
+<a href="#2773" id="2773">2773</a>
+<a href="#2774" id="2774">2774</a>
+<a href="#2775" id="2775">2775</a>
+<a href="#2776" id="2776">2776</a>
+<a href="#2777" id="2777">2777</a>
+<a href="#2778" id="2778">2778</a>
+<a href="#2779" id="2779">2779</a>
+<a href="#2780" id="2780">2780</a>
+<a href="#2781" id="2781">2781</a></pre></div><pre class="rust"><code><span class="doccomment">//! Utilities for testing wallets based upon the [`crate::data_api`] traits.
 
 </span><span class="kw">use </span>std::{
     collections::{BTreeMap, HashMap},
@@ -3142,7 +3155,11 @@
         <span class="self">self</span>.account.id()
     }
 
-    <span class="kw">fn </span>source(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; AccountSource {
+    <span class="kw">fn </span>name(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt; {
+        <span class="self">self</span>.account.name()
+    }
+
+    <span class="kw">fn </span>source(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>AccountSource {
         <span class="self">self</span>.account.source()
     }
 
@@ -3564,7 +3581,8 @@
     &lt;Cache::BlockSource <span class="kw">as </span>BlockSource&gt;::Error: fmt::Debug,
     ParamsT: consensus::Parameters + Send + <span class="lifetime">'static</span>,
     DbT: InputSource + WalletTest + WalletWrite + WalletCommitmentTrees,
-    &lt;DbT <span class="kw">as </span>WalletRead&gt;::AccountId: ConditionallySelectable + Default + Send + <span class="lifetime">'static</span>,
+    &lt;DbT <span class="kw">as </span>WalletRead&gt;::AccountId:
+        std::fmt::Debug + ConditionallySelectable + Default + Send + <span class="lifetime">'static</span>,
 {
     <span class="doccomment">/// Invokes [`scan_cached_blocks`] with the given arguments, expecting success.
     </span><span class="kw">pub fn </span>scan_cached_blocks(<span class="kw-2">&amp;mut </span><span class="self">self</span>, from_height: BlockHeight, limit: usize) -&gt; ScanSummary {
@@ -3623,7 +3641,7 @@
 <span class="kw">impl</span>&lt;Cache, DbT, ParamsT, AccountIdT, ErrT&gt; TestState&lt;Cache, DbT, ParamsT&gt;
 <span class="kw">where
     </span>ParamsT: consensus::Parameters + Send + <span class="lifetime">'static</span>,
-    AccountIdT: std::cmp::Eq + std::hash::Hash,
+    AccountIdT: std::fmt::Debug + std::cmp::Eq + std::hash::Hash,
     ErrT: std::fmt::Debug,
     DbT: InputSource&lt;AccountId = AccountIdT, Error = ErrT&gt;
         + WalletTest
@@ -4054,7 +4072,7 @@
 <span class="doccomment">/// Trait representing the ability to construct a new data store for use in a test.
 </span><span class="kw">pub trait </span>DataStoreFactory {
     <span class="kw">type </span>Error: core::fmt::Debug;
-    <span class="kw">type </span>AccountId: ConditionallySelectable + Default + Hash + Eq + Send + <span class="lifetime">'static</span>;
+    <span class="kw">type </span>AccountId: std::fmt::Debug + ConditionallySelectable + Default + Hash + Eq + Send + <span class="lifetime">'static</span>;
     <span class="kw">type </span>Account: Account&lt;AccountId = <span class="self">Self</span>::AccountId&gt; + Clone;
     <span class="kw">type </span>DsError: core::fmt::Debug;
     <span class="kw">type </span>DataStore: InputSource&lt;AccountId = <span class="self">Self</span>::AccountId, Error = <span class="self">Self</span>::DsError&gt;
@@ -4361,10 +4379,12 @@
             <span class="kw">let </span>seed = Secret::new(<span class="macro">vec!</span>[<span class="number">0u8</span>; <span class="number">32</span>]);
             <span class="kw">let </span>(account, usk) = <span class="kw">match </span><span class="self">self</span>.account_index {
                 <span class="prelude-val">Some</span>(index) =&gt; wallet_data
-                    .import_account_hd(<span class="kw-2">&amp;</span>seed, index, <span class="kw-2">&amp;</span>birthday)
+                    .import_account_hd(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, index, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>)
                     .unwrap(),
                 <span class="prelude-val">None </span>=&gt; {
-                    <span class="kw">let </span>result = wallet_data.create_account(<span class="kw-2">&amp;</span>seed, <span class="kw-2">&amp;</span>birthday).unwrap();
+                    <span class="kw">let </span>result = wallet_data
+                        .create_account(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>)
+                        .unwrap();
                     (
                         wallet_data.get_account(result.<span class="number">0</span>).unwrap().unwrap(),
                         result.<span class="number">1</span>,
@@ -5363,8 +5383,10 @@
 
     <span class="kw">fn </span>create_account(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        _account_name: <span class="kw-2">&amp;</span>str,
         seed: <span class="kw-2">&amp;</span>SecretVec&lt;u8&gt;,
         _birthday: <span class="kw-2">&amp;</span>AccountBirthday,
+        _key_source: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(<span class="self">Self</span>::AccountId, UnifiedSpendingKey), <span class="self">Self</span>::Error&gt; {
         <span class="kw">let </span>account = zip32::AccountId::ZERO;
         UnifiedSpendingKey::from_seed(<span class="kw-2">&amp;</span><span class="self">self</span>.network, seed.expose_secret(), account)
@@ -5374,18 +5396,22 @@
 
     <span class="kw">fn </span>import_account_hd(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        _account_name: <span class="kw-2">&amp;</span>str,
         _seed: <span class="kw-2">&amp;</span>SecretVec&lt;u8&gt;,
         _account_index: zip32::AccountId,
         _birthday: <span class="kw-2">&amp;</span>AccountBirthday,
+        _key_source: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(<span class="self">Self</span>::Account, UnifiedSpendingKey), <span class="self">Self</span>::Error&gt; {
         <span class="macro">todo!</span>()
     }
 
     <span class="kw">fn </span>import_account_ufvk(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        _account_name: <span class="kw-2">&amp;</span>str,
         _unified_key: <span class="kw-2">&amp;</span>UnifiedFullViewingKey,
         _birthday: <span class="kw-2">&amp;</span>AccountBirthday,
         _purpose: AccountPurpose,
+        _key_source: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Account, <span class="self">Self</span>::Error&gt; {
         <span class="macro">todo!</span>()
     }

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/transparent/ephemeral.rs`."><title>ephemeral.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-42caa33d.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (90ab8eaed 2024-11-14)" data-channel="nightly" data-search-js="search-6851d9ab.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/transparent/</div>ephemeral.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/transparent/ephemeral.rs`."><title>ephemeral.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-dbdb5eec.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (d49be02cf 2024-12-02)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/transparent/</div>ephemeral.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -455,7 +455,17 @@
 <a href="#454" id="454">454</a>
 <a href="#455" id="455">455</a>
 <a href="#456" id="456">456</a>
-<a href="#457" id="457">457</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for wallet support of ephemeral transparent addresses.
+<a href="#457" id="457">457</a>
+<a href="#458" id="458">458</a>
+<a href="#459" id="459">459</a>
+<a href="#460" id="460">460</a>
+<a href="#461" id="461">461</a>
+<a href="#462" id="462">462</a>
+<a href="#463" id="463">463</a>
+<a href="#464" id="464">464</a>
+<a href="#465" id="465">465</a>
+<a href="#466" id="466">466</a>
+<a href="#467" id="467">467</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for wallet support of ephemeral transparent addresses.
 </span><span class="kw">use </span>std::cmp::{max, min};
 <span class="kw">use </span>std::ops::Range;
 
@@ -473,7 +483,9 @@
 };
 <span class="kw">use </span>zcash_protocol::consensus;
 
-<span class="kw">use crate</span>::{error::SqliteClientError, AccountId, TxRef};
+<span class="kw">use </span><span class="kw">crate</span>::wallet::{<span class="self">self</span>, get_account_ref};
+<span class="kw">use </span><span class="kw">crate</span>::AccountUuid;
+<span class="kw">use crate</span>::{error::SqliteClientError, AccountRef, TxRef};
 
 <span class="comment">// Returns `TransparentAddressMetadata` in the ephemeral scope for the
 // given address index.
@@ -484,7 +496,7 @@
 <span class="doccomment">/// Returns the first unstored ephemeral address index in the given account.
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>first_unstored_index(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
-    account_id: AccountId,
+    account_id: AccountRef,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;u32, SqliteClientError&gt; {
     <span class="kw">match </span>conn
         .query_row(
@@ -508,7 +520,7 @@
 <span class="doccomment">/// Returns the first unreserved ephemeral address index in the given account.
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>first_unreserved_index(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
-    account_id: AccountId,
+    account_id: AccountRef,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;u32, SqliteClientError&gt; {
     first_unstored_index(conn, account_id)<span class="question-mark">?
         </span>.checked_sub(GAP_LIMIT)
@@ -521,7 +533,7 @@
 /// would violate the gap invariant if used.
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>first_unsafe_index(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
-    account_id: AccountId,
+    account_id: AccountRef,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;u32, SqliteClientError&gt; {
     <span class="comment">// The inner join with `transactions` excludes addresses for which
     // `seen_in_tx` is NULL. The query also excludes addresses observed
@@ -569,7 +581,7 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_ephemeral_ivk&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
     params: <span class="kw-2">&amp;</span>P,
-    account_id: AccountId,
+    account_id: AccountRef,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;EphemeralIvk&gt;, SqliteClientError&gt; {
     <span class="kw">let </span>ufvk = conn
         .query_row(
@@ -606,18 +618,21 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_known_ephemeral_addresses&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
     params: <span class="kw-2">&amp;</span>P,
-    account_id: AccountId,
+    account_id: AccountRef,
     index_range: <span class="prelude-ty">Option</span>&lt;Range&lt;u32&gt;&gt;,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(TransparentAddress, TransparentAddressMetadata)&gt;, SqliteClientError&gt; {
     <span class="kw">let </span>index_range = index_range.unwrap_or(<span class="number">0</span>..(<span class="number">1 </span>&lt;&lt; <span class="number">31</span>));
 
     <span class="kw">let </span><span class="kw-2">mut </span>stmt = conn.prepare(
-        <span class="string">"SELECT address, address_index FROM ephemeral_addresses
-         WHERE account_id = :account AND address_index &gt;= :start AND address_index &lt; :end
+        <span class="string">"SELECT address, address_index 
+         FROM ephemeral_addresses ea
+         WHERE ea.account_id = :account_id
+         AND address_index &gt;= :start 
+         AND address_index &lt; :end
          ORDER BY address_index"</span>,
     )<span class="question-mark">?</span>;
     <span class="kw">let </span><span class="kw-2">mut </span>rows = stmt.query(<span class="macro">named_params!</span>[
-        <span class="string">":account"</span>: account_id.<span class="number">0</span>,
+        <span class="string">":account_id"</span>: account_id.<span class="number">0</span>,
         <span class="string">":start"</span>: index_range.start,
         <span class="string">":end"</span>: min(<span class="number">1 </span>&lt;&lt; <span class="number">31</span>, index_range.end),
     ])<span class="question-mark">?</span>;
@@ -639,12 +654,15 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>find_account_for_ephemeral_address_str(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
     address_str: <span class="kw-2">&amp;</span>str,
-) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;AccountId&gt;, SqliteClientError&gt; {
+) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;AccountUuid&gt;, SqliteClientError&gt; {
     <span class="prelude-val">Ok</span>(conn
         .query_row(
-            <span class="string">"SELECT account_id FROM ephemeral_addresses WHERE address = :address"</span>,
+            <span class="string">"SELECT accounts.uuid 
+             FROM ephemeral_addresses ea
+             JOIN accounts ON accounts.id = ea.account_id
+             WHERE address = :address"</span>,
             <span class="macro">named_params!</span>[<span class="string">":address"</span>: <span class="kw-2">&amp;</span>address_str],
-            |row| <span class="prelude-val">Ok</span>(AccountId(row.get(<span class="number">0</span>)<span class="question-mark">?</span>)),
+            |row| <span class="prelude-val">Ok</span>(AccountUuid(row.get(<span class="number">0</span>)<span class="question-mark">?</span>)),
         )
         .optional()<span class="question-mark">?</span>)
 }
@@ -652,9 +670,10 @@
 <span class="doccomment">/// If this is a known ephemeral address in the given account, return its index.
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>find_index_for_ephemeral_address_str(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
-    account_id: AccountId,
+    account_uuid: AccountUuid,
     address_str: <span class="kw-2">&amp;</span>str,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;NonHardenedChildIndex&gt;, SqliteClientError&gt; {
+    <span class="kw">let </span>account_id = get_account_ref(conn, account_uuid)<span class="question-mark">?</span>;
     <span class="prelude-val">Ok</span>(conn
         .query_row(
             <span class="string">"SELECT address_index FROM ephemeral_addresses
@@ -685,7 +704,7 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>reserve_next_n_ephemeral_addresses&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Transaction,
     params: <span class="kw-2">&amp;</span>P,
-    account_id: AccountId,
+    account_id: AccountRef,
     n: usize,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(TransparentAddress, TransparentAddressMetadata)&gt;, SqliteClientError&gt; {
     <span class="kw">if </span>n == <span class="number">0 </span>{
@@ -703,8 +722,9 @@
         <span class="kw">return </span><span class="prelude-val">Err</span>(AddressGenerationError::DiversifierSpaceExhausted.into());
     }
     <span class="kw">if </span>allocation.end &gt; first_unsafe {
+        <span class="kw">let </span>account_uuid = wallet::get_account_uuid(conn, account_id)<span class="question-mark">?</span>;
         <span class="kw">return </span><span class="prelude-val">Err</span>(SqliteClientError::ReachedGapLimit(
-            account_id,
+            account_uuid,
             max(first_unreserved, first_unsafe),
         ));
     }
@@ -717,7 +737,7 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>init_account&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Transaction,
     params: <span class="kw-2">&amp;</span>P,
-    account_id: AccountId,
+    account_id: AccountRef,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
     reserve_until(conn, params, account_id, <span class="number">0</span>)
 }
@@ -734,7 +754,7 @@
 </span><span class="kw">fn </span>reserve_until&lt;P: consensus::Parameters&gt;(
     conn: <span class="kw-2">&amp;</span>rusqlite::Transaction,
     params: <span class="kw-2">&amp;</span>P,
-    account_id: AccountId,
+    account_id: AccountRef,
     next_to_reserve: u32,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
     <span class="macro">assert!</span>(next_to_reserve &lt;= <span class="number">1 </span>&lt;&lt; <span class="number">31</span>);
@@ -848,7 +868,7 @@
              WHERE address = :address
              RETURNING account_id, address_index"</span>,
             <span class="macro">named_params!</span>[<span class="string">":tx_ref"</span>: tx_ref.<span class="number">0</span>, <span class="string">":address"</span>: address_str],
-            |row| <span class="prelude-val">Ok</span>((AccountId(row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">0</span>)<span class="question-mark">?</span>), row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">1</span>)<span class="question-mark">?</span>)),
+            |row| <span class="prelude-val">Ok</span>((AccountRef(row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">0</span>)<span class="question-mark">?</span>), row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">1</span>)<span class="question-mark">?</span>)),
         )
         .optional()<span class="question-mark">?</span>;
 
@@ -901,7 +921,7 @@
              WHERE address = :address
              RETURNING account_id, address_index"</span>,
             <span class="macro">named_params!</span>[<span class="string">":seen_in_tx"</span>: <span class="kw-2">&amp;</span>earlier_ref, <span class="string">":address"</span>: address_str],
-            |row| <span class="prelude-val">Ok</span>((AccountId(row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">0</span>)<span class="question-mark">?</span>), row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">1</span>)<span class="question-mark">?</span>)),
+            |row| <span class="prelude-val">Ok</span>((AccountRef(row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">0</span>)<span class="question-mark">?</span>), row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">1</span>)<span class="question-mark">?</span>)),
         )
         .optional()<span class="question-mark">?</span>;
 

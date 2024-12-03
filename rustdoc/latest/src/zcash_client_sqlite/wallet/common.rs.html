@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/common.rs`."><title>common.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-42caa33d.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.84.0-nightly (90ab8eaed 2024-11-14)" data-channel="nightly" data-search-js="search-6851d9ab.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>common.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/common.rs`."><title>common.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-dbdb5eec.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (d49be02cf 2024-12-02)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>common.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -422,7 +422,9 @@
 <a href="#421" id="421">421</a>
 <a href="#422" id="422">422</a>
 <a href="#423" id="423">423</a>
-<a href="#424" id="424">424</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions common to Sapling and Orchard support in the wallet.
+<a href="#424" id="424">424</a>
+<a href="#425" id="425">425</a>
+<a href="#426" id="426">426</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions common to Sapling and Orchard support in the wallet.
 
 </span><span class="kw">use </span>rusqlite::{named_params, types::Value, Connection, Row};
 <span class="kw">use </span>std::{num::NonZeroU64, rc::Rc};
@@ -441,7 +443,7 @@
 
 <span class="kw">use </span><span class="kw">super</span>::wallet_birthday;
 <span class="kw">use crate</span>::{
-    error::SqliteClientError, wallet::pool_code, AccountId, ReceivedNoteId, SAPLING_TABLES_PREFIX,
+    error::SqliteClientError, wallet::pool_code, AccountUuid, ReceivedNoteId, SAPLING_TABLES_PREFIX,
 };
 
 <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
@@ -542,7 +544,7 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>select_spendable_notes&lt;P: consensus::Parameters, F, Note&gt;(
     conn: <span class="kw-2">&amp;</span>Connection,
     params: <span class="kw-2">&amp;</span>P,
-    account: AccountId,
+    account: AccountUuid,
     target_value: NonNegativeAmount,
     anchor_height: BlockHeight,
     exclude: <span class="kw-2">&amp;</span>[ReceivedNoteId],
@@ -593,7 +595,8 @@
                     ON accounts.id = {table_prefix}_received_notes.account_id
                  INNER JOIN transactions
                     ON transactions.id_tx = {table_prefix}_received_notes.tx
-                 WHERE {table_prefix}_received_notes.account_id = :account
+                 WHERE accounts.uuid = :account_uuid
+                 AND {table_prefix}_received_notes.account_id = accounts.id
                  AND value &gt; 5000 -- FIXME #1316, allow selection of dust inputs
                  AND accounts.ufvk IS NOT NULL
                  AND recipient_key_scope IS NOT NULL
@@ -646,7 +649,7 @@
 
     <span class="kw">let </span>notes = stmt_select_notes.query_and_then(
         <span class="macro">named_params!</span>[
-            <span class="string">":account"</span>: account.<span class="number">0</span>,
+            <span class="string">":account_uuid"</span>: account.<span class="number">0</span>,
             <span class="string">":anchor_height"</span>: <span class="kw-2">&amp;</span>u32::from(anchor_height),
             <span class="string">":target_value"</span>: <span class="kw-2">&amp;</span>u64::from(target_value),
             <span class="string">":exclude"</span>: <span class="kw-2">&amp;</span>excluded_ptr,
@@ -664,7 +667,7 @@
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
     protocol: ShieldedProtocol,
     chain_tip_height: BlockHeight,
-    account: AccountId,
+    account: AccountUuid,
     filter: <span class="kw-2">&amp;</span>NoteFilter,
     exclude: <span class="kw-2">&amp;</span>[ReceivedNoteId],
 ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;PoolMeta&gt;, SqliteClientError&gt; {
@@ -695,7 +698,7 @@
                  FROM {table_prefix}_received_notes rn
                  INNER JOIN accounts a ON a.id = rn.account_id
                  INNER JOIN transactions ON transactions.id_tx = rn.tx
-                 WHERE rn.account_id = :account_id
+                 WHERE a.uuid = :account_uuid
                  AND a.ufvk IS NOT NULL
                  AND rn.value &gt;= :min_value
                  AND transactions.mined_height IS NOT NULL
@@ -710,7 +713,7 @@
                  )"
             </span>),
             <span class="macro">named_params!</span>[
-                <span class="string">":account_id"</span>: account.<span class="number">0</span>,
+                <span class="string">":account_uuid"</span>: account.<span class="number">0</span>,
                 <span class="string">":min_value"</span>: u64::from(min_value),
                 <span class="string">":exclude"</span>: <span class="kw-2">&amp;</span>excluded_ptr,
                 <span class="string">":chain_tip_height"</span>: u32::from(chain_tip_height)
@@ -728,7 +731,7 @@
     // determine the minimum value of notes to be produced by note splitting.
     </span><span class="kw">fn </span>min_note_value(
         conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
-        account: AccountId,
+        account: AccountUuid,
         filter: <span class="kw-2">&amp;</span>NoteFilter,
         chain_tip_height: BlockHeight,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;NonNegativeAmount&gt;, SqliteClientError&gt; {
@@ -740,7 +743,8 @@
                         SELECT s.value, NTILE(10) OVER (ORDER BY s.value) AS bucket_index
                         FROM sent_notes s
                         JOIN transactions t ON s.tx = t.id_tx
-                        WHERE s.from_account_id = :account_id
+                        JOIN accounts a on a.id = s.from_account_id
+                        WHERE a.uuid = :account_uuid
                         -- only count mined transactions
                         AND t.mined_height IS NOT NULL
                         -- exclude change and account-internal sends
@@ -754,7 +758,7 @@
 
                 <span class="kw">let </span>bucket_maxima = bucket_query
                     .query_and_then::&lt;<span class="kw">_</span>, SqliteClientError, <span class="kw">_</span>, <span class="kw">_</span>&gt;(
-                        <span class="macro">named_params!</span>[<span class="string">":account_id"</span>: account.<span class="number">0</span>],
+                        <span class="macro">named_params!</span>[<span class="string">":account_uuid"</span>: account.<span class="number">0</span>],
                         |row| {
                             NonNegativeAmount::from_nonnegative_i64(row.get::&lt;<span class="kw">_</span>, i64&gt;(<span class="number">0</span>)<span class="question-mark">?</span>).map_err(
                                 |<span class="kw">_</span>| {
@@ -778,7 +782,7 @@
                      FROM v_received_outputs rn
                      INNER JOIN accounts a ON a.id = rn.account_id
                      INNER JOIN transactions ON transactions.id_tx = rn.transaction_id
-                     WHERE rn.account_id = :account_id
+                     WHERE a.uuid = :account_uuid
                      AND a.ufvk IS NOT NULL
                      AND transactions.mined_height IS NOT NULL
                      AND rn.pool != :transparent_pool
@@ -793,7 +797,7 @@
                        )
                      )"</span>,
                     <span class="macro">named_params!</span>[
-                        <span class="string">":account_id"</span>: account.<span class="number">0</span>,
+                        <span class="string">":account_uuid"</span>: account.<span class="number">0</span>,
                         <span class="string">":chain_tip_height"</span>: u32::from(chain_tip_height),
                         <span class="string">":transparent_pool"</span>: pool_code(PoolType::Transparent)
                     ],
