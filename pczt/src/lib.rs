@@ -33,6 +33,8 @@
 //!     - A source of randomness.
 //! - Combiner (anyone can execute)
 //!   - Combines several PCZTs that represent the same transaction into a single PCZT.
+//! - Spend Finalizer (anyone can execute)
+//!   - Combines partial transparent signatures into `script_sig`s.
 //! - Transaction Extractor (anyone can execute)
 //!   - Creates bindingSig and extracts the final transaction.
 

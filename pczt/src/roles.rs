@@ -11,6 +11,9 @@ pub mod signer;
 
 pub mod combiner;
 
+#[cfg(feature = "spend-finalizer")]
+pub mod spend_finalizer;
+
 #[cfg(feature = "tx-extractor")]
 pub mod tx_extractor;
 
