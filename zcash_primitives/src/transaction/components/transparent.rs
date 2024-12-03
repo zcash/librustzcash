@@ -7,15 +7,40 @@ use std::io::{self, Read, Write};
 
 use crate::{
     legacy::{Script, TransparentAddress},
-    transaction::TxId,
+    transaction::{sighash::TransparentAuthorizingContext, TxId},
 };
 
 use super::amount::{Amount, BalanceError, NonNegativeAmount};
 
 pub mod builder;
+pub mod pczt;
 
 pub trait Authorization: Debug {
     type ScriptSig: Debug + Clone + PartialEq;
+}
+
+/// Marker type for a bundle that contains no authorizing data, and the necessary input
+/// information for creating sighashes.
+#[derive(Debug)]
+pub struct EffectsOnly {
+    inputs: Vec<TxOut>,
+}
+
+impl Authorization for EffectsOnly {
+    type ScriptSig = ();
+}
+
+impl TransparentAuthorizingContext for EffectsOnly {
+    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
+        self.inputs.iter().map(|input| input.value).collect()
+    }
+
+    fn input_scriptpubkeys(&self) -> Vec<Script> {
+        self.inputs
+            .iter()
+            .map(|input| input.script_pubkey.clone())
+            .collect()
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

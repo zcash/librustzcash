@@ -10,7 +10,10 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_primitives::transaction`
   - `components::transparent`:
+    - `pczt` module.
+    - `EffectsOnly`
     - `impl MapAuth<Authorized, Authorized> for ()`
+  - `sighash::SighashType`
 
 ## [0.20.0] - 2024-11-14
 

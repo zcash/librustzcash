@@ -1,5 +1,6 @@
 //! Types and functions for building transparent transaction components.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::{
@@ -18,7 +19,7 @@ use {
     crate::transaction::{
         self as tx,
         components::transparent::OutPoint,
-        sighash::{signature_hash, SignableInput, SIGHASH_ALL},
+        sighash::{signature_hash, SighashType, SignableInput, SIGHASH_ALL},
         TransactionData, TxDigests,
     },
     blake2b_simd::Hash as Blake2bHash,
@@ -197,6 +198,58 @@ impl TransparentBuilder {
                     inputs: self.inputs,
                 },
             })
+        }
+    }
+
+    pub(crate) fn build_for_pczt(self) -> Option<transparent::pczt::Bundle> {
+        #[cfg(feature = "transparent-inputs")]
+        let inputs = self
+            .inputs
+            .iter()
+            .map(|i| transparent::pczt::Input {
+                prevout_txid: i.utxo.hash,
+                prevout_index: i.utxo.n,
+                sequence: None,
+                required_time_lock_time: None,
+                required_height_lock_time: None,
+                script_sig: None,
+                value: i.coin.value,
+                script_pubkey: i.coin.script_pubkey.clone(),
+                // We don't currently support spending P2SH coins.
+                redeem_script: None,
+                partial_signatures: BTreeMap::new(),
+                sighash_type: SighashType::ALL,
+                bip32_derivation: BTreeMap::new(),
+                ripemd160_preimages: BTreeMap::new(),
+                sha256_preimages: BTreeMap::new(),
+                hash160_preimages: BTreeMap::new(),
+                hash256_preimages: BTreeMap::new(),
+                proprietary: BTreeMap::new(),
+            })
+            .collect::<Vec<_>>();
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        let inputs = vec![];
+
+        if inputs.is_empty() && self.vout.is_empty() {
+            None
+        } else {
+            let outputs = self
+                .vout
+                .into_iter()
+                .map(|o| transparent::pczt::Output {
+                    value: o.value,
+                    script_pubkey: o.script_pubkey,
+                    // We don't currently support spending P2SH coins, so we only ever see
+                    // external P2SH recipients here, for which we never know the redeem
+                    // script.
+                    redeem_script: None,
+                    bip32_derivation: BTreeMap::new(),
+                    proprietary: BTreeMap::new(),
+                })
+                .collect();
+
+            Some(transparent::pczt::Bundle { inputs, outputs })
         }
     }
 }
