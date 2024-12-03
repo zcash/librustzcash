@@ -1,94 +1,45 @@
 use rand_core::OsRng;
-use sapling::{
-    prover::{OutputProver, SpendProver},
-    value::NoteValue,
-    Note, PaymentAddress,
-};
+use sapling::prover::{OutputProver, SpendProver};
+
+use crate::Pczt;
 
 impl super::Prover {
     pub fn create_sapling_proofs<S, O>(
-        &mut self,
+        self,
         spend_prover: &S,
         output_prover: &O,
-    ) -> Result<(), SaplingError>
+    ) -> Result<Self, SaplingError>
     where
         S: SpendProver,
         O: OutputProver,
     {
-        let mut rng = OsRng;
+        let Pczt {
+            global,
+            transparent,
+            sapling,
+            orchard,
+        } = self.pczt;
 
-        let anchor = jubjub::Base::from_bytes(&self.pczt.sapling.anchor)
-            .into_option()
-            .ok_or(crate::sapling::Error::InvalidAnchor)?;
+        let mut bundle = sapling.into_parsed().map_err(SaplingError::Parser)?;
 
-        for spend in &mut self.pczt.sapling.spends {
-            let proof_generation_key = spend.proof_generation_key_from_field()?;
-            let note = spend.note_from_fields()?;
-            let alpha = spend.alpha_from_field()?;
-            let rcv = spend.rcv_from_field()?;
-            let merkle_path = spend.witness_from_field()?;
+        bundle
+            .create_proofs(spend_prover, output_prover, OsRng)
+            .map_err(SaplingError::Prover)?;
 
-            let circuit = S::prepare_circuit(
-                proof_generation_key,
-                *note.recipient().diversifier(),
-                *note.rseed(),
-                note.value(),
-                alpha,
-                rcv,
-                anchor,
-                merkle_path,
-            )
-            .ok_or(SaplingError::InvalidDiversifier)?;
-
-            let proof = spend_prover.create_proof(circuit, &mut rng);
-            spend.zkproof = Some(S::encode_proof(proof));
-        }
-
-        for output in &mut self.pczt.sapling.outputs {
-            let recipient = PaymentAddress::from_bytes(
-                output
-                    .recipient
-                    .as_ref()
-                    .ok_or(SaplingError::MissingRecipient)?,
-            )
-            .ok_or(SaplingError::InvalidRecipient)?;
-
-            let value = NoteValue::from_raw(output.value.ok_or(SaplingError::MissingValue)?);
-
-            let rseed =
-                sapling::Rseed::AfterZip212(output.rseed.ok_or(SaplingError::MissingRandomSeed)?);
-
-            let note = Note::from_parts(recipient, value, rseed);
-
-            let esk = note.generate_or_derive_esk(&mut rng);
-            let rcm = note.rcm();
-
-            let rcv = output.rcv_from_field()?;
-
-            let circuit = O::prepare_circuit(&esk, recipient, rcm, value, rcv);
-            let proof = output_prover.create_proof(circuit, &mut rng);
-            output.zkproof = Some(O::encode_proof(proof));
-        }
-
-        Ok(())
+        Ok(Self {
+            pczt: Pczt {
+                global,
+                transparent,
+                sapling: crate::sapling::Bundle::serialize_from(bundle),
+                orchard,
+            },
+        })
     }
 }
 
 /// Errors that can occur while creating Sapling proofs for a PCZT.
 #[derive(Debug)]
 pub enum SaplingError {
-    Data(crate::sapling::Error),
-    InvalidDiversifier,
-    InvalidRecipient,
-    InvalidValueCommitTrapdoor,
-    MissingRandomSeed,
-    MissingRecipient,
-    MissingValue,
-    MissingValueCommitTrapdoor,
-}
-
-impl From<crate::sapling::Error> for SaplingError {
-    fn from(e: crate::sapling::Error) -> Self {
-        Self::Data(e)
-    }
+    Parser(sapling::pczt::ParseError),
+    Prover(sapling::pczt::ProverError),
 }

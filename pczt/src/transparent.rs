@@ -6,13 +6,7 @@ use crate::{
 };
 
 #[cfg(feature = "transparent")]
-use {
-    zcash_primitives::{
-        legacy::Script,
-        transaction::components::{transparent, OutPoint},
-    },
-    zcash_protocol::value::Zatoshis,
-};
+use zcash_primitives::transaction::components::transparent;
 
 /// PCZT fields that are specific to producing the transaction's transparent bundle (if
 /// any).
@@ -250,59 +244,152 @@ impl Bundle {
 
 #[cfg(feature = "transparent")]
 impl Bundle {
-    pub(crate) fn to_tx_data<A, E, F, G>(
-        &self,
-        script_sig: F,
-        bundle_auth: G,
-    ) -> Result<Option<transparent::Bundle<A>>, E>
-    where
-        A: transparent::Authorization,
-        E: From<Error>,
-        F: Fn(&Input) -> Result<<A as transparent::Authorization>::ScriptSig, E>,
-        G: FnOnce(&Self) -> Result<A, E>,
-    {
-        let vin = self
+    pub(crate) fn into_parsed(
+        self,
+    ) -> Result<transparent::pczt::Bundle, transparent::pczt::ParseError> {
+        let inputs = self
             .inputs
-            .iter()
+            .into_iter()
             .map(|input| {
-                let prevout = OutPoint::new(input.prevout_txid, input.prevout_index);
-
-                Ok(transparent::TxIn {
-                    prevout,
-                    script_sig: script_sig(input)?,
-                    sequence: input.sequence.unwrap_or(std::u32::MAX),
-                })
+                transparent::pczt::Input::parse(
+                    input.prevout_txid,
+                    input.prevout_index,
+                    input.sequence,
+                    input.required_time_lock_time,
+                    input.required_height_lock_time,
+                    input.script_sig,
+                    input.value,
+                    input.script_pubkey,
+                    input.redeem_script,
+                    input.partial_signatures,
+                    input.sighash_type,
+                    input
+                        .bip32_derivation
+                        .into_iter()
+                        .map(|(k, v)| {
+                            transparent::pczt::Bip32Derivation::parse(
+                                v.seed_fingerprint,
+                                v.derivation_path,
+                            )
+                            .map(|v| (k, v))
+                        })
+                        .collect::<Result<_, _>>()?,
+                    input.ripemd160_preimages,
+                    input.sha256_preimages,
+                    input.hash160_preimages,
+                    input.hash256_preimages,
+                    input.proprietary,
+                )
             })
-            .collect::<Result<Vec<_>, E>>()?;
+            .collect::<Result<_, _>>()?;
 
-        let vout = self
+        let outputs = self
             .outputs
-            .iter()
+            .into_iter()
             .map(|output| {
-                let value = Zatoshis::from_u64(output.value).map_err(|_| Error::InvalidValue)?;
-                let script_pubkey = Script(output.script_pubkey.clone());
-
-                Ok(transparent::TxOut {
-                    value,
-                    script_pubkey,
-                })
+                transparent::pczt::Output::parse(
+                    output.value,
+                    output.script_pubkey,
+                    output.redeem_script,
+                    output
+                        .bip32_derivation
+                        .into_iter()
+                        .map(|(k, v)| {
+                            transparent::pczt::Bip32Derivation::parse(
+                                v.seed_fingerprint,
+                                v.derivation_path,
+                            )
+                            .map(|v| (k, v))
+                        })
+                        .collect::<Result<_, _>>()?,
+                    output.proprietary,
+                )
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<_, _>>()?;
 
-        Ok(if vin.is_empty() && vout.is_empty() {
-            None
-        } else {
-            Some(transparent::Bundle {
-                vin,
-                vout,
-                authorization: bundle_auth(self)?,
-            })
-        })
+        transparent::pczt::Bundle::parse(inputs, outputs)
     }
-}
 
-#[cfg(feature = "transparent")]
-#[derive(Debug)]
-pub enum Error {
-    InvalidValue,
+    pub(crate) fn serialize_from(bundle: transparent::pczt::Bundle) -> Self {
+        let inputs = bundle
+            .inputs()
+            .iter()
+            .map(|input| Input {
+                prevout_txid: (*input.prevout_txid()).into(),
+                prevout_index: *input.prevout_index(),
+                sequence: *input.sequence(),
+                required_time_lock_time: *input.required_time_lock_time(),
+                required_height_lock_time: *input.required_height_lock_time(),
+                script_sig: input
+                    .script_sig()
+                    .as_ref()
+                    .map(|script_sig| script_sig.0.clone()),
+                value: input.value().into_u64(),
+                script_pubkey: input.script_pubkey().0.clone(),
+                redeem_script: input
+                    .redeem_script()
+                    .as_ref()
+                    .map(|redeem_script| redeem_script.0.clone()),
+                partial_signatures: input.partial_signatures().clone(),
+                sighash_type: input.sighash_type().encode(),
+                bip32_derivation: input
+                    .bip32_derivation()
+                    .iter()
+                    .map(|(k, v)| {
+                        (
+                            *k,
+                            Zip32Derivation {
+                                seed_fingerprint: *v.seed_fingerprint(),
+                                derivation_path: v
+                                    .derivation_path()
+                                    .iter()
+                                    .copied()
+                                    .map(u32::from)
+                                    .collect(),
+                            },
+                        )
+                    })
+                    .collect(),
+                ripemd160_preimages: input.ripemd160_preimages().clone(),
+                sha256_preimages: input.sha256_preimages().clone(),
+                hash160_preimages: input.hash160_preimages().clone(),
+                hash256_preimages: input.hash256_preimages().clone(),
+                proprietary: input.proprietary().clone(),
+            })
+            .collect();
+
+        let outputs = bundle
+            .outputs()
+            .iter()
+            .map(|output| Output {
+                value: output.value().into_u64(),
+                script_pubkey: output.script_pubkey().0.clone(),
+                redeem_script: output
+                    .redeem_script()
+                    .as_ref()
+                    .map(|redeem_script| redeem_script.0.clone()),
+                bip32_derivation: output
+                    .bip32_derivation()
+                    .iter()
+                    .map(|(k, v)| {
+                        (
+                            *k,
+                            Zip32Derivation {
+                                seed_fingerprint: *v.seed_fingerprint(),
+                                derivation_path: v
+                                    .derivation_path()
+                                    .iter()
+                                    .copied()
+                                    .map(u32::from)
+                                    .collect(),
+                            },
+                        )
+                    })
+                    .collect(),
+                proprietary: output.proprietary().clone(),
+            })
+            .collect();
+
+        Self { inputs, outputs }
+    }
 }

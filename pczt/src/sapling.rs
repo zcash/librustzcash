@@ -4,16 +4,6 @@ use std::collections::BTreeMap;
 use crate::{
     common::Zip32Derivation,
     roles::combiner::{merge_map, merge_optional},
-    IgnoreMissing,
-};
-
-#[cfg(feature = "sapling")]
-use {
-    ff::PrimeField,
-    sapling::{
-        keys::SpendValidatingKey, value::NoteValue, value::ValueCommitTrapdoor, MerklePath, Node,
-        Note, PaymentAddress, Rseed,
-    },
 };
 
 const GROTH_PROOF_SIZE: usize = 48 + 96 + 48;
@@ -386,221 +376,155 @@ impl Bundle {
 
 #[cfg(feature = "sapling")]
 impl Bundle {
-    pub(crate) fn to_tx_data<A, E, F, G, H, I>(
-        &self,
-        spend_proof: F,
-        spend_auth: G,
-        output_proof: H,
-        bundle_auth: I,
-    ) -> Result<Option<sapling::Bundle<A, zcash_protocol::value::ZatBalance>>, E>
-    where
-        A: sapling::bundle::Authorization,
-        E: From<Error>,
-        F: Fn(&Spend) -> Result<<A as sapling::bundle::Authorization>::SpendProof, E>,
-        G: Fn(&Spend) -> Result<<A as sapling::bundle::Authorization>::AuthSig, E>,
-        H: Fn(&Output) -> Result<<A as sapling::bundle::Authorization>::OutputProof, E>,
-        I: FnOnce(&Self) -> Result<A, E>,
-    {
-        use sapling::{
-            bundle::{OutputDescription, SpendDescription},
-            note::ExtractedNoteCommitment,
-            value::ValueCommitment,
-            Bundle, Nullifier,
-        };
-        use zcash_note_encryption::EphemeralKeyBytes;
-        use zcash_protocol::value::ZatBalance;
-
-        let anchor = bls12_381::Scalar::from_bytes(&self.anchor)
-            .into_option()
-            .ok_or(Error::InvalidAnchor)?;
-
+    pub(crate) fn into_parsed(self) -> Result<sapling::pczt::Bundle, sapling::pczt::ParseError> {
         let spends = self
             .spends
-            .iter()
+            .into_iter()
             .map(|spend| {
-                let cv = ValueCommitment::from_bytes_not_small_order(&spend.cv)
-                    .into_option()
-                    .ok_or(Error::InvalidValueCommitment)?;
-
-                let nullifier = Nullifier(spend.nullifier);
-
-                let rk = redjubjub::VerificationKey::try_from(spend.rk)
-                    .map_err(|_| Error::InvalidRandomizedKey)?;
-
-                Ok(SpendDescription::from_parts(
-                    cv,
-                    anchor,
-                    nullifier,
-                    rk,
-                    spend_proof(spend)?,
-                    spend_auth(spend)?,
-                ))
+                sapling::pczt::Spend::parse(
+                    spend.cv,
+                    spend.nullifier,
+                    spend.rk,
+                    spend.zkproof,
+                    spend.spend_auth_sig,
+                    spend.recipient,
+                    spend.value,
+                    spend.rcm,
+                    spend.rseed,
+                    spend.rcv,
+                    spend.proof_generation_key,
+                    spend.witness,
+                    spend.alpha,
+                    spend
+                        .zip32_derivation
+                        .map(|z| {
+                            sapling::pczt::Zip32Derivation::parse(
+                                z.seed_fingerprint,
+                                z.derivation_path,
+                            )
+                        })
+                        .transpose()?,
+                    spend.dummy_ask,
+                    spend.proprietary,
+                )
             })
-            .collect::<Result<_, E>>()?;
+            .collect::<Result<_, _>>()?;
 
         let outputs = self
             .outputs
-            .iter()
+            .into_iter()
             .map(|output| {
-                let cv = ValueCommitment::from_bytes_not_small_order(&output.cv)
-                    .into_option()
-                    .ok_or(Error::InvalidValueCommitment)?;
-
-                let cmu = ExtractedNoteCommitment::from_bytes(&output.cmu)
-                    .into_option()
-                    .ok_or(Error::InvalidExtractedNoteCommitment)?;
-
-                let ephemeral_key = EphemeralKeyBytes(output.ephemeral_key);
-
-                Ok(OutputDescription::from_parts(
-                    cv,
-                    cmu,
-                    ephemeral_key,
+                sapling::pczt::Output::parse(
+                    output.cv,
+                    output.cmu,
+                    output.ephemeral_key,
+                    output.enc_ciphertext,
+                    output.out_ciphertext,
+                    output.zkproof,
+                    output.recipient,
+                    output.value,
+                    output.rseed,
+                    output.rcv,
+                    output.ock,
                     output
-                        .enc_ciphertext
-                        .as_slice()
-                        .try_into()
-                        .map_err(|_| Error::InvalidEncCiphertext)?,
-                    output
-                        .out_ciphertext
-                        .as_slice()
-                        .try_into()
-                        .map_err(|_| Error::InvalidOutCiphertext)?,
-                    output_proof(output)?,
-                ))
+                        .zip32_derivation
+                        .map(|z| {
+                            sapling::pczt::Zip32Derivation::parse(
+                                z.seed_fingerprint,
+                                z.derivation_path,
+                            )
+                        })
+                        .transpose()?,
+                    output.proprietary,
+                )
             })
-            .collect::<Result<_, E>>()?;
+            .collect::<Result<_, _>>()?;
 
-        let value_balance =
-            ZatBalance::from_u64(self.value_sum).map_err(|e| Error::InvalidValueBalance(e))?;
+        sapling::pczt::Bundle::parse(spends, outputs, self.value_sum, self.anchor, self.bsk)
+    }
 
-        let authorization = bundle_auth(&self)?;
+    pub(crate) fn serialize_from(bundle: sapling::pczt::Bundle) -> Self {
+        let spends = bundle
+            .spends()
+            .iter()
+            .map(|spend| {
+                let (rcm, rseed) = match spend.rseed() {
+                    Some(sapling::Rseed::BeforeZip212(rcm)) => (Some(rcm.to_bytes()), None),
+                    Some(sapling::Rseed::AfterZip212(rseed)) => (None, Some(*rseed)),
+                    None => (None, None),
+                };
 
-        Ok(Bundle::from_parts(
+                Spend {
+                    cv: spend.cv().to_bytes(),
+                    nullifier: spend.nullifier().0,
+                    rk: (*spend.rk()).into(),
+                    zkproof: *spend.zkproof(),
+                    spend_auth_sig: spend.spend_auth_sig().map(|s| s.into()),
+                    recipient: spend.recipient().map(|recipient| recipient.to_bytes()),
+                    value: spend.value().map(|value| value.inner()),
+                    rcm,
+                    rseed,
+                    rcv: spend.rcv().as_ref().map(|rcv| rcv.inner().to_bytes()),
+                    proof_generation_key: spend
+                        .proof_generation_key()
+                        .as_ref()
+                        .map(|key| (key.ak.to_bytes(), key.nsk.to_bytes())),
+                    witness: spend.witness().as_ref().map(|witness| {
+                        (
+                            u32::try_from(u64::from(witness.position()))
+                                .expect("Sapling positions fit in u32"),
+                            witness
+                                .path_elems()
+                                .iter()
+                                .map(|node| node.to_bytes())
+                                .collect::<Vec<_>>()[..]
+                                .try_into()
+                                .expect("path is length 32"),
+                        )
+                    }),
+                    alpha: spend.alpha().map(|alpha| alpha.to_bytes()),
+                    zip32_derivation: spend.zip32_derivation().as_ref().map(|z| Zip32Derivation {
+                        seed_fingerprint: *z.seed_fingerprint(),
+                        derivation_path: z.derivation_path().iter().map(|i| i.index()).collect(),
+                    }),
+                    dummy_ask: spend
+                        .dummy_ask()
+                        .as_ref()
+                        .map(|dummy_ask| dummy_ask.to_bytes()),
+                    proprietary: spend.proprietary().clone(),
+                }
+            })
+            .collect();
+
+        let outputs = bundle
+            .outputs()
+            .iter()
+            .map(|output| Output {
+                cv: output.cv().to_bytes(),
+                cmu: output.cmu().to_bytes(),
+                ephemeral_key: output.ephemeral_key().0,
+                enc_ciphertext: output.enc_ciphertext().to_vec(),
+                out_ciphertext: output.out_ciphertext().to_vec(),
+                zkproof: *output.zkproof(),
+                recipient: output.recipient().map(|recipient| recipient.to_bytes()),
+                value: output.value().map(|value| value.inner()),
+                rseed: *output.rseed(),
+                rcv: output.rcv().as_ref().map(|rcv| rcv.inner().to_bytes()),
+                ock: output.ock().as_ref().map(|ock| ock.0),
+                zip32_derivation: output.zip32_derivation().as_ref().map(|z| Zip32Derivation {
+                    seed_fingerprint: *z.seed_fingerprint(),
+                    derivation_path: z.derivation_path().iter().map(|i| i.index()).collect(),
+                }),
+                proprietary: output.proprietary().clone(),
+            })
+            .collect();
+
+        Self {
             spends,
             outputs,
-            value_balance,
-            authorization,
-        ))
-    }
-}
-
-#[cfg(feature = "sapling")]
-impl Spend {
-    /// Parses a [`Note`] from the explicit fields of this spend.
-    pub(crate) fn note_from_fields(&self) -> Result<Note, Error> {
-        // We want to parse all fields that are present for validity, before raising any
-        // errors about missing fields.
-
-        let recipient = self
-            .recipient
-            .as_ref()
-            .map(|r| PaymentAddress::from_bytes(r).ok_or(Error::InvalidRecipient))
-            .transpose()?;
-
-        let value = self.value.map(NoteValue::from_raw);
-        let rseed = self.rseed.map(Rseed::AfterZip212);
-
-        Ok(Note::from_parts(
-            recipient.ok_or(Error::MissingRecipient)?,
-            value.ok_or(Error::MissingValue)?,
-            rseed.ok_or(Error::MissingRandomSeed)?,
-        ))
-    }
-
-    pub(crate) fn rcv_from_field(&self) -> Result<ValueCommitTrapdoor, Error> {
-        ValueCommitTrapdoor::from_bytes(self.rcv.ok_or(Error::MissingValueCommitTrapdoor)?)
-            .into_option()
-            .ok_or(Error::InvalidValueCommitTrapdoor)
-    }
-
-    pub(crate) fn proof_generation_key_from_field(
-        &self,
-    ) -> Result<sapling::ProofGenerationKey, Error> {
-        let (ak, nsk) = self
-            .proof_generation_key
-            .ok_or(Error::MissingProofGenerationKey)?;
-
-        Ok(sapling::ProofGenerationKey {
-            ak: SpendValidatingKey::temporary_zcash_from_bytes(&ak)
-                .ok_or(Error::InvalidProofGenerationKey)?,
-            nsk: jubjub::Scalar::from_repr(nsk)
-                .into_option()
-                .ok_or(Error::InvalidProofGenerationKey)?,
-        })
-    }
-
-    pub(crate) fn witness_from_field(&self) -> Result<MerklePath, Error> {
-        let (position, auth_path_bytes) = self.witness.ok_or(Error::MissingWitness)?;
-
-        let path_elems = auth_path_bytes
-            .into_iter()
-            .map(|hash| {
-                Node::from_bytes(hash)
-                    .into_option()
-                    .ok_or(Error::InvalidWitness)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        MerklePath::from_parts(path_elems, u64::from(position).into())
-            .map_err(|()| Error::InvalidWitness)
-    }
-
-    pub(crate) fn alpha_from_field(&self) -> Result<jubjub::Scalar, Error> {
-        jubjub::Scalar::from_repr(self.alpha.ok_or(Error::MissingSpendAuthRandomizer)?)
-            .into_option()
-            .ok_or(Error::InvalidSpendAuthRandomizer)
-    }
-}
-
-#[cfg(feature = "sapling")]
-impl Output {
-    pub(crate) fn rcv_from_field(&self) -> Result<ValueCommitTrapdoor, Error> {
-        ValueCommitTrapdoor::from_bytes(self.rcv.ok_or(Error::MissingValueCommitTrapdoor)?)
-            .into_option()
-            .ok_or(Error::InvalidValueCommitTrapdoor)
-    }
-}
-
-#[cfg(feature = "sapling")]
-#[derive(Debug)]
-pub enum Error {
-    InvalidAnchor,
-    InvalidEncCiphertext,
-    InvalidExtractedNoteCommitment,
-    InvalidOutCiphertext,
-    InvalidProofGenerationKey,
-    InvalidRandomizedKey,
-    InvalidRecipient,
-    InvalidSpendAuthRandomizer,
-    InvalidValueBalance(zcash_protocol::value::BalanceError),
-    InvalidValueCommitment,
-    InvalidValueCommitTrapdoor,
-    InvalidWitness,
-    MissingProofGenerationKey,
-    MissingRandomSeed,
-    MissingRecipient,
-    MissingSpendAuthRandomizer,
-    MissingValue,
-    MissingValueCommitTrapdoor,
-    MissingWitness,
-}
-
-#[cfg(feature = "sapling")]
-impl<V> IgnoreMissing for Result<V, Error> {
-    type Value = V;
-    type Error = Error;
-
-    fn ignore_missing(self) -> Result<Option<Self::Value>, Self::Error> {
-        self.map(Some).or_else(|e| match e {
-            Error::MissingProofGenerationKey
-            | Error::MissingRandomSeed
-            | Error::MissingRecipient
-            | Error::MissingSpendAuthRandomizer
-            | Error::MissingValue
-            | Error::MissingValueCommitTrapdoor
-            | Error::MissingWitness => Ok(None),
-            _ => Err(e),
-        })
+            value_sum: bundle.value_sum().to_raw(),
+            anchor: bundle.anchor().to_bytes(),
+            bsk: bundle.bsk().map(|bsk| bsk.into()),
+        }
     }
 }

@@ -1,4 +1,15 @@
-use crate::Pczt;
+use rand_core::OsRng;
+use zcash_primitives::transaction::{
+    components::transparent, sighash::SignableInput, sighash_v5::v5_signature_hash,
+    txid::TxIdDigester,
+};
+
+use crate::{
+    common::{FLAG_INPUTS_MODIFIABLE, FLAG_OUTPUTS_MODIFIABLE},
+    Pczt,
+};
+
+use super::signer::pczt_to_tx_data;
 
 pub struct IoFinalizer {
     pczt: Pczt,
@@ -12,7 +23,7 @@ impl IoFinalizer {
 
     /// Finalizes the IO of the PCZT.
     pub fn finalize_io(self) -> Result<Pczt, Error> {
-        let Self { mut pczt } = self;
+        let Self { pczt } = self;
 
         let has_shielded_spends =
             !(pczt.sapling.spends.is_empty() && pczt.orchard.actions.is_empty());
@@ -28,44 +39,45 @@ impl IoFinalizer {
             return Err(Error::NoOutputs);
         }
 
+        let Pczt {
+            mut global,
+            transparent,
+            sapling,
+            orchard,
+        } = pczt;
+
         // After shielded IO finalization, the inputs and outputs cannot be modified
         // because dummy spends will have been signed.
         if has_shielded_spends || has_shielded_outputs {
-            pczt.global.tx_modifiable &= !0b0000_0011;
+            global.tx_modifiable &= !(FLAG_INPUTS_MODIFIABLE | FLAG_OUTPUTS_MODIFIABLE);
         }
 
-        let sapling_bsk = pczt
-            .sapling
-            .spends
-            .iter()
-            .map(|spend| {
-                spend
-                    .rcv_from_field()
-                    .map_err(Error::Sapling)
-                    .map(|rcv| rcv.inner())
-            })
-            .chain(pczt.sapling.outputs.iter().map(|output| {
-                output
-                    .rcv_from_field()
-                    .map_err(Error::Sapling)
-                    .map(|rcv| -rcv.inner())
-            }))
-            .try_fold(jubjub::Scalar::zero(), |acc, rcv| Ok(acc + rcv?))?;
+        let transparent = transparent.into_parsed().map_err(Error::TransparentParse)?;
+        let mut sapling = sapling.into_parsed().map_err(Error::SaplingParse)?;
+        let mut orchard = orchard.into_parsed().map_err(Error::OrchardParse)?;
 
-        let orchard_rcvs = pczt
-            .orchard
-            .actions
-            .iter()
-            .map(|action| action.rcv_from_field().map_err(Error::Orchard))
-            .collect::<Result<Vec<_>, _>>()?;
-        let orchard_bsk = orchard_rcvs
-            .iter()
-            .sum::<orchard::value::ValueCommitTrapdoor>();
+        let tx_data = pczt_to_tx_data(&global, &transparent, &sapling, &orchard)?;
+        let txid_parts = tx_data.digest(TxIdDigester);
 
-        pczt.sapling.bsk = Some(sapling_bsk.to_bytes());
-        pczt.orchard.bsk = Some(orchard_bsk.to_bytes());
+        // TODO: Pick sighash based on tx version.
+        let shielded_sighash = v5_signature_hash(&tx_data, &SignableInput::Shielded, &txid_parts)
+            .as_ref()
+            .try_into()
+            .expect("correct length");
 
-        Ok(pczt)
+        sapling
+            .finalize_io(shielded_sighash, OsRng)
+            .map_err(Error::SaplingFinalize)?;
+        orchard
+            .finalize_io(shielded_sighash, OsRng)
+            .map_err(Error::OrchardFinalize)?;
+
+        Ok(Pczt {
+            global,
+            transparent: crate::transparent::Bundle::serialize_from(transparent),
+            sapling: crate::sapling::Bundle::serialize_from(sapling),
+            orchard: crate::orchard::Bundle::serialize_from(orchard),
+        })
     }
 }
 
@@ -74,6 +86,23 @@ impl IoFinalizer {
 pub enum Error {
     NoOutputs,
     NoSpends,
-    Orchard(crate::orchard::Error),
-    Sapling(crate::sapling::Error),
+    OrchardFinalize(orchard::pczt::IoFinalizerError),
+    OrchardParse(orchard::pczt::ParseError),
+    SaplingFinalize(sapling::pczt::IoFinalizerError),
+    SaplingParse(sapling::pczt::ParseError),
+    Sign(super::signer::Error),
+    TransparentParse(transparent::pczt::ParseError),
+}
+
+impl From<super::signer::Error> for Error {
+    fn from(e: super::signer::Error) -> Self {
+        match e {
+            super::signer::Error::OrchardParse(parse_error) => Error::OrchardParse(parse_error),
+            super::signer::Error::SaplingParse(parse_error) => Error::SaplingParse(parse_error),
+            super::signer::Error::TransparentParse(parse_error) => {
+                Error::TransparentParse(parse_error)
+            }
+            _ => Error::Sign(e),
+        }
+    }
 }

@@ -2712,13 +2712,14 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.10.0"
-source = "git+https://github.com/zcash/orchard.git?rev=7d8cdee15c57cfbc0dd21cf408df4a41e26fc45c#7d8cdee15c57cfbc0dd21cf408df4a41e26fc45c"
+source = "git+https://github.com/zcash/orchard.git?rev=cb404f817480f267d2e138a268a55bac6474794a#cb404f817480f267d2e138a268a55bac6474794a"
 dependencies = [
  "aes",
  "bitvec",
  "blake2b_simd",
  "ff",
  "fpe",
+ "getset",
  "group",
  "halo2_gadgets",
  "halo2_proofs",
@@ -2877,6 +2878,7 @@ dependencies = [
 name = "pczt"
 version = "0.0.0"
 dependencies = [
+ "blake2b_simd",
  "bls12_381",
  "ff",
  "jubjub",
@@ -2886,6 +2888,7 @@ dependencies = [
  "rand_core",
  "redjubjub",
  "sapling-crypto",
+ "secp256k1",
  "zcash_note_encryption",
  "zcash_primitives",
  "zcash_protocol",
@@ -3718,7 +3721,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.3.0"
-source = "git+https://github.com/zcash/sapling-crypto.git?rev=a8fb276252894cf5d0e97e289f5509cc89bad095#a8fb276252894cf5d0e97e289f5509cc89bad095"
+source = "git+https://github.com/zcash/sapling-crypto.git?rev=7696219bf3740f6d979b2b7362e6c11154004010#7696219bf3740f6d979b2b7362e6c11154004010"
 dependencies = [
  "aes",
  "bellman",
@@ -3730,6 +3733,7 @@ dependencies = [
  "document-features",
  "ff",
  "fpe",
+ "getset",
  "group",
  "hex",
  "incrementalmerkletree",

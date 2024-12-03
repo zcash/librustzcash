@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 
+use rand_core::OsRng;
 use zcash_primitives::{
     consensus::BranchId,
     transaction::{
@@ -109,15 +110,23 @@ impl<'a> TransactionExtractor<'a> {
         let shielded_sighash = signature_hash(&tx_data, &SignableInput::Shielded, &txid_parts);
 
         // Create the binding signatures.
-        let tx_data = tx_data.map_authorization(
-            transparent::RemoveInputInfo,
-            sapling::AddBindingSig {
-                sighash: shielded_sighash.as_ref(),
+        let tx_data = tx_data.try_map_bundles(
+            |t| Ok(t.map(|t| t.map_authorization(transparent::RemoveInputInfo))),
+            |s| {
+                s.map(|s| {
+                    s.apply_binding_signature(*shielded_sighash.as_ref(), OsRng)
+                        .ok_or(Error::SighashMismatch)
+                })
+                .transpose()
             },
-            orchard::AddBindingSig {
-                sighash: shielded_sighash.as_ref(),
+            |o| {
+                o.map(|o| {
+                    o.apply_binding_signature(*shielded_sighash.as_ref(), OsRng)
+                        .ok_or(Error::SighashMismatch)
+                })
+                .transpose()
             },
-        );
+        )?;
 
         let tx = tx_data.freeze().expect("v5 tx can't fail here");
 
@@ -140,9 +149,9 @@ impl<'a> TransactionExtractor<'a> {
 struct Unbound;
 
 impl Authorization for Unbound {
-    type TransparentAuth = transparent::Unbound;
-    type SaplingAuth = sapling::Unbound;
-    type OrchardAuth = orchard::Unbound;
+    type TransparentAuth = zcash_primitives::transaction::components::transparent::pczt::Unbound;
+    type SaplingAuth = ::sapling::pczt::Unbound;
+    type OrchardAuth = ::orchard::pczt::Unbound;
 }
 
 /// Errors that can occur while extracting a transaction from a PCZT.
@@ -153,6 +162,7 @@ pub enum Error {
     Orchard(OrchardError),
     Sapling(SaplingError),
     SaplingRequired,
+    SighashMismatch,
     Transparent(TransparentError),
 }
 
@@ -232,5 +242,16 @@ impl LockTimeInput for crate::transparent::Input {
 
     fn required_height_lock_time(&self) -> Option<u32> {
         self.required_height_lock_time
+    }
+}
+
+#[cfg(feature = "transparent")]
+impl LockTimeInput for zcash_primitives::transaction::components::transparent::pczt::Input {
+    fn required_time_lock_time(&self) -> Option<u32> {
+        *self.required_time_lock_time()
+    }
+
+    fn required_height_lock_time(&self) -> Option<u32> {
+        *self.required_height_lock_time()
     }
 }

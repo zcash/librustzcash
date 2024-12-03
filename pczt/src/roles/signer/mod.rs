@@ -1,18 +1,18 @@
-use orchard::primitives::redpallas;
+use blake2b_simd::Hash as Blake2bHash;
 use rand_core::OsRng;
-use zcash_primitives::{
-    legacy::Script,
-    transaction::{
-        components::transparent,
-        sighash::{SignableInput, TransparentAuthorizingContext},
-        sighash_v5::v5_signature_hash,
-        txid::TxIdDigester,
-        Authorization, TransactionData, TxVersion,
-    },
+use zcash_primitives::transaction::{
+    components::transparent,
+    sighash::{SignableInput, SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE},
+    sighash_v5::v5_signature_hash,
+    txid::TxIdDigester,
+    Authorization, TransactionData, TxDigests, TxVersion,
 };
-use zcash_protocol::{consensus::BranchId, value::Zatoshis};
+use zcash_protocol::consensus::BranchId;
 
-use crate::{IgnoreMissing, Pczt};
+use crate::{
+    common::{Global, FLAG_HAS_SIGHASH_SINGLE, FLAG_INPUTS_MODIFIABLE, FLAG_OUTPUTS_MODIFIABLE},
+    Pczt,
+};
 
 use super::tx_extractor::determine_lock_time;
 
@@ -20,16 +20,93 @@ const V5_TX_VERSION: u32 = 5;
 const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
 
 pub struct Signer {
-    pczt: Pczt,
+    global: Global,
+    transparent: transparent::pczt::Bundle,
+    sapling: sapling::pczt::Bundle,
+    orchard: orchard::pczt::Bundle,
     /// Cached across multiple signatures.
     tx_data: TransactionData<EffectsOnly>,
+    txid_parts: TxDigests<Blake2bHash>,
+    shielded_sighash: [u8; 32],
+    secp: secp256k1::Secp256k1<secp256k1::SignOnly>,
 }
 
 impl Signer {
     /// Instantiates the Signer role with the given PCZT.
     pub fn new(pczt: Pczt) -> Result<Self, Error> {
-        let tx_data = pczt_to_tx_data(&pczt)?;
-        Ok(Self { pczt, tx_data })
+        let Pczt {
+            global,
+            transparent,
+            sapling,
+            orchard,
+        } = pczt;
+
+        let transparent = transparent.into_parsed().map_err(Error::TransparentParse)?;
+        let sapling = sapling.into_parsed().map_err(Error::SaplingParse)?;
+        let orchard = orchard.into_parsed().map_err(Error::OrchardParse)?;
+
+        let tx_data = pczt_to_tx_data(&global, &transparent, &sapling, &orchard)?;
+        let txid_parts = tx_data.digest(TxIdDigester);
+
+        // TODO: Pick sighash based on tx version.
+        let shielded_sighash = v5_signature_hash(&tx_data, &SignableInput::Shielded, &txid_parts)
+            .as_ref()
+            .try_into()
+            .expect("correct length");
+
+        Ok(Self {
+            global,
+            transparent,
+            sapling,
+            orchard,
+            tx_data,
+            txid_parts,
+            shielded_sighash,
+            secp: secp256k1::Secp256k1::signing_only(),
+        })
+    }
+
+    /// Signs the transparent spend at the given index with the given spending key.
+    ///
+    /// It is the caller's responsibility to perform any semantic validity checks on the
+    /// PCZT (for example, comfirming that the change amounts are correct) before calling
+    /// this method.
+    pub fn sign_transparent(
+        &mut self,
+        index: usize,
+        sk: &secp256k1::SecretKey,
+    ) -> Result<(), Error> {
+        let input = self
+            .transparent
+            .inputs_mut()
+            .get_mut(index)
+            .ok_or(Error::InvalidIndex)?;
+
+        // Check consistency of the input being signed.
+        // TODO
+
+        input
+            .sign(index, &self.tx_data, &self.txid_parts, sk, &self.secp)
+            .map_err(Error::TransparentSign)?;
+
+        // Update transaction modifiability:
+        // - If the Signer added a signature that does not use SIGHASH_ANYONECANPAY, the
+        //   Input Modifiable flag must be set to False.
+        if input.sighash_type().encode() & SIGHASH_ANYONECANPAY == 0 {
+            self.global.tx_modifiable &= !FLAG_INPUTS_MODIFIABLE;
+        }
+        // - If the Signer added a signature that does not use SIGHASH_NONE, the Outputs
+        //   Modifiable flag must be set to False.
+        if (input.sighash_type().encode() & !SIGHASH_ANYONECANPAY) != SIGHASH_NONE {
+            self.global.tx_modifiable &= !FLAG_OUTPUTS_MODIFIABLE;
+        }
+        // - If the Signer added a signature that uses SIGHASH_SINGLE, the Has SIGHASH_SINGLE
+        //   flag must be set to True.
+        if (input.sighash_type().encode() & !SIGHASH_ANYONECANPAY) == SIGHASH_SINGLE {
+            self.global.tx_modifiable |= FLAG_HAS_SIGHASH_SINGLE;
+        }
+
+        Ok(())
     }
 
     /// Signs the Sapling spend at the given index with the given spend authorizing key.
@@ -43,17 +120,19 @@ impl Signer {
         ask: &sapling::keys::SpendAuthorizingKey,
     ) -> Result<(), Error> {
         let spend = self
-            .pczt
             .sapling
-            .spends
+            .spends_mut()
             .get_mut(index)
             .ok_or(Error::InvalidIndex)?;
 
         // Check consistency of the input being signed.
         let note_from_fields = spend
-            .note_from_fields()
-            .ignore_missing()
-            .map_err(Error::Sapling)?;
+            .recipient()
+            .zip(spend.value().as_ref())
+            .zip(spend.rseed().as_ref())
+            .map(|((recipient, value), rseed)| {
+                sapling::Note::from_parts(recipient, *value, *rseed)
+            });
 
         if let Some(note) = note_from_fields {
             let tx_spend = self
@@ -65,34 +144,24 @@ impl Signer {
                 .expect("index checked above");
 
             let proof_generation_key = spend
-                .proof_generation_key_from_field()
-                .map_err(Error::Sapling)?;
+                .proof_generation_key()
+                .as_ref()
+                .ok_or(Error::MissingProofGenerationKey)?;
 
             let nk = proof_generation_key.to_viewing_key().nk;
 
-            let merkle_path = spend.witness_from_field().map_err(Error::Sapling)?;
+            let merkle_path = spend.witness().as_ref().ok_or(Error::MissingWitness)?;
 
             if &note.nf(&nk, merkle_path.position().into()) != tx_spend.nullifier() {
                 return Err(Error::InvalidNullifier);
             }
         }
 
-        let alpha = spend.alpha_from_field().map_err(Error::Sapling)?;
+        spend
+            .sign(self.shielded_sighash, ask, OsRng)
+            .map_err(Error::SaplingSign)?;
 
-        let rsk = ask.randomize(&alpha);
-        let rk = redjubjub::VerificationKey::from(&rsk);
-
-        let txid_parts = self.tx_data.digest(TxIdDigester);
-        let shielded_sighash =
-            v5_signature_hash(&self.tx_data, &SignableInput::Shielded, &txid_parts);
-
-        if spend.rk == <[u8; 32]>::from(rk) {
-            let spend_auth_sig = rsk.sign(OsRng, shielded_sighash.as_ref());
-            spend.spend_auth_sig = Some(spend_auth_sig.into());
-            Ok(())
-        } else {
-            Err(Error::WrongSpendAuthorizingKey)
-        }
+        Ok(())
     }
 
     /// Signs the Orchard spend at the given index with the given spend authorizing key.
@@ -106,18 +175,24 @@ impl Signer {
         ask: &orchard::keys::SpendAuthorizingKey,
     ) -> Result<(), Error> {
         let action = self
-            .pczt
             .orchard
-            .actions
+            .actions_mut()
             .get_mut(index)
             .ok_or(Error::InvalidIndex)?;
 
         // Check consistency of the input being signed.
         let note_from_fields = action
-            .spend
-            .note_from_fields()
-            .ignore_missing()
-            .map_err(Error::Orchard)?;
+            .spend()
+            .recipient()
+            .zip(action.spend().value().as_ref())
+            .zip(action.spend().rho().as_ref())
+            .zip(action.spend().rseed().as_ref())
+            .map(|(((recipient, value), rho), rseed)| {
+                orchard::Note::from_parts(recipient, *value, *rho, *rseed)
+                    .into_option()
+                    .ok_or(Error::InvalidNote)
+            })
+            .transpose()?;
 
         if let Some(note) = note_from_fields {
             let tx_action = self
@@ -128,34 +203,32 @@ impl Signer {
                 .get(index)
                 .expect("index checked above");
 
-            let fvk = action.spend.fvk_from_field().map_err(Error::Orchard)?;
+            let fvk = action
+                .spend()
+                .fvk()
+                .as_ref()
+                .ok_or(Error::MissingFullViewingKey)?;
 
             if &note.nullifier(fvk) != tx_action.nullifier() {
                 return Err(Error::InvalidNullifier);
             }
         }
 
-        let alpha = action.spend.alpha_from_field().map_err(Error::Orchard)?;
+        action
+            .sign(self.shielded_sighash, ask, OsRng)
+            .map_err(Error::OrchardSign)?;
 
-        let rsk = ask.randomize(&alpha);
-        let rk = redpallas::VerificationKey::from(&rsk);
-
-        let txid_parts = self.tx_data.digest(TxIdDigester);
-        let shielded_sighash =
-            v5_signature_hash(&self.tx_data, &SignableInput::Shielded, &txid_parts);
-
-        if action.spend.rk == <[u8; 32]>::from(&rk) {
-            let spend_auth_sig = rsk.sign(OsRng, shielded_sighash.as_ref());
-            action.spend.spend_auth_sig = Some((&spend_auth_sig).into());
-            Ok(())
-        } else {
-            Err(Error::WrongSpendAuthorizingKey)
-        }
+        Ok(())
     }
 
     /// Finishes the Signer role, returning the updated PCZT.
     pub fn finish(self) -> Pczt {
-        self.pczt
+        Pczt {
+            global: self.global,
+            transparent: crate::transparent::Bundle::serialize_from(self.transparent),
+            sapling: crate::sapling::Bundle::serialize_from(self.sapling),
+            orchard: crate::orchard::Bundle::serialize_from(self.orchard),
+        }
     }
 }
 
@@ -163,8 +236,13 @@ impl Signer {
 ///
 /// We don't care about existing proofs or signatures here, because they do not affect the
 /// sighash; we only want the effects of the transaction.
-fn pczt_to_tx_data(pczt: &Pczt) -> Result<TransactionData<EffectsOnly>, Error> {
-    let version = match (pczt.global.tx_version, pczt.global.version_group_id) {
+pub(crate) fn pczt_to_tx_data(
+    global: &Global,
+    transparent: &transparent::pczt::Bundle,
+    sapling: &sapling::pczt::Bundle,
+    orchard: &orchard::pczt::Bundle,
+) -> Result<TransactionData<EffectsOnly>, Error> {
+    let version = match (global.tx_version, global.version_group_id) {
         (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::Zip225),
         (version, version_group_id) => Err(Error::Global(GlobalError::UnsupportedTxVersion {
             version,
@@ -172,55 +250,23 @@ fn pczt_to_tx_data(pczt: &Pczt) -> Result<TransactionData<EffectsOnly>, Error> {
         })),
     }?;
 
-    let consensus_branch_id = BranchId::try_from(pczt.global.consensus_branch_id)
+    let consensus_branch_id = BranchId::try_from(global.consensus_branch_id)
         .map_err(|_| Error::Global(GlobalError::UnknownConsensusBranchId))?;
 
-    let transparent_bundle = pczt
-        .transparent
-        .to_tx_data(
-            |_| Ok(()),
-            |bundle| {
-                let inputs = bundle
-                    .inputs
-                    .iter()
-                    .map(|input| {
-                        let value = Zatoshis::from_u64(input.value)
-                            .map_err(|_| crate::transparent::Error::InvalidValue)?;
-                        let script_pubkey = Script(input.script_pubkey.clone());
+    let transparent_bundle = transparent
+        .extract_effects()
+        .map_err(Error::TransparentExtract)?;
 
-                        Ok(transparent::TxOut {
-                            value,
-                            script_pubkey,
-                        })
-                    })
-                    .collect::<Result<_, _>>()?;
+    let sapling_bundle = sapling.extract_effects().map_err(Error::SaplingExtract)?;
 
-                Ok(TransparentEffectsOnly { inputs })
-            },
-        )
-        .map_err(Error::Transparent)?;
-
-    let sapling_bundle = pczt
-        .sapling
-        .to_tx_data(
-            |_| Ok(()),
-            |_| Ok(()),
-            |_| Ok(()),
-            |_| Ok(SaplingEffectsOnly),
-        )
-        .map_err(Error::Sapling)?;
-
-    let orchard_bundle = pczt
-        .orchard
-        .to_tx_data(|_| Ok(()), |_| Ok(OrchardEffectsOnly))
-        .map_err(Error::Orchard)?;
+    let orchard_bundle = orchard.extract_effects().map_err(Error::OrchardExtract)?;
 
     Ok(TransactionData::from_parts(
         version,
         consensus_branch_id,
-        determine_lock_time(&pczt.global, &pczt.transparent.inputs())
+        determine_lock_time(global, transparent.inputs())
             .map_err(|_| Error::IncompatibleLockTimes)?,
-        pczt.global.expiry_height.into(),
+        global.expiry_height.into(),
         transparent_bundle,
         None,
         sapling_bundle,
@@ -228,50 +274,12 @@ fn pczt_to_tx_data(pczt: &Pczt) -> Result<TransactionData<EffectsOnly>, Error> {
     ))
 }
 
-struct EffectsOnly;
+pub(crate) struct EffectsOnly;
 
 impl Authorization for EffectsOnly {
-    type TransparentAuth = TransparentEffectsOnly;
-    type SaplingAuth = SaplingEffectsOnly;
-    type OrchardAuth = OrchardEffectsOnly;
-}
-
-#[derive(Debug)]
-struct TransparentEffectsOnly {
-    inputs: Vec<transparent::TxOut>,
-}
-
-impl transparent::Authorization for TransparentEffectsOnly {
-    type ScriptSig = ();
-}
-
-impl TransparentAuthorizingContext for TransparentEffectsOnly {
-    fn input_amounts(&self) -> Vec<Zatoshis> {
-        self.inputs.iter().map(|input| input.value).collect()
-    }
-
-    fn input_scriptpubkeys(&self) -> Vec<Script> {
-        self.inputs
-            .iter()
-            .map(|input| input.script_pubkey.clone())
-            .collect()
-    }
-}
-
-#[derive(Debug)]
-struct SaplingEffectsOnly;
-
-impl sapling::bundle::Authorization for SaplingEffectsOnly {
-    type SpendProof = ();
-    type OutputProof = ();
-    type AuthSig = ();
-}
-
-#[derive(Debug)]
-struct OrchardEffectsOnly;
-
-impl orchard::bundle::Authorization for OrchardEffectsOnly {
-    type SpendAuth = ();
+    type TransparentAuth = transparent::EffectsOnly;
+    type SaplingAuth = sapling::bundle::EffectsOnly;
+    type OrchardAuth = orchard::bundle::EffectsOnly;
 }
 
 /// Errors that can occur while creating signatures for a PCZT.
@@ -280,12 +288,20 @@ pub enum Error {
     Global(GlobalError),
     IncompatibleLockTimes,
     InvalidIndex,
-    InvalidNoteCommitment,
+    InvalidNote,
     InvalidNullifier,
-    Orchard(crate::orchard::Error),
-    Sapling(crate::sapling::Error),
-    Transparent(crate::transparent::Error),
-    WrongSpendAuthorizingKey,
+    MissingFullViewingKey,
+    MissingProofGenerationKey,
+    MissingWitness,
+    OrchardExtract(orchard::pczt::TxExtractorError),
+    OrchardParse(orchard::pczt::ParseError),
+    OrchardSign(orchard::pczt::SignerError),
+    SaplingExtract(sapling::pczt::TxExtractorError),
+    SaplingParse(sapling::pczt::ParseError),
+    SaplingSign(sapling::pczt::SignerError),
+    TransparentExtract(transparent::pczt::TxExtractorError),
+    TransparentParse(transparent::pczt::ParseError),
+    TransparentSign(transparent::pczt::SignerError),
 }
 
 #[derive(Debug)]

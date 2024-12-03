@@ -1,19 +1,11 @@
 use std::collections::BTreeMap;
 
+#[cfg(feature = "orchard")]
+use ff::PrimeField;
+
 use crate::{
     common::Zip32Derivation,
     roles::combiner::{merge_map, merge_optional},
-    IgnoreMissing,
-};
-
-#[cfg(feature = "orchard")]
-use {
-    orchard::{
-        note::{RandomSeed, Rho},
-        value::{NoteValue, ValueCommitTrapdoor},
-        Address, Note,
-    },
-    pasta_curves::{group::ff::PrimeField, pallas},
 };
 
 /// PCZT fields that are specific to producing the transaction's Orchard bundle (if any).
@@ -357,211 +349,169 @@ impl Bundle {
 
 #[cfg(feature = "orchard")]
 impl Bundle {
-    pub(crate) fn to_tx_data<A, E, F, G>(
-        &self,
-        action_auth: F,
-        bundle_auth: G,
-    ) -> Result<Option<orchard::Bundle<A, zcash_protocol::value::ZatBalance>>, E>
-    where
-        A: orchard::bundle::Authorization,
-        E: From<Error>,
-        F: Fn(&Action) -> Result<<A as orchard::bundle::Authorization>::SpendAuth, E>,
-        G: FnOnce(&Self) -> Result<A, E>,
-    {
-        use nonempty::NonEmpty;
-        use orchard::{
-            bundle::Flags,
-            note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
-            primitives::redpallas,
-            value::ValueCommitment,
-            Action, Anchor, Bundle,
-        };
-        use zcash_protocol::value::ZatBalance;
-
+    pub(crate) fn into_parsed(self) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
         let actions = self
             .actions
+            .into_iter()
+            .map(|action| {
+                let spend = orchard::pczt::Spend::parse(
+                    action.spend.nullifier,
+                    action.spend.rk,
+                    action.spend.spend_auth_sig,
+                    action.spend.recipient,
+                    action.spend.value,
+                    action.spend.rho,
+                    action.spend.rseed,
+                    action.spend.fvk,
+                    action.spend.witness,
+                    action.spend.alpha,
+                    action
+                        .spend
+                        .zip32_derivation
+                        .map(|z| {
+                            orchard::pczt::Zip32Derivation::parse(
+                                z.seed_fingerprint,
+                                z.derivation_path,
+                            )
+                        })
+                        .transpose()?,
+                    action.spend.dummy_sk,
+                    action.spend.proprietary,
+                )?;
+
+                let output = orchard::pczt::Output::parse(
+                    *spend.nullifier(),
+                    action.output.cmx,
+                    action.output.ephemeral_key,
+                    action.output.enc_ciphertext,
+                    action.output.out_ciphertext,
+                    action.output.recipient,
+                    action.output.value,
+                    action.output.rseed,
+                    action.output.ock,
+                    action
+                        .output
+                        .zip32_derivation
+                        .map(|z| {
+                            orchard::pczt::Zip32Derivation::parse(
+                                z.seed_fingerprint,
+                                z.derivation_path,
+                            )
+                        })
+                        .transpose()?,
+                    action.output.proprietary,
+                )?;
+
+                orchard::pczt::Action::parse(action.cv_net, spend, output, action.rcv)
+            })
+            .collect::<Result<_, _>>()?;
+
+        orchard::pczt::Bundle::parse(
+            actions,
+            self.flags,
+            self.value_sum,
+            self.anchor,
+            self.zkproof,
+            self.bsk,
+        )
+    }
+
+    pub(crate) fn serialize_from(bundle: orchard::pczt::Bundle) -> Self {
+        let actions = bundle
+            .actions()
             .iter()
             .map(|action| {
-                let nf = Nullifier::from_bytes(&action.spend.nullifier)
-                    .into_option()
-                    .ok_or(Error::InvalidNullifier)?;
+                let spend = action.spend();
+                let output = action.output();
 
-                let rk = redpallas::VerificationKey::try_from(action.spend.rk)
-                    .map_err(|_| Error::InvalidRandomizedKey)?;
-
-                let cmx = ExtractedNoteCommitment::from_bytes(&action.output.cmx)
-                    .into_option()
-                    .ok_or(Error::InvalidExtractedNoteCommitment)?;
-
-                let encrypted_note = TransmittedNoteCiphertext {
-                    epk_bytes: action.output.ephemeral_key,
-                    enc_ciphertext: action
-                        .output
-                        .enc_ciphertext
-                        .as_slice()
-                        .try_into()
-                        .map_err(|_| Error::InvalidEncCiphertext)?,
-                    out_ciphertext: action
-                        .output
-                        .out_ciphertext
-                        .as_slice()
-                        .try_into()
-                        .map_err(|_| Error::InvalidOutCiphertext)?,
-                };
-
-                let cv_net = ValueCommitment::from_bytes(&action.cv_net)
-                    .into_option()
-                    .ok_or(Error::InvalidValueCommitment)?;
-
-                let authorization = action_auth(action)?;
-
-                Ok(Action::from_parts(
-                    nf,
-                    rk,
-                    cmx,
-                    encrypted_note,
-                    cv_net,
-                    authorization,
-                ))
+                Action {
+                    cv_net: action.cv_net().to_bytes(),
+                    spend: Spend {
+                        nullifier: spend.nullifier().to_bytes(),
+                        rk: spend.rk().into(),
+                        spend_auth_sig: spend.spend_auth_sig().as_ref().map(|s| s.into()),
+                        recipient: action
+                            .spend()
+                            .recipient()
+                            .map(|recipient| recipient.to_raw_address_bytes()),
+                        value: spend.value().map(|value| value.inner()),
+                        rho: spend.rho().map(|rho| rho.to_bytes()),
+                        rseed: spend.rseed().map(|rseed| *rseed.as_bytes()),
+                        fvk: spend.fvk().as_ref().map(|fvk| fvk.to_bytes()),
+                        witness: spend.witness().as_ref().map(|witness| {
+                            (
+                                u32::try_from(u64::from(witness.position()))
+                                    .expect("Sapling positions fit in u32"),
+                                witness
+                                    .auth_path()
+                                    .iter()
+                                    .map(|node| node.to_bytes())
+                                    .collect::<Vec<_>>()[..]
+                                    .try_into()
+                                    .expect("path is length 32"),
+                            )
+                        }),
+                        alpha: spend.alpha().map(|alpha| alpha.to_repr()),
+                        zip32_derivation: spend.zip32_derivation().as_ref().map(|z| {
+                            Zip32Derivation {
+                                seed_fingerprint: *z.seed_fingerprint(),
+                                derivation_path: z
+                                    .derivation_path()
+                                    .iter()
+                                    .map(|i| i.index())
+                                    .collect(),
+                            }
+                        }),
+                        dummy_sk: action
+                            .spend()
+                            .dummy_sk()
+                            .map(|dummy_sk| *dummy_sk.to_bytes()),
+                        proprietary: spend.proprietary().clone(),
+                    },
+                    output: Output {
+                        cmx: output.cmx().to_bytes(),
+                        ephemeral_key: output.encrypted_note().epk_bytes,
+                        enc_ciphertext: output.encrypted_note().enc_ciphertext.to_vec(),
+                        out_ciphertext: output.encrypted_note().out_ciphertext.to_vec(),
+                        recipient: action
+                            .output()
+                            .recipient()
+                            .map(|recipient| recipient.to_raw_address_bytes()),
+                        value: output.value().map(|value| value.inner()),
+                        rseed: output.rseed().map(|rseed| *rseed.as_bytes()),
+                        ock: output.ock().as_ref().map(|ock| ock.0),
+                        zip32_derivation: output.zip32_derivation().as_ref().map(|z| {
+                            Zip32Derivation {
+                                seed_fingerprint: *z.seed_fingerprint(),
+                                derivation_path: z
+                                    .derivation_path()
+                                    .iter()
+                                    .map(|i| i.index())
+                                    .collect(),
+                            }
+                        }),
+                        proprietary: output.proprietary().clone(),
+                    },
+                    rcv: action.rcv().as_ref().map(|rcv| rcv.to_bytes()),
+                }
             })
-            .collect::<Result<_, E>>()?;
+            .collect();
 
-        Ok(if let Some(actions) = NonEmpty::from_vec(actions) {
-            let flags = Flags::from_byte(self.flags).ok_or(Error::UnexpectedFlagBitsSet)?;
+        let value_sum = {
+            let (magnitude, sign) = bundle.value_sum().magnitude_sign();
+            (magnitude, matches!(sign, orchard::value::Sign::Negative))
+        };
 
-            let value_balance =
-                ZatBalance::from_u64(self.value_sum).map_err(|e| Error::InvalidValueBalance(e))?;
-
-            let anchor = Anchor::from_bytes(self.anchor)
-                .into_option()
-                .ok_or(Error::InvalidAnchor)?;
-
-            let authorization = bundle_auth(&self)?;
-
-            Some(Bundle::from_parts(
-                actions,
-                flags,
-                value_balance,
-                anchor,
-                authorization,
-            ))
-        } else {
-            None
-        })
-    }
-}
-
-impl Action {
-    pub(crate) fn rcv_from_field(&self) -> Result<ValueCommitTrapdoor, Error> {
-        ValueCommitTrapdoor::from_bytes(self.rcv.ok_or(Error::MissingValueCommitTrapdoor)?)
-            .into_option()
-            .ok_or(Error::InvalidValueCommitTrapdoor)
-    }
-}
-
-#[cfg(feature = "orchard")]
-impl Spend {
-    /// Parses a [`Note`] from the explicit fields of this spend.
-    pub(crate) fn note_from_fields(&self) -> Result<Note, Error> {
-        // We want to parse all fields that are present for validity, before raising any
-        // errors about missing fields. The only exception is that we raise an error for a
-        // missing rho before validating rseed (as the latter requires rho).
-
-        let recipient = self
-            .recipient
-            .as_ref()
-            .map(|r| {
-                Address::from_raw_address_bytes(r)
-                    .into_option()
-                    .ok_or(Error::InvalidSpendRecipient)
-            })
-            .transpose()?;
-
-        let value = self.value.map(NoteValue::from_raw);
-
-        let rho = self
-            .rho
-            .as_ref()
-            .map(|rho| Rho::from_bytes(rho).into_option().ok_or(Error::InvalidRho))
-            .transpose()?
-            .ok_or(Error::MissingRho)?;
-
-        let rseed = self
-            .rseed
-            .map(|rseed| {
-                RandomSeed::from_bytes(rseed, &rho)
-                    .into_option()
-                    .ok_or(Error::InvalidRandomSeed)
-            })
-            .transpose()?;
-
-        Note::from_parts(
-            recipient.ok_or(Error::MissingSpendRecipient)?,
-            value.ok_or(Error::MissingValue)?,
-            rho,
-            rseed.ok_or(Error::MissingRandomSeed)?,
-        )
-        .into_option()
-        .ok_or(Error::InvalidSpendNote)
-    }
-
-    pub(crate) fn fvk_from_field(&self) -> Result<orchard::keys::FullViewingKey, Error> {
-        orchard::keys::FullViewingKey::from_bytes(
-            self.fvk.as_ref().ok_or(Error::MissingFullViewingKey)?,
-        )
-        .ok_or(Error::InvalidFullViewingKey)
-    }
-
-    pub(crate) fn alpha_from_field(&self) -> Result<pallas::Scalar, Error> {
-        pallas::Scalar::from_repr(self.alpha.ok_or(Error::MissingSpendAuthRandomizer)?)
-            .into_option()
-            .ok_or(Error::InvalidSpendAuthRandomizer)
-    }
-}
-
-#[cfg(feature = "orchard")]
-#[derive(Debug)]
-pub enum Error {
-    InvalidAnchor,
-    InvalidEncCiphertext,
-    InvalidExtractedNoteCommitment,
-    InvalidFullViewingKey,
-    InvalidNullifier,
-    InvalidOutCiphertext,
-    InvalidRandomizedKey,
-    InvalidRandomSeed,
-    InvalidRho,
-    InvalidSpendAuthRandomizer,
-    InvalidSpendNote,
-    InvalidSpendRecipient,
-    InvalidValueBalance(zcash_protocol::value::BalanceError),
-    InvalidValueCommitment,
-    InvalidValueCommitTrapdoor,
-    MissingFullViewingKey,
-    MissingRandomSeed,
-    MissingRho,
-    MissingSpendAuthRandomizer,
-    MissingSpendRecipient,
-    MissingValue,
-    MissingValueCommitTrapdoor,
-    UnexpectedFlagBitsSet,
-}
-
-#[cfg(feature = "orchard")]
-impl<V> IgnoreMissing for Result<V, Error> {
-    type Value = V;
-    type Error = Error;
-
-    fn ignore_missing(self) -> Result<Option<Self::Value>, Self::Error> {
-        self.map(Some).or_else(|e| match e {
-            Error::MissingFullViewingKey
-            | Error::MissingRandomSeed
-            | Error::MissingRho
-            | Error::MissingSpendAuthRandomizer
-            | Error::MissingSpendRecipient
-            | Error::MissingValue
-            | Error::MissingValueCommitTrapdoor => Ok(None),
-            _ => Err(e),
-        })
+        Self {
+            actions,
+            flags: bundle.flags().to_byte(),
+            value_sum,
+            anchor: bundle.anchor().to_bytes(),
+            zkproof: bundle
+                .zkproof()
+                .as_ref()
+                .map(|zkproof| zkproof.as_ref().to_vec()),
+            bsk: bundle.bsk().as_ref().map(|bsk| bsk.into()),
+        }
     }
 }

@@ -32,7 +32,9 @@ mod tests {
         // Extraction fails in Sapling because we happen to extract it before Orchard.
         assert!(matches!(
             TransactionExtractor::new(pczt).extract().unwrap_err(),
-            tx_extractor::Error::Sapling(tx_extractor::SaplingError::MissingBsk),
+            tx_extractor::Error::Sapling(tx_extractor::SaplingError::Extract(
+                sapling::pczt::TxExtractorError::MissingBindingSignatureSigningKey
+            )),
         ));
     }
 
