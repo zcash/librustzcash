@@ -6,6 +6,7 @@ use std::path::Path;
 
 use sapling::{
     bundle::GrothProofBytes,
+    circuit::{OutputVerifyingKey, SpendVerifyingKey},
     keys::EphemeralSecretKey,
     prover::{OutputProver, SpendProver},
     value::{NoteValue, ValueCommitTrapdoor},
@@ -128,6 +129,14 @@ impl LocalTxProver {
             spend_params: p.spend_params,
             output_params: p.output_params,
         }
+    }
+
+    /// Returns the verifying keys for the Sapling circuits.
+    pub fn verifying_keys(&self) -> (SpendVerifyingKey, OutputVerifyingKey) {
+        (
+            self.spend_params.verifying_key(),
+            self.output_params.verifying_key(),
+        )
     }
 }
 

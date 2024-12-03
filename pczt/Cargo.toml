@@ -34,6 +34,14 @@ nonempty = { workspace = true, optional = true }
 orchard = { workspace = true, optional = true }
 pasta_curves = { workspace = true, optional = true }
 
+[dev-dependencies]
+incrementalmerkletree.workspace = true
+secp256k1 = { workspace = true, features = ["rand"] }
+shardtree.workspace = true
+zcash_primitives = { workspace = true, features = ["test-dependencies",  "transparent-inputs"] }
+zcash_proofs = { workspace = true, features = ["bundled-prover"] }
+zip32.workspace = true
+
 [features]
 orchard = [
     "dep:ff",
@@ -58,3 +66,7 @@ prover = ["dep:rand_core", "sapling?/temporary-zcashd"]
 signer = ["dep:blake2b_simd", "dep:rand_core", "orchard", "sapling", "transparent"]
 spend-finalizer = ["transparent"]
 tx-extractor = ["dep:rand_core", "orchard", "sapling", "transparent"]
+
+[[test]]
+name = "end_to_end"
+required-features = ["io-finalizer", "prover", "signer", "tx-extractor"]
