@@ -11,6 +11,7 @@ members = [
     "zcash",
     "zcash_client_backend",
     "zcash_client_sqlite",
+    "zcash_client_memory",
     "zcash_extensions",
     "zcash_history",
     "zcash_keys",
@@ -126,7 +127,7 @@ subtle = "2.2.3"
 rusqlite = { version = "0.32", features = ["bundled"] }
 schemerz = "0.2"
 schemerz-rusqlite = "0.320"
-time = "0.3.22"
+time = { version = "0.3.22", default-features = false }
 uuid = "1.1"
 
 # Static constants and assertions
@@ -155,7 +156,7 @@ trait-variant = "0.1"
 # ZIP 32
 aes = "0.8"
 fpe = "0.6"
-zip32 = "0.1.1"
+zip32 = "0.1.2"
 
 [profile.release]
 lto = true
