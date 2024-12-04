@@ -63,8 +63,10 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
 
     fn create_account(
         &mut self,
+        account_name: &str,
         seed: &SecretVec<u8>,
         birthday: &AccountBirthday,
+        key_source: Option<&str>,
     ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
         if cfg!(not(test)) {
             unimplemented!(
@@ -85,9 +87,11 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
             let ufvk = usk.to_unified_full_viewing_key();
 
             let (id, _account) = self.add_account(
+                account_name,
                 AccountSource::Derived {
                     seed_fingerprint,
                     account_index,
+                    key_source: key_source.map(|s| s.to_string()),
                 },
                 ufvk,
                 birthday.clone(),
@@ -1041,9 +1045,11 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
 
     fn import_account_hd(
         &mut self,
+        _account_name: &str,
         _seed: &SecretVec<u8>,
         _account_index: zip32::AccountId,
         _birthday: &AccountBirthday,
+        _key_source: Option<&str>,
     ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error> {
         unimplemented!(
             "Memwallet does not support adding accounts from seed phrases. 
@@ -1053,13 +1059,19 @@ Instead derive the ufvk in the calling code and import it using `import_account_
 
     fn import_account_ufvk(
         &mut self,
+        account_name: &str,
         unified_key: &UnifiedFullViewingKey,
         birthday: &AccountBirthday,
         purpose: AccountPurpose,
+        key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error> {
         tracing::debug!("import_account_ufvk");
         let (_id, account) = self.add_account(
-            AccountSource::Imported { purpose },
+            account_name,
+            AccountSource::Imported {
+                purpose,
+                key_source: key_source.map(str::to_owned),
+            },
             unified_key.to_owned(),
             birthday.clone(),
         )?;

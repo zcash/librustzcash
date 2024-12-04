@@ -164,13 +164,17 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
 
     pub(crate) fn add_account(
         &mut self,
+        account_name: &str,
         kind: AccountSource,
         viewing_key: UnifiedFullViewingKey,
         birthday: AccountBirthday,
     ) -> Result<(AccountId, Account), Error> {
-        let (id, account) =
-            self.accounts
-                .new_account(kind, viewing_key.to_owned(), birthday.clone())?;
+        let (id, account) = self.accounts.new_account(
+            account_name,
+            kind,
+            viewing_key.to_owned(),
+            birthday.clone(),
+        )?;
 
         // If a birthday frontier is available, insert it into the note commitment tree. If the
         // birthday frontier is the empty frontier, we don't need to do anything.
@@ -481,8 +485,9 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
                 AccountSource::Derived {
                     seed_fingerprint: sf,
                     account_index,
+                    ..
                 } => {
-                    if &sf == seed_fingerprint {
+                    if sf == seed_fingerprint {
                         Some(account_index)
                     } else {
                         None
@@ -490,7 +495,8 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
                 }
                 _ => None,
             })
-            .max())
+            .max()
+            .copied())
     }
     pub(crate) fn insert_received_sapling_note(
         &mut self,

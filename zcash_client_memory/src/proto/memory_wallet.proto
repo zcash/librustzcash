@@ -71,6 +71,8 @@ message Account {
   repeated Address addresses = 9; // account addresses
 
   repeated EphemeralAddressRecord ephemeral_addresses = 10; // map from index to encoded unified address
+  string account_name = 11; // human readable name for the account
+  optional string key_source = 12; // key source metadata
 }
 
 enum AccountKind {

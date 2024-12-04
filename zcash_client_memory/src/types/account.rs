@@ -74,6 +74,7 @@ impl Accounts {
     /// Otherwise the scan queue will not be correctly updated
     pub(crate) fn new_account(
         &mut self,
+        account_name: &str,
         kind: AccountSource,
         viewing_key: UnifiedFullViewingKey,
         birthday: AccountBirthday,
@@ -81,7 +82,13 @@ impl Accounts {
         self.nonce += 1;
         let account_id = AccountId(self.nonce);
 
-        let acc = Account::new(account_id, kind, viewing_key, birthday)?;
+        let acc = Account::new(
+            account_name.to_string(),
+            account_id,
+            kind,
+            viewing_key,
+            birthday,
+        )?;
 
         self.accounts.insert(account_id, acc.clone());
 
@@ -202,6 +209,7 @@ impl EphemeralAddress {
 /// An internal representation account stored in the database.
 #[derive(Debug, Clone)]
 pub struct Account {
+    account_name: String,
     account_id: AccountId,
     kind: AccountSource,
     viewing_key: UnifiedFullViewingKey,
@@ -214,7 +222,8 @@ pub struct Account {
 
 impl PartialEq for Account {
     fn eq(&self, other: &Self) -> bool {
-        self.account_id == other.account_id
+        self.account_name == other.account_name
+            && self.account_id == other.account_id
             && self.kind == other.kind
             && self
                 .viewing_key
@@ -231,12 +240,14 @@ impl PartialEq for Account {
 
 impl Account {
     pub(crate) fn new(
+        account_name: String,
         account_id: AccountId,
         kind: AccountSource,
         viewing_key: UnifiedFullViewingKey,
         birthday: AccountBirthday,
     ) -> Result<Self, Error> {
         let mut acc = Self {
+            account_name,
             account_id,
             kind,
             viewing_key,
@@ -493,8 +504,8 @@ impl zcash_client_backend::data_api::Account for Account {
         self.account_id
     }
 
-    fn source(&self) -> AccountSource {
-        self.kind
+    fn source(&self) -> &AccountSource {
+        &self.kind
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
@@ -503,6 +514,10 @@ impl zcash_client_backend::data_api::Account for Account {
 
     fn uivk(&self) -> UnifiedIncomingViewingKey {
         self.viewing_key.to_unified_incoming_viewing_key()
+    }
+
+    fn name(&self) -> Option<&str> {
+        todo!()
     }
 }
 
@@ -547,6 +562,7 @@ mod serialization {
     impl From<Account> for proto::Account {
         fn from(acc: Account) -> Self {
             Self {
+                account_name: acc.account_name.clone(),
                 account_id: *acc.account_id,
                 kind: match acc.kind {
                     AccountSource::Derived { .. } => 0,
@@ -564,11 +580,16 @@ mod serialization {
                 },
                 purpose: match acc.kind {
                     AccountSource::Derived { .. } => None,
-                    AccountSource::Imported { purpose } => match purpose {
+                    AccountSource::Imported { purpose, .. } => match purpose {
                         AccountPurpose::Spending => Some(0),
                         AccountPurpose::ViewOnly => Some(1),
                     },
                 },
+                key_source: match acc.kind {
+                    AccountSource::Derived { ref key_source, .. } => key_source,
+                    AccountSource::Imported { ref key_source, .. } => key_source,
+                }
+                .clone(),
                 viewing_key: acc.viewing_key.encode(&EncodingParams),
                 birthday: Some(acc.birthday().clone().try_into().unwrap()),
                 addresses: acc
@@ -603,6 +624,7 @@ mod serialization {
 
         fn try_from(acc: proto::Account) -> Result<Self, Self::Error> {
             Ok(Self {
+                account_name: acc.account_name.clone(),
                 account_id: acc.account_id.into(),
                 kind: match acc.kind {
                     0 => AccountSource::Derived {
@@ -610,6 +632,7 @@ mod serialization {
                             acc.seed_fingerprint().try_into()?,
                         ),
                         account_index: read_optional!(acc, account_index)?.try_into()?,
+                        key_source: acc.key_source,
                     },
                     1 => AccountSource::Imported {
                         purpose: match read_optional!(acc, purpose)? {
@@ -617,6 +640,7 @@ mod serialization {
                             1 => AccountPurpose::ViewOnly,
                             _ => unreachable!(),
                         },
+                        key_source: acc.key_source,
                     },
                     _ => unreachable!(),
                 },
@@ -732,9 +756,11 @@ mod serialization {
         #[test]
         fn test_account_serialization_roundtrip() {
             let acc = Account::new(
+                "test_account_name".to_string(),
                 AccountId(0),
                 AccountSource::Imported {
                     purpose: AccountPurpose::Spending,
+                    key_source: Some("test_key_source".to_string()),
                 },
                 UnifiedFullViewingKey::decode(&EncodingParams, TEST_VK).unwrap(),
                 AccountBirthday::from_sapling_activation(
