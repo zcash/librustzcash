@@ -6,6 +6,7 @@ use pczt::{
         combiner::Combiner, creator::Creator, io_finalizer::IoFinalizer, prover::Prover,
         signer::Signer, spend_finalizer::SpendFinalizer, tx_extractor::TransactionExtractor,
     },
+    Pczt,
 };
 use rand_core::OsRng;
 use shardtree::{store::memory::MemoryShardStore, ShardTree};
@@ -25,6 +26,11 @@ static ORCHARD_PROVING_KEY: OnceLock<orchard::circuit::ProvingKey> = OnceLock::n
 
 fn orchard_proving_key() -> &'static orchard::circuit::ProvingKey {
     ORCHARD_PROVING_KEY.get_or_init(orchard::circuit::ProvingKey::build)
+}
+
+fn check_round_trip(pczt: &Pczt) {
+    let encoded = pczt.serialize();
+    assert_eq!(encoded, Pczt::parse(&encoded).unwrap().serialize());
 }
 
 #[test]
@@ -91,23 +97,28 @@ fn transparent_to_orchard() {
 
     // Create the base PCZT.
     let pczt = Creator::build_from_parts(pczt_parts).unwrap();
+    check_round_trip(&pczt);
 
     // Finalize the I/O.
     let pczt = IoFinalizer::new(pczt).finalize_io().unwrap();
+    check_round_trip(&pczt);
 
     // Create proofs.
     let pczt = Prover::new(pczt)
         .create_orchard_proof(orchard_proving_key())
         .unwrap()
         .finish();
+    check_round_trip(&pczt);
 
     // Apply signatures.
     let mut signer = Signer::new(pczt).unwrap();
     signer.sign_transparent(0, &transparent_sk).unwrap();
     let pczt = signer.finish();
+    check_round_trip(&pczt);
 
     // Finalize spends.
     let pczt = SpendFinalizer::new(pczt).finalize_spends().unwrap();
+    check_round_trip(&pczt);
 
     // We should now be able to extract the fully authorized transaction.
     let tx = TransactionExtractor::new(pczt).extract().unwrap();
@@ -218,9 +229,11 @@ fn sapling_to_orchard() {
 
     // Create the base PCZT.
     let pczt = Creator::build_from_parts(pczt_parts).unwrap();
+    check_round_trip(&pczt);
 
     // Finalize the I/O.
     let pczt = IoFinalizer::new(pczt).finalize_io().unwrap();
+    check_round_trip(&pczt);
 
     // To test the Combiner, we will create the Sapling proofs, Sapling signatures, and
     // Orchard proof "in parallel".
@@ -231,12 +244,14 @@ fn sapling_to_orchard() {
         .create_sapling_proofs(&sapling_prover, &sapling_prover)
         .unwrap()
         .finish();
+    check_round_trip(&pczt_with_sapling_proofs);
 
     // Create Orchard proof.
     let pczt_with_orchard_proof = Prover::new(pczt.clone())
         .create_orchard_proof(orchard_proving_key())
         .unwrap()
         .finish();
+    check_round_trip(&pczt_with_orchard_proof);
 
     // Pass the PCZT to be signed through a serialization cycle to ensure we don't lose
     // any information. This emulates passing it to another device.
@@ -249,6 +264,7 @@ fn sapling_to_orchard() {
         .sign_sapling(index, &sapling_extsk.expsk.ask)
         .unwrap();
     let pczt_with_sapling_signatures = signer.finish();
+    check_round_trip(&pczt_with_sapling_signatures);
 
     // Emulate passing the signed PCZT back to the first device.
     let pczt_with_sapling_signatures =
@@ -262,6 +278,7 @@ fn sapling_to_orchard() {
     ])
     .combine()
     .unwrap();
+    check_round_trip(&pczt);
 
     // We should now be able to extract the fully authorized transaction.
     let (spend_vk, output_vk) = sapling_prover.verifying_keys();
@@ -361,21 +378,25 @@ fn orchard_to_orchard() {
 
     // Create the base PCZT.
     let pczt = Creator::build_from_parts(pczt_parts).unwrap();
+    check_round_trip(&pczt);
 
     // Finalize the I/O.
     let pczt = IoFinalizer::new(pczt).finalize_io().unwrap();
+    check_round_trip(&pczt);
 
     // Create proofs.
     let pczt = Prover::new(pczt)
         .create_orchard_proof(orchard_proving_key())
         .unwrap()
         .finish();
+    check_round_trip(&pczt);
 
     // Apply signatures.
     let index = orchard_meta.spend_action_index(0).unwrap();
     let mut signer = Signer::new(pczt).unwrap();
     signer.sign_orchard(index, &orchard_ask).unwrap();
     let pczt = signer.finish();
+    check_round_trip(&pczt);
 
     // We should now be able to extract the fully authorized transaction.
     let tx = TransactionExtractor::new(pczt).extract().unwrap();

@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::roles::combiner::merge_map;
 
 pub(crate) const FLAG_INPUTS_MODIFIABLE: u8 = 0b0000_0001;
@@ -7,7 +9,7 @@ pub(crate) const FLAG_OUTPUTS_MODIFIABLE: u8 = 0b0000_0010;
 pub(crate) const FLAG_HAS_SIGHASH_SINGLE: u8 = 0b0000_0100;
 
 /// Global fields that are relevant to the transaction as a whole.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Global {
     //
     // Transaction effecting data.
@@ -132,7 +134,7 @@ impl Global {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Zip32Derivation {
     /// The [ZIP 32 seed fingerprint](https://zips.z.cash/zip-0032#seed-fingerprints).
     pub(crate) seed_fingerprint: [u8; 32],

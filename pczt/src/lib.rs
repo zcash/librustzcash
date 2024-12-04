@@ -38,6 +38,8 @@
 //! - Transaction Extractor (anyone can execute)
 //!   - Creates bindingSig and extracts the final transaction.
 
+use serde::{Deserialize, Serialize};
+
 pub mod roles;
 
 mod common;
@@ -45,13 +47,16 @@ mod orchard;
 mod sapling;
 mod transparent;
 
+const MAGIC_BYTES: &[u8] = b"PCZT";
+const PCZT_VERSION_1: u32 = 1;
+
 #[cfg(feature = "zcp-builder")]
 const SAPLING_TX_VERSION: u32 = 4;
 const V5_TX_VERSION: u32 = 5;
 const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
 
 /// A partially-created Zcash transaction.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Pczt {
     /// Global fields that are relevant to the transaction as a whole.
     global: common::Global,
@@ -67,4 +72,44 @@ pub struct Pczt {
     transparent: transparent::Bundle,
     sapling: sapling::Bundle,
     orchard: orchard::Bundle,
+}
+
+impl Pczt {
+    /// Parses a PCZT from its encoding.
+    pub fn parse(bytes: &[u8]) -> Result<Self, ParseError> {
+        if bytes.len() < 8 {
+            return Err(ParseError::TooShort);
+        }
+        if &bytes[..4] != MAGIC_BYTES {
+            return Err(ParseError::NotPczt);
+        }
+        let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        if version != PCZT_VERSION_1 {
+            return Err(ParseError::UnknownVersion(version));
+        }
+
+        // This is a v1 PCZT.
+        postcard::from_bytes(&bytes[8..]).map_err(ParseError::Invalid)
+    }
+
+    /// Serializes this PCZT.
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(MAGIC_BYTES);
+        bytes.extend_from_slice(&PCZT_VERSION_1.to_le_bytes());
+        postcard::to_extend(self, bytes).expect("can serialize into memory")
+    }
+}
+
+/// Errors that can occur while parsing a PCZT.
+#[derive(Debug)]
+pub enum ParseError {
+    /// The bytes do not contain a PCZT.
+    NotPczt,
+    /// The PCZT encoding was invalid.
+    Invalid(postcard::Error),
+    /// The bytes are too short to contain a PCZT.
+    TooShort,
+    /// The PCZT has an unknown version.
+    UnknownVersion(u32),
 }

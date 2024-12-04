@@ -18,6 +18,11 @@ zcash_protocol = { workspace = true, optional = true }
 blake2b_simd = { workspace = true, optional = true }
 rand_core = { workspace = true, optional = true }
 
+# Encoding
+postcard = { version = "1", features = ["alloc"] }
+serde.workspace = true
+serde_with = "3"
+
 # Payment protocols
 # - Transparent
 secp256k1 = { workspace = true, optional = true  }

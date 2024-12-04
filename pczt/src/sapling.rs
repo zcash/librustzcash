@@ -1,6 +1,9 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
+
 use crate::{
     common::Zip32Derivation,
     roles::combiner::{merge_map, merge_optional},
@@ -9,7 +12,7 @@ use crate::{
 const GROTH_PROOF_SIZE: usize = 48 + 96 + 48;
 
 /// PCZT fields that are specific to producing the transaction's Sapling bundle (if any).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Bundle {
     pub(crate) spends: Vec<Spend>,
     pub(crate) outputs: Vec<Output>,
@@ -34,7 +37,8 @@ pub(crate) struct Bundle {
 }
 
 /// Information about a Sapling spend within a transaction.
-#[derive(Clone, Debug)]
+#[serde_as]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Spend {
     //
     // SpendDescription effecting data.
@@ -49,11 +53,13 @@ pub(crate) struct Spend {
     /// The Spend proof.
     ///
     /// This is set by the Prover.
+    #[serde_as(as = "Option<[_; GROTH_PROOF_SIZE]>")]
     pub(crate) zkproof: Option<[u8; GROTH_PROOF_SIZE]>,
 
     /// The spend authorization signature.
     ///
     /// This is set by the Signer.
+    #[serde_as(as = "Option<[_; 64]>")]
     pub(crate) spend_auth_sig: Option<[u8; 64]>,
 
     /// The [raw encoding] of the Sapling payment address that received the note being spent.
@@ -62,6 +68,7 @@ pub(crate) struct Spend {
     /// - This is required by the Prover.
     ///
     /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#saplingpaymentaddrencoding
+    #[serde_as(as = "Option<[_; 43]>")]
     pub(crate) recipient: Option<[u8; 43]>,
 
     /// The value of the input being spent.
@@ -139,7 +146,8 @@ pub(crate) struct Spend {
 }
 
 /// Information about a Sapling output within a transaction.
-#[derive(Clone, Debug)]
+#[serde_as]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Output {
     //
     // OutputDescription effecting data.
@@ -167,6 +175,7 @@ pub(crate) struct Output {
     /// The Output proof.
     ///
     /// This is set by the Prover.
+    #[serde_as(as = "Option<[_; GROTH_PROOF_SIZE]>")]
     pub(crate) zkproof: Option<[u8; GROTH_PROOF_SIZE]>,
 
     /// The [raw encoding] of the Sapling payment address that will receive the output.
@@ -175,6 +184,7 @@ pub(crate) struct Output {
     /// - This is required by the Prover.
     ///
     /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#saplingpaymentaddrencoding
+    #[serde_as(as = "Option<[_; 43]>")]
     pub(crate) recipient: Option<[u8; 43]>,
 
     /// The value of the output.

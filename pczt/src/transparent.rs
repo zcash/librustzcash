@@ -5,18 +5,22 @@ use crate::{
     roles::combiner::{merge_map, merge_optional},
 };
 
+use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
+
 #[cfg(feature = "transparent")]
 use zcash_primitives::transaction::components::transparent;
 
 /// PCZT fields that are specific to producing the transaction's transparent bundle (if
 /// any).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Bundle {
     pub(crate) inputs: Vec<Input>,
     pub(crate) outputs: Vec<Output>,
 }
 
-#[derive(Clone, Debug)]
+#[serde_as]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Input {
     //
     // Transparent effecting data.
@@ -69,6 +73,7 @@ pub(crate) struct Input {
     /// - Each entry is set by a Signer, and should contain an ECDSA signature that is
     ///   valid under the corresponding pubkey.
     /// - These are required by the Spend Finalizer to assemble `script_sig`.
+    #[serde_as(as = "BTreeMap<[_; 33], _>")]
     pub(crate) partial_signatures: BTreeMap<[u8; 33], Vec<u8>>,
 
     /// The sighash type to be used for this input.
@@ -87,6 +92,7 @@ pub(crate) struct Input {
     /// - Individual entries may be required by a Signer.
     /// - It is not required that the map include entries for all of the used pubkeys.
     ///   In particular, it is not possible to include entries for non-BIP-32 pubkeys.
+    #[serde_as(as = "BTreeMap<[_; 33], _>")]
     pub(crate) bip32_derivation: BTreeMap<[u8; 33], Zip32Derivation>,
 
     /// Mappings of the form `key = RIPEMD160(value)`.
@@ -117,7 +123,8 @@ pub(crate) struct Input {
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
-#[derive(Clone, Debug)]
+#[serde_as]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Output {
     //
     // Transparent effecting data.
@@ -141,6 +148,7 @@ pub(crate) struct Output {
     /// - Individual entries may be required by a Signer.
     /// - It is not required that the map include entries for all of the used pubkeys.
     ///   In particular, it is not possible to include entries for non-BIP-32 pubkeys.
+    #[serde_as(as = "BTreeMap<[_; 33], _>")]
     pub(crate) bip32_derivation: BTreeMap<[u8; 33], Zip32Derivation>,
 
     /// Proprietary fields related to the note being spent.

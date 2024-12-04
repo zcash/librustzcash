@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 #[cfg(feature = "orchard")]
 use ff::PrimeField;
+use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 
 use crate::{
     common::Zip32Derivation,
@@ -9,7 +11,7 @@ use crate::{
 };
 
 /// PCZT fields that are specific to producing the transaction's Orchard bundle (if any).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Bundle {
     /// The Orchard actions in this bundle.
     ///
@@ -52,7 +54,7 @@ pub(crate) struct Bundle {
     pub(crate) bsk: Option<[u8; 32]>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Action {
     //
     // Action effecting data.
@@ -77,7 +79,8 @@ pub(crate) struct Action {
 }
 
 /// Information about a Sapling spend within a transaction.
-#[derive(Clone, Debug)]
+#[serde_as]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Spend {
     //
     // Spend-specific Action effecting data.
@@ -91,6 +94,7 @@ pub(crate) struct Spend {
     /// The spend authorization signature.
     ///
     /// This is set by the Signer.
+    #[serde_as(as = "Option<[_; 64]>")]
     pub(crate) spend_auth_sig: Option<[u8; 64]>,
 
     /// The [raw encoding] of the Orchard payment address that received the note being spent.
@@ -99,6 +103,7 @@ pub(crate) struct Spend {
     /// - This is required by the Prover.
     ///
     /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#orchardpaymentaddrencoding
+    #[serde_as(as = "Option<[_; 43]>")]
     pub(crate) recipient: Option<[u8; 43]>,
 
     /// The value of the input being spent.
@@ -127,6 +132,7 @@ pub(crate) struct Spend {
     ///
     /// - This is set by the Updater.
     /// - This is required by the Prover.
+    #[serde_as(as = "Option<[_; 96]>")]
     pub(crate) fvk: Option<[u8; 96]>,
 
     /// A witness from the note to the bundle's anchor.
@@ -159,7 +165,8 @@ pub(crate) struct Spend {
 }
 
 /// Information about an Orchard output within a transaction.
-#[derive(Clone, Debug)]
+#[serde_as]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Output {
     //
     // Output-specific Action effecting data.
@@ -187,6 +194,7 @@ pub(crate) struct Output {
     /// - This is required by the Prover.
     ///
     /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#orchardpaymentaddrencoding
+    #[serde_as(as = "Option<[_; 43]>")]
     pub(crate) recipient: Option<[u8; 43]>,
 
     /// The value of the output.
