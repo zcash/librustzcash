@@ -402,6 +402,7 @@ mod tests {
         let prover = LocalTxProver::bundled();
         let res = builder
             .build(
+                &[],
                 OsRng,
                 &prover,
                 &prover,

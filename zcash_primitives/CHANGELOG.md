@@ -18,6 +18,13 @@ and this library adheres to Rust's notion of
     - `impl MapAuth<Authorized, Authorized> for ()`
   - `sighash::SighashType`
 
+### Changed
+- `zcash_primitives::transaction::builder`:
+  - `Builder::add_orchard_spend` now takes `orchard::keys::FullViewingKey`
+    instead of `&orchard::keys::SpendingKey`.
+  - `Builder::build` now takes an `&[orchard::keys::SpendAuthorizingKey]`
+    argument.
+
 ## [0.20.0] - 2024-11-14
 
 ### Added

@@ -350,7 +350,7 @@ fn orchard_to_orchard() {
         },
     );
     builder
-        .add_orchard_spend::<zip317::FeeRule>(&orchard_sk, note, merkle_path)
+        .add_orchard_spend::<zip317::FeeRule>(orchard_fvk.clone(), note, merkle_path)
         .unwrap();
     builder
         .add_orchard_output::<zip317::FeeRule>(
