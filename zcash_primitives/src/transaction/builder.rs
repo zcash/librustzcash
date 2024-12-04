@@ -311,7 +311,6 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     // transaction, and then the caller will be responsible for using the spending keys or their
     // derivatives for proving and signing to complete transaction creation.
     sapling_asks: Vec<sapling::keys::SpendAuthorizingKey>,
-    orchard_saks: Vec<orchard::keys::SpendAuthorizingKey>,
     #[cfg(zcash_unstable = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(zcash_unstable = "zfuture"))]
@@ -396,7 +395,6 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             sapling_builder,
             orchard_builder,
             sapling_asks: vec![],
-            orchard_saks: Vec::new(),
             #[cfg(zcash_unstable = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
@@ -424,7 +422,6 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             sapling_builder: self.sapling_builder,
             orchard_builder: self.orchard_builder,
             sapling_asks: self.sapling_asks,
-            orchard_saks: self.orchard_saks,
             tze_builder: self.tze_builder,
             progress_notifier,
         }
@@ -438,16 +435,12 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     /// the given note.
     pub fn add_orchard_spend<FE>(
         &mut self,
-        sk: &orchard::keys::SpendingKey,
+        fvk: orchard::keys::FullViewingKey,
         note: orchard::Note,
         merkle_path: orchard::tree::MerklePath,
     ) -> Result<(), Error<FE>> {
         if let Some(builder) = self.orchard_builder.as_mut() {
-            builder.add_spend(orchard::keys::FullViewingKey::from(sk), note, merkle_path)?;
-
-            self.orchard_saks
-                .push(orchard::keys::SpendAuthorizingKey::from(sk));
-
+            builder.add_spend(fvk, note, merkle_path)?;
             Ok(())
         } else {
             Err(Error::OrchardBuilderNotAvailable)
@@ -663,13 +656,14 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     #[allow(clippy::too_many_arguments)]
     pub fn build<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FR: FeeRule>(
         self,
+        orchard_saks: &[orchard::keys::SpendAuthorizingKey],
         rng: R,
         spend_prover: &SP,
         output_prover: &OP,
         fee_rule: &FR,
     ) -> Result<BuildResult, Error<FR::Error>> {
         let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
-        self.build_internal(rng, spend_prover, output_prover, fee)
+        self.build_internal(orchard_saks, rng, spend_prover, output_prover, fee)
     }
 
     /// Builds a transaction from the configured spends and outputs.
@@ -684,18 +678,20 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         FR: FutureFeeRule,
     >(
         self,
+        orchard_saks: &[orchard::keys::SpendAuthorizingKey],
         rng: R,
         spend_prover: &SP,
         output_prover: &OP,
         fee_rule: &FR,
     ) -> Result<BuildResult, Error<FR::Error>> {
         let fee = self.get_fee_zfuture(fee_rule).map_err(Error::Fee)?;
-        self.build_internal(rng, spend_prover, output_prover, fee)
+        self.build_internal(orchard_saks, rng, spend_prover, output_prover, fee)
     }
 
     #[allow(clippy::too_many_arguments)]
     fn build_internal<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FE>(
         self,
+        orchard_saks: &[orchard::keys::SpendAuthorizingKey],
         mut rng: R,
         spend_prover: &SP,
         output_prover: &OP,
@@ -834,7 +830,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
                         b.apply_signatures(
                             &mut rng,
                             *shielded_sig_commitment.as_ref(),
-                            &self.orchard_saks,
+                            orchard_saks,
                         )
                     })
             })
@@ -997,6 +993,7 @@ mod testing {
         /// DO NOT USE EXCEPT FOR UNIT TESTING.
         pub fn mock_build<R: RngCore>(
             self,
+            orchard_saks: &[orchard::keys::SpendAuthorizingKey],
             rng: R,
         ) -> Result<BuildResult, Error<zip317::FeeError>> {
             struct FakeCryptoRng<R: RngCore>(R);
@@ -1020,6 +1017,7 @@ mod testing {
             }
 
             self.build(
+                orchard_saks,
                 FakeCryptoRng(rng),
                 &MockSpendProver,
                 &MockOutputProver,
@@ -1094,7 +1092,6 @@ mod tests {
             progress_notifier: (),
             orchard_builder: None,
             sapling_asks: vec![],
-            orchard_saks: Vec::new(),
         };
 
         let tsk = AccountPrivKey::from_seed(&TEST_NETWORK, &[0u8; 32], AccountId::ZERO).unwrap();
@@ -1125,7 +1122,7 @@ mod tests {
             )
             .unwrap();
 
-        let res = builder.mock_build(OsRng).unwrap();
+        let res = builder.mock_build(&[], OsRng).unwrap();
         // No binding signature, because only t input and outputs
         assert!(res.transaction().sapling_bundle.is_none());
     }
@@ -1170,7 +1167,7 @@ mod tests {
             .unwrap();
 
         // A binding signature (and bundle) is present because there is a Sapling spend.
-        let res = builder.mock_build(OsRng).unwrap();
+        let res = builder.mock_build(&[], OsRng).unwrap();
         assert!(res.transaction().sapling_bundle().is_some());
     }
 
@@ -1195,7 +1192,7 @@ mod tests {
             };
             let builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             assert_matches!(
-                builder.mock_build(OsRng),
+                builder.mock_build(&[], OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected == MINIMUM_FEE.into()
             );
         }
@@ -1221,7 +1218,7 @@ mod tests {
                 )
                 .unwrap();
             assert_matches!(
-                builder.mock_build(OsRng),
+                builder.mock_build(&[], OsRng),
                 Err(Error::InsufficientFunds(expected)) if
                     expected == (NonNegativeAmount::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
             );
@@ -1242,7 +1239,7 @@ mod tests {
                 )
                 .unwrap();
             assert_matches!(
-                builder.mock_build(OsRng),
+                builder.mock_build(&[], OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected ==
                     (NonNegativeAmount::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
             );
@@ -1283,7 +1280,7 @@ mod tests {
                 )
                 .unwrap();
             assert_matches!(
-                builder.mock_build(OsRng),
+                builder.mock_build(&[], OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected == Amount::const_from_i64(1)
             );
         }
@@ -1325,7 +1322,7 @@ mod tests {
                     NonNegativeAmount::const_from_u64(15000),
                 )
                 .unwrap();
-            let res = builder.mock_build(OsRng).unwrap();
+            let res = builder.mock_build(&[], OsRng).unwrap();
             assert_eq!(
                 res.transaction()
                     .fee_paid(|_| Err(BalanceError::Overflow))

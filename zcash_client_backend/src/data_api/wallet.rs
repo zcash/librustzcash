@@ -458,6 +458,8 @@ struct BuildState<'a, P, AccountId> {
     step_index: usize,
     builder: Builder<'a, P, ()>,
     #[cfg(feature = "orchard")]
+    orchard_saks: Vec<orchard::keys::SpendAuthorizingKey>,
+    #[cfg(feature = "orchard")]
     orchard_output_meta: Vec<(
         Recipient<AccountId, PoolType, OutPoint>,
         NonNegativeAmount,
@@ -644,6 +646,8 @@ where
             orchard_anchor,
         },
     );
+    #[cfg(feature = "orchard")]
+    let mut orchard_saks = vec![];
 
     #[cfg(all(feature = "transparent-inputs", not(feature = "orchard")))]
     let has_shielded_inputs = !sapling_inputs.is_empty();
@@ -656,7 +660,8 @@ where
 
     #[cfg(feature = "orchard")]
     for (orchard_note, merkle_path) in orchard_inputs.into_iter() {
-        builder.add_orchard_spend(usk.orchard(), *orchard_note, merkle_path.into())?;
+        builder.add_orchard_spend(usk.orchard().into(), *orchard_note, merkle_path.into())?;
+        orchard_saks.push(usk.orchard().into());
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -1029,6 +1034,8 @@ where
         step_index,
         builder,
         #[cfg(feature = "orchard")]
+        orchard_saks,
+        #[cfg(feature = "orchard")]
         orchard_output_meta,
         sapling_output_meta,
         transparent_output_meta,
@@ -1081,9 +1088,14 @@ where
     )?;
 
     // Build the transaction with the specified fee rule
-    let build_result = build_state
-        .builder
-        .build(OsRng, spend_prover, output_prover, fee_rule)?;
+    #[cfg(feature = "orchard")]
+    let orchard_saks = &build_state.orchard_saks;
+    #[cfg(not(feature = "orchard"))]
+    let orchard_saks = &[];
+    let build_result =
+        build_state
+            .builder
+            .build(orchard_saks, OsRng, spend_prover, output_prover, fee_rule)?;
 
     #[cfg(feature = "orchard")]
     let orchard_fvk: orchard::keys::FullViewingKey = usk.orchard().into();

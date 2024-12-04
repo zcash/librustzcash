@@ -742,6 +742,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     let test_prover = LocalTxProver::bundled();
     let build_result = builder
         .build(
+            &[],
             OsRng,
             &test_prover,
             &test_prover,
