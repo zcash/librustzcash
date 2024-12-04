@@ -660,6 +660,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     ///
     /// Upon success, returns a tuple containing the final transaction, and the
     /// [`SaplingMetadata`] generated during the build process.
+    #[allow(clippy::too_many_arguments)]
     pub fn build<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FR: FeeRule>(
         self,
         rng: R,
@@ -692,6 +693,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         self.build_internal(rng, spend_prover, output_prover, fee)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_internal<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FE>(
         self,
         mut rng: R,
