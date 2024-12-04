@@ -452,20 +452,43 @@ where
     Ok(NonEmpty::from_vec(txids).expect("proposal.steps is NonEmpty"))
 }
 
+#[allow(clippy::type_complexity)]
+struct BuildState<'a, P, AccountId> {
+    #[cfg(feature = "transparent-inputs")]
+    step_index: usize,
+    builder: Builder<'a, P, ()>,
+    #[cfg(feature = "orchard")]
+    orchard_output_meta: Vec<(
+        Recipient<AccountId, PoolType, OutPoint>,
+        NonNegativeAmount,
+        Option<MemoBytes>,
+    )>,
+    sapling_output_meta: Vec<(
+        Recipient<AccountId, PoolType, OutPoint>,
+        NonNegativeAmount,
+        Option<MemoBytes>,
+    )>,
+    transparent_output_meta: Vec<(
+        Recipient<AccountId, Note, ()>,
+        TransparentAddress,
+        NonNegativeAmount,
+        StepOutputIndex,
+    )>,
+    #[cfg(feature = "transparent-inputs")]
+    utxos_spent: Vec<OutPoint>,
+}
+
 // `unused_transparent_outputs` maps `StepOutput`s for transparent outputs
 // that have not been consumed so far, to the corresponding pair of
 // `TransparentAddress` and `Outpoint`.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>(
+fn build_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>(
     wallet_db: &mut DbT,
     params: &ParamsT,
-    spend_prover: &impl SpendProver,
-    output_prover: &impl OutputProver,
     usk: &UnifiedSpendingKey,
     account_id: <DbT as WalletRead>::AccountId,
     ovk_policy: OvkPolicy,
-    fee_rule: &FeeRuleT,
     min_target_height: BlockHeight,
     prior_step_results: &[(&Step<N>, StepResult<<DbT as WalletRead>::AccountId>)],
     proposal_step: &Step<N>,
@@ -474,7 +497,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N
         (TransparentAddress, OutPoint),
     >,
 ) -> Result<
-    StepResult<<DbT as WalletRead>::AccountId>,
+    BuildState<'static, ParamsT, DbT::AccountId>,
     CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
 >
 where
@@ -1001,76 +1024,133 @@ where
         }
     }
 
-    // Build the transaction with the specified fee rule
-    let build_result = builder.build(OsRng, spend_prover, output_prover, fee_rule)?;
+    Ok(BuildState {
+        #[cfg(feature = "transparent-inputs")]
+        step_index,
+        builder,
+        #[cfg(feature = "orchard")]
+        orchard_output_meta,
+        sapling_output_meta,
+        transparent_output_meta,
+        #[cfg(feature = "transparent-inputs")]
+        utxos_spent,
+    })
+}
 
+// `unused_transparent_outputs` maps `StepOutput`s for transparent outputs
+// that have not been consumed so far, to the corresponding pair of
+// `TransparentAddress` and `Outpoint`.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>(
+    wallet_db: &mut DbT,
+    params: &ParamsT,
+    spend_prover: &impl SpendProver,
+    output_prover: &impl OutputProver,
+    usk: &UnifiedSpendingKey,
+    account_id: <DbT as WalletRead>::AccountId,
+    ovk_policy: OvkPolicy,
+    fee_rule: &FeeRuleT,
+    min_target_height: BlockHeight,
+    prior_step_results: &[(&Step<N>, StepResult<<DbT as WalletRead>::AccountId>)],
+    proposal_step: &Step<N>,
+    #[cfg(feature = "transparent-inputs")] unused_transparent_outputs: &mut HashMap<
+        StepOutput,
+        (TransparentAddress, OutPoint),
+    >,
+) -> Result<
+    StepResult<<DbT as WalletRead>::AccountId>,
+    CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
+>
+where
+    DbT: WalletWrite + WalletCommitmentTrees,
+    ParamsT: consensus::Parameters + Clone,
+    FeeRuleT: FeeRule,
+{
+    let build_state = build_proposed_transaction::<_, _, _, FeeRuleT, _, _>(
+        wallet_db,
+        params,
+        usk,
+        account_id,
+        ovk_policy,
+        min_target_height,
+        prior_step_results,
+        proposal_step,
+        #[cfg(feature = "transparent-inputs")]
+        unused_transparent_outputs,
+    )?;
+
+    // Build the transaction with the specified fee rule
+    let build_result = build_state
+        .builder
+        .build(OsRng, spend_prover, output_prover, fee_rule)?;
+
+    #[cfg(feature = "orchard")]
+    let orchard_fvk: orchard::keys::FullViewingKey = usk.orchard().into();
     #[cfg(feature = "orchard")]
     let orchard_internal_ivk = orchard_fvk.to_ivk(orchard::keys::Scope::Internal);
     #[cfg(feature = "orchard")]
-    let orchard_outputs =
-        orchard_output_meta
-            .into_iter()
-            .enumerate()
-            .map(|(i, (recipient, value, memo))| {
-                let output_index = build_result
-                    .orchard_meta()
-                    .output_action_index(i)
-                    .expect("An action should exist in the transaction for each Orchard output.");
+    let orchard_outputs = build_state.orchard_output_meta.into_iter().enumerate().map(
+        |(i, (recipient, value, memo))| {
+            let output_index = build_result
+                .orchard_meta()
+                .output_action_index(i)
+                .expect("An action should exist in the transaction for each Orchard output.");
 
-                let recipient = recipient
-                    .map_internal_account_note(|pool| {
-                        assert!(pool == PoolType::ORCHARD);
-                        build_result
-                            .transaction()
-                            .orchard_bundle()
-                            .and_then(|bundle| {
-                                bundle
-                                    .decrypt_output_with_key(output_index, &orchard_internal_ivk)
-                                    .map(|(note, _, _)| Note::Orchard(note))
-                            })
-                    })
-                    .internal_account_note_transpose_option()
-                    .expect("Wallet-internal outputs must be decryptable with the wallet's IVK");
+            let recipient = recipient
+                .map_internal_account_note(|pool| {
+                    assert!(pool == PoolType::ORCHARD);
+                    build_result
+                        .transaction()
+                        .orchard_bundle()
+                        .and_then(|bundle| {
+                            bundle
+                                .decrypt_output_with_key(output_index, &orchard_internal_ivk)
+                                .map(|(note, _, _)| Note::Orchard(note))
+                        })
+                })
+                .internal_account_note_transpose_option()
+                .expect("Wallet-internal outputs must be decryptable with the wallet's IVK");
 
-                SentTransactionOutput::from_parts(output_index, recipient, value, memo)
-            });
+            SentTransactionOutput::from_parts(output_index, recipient, value, memo)
+        },
+    );
 
+    let sapling_dfvk = usk.sapling().to_diversifiable_full_viewing_key();
     let sapling_internal_ivk =
         PreparedIncomingViewingKey::new(&sapling_dfvk.to_ivk(Scope::Internal));
-    let sapling_outputs =
-        sapling_output_meta
-            .into_iter()
-            .enumerate()
-            .map(|(i, (recipient, value, memo))| {
-                let output_index = build_result
-                    .sapling_meta()
-                    .output_index(i)
-                    .expect("An output should exist in the transaction for each Sapling payment.");
+    let sapling_outputs = build_state.sapling_output_meta.into_iter().enumerate().map(
+        |(i, (recipient, value, memo))| {
+            let output_index = build_result
+                .sapling_meta()
+                .output_index(i)
+                .expect("An output should exist in the transaction for each Sapling payment.");
 
-                let recipient = recipient
-                    .map_internal_account_note(|pool| {
-                        assert!(pool == PoolType::SAPLING);
-                        build_result
-                            .transaction()
-                            .sapling_bundle()
-                            .and_then(|bundle| {
-                                try_sapling_note_decryption(
-                                    &sapling_internal_ivk,
-                                    &bundle.shielded_outputs()[output_index],
-                                    zip212_enforcement(params, min_target_height),
-                                )
-                                .map(|(note, _, _)| Note::Sapling(note))
-                            })
-                    })
-                    .internal_account_note_transpose_option()
-                    .expect("Wallet-internal outputs must be decryptable with the wallet's IVK");
+            let recipient = recipient
+                .map_internal_account_note(|pool| {
+                    assert!(pool == PoolType::SAPLING);
+                    build_result
+                        .transaction()
+                        .sapling_bundle()
+                        .and_then(|bundle| {
+                            try_sapling_note_decryption(
+                                &sapling_internal_ivk,
+                                &bundle.shielded_outputs()[output_index],
+                                zip212_enforcement(params, min_target_height),
+                            )
+                            .map(|(note, _, _)| Note::Sapling(note))
+                        })
+                })
+                .internal_account_note_transpose_option()
+                .expect("Wallet-internal outputs must be decryptable with the wallet's IVK");
 
-                SentTransactionOutput::from_parts(output_index, recipient, value, memo)
-            });
+            SentTransactionOutput::from_parts(output_index, recipient, value, memo)
+        },
+    );
 
     let txid: [u8; 32] = build_result.transaction().txid().into();
     assert_eq!(
-        transparent_output_meta.len(),
+        build_state.transparent_output_meta.len(),
         build_result
             .transaction()
             .transparent_bundle()
@@ -1078,8 +1158,11 @@ where
     );
 
     #[allow(unused_variables)]
-    let transparent_outputs = transparent_output_meta.into_iter().enumerate().map(
-        |(n, (recipient, address, value, step_output_index))| {
+    let transparent_outputs = build_state
+        .transparent_output_meta
+        .into_iter()
+        .enumerate()
+        .map(|(n, (recipient, address, value, step_output_index))| {
             // This assumes that transparent outputs are pushed onto `transparent_output_meta`
             // with the same indices they have in the transaction's transparent outputs.
             // We do not reorder transparent outputs; there is no reason to do so because it
@@ -1089,12 +1172,11 @@ where
             let recipient = recipient.map_ephemeral_transparent_outpoint(|()| outpoint.clone());
             #[cfg(feature = "transparent-inputs")]
             unused_transparent_outputs.insert(
-                StepOutput::new(step_index, step_output_index),
+                StepOutput::new(build_state.step_index, step_output_index),
                 (address, outpoint),
             );
             SentTransactionOutput::from_parts(n, recipient, value, None)
-        },
-    );
+        });
 
     let mut outputs: Vec<SentTransactionOutput<_>> = vec![];
     #[cfg(feature = "orchard")]
@@ -1107,7 +1189,7 @@ where
         outputs,
         fee_amount: proposal_step.balance().fee_required(),
         #[cfg(feature = "transparent-inputs")]
-        utxos_spent,
+        utxos_spent: build_state.utxos_spent,
     })
 }
 
