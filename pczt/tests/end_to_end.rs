@@ -5,6 +5,7 @@ use pczt::{
     roles::{
         combiner::Combiner, creator::Creator, io_finalizer::IoFinalizer, prover::Prover,
         signer::Signer, spend_finalizer::SpendFinalizer, tx_extractor::TransactionExtractor,
+        updater::Updater,
     },
     Pczt,
 };
@@ -159,7 +160,7 @@ fn sapling_to_orchard() {
             .add_output(None, sapling_recipient, value, None)
             .unwrap();
         let (bundle, meta) = sapling_builder
-            .build::<LocalTxProver, LocalTxProver, _, i64>(&mut rng)
+            .build::<LocalTxProver, LocalTxProver, _, i64>(&[], &mut rng)
             .unwrap()
             .unwrap();
         let output = bundle
@@ -203,7 +204,7 @@ fn sapling_to_orchard() {
         },
     );
     builder
-        .add_sapling_spend::<zip317::FeeRule>(&sapling_extsk, note, merkle_path)
+        .add_sapling_spend::<zip317::FeeRule>(sapling_dfvk.fvk().clone(), note, merkle_path)
         .unwrap();
     builder
         .add_orchard_output::<zip317::FeeRule>(
@@ -237,6 +238,17 @@ fn sapling_to_orchard() {
     let pczt = IoFinalizer::new(pczt).finalize_io().unwrap();
     check_round_trip(&pczt);
 
+    // Update the Sapling bundle with its proof generation key.
+    let index = sapling_meta.spend_index(0).unwrap();
+    let pczt = Updater::new(pczt)
+        .update_sapling_with(|mut updater| {
+            updater.update_spend_with(index, |mut spend_updater| {
+                spend_updater.set_proof_generation_key(sapling_extsk.expsk.proof_generation_key())
+            })
+        })
+        .unwrap()
+        .finish();
+
     // To test the Combiner, we will create the Sapling proofs, Sapling signatures, and
     // Orchard proof "in parallel".
 
@@ -260,7 +272,6 @@ fn sapling_to_orchard() {
     let pczt = Pczt::parse(&pczt.serialize()).unwrap();
 
     // Apply signatures.
-    let index = sapling_meta.spend_index(0).unwrap();
     let mut signer = Signer::new(pczt).unwrap();
     signer
         .sign_sapling(index, &sapling_extsk.expsk.ask)

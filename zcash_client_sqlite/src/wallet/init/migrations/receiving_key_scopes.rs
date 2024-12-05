@@ -410,6 +410,7 @@ mod tests {
             .build(
                 &transparent_signing_set,
                 &[],
+                &[],
                 OsRng,
                 &prover,
                 &prover,
