@@ -88,8 +88,79 @@ use {
     zcash_primitives::transaction::components::TxOut,
 };
 
+#[cfg(feature = "pczt")]
+use {
+    crate::data_api::error::PcztError,
+    bip32::ChildNumber,
+    orchard::note_encryption::OrchardDomain,
+    pczt::roles::{
+        creator::Creator, io_finalizer::IoFinalizer, spend_finalizer::SpendFinalizer,
+        tx_extractor::TransactionExtractor, updater::Updater,
+    },
+    sapling::note_encryption::SaplingDomain,
+    serde::{Deserialize, Serialize},
+    zcash_address::ZcashAddress,
+    zcash_note_encryption::try_output_recovery_with_pkd_esk,
+    zcash_primitives::transaction::components::transparent::pczt::Bip32Derivation,
+    zcash_protocol::{
+        consensus::NetworkConstants,
+        value::{BalanceError, ZatBalance},
+    },
+};
+
 pub mod input_selection;
 use input_selection::{GreedyInputSelector, InputSelector, InputSelectorError};
+
+#[cfg(feature = "pczt")]
+const PROPRIETARY_PROPOSAL_INFO: &str = "zcash_client_backend:proposal_info";
+#[cfg(feature = "pczt")]
+const PROPRIETARY_OUTPUT_INFO: &str = "zcash_client_backend:output_info";
+
+/// Information about the proposal from which a PCZT was created.
+///
+/// Stored under the proprietary field `PROPRIETARY_PROPOSAL_INFO`.
+#[cfg(feature = "pczt")]
+#[derive(Serialize, Deserialize)]
+struct ProposalInfo<AccountId> {
+    from_account: AccountId,
+    target_height: u32,
+}
+
+/// Reduced version of [`Recipient`] stored inside a PCZT.
+///
+/// Stored under the proprietary field `PROPRIETARY_OUTPUT_INFO`.
+#[cfg(feature = "pczt")]
+#[derive(Serialize, Deserialize)]
+enum PcztRecipient<AccountId> {
+    External(ZcashAddress),
+    EphemeralTransparent {
+        receiving_account: AccountId,
+    },
+    InternalAccount {
+        receiving_account: AccountId,
+        external_address: Option<ZcashAddress>,
+    },
+}
+
+#[cfg(feature = "pczt")]
+impl<AccountId: Copy> PcztRecipient<AccountId> {
+    fn from_recipient<N, O>(recipient: Recipient<AccountId, N, O>) -> Self {
+        match recipient {
+            Recipient::External(addr, _) => PcztRecipient::External(addr),
+            Recipient::EphemeralTransparent {
+                receiving_account, ..
+            } => PcztRecipient::EphemeralTransparent { receiving_account },
+            Recipient::InternalAccount {
+                receiving_account,
+                external_address,
+                ..
+            } => PcztRecipient::InternalAccount {
+                receiving_account,
+                external_address,
+            },
+        }
+    }
+}
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
@@ -173,6 +244,17 @@ pub type ShieldErrT<DbT, InputsT, ChangeT> = Error<
     <<ChangeT as ChangeStrategy>::FeeRule as FeeRule>::Error,
     <ChangeT as ChangeStrategy>::Error,
     Infallible,
+>;
+
+/// Errors that may be generated when extracting a transaction from a PCZT.
+#[cfg(feature = "pczt")]
+pub type ExtractErrT<DbT, N> = Error<
+    <DbT as WalletRead>::Error,
+    <DbT as WalletCommitmentTrees>::Error,
+    Infallible,
+    Infallible,
+    Infallible,
+    N,
 >;
 
 /// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
@@ -431,8 +513,8 @@ where
     // Store the transactions only after creating all of them. This avoids undesired
     // retransmissions in case a transaction is stored and the creation of a subsequent
     // transaction fails.
-    let mut transactions = Vec::with_capacity(proposal.steps().len());
-    let mut txids = Vec::with_capacity(proposal.steps().len());
+    let mut transactions = Vec::with_capacity(step_results.len());
+    let mut txids = Vec::with_capacity(step_results.len());
     #[allow(unused_variables)]
     for (_, step_result) in step_results.iter() {
         let tx = step_result.build_result.transaction();
@@ -1228,6 +1310,641 @@ where
         #[cfg(feature = "transparent-inputs")]
         utxos_spent: build_state.utxos_spent,
     })
+}
+
+/// Constructs a transaction using the inputs supplied by the given proposal.
+///
+/// Only single-step proposals are currently supported.
+///
+/// Returns a partially-created Zcash transaction (PCZT) that is ready to be authorized.
+/// You can use the following roles for this:
+/// - [`pczt::roles::prover::Prover`]
+/// - [`pczt::roles::signer::Signer`] (if you have local access to the spend authorizing
+///   keys)
+/// - [`pczt::roles::combiner::Combiner`] (if you create proofs and apply signatures in
+///   parallel)
+///
+/// Once the PCZT fully authorized, call [`extract_and_store_transaction_from_pczt`] to
+/// finish transaction creation.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+#[cfg(feature = "pczt")]
+pub fn create_proposed_transaction_pczt<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>(
+    wallet_db: &mut DbT,
+    params: &ParamsT,
+    account_id: <DbT as WalletRead>::AccountId,
+    ovk_policy: OvkPolicy,
+    proposal: &Proposal<FeeRuleT, N>,
+) -> Result<pczt::Pczt, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
+where
+    DbT: WalletWrite + WalletCommitmentTrees,
+    ParamsT: consensus::Parameters + Clone,
+    FeeRuleT: FeeRule,
+    DbT::AccountId: serde::Serialize,
+{
+    let account = wallet_db
+        .get_account(account_id)
+        .map_err(Error::DataSource)?
+        .ok_or(Error::AccountIdNotRecognized)?;
+    let ufvk = account.ufvk().ok_or(Error::AccountCannotSpend)?;
+    let account_derivation = account.source().key_derivation();
+
+    // For now we only support turning single-step proposals into PCZTs.
+    if proposal.steps().len() > 1 {
+        return Err(Error::ProposalNotSupported);
+    }
+    let fee_rule = proposal.fee_rule();
+    let min_target_height = proposal.min_target_height();
+    let prior_step_results = &[];
+    let proposal_step = proposal.steps().first();
+    let unused_transparent_outputs = &mut HashMap::new();
+
+    let build_state = build_proposed_transaction::<_, _, _, FeeRuleT, _, _>(
+        wallet_db,
+        params,
+        ufvk,
+        account_id,
+        ovk_policy,
+        min_target_height,
+        prior_step_results,
+        proposal_step,
+        #[cfg(feature = "transparent-inputs")]
+        unused_transparent_outputs,
+    )?;
+
+    // Build the transaction with the specified fee rule
+    let build_result = build_state.builder.build_for_pczt(OsRng, fee_rule)?;
+
+    let created = Creator::build_from_parts(build_result.pczt_parts).ok_or(PcztError::Build)?;
+
+    let io_finalized = IoFinalizer::new(created).finalize_io()?;
+
+    #[cfg(feature = "orchard")]
+    let orchard_outputs = build_state
+        .orchard_output_meta
+        .into_iter()
+        .enumerate()
+        .map(|(i, (recipient, _, _))| {
+            let output_index = build_result
+                .orchard_meta
+                .output_action_index(i)
+                .expect("An action should exist in the transaction for each Orchard output.");
+
+            (output_index, PcztRecipient::from_recipient(recipient))
+        })
+        .collect::<HashMap<_, _>>();
+
+    let sapling_outputs = build_state
+        .sapling_output_meta
+        .into_iter()
+        .enumerate()
+        .map(|(i, (recipient, _, _))| {
+            let output_index = build_result
+                .sapling_meta
+                .output_index(i)
+                .expect("An output should exist in the transaction for each Sapling output.");
+
+            (output_index, PcztRecipient::from_recipient(recipient))
+        })
+        .collect::<HashMap<_, _>>();
+
+    let pczt = Updater::new(io_finalized)
+        .update_global_with(|mut updater| {
+            updater.set_proprietary(
+                PROPRIETARY_PROPOSAL_INFO.into(),
+                postcard::to_allocvec(&ProposalInfo::<DbT::AccountId> {
+                    from_account: account_id,
+                    target_height: proposal.min_target_height().into(),
+                })
+                .expect("postcard encoding of PCZT proposal metadata should not fail"),
+            )
+        })
+        .update_orchard_with(|mut updater| {
+            for index in 0..updater.bundle().actions().len() {
+                updater.update_action_with(index, |mut action_updater| {
+                    // If the account has a known derivation, add the Orchard key path to the PCZT.
+                    if let Some(derivation) = account_derivation {
+                        // All spent notes are from the same account.
+                        action_updater.set_spend_zip32_derivation(
+                            orchard::pczt::Zip32Derivation::parse(
+                                derivation.seed_fingerprint().to_bytes(),
+                                vec![
+                                    zip32::ChildIndex::hardened(32).index(),
+                                    zip32::ChildIndex::hardened(params.network_type().coin_type())
+                                        .index(),
+                                    zip32::ChildIndex::hardened(u32::from(
+                                        derivation.account_index(),
+                                    ))
+                                    .index(),
+                                ],
+                            )
+                            .expect("valid"),
+                        );
+                    }
+
+                    if let Some(pczt_recipient) = orchard_outputs.get(&index) {
+                        action_updater.set_output_proprietary(
+                            PROPRIETARY_OUTPUT_INFO.into(),
+                            postcard::to_allocvec(pczt_recipient).expect(
+                                "postcard encoding of PCZT recipient metadata should not fail",
+                            ),
+                        );
+                    }
+
+                    Ok(())
+                })?;
+            }
+            Ok(())
+        })?
+        .update_sapling_with(|mut updater| {
+            // If the account has a known derivation, add the Sapling key path to the PCZT.
+            if let Some(derivation) = account_derivation {
+                let non_dummy_spends = updater
+                    .bundle()
+                    .spends()
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, spend)| {
+                        // Dummy spends will already have a proof generation key.
+                        spend.proof_generation_key().is_none().then_some(index)
+                    })
+                    .collect::<Vec<_>>();
+
+                for index in non_dummy_spends {
+                    updater.update_spend_with(index, |mut spend_updater| {
+                        // All non-dummy spent notes are from the same account.
+                        spend_updater.set_zip32_derivation(
+                            sapling::pczt::Zip32Derivation::parse(
+                                derivation.seed_fingerprint().to_bytes(),
+                                vec![
+                                    zip32::ChildIndex::hardened(32).index(),
+                                    zip32::ChildIndex::hardened(params.network_type().coin_type())
+                                        .index(),
+                                    zip32::ChildIndex::hardened(u32::from(
+                                        derivation.account_index(),
+                                    ))
+                                    .index(),
+                                ],
+                            )
+                            .expect("valid"),
+                        );
+                        Ok(())
+                    })?;
+                }
+            }
+
+            for index in 0..updater.bundle().outputs().len() {
+                if let Some(pczt_recipient) = sapling_outputs.get(&index) {
+                    updater.update_output_with(index, |mut output_updater| {
+                        output_updater.set_proprietary(
+                            PROPRIETARY_OUTPUT_INFO.into(),
+                            postcard::to_allocvec(pczt_recipient).expect(
+                                "postcard encoding of PCZT recipient metadata should not fail",
+                            ),
+                        );
+                        Ok(())
+                    })?;
+                }
+            }
+
+            Ok(())
+        })?
+        .update_transparent_with(|mut updater| {
+            // If the account has a known derivation, add the transparent key paths to the PCZT.
+            if let Some(derivation) = account_derivation {
+                // Match address metadata to the inputs that spend from those addresses.
+                let inputs_to_update = updater
+                    .bundle()
+                    .inputs()
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, input)| {
+                        build_state
+                            .transparent_input_addresses
+                            .get(
+                                &input
+                                    .script_pubkey()
+                                    .address()
+                                    .expect("we created this with a supported transparent address"),
+                            )
+                            .map(|address_metadata| {
+                                (
+                                    index,
+                                    address_metadata.scope(),
+                                    address_metadata.address_index(),
+                                )
+                            })
+                    })
+                    .collect::<Vec<_>>();
+
+                for (index, scope, address_index) in inputs_to_update {
+                    updater.update_input_with(index, |mut input_updater| {
+                        let pubkey = ufvk
+                            .transparent()
+                            .expect("we derived this successfully in build_proposed_transaction")
+                            .derive_address_pubkey(scope, address_index)
+                            .expect("spending key derivation should not fail");
+
+                        input_updater.set_bip32_derivation(
+                            pubkey.serialize(),
+                            Bip32Derivation::parse(
+                                derivation.seed_fingerprint().to_bytes(),
+                                vec![
+                                    // Transparent uses BIP 44 derivation.
+                                    44 | ChildNumber::HARDENED_FLAG,
+                                    params.network_type().coin_type() | ChildNumber::HARDENED_FLAG,
+                                    u32::from(derivation.account_index())
+                                        | ChildNumber::HARDENED_FLAG,
+                                    ChildNumber::from(scope).into(),
+                                    ChildNumber::from(address_index).into(),
+                                ],
+                            )
+                            .expect("valid"),
+                        );
+                        Ok(())
+                    })?;
+                }
+            }
+
+            assert_eq!(
+                build_state.transparent_output_meta.len(),
+                updater.bundle().outputs().len(),
+            );
+            for (index, (recipient, _, _, _)) in
+                build_state.transparent_output_meta.into_iter().enumerate()
+            {
+                updater.update_output_with(index, |mut output_updater| {
+                    output_updater.set_proprietary(
+                        PROPRIETARY_OUTPUT_INFO.into(),
+                        postcard::to_allocvec(&PcztRecipient::from_recipient(recipient))
+                            .expect("postcard encoding of pczt recipient metadata should not fail"),
+                    );
+                    Ok(())
+                })?;
+            }
+
+            Ok(())
+        })?
+        .finish();
+
+    Ok(pczt)
+}
+
+/// Finalizes the given PCZT, and persists the transaction to the wallet database.
+///
+/// The PCZT should have been created via [`create_proposed_transaction_pczt`], which adds
+/// metadata necessary for the wallet backend.
+///
+/// Returns the transaction ID for the resulting transaction.
+#[cfg(feature = "pczt")]
+pub fn extract_and_store_transaction_from_pczt<DbT, N>(
+    wallet_db: &mut DbT,
+    pczt: pczt::Pczt,
+    spend_vk: &sapling::circuit::SpendVerifyingKey,
+    output_vk: &sapling::circuit::OutputVerifyingKey,
+    #[cfg(feature = "orchard")] orchard_vk: &orchard::circuit::VerifyingKey,
+) -> Result<TxId, ExtractErrT<DbT, N>>
+where
+    DbT: WalletWrite + WalletCommitmentTrees,
+    DbT::AccountId: serde::de::DeserializeOwned,
+{
+    use std::collections::BTreeMap;
+    use zcash_note_encryption::{Domain, ShieldedOutput, ENC_CIPHERTEXT_SIZE};
+
+    let finalized = SpendFinalizer::new(pczt).finalize_spends()?;
+
+    let proposal_info = finalized
+        .global()
+        .proprietary()
+        .get(PROPRIETARY_PROPOSAL_INFO)
+        .ok_or_else(|| PcztError::Invalid("PCZT missing proprietary proposal info field".into()))
+        .and_then(|v| {
+            postcard::from_bytes::<ProposalInfo<DbT::AccountId>>(v).map_err(|e| {
+                PcztError::Invalid(format!(
+                    "Postcard decoding of proprietary proposal info failed: {}",
+                    e
+                ))
+            })
+        })?;
+
+    let orchard_output_info = finalized
+        .orchard()
+        .actions()
+        .iter()
+        .map(|act| {
+            let note = || {
+                let recipient =
+                    act.output().recipient().as_ref().and_then(|b| {
+                        ::orchard::Address::from_raw_address_bytes(b).into_option()
+                    })?;
+                let value = act
+                    .output()
+                    .value()
+                    .map(orchard::value::NoteValue::from_raw)?;
+                let rho = orchard::note::Rho::from_bytes(act.spend().nullifier()).into_option()?;
+                let rseed = act.output().rseed().as_ref().and_then(|rseed| {
+                    orchard::note::RandomSeed::from_bytes(*rseed, &rho).into_option()
+                })?;
+
+                orchard::Note::from_parts(recipient, value, rho, rseed).into_option()
+            };
+
+            let pczt_recipient = act
+                .output()
+                .proprietary()
+                .get(PROPRIETARY_OUTPUT_INFO)
+                .map(|v| postcard::from_bytes::<PcztRecipient<DbT::AccountId>>(v))
+                .transpose()?;
+
+            // If the pczt recipient is not present, this is a dummy note; if the note is not
+            // present, then the PCZT has been pruned to make this output unrecoverable and so we
+            // also ignore it.
+            Ok(pczt_recipient.zip(note()))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e: postcard::Error| {
+            PcztError::Invalid(format!(
+                "Postcard decoding of proprietary output info failed: {}",
+                e
+            ))
+        })?;
+
+    let sapling_output_info = finalized
+        .sapling()
+        .outputs()
+        .iter()
+        .map(|out| {
+            let note = || {
+                let recipient = out
+                    .recipient()
+                    .as_ref()
+                    .and_then(::sapling::PaymentAddress::from_bytes)?;
+                let value = out.value().map(::sapling::value::NoteValue::from_raw)?;
+                let rseed = out
+                    .rseed()
+                    .as_ref()
+                    .cloned()
+                    .map(::sapling::note::Rseed::AfterZip212)?;
+
+                Some(::sapling::Note::from_parts(recipient, value, rseed))
+            };
+
+            let pczt_recipient = out
+                .proprietary()
+                .get(PROPRIETARY_OUTPUT_INFO)
+                .map(|v| postcard::from_bytes::<PcztRecipient<DbT::AccountId>>(v))
+                .transpose()?;
+
+            // If the pczt recipient is not present, this is a dummy note; if the note is not
+            // present, then the PCZT has been pruned to make this output unrecoverable and so we
+            // also ignore it.
+            Ok(pczt_recipient.zip(note()))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e: postcard::Error| {
+            PcztError::Invalid(format!(
+                "Postcard decoding of proprietary output info failed: {}",
+                e
+            ))
+        })?;
+
+    let transparent_output_info = finalized
+        .transparent()
+        .outputs()
+        .iter()
+        .map(|out| {
+            out.proprietary()
+                .get(PROPRIETARY_OUTPUT_INFO)
+                .map(|v| postcard::from_bytes::<PcztRecipient<DbT::AccountId>>(v))
+                .transpose()
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e: postcard::Error| {
+            PcztError::Invalid(format!(
+                "Postcard decoding of proprietary output info failed: {}",
+                e
+            ))
+        })?;
+
+    let utxos_map = finalized
+        .transparent()
+        .inputs()
+        .iter()
+        .map(|input| {
+            ZatBalance::from_u64(*input.value()).map(|value| {
+                (
+                    OutPoint::new(*input.prevout_txid(), *input.prevout_index()),
+                    value,
+                )
+            })
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+
+    let transaction = TransactionExtractor::new(finalized)
+        .with_sapling(spend_vk, output_vk)
+        .with_orchard(orchard_vk)
+        .extract()?;
+    let txid = transaction.txid();
+
+    #[allow(clippy::too_many_arguments)]
+    fn to_sent_transaction_output<
+        AccountId: Copy,
+        D: Domain,
+        O: ShieldedOutput<D, { ENC_CIPHERTEXT_SIZE }>,
+        DbT: WalletRead + WalletCommitmentTrees,
+        N,
+    >(
+        domain: D,
+        note: D::Note,
+        output: &O,
+        output_pool: ShieldedProtocol,
+        output_index: usize,
+        pczt_recipient: PcztRecipient<AccountId>,
+        note_value: impl Fn(&D::Note) -> u64,
+        memo_bytes: impl Fn(&D::Memo) -> &[u8; 512],
+        wallet_note: impl Fn(D::Note) -> Note,
+    ) -> Result<SentTransactionOutput<AccountId>, ExtractErrT<DbT, N>> {
+        let pk_d = D::get_pk_d(&note);
+        let esk = D::derive_esk(&note).expect("notes are post-ZIP 212");
+        let memo = try_output_recovery_with_pkd_esk(&domain, pk_d, esk, output).map(|(_, _, m)| {
+            MemoBytes::from_bytes(memo_bytes(&m)).expect("Memo is the correct length.")
+        });
+
+        let note_value = NonNegativeAmount::try_from(note_value(&note))?;
+        let recipient = match pczt_recipient {
+            PcztRecipient::External(addr) => {
+                Ok(Recipient::External(addr, PoolType::Shielded(output_pool)))
+            }
+            PcztRecipient::EphemeralTransparent { .. } => Err(PcztError::Invalid(
+                "shielded output cannot be EphemeralTransparent".into(),
+            )),
+            PcztRecipient::InternalAccount {
+                receiving_account,
+                external_address,
+            } => Ok(Recipient::InternalAccount {
+                receiving_account,
+                external_address,
+                note: wallet_note(note),
+            }),
+        }?;
+
+        Ok(SentTransactionOutput::from_parts(
+            output_index,
+            recipient,
+            note_value,
+            memo,
+        ))
+    }
+
+    #[cfg(feature = "orchard")]
+    let orchard_outputs = transaction
+        .orchard_bundle()
+        .map(|bundle| {
+            assert_eq!(bundle.actions().len(), orchard_output_info.len());
+            bundle
+                .actions()
+                .iter()
+                .zip(orchard_output_info)
+                .enumerate()
+                .filter_map(|(output_index, (action, output_info))| {
+                    output_info.map(|(pczt_recipient, note)| {
+                        let domain = OrchardDomain::for_action(action);
+                        to_sent_transaction_output::<_, _, _, DbT, _>(
+                            domain,
+                            note,
+                            action,
+                            ShieldedProtocol::Orchard,
+                            output_index,
+                            pczt_recipient,
+                            |note| note.value().inner(),
+                            |memo| memo,
+                            Note::Orchard,
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
+
+    let sapling_outputs = transaction
+        .sapling_bundle()
+        .map(|bundle| {
+            assert_eq!(bundle.shielded_outputs().len(), sapling_output_info.len());
+            bundle
+                .shielded_outputs()
+                .iter()
+                .zip(sapling_output_info)
+                .enumerate()
+                .filter_map(|(output_index, (action, output_info))| {
+                    output_info.map(|(pczt_recipient, note)| {
+                        let domain =
+                            SaplingDomain::new(sapling::note_encryption::Zip212Enforcement::On);
+                        to_sent_transaction_output::<_, _, _, DbT, _>(
+                            domain,
+                            note,
+                            action,
+                            ShieldedProtocol::Sapling,
+                            output_index,
+                            pczt_recipient,
+                            |note| note.value().inner(),
+                            |memo| memo,
+                            Note::Sapling,
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
+
+    #[allow(unused_variables)]
+    let transparent_outputs = transaction
+        .transparent_bundle()
+        .map(|bundle| {
+            assert_eq!(bundle.vout.len(), transparent_output_info.len());
+            bundle
+                .vout
+                .iter()
+                .zip(transparent_output_info)
+                .enumerate()
+                .filter_map(|(output_index, (output, output_info))| {
+                    output_info.map(|pczt_recipient| {
+                        // This assumes that transparent outputs are pushed onto `transparent_output_meta`
+                        // with the same indices they have in the transaction's transparent outputs.
+                        // We do not reorder transparent outputs; there is no reason to do so because it
+                        // would not usefully improve privacy.
+                        let outpoint = OutPoint::new(txid.into(), output_index as u32);
+
+                        let recipient = match pczt_recipient {
+                            PcztRecipient::External(addr) => {
+                                Ok(Recipient::External(addr, PoolType::Transparent))
+                            }
+                            PcztRecipient::EphemeralTransparent { receiving_account } => output
+                                .recipient_address()
+                                .ok_or(PcztError::Invalid(
+                                    "Ephemeral outputs cannot have a non-standard script_pubkey"
+                                        .into(),
+                                ))
+                                .map(|ephemeral_address| Recipient::EphemeralTransparent {
+                                    receiving_account,
+                                    ephemeral_address,
+                                    outpoint_metadata: outpoint,
+                                }),
+                            PcztRecipient::InternalAccount {
+                                receiving_account,
+                                external_address,
+                            } => Err(PcztError::Invalid(
+                                "Transparent output cannot be InternalAccount".into(),
+                            )),
+                        }?;
+
+                        Ok(SentTransactionOutput::from_parts(
+                            output_index,
+                            recipient,
+                            output.value,
+                            None,
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, ExtractErrT<DbT, _>>>()
+        })
+        .transpose()?;
+
+    let mut outputs: Vec<SentTransactionOutput<_>> = vec![];
+    #[cfg(feature = "orchard")]
+    outputs.extend(orchard_outputs.into_iter().flatten());
+    outputs.extend(sapling_outputs.into_iter().flatten());
+    outputs.extend(transparent_outputs.into_iter().flatten());
+
+    let fee_amount = NonNegativeAmount::try_from(transaction.fee_paid(|outpoint| {
+        utxos_map
+            .get(outpoint)
+            .copied()
+            // Error doesn't matter, this can never happen because we constructed the
+            // UTXOs map and the transaction from the same PCZT.
+            .ok_or(BalanceError::Overflow)
+    })?)?;
+
+    // We don't need the spent UTXOs to be in transaction order.
+    let utxos_spent = utxos_map.into_keys().collect::<Vec<_>>();
+
+    let created = time::OffsetDateTime::now_utc();
+
+    let transactions = vec![SentTransaction::new(
+        &transaction,
+        created,
+        BlockHeight::from_u32(proposal_info.target_height),
+        proposal_info.from_account,
+        &outputs,
+        fee_amount,
+        #[cfg(feature = "transparent-inputs")]
+        &utxos_spent,
+    )];
+
+    wallet_db
+        .store_transactions_to_be_sent(&transactions)
+        .map_err(Error::DataSource)?;
+
+    Ok(txid)
 }
 
 /// Constructs a transaction that consumes available transparent UTXOs belonging to the specified

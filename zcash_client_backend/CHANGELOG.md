@@ -8,20 +8,29 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
-- `zcash_client_backend::data_api::AccountSource::key_derivation`
+- `zcash_client_backend::data_api`
+  - `AccountSource::key_derivation`
+  - `error::PcztError`
+  - `wallet::ExtractErrT`
+  - `wallet::create_proposed_transaction_pczt`
+  - `wallet::extract_and_store_transaction_from_pczt`
 
 ### Changed
-- `zcash_client_backend::data_api::WalletRead`:
-  - The `create_account`, `import_account_hd`, and `import_account_ufvk`
+- `zcash_client_backend::data_api`
+  - `WalletRead::{create_account, import_account_hd, import_account_ufvk}`
     methods now each take additional `account_name` and `key_source` arguments.
     These allow the wallet backend to store additional metadata that is useful
     to applications managing these accounts.
-- `zcash_client_backend::data_api::AccountSource`:
-  - Both the `Derived` and `Importants` now have an additional `key_source`
-    property that is used to convey application-specific key source metadata.
-  - The `Copy` impl for this type has been removed.
-- `zcash_client_backend::data_api::Account` has an additional `name` method
-  that returns the human-readable name of the account, if any.
+  - `AccountSource`:
+    - Both the `Derived` and `Importants` now have an additional `key_source`
+      property that is used to convey application-specific key source metadata.
+    - The `Copy` impl for this type has been removed.
+  - `Account` has an additional `name` method that returns the human-readable
+    name of the account, if any.
+  - `error::Error` has new variants:
+    - `AccountIdNotRecognized`
+    - `AccountCannotSpend`
+    - `Pczt`
 
 ## [0.15.0] - 2024-11-14
 

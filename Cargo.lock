@@ -6176,7 +6176,9 @@ dependencies = [
  "nonempty",
  "orchard",
  "pasta_curves",
+ "pczt",
  "percent-encoding",
+ "postcard",
  "proptest",
  "prost",
  "rand",
@@ -6326,9 +6328,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_note_encryption"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b4580cd6cee12e44421dac43169be8d23791650816bdb34e6ddfa70ac89c1c5"
+checksum = "77efec759c3798b6e4d829fcc762070d9b229b0f13338c40bf993b7b609c2272"
 dependencies = [
  "chacha20",
  "chacha20poly1305",

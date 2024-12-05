@@ -8,6 +8,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
+- `zcash_primitives::legacy::Script::address`
 - `zcash_primitives::transaction`
   - `TransactionData::try_map_bundles`
   - `builder::{PcztResult, PcztParts}`

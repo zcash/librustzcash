@@ -329,7 +329,7 @@ impl Script {
     }
 
     /// Returns the address that this Script contains, if any.
-    pub(crate) fn address(&self) -> Option<TransparentAddress> {
+    pub fn address(&self) -> Option<TransparentAddress> {
         if self.0.len() == 25
             && self.0[0..3] == [OpCode::Dup as u8, OpCode::Hash160 as u8, 0x14]
             && self.0[23..25] == [OpCode::EqualVerify as u8, OpCode::CheckSig as u8]
