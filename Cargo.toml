@@ -40,9 +40,11 @@ zcash_keys = { version = "0.5", path = "zcash_keys" }
 zcash_protocol = { version = "0.4.1", path = "components/zcash_protocol" }
 zip321 = { version = "0.2", path = "components/zip321" }
 
-zcash_note_encryption = "0.4"
+zcash_note_encryption = "0.4.1"
 zcash_primitives = { version = "0.20", path = "zcash_primitives", default-features = false }
 zcash_proofs = { version = "0.20", path = "zcash_proofs", default-features = false }
+
+pczt = { version = "0.0", path = "pczt" }
 
 # Shielded protocols
 bellman = { version = "0.14", default-features = false, features = ["groth16"] }
@@ -95,6 +97,7 @@ bs58 = { version = "0.5", features = ["check"] }
 byteorder = "1"
 hex = "0.4"
 percent-encoding = "2.1.0"
+postcard = { version = "1", features = ["alloc"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

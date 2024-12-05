@@ -1092,6 +1092,64 @@ where
         )
     }
 
+    /// Invokes [`create_proposed_transaction_pczt`] with the given arguments.
+    ///
+    /// [`create_proposed_transaction_pczt`]: super::wallet::create_proposed_transaction_pczt
+    #[cfg(feature = "pczt")]
+    #[allow(clippy::type_complexity)]
+    pub fn create_proposed_transaction_pczt<InputsErrT, FeeRuleT, ChangeErrT>(
+        &mut self,
+        spend_from_account: <DbT as InputSource>::AccountId,
+        ovk_policy: OvkPolicy,
+        proposal: &Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
+    ) -> Result<
+        pczt::Pczt,
+        super::wallet::CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, DbT::NoteRef>,
+    >
+    where
+        <DbT as WalletRead>::AccountId: serde::Serialize,
+        FeeRuleT: FeeRule,
+    {
+        use super::wallet::create_proposed_transaction_pczt;
+
+        let network = self.network().clone();
+
+        create_proposed_transaction_pczt(
+            self.wallet_mut(),
+            &network,
+            spend_from_account,
+            ovk_policy,
+            proposal,
+        )
+    }
+
+    /// Invokes [`extract_and_store_transaction_from_pczt`] with the given arguments.
+    ///
+    /// [`extract_and_store_transaction_from_pczt`]: super::wallet::extract_and_store_transaction_from_pczt
+    #[cfg(feature = "pczt")]
+    #[allow(clippy::type_complexity)]
+    pub fn extract_and_store_transaction_from_pczt(
+        &mut self,
+        pczt: pczt::Pczt,
+    ) -> Result<TxId, super::wallet::ExtractErrT<DbT, DbT::NoteRef>>
+    where
+        <DbT as WalletRead>::AccountId: serde::de::DeserializeOwned,
+    {
+        use super::wallet::extract_and_store_transaction_from_pczt;
+
+        let prover = LocalTxProver::bundled();
+        let (spend_vk, output_vk) = prover.verifying_keys();
+        let orchard_vk = ::orchard::circuit::VerifyingKey::build();
+
+        extract_and_store_transaction_from_pczt(
+            self.wallet_mut(),
+            pczt,
+            &spend_vk,
+            &output_vk,
+            &orchard_vk,
+        )
+    }
+
     /// Invokes [`shield_transparent_funds`] with the given arguments.
     ///
     /// [`shield_transparent_funds`]: crate::data_api::wallet::shield_transparent_funds

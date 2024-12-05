@@ -74,7 +74,6 @@ use zcash_client_backend::data_api::{
     AccountPurpose, DecryptedTransaction, Progress, TransactionDataRequest, TransactionStatus,
     Zip32Derivation,
 };
-
 use zip32::fingerprint::SeedFingerprint;
 
 use std::collections::{HashMap, HashSet};
