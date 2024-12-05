@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::AccountSource::key_derivation`
+
 ### Changed
 - `zcash_client_backend::data_api::WalletRead`:
   - The `create_account`, `import_account_hd`, and `import_account_ufvk`

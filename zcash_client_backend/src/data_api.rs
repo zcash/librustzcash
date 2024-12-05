@@ -385,6 +385,28 @@ pub enum AccountSource {
     },
 }
 
+impl AccountSource {
+    /// Returns the key derivation metadata for the account source, if any is available.
+    pub fn key_derivation(&self) -> Option<&Zip32Derivation> {
+        match self {
+            AccountSource::Derived { derivation, .. } => Some(derivation),
+            AccountSource::Imported {
+                purpose: AccountPurpose::Spending { derivation },
+                ..
+            } => derivation.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Returns the application-level key source identifier.
+    pub fn key_source(&self) -> Option<&str> {
+        match self {
+            AccountSource::Derived { key_source, .. } => key_source.as_ref().map(|s| s.as_str()),
+            AccountSource::Imported { key_source, .. } => key_source.as_ref().map(|s| s.as_str()),
+        }
+    }
+}
+
 /// A set of capabilities that a client account must provide.
 pub trait Account {
     type AccountId: Copy;
