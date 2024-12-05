@@ -19,7 +19,8 @@ use zcash_primitives::{
 use zcash_protocol::local_consensus::LocalNetwork;
 
 use super::TestAccount;
-/// checks whether the transparent balance of the given test [`account`] is as [`expected`]
+
+/// Checks whether the transparent balance of the given test [`account`] is as [`expected`]
 /// considering the [`min_confirmations`]. It is assumed that zero or one [`min_confirmations`]
 /// are treated the same so this function also checks the other case when 1 or 0 [`min_confirmations`]
 /// are passed as arguments.
