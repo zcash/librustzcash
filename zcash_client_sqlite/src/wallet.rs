@@ -72,7 +72,9 @@ use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use uuid::Uuid;
 use zcash_client_backend::data_api::{
     AccountPurpose, DecryptedTransaction, Progress, TransactionDataRequest, TransactionStatus,
+    Zip32Derivation,
 };
+
 use zip32::fingerprint::SeedFingerprint;
 
 use std::collections::{HashMap, HashSet};
@@ -150,28 +152,36 @@ fn parse_account_source(
     spending_key_available: bool,
     key_source: Option<String>,
 ) -> Result<AccountSource, SqliteClientError> {
-    match (account_kind, hd_seed_fingerprint, hd_account_index) {
-        (0, Some(seed_fp), Some(account_index)) => Ok(AccountSource::Derived {
-            seed_fingerprint: SeedFingerprint::from_bytes(seed_fp),
-            account_index: zip32::AccountId::try_from(account_index).map_err(|_| {
-                SqliteClientError::CorruptedData(
-                    "ZIP-32 account ID from wallet DB is out of range.".to_string(),
-                )
-            })?,
+    let derivation = hd_seed_fingerprint
+        .zip(hd_account_index)
+        .map(|(seed_fp, idx)| {
+            zip32::AccountId::try_from(idx)
+                .map_err(|_| {
+                    SqliteClientError::CorruptedData(
+                        "ZIP-32 account ID from wallet DB is out of range.".to_string(),
+                    )
+                })
+                .map(|idx| Zip32Derivation::new(SeedFingerprint::from_bytes(seed_fp), idx))
+        })
+        .transpose()?;
+
+    match (account_kind, derivation) {
+        (0, Some(derivation)) => Ok(AccountSource::Derived {
+            derivation,
             key_source,
         }),
-        (1, None, None) => Ok(AccountSource::Imported {
+        (1, derivation) => Ok(AccountSource::Imported {
             purpose: if spending_key_available {
-                AccountPurpose::Spending
+                AccountPurpose::Spending { derivation }
             } else {
                 AccountPurpose::ViewOnly
             },
             key_source,
         }),
-        (0, None, None) | (1, Some(_), Some(_)) => Err(SqliteClientError::CorruptedData(
+        (0, None) => Err(SqliteClientError::CorruptedData(
             "Wallet DB account_kind constraint violated".to_string(),
         )),
-        (_, _, _) => Err(SqliteClientError::CorruptedData(
+        (_, _) => Err(SqliteClientError::CorruptedData(
             "Unrecognized account_kind".to_string(),
         )),
     }
@@ -378,21 +388,19 @@ pub(crate) fn add_account<P: consensus::Parameters>(
 
     let account_uuid = AccountUuid(Uuid::new_v4());
 
-    let (hd_seed_fingerprint, hd_account_index, spending_key_available, key_source) = match kind {
+    let (derivation, spending_key_available, key_source) = match kind {
         AccountSource::Derived {
-            seed_fingerprint,
-            account_index,
+            derivation,
             key_source,
-        } => (
-            Some(seed_fingerprint),
-            Some(account_index),
-            true,
-            key_source,
-        ),
+        } => (Some(derivation), true, key_source),
         AccountSource::Imported {
-            purpose,
+            purpose: AccountPurpose::Spending { derivation },
             key_source,
-        } => (None, None, *purpose == AccountPurpose::Spending, key_source),
+        } => (derivation.as_ref(), true, key_source),
+        AccountSource::Imported {
+            purpose: AccountPurpose::ViewOnly,
+            key_source,
+        } => (None, false, key_source),
     };
 
     #[cfg(feature = "orchard")]
@@ -449,8 +457,8 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ":account_name": account_name,
                 ":uuid": account_uuid.0,
                 ":account_kind": account_kind_code(kind),
-                ":hd_seed_fingerprint": hd_seed_fingerprint.as_ref().map(|fp| fp.to_bytes()),
-                ":hd_account_index": hd_account_index.map(|i| u32::from(*i)),
+                ":hd_seed_fingerprint": derivation.map(|d| d.seed_fingerprint().to_bytes()),
+                ":hd_account_index": derivation.map(|d| u32::from(d.account_index())),
                 ":key_source": key_source,
                 ":ufvk": ufvk_encoded,
                 ":uivk": viewing_key.uivk().encode(params),
@@ -832,8 +840,7 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
                 name: account_name,
                 uuid: account_uuid,
                 kind: AccountSource::Derived {
-                    seed_fingerprint: *seed_fp,
-                    account_index,
+                    derivation: Zip32Derivation::new(*seed_fp, account_index),
                     key_source,
                 },
                 viewing_key: ViewingKey::Full(Box::new(ufvk)),
@@ -3761,7 +3768,7 @@ mod tests {
         let expected_account_index = zip32::AccountId::try_from(0).unwrap();
         assert_matches!(
             account_parameters.kind,
-            AccountSource::Derived{account_index, ..} if account_index == expected_account_index
+            AccountSource::Derived{derivation, ..} if derivation.account_index() == expected_account_index
         );
     }
 

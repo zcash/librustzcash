@@ -54,7 +54,7 @@ use zcash_client_backend::{
         Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, BlockMetadata,
         DecryptedTransaction, InputSource, NoteFilter, NullifierQuery, ScannedBlock, SeedRelevance,
         SentTransaction, SpendableNotes, TransactionDataRequest, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        WalletSummary, WalletWrite, Zip32Derivation, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -442,17 +442,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error> {
         if let Some(account) = self.get_account(account_id)? {
-            if let AccountSource::Derived {
-                seed_fingerprint,
-                account_index,
-                ..
-            } = account.source()
-            {
+            if let AccountSource::Derived { derivation, .. } = account.source() {
                 wallet::seed_matches_derived_account(
                     &self.params,
                     seed,
-                    seed_fingerprint,
-                    *account_index,
+                    derivation.seed_fingerprint(),
+                    derivation.account_index(),
                     &account.uivk(),
                 )
             } else {
@@ -480,19 +475,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
             // way we could determine that is by brute-forcing the ZIP 32 account
             // index space, which we're not going to do. The method name indicates to
             // the caller that we only check derived accounts.
-            if let AccountSource::Derived {
-                seed_fingerprint,
-                account_index,
-                ..
-            } = account.source()
-            {
+            if let AccountSource::Derived { derivation, .. } = account.source() {
                 has_derived = true;
 
                 if wallet::seed_matches_derived_account(
                     &self.params,
                     seed,
-                    seed_fingerprint,
-                    *account_index,
+                    derivation.seed_fingerprint(),
+                    derivation.account_index(),
                     &account.uivk(),
                 )? {
                     // The seed is relevant to this account.
@@ -873,8 +863,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 &wdb.params,
                 account_name,
                 &AccountSource::Derived {
-                    seed_fingerprint,
-                    account_index: zip32_account_index,
+                    derivation: Zip32Derivation::new(seed_fingerprint, zip32_account_index),
                     key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
@@ -911,8 +900,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 &wdb.params,
                 account_name,
                 &AccountSource::Derived {
-                    seed_fingerprint,
-                    account_index,
+                    derivation: Zip32Derivation::new(seed_fingerprint, account_index),
                     key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
@@ -2023,7 +2011,7 @@ mod tests {
             .build();
         assert_matches!(
             st.test_account().unwrap().account().source(),
-            AccountSource::Derived { account_index, .. } if *account_index == zip32::AccountId::ZERO);
+            AccountSource::Derived { derivation, .. } if derivation.account_index() == zip32::AccountId::ZERO);
     }
 
     #[test]
@@ -2046,7 +2034,7 @@ mod tests {
             .unwrap();
         assert_matches!(
             first.0.source(),
-            AccountSource::Derived { account_index, .. } if *account_index == zip32_index_1);
+            AccountSource::Derived { derivation, .. } if derivation.account_index() == zip32_index_1);
 
         let zip32_index_2 = zip32_index_1.next().unwrap();
         let second = st
@@ -2055,7 +2043,7 @@ mod tests {
             .unwrap();
         assert_matches!(
             second.0.source(),
-            AccountSource::Derived { account_index, .. } if *account_index == zip32_index_2);
+            AccountSource::Derived { derivation, .. } if derivation.account_index() == zip32_index_2);
     }
 
     fn check_collisions<C, DbT: WalletTest + WalletWrite, P: consensus::Parameters>(
@@ -2068,7 +2056,7 @@ mod tests {
     {
         assert_matches!(
             st.wallet_mut()
-                .import_account_ufvk("", ufvk, birthday, AccountPurpose::Spending, None),
+                .import_account_ufvk("", ufvk, birthday, AccountPurpose::Spending { derivation: None }, None),
             Err(e) if is_account_collision(&e)
         );
 
@@ -2089,7 +2077,7 @@ mod tests {
                     "",
                     &subset_ufvk,
                     birthday,
-                    AccountPurpose::Spending,
+                    AccountPurpose::Spending { derivation: None },
                     None,
                 ),
                 Err(e) if is_account_collision(&e)
@@ -2113,7 +2101,7 @@ mod tests {
                     "",
                     &subset_ufvk,
                     birthday,
-                    AccountPurpose::Spending,
+                    AccountPurpose::Spending { derivation: None },
                     None,
                 ),
                 Err(e) if is_account_collision(&e)
@@ -2172,7 +2160,13 @@ mod tests {
 
         let account = st
             .wallet_mut()
-            .import_account_ufvk("", &ufvk, &birthday, AccountPurpose::Spending, None)
+            .import_account_ufvk(
+                "",
+                &ufvk,
+                &birthday,
+                AccountPurpose::Spending { derivation: None },
+                None,
+            )
             .unwrap();
         assert_eq!(
             ufvk.encode(st.network()),
@@ -2182,7 +2176,7 @@ mod tests {
         assert_matches!(
             account.source(),
             AccountSource::Imported {
-                purpose: AccountPurpose::Spending,
+                purpose: AccountPurpose::Spending { .. },
                 ..
             }
         );

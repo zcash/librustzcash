@@ -331,13 +331,40 @@ impl AccountBalance {
     }
 }
 
+/// Source metadata for a ZIP 32-derived key.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Zip32Derivation {
+    seed_fingerprint: SeedFingerprint,
+    account_index: zip32::AccountId,
+}
+
+impl Zip32Derivation {
+    /// Constructs new derivation metadata from its constituent parts.
+    pub fn new(seed_fingerprint: SeedFingerprint, account_index: zip32::AccountId) -> Self {
+        Self {
+            seed_fingerprint,
+            account_index,
+        }
+    }
+
+    /// Returns the seed fingerprint.
+    pub fn seed_fingerprint(&self) -> &SeedFingerprint {
+        &self.seed_fingerprint
+    }
+
+    /// Returns the account-level index in the ZIP 32 derivation path.
+    pub fn account_index(&self) -> zip32::AccountId {
+        self.account_index
+    }
+}
+
 /// An enumeration used to control what information is tracked by the wallet for
 /// notes received by a given account.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum AccountPurpose {
     /// For spending accounts, the wallet will track information needed to spend
     /// received notes.
-    Spending,
+    Spending { derivation: Option<Zip32Derivation> },
     /// For view-only accounts, the wallet will not track spend information.
     ViewOnly,
 }
@@ -347,8 +374,7 @@ pub enum AccountPurpose {
 pub enum AccountSource {
     /// An account derived from a known seed.
     Derived {
-        seed_fingerprint: SeedFingerprint,
-        account_index: zip32::AccountId,
+        derivation: Zip32Derivation,
         key_source: Option<String>,
     },
 
@@ -376,8 +402,10 @@ pub trait Account {
     /// Returns whether the account is a spending account or a view-only account.
     fn purpose(&self) -> AccountPurpose {
         match self.source() {
-            AccountSource::Derived { .. } => AccountPurpose::Spending,
-            AccountSource::Imported { purpose, .. } => *purpose,
+            AccountSource::Derived { derivation, .. } => AccountPurpose::Spending {
+                derivation: Some(derivation.clone()),
+            },
+            AccountSource::Imported { purpose, .. } => purpose.clone(),
         }
     }
 
