@@ -79,11 +79,9 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     /// Attempted to create a spend to an unsupported Unified Address receiver
     NoSupportedReceivers(Box<UnifiedAddress>),
 
-    /// A proposed transaction cannot be built because it requires spending an input
-    /// for which no spending key is available.
-    ///
-    /// The argument is the address of the note or UTXO being spent.
-    NoSpendingKey(String),
+    /// A proposed transaction cannot be built because it requires spending an input of a type for
+    /// which a key that is required to construct the transaciton is not available.
+    KeyNotAvailable(PoolType),
 
     /// A note being spent does not correspond to either the internal or external
     /// full viewing key for an account.
@@ -170,7 +168,7 @@ where
                     acc
                 })
             ),
-            Error::NoSpendingKey(addr) => write!(f, "No spending key available for address: {}", addr),
+            Error::KeyNotAvailable(pool) => write!(f, "A key required for transaction construction was not available for pool type {}", pool),
             Error::NoteMismatch(n) => write!(f, "A note being spent ({:?}) does not correspond to either the internal or external full viewing key for the provided spending key.", n),
 
             Error::Address(e) => {
