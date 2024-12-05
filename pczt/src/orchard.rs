@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 #[cfg(feature = "orchard")]
 use ff::PrimeField;
+use getset::Getters;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -11,12 +12,13 @@ use crate::{
 };
 
 /// PCZT fields that are specific to producing the transaction's Orchard bundle (if any).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct Bundle {
+#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+pub struct Bundle {
     /// The Orchard actions in this bundle.
     ///
     /// Entries are added by the Constructor, and modified by an Updater, IO Finalizer,
     /// Signer, Combiner, or Spend Finalizer.
+    #[getset(get = "pub")]
     pub(crate) actions: Vec<Action>,
 
     /// The flags for the Orchard bundle.
@@ -54,8 +56,8 @@ pub(crate) struct Bundle {
     pub(crate) bsk: Option<[u8; 32]>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct Action {
+#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+pub struct Action {
     //
     // Action effecting data.
     //
@@ -63,7 +65,9 @@ pub(crate) struct Action {
     // by the Constructor when adding an output.
     //
     pub(crate) cv_net: [u8; 32],
+    #[getset(get = "pub")]
     pub(crate) spend: Spend,
+    #[getset(get = "pub")]
     pub(crate) output: Output,
 
     /// The value commitment randomness.
@@ -80,14 +84,15 @@ pub(crate) struct Action {
 
 /// Information about a Sapling spend within a transaction.
 #[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct Spend {
+#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+pub struct Spend {
     //
     // Spend-specific Action effecting data.
     //
     // These are required fields that are part of the final transaction, and are filled in
     // by the Constructor when adding a spend.
     //
+    #[getset(get = "pub")]
     pub(crate) nullifier: [u8; 32],
     pub(crate) rk: [u8; 32],
 
@@ -161,13 +166,14 @@ pub(crate) struct Spend {
     pub(crate) dummy_sk: Option<[u8; 32]>,
 
     /// Proprietary fields related to the note being spent.
+    #[getset(get = "pub")]
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
 /// Information about an Orchard output within a transaction.
 #[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct Output {
+#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+pub struct Output {
     //
     // Output-specific Action effecting data.
     //
@@ -195,6 +201,7 @@ pub(crate) struct Output {
     ///
     /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#orchardpaymentaddrencoding
     #[serde_as(as = "Option<[_; 43]>")]
+    #[getset(get = "pub")]
     pub(crate) recipient: Option<[u8; 43]>,
 
     /// The value of the output.
@@ -204,12 +211,14 @@ pub(crate) struct Output {
     ///
     /// This exposes the value to all participants. For Signers who don't need this
     /// information, we can drop the values and compress the rcvs into the bsk global.
+    #[getset(get = "pub")]
     pub(crate) value: Option<u64>,
 
     /// The seed randomness for the output.
     ///
     /// - This is set by the Constructor.
     /// - This is required by the Prover, instead of disclosing `shared_secret` to them.
+    #[getset(get = "pub")]
     pub(crate) rseed: Option<[u8; 32]>,
 
     /// The `ock` value used to encrypt `out_ciphertext`.
@@ -224,6 +233,7 @@ pub(crate) struct Output {
     pub(crate) zip32_derivation: Option<Zip32Derivation>,
 
     /// Proprietary fields related to the note being created.
+    #[getset(get = "pub")]
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 

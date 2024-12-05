@@ -5,6 +5,7 @@ use crate::{
     roles::combiner::{merge_map, merge_optional},
 };
 
+use getset::Getters;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -13,22 +14,26 @@ use zcash_primitives::transaction::components::transparent;
 
 /// PCZT fields that are specific to producing the transaction's transparent bundle (if
 /// any).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct Bundle {
+#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+pub struct Bundle {
+    #[getset(get = "pub")]
     pub(crate) inputs: Vec<Input>,
+    #[getset(get = "pub")]
     pub(crate) outputs: Vec<Output>,
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct Input {
+#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+pub struct Input {
     //
     // Transparent effecting data.
     //
     // These are required fields that are part of the final transaction, and are filled in
     // by the Constructor when adding an output.
     //
+    #[getset(get = "pub")]
     pub(crate) prevout_txid: [u8; 32],
+    #[getset(get = "pub")]
     pub(crate) prevout_index: u32,
 
     /// The sequence number of this input.
@@ -59,6 +64,7 @@ pub(crate) struct Input {
 
     // These are required by the Transaction Extractor, to derive the shielded sighash
     // needed for computing the binding signatures.
+    #[getset(get = "pub")]
     pub(crate) value: u64,
     pub(crate) script_pubkey: Vec<u8>,
 
@@ -120,12 +126,13 @@ pub(crate) struct Input {
     pub(crate) hash256_preimages: BTreeMap<[u8; 32], Vec<u8>>,
 
     /// Proprietary fields related to the note being spent.
+    #[getset(get = "pub")]
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct Output {
+#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+pub struct Output {
     //
     // Transparent effecting data.
     //
@@ -152,6 +159,7 @@ pub(crate) struct Output {
     pub(crate) bip32_derivation: BTreeMap<[u8; 33], Zip32Derivation>,
 
     /// Proprietary fields related to the note being spent.
+    #[getset(get = "pub")]
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 

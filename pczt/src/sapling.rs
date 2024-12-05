@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
+use getset::Getters;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -12,9 +13,11 @@ use crate::{
 const GROTH_PROOF_SIZE: usize = 48 + 96 + 48;
 
 /// PCZT fields that are specific to producing the transaction's Sapling bundle (if any).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct Bundle {
+#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+pub struct Bundle {
+    #[getset(get = "pub")]
     pub(crate) spends: Vec<Spend>,
+    #[getset(get = "pub")]
     pub(crate) outputs: Vec<Output>,
 
     /// The net value of Sapling spends minus outputs.
@@ -38,8 +41,8 @@ pub(crate) struct Bundle {
 
 /// Information about a Sapling spend within a transaction.
 #[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct Spend {
+#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+pub struct Spend {
     //
     // SpendDescription effecting data.
     //
@@ -142,13 +145,14 @@ pub(crate) struct Spend {
     pub(crate) dummy_ask: Option<[u8; 32]>,
 
     /// Proprietary fields related to the note being spent.
+    #[getset(get = "pub")]
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
 /// Information about a Sapling output within a transaction.
 #[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct Output {
+#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+pub struct Output {
     //
     // OutputDescription effecting data.
     //
@@ -185,6 +189,7 @@ pub(crate) struct Output {
     ///
     /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#saplingpaymentaddrencoding
     #[serde_as(as = "Option<[_; 43]>")]
+    #[getset(get = "pub")]
     pub(crate) recipient: Option<[u8; 43]>,
 
     /// The value of the output.
@@ -194,12 +199,14 @@ pub(crate) struct Output {
     ///
     /// This exposes the output value to all participants. For Signers who don't need this
     /// information, or after signatures have been applied, this can be redacted.
+    #[getset(get = "pub")]
     pub(crate) value: Option<u64>,
 
     /// The seed randomness for the output.
     ///
     /// - This is set by the Constructor.
     /// - This is required by the Prover, instead of disclosing `shared_secret` to them.
+    #[getset(get = "pub")]
     pub(crate) rseed: Option<[u8; 32]>,
 
     /// The value commitment randomness.
@@ -225,6 +232,7 @@ pub(crate) struct Output {
     pub(crate) zip32_derivation: Option<Zip32Derivation>,
 
     /// Proprietary fields related to the note being spent.
+    #[getset(get = "pub")]
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 

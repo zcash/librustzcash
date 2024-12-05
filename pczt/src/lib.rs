@@ -41,14 +41,15 @@
 //! - Transaction Extractor (anyone can execute)
 //!   - Creates bindingSig and extracts the final transaction.
 
+use getset::Getters;
 use serde::{Deserialize, Serialize};
 
 pub mod roles;
 
-mod common;
-mod orchard;
-mod sapling;
-mod transparent;
+pub mod common;
+pub mod orchard;
+pub mod sapling;
+pub mod transparent;
 
 const MAGIC_BYTES: &[u8] = b"PCZT";
 const PCZT_VERSION_1: u32 = 1;
@@ -59,9 +60,10 @@ const V5_TX_VERSION: u32 = 5;
 const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
 
 /// A partially-created Zcash transaction.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
 pub struct Pczt {
     /// Global fields that are relevant to the transaction as a whole.
+    #[getset(get = "pub")]
     global: common::Global,
 
     //
@@ -72,8 +74,11 @@ pub struct Pczt {
     // and there may be phases where we need to store protocol-specific metadata before
     // it has been determined whether there are protocol-specific inputs or outputs.
     //
+    #[getset(get = "pub")]
     transparent: transparent::Bundle,
+    #[getset(get = "pub")]
     sapling: sapling::Bundle,
+    #[getset(get = "pub")]
     orchard: orchard::Bundle,
 }
 

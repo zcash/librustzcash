@@ -2937,6 +2937,7 @@ dependencies = [
  "blake2b_simd",
  "bls12_381",
  "ff",
+ "getset",
  "incrementalmerkletree",
  "jubjub",
  "nonempty",

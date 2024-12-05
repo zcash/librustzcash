@@ -39,6 +39,9 @@ nonempty = { workspace = true, optional = true }
 orchard = { workspace = true, optional = true }
 pasta_curves = { workspace = true, optional = true }
 
+# - Bolierplate
+getset = "0.1"
+
 [dev-dependencies]
 incrementalmerkletree.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }

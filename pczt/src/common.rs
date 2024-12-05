@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use getset::Getters;
 use serde::{Deserialize, Serialize};
 
 use crate::roles::combiner::merge_map;
@@ -9,8 +10,8 @@ pub(crate) const FLAG_OUTPUTS_MODIFIABLE: u8 = 0b0000_0010;
 pub(crate) const FLAG_HAS_SIGHASH_SINGLE: u8 = 0b0000_0100;
 
 /// Global fields that are relevant to the transaction as a whole.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct Global {
+#[derive(Clone, Debug, Serialize, Deserialize, Getters)]
+pub struct Global {
     //
     // Transaction effecting data.
     //
@@ -83,6 +84,7 @@ pub(crate) struct Global {
     pub(crate) tx_modifiable: u8,
 
     /// Proprietary fields related to the overall transaction.
+    #[getset(get = "pub")]
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
