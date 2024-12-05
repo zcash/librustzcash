@@ -14,6 +14,9 @@ use crate::{
 mod parse;
 pub use parse::ParseError;
 
+mod updater;
+pub use updater::{InputUpdater, OutputUpdater, Updater, UpdaterError};
+
 #[cfg(feature = "transparent-inputs")]
 mod signer;
 #[cfg(feature = "transparent-inputs")]

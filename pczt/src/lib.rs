@@ -13,6 +13,9 @@
 //! - IO Finalizer (anyone can execute)
 //!   - Sets the appropriate bits in `Global.tx_modifiable` to 0.
 //!   - Updates the various bsk values using the rcv information from spends and outputs.
+//! - Updater (anyone can contribute)
+//!   - Adds information necessary for subsequent entities to proceed, such as key paths
+//!     for signing spends.
 //! - Prover (capability holders can contribute)
 //!   - Needs all private information for a single spend or output.
 //!   - In practice, the Updater that adds a given spend or output will either act as

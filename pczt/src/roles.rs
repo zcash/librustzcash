@@ -3,6 +3,8 @@ pub mod creator;
 #[cfg(feature = "io-finalizer")]
 pub mod io_finalizer;
 
+pub mod updater;
+
 #[cfg(feature = "prover")]
 pub mod prover;
 
