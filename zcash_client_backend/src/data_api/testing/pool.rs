@@ -742,11 +742,15 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         )
         .unwrap();
 
-    assert_matches!(builder.add_transparent_input(pubkey, outpoint, txout), Ok(_));
+    assert_matches!(
+        builder.add_transparent_input(pubkey, outpoint, txout),
+        Ok(_)
+    );
     let test_prover = LocalTxProver::bundled();
     let build_result = builder
         .build(
             &transparent_signing_set,
+            &[],
             &[],
             OsRng,
             &test_prover,

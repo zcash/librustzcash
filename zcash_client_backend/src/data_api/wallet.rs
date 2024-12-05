@@ -461,6 +461,7 @@ struct BuildState<'a, P, AccountId> {
     step_index: usize,
     builder: Builder<'a, P, ()>,
     transparent_signing_set: TransparentSigningSet,
+    sapling_extsks: Vec<sapling::zip32::ExtendedSpendingKey>,
     #[cfg(feature = "orchard")]
     orchard_saks: Vec<orchard::keys::SpendAuthorizingKey>,
     #[cfg(feature = "orchard")]
@@ -652,6 +653,7 @@ where
     );
     #[cfg_attr(not(feature = "transparent-inputs"), allow(unused_mut))]
     let mut transparent_signing_set = TransparentSigningSet::new();
+    let mut sapling_extsks = vec![];
     #[cfg(feature = "orchard")]
     let mut orchard_saks = vec![];
 
@@ -661,7 +663,9 @@ where
     let has_shielded_inputs = !(sapling_inputs.is_empty() && orchard_inputs.is_empty());
 
     for (sapling_key, sapling_note, merkle_path) in sapling_inputs.into_iter() {
-        builder.add_sapling_spend(&sapling_key, sapling_note.clone(), merkle_path)?;
+        let dfvk = sapling_key.to_diversifiable_full_viewing_key();
+        builder.add_sapling_spend(dfvk.fvk().clone(), sapling_note.clone(), merkle_path)?;
+        sapling_extsks.push(sapling_key);
     }
 
     #[cfg(feature = "orchard")]
@@ -1044,6 +1048,7 @@ where
         step_index,
         builder,
         transparent_signing_set,
+        sapling_extsks,
         #[cfg(feature = "orchard")]
         orchard_saks,
         #[cfg(feature = "orchard")]
@@ -1105,6 +1110,7 @@ where
     let orchard_saks = &[];
     let build_result = build_state.builder.build(
         &build_state.transparent_signing_set,
+        &build_state.sapling_extsks,
         orchard_saks,
         OsRng,
         spend_prover,

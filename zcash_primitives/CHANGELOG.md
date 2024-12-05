@@ -29,10 +29,13 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::transaction::builder`:
   - `Builder::add_orchard_spend` now takes `orchard::keys::FullViewingKey`
     instead of `&orchard::keys::SpendingKey`.
+  - `Builder::add_sapling_spend` now takes `sapling::keys::FullViewingKey`
+    instead of `&sapling::zip32::ExtendedSpendingKey`.
   - `Builder::add_transparent_input` now takes `secp256k1::PublicKey` instead of
     `secp256k1::SecretKey`.
   - `Builder::build` now takes several additional arguments:
     - `&TransparentSigningSet`
+    - `&[sapling::zip32::ExtendedSpendingKey]`
     - `&[orchard::keys::SpendAuthorizingKey]`
 
 ## [0.20.0] - 2024-11-14
