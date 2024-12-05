@@ -16,14 +16,24 @@ and this library adheres to Rust's notion of
     - `pczt` module.
     - `EffectsOnly`
     - `impl MapAuth<Authorized, Authorized> for ()`
+    - `builder::TransparentSigningSet`
   - `sighash::SighashType`
 
 ### Changed
+- `zcash_primitives::transaction::components::transparent`:
+  - `builder::TransparentBuilder::add_input` now takes `secp256k1::PublicKey`
+    instead of `secp256k1::SecretKey`.
+  - `Bundle<Unauthorized>::apply_signatures` now takes an additional argument
+    `&TransparentSigningSet`.
+  - `builder::Error` has a new variant `MissingSigningKey`.
 - `zcash_primitives::transaction::builder`:
   - `Builder::add_orchard_spend` now takes `orchard::keys::FullViewingKey`
     instead of `&orchard::keys::SpendingKey`.
-  - `Builder::build` now takes an `&[orchard::keys::SpendAuthorizingKey]`
-    argument.
+  - `Builder::add_transparent_input` now takes `secp256k1::PublicKey` instead of
+    `secp256k1::SecretKey`.
+  - `Builder::build` now takes several additional arguments:
+    - `&TransparentSigningSet`
+    - `&[orchard::keys::SpendAuthorizingKey]`
 
 ## [0.20.0] - 2024-11-14
 

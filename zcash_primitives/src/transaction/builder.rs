@@ -53,6 +53,7 @@ use crate::{
 
 use super::components::amount::NonNegativeAmount;
 use super::components::sapling::zip212_enforcement;
+use super::components::transparent::builder::TransparentSigningSet;
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
@@ -511,11 +512,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     #[cfg(feature = "transparent-inputs")]
     pub fn add_transparent_input(
         &mut self,
-        sk: secp256k1::SecretKey,
+        pubkey: secp256k1::PublicKey,
         utxo: transparent::OutPoint,
         coin: TxOut,
     ) -> Result<(), transparent::builder::Error> {
-        self.transparent_builder.add_input(sk, utxo, coin)
+        self.transparent_builder.add_input(pubkey, utxo, coin)
     }
 
     /// Adds a transparent address to send funds to.
@@ -656,6 +657,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     #[allow(clippy::too_many_arguments)]
     pub fn build<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FR: FeeRule>(
         self,
+        transparent_signing_set: &TransparentSigningSet,
         orchard_saks: &[orchard::keys::SpendAuthorizingKey],
         rng: R,
         spend_prover: &SP,
@@ -663,7 +665,14 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         fee_rule: &FR,
     ) -> Result<BuildResult, Error<FR::Error>> {
         let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
-        self.build_internal(orchard_saks, rng, spend_prover, output_prover, fee)
+        self.build_internal(
+            transparent_signing_set,
+            orchard_saks,
+            rng,
+            spend_prover,
+            output_prover,
+            fee,
+        )
     }
 
     /// Builds a transaction from the configured spends and outputs.
@@ -678,6 +687,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         FR: FutureFeeRule,
     >(
         self,
+        transparent_signing_set: &TransparentSigningSet,
         orchard_saks: &[orchard::keys::SpendAuthorizingKey],
         rng: R,
         spend_prover: &SP,
@@ -685,12 +695,20 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         fee_rule: &FR,
     ) -> Result<BuildResult, Error<FR::Error>> {
         let fee = self.get_fee_zfuture(fee_rule).map_err(Error::Fee)?;
-        self.build_internal(orchard_saks, rng, spend_prover, output_prover, fee)
+        self.build_internal(
+            transparent_signing_set,
+            orchard_saks,
+            rng,
+            spend_prover,
+            output_prover,
+            fee,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
     fn build_internal<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FE>(
         self,
+        transparent_signing_set: &TransparentSigningSet,
         orchard_saks: &[orchard::keys::SpendAuthorizingKey],
         mut rng: R,
         spend_prover: &SP,
@@ -787,14 +805,20 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         //
         let txid_parts = unauthed_tx.digest(TxIdDigester);
 
-        let transparent_bundle = unauthed_tx.transparent_bundle.clone().map(|b| {
-            b.apply_signatures(
-                #[cfg(feature = "transparent-inputs")]
-                &unauthed_tx,
-                #[cfg(feature = "transparent-inputs")]
-                &txid_parts,
-            )
-        });
+        let transparent_bundle = unauthed_tx
+            .transparent_bundle
+            .clone()
+            .map(|b| {
+                b.apply_signatures(
+                    #[cfg(feature = "transparent-inputs")]
+                    &unauthed_tx,
+                    #[cfg(feature = "transparent-inputs")]
+                    &txid_parts,
+                    transparent_signing_set,
+                )
+            })
+            .transpose()
+            .map_err(Error::TransparentBuild)?;
 
         #[cfg(zcash_unstable = "zfuture")]
         let tze_bundle = unauthed_tx
@@ -985,7 +1009,7 @@ mod testing {
             self,
             prover::mock::{MockOutputProver, MockSpendProver},
         },
-        transaction::fees::zip317,
+        transaction::{components::transparent::builder::TransparentSigningSet, fees::zip317},
     };
 
     impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
@@ -993,6 +1017,7 @@ mod testing {
         /// DO NOT USE EXCEPT FOR UNIT TESTING.
         pub fn mock_build<R: RngCore>(
             self,
+            transparent_signing_set: &TransparentSigningSet,
             orchard_saks: &[orchard::keys::SpendAuthorizingKey],
             rng: R,
         ) -> Result<BuildResult, Error<zip317::FeeError>> {
@@ -1017,6 +1042,7 @@ mod testing {
             }
 
             self.build(
+                transparent_signing_set,
                 orchard_saks,
                 FakeCryptoRng(rng),
                 &MockSpendProver,
@@ -1044,7 +1070,10 @@ mod tests {
         sapling::{self, zip32::ExtendedSpendingKey, Node, Rseed},
         transaction::{
             builder::BuildConfig,
-            components::amount::{Amount, BalanceError, NonNegativeAmount},
+            components::{
+                amount::{Amount, BalanceError, NonNegativeAmount},
+                transparent::builder::TransparentSigningSet,
+            },
         },
     };
 
@@ -1069,6 +1098,7 @@ mod tests {
         use crate::consensus::NetworkUpgrade;
         use crate::legacy::keys::NonHardenedChildIndex;
         use crate::transaction::builder::{self, TransparentBuilder};
+        use crate::transaction::components::transparent::builder::TransparentSigningSet;
 
         let sapling_activation_height = TEST_NETWORK
             .activation_height(NetworkUpgrade::Sapling)
@@ -1094,7 +1124,12 @@ mod tests {
             sapling_asks: vec![],
         };
 
+        let mut transparent_signing_set = TransparentSigningSet::new();
         let tsk = AccountPrivKey::from_seed(&TEST_NETWORK, &[0u8; 32], AccountId::ZERO).unwrap();
+        let sk = tsk
+            .derive_external_secret_key(NonHardenedChildIndex::ZERO)
+            .unwrap();
+        let pubkey = transparent_signing_set.add_key(sk);
         let prev_coin = TxOut {
             value: NonNegativeAmount::const_from_u64(50000),
             script_pubkey: tsk
@@ -1106,12 +1141,7 @@ mod tests {
                 .script(),
         };
         builder
-            .add_transparent_input(
-                tsk.derive_external_secret_key(NonHardenedChildIndex::ZERO)
-                    .unwrap(),
-                OutPoint::fake(),
-                prev_coin,
-            )
+            .add_transparent_input(pubkey, OutPoint::fake(), prev_coin)
             .unwrap();
 
         // Create a tx with only t output. No binding_sig should be present
@@ -1122,7 +1152,9 @@ mod tests {
             )
             .unwrap();
 
-        let res = builder.mock_build(&[], OsRng).unwrap();
+        let res = builder
+            .mock_build(&transparent_signing_set, &[], OsRng)
+            .unwrap();
         // No binding signature, because only t input and outputs
         assert!(res.transaction().sapling_bundle.is_none());
     }
@@ -1167,7 +1199,9 @@ mod tests {
             .unwrap();
 
         // A binding signature (and bundle) is present because there is a Sapling spend.
-        let res = builder.mock_build(&[], OsRng).unwrap();
+        let res = builder
+            .mock_build(&TransparentSigningSet::new(), &[], OsRng)
+            .unwrap();
         assert!(res.transaction().sapling_bundle().is_some());
     }
 
@@ -1192,7 +1226,7 @@ mod tests {
             };
             let builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             assert_matches!(
-                builder.mock_build(&[], OsRng),
+                builder.mock_build(&TransparentSigningSet::new(), &[], OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected == MINIMUM_FEE.into()
             );
         }
@@ -1218,7 +1252,7 @@ mod tests {
                 )
                 .unwrap();
             assert_matches!(
-                builder.mock_build(&[], OsRng),
+                builder.mock_build(&TransparentSigningSet::new(), &[], OsRng),
                 Err(Error::InsufficientFunds(expected)) if
                     expected == (NonNegativeAmount::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
             );
@@ -1239,7 +1273,7 @@ mod tests {
                 )
                 .unwrap();
             assert_matches!(
-                builder.mock_build(&[], OsRng),
+                builder.mock_build(&TransparentSigningSet::new(), &[], OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected ==
                     (NonNegativeAmount::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
             );
@@ -1280,7 +1314,7 @@ mod tests {
                 )
                 .unwrap();
             assert_matches!(
-                builder.mock_build(&[], OsRng),
+                builder.mock_build(&TransparentSigningSet::new(), &[], OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected == Amount::const_from_i64(1)
             );
         }
@@ -1322,7 +1356,9 @@ mod tests {
                     NonNegativeAmount::const_from_u64(15000),
                 )
                 .unwrap();
-            let res = builder.mock_build(&[], OsRng).unwrap();
+            let res = builder
+                .mock_build(&TransparentSigningSet::new(), &[], OsRng)
+                .unwrap();
             assert_eq!(
                 res.transaction()
                     .fee_paid(|_| Err(BalanceError::Overflow))
