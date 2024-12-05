@@ -41,6 +41,7 @@ use sapling::{
 };
 use shardtree::error::{QueryError, ShardTreeError};
 use std::num::NonZeroU32;
+use zcash_keys::keys::UnifiedFullViewingKey;
 
 use super::InputSource;
 use crate::{
@@ -460,10 +461,8 @@ struct BuildState<'a, P, AccountId> {
     #[cfg(feature = "transparent-inputs")]
     step_index: usize,
     builder: Builder<'a, P, ()>,
-    transparent_signing_set: TransparentSigningSet,
-    sapling_extsks: Vec<sapling::zip32::ExtendedSpendingKey>,
-    #[cfg(feature = "orchard")]
-    orchard_saks: Vec<orchard::keys::SpendAuthorizingKey>,
+    #[cfg(feature = "transparent-inputs")]
+    transparent_input_addresses: HashMap<TransparentAddress, TransparentAddressMetadata>,
     #[cfg(feature = "orchard")]
     orchard_output_meta: Vec<(
         Recipient<AccountId, PoolType, OutPoint>,
@@ -493,7 +492,7 @@ struct BuildState<'a, P, AccountId> {
 fn build_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>(
     wallet_db: &mut DbT,
     params: &ParamsT,
-    usk: &UnifiedSpendingKey,
+    ufvk: &UnifiedFullViewingKey,
     account_id: <DbT as WalletRead>::AccountId,
     ovk_policy: OvkPolicy,
     min_target_height: BlockHeight,
@@ -564,26 +563,20 @@ where
                         .notes()
                         .iter()
                         .filter_map(|selected| match selected.note() {
-                            Note::Sapling(note) => {
-                                let key = match selected.spending_key_scope() {
-                                    Scope::External => usk.sapling().clone(),
-                                    Scope::Internal => usk.sapling().derive_internal(),
-                                };
-
-                                sapling_tree
-                                    .witness_at_checkpoint_id_caching(
-                                        selected.note_commitment_tree_position(),
-                                        &inputs.anchor_height(),
-                                    )
-                                    .and_then(|witness| {
-                                        witness.ok_or(ShardTreeError::Query(
-                                            QueryError::CheckpointPruned,
-                                        ))
-                                    })
-                                    .map(|merkle_path| Some((key, note, merkle_path)))
-                                    .map_err(Error::from)
-                                    .transpose()
-                            }
+                            Note::Sapling(note) => sapling_tree
+                                .witness_at_checkpoint_id_caching(
+                                    selected.note_commitment_tree_position(),
+                                    &inputs.anchor_height(),
+                                )
+                                .and_then(|witness| {
+                                    witness
+                                        .ok_or(ShardTreeError::Query(QueryError::CheckpointPruned))
+                                })
+                                .map(|merkle_path| {
+                                    Some((selected.spending_key_scope(), note, merkle_path))
+                                })
+                                .map_err(Error::from)
+                                .transpose(),
                             #[cfg(feature = "orchard")]
                             Note::Orchard(_) => None,
                         })
@@ -651,27 +644,34 @@ where
             orchard_anchor,
         },
     );
-    #[cfg_attr(not(feature = "transparent-inputs"), allow(unused_mut))]
-    let mut transparent_signing_set = TransparentSigningSet::new();
-    let mut sapling_extsks = vec![];
-    #[cfg(feature = "orchard")]
-    let mut orchard_saks = vec![];
 
     #[cfg(all(feature = "transparent-inputs", not(feature = "orchard")))]
     let has_shielded_inputs = !sapling_inputs.is_empty();
     #[cfg(all(feature = "transparent-inputs", feature = "orchard"))]
     let has_shielded_inputs = !(sapling_inputs.is_empty() && orchard_inputs.is_empty());
 
-    for (sapling_key, sapling_note, merkle_path) in sapling_inputs.into_iter() {
-        let dfvk = sapling_key.to_diversifiable_full_viewing_key();
-        builder.add_sapling_spend(dfvk.fvk().clone(), sapling_note.clone(), merkle_path)?;
-        sapling_extsks.push(sapling_key);
+    for (_sapling_key_scope, sapling_note, merkle_path) in sapling_inputs.into_iter() {
+        let key = match _sapling_key_scope {
+            Scope::External => ufvk.sapling().map(|k| k.fvk().clone()),
+            Scope::Internal => ufvk.sapling().map(|k| k.to_internal_fvk()),
+        };
+
+        builder.add_sapling_spend(
+            key.ok_or(Error::KeyNotAvailable(PoolType::SAPLING))?,
+            sapling_note.clone(),
+            merkle_path,
+        )?;
     }
 
     #[cfg(feature = "orchard")]
     for (orchard_note, merkle_path) in orchard_inputs.into_iter() {
-        builder.add_orchard_spend(usk.orchard().into(), *orchard_note, merkle_path.into())?;
-        orchard_saks.push(usk.orchard().into());
+        builder.add_orchard_spend(
+            ufvk.orchard()
+                .cloned()
+                .ok_or(Error::KeyNotAvailable(PoolType::ORCHARD))?,
+            *orchard_note,
+            merkle_path.into(),
+        )?;
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -706,30 +706,30 @@ where
     #[cfg(feature = "transparent-inputs")]
     let utxos_spent = {
         let mut utxos_spent: Vec<OutPoint> = vec![];
-        let add_transparent_input =
-            |builder: &mut Builder<_, _>,
-             transparent_signing_set: &mut TransparentSigningSet,
-             utxos_spent: &mut Vec<_>,
-             address_metadata: &TransparentAddressMetadata,
-             outpoint: OutPoint,
-             txout: TxOut|
-             -> Result<(), CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>> {
-                let secret_key = usk
-                    .transparent()
-                    .derive_secret_key(address_metadata.scope(), address_metadata.address_index())
-                    .expect("spending key derivation should not fail");
-                let pubkey = transparent_signing_set.add_key(secret_key);
+        let add_transparent_input = |builder: &mut Builder<_, _>,
+                                     utxos_spent: &mut Vec<_>,
+                                     address_metadata: &TransparentAddressMetadata,
+                                     outpoint: OutPoint,
+                                     txout: TxOut|
+         -> Result<
+            (),
+            CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
+        > {
+            let pubkey = ufvk
+                .transparent()
+                .ok_or(Error::KeyNotAvailable(PoolType::Transparent))?
+                .derive_address_pubkey(address_metadata.scope(), address_metadata.address_index())
+                .expect("spending key derivation should not fail");
 
-                utxos_spent.push(outpoint.clone());
-                builder.add_transparent_input(pubkey, outpoint, txout)?;
+            utxos_spent.push(outpoint.clone());
+            builder.add_transparent_input(pubkey, outpoint, txout)?;
 
-                Ok(())
-            };
+            Ok(())
+        };
 
         for utxo in proposal_step.transparent_inputs() {
             add_transparent_input(
                 &mut builder,
-                &mut transparent_signing_set,
                 &mut utxos_spent,
                 &metadata_from_address(*utxo.recipient_address())?,
                 utxo.outpoint().clone(),
@@ -755,7 +755,6 @@ where
 
             add_transparent_input(
                 &mut builder,
-                &mut transparent_signing_set,
                 &mut utxos_spent,
                 &address_metadata,
                 outpoint,
@@ -766,11 +765,10 @@ where
     };
 
     #[cfg(feature = "orchard")]
-    let orchard_fvk: orchard::keys::FullViewingKey = usk.orchard().into();
-
-    #[cfg(feature = "orchard")]
     let orchard_external_ovk = match &ovk_policy {
-        OvkPolicy::Sender => Some(orchard_fvk.to_ovk(orchard::keys::Scope::External)),
+        OvkPolicy::Sender => ufvk
+            .orchard()
+            .map(|fvk| fvk.to_ovk(orchard::keys::Scope::External)),
         OvkPolicy::Custom { orchard, .. } => Some(orchard.clone()),
         OvkPolicy::Discard => None,
     };
@@ -779,22 +777,17 @@ where
     let orchard_internal_ovk = || {
         #[cfg(feature = "transparent-inputs")]
         if proposal_step.is_shielding() {
-            return Some(orchard::keys::OutgoingViewingKey::from(
-                usk.transparent()
-                    .to_account_pubkey()
-                    .internal_ovk()
-                    .as_bytes(),
-            ));
+            return ufvk
+                .transparent()
+                .map(|k| orchard::keys::OutgoingViewingKey::from(k.internal_ovk().as_bytes()));
         }
 
-        Some(orchard_fvk.to_ovk(Scope::Internal))
+        ufvk.orchard().map(|k| k.to_ovk(Scope::Internal))
     };
-
-    let sapling_dfvk = usk.sapling().to_diversifiable_full_viewing_key();
 
     // Apply the outgoing viewing key policy.
     let sapling_external_ovk = match &ovk_policy {
-        OvkPolicy::Sender => Some(sapling_dfvk.to_ovk(Scope::External)),
+        OvkPolicy::Sender => ufvk.sapling().map(|k| k.to_ovk(Scope::External)),
         OvkPolicy::Custom { sapling, .. } => Some(*sapling),
         OvkPolicy::Discard => None,
     };
@@ -802,15 +795,12 @@ where
     let sapling_internal_ovk = || {
         #[cfg(feature = "transparent-inputs")]
         if proposal_step.is_shielding() {
-            return Some(sapling::keys::OutgoingViewingKey(
-                usk.transparent()
-                    .to_account_pubkey()
-                    .internal_ovk()
-                    .as_bytes(),
-            ));
+            return ufvk
+                .transparent()
+                .map(|k| sapling::keys::OutgoingViewingKey(k.internal_ovk().as_bytes()));
         }
 
-        Some(sapling_dfvk.to_ovk(Scope::Internal))
+        ufvk.sapling().map(|k| k.to_ovk(Scope::Internal))
     };
 
     #[cfg(feature = "orchard")]
@@ -959,7 +949,10 @@ where
             PoolType::Shielded(ShieldedProtocol::Sapling) => {
                 builder.add_sapling_output(
                     sapling_internal_ovk(),
-                    sapling_dfvk.change_address().1,
+                    ufvk.sapling()
+                        .ok_or(Error::KeyNotAvailable(PoolType::SAPLING))?
+                        .change_address()
+                        .1,
                     change_value.value(),
                     memo.clone(),
                 )?;
@@ -981,7 +974,9 @@ where
                 {
                     builder.add_orchard_output(
                         orchard_internal_ovk(),
-                        orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal),
+                        ufvk.orchard()
+                            .ok_or(Error::KeyNotAvailable(PoolType::ORCHARD))?
+                            .address_at(0u32, orchard::keys::Scope::Internal),
                         change_value.value().into(),
                         memo.clone(),
                     )?;
@@ -1047,10 +1042,8 @@ where
         #[cfg(feature = "transparent-inputs")]
         step_index,
         builder,
-        transparent_signing_set,
-        sapling_extsks,
-        #[cfg(feature = "orchard")]
-        orchard_saks,
+        #[cfg(feature = "transparent-inputs")]
+        transparent_input_addresses: cache,
         #[cfg(feature = "orchard")]
         orchard_output_meta,
         sapling_output_meta,
@@ -1093,7 +1086,7 @@ where
     let build_state = build_proposed_transaction::<_, _, _, FeeRuleT, _, _>(
         wallet_db,
         params,
-        usk,
+        &usk.to_unified_full_viewing_key(),
         account_id,
         ovk_policy,
         min_target_height,
@@ -1104,13 +1097,24 @@ where
     )?;
 
     // Build the transaction with the specified fee rule
+    #[cfg_attr(not(feature = "transparent-inputs"), allow(unused_mut))]
+    let mut transparent_signing_set = TransparentSigningSet::new();
+    #[cfg(feature = "transparent-inputs")]
+    for (_, address_metadata) in build_state.transparent_input_addresses {
+        transparent_signing_set.add_key(
+            usk.transparent()
+                .derive_secret_key(address_metadata.scope(), address_metadata.address_index())
+                .expect("spending key derivation should not fail"),
+        );
+    }
+    let sapling_extsks = &[usk.sapling().clone(), usk.sapling().derive_internal()];
     #[cfg(feature = "orchard")]
-    let orchard_saks = &build_state.orchard_saks;
+    let orchard_saks = &[usk.orchard().into()];
     #[cfg(not(feature = "orchard"))]
     let orchard_saks = &[];
     let build_result = build_state.builder.build(
-        &build_state.transparent_signing_set,
-        &build_state.sapling_extsks,
+        &transparent_signing_set,
+        sapling_extsks,
         orchard_saks,
         OsRng,
         spend_prover,
