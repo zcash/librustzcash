@@ -494,6 +494,8 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     DSF: DataStoreFactory,
     <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
+    use zcash_primitives::transaction::components::transparent::builder::TransparentSigningSet;
+
     use crate::data_api::{OutputOfSentTx, GAP_LIMIT};
 
     let mut st = TestBuilder::new()
@@ -715,6 +717,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
             orchard_anchor: None,
         },
     );
+    let mut transparent_signing_set = TransparentSigningSet::new();
     let (colliding_addr, _) = &known_addrs[10];
     let utxo_value = (value - zip317::MINIMUM_FEE).unwrap();
     assert_matches!(
@@ -726,6 +729,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         .transparent()
         .derive_secret_key(Scope::External.into(), default_index)
         .unwrap();
+    let pubkey = transparent_signing_set.add_key(sk);
     let outpoint = OutPoint::fake();
     let txout = TxOut {
         script_pubkey: default_addr.script(),
@@ -738,10 +742,11 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         )
         .unwrap();
 
-    assert_matches!(builder.add_transparent_input(sk, outpoint, txout), Ok(_));
+    assert_matches!(builder.add_transparent_input(pubkey, outpoint, txout), Ok(_));
     let test_prover = LocalTxProver::bundled();
     let build_result = builder
         .build(
+            &transparent_signing_set,
             &[],
             OsRng,
             &test_prover,

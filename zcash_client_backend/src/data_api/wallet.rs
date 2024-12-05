@@ -63,7 +63,10 @@ use zcash_primitives::{
     legacy::TransparentAddress,
     transaction::{
         builder::{BuildConfig, BuildResult, Builder},
-        components::{amount::NonNegativeAmount, sapling::zip212_enforcement, OutPoint},
+        components::{
+            amount::NonNegativeAmount, sapling::zip212_enforcement,
+            transparent::builder::TransparentSigningSet, OutPoint,
+        },
         fees::FeeRule,
         Transaction, TxId,
     },
@@ -457,6 +460,7 @@ struct BuildState<'a, P, AccountId> {
     #[cfg(feature = "transparent-inputs")]
     step_index: usize,
     builder: Builder<'a, P, ()>,
+    transparent_signing_set: TransparentSigningSet,
     #[cfg(feature = "orchard")]
     orchard_saks: Vec<orchard::keys::SpendAuthorizingKey>,
     #[cfg(feature = "orchard")]
@@ -646,6 +650,8 @@ where
             orchard_anchor,
         },
     );
+    #[cfg_attr(not(feature = "transparent-inputs"), allow(unused_mut))]
+    let mut transparent_signing_set = TransparentSigningSet::new();
     #[cfg(feature = "orchard")]
     let mut orchard_saks = vec![];
 
@@ -698,6 +704,7 @@ where
         let mut utxos_spent: Vec<OutPoint> = vec![];
         let add_transparent_input =
             |builder: &mut Builder<_, _>,
+             transparent_signing_set: &mut TransparentSigningSet,
              utxos_spent: &mut Vec<_>,
              address_metadata: &TransparentAddressMetadata,
              outpoint: OutPoint,
@@ -707,9 +714,10 @@ where
                     .transparent()
                     .derive_secret_key(address_metadata.scope(), address_metadata.address_index())
                     .expect("spending key derivation should not fail");
+                let pubkey = transparent_signing_set.add_key(secret_key);
 
                 utxos_spent.push(outpoint.clone());
-                builder.add_transparent_input(secret_key, outpoint, txout)?;
+                builder.add_transparent_input(pubkey, outpoint, txout)?;
 
                 Ok(())
             };
@@ -717,6 +725,7 @@ where
         for utxo in proposal_step.transparent_inputs() {
             add_transparent_input(
                 &mut builder,
+                &mut transparent_signing_set,
                 &mut utxos_spent,
                 &metadata_from_address(*utxo.recipient_address())?,
                 utxo.outpoint().clone(),
@@ -742,6 +751,7 @@ where
 
             add_transparent_input(
                 &mut builder,
+                &mut transparent_signing_set,
                 &mut utxos_spent,
                 &address_metadata,
                 outpoint,
@@ -1033,6 +1043,7 @@ where
         #[cfg(feature = "transparent-inputs")]
         step_index,
         builder,
+        transparent_signing_set,
         #[cfg(feature = "orchard")]
         orchard_saks,
         #[cfg(feature = "orchard")]
@@ -1092,10 +1103,14 @@ where
     let orchard_saks = &build_state.orchard_saks;
     #[cfg(not(feature = "orchard"))]
     let orchard_saks = &[];
-    let build_result =
-        build_state
-            .builder
-            .build(orchard_saks, OsRng, spend_prover, output_prover, fee_rule)?;
+    let build_result = build_state.builder.build(
+        &build_state.transparent_signing_set,
+        orchard_saks,
+        OsRng,
+        spend_prover,
+        output_prover,
+        fee_rule,
+    )?;
 
     #[cfg(feature = "orchard")]
     let orchard_fvk: orchard::keys::FullViewingKey = usk.orchard().into();

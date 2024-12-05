@@ -49,6 +49,8 @@ fn transparent_to_orchard() {
     let transparent_sk = transparent_account_sk
         .derive_external_secret_key(address_index)
         .unwrap();
+    let secp = secp256k1::Secp256k1::signing_only();
+    let transparent_pubkey = transparent_sk.public_key(&secp);
 
     // Create an Orchard account to receive funds.
     let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
@@ -73,7 +75,7 @@ fn transparent_to_orchard() {
         },
     );
     builder
-        .add_transparent_input(transparent_sk, utxo, coin)
+        .add_transparent_input(transparent_pubkey, utxo, coin)
         .unwrap();
     builder
         .add_orchard_output::<zip317::FeeRule>(
