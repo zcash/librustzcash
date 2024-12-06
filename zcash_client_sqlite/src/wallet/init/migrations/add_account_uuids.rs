@@ -1,11 +1,12 @@
-//! This migration adds a UUID to each account record.
+//! This migration adds a UUID to each account record, and adds `name` and `key_source` columns. In
+//! addition, imported account records are now permitted to include key derivation metadata.
 
 use std::collections::HashSet;
 
 use rusqlite::named_params;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::data_api::{AccountPurpose, AccountSource};
+use zcash_client_backend::data_api::{AccountPurpose, AccountSource, Zip32Derivation};
 use zip32::fingerprint::SeedFingerprint;
 
 use crate::wallet::{account_kind_code, init::WalletMigrationError};
@@ -37,8 +38,10 @@ impl RusqliteMigration for Migration {
 
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
         let account_kind_derived = account_kind_code(&AccountSource::Derived {
-            seed_fingerprint: SeedFingerprint::from_bytes([0; 32]),
-            account_index: zip32::AccountId::ZERO,
+            derivation: Zip32Derivation::new(
+                SeedFingerprint::from_bytes([0; 32]),
+                zip32::AccountId::ZERO,
+            ),
             key_source: None,
         });
         let account_kind_imported = account_kind_code(&AccountSource::Imported {
@@ -77,8 +80,7 @@ impl RusqliteMigration for Migration {
                   OR
                   (
                     account_kind = {account_kind_imported}
-                    AND hd_seed_fingerprint IS NULL
-                    AND hd_account_index IS NULL
+                    AND (hd_seed_fingerprint IS NULL) = (hd_account_index IS NULL)
                   )
                 )
             );

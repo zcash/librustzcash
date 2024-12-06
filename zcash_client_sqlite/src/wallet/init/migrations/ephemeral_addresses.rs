@@ -209,6 +209,8 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn initialize_table() {
+        use zcash_client_backend::data_api::Zip32Derivation;
+
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
@@ -228,8 +230,10 @@ mod tests {
         let account0_index = Zip32AccountId::ZERO;
         let account0_seed_fp = [0u8; 32];
         let account0_kind = account_kind_code(&AccountSource::Derived {
-            seed_fingerprint: SeedFingerprint::from_seed(&account0_seed_fp).unwrap(),
-            account_index: account0_index,
+            derivation: Zip32Derivation::new(
+                SeedFingerprint::from_seed(&account0_seed_fp).unwrap(),
+                account0_index,
+            ),
             key_source: None,
         });
         assert_eq!(u32::from(account0_index), 0);

@@ -1084,8 +1084,8 @@ mod tests {
         assert_matches!(
             db_data.get_account(account_id),
             Ok(Some(account)) if matches!(
-                account.kind,
-                AccountSource::Derived{account_index, ..} if account_index == zip32::AccountId::ZERO,
+                &account.kind,
+                AccountSource::Derived{derivation, ..} if derivation.account_index() == zip32::AccountId::ZERO,
             )
         );
 

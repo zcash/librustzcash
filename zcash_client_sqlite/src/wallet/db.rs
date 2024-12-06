@@ -41,18 +41,17 @@ CREATE TABLE "accounts" (
     recover_until_height INTEGER,
     has_spend_key INTEGER NOT NULL DEFAULT 1,
     CHECK (
-        (
+      (
         account_kind = 0
         AND hd_seed_fingerprint IS NOT NULL
         AND hd_account_index IS NOT NULL
         AND ufvk IS NOT NULL
-        )
-        OR
-        (
+      )
+      OR
+      (
         account_kind = 1
-        AND hd_seed_fingerprint IS NULL
-        AND hd_account_index IS NULL
-        )
+        AND (hd_seed_fingerprint IS NULL) = (hd_account_index IS NULL)
+      )
     )
 )"#;
 pub(super) const INDEX_ACCOUNTS_UUID: &str =
@@ -384,8 +383,8 @@ CREATE TABLE transparent_spend_map (
     prevout_txid BLOB NOT NULL,
     prevout_output_index INTEGER NOT NULL,
     FOREIGN KEY (spending_transaction_id) REFERENCES transactions(id_tx)
-    -- NOTE: We can't create a unique constraint on just (prevout_txid, prevout_output_index) 
-    -- because the same output may be attempted to be spent in multiple transactions, even 
+    -- NOTE: We can't create a unique constraint on just (prevout_txid, prevout_output_index)
+    -- because the same output may be attempted to be spent in multiple transactions, even
     -- though only one will ever be mined.
     CONSTRAINT transparent_spend_map_unique UNIQUE (
         spending_transaction_id, prevout_txid, prevout_output_index
