@@ -48,8 +48,6 @@ const ZCASH_SEQUENCE_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSequencHash";
 const ZCASH_OUTPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOutputsHash";
 
 // TxId tze level 2 node personalization
-#[cfg(zcash_unstable = "nsm")]
-const ZCASH_BURN_AMOUNT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxBurnAmnt_Hash";
 #[cfg(zcash_unstable = "tze")]
 const ZCASH_TZE_INPUTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTZEIns_Hash";
 #[cfg(zcash_unstable = "tze")]
@@ -232,6 +230,8 @@ fn hash_header_txid_data(
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
+    #[cfg(zcash_unstable = "nsm")]
+    burn_amount: Option<&NonNegativeAmount>,
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_HEADERS_HASH_PERSONALIZATION);
 
@@ -242,6 +242,11 @@ fn hash_header_txid_data(
         .unwrap();
     h.write_u32::<LittleEndian>(lock_time).unwrap();
     h.write_u32::<LittleEndian>(expiry_height.into()).unwrap();
+
+    #[cfg(zcash_unstable = "nsm")]
+    if let Some(&burn_amount) = burn_amount {
+        h.write_u64::<LittleEndian>(burn_amount.into()).unwrap();
+    }
 
     h.finalize()
 }
@@ -307,9 +312,6 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
     type SaplingDigest = Option<Blake2bHash>;
     type OrchardDigest = Option<Blake2bHash>;
 
-    #[cfg(zcash_unstable = "nsm")]
-    type BurnAmountDigest = Option<Blake2bHash>;
-
     #[cfg(zcash_unstable = "tze")]
     type TzeDigest = Option<TzeDigests<Blake2bHash>>;
 
@@ -321,8 +323,17 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
+        #[cfg(zcash_unstable = "nsm")]
+        burn_amount: Option<&NonNegativeAmount>,
     ) -> Self::HeaderDigest {
-        hash_header_txid_data(version, consensus_branch_id, lock_time, expiry_height)
+        hash_header_txid_data(
+            version,
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+            #[cfg(zcash_unstable = "nsm")]
+            burn_amount
+        )
     }
 
     fn digest_transparent(
@@ -346,18 +357,6 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         orchard_bundle.map(|b| b.commitment().0)
     }
 
-    #[cfg(zcash_unstable = "nsm")]
-    fn digest_burn_amount(&self, burn_amount: Option<&NonNegativeAmount>) -> Self::BurnAmountDigest {
-        let mut h = hasher(ZCASH_BURN_AMOUNT_HASH_PERSONALIZATION);
-
-        if let Some(&burn_amount) = burn_amount {
-            h.write_u64::<LittleEndian>(burn_amount.into()).unwrap();
-            Some(h.finalize())
-        } else {
-            None
-        }
-    }
-
     #[cfg(zcash_unstable = "tze")]
     fn digest_tze(&self, tze_bundle: Option<&tze::Bundle<A::TzeAuth>>) -> Self::TzeDigest {
         tze_bundle.map(tze_digests)
@@ -369,7 +368,6 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         transparent_digests: Self::TransparentDigest,
         sapling_digest: Self::SaplingDigest,
         orchard_digest: Self::OrchardDigest,
-        #[cfg(zcash_unstable = "nsm")] burn_amount_digest: Self::BurnAmountDigest,
         #[cfg(zcash_unstable = "tze")] tze_digests: Self::TzeDigest,
     ) -> Self::Digest {
         TxDigests {
@@ -377,8 +375,6 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
             transparent_digests,
             sapling_digest,
             orchard_digest,
-            #[cfg(zcash_unstable = "nsm")]
-            burn_amount_digest,
             #[cfg(zcash_unstable = "tze")]
             tze_digests,
         }
@@ -392,7 +388,6 @@ pub(crate) fn to_hash(
     transparent_digest: Blake2bHash,
     sapling_digest: Option<Blake2bHash>,
     orchard_digest: Option<Blake2bHash>,
-    #[cfg(zcash_unstable = "nsm")] burn_amount: Option<Blake2bHash>,
     #[cfg(zcash_unstable = "tze")] tze_digests: Option<&TzeDigests<Blake2bHash>>,
 ) -> Blake2bHash {
     let mut personal = [0; 16];
@@ -417,11 +412,6 @@ pub(crate) fn to_hash(
     )
     .unwrap();
 
-    #[cfg(zcash_unstable = "nsm")]
-    if let Some(burn_amount) = burn_amount {
-        h.write_all(burn_amount.as_bytes()).unwrap();
-    }
-
     #[cfg(zcash_unstable = "tze")]
     if let Some(tze_digests) = tze_digests {
         h.write_all(hash_tze_txid_data(tze_digests).as_bytes())
@@ -443,8 +433,6 @@ pub fn to_txid(
         hash_transparent_txid_data(digests.transparent_digests.as_ref()),
         digests.sapling_digest,
         digests.orchard_digest,
-        #[cfg(zcash_unstable = "nsm")]
-        digests.burn_amount_digest,
         #[cfg(zcash_unstable = "tze")]
         digests.tze_digests.as_ref(),
     );
@@ -466,9 +454,6 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
     type SaplingDigest = Blake2bHash;
     type OrchardDigest = Blake2bHash;
 
-    #[cfg(zcash_unstable = "nsm")]
-    type BurnAmountDigest = Option<Blake2bHash>;
-
     #[cfg(zcash_unstable = "tze")]
     type TzeDigest = Blake2bHash;
 
@@ -480,6 +465,8 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         consensus_branch_id: BranchId,
         _lock_time: u32,
         _expiry_height: BlockHeight,
+        #[cfg(zcash_unstable = "nsm")]
+        _burn_amount: Option<&NonNegativeAmount>,
     ) -> Self::HeaderDigest {
         consensus_branch_id
     }
@@ -531,16 +518,6 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         })
     }
 
-    #[cfg(zcash_unstable = "nsm")]
-    fn digest_burn_amount(&self, burn_amount: Option<&NonNegativeAmount>) -> Self::BurnAmountDigest {
-        let mut h = hasher(ZCASH_BURN_AMOUNT_HASH_PERSONALIZATION);
-
-        burn_amount.map(|&burn_amount| {
-            h.write_u64::<LittleEndian>(burn_amount.into()).unwrap();
-            h.finalize()
-        })
-    }
-
     #[cfg(zcash_unstable = "tze")]
     fn digest_tze(&self, tze_bundle: Option<&tze::Bundle<tze::Authorized>>) -> Blake2bHash {
         let mut h = hasher(ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION);
@@ -558,7 +535,6 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         transparent_digest: Self::TransparentDigest,
         sapling_digest: Self::SaplingDigest,
         orchard_digest: Self::OrchardDigest,
-        #[cfg(zcash_unstable = "nsm")] burn_amount_digest: Self::BurnAmountDigest,
         #[cfg(zcash_unstable = "tze")] tze_digest: Self::TzeDigest,
     ) -> Self::Digest {
         let digests = [transparent_digest, sapling_digest, orchard_digest];
@@ -572,11 +548,6 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         let mut h = hasher(&personal);
         for digest in &digests {
             h.write_all(digest.as_bytes()).unwrap();
-        }
-
-        #[cfg(zcash_unstable = "nsm")]
-        if let Some(burn_amount) = burn_amount_digest {
-            h.write_all(burn_amount.as_bytes()).unwrap();
         }
 
         #[cfg(zcash_unstable = "tze")]

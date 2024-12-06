@@ -1250,7 +1250,6 @@ mod tests {
                     NonNegativeAmount::const_from_u64(10000),
                 )
                 .unwrap();
-            #[cfg(zcash_unstable = "nsm")]
             builder.set_burn_amount(Some(NonNegativeAmount::const_from_u64(10000)));
             assert_matches!(
                 builder.mock_build(OsRng),
