@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api.rs`."><title>data_api.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-dbdb5eec.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (d49be02cf 2024-12-02)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>data_api.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api.rs`."><title>data_api.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-dbdb5eec.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (c94848c04 2024-12-05)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>data_api.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -2501,7 +2501,57 @@
 <a href="#2500" id="2500">2500</a>
 <a href="#2501" id="2501">2501</a>
 <a href="#2502" id="2502">2502</a>
-<a href="#2503" id="2503">2503</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Utilities for Zcash wallet construction
+<a href="#2503" id="2503">2503</a>
+<a href="#2504" id="2504">2504</a>
+<a href="#2505" id="2505">2505</a>
+<a href="#2506" id="2506">2506</a>
+<a href="#2507" id="2507">2507</a>
+<a href="#2508" id="2508">2508</a>
+<a href="#2509" id="2509">2509</a>
+<a href="#2510" id="2510">2510</a>
+<a href="#2511" id="2511">2511</a>
+<a href="#2512" id="2512">2512</a>
+<a href="#2513" id="2513">2513</a>
+<a href="#2514" id="2514">2514</a>
+<a href="#2515" id="2515">2515</a>
+<a href="#2516" id="2516">2516</a>
+<a href="#2517" id="2517">2517</a>
+<a href="#2518" id="2518">2518</a>
+<a href="#2519" id="2519">2519</a>
+<a href="#2520" id="2520">2520</a>
+<a href="#2521" id="2521">2521</a>
+<a href="#2522" id="2522">2522</a>
+<a href="#2523" id="2523">2523</a>
+<a href="#2524" id="2524">2524</a>
+<a href="#2525" id="2525">2525</a>
+<a href="#2526" id="2526">2526</a>
+<a href="#2527" id="2527">2527</a>
+<a href="#2528" id="2528">2528</a>
+<a href="#2529" id="2529">2529</a>
+<a href="#2530" id="2530">2530</a>
+<a href="#2531" id="2531">2531</a>
+<a href="#2532" id="2532">2532</a>
+<a href="#2533" id="2533">2533</a>
+<a href="#2534" id="2534">2534</a>
+<a href="#2535" id="2535">2535</a>
+<a href="#2536" id="2536">2536</a>
+<a href="#2537" id="2537">2537</a>
+<a href="#2538" id="2538">2538</a>
+<a href="#2539" id="2539">2539</a>
+<a href="#2540" id="2540">2540</a>
+<a href="#2541" id="2541">2541</a>
+<a href="#2542" id="2542">2542</a>
+<a href="#2543" id="2543">2543</a>
+<a href="#2544" id="2544">2544</a>
+<a href="#2545" id="2545">2545</a>
+<a href="#2546" id="2546">2546</a>
+<a href="#2547" id="2547">2547</a>
+<a href="#2548" id="2548">2548</a>
+<a href="#2549" id="2549">2549</a>
+<a href="#2550" id="2550">2550</a>
+<a href="#2551" id="2551">2551</a>
+<a href="#2552" id="2552">2552</a>
+<a href="#2553" id="2553">2553</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Utilities for Zcash wallet construction
 //!
 //! This module defines a set of APIs for wallet data persistence, and provides a suite of methods
 //! based upon these APIs that can be used to implement a fully functional Zcash wallet. At
@@ -2834,13 +2884,40 @@
     }
 }
 
+<span class="doccomment">/// Source metadata for a ZIP 32-derived key.
+</span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+</span><span class="kw">pub struct </span>Zip32Derivation {
+    seed_fingerprint: SeedFingerprint,
+    account_index: zip32::AccountId,
+}
+
+<span class="kw">impl </span>Zip32Derivation {
+    <span class="doccomment">/// Constructs new derivation metadata from its constituent parts.
+    </span><span class="kw">pub fn </span>new(seed_fingerprint: SeedFingerprint, account_index: zip32::AccountId) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            seed_fingerprint,
+            account_index,
+        }
+    }
+
+    <span class="doccomment">/// Returns the seed fingerprint.
+    </span><span class="kw">pub fn </span>seed_fingerprint(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>SeedFingerprint {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.seed_fingerprint
+    }
+
+    <span class="doccomment">/// Returns the account-level index in the ZIP 32 derivation path.
+    </span><span class="kw">pub fn </span>account_index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; zip32::AccountId {
+        <span class="self">self</span>.account_index
+    }
+}
+
 <span class="doccomment">/// An enumeration used to control what information is tracked by the wallet for
 /// notes received by a given account.
-</span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+</span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 </span><span class="kw">pub enum </span>AccountPurpose {
     <span class="doccomment">/// For spending accounts, the wallet will track information needed to spend
     /// received notes.
-    </span>Spending,
+    </span>Spending { derivation: <span class="prelude-ty">Option</span>&lt;Zip32Derivation&gt; },
     <span class="doccomment">/// For view-only accounts, the wallet will not track spend information.
     </span>ViewOnly,
 }
@@ -2850,8 +2927,7 @@
 </span><span class="kw">pub enum </span>AccountSource {
     <span class="doccomment">/// An account derived from a known seed.
     </span>Derived {
-        seed_fingerprint: SeedFingerprint,
-        account_index: zip32::AccountId,
+        derivation: Zip32Derivation,
         key_source: <span class="prelude-ty">Option</span>&lt;String&gt;,
     },
 
@@ -2860,6 +2936,28 @@
         purpose: AccountPurpose,
         key_source: <span class="prelude-ty">Option</span>&lt;String&gt;,
     },
+}
+
+<span class="kw">impl </span>AccountSource {
+    <span class="doccomment">/// Returns the key derivation metadata for the account source, if any is available.
+    </span><span class="kw">pub fn </span>key_derivation(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Zip32Derivation&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            AccountSource::Derived { derivation, .. } =&gt; <span class="prelude-val">Some</span>(derivation),
+            AccountSource::Imported {
+                purpose: AccountPurpose::Spending { derivation },
+                ..
+            } =&gt; derivation.as_ref(),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="doccomment">/// Returns the application-level key source identifier.
+    </span><span class="kw">pub fn </span>key_source(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            AccountSource::Derived { key_source, .. } =&gt; key_source.as_ref().map(|s| s.as_str()),
+            AccountSource::Imported { key_source, .. } =&gt; key_source.as_ref().map(|s| s.as_str()),
+        }
+    }
 }
 
 <span class="doccomment">/// A set of capabilities that a client account must provide.
@@ -2879,8 +2977,10 @@
     <span class="doccomment">/// Returns whether the account is a spending account or a view-only account.
     </span><span class="kw">fn </span>purpose(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; AccountPurpose {
         <span class="kw">match </span><span class="self">self</span>.source() {
-            AccountSource::Derived { .. } =&gt; AccountPurpose::Spending,
-            AccountSource::Imported { purpose, .. } =&gt; <span class="kw-2">*</span>purpose,
+            AccountSource::Derived { derivation, .. } =&gt; AccountPurpose::Spending {
+                derivation: <span class="prelude-val">Some</span>(derivation.clone()),
+            },
+            AccountSource::Imported { purpose, .. } =&gt; purpose.clone(),
         }
     }
 

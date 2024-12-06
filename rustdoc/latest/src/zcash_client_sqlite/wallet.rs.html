@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet.rs`."><title>wallet.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-dbdb5eec.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (d49be02cf 2024-12-02)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>wallet.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet.rs`."><title>wallet.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-dbdb5eec.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (c94848c04 2024-12-05)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>wallet.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -3863,7 +3863,14 @@
 <a href="#3862" id="3862">3862</a>
 <a href="#3863" id="3863">3863</a>
 <a href="#3864" id="3864">3864</a>
-<a href="#3865" id="3865">3865</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for querying information in the wallet database.
+<a href="#3865" id="3865">3865</a>
+<a href="#3866" id="3866">3866</a>
+<a href="#3867" id="3867">3867</a>
+<a href="#3868" id="3868">3868</a>
+<a href="#3869" id="3869">3869</a>
+<a href="#3870" id="3870">3870</a>
+<a href="#3871" id="3871">3871</a>
+<a href="#3872" id="3872">3872</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for querying information in the wallet database.
 //!
 //! These functions should generally not be used directly; instead,
 //! their functionality is available via the [`WalletRead`] and
@@ -3937,7 +3944,9 @@
 <span class="kw">use </span>uuid::Uuid;
 <span class="kw">use </span>zcash_client_backend::data_api::{
     AccountPurpose, DecryptedTransaction, Progress, TransactionDataRequest, TransactionStatus,
+    Zip32Derivation,
 };
+
 <span class="kw">use </span>zip32::fingerprint::SeedFingerprint;
 
 <span class="kw">use </span>std::collections::{HashMap, HashSet};
@@ -4015,28 +4024,36 @@
     spending_key_available: bool,
     key_source: <span class="prelude-ty">Option</span>&lt;String&gt;,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;AccountSource, SqliteClientError&gt; {
-    <span class="kw">match </span>(account_kind, hd_seed_fingerprint, hd_account_index) {
-        (<span class="number">0</span>, <span class="prelude-val">Some</span>(seed_fp), <span class="prelude-val">Some</span>(account_index)) =&gt; <span class="prelude-val">Ok</span>(AccountSource::Derived {
-            seed_fingerprint: SeedFingerprint::from_bytes(seed_fp),
-            account_index: zip32::AccountId::try_from(account_index).map_err(|<span class="kw">_</span>| {
-                SqliteClientError::CorruptedData(
-                    <span class="string">"ZIP-32 account ID from wallet DB is out of range."</span>.to_string(),
-                )
-            })<span class="question-mark">?</span>,
+    <span class="kw">let </span>derivation = hd_seed_fingerprint
+        .zip(hd_account_index)
+        .map(|(seed_fp, idx)| {
+            zip32::AccountId::try_from(idx)
+                .map_err(|<span class="kw">_</span>| {
+                    SqliteClientError::CorruptedData(
+                        <span class="string">"ZIP-32 account ID from wallet DB is out of range."</span>.to_string(),
+                    )
+                })
+                .map(|idx| Zip32Derivation::new(SeedFingerprint::from_bytes(seed_fp), idx))
+        })
+        .transpose()<span class="question-mark">?</span>;
+
+    <span class="kw">match </span>(account_kind, derivation) {
+        (<span class="number">0</span>, <span class="prelude-val">Some</span>(derivation)) =&gt; <span class="prelude-val">Ok</span>(AccountSource::Derived {
+            derivation,
             key_source,
         }),
-        (<span class="number">1</span>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; <span class="prelude-val">Ok</span>(AccountSource::Imported {
+        (<span class="number">1</span>, derivation) =&gt; <span class="prelude-val">Ok</span>(AccountSource::Imported {
             purpose: <span class="kw">if </span>spending_key_available {
-                AccountPurpose::Spending
+                AccountPurpose::Spending { derivation }
             } <span class="kw">else </span>{
                 AccountPurpose::ViewOnly
             },
             key_source,
         }),
-        (<span class="number">0</span>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>) | (<span class="number">1</span>, <span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">Some</span>(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Err</span>(SqliteClientError::CorruptedData(
+        (<span class="number">0</span>, <span class="prelude-val">None</span>) =&gt; <span class="prelude-val">Err</span>(SqliteClientError::CorruptedData(
             <span class="string">"Wallet DB account_kind constraint violated"</span>.to_string(),
         )),
-        (<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(SqliteClientError::CorruptedData(
+        (<span class="kw">_</span>, <span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(SqliteClientError::CorruptedData(
             <span class="string">"Unrecognized account_kind"</span>.to_string(),
         )),
     }
@@ -4243,21 +4260,19 @@
 
     </span><span class="kw">let </span>account_uuid = AccountUuid(Uuid::new_v4());
 
-    <span class="kw">let </span>(hd_seed_fingerprint, hd_account_index, spending_key_available, key_source) = <span class="kw">match </span>kind {
+    <span class="kw">let </span>(derivation, spending_key_available, key_source) = <span class="kw">match </span>kind {
         AccountSource::Derived {
-            seed_fingerprint,
-            account_index,
+            derivation,
             key_source,
-        } =&gt; (
-            <span class="prelude-val">Some</span>(seed_fingerprint),
-            <span class="prelude-val">Some</span>(account_index),
-            <span class="bool-val">true</span>,
-            key_source,
-        ),
+        } =&gt; (<span class="prelude-val">Some</span>(derivation), <span class="bool-val">true</span>, key_source),
         AccountSource::Imported {
-            purpose,
+            purpose: AccountPurpose::Spending { derivation },
             key_source,
-        } =&gt; (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>, <span class="kw-2">*</span>purpose == AccountPurpose::Spending, key_source),
+        } =&gt; (derivation.as_ref(), <span class="bool-val">true</span>, key_source),
+        AccountSource::Imported {
+            purpose: AccountPurpose::ViewOnly,
+            key_source,
+        } =&gt; (<span class="prelude-val">None</span>, <span class="bool-val">false</span>, key_source),
     };
 
     <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
@@ -4314,8 +4329,8 @@
                 <span class="string">":account_name"</span>: account_name,
                 <span class="string">":uuid"</span>: account_uuid.<span class="number">0</span>,
                 <span class="string">":account_kind"</span>: account_kind_code(kind),
-                <span class="string">":hd_seed_fingerprint"</span>: hd_seed_fingerprint.as_ref().map(|fp| fp.to_bytes()),
-                <span class="string">":hd_account_index"</span>: hd_account_index.map(|i| u32::from(<span class="kw-2">*</span>i)),
+                <span class="string">":hd_seed_fingerprint"</span>: derivation.map(|d| d.seed_fingerprint().to_bytes()),
+                <span class="string">":hd_account_index"</span>: derivation.map(|d| u32::from(d.account_index())),
                 <span class="string">":key_source"</span>: key_source,
                 <span class="string">":ufvk"</span>: ufvk_encoded,
                 <span class="string">":uivk"</span>: viewing_key.uivk().encode(params),
@@ -4697,8 +4712,7 @@
                 name: account_name,
                 uuid: account_uuid,
                 kind: AccountSource::Derived {
-                    seed_fingerprint: <span class="kw-2">*</span>seed_fp,
-                    account_index,
+                    derivation: Zip32Derivation::new(<span class="kw-2">*</span>seed_fp, account_index),
                     key_source,
                 },
                 viewing_key: ViewingKey::Full(Box::new(ufvk)),
@@ -7626,7 +7640,7 @@
         <span class="kw">let </span>expected_account_index = zip32::AccountId::try_from(<span class="number">0</span>).unwrap();
         <span class="macro">assert_matches!</span>(
             account_parameters.kind,
-            AccountSource::Derived{account_index, ..} <span class="kw">if </span>account_index == expected_account_index
+            AccountSource::Derived{derivation, ..} <span class="kw">if </span>derivation.account_index() == expected_account_index
         );
     }
 
