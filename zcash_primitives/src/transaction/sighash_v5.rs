@@ -198,8 +198,6 @@ pub fn v5_signature_hash<
         ),
         txid_parts.sapling_digest,
         txid_parts.orchard_digest,
-        #[cfg(zcash_unstable = "nsm")]
-        txid_parts.burn_amount_digest,
         #[cfg(zcash_unstable = "tze")]
         tx.tze_bundle
             .as_ref()
