@@ -451,6 +451,8 @@ impl<A: Authorization> TransactionData<A> {
                 self.consensus_branch_id,
                 self.lock_time,
                 self.expiry_height,
+                #[cfg(zcash_unstable = "nsm")]
+                self.burn_amount.as_ref(),
             ),
             digester.digest_transparent(self.transparent_bundle.as_ref()),
             digester.digest_sapling(self.sapling_bundle.as_ref()),
@@ -1011,6 +1013,8 @@ pub trait TransactionDigest<A: Authorization> {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
+        #[cfg(zcash_unstable = "nsm")]
+        burn_amount: Option<&NonNegativeAmount>,
     ) -> Self::HeaderDigest;
 
     fn digest_transparent(
