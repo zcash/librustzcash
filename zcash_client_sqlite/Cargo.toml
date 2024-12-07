@@ -49,6 +49,7 @@ nonempty.workspace = true
 prost.workspace = true
 group.workspace = true
 jubjub.workspace = true
+serde = { workspace = true, optional = true }
 
 # - Secret management
 secrecy.workspace = true
@@ -125,6 +126,9 @@ transparent-inputs = [
   "zcash_client_backend/transparent-inputs"
 ]
 
+## Enables `serde` derives for certain types.
+serde = ["dep:serde", "uuid/serde"]
+
 #! ### Experimental features
 
 ## Exposes unstable APIs. Their behaviour may change at any time.
@@ -132,6 +136,10 @@ unstable = ["zcash_client_backend/unstable"]
 
 ## A feature used to isolate tests that are expensive to run. Test-only.
 expensive-tests = []
+
+## A feature used to enable PCZT-specific tests without interfering with the
+## protocol-specific flags. Test-only.
+pczt-tests = ["serde", "zcash_client_backend/pczt"]
 
 [lib]
 bench = false
