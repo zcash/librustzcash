@@ -84,6 +84,9 @@ use {
 #[cfg(feature = "orchard")]
 use crate::PoolType;
 
+#[cfg(feature = "pczt")]
+use pczt::roles::{prover::Prover, signer::Signer};
+
 /// Trait that exposes the pool-specific types and operations necessary to run the
 /// single-shielded-pool tests on a given pool.
 ///
@@ -162,6 +165,18 @@ pub trait ShieldedPoolTester {
     ) -> Option<(Note, Address, MemoBytes)>;
 
     fn received_note_count(summary: &ScanSummary) -> usize;
+
+    #[cfg(feature = "pczt")]
+    fn add_proof_generation_keys(
+        pczt: pczt::Pczt,
+        usk: &UnifiedSpendingKey,
+    ) -> Result<pczt::Pczt, pczt::roles::updater::SaplingError>;
+
+    #[cfg(feature = "pczt")]
+    fn apply_signatures_to_pczt(
+        signer: &mut Signer,
+        usk: &UnifiedSpendingKey,
+    ) -> Result<(), pczt::roles::signer::Error>;
 }
 
 /// Tests sending funds within the given shielded pool in a single transaction.
@@ -3079,4 +3094,117 @@ pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, DSF, TC>(
         NoteFilter::ExceedsPriorSendPercentile(BoundedU8::new_const(50)),
         Some(5),
     );
+}
+
+#[cfg(feature = "pczt")]
+pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, DSF>(
+    ds_factory: DSF,
+    cache: impl TestCache,
+) where
+    DSF: DataStoreFactory,
+    <DSF as DataStoreFactory>::AccountId: serde::Serialize + serde::de::DeserializeOwned,
+{
+    use zcash_protocol::consensus::ZIP212_GRACE_PERIOD;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .with_initial_chain_state(|_, network| {
+            // Initialize the chain state to after ZIP 212 became enforced.
+            let birthday_height =
+                network.activation_height(NetworkUpgrade::Nu5).unwrap() + ZIP212_GRACE_PERIOD;
+
+            InitialChainState {
+                chain_state: ChainState::new(
+                    birthday_height - 1,
+                    BlockHash([5; 32]),
+                    Frontier::empty(),
+                    #[cfg(feature = "orchard")]
+                    Frontier::empty(),
+                ),
+                prior_sapling_roots: vec![],
+                #[cfg(feature = "orchard")]
+                prior_orchard_roots: vec![],
+            }
+        })
+        .with_account_having_current_birthday()
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+
+    let p0_fvk = P0::test_account_fvk(&st);
+
+    let p1_fvk = P1::test_account_fvk(&st);
+    let p1_to = P1::fvk_default_address(&p1_fvk);
+
+    // Only mine a block in P0 to ensure the transactions source is there.
+    let note_value = NonNegativeAmount::const_from_u64(350000);
+    st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+    st.scan_cached_blocks(account.birthday().height(), 1);
+
+    assert_eq!(st.get_total_balance(account.id()), note_value);
+    assert_eq!(st.get_spendable_balance(account.id(), 1), note_value);
+
+    let transfer_amount = NonNegativeAmount::const_from_u64(200000);
+    let p0_to_p1 = TransactionRequest::new(vec![Payment::without_memo(
+        p1_to.to_zcash_address(st.network()),
+        transfer_amount,
+    )])
+    .unwrap();
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, P0::SHIELDED_PROTOCOL);
+    let proposal0 = st
+        .propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            p0_to_p1,
+            NonZeroU32::new(1).unwrap(),
+        )
+        .unwrap();
+
+    let _min_target_height = proposal0.min_target_height();
+    assert_eq!(proposal0.steps().len(), 1);
+
+    let create_proposed_result = st.create_proposed_transaction_pczt::<Infallible, _, Infallible>(
+        account.id(),
+        OvkPolicy::Sender,
+        &proposal0,
+    );
+    assert_matches!(&create_proposed_result, Ok(_));
+    let pczt_created = create_proposed_result.unwrap();
+
+    // If we don't create proofs or signatures, we will fail to extract a transaction.
+    assert_matches!(
+        st.extract_and_store_transaction_from_pczt(pczt_created.clone()),
+        Err(Error::Pczt(data_api::error::PcztError::Extraction(_)))
+    );
+
+    // Add proof generation keys to Sapling spends.
+    let pczt_updated = P0::add_proof_generation_keys(pczt_created, account.usk()).unwrap();
+
+    // Create proofs.
+    let sapling_prover = LocalTxProver::bundled();
+    let orchard_pk = ::orchard::circuit::ProvingKey::build();
+    let pczt_proven = Prover::new(pczt_updated)
+        .create_orchard_proof(&orchard_pk)
+        .unwrap()
+        .create_sapling_proofs(&sapling_prover, &sapling_prover)
+        .unwrap()
+        .finish();
+
+    // Apply signatures.
+    let mut signer = Signer::new(pczt_proven).unwrap();
+    P0::apply_signatures_to_pczt(&mut signer, account.usk()).unwrap();
+    let pczt_authorized = signer.finish();
+
+    // Now we can extract the transaction.
+    let extract_and_store_result = st.extract_and_store_transaction_from_pczt(pczt_authorized);
+    assert_matches!(&extract_and_store_result, Ok(_));
+    let txid = extract_and_store_result.unwrap();
+
+    let (h, _) = st.generate_next_block_including(txid);
+    st.scan_cached_blocks(h, 1);
 }
