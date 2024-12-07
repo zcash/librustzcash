@@ -459,7 +459,7 @@ impl UnifiedSpendingKey {
     #[cfg(any(test, feature = "test-dependencies"))]
     pub fn default_address(
         &self,
-        request: UnifiedAddressRequest,
+        request: Option<UnifiedAddressRequest>,
     ) -> (UnifiedAddress, DiversifierIndex) {
         self.to_unified_full_viewing_key()
             .default_address(request)
@@ -890,14 +890,15 @@ impl UnifiedFullViewingKey {
         self.orchard.as_ref()
     }
 
-    /// Attempts to derive the Unified Address for the given diversifier index and
-    /// receiver types.
+    /// Attempts to derive the Unified Address for the given diversifier index and receiver types.
+    /// If `request` is None, the address should be derived to contain a receiver for each item in
+    /// this UFVK.
     ///
     /// Returns `None` if the specified index does not produce a valid diversifier.
     pub fn address(
         &self,
         j: DiversifierIndex,
-        request: UnifiedAddressRequest,
+        request: Option<UnifiedAddressRequest>,
     ) -> Result<UnifiedAddress, AddressGenerationError> {
         self.to_unified_incoming_viewing_key().address(j, request)
     }
@@ -908,11 +909,10 @@ impl UnifiedFullViewingKey {
     ///
     /// Returns an `Err(AddressGenerationError)` if no valid diversifier exists or if the features
     /// required to satisfy the unified address request are not properly enabled.
-    #[allow(unused_mut)]
     pub fn find_address(
         &self,
-        mut j: DiversifierIndex,
-        request: UnifiedAddressRequest,
+        j: DiversifierIndex,
+        request: Option<UnifiedAddressRequest>,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.to_unified_incoming_viewing_key()
             .find_address(j, request)
@@ -925,7 +925,7 @@ impl UnifiedFullViewingKey {
     /// required to satisfy the unified address request are not properly enabled.
     pub fn default_address(
         &self,
-        request: UnifiedAddressRequest,
+        request: Option<UnifiedAddressRequest>,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.find_address(DiversifierIndex::new(), request)
     }
@@ -1120,8 +1120,11 @@ impl UnifiedIncomingViewingKey {
     pub fn address(
         &self,
         _j: DiversifierIndex,
-        request: UnifiedAddressRequest,
+        request: Option<UnifiedAddressRequest>,
     ) -> Result<UnifiedAddress, AddressGenerationError> {
+        let request = request
+            .or(self.to_address_request())
+            .ok_or(AddressGenerationError::ShieldedReceiverRequired)?;
         #[cfg(feature = "orchard")]
         let mut orchard = None;
         if request.has_orchard {
@@ -1208,13 +1211,13 @@ impl UnifiedIncomingViewingKey {
     pub fn find_address(
         &self,
         mut j: DiversifierIndex,
-        request: UnifiedAddressRequest,
+        request: Option<UnifiedAddressRequest>,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         // If we need to generate a transparent receiver, check that the user has not
         // specified an invalid transparent child index, from which we can never search to
         // find a valid index.
         #[cfg(feature = "transparent-inputs")]
-        if request.has_p2pkh
+        if request.iter().any(|r| r.has_p2pkh)
             && self.transparent.is_some()
             && to_transparent_child_index(j).is_none()
         {
@@ -1248,7 +1251,7 @@ impl UnifiedIncomingViewingKey {
     /// required to satisfy the unified address request are not properly enabled.
     pub fn default_address(
         &self,
-        request: UnifiedAddressRequest,
+        request: Option<UnifiedAddressRequest>,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.find_address(DiversifierIndex::new(), request)
     }
@@ -1506,7 +1509,10 @@ mod tests {
             }
 
             let ua = ufvk
-                .address(d_idx, UnifiedAddressRequest::unsafe_new(false, true, true))
+                .address(
+                    d_idx,
+                    Some(UnifiedAddressRequest::unsafe_new(false, true, true)),
+                )
                 .unwrap_or_else(|err| {
                     panic!(
                         "unified address generation failed for account {}: {:?}",
@@ -1687,7 +1693,10 @@ mod tests {
             }
 
             let ua = uivk
-                .address(d_idx, UnifiedAddressRequest::unsafe_new(false, true, true))
+                .address(
+                    d_idx,
+                    Some(UnifiedAddressRequest::unsafe_new(false, true, true)),
+                )
                 .unwrap_or_else(|err| {
                     panic!(
                         "unified address generation failed for account {}: {:?}",
