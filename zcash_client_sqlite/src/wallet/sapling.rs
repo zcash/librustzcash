@@ -543,4 +543,16 @@ pub(crate) mod tests {
     fn multi_pool_checkpoints_with_pruning() {
         testing::pool::multi_pool_checkpoints_with_pruning::<SaplingPoolTester, OrchardPoolTester>()
     }
+
+    #[cfg(feature = "pczt-tests")]
+    #[test]
+    fn pczt_single_step_sapling_only() {
+        testing::pool::pczt_single_step::<SaplingPoolTester, SaplingPoolTester>()
+    }
+
+    #[cfg(feature = "pczt-tests")]
+    #[test]
+    fn pczt_single_step_sapling_to_orchard() {
+        testing::pool::pczt_single_step::<SaplingPoolTester, OrchardPoolTester>()
+    }
 }
