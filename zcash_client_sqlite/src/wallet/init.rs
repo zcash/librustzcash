@@ -991,7 +991,7 @@ mod tests {
             // Orchard component.
             let ua_request = UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT);
             let address_str = Address::Unified(
-                ufvk.default_address(ua_request)
+                ufvk.default_address(Some(ua_request))
                     .expect("A valid default address exists for the UFVK")
                     .0,
             )
@@ -1011,7 +1011,7 @@ mod tests {
             {
                 let taddr = Address::Transparent(
                     *ufvk
-                        .default_address(ua_request)
+                        .default_address(Some(ua_request))
                         .expect("A valid default address exists for the UFVK")
                         .0
                         .transparent()
@@ -1118,7 +1118,7 @@ mod tests {
                 // hardcoded with knowledge of what's coming next
                 let ua_request = UnifiedAddressRequest::unsafe_new(false, true, true);
                 db_data
-                    .get_next_available_address(account_id, ua_request)
+                    .get_next_available_address(account_id, Some(ua_request))
                     .unwrap()
                     .expect("get_next_available_address generated an address");
             } else {

@@ -135,7 +135,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             "Address field value decoded to a transparent address; should have been Sapling or unified.".to_string()));
                     }
                     Address::Unified(decoded_address) => {
-                        let (expected_address, idx) = ufvk.default_address(ua_request)?;
+                        let (expected_address, idx) = ufvk.default_address(Some(ua_request))?;
                         if decoded_address != expected_address {
                             return Err(if seed_is_relevant {
                                 WalletMigrationError::CorruptedData(
@@ -154,7 +154,10 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 seed_is_relevant = true;
 
                 let ufvk_str: String = ufvk.encode(&self.params);
-                let address_str: String = ufvk.default_address(ua_request)?.0.encode(&self.params);
+                let address_str: String = ufvk
+                    .default_address(Some(ua_request))?
+                    .0
+                    .encode(&self.params);
 
                 // This migration, and the wallet behaviour before it, stored the default
                 // transparent address in the `accounts` table. This does not necessarily
