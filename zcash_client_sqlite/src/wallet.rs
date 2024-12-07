@@ -1327,7 +1327,8 @@ impl ProgressEstimator for SubtreeProgressEstimator {
 /// that they are not yet spendable, or for which it is not yet possible to construct witnesses.
 ///
 /// `min_confirmations` can be 0, but that case is currently treated identically to
-/// `min_confirmations == 1` for shielded notes. This behaviour may change in the future.
+/// `min_confirmations == 1` for both shielded and transparent TXOs. This behaviour
+/// may change in the future.
 #[tracing::instrument(skip(tx, params, progress))]
 pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     tx: &rusqlite::Transaction,
@@ -1578,7 +1579,12 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     drop(sapling_trace);
 
     #[cfg(feature = "transparent-inputs")]
-    transparent::add_transparent_account_balances(tx, chain_tip_height + 1, &mut account_balances)?;
+    transparent::add_transparent_account_balances(
+        tx,
+        chain_tip_height + 1,
+        min_confirmations,
+        &mut account_balances,
+    )?;
 
     // The approach used here for Sapling and Orchard subtree indexing was a quick hack
     // that has not yet been replaced. TODO: Make less hacky.
