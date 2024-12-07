@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api.rs`."><title>data_api.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-dbdb5eec.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (c94848c04 2024-12-05)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>data_api.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api.rs`."><title>data_api.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (8dc83770f 2024-12-06)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>data_api.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -2551,7 +2551,18 @@
 <a href="#2550" id="2550">2550</a>
 <a href="#2551" id="2551">2551</a>
 <a href="#2552" id="2552">2552</a>
-<a href="#2553" id="2553">2553</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Utilities for Zcash wallet construction
+<a href="#2553" id="2553">2553</a>
+<a href="#2554" id="2554">2554</a>
+<a href="#2555" id="2555">2555</a>
+<a href="#2556" id="2556">2556</a>
+<a href="#2557" id="2557">2557</a>
+<a href="#2558" id="2558">2558</a>
+<a href="#2559" id="2559">2559</a>
+<a href="#2560" id="2560">2560</a>
+<a href="#2561" id="2561">2561</a>
+<a href="#2562" id="2562">2562</a>
+<a href="#2563" id="2563">2563</a>
+<a href="#2564" id="2564">2564</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Utilities for Zcash wallet construction
 //!
 //! This module defines a set of APIs for wallet data persistence, and provides a suite of methods
 //! based upon these APIs that can be used to implement a fully functional Zcash wallet. At
@@ -2784,14 +2795,8 @@
     <span class="doccomment">/// The value of unspent Orchard outputs belonging to the account.
     </span>orchard_balance: Balance,
 
-    <span class="doccomment">/// The value of all unspent transparent outputs belonging to the account, irrespective of
-    /// confirmation depth.
-    ///
-    /// Unshielded balances are not subject to confirmation-depth constraints, because the only
-    /// possible operation on a transparent balance is to shield it, it is possible to create a
-    /// zero-conf transaction to perform that shielding, and the resulting shielded notes will be
-    /// subject to normal confirmation rules.
-    </span>unshielded: NonNegativeAmount,
+    <span class="doccomment">/// The value of all unspent transparent outputs belonging to the account.
+    </span>unshielded_balance: Balance,
 }
 
 <span class="kw">impl </span>AccountBalance {
@@ -2799,12 +2804,14 @@
     </span><span class="kw">pub const </span>ZERO: <span class="self">Self </span>= <span class="self">Self </span>{
         sapling_balance: Balance::ZERO,
         orchard_balance: Balance::ZERO,
-        unshielded: NonNegativeAmount::ZERO,
+        unshielded_balance: Balance::ZERO,
     };
 
     <span class="kw">fn </span>check_total(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;NonNegativeAmount, BalanceError&gt; {
-        (<span class="self">self</span>.sapling_balance.total() + <span class="self">self</span>.orchard_balance.total() + <span class="self">self</span>.unshielded)
-            .ok_or(BalanceError::Overflow)
+        (<span class="self">self</span>.sapling_balance.total()
+            + <span class="self">self</span>.orchard_balance.total()
+            + <span class="self">self</span>.unshielded_balance.total())
+        .ok_or(BalanceError::Overflow)
     }
 
     <span class="doccomment">/// Returns the [`Balance`] of Sapling funds in the account.
@@ -2812,7 +2819,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>.sapling_balance
     }
 
-    <span class="doccomment">/// Provides a `mutable reference to the [`Balance`] of Sapling funds in the account
+    <span class="doccomment">/// Provides a mutable reference to the [`Balance`] of Sapling funds in the account
     /// to the specified callback, checking invariants after the callback's action has been
     /// evaluated.
     </span><span class="kw">pub fn </span>with_sapling_balance_mut&lt;A, E: From&lt;BalanceError&gt;&gt;(
@@ -2829,7 +2836,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>.orchard_balance
     }
 
-    <span class="doccomment">/// Provides a `mutable reference to the [`Balance`] of Orchard funds in the account
+    <span class="doccomment">/// Provides a mutable reference to the [`Balance`] of Orchard funds in the account
     /// to the specified callback, checking invariants after the callback's action has been
     /// evaluated.
     </span><span class="kw">pub fn </span>with_orchard_balance_mut&lt;A, E: From&lt;BalanceError&gt;&gt;(
@@ -2842,22 +2849,36 @@
     }
 
     <span class="doccomment">/// Returns the total value of unspent transparent transaction outputs belonging to the wallet.
+    </span><span class="attr">#[deprecated(
+        note = <span class="string">"this function is deprecated. Please use [`AccountBalance::unshielded_balance`] instead."
+    </span>)]
     </span><span class="kw">pub fn </span>unshielded(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; NonNegativeAmount {
-        <span class="self">self</span>.unshielded
+        <span class="self">self</span>.unshielded_balance.total()
     }
 
-    <span class="doccomment">/// Adds the specified value to the unshielded total, checking for overflow of
-    /// the total account balance.
-    </span><span class="kw">pub fn </span>add_unshielded_value(<span class="kw-2">&amp;mut </span><span class="self">self</span>, value: NonNegativeAmount) -&gt; <span class="prelude-ty">Result</span>&lt;(), BalanceError&gt; {
-        <span class="self">self</span>.unshielded = (<span class="self">self</span>.unshielded + value).ok_or(BalanceError::Overflow)<span class="question-mark">?</span>;
+    <span class="doccomment">/// Returns the [`Balance`] of unshielded funds in the account.
+    </span><span class="kw">pub fn </span>unshielded_balance(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Balance {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.unshielded_balance
+    }
+
+    <span class="doccomment">/// Provides a mutable reference to the [`Balance`] of transparent funds in the account
+    /// to the specified callback, checking invariants after the callback's action has been
+    /// evaluated.
+    </span><span class="kw">pub fn </span>with_unshielded_balance_mut&lt;A, E: From&lt;BalanceError&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        f: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;mut </span>Balance) -&gt; <span class="prelude-ty">Result</span>&lt;A, E&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;A, E&gt; {
+        <span class="kw">let </span>result = f(<span class="kw-2">&amp;mut </span><span class="self">self</span>.unshielded_balance)<span class="question-mark">?</span>;
         <span class="self">self</span>.check_total()<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(())
+        <span class="prelude-val">Ok</span>(result)
     }
 
     <span class="doccomment">/// Returns the total value of funds belonging to the account.
     </span><span class="kw">pub fn </span>total(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; NonNegativeAmount {
-        (<span class="self">self</span>.sapling_balance.total() + <span class="self">self</span>.orchard_balance.total() + <span class="self">self</span>.unshielded)
-            .expect(<span class="string">"Account balance cannot overflow MAX_MONEY"</span>)
+        (<span class="self">self</span>.sapling_balance.total()
+            + <span class="self">self</span>.orchard_balance.total()
+            + <span class="self">self</span>.unshielded_balance.total())
+        .expect(<span class="string">"Account balance cannot overflow MAX_MONEY"</span>)
     }
 
     <span class="doccomment">/// Returns the total value of shielded (Sapling and Orchard) funds that may immediately be
@@ -3807,8 +3828,9 @@
     /// or `Ok(None)` if the wallet has no initialized accounts.
     </span><span class="kw">fn </span>get_wallet_birthday(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;BlockHeight&gt;, <span class="self">Self</span>::Error&gt;;
 
-    <span class="doccomment">/// Returns the wallet balances and sync status for an account given the specified minimum
-    /// number of confirmations, or `Ok(None)` if the wallet has no balance data available.
+    <span class="doccomment">/// Returns a [`WalletSummary`] that represents the sync status, and the wallet balances
+    /// given the specified minimum number of confirmations for all accounts known to the
+    /// wallet; or `Ok(None)` if the wallet has no summary data available.
     </span><span class="kw">fn </span>get_wallet_summary(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         min_confirmations: u32,
