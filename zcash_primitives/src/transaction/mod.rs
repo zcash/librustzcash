@@ -507,6 +507,44 @@ impl<A: Authorization> TransactionData<A> {
         }
     }
 
+    /// Maps the bundles from one type to another with fallible closures.
+    ///
+    /// This shouldn't be necessary for most use cases; it is provided for handling the
+    /// transaction extraction logic in the `pczt` crate.
+    pub fn try_map_bundles<B: Authorization, E>(
+        self,
+        f_transparent: impl FnOnce(
+            Option<transparent::Bundle<A::TransparentAuth>>,
+        )
+            -> Result<Option<transparent::Bundle<B::TransparentAuth>>, E>,
+        f_sapling: impl FnOnce(
+            Option<sapling::Bundle<A::SaplingAuth, Amount>>,
+        ) -> Result<Option<sapling::Bundle<B::SaplingAuth, Amount>>, E>,
+        f_orchard: impl FnOnce(
+            Option<orchard::bundle::Bundle<A::OrchardAuth, Amount>>,
+        )
+            -> Result<Option<orchard::bundle::Bundle<B::OrchardAuth, Amount>>, E>,
+        #[cfg(zcash_unstable = "zfuture")] f_tze: impl FnOnce(
+            Option<tze::Bundle<A::TzeAuth>>,
+        ) -> Result<
+            Option<tze::Bundle<B::TzeAuth>>,
+            E,
+        >,
+    ) -> Result<TransactionData<B>, E> {
+        Ok(TransactionData {
+            version: self.version,
+            consensus_branch_id: self.consensus_branch_id,
+            lock_time: self.lock_time,
+            expiry_height: self.expiry_height,
+            transparent_bundle: f_transparent(self.transparent_bundle)?,
+            sprout_bundle: self.sprout_bundle,
+            sapling_bundle: f_sapling(self.sapling_bundle)?,
+            orchard_bundle: f_orchard(self.orchard_bundle)?,
+            #[cfg(zcash_unstable = "zfuture")]
+            tze_bundle: f_tze(self.tze_bundle)?,
+        })
+    }
+
     pub fn map_authorization<B: Authorization>(
         self,
         f_transparent: impl transparent::MapAuth<A::TransparentAuth, B::TransparentAuth>,

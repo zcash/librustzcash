@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_proofs::prover::LocalTxProver::verifying_keys`
+
 ## [0.20.0] - 2024-11-14
 
 ### Changed

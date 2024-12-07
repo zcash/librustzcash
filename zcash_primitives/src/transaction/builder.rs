@@ -6,6 +6,7 @@ use std::fmt;
 use std::sync::mpsc::Sender;
 
 use rand::{CryptoRng, RngCore};
+use zcash_protocol::consensus::Parameters;
 
 use crate::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade},
@@ -270,6 +271,30 @@ impl BuildResult {
     pub fn orchard_meta(&self) -> &orchard::builder::BundleMetadata {
         &self.orchard_meta
     }
+}
+
+/// The result of [`Builder::build_for_pczt`].
+///
+/// It includes the PCZT components along with metadata describing how spends and outputs
+/// were shuffled in creating the transaction's shielded bundles.
+#[derive(Debug)]
+pub struct PcztResult<P: Parameters> {
+    pub pczt_parts: PcztParts<P>,
+    pub sapling_meta: SaplingMetadata,
+    pub orchard_meta: orchard::builder::BundleMetadata,
+}
+
+/// The components of a PCZT.
+#[derive(Debug)]
+pub struct PcztParts<P: Parameters> {
+    pub params: P,
+    pub version: TxVersion,
+    pub consensus_branch_id: BranchId,
+    pub lock_time: u32,
+    pub expiry_height: BlockHeight,
+    pub transparent: Option<transparent::pczt::Bundle>,
+    pub sapling: Option<sapling::pczt::Bundle>,
+    pub orchard: Option<orchard::pczt::Bundle>,
 }
 
 /// Generates a [`Transaction`] from its inputs and outputs.
@@ -831,6 +856,86 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         // of freeze() should be infalliable.
         Ok(BuildResult {
             transaction: authorized_tx.freeze().unwrap(),
+            sapling_meta,
+            orchard_meta,
+        })
+    }
+
+    /// Builds a PCZT from the configured spends and outputs.
+    ///
+    /// Upon success, returns a struct containing the PCZT components, and the
+    /// [`SaplingMetadata`] and [`orchard::builder::BundleMetadata`] generated during the
+    /// build process.
+    pub fn build_for_pczt<R: RngCore + CryptoRng, FR: FeeRule>(
+        self,
+        mut rng: R,
+        fee_rule: &FR,
+    ) -> Result<PcztResult<P>, Error<FR::Error>> {
+        let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
+        let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
+
+        // determine transaction version
+        let version = TxVersion::suggested_for_branch(consensus_branch_id);
+
+        let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
+
+        //
+        // Consistency checks
+        //
+
+        // After fees are accounted for, the value balance of the transaction must be zero.
+        let balance_after_fees =
+            (self.value_balance()? - fee.into()).ok_or(BalanceError::Underflow)?;
+
+        match balance_after_fees.cmp(&Amount::zero()) {
+            Ordering::Less => {
+                return Err(Error::InsufficientFunds(-balance_after_fees));
+            }
+            Ordering::Greater => {
+                return Err(Error::ChangeRequired(balance_after_fees));
+            }
+            Ordering::Equal => (),
+        };
+
+        let transparent_bundle = self.transparent_builder.build_for_pczt();
+
+        let (sapling_bundle, sapling_meta) = match self
+            .sapling_builder
+            .map(|builder| {
+                builder
+                    .build_for_pczt(&mut rng)
+                    .map_err(Error::SaplingBuild)
+            })
+            .transpose()?
+        {
+            Some((bundle, meta)) => (Some(bundle), meta),
+            None => (None, SaplingMetadata::empty()),
+        };
+
+        let (orchard_bundle, orchard_meta) = match self
+            .orchard_builder
+            .map(|builder| {
+                builder
+                    .build_for_pczt(&mut rng)
+                    .map_err(Error::OrchardBuild)
+            })
+            .transpose()?
+        {
+            Some((bundle, meta)) => (Some(bundle), meta),
+            None => (None, orchard::builder::BundleMetadata::empty()),
+        };
+
+        Ok(PcztResult {
+            pczt_parts: PcztParts {
+                params: self.params,
+                version,
+                consensus_branch_id,
+                lock_time: 0,
+                expiry_height: self.expiry_height,
+                transparent: transparent_bundle,
+                sapling: sapling_bundle,
+                orchard: orchard_bundle,
+            },
             sapling_meta,
             orchard_meta,
         })
