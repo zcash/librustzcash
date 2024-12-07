@@ -8,6 +8,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
+- `zcash_primitives::legacy::Script::address`
 - `zcash_primitives::transaction`
   - `TransactionData::try_map_bundles`
   - `builder::{PcztResult, PcztParts}`
@@ -16,7 +17,27 @@ and this library adheres to Rust's notion of
     - `pczt` module.
     - `EffectsOnly`
     - `impl MapAuth<Authorized, Authorized> for ()`
+    - `builder::TransparentSigningSet`
   - `sighash::SighashType`
+
+### Changed
+- `zcash_primitives::transaction::components::transparent`:
+  - `builder::TransparentBuilder::add_input` now takes `secp256k1::PublicKey`
+    instead of `secp256k1::SecretKey`.
+  - `Bundle<Unauthorized>::apply_signatures` now takes an additional argument
+    `&TransparentSigningSet`.
+  - `builder::Error` has a new variant `MissingSigningKey`.
+- `zcash_primitives::transaction::builder`:
+  - `Builder::add_orchard_spend` now takes `orchard::keys::FullViewingKey`
+    instead of `&orchard::keys::SpendingKey`.
+  - `Builder::add_sapling_spend` now takes `sapling::keys::FullViewingKey`
+    instead of `&sapling::zip32::ExtendedSpendingKey`.
+  - `Builder::add_transparent_input` now takes `secp256k1::PublicKey` instead of
+    `secp256k1::SecretKey`.
+  - `Builder::build` now takes several additional arguments:
+    - `&TransparentSigningSet`
+    - `&[sapling::zip32::ExtendedSpendingKey]`
+    - `&[orchard::keys::SpendAuthorizingKey]`
 
 ## [0.20.0] - 2024-11-14
 

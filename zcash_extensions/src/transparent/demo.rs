@@ -491,6 +491,7 @@ mod tests {
             builder::{BuildConfig, Builder},
             components::{
                 amount::{Amount, NonNegativeAmount},
+                transparent::builder::TransparentSigningSet,
                 tze::{Authorized, Bundle, OutPoint, TzeIn, TzeOut},
             },
             fees::{fixed, zip317::MINIMUM_FEE},
@@ -798,7 +799,9 @@ mod tests {
 
         // create some inputs to spend
         let extsk = ExtendedSpendingKey::master(&[]);
+        let dfvk = extsk.to_diversifiable_full_viewing_key();
         let to = extsk.default_address().1;
+        let sapling_extsks = &[extsk];
         let note1 = to.create_note(
             sapling::value::NoteValue::from_raw(110000),
             Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)),
@@ -812,7 +815,7 @@ mod tests {
 
         let mut builder_a = demo_builder(tx_height, witness1.root().into());
         builder_a
-            .add_sapling_spend::<Infallible>(&extsk, note1, witness1.path().unwrap())
+            .add_sapling_spend::<Infallible>(dfvk.fvk().clone(), note1, witness1.path().unwrap())
             .unwrap();
 
         let value = NonNegativeAmount::const_from_u64(100000);
@@ -823,7 +826,15 @@ mod tests {
             .unwrap();
         let res_a = builder_a
             .txn_builder
-            .build_zfuture(OsRng, &prover, &prover, &fee_rule)
+            .build_zfuture(
+                &TransparentSigningSet::new(),
+                sapling_extsks,
+                &[],
+                OsRng,
+                &prover,
+                &prover,
+                &fee_rule,
+            )
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
         let tze_a = res_a.transaction().tze_bundle().unwrap();
@@ -844,7 +855,15 @@ mod tests {
             .unwrap();
         let res_b = builder_b
             .txn_builder
-            .build_zfuture(OsRng, &prover, &prover, &fee_rule)
+            .build_zfuture(
+                &TransparentSigningSet::new(),
+                sapling_extsks,
+                &[],
+                OsRng,
+                &prover,
+                &prover,
+                &fee_rule,
+            )
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
         let tze_b = res_b.transaction().tze_bundle().unwrap();
@@ -872,7 +891,15 @@ mod tests {
 
         let res_c = builder_c
             .txn_builder
-            .build_zfuture(OsRng, &prover, &prover, &fee_rule)
+            .build_zfuture(
+                &TransparentSigningSet::new(),
+                sapling_extsks,
+                &[],
+                OsRng,
+                &prover,
+                &prover,
+                &fee_rule,
+            )
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
         let tze_c = res_c.transaction().tze_bundle().unwrap();

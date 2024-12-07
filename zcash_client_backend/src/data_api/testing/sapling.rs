@@ -150,4 +150,61 @@ impl ShieldedPoolTester for SaplingPoolTester {
     fn received_note_count(summary: &ScanSummary) -> usize {
         summary.received_sapling_note_count()
     }
+
+    #[cfg(feature = "pczt")]
+    fn add_proof_generation_keys(
+        pczt: pczt::Pczt,
+        usk: &UnifiedSpendingKey,
+    ) -> Result<pczt::Pczt, pczt::roles::updater::SaplingError> {
+        let extsk = Self::usk_to_sk(usk);
+
+        Ok(pczt::roles::updater::Updater::new(pczt)
+            .update_sapling_with(|mut updater| {
+                let non_dummy_spends = updater
+                    .bundle()
+                    .spends()
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, spend)| {
+                        // Dummy spends will already have a proof generation key.
+                        spend.proof_generation_key().is_none().then_some(index)
+                    })
+                    .collect::<Vec<_>>();
+
+                // Assume all non-dummy spent notes are from the same account.
+                for index in non_dummy_spends {
+                    updater.update_spend_with(index, |mut spend_updater| {
+                        spend_updater.set_proof_generation_key(extsk.expsk.proof_generation_key())
+                    })?;
+                }
+
+                Ok(())
+            })?
+            .finish())
+    }
+
+    #[cfg(feature = "pczt")]
+    fn apply_signatures_to_pczt(
+        signer: &mut pczt::roles::signer::Signer,
+        usk: &UnifiedSpendingKey,
+    ) -> Result<(), pczt::roles::signer::Error> {
+        let extsk = Self::usk_to_sk(usk);
+
+        // Figuring out which one is for us is hard. Let's just try signing all of them!
+        for index in 0.. {
+            match signer.sign_sapling(index, &extsk.expsk.ask) {
+                // Loop termination.
+                Err(pczt::roles::signer::Error::InvalidIndex) => break,
+                // Ignore any errors due to using the wrong key.
+                Ok(())
+                | Err(pczt::roles::signer::Error::SaplingSign(
+                    sapling::pczt::SignerError::WrongSpendAuthorizingKey,
+                )) => Ok(()),
+                // Raise any unexpected errors.
+                Err(e) => Err(e),
+            }?;
+        }
+
+        Ok(())
+    }
 }

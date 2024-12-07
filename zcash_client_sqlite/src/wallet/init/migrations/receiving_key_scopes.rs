@@ -306,7 +306,10 @@ mod tests {
         memo::MemoBytes,
         transaction::{
             builder::{BuildConfig, BuildResult, Builder},
-            components::{amount::NonNegativeAmount, transparent},
+            components::{
+                amount::NonNegativeAmount,
+                transparent::{self, builder::TransparentSigningSet},
+            },
             fees::fixed,
             Transaction,
         },
@@ -364,11 +367,14 @@ mod tests {
                 orchard_anchor: None,
             },
         );
+        let mut transparent_signing_set = TransparentSigningSet::new();
         builder
             .add_transparent_input(
-                usk0.transparent()
-                    .derive_external_secret_key(NonHardenedChildIndex::ZERO)
-                    .unwrap(),
+                transparent_signing_set.add_key(
+                    usk0.transparent()
+                        .derive_external_secret_key(NonHardenedChildIndex::ZERO)
+                        .unwrap(),
+                ),
                 transparent::OutPoint::fake(),
                 transparent::TxOut {
                     value: NonNegativeAmount::const_from_u64(EXTERNAL_VALUE + INTERNAL_VALUE),
@@ -402,6 +408,9 @@ mod tests {
         let prover = LocalTxProver::bundled();
         let res = builder
             .build(
+                &transparent_signing_set,
+                &[],
+                &[],
                 OsRng,
                 &prover,
                 &prover,
