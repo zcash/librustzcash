@@ -6,6 +6,16 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- The `UnifiedAddressRequest` argument to the following methods is now optional:
+  - `zcash_keys::keys::UnifiedSpendingKey::address`
+  - `zcash_keys::keys::UnifiedSpendingKey::default_address`
+  - `zcash_keys::keys::UnifiedFullViewingKey::find_address`
+  - `zcash_keys::keys::UnifiedFullViewingKey::default_address`
+  - `zcash_keys::keys::UnifiedIncomingViewingKey::address`
+  - `zcash_keys::keys::UnifiedIncomingViewingKey::find_address`
+  - `zcash_keys::keys::UnifiedIncomingViewingKey::default_address`
+
 ## [0.5.0] - 2024-11-14
 
 ### Changed

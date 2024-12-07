@@ -65,9 +65,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 })?
             };
 
-            let (default_addr, diversifier_index) = uivk.default_address(
+            let (default_addr, diversifier_index) = uivk.default_address(Some(
                 UnifiedAddressRequest::unsafe_new(UA_ORCHARD, true, UA_TRANSPARENT),
-            )?;
+            ))?;
 
             let mut di_be = *diversifier_index.as_bytes();
             di_be.reverse();
@@ -140,11 +140,11 @@ mod tests {
             .unwrap();
 
         let (addr, diversifier_index) = ufvk
-            .default_address(UnifiedAddressRequest::unsafe_new(
+            .default_address(Some(UnifiedAddressRequest::unsafe_new(
                 false,
                 true,
                 UA_TRANSPARENT,
-            ))
+            )))
             .unwrap();
         let mut di_be = *diversifier_index.as_bytes();
         di_be.reverse();

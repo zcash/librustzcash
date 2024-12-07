@@ -31,6 +31,7 @@ and this library adheres to Rust's notion of
     - `AccountIdNotRecognized`
     - `AccountCannotSpend`
     - `Pczt`
+  - The `request` argument to `WalletRead::get_next_available_address` is now optional.
 
 ## [0.15.0] - 2024-11-14
 
