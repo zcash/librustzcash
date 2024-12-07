@@ -20,10 +20,10 @@ use zcash_protocol::local_consensus::LocalNetwork;
 
 use super::TestAccount;
 
-/// Checks whether the transparent balance of the given test [`account`] is as [`expected`]
-/// considering the [`min_confirmations`]. It is assumed that zero or one [`min_confirmations`]
-/// are treated the same so this function also checks the other case when 1 or 0 [`min_confirmations`]
-/// are passed as arguments.
+/// Checks whether the transparent balance of the given test `account` is as `expected`
+/// considering the `min_confirmations`. It is assumed that zero or one `min_confirmations`
+/// are treated the same, and so this function also checks the other case when
+/// `min_confirmations` is 0 or 1.
 fn check_balance<DSF>(
     st: &TestState<impl TestCache, <DSF as DataStoreFactory>::DataStore, LocalNetwork>,
     account: &TestAccount<<DSF as DataStoreFactory>::Account>,
