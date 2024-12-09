@@ -1329,7 +1329,7 @@ where
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 #[cfg(feature = "pczt")]
-pub fn create_proposed_transaction_pczt<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>(
+pub fn create_pczt_from_proposal<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>(
     wallet_db: &mut DbT,
     params: &ParamsT,
     account_id: <DbT as WalletRead>::AccountId,
@@ -1592,7 +1592,7 @@ where
 
 /// Finalizes the given PCZT, and persists the transaction to the wallet database.
 ///
-/// The PCZT should have been created via [`create_proposed_transaction_pczt`], which adds
+/// The PCZT should have been created via [`create_pczt_from_proposal`], which adds
 /// metadata necessary for the wallet backend.
 ///
 /// Returns the transaction ID for the resulting transaction.

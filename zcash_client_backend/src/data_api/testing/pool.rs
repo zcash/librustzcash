@@ -3111,8 +3111,10 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, DSF>(
         .with_block_cache(cache)
         .with_initial_chain_state(|_, network| {
             // Initialize the chain state to after ZIP 212 became enforced.
-            let birthday_height =
-                network.activation_height(NetworkUpgrade::Nu5).unwrap() + ZIP212_GRACE_PERIOD;
+            let birthday_height = std::cmp::max(
+                network.activation_height(NetworkUpgrade::Nu5).unwrap(),
+                network.activation_height(NetworkUpgrade::Canopy).unwrap() + ZIP212_GRACE_PERIOD,
+            );
 
             InitialChainState {
                 chain_state: ChainState::new(
@@ -3168,7 +3170,7 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, DSF>(
     let _min_target_height = proposal0.min_target_height();
     assert_eq!(proposal0.steps().len(), 1);
 
-    let create_proposed_result = st.create_proposed_transaction_pczt::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_pczt_from_proposal::<Infallible, _, Infallible>(
         account.id(),
         OvkPolicy::Sender,
         &proposal0,

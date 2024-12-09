@@ -86,8 +86,8 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     /// Attempted to create a spend to an unsupported Unified Address receiver
     NoSupportedReceivers(Box<UnifiedAddress>),
 
-    /// A proposed transaction cannot be built because it requires spending an input of a type for
-    /// which a key that is required to construct the transaciton is not available.
+    /// A proposed transaction cannot be built because it requires spending an input of
+    /// a type for which a key required to construct the transaction is not available.
     KeyNotAvailable(PoolType),
 
     /// A note being spent does not correspond to either the internal or external

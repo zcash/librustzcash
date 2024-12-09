@@ -172,7 +172,7 @@ transparent-inputs = [
 ## Enables receiving and spending Orchard funds.
 orchard = ["dep:orchard", "dep:pasta_curves", "zcash_keys/orchard"]
 
-## Enables creating partially-signed transactions for use in hardware wallet and multisig scenarios.
+## Enables creating partially-constructed transactions for use in hardware wallet and multisig scenarios.
 pczt = [
   "orchard",
   "transparent-inputs",

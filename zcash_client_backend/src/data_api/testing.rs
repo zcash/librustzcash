@@ -1092,12 +1092,12 @@ where
         )
     }
 
-    /// Invokes [`create_proposed_transaction_pczt`] with the given arguments.
+    /// Invokes [`create_pczt_from_proposal`] with the given arguments.
     ///
-    /// [`create_proposed_transaction_pczt`]: super::wallet::create_proposed_transaction_pczt
+    /// [`create_pczt_from_proposal`]: super::wallet::create_pczt_from_proposal
     #[cfg(feature = "pczt")]
     #[allow(clippy::type_complexity)]
-    pub fn create_proposed_transaction_pczt<InputsErrT, FeeRuleT, ChangeErrT>(
+    pub fn create_pczt_from_proposal<InputsErrT, FeeRuleT, ChangeErrT>(
         &mut self,
         spend_from_account: <DbT as InputSource>::AccountId,
         ovk_policy: OvkPolicy,
@@ -1110,11 +1110,11 @@ where
         <DbT as WalletRead>::AccountId: serde::Serialize,
         FeeRuleT: FeeRule,
     {
-        use super::wallet::create_proposed_transaction_pczt;
+        use super::wallet::create_pczt_from_proposal;
 
         let network = self.network().clone();
 
-        create_proposed_transaction_pczt(
+        create_pczt_from_proposal(
             self.wallet_mut(),
             &network,
             spend_from_account,

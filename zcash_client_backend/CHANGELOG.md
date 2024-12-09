@@ -12,7 +12,7 @@ and this library adheres to Rust's notion of
   - `AccountSource::key_derivation`
   - `error::PcztError`
   - `wallet::ExtractErrT`
-  - `wallet::create_proposed_transaction_pczt`
+  - `wallet::create_pczt_from_proposal`
   - `wallet::extract_and_store_transaction_from_pczt`
 
 ### Changed
