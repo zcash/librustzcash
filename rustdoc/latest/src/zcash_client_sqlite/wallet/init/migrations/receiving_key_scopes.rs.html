@@ -900,7 +900,16 @@
 <a href="#899" id="899">899</a>
 <a href="#900" id="900">900</a>
 <a href="#901" id="901">901</a>
-<a href="#902" id="902">902</a></pre></div><pre class="rust"><code><span class="doccomment">//! This migration adds decryption key scope to persisted information about received notes.
+<a href="#902" id="902">902</a>
+<a href="#903" id="903">903</a>
+<a href="#904" id="904">904</a>
+<a href="#905" id="905">905</a>
+<a href="#906" id="906">906</a>
+<a href="#907" id="907">907</a>
+<a href="#908" id="908">908</a>
+<a href="#909" id="909">909</a>
+<a href="#910" id="910">910</a>
+<a href="#911" id="911">911</a></pre></div><pre class="rust"><code><span class="doccomment">//! This migration adds decryption key scope to persisted information about received notes.
 
 </span><span class="kw">use </span>std::collections::HashSet;
 
@@ -1208,7 +1217,10 @@
         memo::MemoBytes,
         transaction::{
             builder::{BuildConfig, BuildResult, Builder},
-            components::{amount::NonNegativeAmount, transparent},
+            components::{
+                amount::NonNegativeAmount,
+                transparent::{<span class="self">self</span>, builder::TransparentSigningSet},
+            },
             fees::fixed,
             Transaction,
         },
@@ -1266,11 +1278,14 @@
                 orchard_anchor: <span class="prelude-val">None</span>,
             },
         );
+        <span class="kw">let </span><span class="kw-2">mut </span>transparent_signing_set = TransparentSigningSet::new();
         builder
             .add_transparent_input(
-                usk0.transparent()
-                    .derive_external_secret_key(NonHardenedChildIndex::ZERO)
-                    .unwrap(),
+                transparent_signing_set.add_key(
+                    usk0.transparent()
+                        .derive_external_secret_key(NonHardenedChildIndex::ZERO)
+                        .unwrap(),
+                ),
                 transparent::OutPoint::fake(),
                 transparent::TxOut {
                     value: NonNegativeAmount::const_from_u64(EXTERNAL_VALUE + INTERNAL_VALUE),
@@ -1304,6 +1319,9 @@
         <span class="kw">let </span>prover = LocalTxProver::bundled();
         <span class="kw">let </span>res = builder
             .build(
+                <span class="kw-2">&amp;</span>transparent_signing_set,
+                <span class="kw-2">&amp;</span>[],
+                <span class="kw-2">&amp;</span>[],
                 OsRng,
                 <span class="kw-2">&amp;</span>prover,
                 <span class="kw-2">&amp;</span>prover,

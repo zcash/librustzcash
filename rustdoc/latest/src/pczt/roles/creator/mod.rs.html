@@ -168,7 +168,9 @@
 <a href="#167" id="167">167</a>
 <a href="#168" id="168">168</a>
 <a href="#169" id="169">169</a>
-<a href="#170" id="170">170</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeMap;
+<a href="#170" id="170">170</a>
+<a href="#171" id="171">171</a>
+<a href="#172" id="172">172</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeMap;
 
 <span class="kw">use crate</span>::{
     common::{
@@ -283,6 +285,8 @@
             | zcash_primitives::transaction::TxVersion::Overwinter =&gt; <span class="prelude-val">None</span>,
             zcash_primitives::transaction::TxVersion::Sapling =&gt; <span class="prelude-val">Some</span>(SAPLING_TX_VERSION),
             zcash_primitives::transaction::TxVersion::Zip225 =&gt; <span class="prelude-val">Some</span>(V5_TX_VERSION),
+            <span class="attr">#[cfg(zcash_unstable = <span class="string">"zfuture"</span>)]
+            </span>zcash_primitives::transaction::TxVersion::ZFuture =&gt; <span class="prelude-val">None</span>,
         }<span class="question-mark">?</span>;
 
         <span class="comment">// Spends and outputs not modifiable.

@@ -2303,7 +2303,8 @@
 <a href="#2302" id="2302">2302</a>
 <a href="#2303" id="2303">2303</a>
 <a href="#2304" id="2304">2304</a>
-<a href="#2305" id="2305">2305</a></pre></div><pre class="rust"><code><span class="doccomment">//! *An SQLite-based Zcash light client.*
+<a href="#2305" id="2305">2305</a>
+<a href="#2306" id="2306">2306</a></pre></div><pre class="rust"><code><span class="doccomment">//! *An SQLite-based Zcash light client.*
 //!
 //! `zcash_client_sqlite` contains complete SQLite-based implementations of the [`WalletRead`],
 //! [`WalletWrite`], and [`BlockSource`] traits from the [`zcash_client_backend`] crate. In
@@ -2482,7 +2483,8 @@
 /// - Restoring a wallet from a backed-up seed.
 /// - Importing the same viewing key into two different wallet instances.
 </span><span class="attr">#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
-</span><span class="kw">pub struct </span>AccountUuid(Uuid);
+#[cfg_attr(feature = <span class="string">"serde"</span>, derive(serde::Serialize, serde::Deserialize))]
+</span><span class="kw">pub struct </span>AccountUuid(<span class="attr">#[cfg_attr(feature = <span class="string">"serde"</span>, serde(with = <span class="string">"uuid::serde::compact"</span>))] </span>Uuid);
 
 <span class="kw">impl </span>ConditionallySelectable <span class="kw">for </span>AccountUuid {
     <span class="kw">fn </span>conditional_select(a: <span class="kw-2">&amp;</span><span class="self">Self</span>, b: <span class="kw-2">&amp;</span><span class="self">Self</span>, choice: subtle::Choice) -&gt; <span class="self">Self </span>{

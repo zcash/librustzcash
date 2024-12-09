@@ -2779,7 +2779,65 @@
 <a href="#2778" id="2778">2778</a>
 <a href="#2779" id="2779">2779</a>
 <a href="#2780" id="2780">2780</a>
-<a href="#2781" id="2781">2781</a></pre></div><pre class="rust"><code><span class="doccomment">//! Utilities for testing wallets based upon the [`crate::data_api`] traits.
+<a href="#2781" id="2781">2781</a>
+<a href="#2782" id="2782">2782</a>
+<a href="#2783" id="2783">2783</a>
+<a href="#2784" id="2784">2784</a>
+<a href="#2785" id="2785">2785</a>
+<a href="#2786" id="2786">2786</a>
+<a href="#2787" id="2787">2787</a>
+<a href="#2788" id="2788">2788</a>
+<a href="#2789" id="2789">2789</a>
+<a href="#2790" id="2790">2790</a>
+<a href="#2791" id="2791">2791</a>
+<a href="#2792" id="2792">2792</a>
+<a href="#2793" id="2793">2793</a>
+<a href="#2794" id="2794">2794</a>
+<a href="#2795" id="2795">2795</a>
+<a href="#2796" id="2796">2796</a>
+<a href="#2797" id="2797">2797</a>
+<a href="#2798" id="2798">2798</a>
+<a href="#2799" id="2799">2799</a>
+<a href="#2800" id="2800">2800</a>
+<a href="#2801" id="2801">2801</a>
+<a href="#2802" id="2802">2802</a>
+<a href="#2803" id="2803">2803</a>
+<a href="#2804" id="2804">2804</a>
+<a href="#2805" id="2805">2805</a>
+<a href="#2806" id="2806">2806</a>
+<a href="#2807" id="2807">2807</a>
+<a href="#2808" id="2808">2808</a>
+<a href="#2809" id="2809">2809</a>
+<a href="#2810" id="2810">2810</a>
+<a href="#2811" id="2811">2811</a>
+<a href="#2812" id="2812">2812</a>
+<a href="#2813" id="2813">2813</a>
+<a href="#2814" id="2814">2814</a>
+<a href="#2815" id="2815">2815</a>
+<a href="#2816" id="2816">2816</a>
+<a href="#2817" id="2817">2817</a>
+<a href="#2818" id="2818">2818</a>
+<a href="#2819" id="2819">2819</a>
+<a href="#2820" id="2820">2820</a>
+<a href="#2821" id="2821">2821</a>
+<a href="#2822" id="2822">2822</a>
+<a href="#2823" id="2823">2823</a>
+<a href="#2824" id="2824">2824</a>
+<a href="#2825" id="2825">2825</a>
+<a href="#2826" id="2826">2826</a>
+<a href="#2827" id="2827">2827</a>
+<a href="#2828" id="2828">2828</a>
+<a href="#2829" id="2829">2829</a>
+<a href="#2830" id="2830">2830</a>
+<a href="#2831" id="2831">2831</a>
+<a href="#2832" id="2832">2832</a>
+<a href="#2833" id="2833">2833</a>
+<a href="#2834" id="2834">2834</a>
+<a href="#2835" id="2835">2835</a>
+<a href="#2836" id="2836">2836</a>
+<a href="#2837" id="2837">2837</a>
+<a href="#2838" id="2838">2838</a>
+<a href="#2839" id="2839">2839</a></pre></div><pre class="rust"><code><span class="doccomment">//! Utilities for testing wallets based upon the [`crate::data_api`] traits.
 
 </span><span class="kw">use </span>std::{
     collections::{BTreeMap, HashMap},
@@ -3870,6 +3928,64 @@
             usk,
             ovk_policy,
             proposal,
+        )
+    }
+
+    <span class="doccomment">/// Invokes [`create_pczt_from_proposal`] with the given arguments.
+    ///
+    /// [`create_pczt_from_proposal`]: super::wallet::create_pczt_from_proposal
+    </span><span class="attr">#[cfg(feature = <span class="string">"pczt"</span>)]
+    #[allow(clippy::type_complexity)]
+    </span><span class="kw">pub fn </span>create_pczt_from_proposal&lt;InputsErrT, FeeRuleT, ChangeErrT&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        spend_from_account: &lt;DbT <span class="kw">as </span>InputSource&gt;::AccountId,
+        ovk_policy: OvkPolicy,
+        proposal: <span class="kw-2">&amp;</span>Proposal&lt;FeeRuleT, &lt;DbT <span class="kw">as </span>InputSource&gt;::NoteRef&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;
+        pczt::Pczt,
+        <span class="kw">super</span>::wallet::CreateErrT&lt;DbT, InputsErrT, FeeRuleT, ChangeErrT, DbT::NoteRef&gt;,
+    &gt;
+    <span class="kw">where
+        </span>&lt;DbT <span class="kw">as </span>WalletRead&gt;::AccountId: serde::Serialize,
+        FeeRuleT: FeeRule,
+    {
+        <span class="kw">use </span><span class="kw">super</span>::wallet::create_pczt_from_proposal;
+
+        <span class="kw">let </span>network = <span class="self">self</span>.network().clone();
+
+        create_pczt_from_proposal(
+            <span class="self">self</span>.wallet_mut(),
+            <span class="kw-2">&amp;</span>network,
+            spend_from_account,
+            ovk_policy,
+            proposal,
+        )
+    }
+
+    <span class="doccomment">/// Invokes [`extract_and_store_transaction_from_pczt`] with the given arguments.
+    ///
+    /// [`extract_and_store_transaction_from_pczt`]: super::wallet::extract_and_store_transaction_from_pczt
+    </span><span class="attr">#[cfg(feature = <span class="string">"pczt"</span>)]
+    #[allow(clippy::type_complexity)]
+    </span><span class="kw">pub fn </span>extract_and_store_transaction_from_pczt(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        pczt: pczt::Pczt,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;TxId, <span class="kw">super</span>::wallet::ExtractErrT&lt;DbT, DbT::NoteRef&gt;&gt;
+    <span class="kw">where
+        </span>&lt;DbT <span class="kw">as </span>WalletRead&gt;::AccountId: serde::de::DeserializeOwned,
+    {
+        <span class="kw">use </span><span class="kw">super</span>::wallet::extract_and_store_transaction_from_pczt;
+
+        <span class="kw">let </span>prover = LocalTxProver::bundled();
+        <span class="kw">let </span>(spend_vk, output_vk) = prover.verifying_keys();
+        <span class="kw">let </span>orchard_vk = ::orchard::circuit::VerifyingKey::build();
+
+        extract_and_store_transaction_from_pczt(
+            <span class="self">self</span>.wallet_mut(),
+            pczt,
+            <span class="kw-2">&amp;</span>spend_vk,
+            <span class="kw-2">&amp;</span>output_vk,
+            <span class="kw-2">&amp;</span>orchard_vk,
         )
     }
 

@@ -838,7 +838,7 @@
     }
 
     <span class="doccomment">/// Returns the address that this Script contains, if any.
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>address(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;TransparentAddress&gt; {
+    </span><span class="kw">pub fn </span>address(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;TransparentAddress&gt; {
         <span class="kw">if </span><span class="self">self</span>.<span class="number">0</span>.len() == <span class="number">25
             </span>&amp;&amp; <span class="self">self</span>.<span class="number">0</span>[<span class="number">0</span>..<span class="number">3</span>] == [OpCode::Dup <span class="kw">as </span>u8, OpCode::Hash160 <span class="kw">as </span>u8, <span class="number">0x14</span>]
             &amp;&amp; <span class="self">self</span>.<span class="number">0</span>[<span class="number">23</span>..<span class="number">25</span>] == [OpCode::EqualVerify <span class="kw">as </span>u8, OpCode::CheckSig <span class="kw">as </span>u8]

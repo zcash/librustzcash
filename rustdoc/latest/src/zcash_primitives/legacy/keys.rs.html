@@ -772,7 +772,21 @@
 <a href="#771" id="771">771</a>
 <a href="#772" id="772">772</a>
 <a href="#773" id="773">773</a>
-<a href="#774" id="774">774</a></pre></div><pre class="rust"><code><span class="doccomment">//! Transparent key components.
+<a href="#774" id="774">774</a>
+<a href="#775" id="775">775</a>
+<a href="#776" id="776">776</a>
+<a href="#777" id="777">777</a>
+<a href="#778" id="778">778</a>
+<a href="#779" id="779">779</a>
+<a href="#780" id="780">780</a>
+<a href="#781" id="781">781</a>
+<a href="#782" id="782">782</a>
+<a href="#783" id="783">783</a>
+<a href="#784" id="784">784</a>
+<a href="#785" id="785">785</a>
+<a href="#786" id="786">786</a>
+<a href="#787" id="787">787</a>
+<a href="#788" id="788">788</a></pre></div><pre class="rust"><code><span class="doccomment">//! Transparent key components.
 
 </span><span class="kw">use </span>bip32::{
     ChildNumber, ExtendedKey, ExtendedKeyAttrs, ExtendedPrivateKey, ExtendedPublicKey, Prefix,
@@ -1019,6 +1033,20 @@
         <span class="self">self</span>.<span class="number">0
             </span>.derive_child(ChildNumber::new(<span class="number">2</span>, <span class="bool-val">false</span>)<span class="question-mark">?</span>)
             .map(EphemeralIvk)
+    }
+
+    <span class="doccomment">/// Derives the BIP44 public key at the "address level" path corresponding to the given scope
+    /// and address index.
+    </span><span class="kw">pub fn </span>derive_address_pubkey(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        scope: TransparentKeyScope,
+        address_index: NonHardenedChildIndex,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;secp256k1::PublicKey, bip32::Error&gt; {
+        <span class="prelude-val">Ok</span>(<span class="kw-2">*</span><span class="self">self
+            </span>.<span class="number">0
+            </span>.derive_child(scope.into())<span class="question-mark">?
+            </span>.derive_child(address_index.into())<span class="question-mark">?
+            </span>.public_key())
     }
 
     <span class="doccomment">/// Derives the internal ovk and external ovk corresponding to this

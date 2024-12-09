@@ -346,7 +346,47 @@
 <a href="#345" id="345">345</a>
 <a href="#346" id="346">346</a>
 <a href="#347" id="347">347</a>
-<a href="#348" id="348">348</a></pre></div><pre class="rust"><code><span class="doccomment">//! Types and functions for building transparent transaction components.
+<a href="#348" id="348">348</a>
+<a href="#349" id="349">349</a>
+<a href="#350" id="350">350</a>
+<a href="#351" id="351">351</a>
+<a href="#352" id="352">352</a>
+<a href="#353" id="353">353</a>
+<a href="#354" id="354">354</a>
+<a href="#355" id="355">355</a>
+<a href="#356" id="356">356</a>
+<a href="#357" id="357">357</a>
+<a href="#358" id="358">358</a>
+<a href="#359" id="359">359</a>
+<a href="#360" id="360">360</a>
+<a href="#361" id="361">361</a>
+<a href="#362" id="362">362</a>
+<a href="#363" id="363">363</a>
+<a href="#364" id="364">364</a>
+<a href="#365" id="365">365</a>
+<a href="#366" id="366">366</a>
+<a href="#367" id="367">367</a>
+<a href="#368" id="368">368</a>
+<a href="#369" id="369">369</a>
+<a href="#370" id="370">370</a>
+<a href="#371" id="371">371</a>
+<a href="#372" id="372">372</a>
+<a href="#373" id="373">373</a>
+<a href="#374" id="374">374</a>
+<a href="#375" id="375">375</a>
+<a href="#376" id="376">376</a>
+<a href="#377" id="377">377</a>
+<a href="#378" id="378">378</a>
+<a href="#379" id="379">379</a>
+<a href="#380" id="380">380</a>
+<a href="#381" id="381">381</a>
+<a href="#382" id="382">382</a>
+<a href="#383" id="383">383</a>
+<a href="#384" id="384">384</a>
+<a href="#385" id="385">385</a>
+<a href="#386" id="386">386</a>
+<a href="#387" id="387">387</a>
+<a href="#388" id="388">388</a></pre></div><pre class="rust"><code><span class="doccomment">//! Types and functions for building transparent transaction components.
 
 </span><span class="kw">use </span>std::collections::BTreeMap;
 <span class="kw">use </span>std::fmt;
@@ -378,6 +418,8 @@
 </span><span class="kw">pub enum </span>Error {
     InvalidAddress,
     InvalidAmount,
+    <span class="doccomment">/// A bundle could not be built because a required signing keys was missing.
+    </span>MissingSigningKey,
 }
 
 <span class="kw">impl </span>fmt::Display <span class="kw">for </span>Error {
@@ -385,15 +427,56 @@
         <span class="kw">match </span><span class="self">self </span>{
             Error::InvalidAddress =&gt; <span class="macro">write!</span>(f, <span class="string">"Invalid address"</span>),
             Error::InvalidAmount =&gt; <span class="macro">write!</span>(f, <span class="string">"Invalid amount"</span>),
+            Error::MissingSigningKey =&gt; <span class="macro">write!</span>(f, <span class="string">"Missing signing key"</span>),
         }
     }
 }
 
-<span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<span class="doccomment">/// A set of transparent signing keys.
+///
+/// When the `transparent-inputs` feature flag is enabled, transparent signing keys can be
+/// stored in this set and used to authorize transactions with transparent inputs.
+</span><span class="kw">pub struct </span>TransparentSigningSet {
+    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+    </span>secp: secp256k1::Secp256k1&lt;secp256k1::SignOnly&gt;,
+    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+    </span>keys: Vec&lt;(secp256k1::SecretKey, secp256k1::PublicKey)&gt;,
+}
+
+<span class="kw">impl </span>Default <span class="kw">for </span>TransparentSigningSet {
+    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::new()
+    }
+}
+
+<span class="kw">impl </span>TransparentSigningSet {
+    <span class="doccomment">/// Constructs an empty set of signing keys.
+    </span><span class="kw">pub fn </span>new() -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+            </span>secp: secp256k1::Secp256k1::gen_new(),
+            <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+            </span>keys: <span class="macro">vec!</span>[],
+        }
+    }
+
+    <span class="doccomment">/// Adds a signing key to the set.
+    ///
+    /// Returns the corresponding pubkey.
+    </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+    </span><span class="kw">pub fn </span>add_key(<span class="kw-2">&amp;mut </span><span class="self">self</span>, sk: secp256k1::SecretKey) -&gt; secp256k1::PublicKey {
+        <span class="kw">let </span>pubkey = secp256k1::PublicKey::from_secret_key(<span class="kw-2">&amp;</span><span class="self">self</span>.secp, <span class="kw-2">&amp;</span>sk);
+        <span class="comment">// Cache the pubkey for ease of matching later.
+        </span><span class="self">self</span>.keys.push((sk, pubkey));
+        pubkey
+    }
+}
+
+<span class="comment">// TODO: This feature gate can be removed.
+</span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 #[derive(Debug, Clone)]
 </span><span class="kw">pub struct </span>TransparentInputInfo {
-    sk: secp256k1::SecretKey,
-    pubkey: [u8; secp256k1::constants::PUBLIC_KEY_SIZE],
+    pubkey: secp256k1::PublicKey,
     utxo: OutPoint,
     coin: TxOut,
 }
@@ -411,16 +494,12 @@
 
 <span class="kw">pub struct </span>TransparentBuilder {
     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-    </span>secp: secp256k1::Secp256k1&lt;secp256k1::SignOnly&gt;,
-    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     </span>inputs: Vec&lt;TransparentInputInfo&gt;,
     vout: Vec&lt;TxOut&gt;,
 }
 
 <span class="attr">#[derive(Debug, Clone)]
 </span><span class="kw">pub struct </span>Unauthorized {
-    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-    </span>secp: secp256k1::Secp256k1&lt;secp256k1::SignOnly&gt;,
     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     </span>inputs: Vec&lt;TransparentInputInfo&gt;,
 }
@@ -433,8 +512,6 @@
     <span class="doccomment">/// Constructs a new TransparentBuilder
     </span><span class="kw">pub fn </span>empty() -&gt; <span class="self">Self </span>{
         TransparentBuilder {
-            <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-            </span>secp: secp256k1::Secp256k1::gen_new(),
             <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
             </span>inputs: <span class="macro">vec!</span>[],
             vout: <span class="macro">vec!</span>[],
@@ -457,32 +534,27 @@
     </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     </span><span class="kw">pub fn </span>add_input(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        sk: secp256k1::SecretKey,
+        pubkey: secp256k1::PublicKey,
         utxo: OutPoint,
         coin: TxOut,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), Error&gt; {
         <span class="comment">// Ensure that the RIPEMD-160 digest of the public key associated with the
         // provided secret key matches that of the address to which the provided
         // output may be spent.
-        </span><span class="kw">let </span>pubkey = secp256k1::PublicKey::from_secret_key(<span class="kw-2">&amp;</span><span class="self">self</span>.secp, <span class="kw-2">&amp;</span>sk).serialize();
-        <span class="kw">match </span>coin.script_pubkey.address() {
+        </span><span class="kw">match </span>coin.script_pubkey.address() {
             <span class="prelude-val">Some</span>(TransparentAddress::PublicKeyHash(hash)) =&gt; {
                 <span class="kw">use </span>ripemd::Ripemd160;
                 <span class="kw">use </span>sha2::Sha256;
 
-                <span class="kw">if </span>hash[..] != Ripemd160::digest(Sha256::digest(pubkey))[..] {
+                <span class="kw">if </span>hash[..] != Ripemd160::digest(Sha256::digest(pubkey.serialize()))[..] {
                     <span class="kw">return </span><span class="prelude-val">Err</span>(Error::InvalidAddress);
                 }
             }
             <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(Error::InvalidAddress),
         }
 
-        <span class="self">self</span>.inputs.push(TransparentInputInfo {
-            sk,
-            pubkey,
-            utxo,
-            coin,
-        });
+        <span class="self">self</span>.inputs
+            .push(TransparentInputInfo { pubkey, utxo, coin });
 
         <span class="prelude-val">Ok</span>(())
     }
@@ -540,8 +612,6 @@
                 vin,
                 vout: <span class="self">self</span>.vout,
                 authorization: Unauthorized {
-                    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-                    </span>secp: <span class="self">self</span>.secp,
                     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
                     </span>inputs: <span class="self">self</span>.inputs,
                 },
@@ -644,7 +714,8 @@
         <span class="self">self</span>,
         <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)] </span>mtx: <span class="kw-2">&amp;</span>TransactionData&lt;tx::Unauthorized&gt;,
         <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)] </span>txid_parts_cache: <span class="kw-2">&amp;</span>TxDigests&lt;Blake2bHash&gt;,
-    ) -&gt; Bundle&lt;Authorized&gt; {
+        signing_set: <span class="kw-2">&amp;</span>TransparentSigningSet,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Bundle&lt;Authorized&gt;, Error&gt; {
         <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
         </span><span class="kw">let </span>script_sigs = <span class="self">self
             </span>.authorization
@@ -652,6 +723,13 @@
             .iter()
             .enumerate()
             .map(|(index, info)| {
+                <span class="comment">// Find the matching signing key.
+                </span><span class="kw">let </span>(sk, <span class="kw">_</span>) = signing_set
+                    .keys
+                    .iter()
+                    .find(|(<span class="kw">_</span>, pubkey)| pubkey == <span class="kw-2">&amp;</span>info.pubkey)
+                    .ok_or(Error::MissingSigningKey)<span class="question-mark">?</span>;
+
                 <span class="kw">let </span>sighash = signature_hash(
                     mtx,
                     <span class="kw-2">&amp;</span>SignableInput::Transparent {
@@ -665,33 +743,35 @@
                 );
 
                 <span class="kw">let </span>msg = secp256k1::Message::from_slice(sighash.as_ref()).expect(<span class="string">"32 bytes"</span>);
-                <span class="kw">let </span>sig = <span class="self">self</span>.authorization.secp.sign_ecdsa(<span class="kw-2">&amp;</span>msg, <span class="kw-2">&amp;</span>info.sk);
+                <span class="kw">let </span>sig = signing_set.secp.sign_ecdsa(<span class="kw-2">&amp;</span>msg, sk);
 
                 <span class="comment">// Signature has to have "SIGHASH_ALL" appended to it
                 </span><span class="kw">let </span><span class="kw-2">mut </span>sig_bytes: Vec&lt;u8&gt; = sig.serialize_der()[..].to_vec();
                 sig_bytes.extend([SIGHASH_ALL]);
 
                 <span class="comment">// P2PKH scriptSig
-                </span>Script::default() &lt;&lt; <span class="kw-2">&amp;</span>sig_bytes[..] &lt;&lt; <span class="kw-2">&amp;</span>info.pubkey[..]
+                </span><span class="prelude-val">Ok</span>(Script::default() &lt;&lt; <span class="kw-2">&amp;</span>sig_bytes[..] &lt;&lt; <span class="kw-2">&amp;</span>info.pubkey.serialize()[..])
             });
 
         <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
-        </span><span class="kw">let </span>script_sigs = std::iter::empty::&lt;Script&gt;();
+        </span><span class="kw">let </span>script_sigs = std::iter::empty::&lt;<span class="prelude-ty">Result</span>&lt;Script, Error&gt;&gt;();
 
-        transparent::Bundle {
+        <span class="prelude-val">Ok</span>(transparent::Bundle {
             vin: <span class="self">self
                 </span>.vin
                 .iter()
                 .zip(script_sigs)
-                .map(|(txin, sig)| TxIn {
-                    prevout: txin.prevout.clone(),
-                    script_sig: sig,
-                    sequence: txin.sequence,
+                .map(|(txin, sig)| {
+                    <span class="prelude-val">Ok</span>(TxIn {
+                        prevout: txin.prevout.clone(),
+                        script_sig: sig<span class="question-mark">?</span>,
+                        sequence: txin.sequence,
+                    })
                 })
-                .collect(),
+                .collect::&lt;<span class="prelude-ty">Result</span>&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>,
             vout: <span class="self">self</span>.vout,
             authorization: Authorized,
-        }
+        })
     }
 }
 </code></pre></div></section></main></body></html>
