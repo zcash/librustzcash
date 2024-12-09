@@ -33,6 +33,7 @@ zcash_primitives.workspace = true
 zcash_protocol.workspace = true
 zip32.workspace = true
 zip321.workspace = true
+pczt = { workspace = true, optional = true }
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
@@ -47,6 +48,7 @@ rand_core.workspace = true
 base64.workspace = true
 bech32.workspace = true
 bs58.workspace = true
+postcard = { workspace = true, optional = true }
 
 # - Errors
 bip32 = { workspace = true, optional = true }
@@ -169,6 +171,22 @@ transparent-inputs = [
 
 ## Enables receiving and spending Orchard funds.
 orchard = ["dep:orchard", "dep:pasta_curves", "zcash_keys/orchard"]
+
+## Enables creating partially-constructed transactions for use in hardware wallet and multisig scenarios.
+pczt = [
+  "orchard",
+  "transparent-inputs",
+  "pczt/zcp-builder",
+  "pczt/io-finalizer",
+  "pczt/prover",
+  "pczt/signer",
+  "pczt/spend-finalizer",
+  "pczt/tx-extractor",
+  "pczt/zcp-builder",
+  "dep:postcard",
+  "dep:serde",
+  "zcash_address/serde",
+]
 
 ## Exposes a wallet synchronization function that implements the necessary state machine.
 sync = [

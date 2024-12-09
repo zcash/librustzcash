@@ -177,7 +177,8 @@ pub(crate) const UA_TRANSPARENT: bool = true;
 /// - Restoring a wallet from a backed-up seed.
 /// - Importing the same viewing key into two different wallet instances.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
-pub struct AccountUuid(Uuid);
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AccountUuid(#[cfg_attr(feature = "serde", serde(with = "uuid::serde::compact"))] Uuid);
 
 impl ConditionallySelectable for AccountUuid {
     fn conditional_select(a: &Self, b: &Self, choice: subtle::Choice) -> Self {

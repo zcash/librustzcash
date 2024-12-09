@@ -6,6 +6,9 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `impl serde::{Serialize, Deserialize} for zcash_address::ZcashAddress` behind
+  the `serde` feature flag.
 
 ## [0.6.0] - 2024-10-02
 ### Changed

@@ -46,7 +46,7 @@ fn bench_note_decryption(c: &mut Criterion) {
             .add_output(None, pa, NoteValue::from_raw(100), None)
             .unwrap();
         let (bundle, _) = builder
-            .build::<MockSpendProver, MockOutputProver, _, Amount>(&mut rng)
+            .build::<MockSpendProver, MockOutputProver, _, Amount>(&[], &mut rng)
             .unwrap()
             .unwrap();
         bundle.shielded_outputs()[0].clone()

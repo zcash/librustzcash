@@ -247,6 +247,20 @@ impl AccountPubKey {
             .map(EphemeralIvk)
     }
 
+    /// Derives the BIP44 public key at the "address level" path corresponding to the given scope
+    /// and address index.
+    pub fn derive_address_pubkey(
+        &self,
+        scope: TransparentKeyScope,
+        address_index: NonHardenedChildIndex,
+    ) -> Result<secp256k1::PublicKey, bip32::Error> {
+        Ok(*self
+            .0
+            .derive_child(scope.into())?
+            .derive_child(address_index.into())?
+            .public_key())
+    }
+
     /// Derives the internal ovk and external ovk corresponding to this
     /// transparent fvk. As specified in [ZIP 316][transparent-ovk].
     ///

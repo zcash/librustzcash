@@ -8,7 +8,12 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
-- `zcash_client_backend::data_api::AccountSource::key_derivation`
+- `zcash_client_backend::data_api`
+  - `AccountSource::key_derivation`
+  - `error::PcztError`
+  - `wallet::ExtractErrT`
+  - `wallet::create_pczt_from_proposal`
+  - `wallet::extract_and_store_transaction_from_pczt`
 
 ### Changed
 - `zcash_client_backend::data_api::AccountBalance`: Refactored to use `Balance`
@@ -29,6 +34,10 @@ and this library adheres to Rust's notion of
   - The `request` argument to `WalletRead::get_next_available_address` is now optional.
 - `zcash_client_backend::data_api::Account` has an additional `name` method
   that returns the human-readable name of the account, if any.
+- `zcash_client_backend::data_api::error::Error` has new variants:
+    - `AccountIdNotRecognized`
+    - `AccountCannotSpend`
+    - `Pczt`
 
 ### Deprecated
 - `AccountBalance::unshielded`. Instead use `unshielded_balance` which

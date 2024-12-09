@@ -113,6 +113,8 @@ impl Creator {
             | zcash_primitives::transaction::TxVersion::Overwinter => None,
             zcash_primitives::transaction::TxVersion::Sapling => Some(SAPLING_TX_VERSION),
             zcash_primitives::transaction::TxVersion::Zip225 => Some(V5_TX_VERSION),
+            #[cfg(zcash_unstable = "zfuture")]
+            zcash_primitives::transaction::TxVersion::ZFuture => None,
         }?;
 
         // Spends and outputs not modifiable.

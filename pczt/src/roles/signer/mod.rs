@@ -307,6 +307,8 @@ impl Authorization for EffectsOnly {
     type TransparentAuth = transparent::EffectsOnly;
     type SaplingAuth = sapling::bundle::EffectsOnly;
     type OrchardAuth = orchard::bundle::EffectsOnly;
+    #[cfg(zcash_unstable = "zfuture")]
+    type TzeAuth = std::convert::Infallible;
 }
 
 /// Errors that can occur while creating signatures for a PCZT.
