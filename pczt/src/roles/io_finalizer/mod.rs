@@ -9,7 +9,7 @@ use crate::{
         FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
     },
-    Pczt,
+    Pczt, V5_TX_VERSION, V5_VERSION_GROUP_ID,
 };
 
 use super::signer::pczt_to_tx_data;
@@ -65,6 +65,13 @@ impl IoFinalizer {
         let txid_parts = tx_data.digest(TxIdDigester);
 
         // TODO: Pick sighash based on tx version.
+        match (global.tx_version, global.version_group_id) {
+            (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(()),
+            (version, version_group_id) => Err(Error::UnsupportedTxVersion {
+                version,
+                version_group_id,
+            }),
+        }?;
         let shielded_sighash = v5_signature_hash(&tx_data, &SignableInput::Shielded, &txid_parts)
             .as_ref()
             .try_into()
@@ -97,6 +104,7 @@ pub enum Error {
     SaplingParse(sapling::pczt::ParseError),
     Sign(super::signer::Error),
     TransparentParse(transparent::pczt::ParseError),
+    UnsupportedTxVersion { version: u32, version_group_id: u32 },
 }
 
 impl From<super::signer::Error> for Error {
