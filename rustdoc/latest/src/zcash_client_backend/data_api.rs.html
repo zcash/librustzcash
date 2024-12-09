@@ -2562,7 +2562,8 @@
 <a href="#2561" id="2561">2561</a>
 <a href="#2562" id="2562">2562</a>
 <a href="#2563" id="2563">2563</a>
-<a href="#2564" id="2564">2564</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Utilities for Zcash wallet construction
+<a href="#2564" id="2564">2564</a>
+<a href="#2565" id="2565">2565</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Utilities for Zcash wallet construction
 //!
 //! This module defines a set of APIs for wallet data persistence, and provides a suite of methods
 //! based upon these APIs that can be used to implement a fully functional Zcash wallet. At
@@ -4939,15 +4940,16 @@
         key_source: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Account, <span class="self">Self</span>::Error&gt;;
 
-    <span class="doccomment">/// Generates and persists the next available diversified address, given the current
-    /// addresses known to the wallet.
+    <span class="doccomment">/// Generates and persists the next available diversified address for the specified account,
+    /// given the current addresses known to the wallet. If the `request` parameter is `None`,
+    /// an address should be generated using all of the available receivers for the account's UFVK.
     ///
     /// Returns `Ok(None)` if the account identifier does not correspond to a known
     /// account.
     </span><span class="kw">fn </span>get_next_available_address(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         account: <span class="self">Self</span>::AccountId,
-        request: UnifiedAddressRequest,
+        request: <span class="prelude-ty">Option</span>&lt;UnifiedAddressRequest&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;UnifiedAddress&gt;, <span class="self">Self</span>::Error&gt;;
 
     <span class="doccomment">/// Updates the wallet's view of the blockchain.

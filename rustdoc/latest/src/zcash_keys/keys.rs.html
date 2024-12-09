@@ -1755,7 +1755,20 @@
 <a href="#1754" id="1754">1754</a>
 <a href="#1755" id="1755">1755</a>
 <a href="#1756" id="1756">1756</a>
-<a href="#1757" id="1757">1757</a></pre></div><pre class="rust"><code><span class="doccomment">//! Helper functions for managing light client key material.
+<a href="#1757" id="1757">1757</a>
+<a href="#1758" id="1758">1758</a>
+<a href="#1759" id="1759">1759</a>
+<a href="#1760" id="1760">1760</a>
+<a href="#1761" id="1761">1761</a>
+<a href="#1762" id="1762">1762</a>
+<a href="#1763" id="1763">1763</a>
+<a href="#1764" id="1764">1764</a>
+<a href="#1765" id="1765">1765</a>
+<a href="#1766" id="1766">1766</a>
+<a href="#1767" id="1767">1767</a>
+<a href="#1768" id="1768">1768</a>
+<a href="#1769" id="1769">1769</a>
+<a href="#1770" id="1770">1770</a></pre></div><pre class="rust"><code><span class="doccomment">//! Helper functions for managing light client key material.
 </span><span class="kw">use </span>std::{
     error,
     fmt::{<span class="self">self</span>, Display},
@@ -2216,7 +2229,7 @@
     <span class="attr">#[cfg(any(test, feature = <span class="string">"test-dependencies"</span>))]
     </span><span class="kw">pub fn </span>default_address(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        request: UnifiedAddressRequest,
+        request: <span class="prelude-ty">Option</span>&lt;UnifiedAddressRequest&gt;,
     ) -&gt; (UnifiedAddress, DiversifierIndex) {
         <span class="self">self</span>.to_unified_full_viewing_key()
             .default_address(request)
@@ -2647,42 +2660,44 @@
         <span class="self">self</span>.orchard.as_ref()
     }
 
-    <span class="doccomment">/// Attempts to derive the Unified Address for the given diversifier index and
-    /// receiver types.
+    <span class="doccomment">/// Attempts to derive the Unified Address for the given diversifier index and receiver types.
+    /// If `request` is None, the address should be derived to contain a receiver for each item in
+    /// this UFVK.
     ///
     /// Returns `None` if the specified index does not produce a valid diversifier.
     </span><span class="kw">pub fn </span>address(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         j: DiversifierIndex,
-        request: UnifiedAddressRequest,
+        request: <span class="prelude-ty">Option</span>&lt;UnifiedAddressRequest&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;UnifiedAddress, AddressGenerationError&gt; {
         <span class="self">self</span>.to_unified_incoming_viewing_key().address(j, request)
     }
 
-    <span class="doccomment">/// Searches the diversifier space starting at diversifier index `j` for one which will
-    /// produce a valid diversifier, and return the Unified Address constructed using that
-    /// diversifier along with the index at which the valid diversifier was found.
+    <span class="doccomment">/// Searches the diversifier space starting at diversifier index `j` for one which will produce
+    /// a valid diversifier, and return the Unified Address constructed using that diversifier
+    /// along with the index at which the valid diversifier was found. If `request` is None, the
+    /// address should be derived to contain a receiver for each item in this UFVK.
     ///
     /// Returns an `Err(AddressGenerationError)` if no valid diversifier exists or if the features
     /// required to satisfy the unified address request are not properly enabled.
-    </span><span class="attr">#[allow(unused_mut)]
     </span><span class="kw">pub fn </span>find_address(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="kw-2">mut </span>j: DiversifierIndex,
-        request: UnifiedAddressRequest,
+        j: DiversifierIndex,
+        request: <span class="prelude-ty">Option</span>&lt;UnifiedAddressRequest&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(UnifiedAddress, DiversifierIndex), AddressGenerationError&gt; {
         <span class="self">self</span>.to_unified_incoming_viewing_key()
             .find_address(j, request)
     }
 
     <span class="doccomment">/// Find the Unified Address corresponding to the smallest valid diversifier index, along with
-    /// that index.
+    /// that index. If `request` is None, the address should be derived to contain a receiver for
+    /// each item in this UFVK.
     ///
     /// Returns an `Err(AddressGenerationError)` if no valid diversifier exists or if the features
     /// required to satisfy the unified address request are not properly enabled.
     </span><span class="kw">pub fn </span>default_address(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        request: UnifiedAddressRequest,
+        request: <span class="prelude-ty">Option</span>&lt;UnifiedAddressRequest&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(UnifiedAddress, DiversifierIndex), AddressGenerationError&gt; {
         <span class="self">self</span>.find_address(DiversifierIndex::new(), request)
     }
@@ -2870,15 +2885,19 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>.orchard
     }
 
-    <span class="doccomment">/// Attempts to derive the Unified Address for the given diversifier index and
-    /// receiver types.
+    <span class="doccomment">/// Attempts to derive the Unified Address for the given diversifier index and receiver types.
+    /// If `request` is None, the address should be derived to contain a receiver for each item in
+    /// this UFVK.
     ///
     /// Returns `None` if the specified index does not produce a valid diversifier.
     </span><span class="kw">pub fn </span>address(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         _j: DiversifierIndex,
-        request: UnifiedAddressRequest,
+        request: <span class="prelude-ty">Option</span>&lt;UnifiedAddressRequest&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;UnifiedAddress, AddressGenerationError&gt; {
+        <span class="kw">let </span>request = request
+            .or(<span class="self">self</span>.to_address_request())
+            .ok_or(AddressGenerationError::ShieldedReceiverRequired)<span class="question-mark">?</span>;
         <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
         </span><span class="kw">let </span><span class="kw-2">mut </span>orchard = <span class="prelude-val">None</span>;
         <span class="kw">if </span>request.has_orchard {
@@ -2965,13 +2984,13 @@
     </span><span class="kw">pub fn </span>find_address(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="kw-2">mut </span>j: DiversifierIndex,
-        request: UnifiedAddressRequest,
+        request: <span class="prelude-ty">Option</span>&lt;UnifiedAddressRequest&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(UnifiedAddress, DiversifierIndex), AddressGenerationError&gt; {
         <span class="comment">// If we need to generate a transparent receiver, check that the user has not
         // specified an invalid transparent child index, from which we can never search to
         // find a valid index.
         </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-        </span><span class="kw">if </span>request.has_p2pkh
+        </span><span class="kw">if </span>request.iter().any(|r| r.has_p2pkh)
             &amp;&amp; <span class="self">self</span>.transparent.is_some()
             &amp;&amp; to_transparent_child_index(j).is_none()
         {
@@ -2999,13 +3018,14 @@
     }
 
     <span class="doccomment">/// Find the Unified Address corresponding to the smallest valid diversifier index, along with
-    /// that index.
+    /// that index. If `request` is None, the address should be derived to contain a receiver for
+    /// each item in this UFVK.
     ///
     /// Returns an `Err(AddressGenerationError)` if no valid diversifier exists or if the features
     /// required to satisfy the unified address request are not properly enabled.
     </span><span class="kw">pub fn </span>default_address(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        request: UnifiedAddressRequest,
+        request: <span class="prelude-ty">Option</span>&lt;UnifiedAddressRequest&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(UnifiedAddress, DiversifierIndex), AddressGenerationError&gt; {
         <span class="self">self</span>.find_address(DiversifierIndex::new(), request)
     }
@@ -3263,7 +3283,10 @@
             }
 
             <span class="kw">let </span>ua = ufvk
-                .address(d_idx, UnifiedAddressRequest::unsafe_new(<span class="bool-val">false</span>, <span class="bool-val">true</span>, <span class="bool-val">true</span>))
+                .address(
+                    d_idx,
+                    <span class="prelude-val">Some</span>(UnifiedAddressRequest::unsafe_new(<span class="bool-val">false</span>, <span class="bool-val">true</span>, <span class="bool-val">true</span>)),
+                )
                 .unwrap_or_else(|err| {
                     <span class="macro">panic!</span>(
                         <span class="string">"unified address generation failed for account {}: {:?}"</span>,
@@ -3444,7 +3467,10 @@
             }
 
             <span class="kw">let </span>ua = uivk
-                .address(d_idx, UnifiedAddressRequest::unsafe_new(<span class="bool-val">false</span>, <span class="bool-val">true</span>, <span class="bool-val">true</span>))
+                .address(
+                    d_idx,
+                    <span class="prelude-val">Some</span>(UnifiedAddressRequest::unsafe_new(<span class="bool-val">false</span>, <span class="bool-val">true</span>, <span class="bool-val">true</span>)),
+                )
                 .unwrap_or_else(|err| {
                     <span class="macro">panic!</span>(
                         <span class="string">"unified address generation failed for account {}: {:?}"</span>,

@@ -2123,7 +2123,7 @@
             // Orchard component.
             </span><span class="kw">let </span>ua_request = UnifiedAddressRequest::unsafe_new(<span class="bool-val">false</span>, <span class="bool-val">true</span>, UA_TRANSPARENT);
             <span class="kw">let </span>address_str = Address::Unified(
-                ufvk.default_address(ua_request)
+                ufvk.default_address(<span class="prelude-val">Some</span>(ua_request))
                     .expect(<span class="string">"A valid default address exists for the UFVK"</span>)
                     .<span class="number">0</span>,
             )
@@ -2143,7 +2143,7 @@
             </span>{
                 <span class="kw">let </span>taddr = Address::Transparent(
                     <span class="kw-2">*</span>ufvk
-                        .default_address(ua_request)
+                        .default_address(<span class="prelude-val">Some</span>(ua_request))
                         .expect(<span class="string">"A valid default address exists for the UFVK"</span>)
                         .<span class="number">0
                         </span>.transparent()
@@ -2250,7 +2250,7 @@
                 <span class="comment">// hardcoded with knowledge of what's coming next
                 </span><span class="kw">let </span>ua_request = UnifiedAddressRequest::unsafe_new(<span class="bool-val">false</span>, <span class="bool-val">true</span>, <span class="bool-val">true</span>);
                 db_data
-                    .get_next_available_address(account_id, ua_request)
+                    .get_next_available_address(account_id, <span class="prelude-val">Some</span>(ua_request))
                     .unwrap()
                     .expect(<span class="string">"get_next_available_address generated an address"</span>);
             } <span class="kw">else </span>{

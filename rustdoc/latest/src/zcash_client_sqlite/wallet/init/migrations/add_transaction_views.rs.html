@@ -938,11 +938,11 @@
         <span class="kw">let </span>usk = UnifiedSpendingKey::from_seed(<span class="kw-2">&amp;</span>network, <span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>][..], AccountId::ZERO).unwrap();
         <span class="kw">let </span>ufvk = usk.to_unified_full_viewing_key();
         <span class="kw">let </span>(ua, <span class="kw">_</span>) = ufvk
-            .default_address(UnifiedAddressRequest::unsafe_new(
+            .default_address(<span class="prelude-val">Some</span>(UnifiedAddressRequest::unsafe_new(
                 <span class="bool-val">false</span>,
                 <span class="bool-val">true</span>,
                 UA_TRANSPARENT,
-            ))
+            )))
             .expect(<span class="string">"A valid default address exists for the UFVK"</span>);
         <span class="kw">let </span>taddr = ufvk
             .transparent()

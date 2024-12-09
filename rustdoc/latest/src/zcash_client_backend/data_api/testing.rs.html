@@ -5419,7 +5419,7 @@
     <span class="kw">fn </span>get_next_available_address(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         _account: <span class="self">Self</span>::AccountId,
-        _request: UnifiedAddressRequest,
+        _request: <span class="prelude-ty">Option</span>&lt;UnifiedAddressRequest&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;UnifiedAddress&gt;, <span class="self">Self</span>::Error&gt; {
         <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)
     }

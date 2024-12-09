@@ -222,9 +222,7 @@
 <a href="#221" id="221">221</a>
 <a href="#222" id="222">222</a>
 <a href="#223" id="223">223</a>
-<a href="#224" id="224">224</a>
-<a href="#225" id="225">225</a>
-<a href="#226" id="226">226</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::collections::HashSet;
+<a href="#224" id="224">224</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::collections::HashSet;
 
 <span class="kw">use </span>rusqlite::{named_params, Transaction};
 <span class="kw">use </span>schemerz_rusqlite::RusqliteMigration;
@@ -312,9 +310,9 @@
                     <span class="string">"Address in accounts table was not a Unified Address."</span>.to_string(),
                 ));
             };
-            <span class="kw">let </span>(expected_address, idx) = ufvk.default_address(
+            <span class="kw">let </span>(expected_address, idx) = ufvk.default_address(<span class="prelude-val">Some</span>(
                 UnifiedAddressRequest::unsafe_new(<span class="bool-val">false</span>, <span class="bool-val">true</span>, UA_TRANSPARENT),
-            )<span class="question-mark">?</span>;
+            ))<span class="question-mark">?</span>;
             <span class="kw">if </span>decoded_address != expected_address {
                 <span class="kw">return </span><span class="prelude-val">Err</span>(WalletMigrationError::CorruptedData(<span class="macro">format!</span>(
                     <span class="string">"Decoded UA {} does not match the UFVK's default address {} at {:?}."</span>,
@@ -384,10 +382,8 @@
                 ],
             )<span class="question-mark">?</span>;
 
-            <span class="kw">let </span>(address, d_idx) = ufvk.default_address(UnifiedAddressRequest::unsafe_new(
-                <span class="bool-val">false</span>,
-                <span class="bool-val">true</span>,
-                UA_TRANSPARENT,
+            <span class="kw">let </span>(address, d_idx) = ufvk.default_address(<span class="prelude-val">Some</span>(
+                UnifiedAddressRequest::unsafe_new(<span class="bool-val">false</span>, <span class="bool-val">true</span>, UA_TRANSPARENT),
             ))<span class="question-mark">?</span>;
             insert_address(transaction, <span class="kw-2">&amp;</span><span class="self">self</span>.params, account, d_idx, <span class="kw-2">&amp;</span>address)<span class="question-mark">?</span>;
         }

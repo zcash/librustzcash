@@ -244,9 +244,7 @@
 <a href="#243" id="243">243</a>
 <a href="#244" id="244">244</a>
 <a href="#245" id="245">245</a>
-<a href="#246" id="246">246</a>
-<a href="#247" id="247">247</a>
-<a href="#248" id="248">248</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::convert::TryInto;
+<a href="#246" id="246">246</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::convert::TryInto;
 <span class="kw">use </span>std::iter;
 
 <span class="kw">use </span>bech32::{FromBase32, ToBase32};
@@ -255,7 +253,7 @@
     unified::{<span class="self">self</span>, Encoding},
     ToAddress, ZcashAddress,
 };
-<span class="kw">use </span>zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
+<span class="kw">use </span>zcash_keys::keys::UnifiedFullViewingKey;
 <span class="kw">use </span>zcash_primitives::{
     legacy::{
         keys::{AccountPrivKey, IncomingViewingKey},
@@ -468,9 +466,7 @@
                 };
                 <span class="macro">eprintln!</span>(<span class="string">"- UFVK: {encoded_ufvk}"</span>);
 
-                <span class="kw">let </span>(default_ua, <span class="kw">_</span>) = ufvk
-                    .default_address(UnifiedAddressRequest::unsafe_new(<span class="bool-val">false</span>, <span class="bool-val">true</span>, <span class="bool-val">false</span>))
-                    .expect(<span class="string">"should exist"</span>);
+                <span class="kw">let </span>(default_ua, <span class="kw">_</span>) = ufvk.default_address(<span class="prelude-val">None</span>).expect(<span class="string">"should exist"</span>);
                 <span class="kw">let </span>encoded_ua = <span class="kw">match </span>network {
                     NetworkType::Main =&gt; default_ua.encode(<span class="kw-2">&amp;</span>Network::MainNetwork),
                     NetworkType::Test =&gt; default_ua.encode(<span class="kw-2">&amp;</span>Network::TestNetwork),

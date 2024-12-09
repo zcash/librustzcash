@@ -1003,7 +1003,7 @@
         params: Network,
         request: UnifiedAddressRequest,
     ) -&gt; <span class="kw">impl </span>Strategy&lt;Value = UnifiedAddress&gt; {
-        arb_unified_spending_key(params).prop_map(<span class="kw">move </span>|k| k.default_address(request).<span class="number">0</span>)
+        arb_unified_spending_key(params).prop_map(<span class="kw">move </span>|k| k.default_address(<span class="prelude-val">Some</span>(request)).<span class="number">0</span>)
     }
 
     <span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)]

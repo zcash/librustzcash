@@ -261,9 +261,9 @@
                 })<span class="question-mark">?
             </span>};
 
-            <span class="kw">let </span>(default_addr, diversifier_index) = uivk.default_address(
+            <span class="kw">let </span>(default_addr, diversifier_index) = uivk.default_address(<span class="prelude-val">Some</span>(
                 UnifiedAddressRequest::unsafe_new(UA_ORCHARD, <span class="bool-val">true</span>, UA_TRANSPARENT),
-            )<span class="question-mark">?</span>;
+            ))<span class="question-mark">?</span>;
 
             <span class="kw">let </span><span class="kw-2">mut </span>di_be = <span class="kw-2">*</span>diversifier_index.as_bytes();
             di_be.reverse();
@@ -336,11 +336,11 @@
             .unwrap();
 
         <span class="kw">let </span>(addr, diversifier_index) = ufvk
-            .default_address(UnifiedAddressRequest::unsafe_new(
+            .default_address(<span class="prelude-val">Some</span>(UnifiedAddressRequest::unsafe_new(
                 <span class="bool-val">false</span>,
                 <span class="bool-val">true</span>,
                 UA_TRANSPARENT,
-            ))
+            )))
             .unwrap();
         <span class="kw">let </span><span class="kw-2">mut </span>di_be = <span class="kw-2">*</span>diversifier_index.as_bytes();
         di_be.reverse();

@@ -2303,12 +2303,7 @@
 <a href="#2302" id="2302">2302</a>
 <a href="#2303" id="2303">2303</a>
 <a href="#2304" id="2304">2304</a>
-<a href="#2305" id="2305">2305</a>
-<a href="#2306" id="2306">2306</a>
-<a href="#2307" id="2307">2307</a>
-<a href="#2308" id="2308">2308</a>
-<a href="#2309" id="2309">2309</a>
-<a href="#2310" id="2310">2310</a></pre></div><pre class="rust"><code><span class="doccomment">//! *An SQLite-based Zcash light client.*
+<a href="#2305" id="2305">2305</a></pre></div><pre class="rust"><code><span class="doccomment">//! *An SQLite-based Zcash light client.*
 //!
 //! `zcash_client_sqlite` contains complete SQLite-based implementations of the [`WalletRead`],
 //! [`WalletWrite`], and [`BlockSource`] traits from the [`zcash_client_backend`] crate. In
@@ -2468,9 +2463,6 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>UA_TRANSPARENT: bool = <span class="bool-val">false</span>;
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>UA_TRANSPARENT: bool = <span class="bool-val">true</span>;
-
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>DEFAULT_UA_REQUEST: UnifiedAddressRequest =
-    UnifiedAddressRequest::unsafe_new(UA_ORCHARD, <span class="bool-val">true</span>, UA_TRANSPARENT);
 
 <span class="doccomment">/// Unique identifier for a specific account tracked by a [`WalletDb`].
 ///
@@ -3247,7 +3239,7 @@
     <span class="kw">fn </span>get_next_available_address(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         account_uuid: <span class="self">Self</span>::AccountId,
-        request: UnifiedAddressRequest,
+        request: <span class="prelude-ty">Option</span>&lt;UnifiedAddressRequest&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;UnifiedAddress&gt;, <span class="self">Self</span>::Error&gt; {
         <span class="self">self</span>.transactionally(
             |wdb| <span class="kw">match </span>wdb.get_unified_full_viewing_keys()<span class="question-mark">?</span>.get(<span class="kw-2">&amp;</span>account_uuid) {
@@ -4250,9 +4242,7 @@
     <span class="kw">use </span>zcash_primitives::block::BlockHash;
     <span class="kw">use </span>zcash_protocol::consensus;
 
-    <span class="kw">use crate</span>::{
-        error::SqliteClientError, testing::db::TestDbFactory, AccountUuid, DEFAULT_UA_REQUEST,
-    };
+    <span class="kw">use crate</span>::{error::SqliteClientError, testing::db::TestDbFactory, AccountUuid};
 
     <span class="attr">#[cfg(feature = <span class="string">"unstable"</span>)]
     </span><span class="kw">use </span>{
@@ -4303,7 +4293,7 @@
 
         <span class="kw">let </span>addr2 = st
             .wallet_mut()
-            .get_next_available_address(account.id(), DEFAULT_UA_REQUEST)
+            .get_next_available_address(account.id(), <span class="prelude-val">None</span>)
             .unwrap();
         <span class="macro">assert!</span>(addr2.is_some());
         <span class="macro">assert_ne!</span>(current_addr, addr2);
@@ -4554,7 +4544,7 @@
 
         <span class="comment">// The receiver for the default UA should be in the set.
         </span><span class="macro">assert!</span>(receivers.contains_key(
-            ufvk.default_address(DEFAULT_UA_REQUEST)
+            ufvk.default_address(<span class="prelude-val">None</span>)
                 .expect(<span class="string">"A valid default address exists for the UFVK"</span>)
                 .<span class="number">0
                 </span>.transparent()

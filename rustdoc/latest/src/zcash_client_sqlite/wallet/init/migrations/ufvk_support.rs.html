@@ -306,7 +306,10 @@
 <a href="#305" id="305">305</a>
 <a href="#306" id="306">306</a>
 <a href="#307" id="307">307</a>
-<a href="#308" id="308">308</a></pre></div><pre class="rust"><code><span class="doccomment">//! Migration that adds support for unified full viewing keys.
+<a href="#308" id="308">308</a>
+<a href="#309" id="309">309</a>
+<a href="#310" id="310">310</a>
+<a href="#311" id="311">311</a></pre></div><pre class="rust"><code><span class="doccomment">//! Migration that adds support for unified full viewing keys.
 </span><span class="kw">use </span>std::{collections::HashSet, rc::Rc};
 
 <span class="kw">use </span>rusqlite::{named_params, params};
@@ -443,7 +446,7 @@
                             <span class="string">"Address field value decoded to a transparent address; should have been Sapling or unified."</span>.to_string()));
                     }
                     Address::Unified(decoded_address) =&gt; {
-                        <span class="kw">let </span>(expected_address, idx) = ufvk.default_address(ua_request)<span class="question-mark">?</span>;
+                        <span class="kw">let </span>(expected_address, idx) = ufvk.default_address(<span class="prelude-val">Some</span>(ua_request))<span class="question-mark">?</span>;
                         <span class="kw">if </span>decoded_address != expected_address {
                             <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="kw">if </span>seed_is_relevant {
                                 WalletMigrationError::CorruptedData(
@@ -462,7 +465,10 @@
                 </span>seed_is_relevant = <span class="bool-val">true</span>;
 
                 <span class="kw">let </span>ufvk_str: String = ufvk.encode(<span class="kw-2">&amp;</span><span class="self">self</span>.params);
-                <span class="kw">let </span>address_str: String = ufvk.default_address(ua_request)<span class="question-mark">?</span>.<span class="number">0</span>.encode(<span class="kw-2">&amp;</span><span class="self">self</span>.params);
+                <span class="kw">let </span>address_str: String = ufvk
+                    .default_address(<span class="prelude-val">Some</span>(ua_request))<span class="question-mark">?
+                    </span>.<span class="number">0
+                    </span>.encode(<span class="kw-2">&amp;</span><span class="self">self</span>.params);
 
                 <span class="comment">// This migration, and the wallet behaviour before it, stored the default
                 // transparent address in the `accounts` table. This does not necessarily

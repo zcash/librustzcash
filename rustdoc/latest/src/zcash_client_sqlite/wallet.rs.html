@@ -3876,7 +3876,18 @@
 <a href="#3875" id="3875">3875</a>
 <a href="#3876" id="3876">3876</a>
 <a href="#3877" id="3877">3877</a>
-<a href="#3878" id="3878">3878</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for querying information in the wallet database.
+<a href="#3878" id="3878">3878</a>
+<a href="#3879" id="3879">3879</a>
+<a href="#3880" id="3880">3880</a>
+<a href="#3881" id="3881">3881</a>
+<a href="#3882" id="3882">3882</a>
+<a href="#3883" id="3883">3883</a>
+<a href="#3884" id="3884">3884</a>
+<a href="#3885" id="3885">3885</a>
+<a href="#3886" id="3886">3886</a>
+<a href="#3887" id="3887">3887</a>
+<a href="#3888" id="3888">3888</a>
+<a href="#3889" id="3889">3889</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for querying information in the wallet database.
 //!
 //! These functions should generally not be used directly; instead,
 //! their functionality is available via the [`WalletRead`] and
@@ -3997,8 +4008,8 @@
 <span class="kw">use crate</span>::{
     error::SqliteClientError,
     wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
-    AccountRef, SqlTransaction, TransferType, WalletCommitmentTrees, WalletDb, DEFAULT_UA_REQUEST,
-    PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
+    AccountRef, SqlTransaction, TransferType, WalletCommitmentTrees, WalletDb, PRUNING_DEPTH,
+    SAPLING_TABLES_PREFIX,
 };
 <span class="kw">use crate</span>::{AccountUuid, TxRef, VERIFY_LOOKAHEAD};
 
@@ -4098,14 +4109,14 @@
 }
 
 <span class="kw">impl </span>Account {
-    <span class="doccomment">/// Returns the default Unified Address for the account,
-    /// along with the diversifier index that generated it.
+    <span class="doccomment">/// Returns the default Unified Address for the account, along with the diversifier index that
+    /// generated it.
     ///
     /// The diversifier index may be non-zero if the Unified Address includes a Sapling
     /// receiver, and there was no valid Sapling receiver at diversifier index zero.
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>default_address(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        request: UnifiedAddressRequest,
+        request: <span class="prelude-ty">Option</span>&lt;UnifiedAddressRequest&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(UnifiedAddress, DiversifierIndex), AddressGenerationError&gt; {
         <span class="self">self</span>.uivk().default_address(request)
     }
@@ -4165,24 +4176,42 @@
             )
         })<span class="question-mark">? </span>== seed_fingerprint;
 
-    <span class="comment">// Keys are not comparable with `Eq`, but addresses are, so we derive what should
-    // be equivalent addresses for each key and use those to check for key equality.
-    </span><span class="kw">let </span>uivk_match =
-        <span class="kw">match </span>UnifiedSpendingKey::from_seed(params, <span class="kw-2">&amp;</span>seed.expose_secret()[..], account_index) {
-            <span class="comment">// If we can't derive a USK from the given seed with the account's ZIP 32
-            // account index, then we immediately know the UIVK won't match because wallet
-            // accounts are required to have a known UIVK.
-            </span><span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
-            <span class="prelude-val">Ok</span>(usk) =&gt; UnifiedAddressRequest::all().map_or(
-                <span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, SqliteClientError&gt;(<span class="bool-val">false</span>),
-                |ua_request| {
-                    <span class="prelude-val">Ok</span>(usk
-                        .to_unified_full_viewing_key()
-                        .default_address(ua_request)<span class="question-mark">?
-                        </span>== uivk.default_address(ua_request)<span class="question-mark">?</span>)
-                },
-            )<span class="question-mark">?</span>,
-        };
+    <span class="comment">// `UnifiedIncomingViewingKey`s are not comparable with `Eq`, but Unified Address
+    // components are, so we derive corresponding addresses for each key and use
+    // those to check whether any components match.
+    </span><span class="kw">let </span>uivk_match = {
+        <span class="kw">let </span>usk = UnifiedSpendingKey::from_seed(params, <span class="kw-2">&amp;</span>seed.expose_secret()[..], account_index)
+            .map_err(|<span class="kw">_</span>| SqliteClientError::KeyDerivationError(account_index))<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>(seed_addr, <span class="kw">_</span>) = usk.to_unified_full_viewing_key().default_address(<span class="prelude-val">Some</span>(
+            UnifiedAddressRequest::all().expect(<span class="string">"At least one supported pool feature is enabled."</span>),
+        ))<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>(uivk_addr, <span class="kw">_</span>) = uivk.default_address(<span class="prelude-val">None</span>)<span class="question-mark">?</span>;
+
+        <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
+        </span><span class="kw">let </span>orchard_match = <span class="bool-val">false</span>;
+        <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+        </span><span class="kw">let </span>orchard_match = seed_addr
+            .orchard()
+            .zip(uivk_addr.orchard())
+            .map(|(a, b)| a == b)
+            == <span class="prelude-val">Some</span>(<span class="bool-val">true</span>);
+
+        <span class="kw">let </span>sapling_match = seed_addr
+            .sapling()
+            .zip(uivk_addr.sapling())
+            .map(|(a, b)| a == b)
+            == <span class="prelude-val">Some</span>(<span class="bool-val">true</span>);
+
+        <span class="kw">let </span>p2pkh_match = seed_addr
+            .transparent()
+            .zip(uivk_addr.transparent())
+            .map(|(a, b)| a == b)
+            == <span class="prelude-val">Some</span>(<span class="bool-val">true</span>);
+
+        orchard_match || sapling_match || p2pkh_match
+    };
 
     <span class="kw">if </span>seed_fingerprint_match != uivk_match {
         <span class="comment">// If these mismatch, it suggests database corruption.
@@ -4475,14 +4504,7 @@
     <span class="comment">// Always derive the default Unified Address for the account. If the account's viewing
     // key has fewer components than the wallet supports (most likely due to this being an
     // imported viewing key), derive an address containing the common subset of receivers.
-    </span><span class="kw">let </span>ua_request = account
-        .uivk()
-        .to_address_request()
-        .and_then(|ua_request| ua_request.intersect(<span class="kw-2">&amp;</span>DEFAULT_UA_REQUEST))
-        .ok_or_else(|| {
-            SqliteClientError::AddressGeneration(AddressGenerationError::ShieldedReceiverRequired)
-        })<span class="question-mark">?</span>;
-    <span class="kw">let </span>(address, d_idx) = account.default_address(ua_request)<span class="question-mark">?</span>;
+    </span><span class="kw">let </span>(address, d_idx) = account.default_address(<span class="prelude-val">None</span>)<span class="question-mark">?</span>;
     insert_address(conn, params, account_id, d_idx, <span class="kw-2">&amp;</span>address)<span class="question-mark">?</span>;
 
     <span class="comment">// Initialize the `ephemeral_addresses` table.
