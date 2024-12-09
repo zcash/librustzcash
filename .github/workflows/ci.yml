@@ -66,6 +66,49 @@ jobs:
           cargo test
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+
+  test-slow:
+    name: Slow Test
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      matrix:
+        target:
+          - Linux
+        state:
+          - Orchard
+          - NU7
+
+        include:
+          - target: Linux
+            os: ubuntu-latest-8cores
+
+          - state: Orchard
+            extra_flags: orchard
+          - state: NU7
+            rustflags: '--cfg zcash_unstable="nu7"'
+
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      RUSTDOCFLAGS: ${{ matrix.rustflags }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - id: prepare
+        uses: ./.github/actions/prepare
+        with:
+          extra-features: ${{ matrix.extra_flags || '' }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
       - name: Run slow tests
         run: >
           cargo test
