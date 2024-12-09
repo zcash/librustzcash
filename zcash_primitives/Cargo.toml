@@ -138,3 +138,6 @@ harness = false
 
 [badges]
 maintenance = { status = "actively-developed" }
+
+[lints]
+workspace = true
