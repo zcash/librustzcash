@@ -618,6 +618,12 @@ who = "Kris Nuttycombe <kris@nutty.land>"
 criteria = "safe-to-deploy"
 delta = "0.2.0 -> 0.3.0"
 
+[[audits.zcash_note_encryption]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+version = "0.4.1"
+notes = "Additive-only change that exposes the ability to decrypt by pk_d and esk. No functional changes."
+
 [[audits.zcash_primitives]]
 who = "Kris Nuttycombe <kris@nutty.land>"
 criteria = "safe-to-deploy"

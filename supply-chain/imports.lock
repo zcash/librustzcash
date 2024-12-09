@@ -62,20 +62,6 @@ user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
-[[publisher.orchard]]
-version = "0.10.0"
-when = "2024-10-02"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
-
-[[publisher.sapling-crypto]]
-version = "0.3.0"
-when = "2024-10-02"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
-
 [[publisher.schemerz]]
 version = "0.2.0"
 when = "2024-10-16"
