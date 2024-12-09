@@ -903,9 +903,10 @@ impl UnifiedFullViewingKey {
         self.to_unified_incoming_viewing_key().address(j, request)
     }
 
-    /// Searches the diversifier space starting at diversifier index `j` for one which will
-    /// produce a valid diversifier, and return the Unified Address constructed using that
-    /// diversifier along with the index at which the valid diversifier was found.
+    /// Searches the diversifier space starting at diversifier index `j` for one which will produce
+    /// a valid diversifier, and return the Unified Address constructed using that diversifier
+    /// along with the index at which the valid diversifier was found. If `request` is None, the
+    /// address should be derived to contain a receiver for each item in this UFVK.
     ///
     /// Returns an `Err(AddressGenerationError)` if no valid diversifier exists or if the features
     /// required to satisfy the unified address request are not properly enabled.
@@ -919,7 +920,8 @@ impl UnifiedFullViewingKey {
     }
 
     /// Find the Unified Address corresponding to the smallest valid diversifier index, along with
-    /// that index.
+    /// that index. If `request` is None, the address should be derived to contain a receiver for
+    /// each item in this UFVK.
     ///
     /// Returns an `Err(AddressGenerationError)` if no valid diversifier exists or if the features
     /// required to satisfy the unified address request are not properly enabled.
@@ -1113,8 +1115,9 @@ impl UnifiedIncomingViewingKey {
         &self.orchard
     }
 
-    /// Attempts to derive the Unified Address for the given diversifier index and
-    /// receiver types.
+    /// Attempts to derive the Unified Address for the given diversifier index and receiver types.
+    /// If `request` is None, the address should be derived to contain a receiver for each item in
+    /// this UFVK.
     ///
     /// Returns `None` if the specified index does not produce a valid diversifier.
     pub fn address(
@@ -1245,7 +1248,8 @@ impl UnifiedIncomingViewingKey {
     }
 
     /// Find the Unified Address corresponding to the smallest valid diversifier index, along with
-    /// that index.
+    /// that index. If `request` is None, the address should be derived to contain a receiver for
+    /// each item in this UFVK.
     ///
     /// Returns an `Err(AddressGenerationError)` if no valid diversifier exists or if the features
     /// required to satisfy the unified address request are not properly enabled.

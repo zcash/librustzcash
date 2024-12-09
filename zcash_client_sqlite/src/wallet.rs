@@ -287,14 +287,15 @@ pub(crate) fn seed_matches_derived_account<P: consensus::Parameters>(
             )
         })? == seed_fingerprint;
 
-    // Keys are not comparable with `Eq`, but addresses are, so we derive what should
-    // be equivalent addresses for each key and use those to check for key equality.
+    // `UnifiedIncomingViewingKey`s are not comparable with `Eq`, but Unified Address
+    // components are, so we derive corresponding addresses for each key and use
+    // those to check whether any components match.
     let uivk_match = {
         let usk = UnifiedSpendingKey::from_seed(params, &seed.expose_secret()[..], account_index)
             .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
 
         let (seed_addr, _) = usk.to_unified_full_viewing_key().default_address(Some(
-            UnifiedAddressRequest::all().expect("At least one supported pool feature ie enabled."),
+            UnifiedAddressRequest::all().expect("At least one supported pool feature is enabled."),
         ))?;
 
         let (uivk_addr, _) = uivk.default_address(None)?;
