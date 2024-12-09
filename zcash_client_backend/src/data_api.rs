@@ -2375,15 +2375,16 @@ pub trait WalletWrite: WalletRead {
         key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error>;
 
-    /// Generates and persists the next available diversified address, given the current
-    /// addresses known to the wallet.
+    /// Generates and persists the next available diversified address for the specified account,
+    /// given the current addresses known to the wallet. If the `request` parameter is `None`,
+    /// an address should be generated using all of the available receivers for the account's UFVK.
     ///
     /// Returns `Ok(None)` if the account identifier does not correspond to a known
     /// account.
     fn get_next_available_address(
         &mut self,
         account: Self::AccountId,
-        request: UnifiedAddressRequest,
+        request: Option<UnifiedAddressRequest>,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
     /// Updates the wallet's view of the blockchain.

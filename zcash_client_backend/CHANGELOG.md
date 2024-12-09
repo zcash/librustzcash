@@ -26,6 +26,7 @@ and this library adheres to Rust's notion of
     additional `key_source` field that is used to convey application-specific
     key source metadata.
   - The `Copy` impl for this type has been removed.
+  - The `request` argument to `WalletRead::get_next_available_address` is now optional.
 - `zcash_client_backend::data_api::Account` has an additional `name` method
   that returns the human-readable name of the account, if any.
 

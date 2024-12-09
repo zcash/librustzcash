@@ -119,8 +119,8 @@ use zip32::{self, DiversifierIndex, Scope};
 use crate::{
     error::SqliteClientError,
     wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
-    AccountRef, SqlTransaction, TransferType, WalletCommitmentTrees, WalletDb, DEFAULT_UA_REQUEST,
-    PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
+    AccountRef, SqlTransaction, TransferType, WalletCommitmentTrees, WalletDb, PRUNING_DEPTH,
+    SAPLING_TABLES_PREFIX,
 };
 use crate::{AccountUuid, TxRef, VERIFY_LOOKAHEAD};
 
@@ -220,14 +220,14 @@ pub struct Account {
 }
 
 impl Account {
-    /// Returns the default Unified Address for the account,
-    /// along with the diversifier index that generated it.
+    /// Returns the default Unified Address for the account, along with the diversifier index that
+    /// generated it.
     ///
     /// The diversifier index may be non-zero if the Unified Address includes a Sapling
     /// receiver, and there was no valid Sapling receiver at diversifier index zero.
     pub(crate) fn default_address(
         &self,
-        request: UnifiedAddressRequest,
+        request: Option<UnifiedAddressRequest>,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.uivk().default_address(request)
     }
@@ -287,24 +287,42 @@ pub(crate) fn seed_matches_derived_account<P: consensus::Parameters>(
             )
         })? == seed_fingerprint;
 
-    // Keys are not comparable with `Eq`, but addresses are, so we derive what should
-    // be equivalent addresses for each key and use those to check for key equality.
-    let uivk_match =
-        match UnifiedSpendingKey::from_seed(params, &seed.expose_secret()[..], account_index) {
-            // If we can't derive a USK from the given seed with the account's ZIP 32
-            // account index, then we immediately know the UIVK won't match because wallet
-            // accounts are required to have a known UIVK.
-            Err(_) => false,
-            Ok(usk) => UnifiedAddressRequest::all().map_or(
-                Ok::<_, SqliteClientError>(false),
-                |ua_request| {
-                    Ok(usk
-                        .to_unified_full_viewing_key()
-                        .default_address(ua_request)?
-                        == uivk.default_address(ua_request)?)
-                },
-            )?,
-        };
+    // `UnifiedIncomingViewingKey`s are not comparable with `Eq`, but Unified Address
+    // components are, so we derive corresponding addresses for each key and use
+    // those to check whether any components match.
+    let uivk_match = {
+        let usk = UnifiedSpendingKey::from_seed(params, &seed.expose_secret()[..], account_index)
+            .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
+
+        let (seed_addr, _) = usk.to_unified_full_viewing_key().default_address(Some(
+            UnifiedAddressRequest::all().expect("At least one supported pool feature is enabled."),
+        ))?;
+
+        let (uivk_addr, _) = uivk.default_address(None)?;
+
+        #[cfg(not(feature = "orchard"))]
+        let orchard_match = false;
+        #[cfg(feature = "orchard")]
+        let orchard_match = seed_addr
+            .orchard()
+            .zip(uivk_addr.orchard())
+            .map(|(a, b)| a == b)
+            == Some(true);
+
+        let sapling_match = seed_addr
+            .sapling()
+            .zip(uivk_addr.sapling())
+            .map(|(a, b)| a == b)
+            == Some(true);
+
+        let p2pkh_match = seed_addr
+            .transparent()
+            .zip(uivk_addr.transparent())
+            .map(|(a, b)| a == b)
+            == Some(true);
+
+        orchard_match || sapling_match || p2pkh_match
+    };
 
     if seed_fingerprint_match != uivk_match {
         // If these mismatch, it suggests database corruption.
@@ -597,14 +615,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     // Always derive the default Unified Address for the account. If the account's viewing
     // key has fewer components than the wallet supports (most likely due to this being an
     // imported viewing key), derive an address containing the common subset of receivers.
-    let ua_request = account
-        .uivk()
-        .to_address_request()
-        .and_then(|ua_request| ua_request.intersect(&DEFAULT_UA_REQUEST))
-        .ok_or_else(|| {
-            SqliteClientError::AddressGeneration(AddressGenerationError::ShieldedReceiverRequired)
-        })?;
-    let (address, d_idx) = account.default_address(ua_request)?;
+    let (address, d_idx) = account.default_address(None)?;
     insert_address(conn, params, account_id, d_idx, &address)?;
 
     // Initialize the `ephemeral_addresses` table.

@@ -2638,7 +2638,7 @@ impl WalletWrite for MockWalletDb {
     fn get_next_available_address(
         &mut self,
         _account: Self::AccountId,
-        _request: UnifiedAddressRequest,
+        _request: Option<UnifiedAddressRequest>,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         Ok(None)
     }
