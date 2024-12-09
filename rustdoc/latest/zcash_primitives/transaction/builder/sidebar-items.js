@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["DEFAULT_TX_EXPIRY_DELTA"],"enum":["BuildConfig","Error","FeeError"],"struct":["BuildResult","Builder","Progress"]};
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_TX_EXPIRY_DELTA"],"enum":["BuildConfig","Error","FeeError"],"struct":["BuildResult","Builder","PcztParts","PcztResult","Progress"]};

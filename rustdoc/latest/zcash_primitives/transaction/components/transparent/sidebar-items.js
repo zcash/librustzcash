@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["builder","testing"],"struct":["Authorized","Bundle","OutPoint","TxIn","TxOut"],"trait":["Authorization","MapAuth"]};
+window.SIDEBAR_ITEMS = {"mod":["builder","pczt","testing"],"struct":["Authorized","Bundle","EffectsOnly","OutPoint","TxIn","TxOut"],"trait":["Authorization","MapAuth"]};

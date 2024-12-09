@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {};
+window.SIDEBAR_ITEMS = {"enum":["ParseError"],"mod":["common","orchard","roles","sapling","transparent"],"struct":["Pczt"]};

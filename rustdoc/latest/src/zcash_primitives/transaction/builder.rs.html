@@ -1228,7 +1228,112 @@
 <a href="#1227" id="1227">1227</a>
 <a href="#1228" id="1228">1228</a>
 <a href="#1229" id="1229">1229</a>
-<a href="#1230" id="1230">1230</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs for building transactions.
+<a href="#1230" id="1230">1230</a>
+<a href="#1231" id="1231">1231</a>
+<a href="#1232" id="1232">1232</a>
+<a href="#1233" id="1233">1233</a>
+<a href="#1234" id="1234">1234</a>
+<a href="#1235" id="1235">1235</a>
+<a href="#1236" id="1236">1236</a>
+<a href="#1237" id="1237">1237</a>
+<a href="#1238" id="1238">1238</a>
+<a href="#1239" id="1239">1239</a>
+<a href="#1240" id="1240">1240</a>
+<a href="#1241" id="1241">1241</a>
+<a href="#1242" id="1242">1242</a>
+<a href="#1243" id="1243">1243</a>
+<a href="#1244" id="1244">1244</a>
+<a href="#1245" id="1245">1245</a>
+<a href="#1246" id="1246">1246</a>
+<a href="#1247" id="1247">1247</a>
+<a href="#1248" id="1248">1248</a>
+<a href="#1249" id="1249">1249</a>
+<a href="#1250" id="1250">1250</a>
+<a href="#1251" id="1251">1251</a>
+<a href="#1252" id="1252">1252</a>
+<a href="#1253" id="1253">1253</a>
+<a href="#1254" id="1254">1254</a>
+<a href="#1255" id="1255">1255</a>
+<a href="#1256" id="1256">1256</a>
+<a href="#1257" id="1257">1257</a>
+<a href="#1258" id="1258">1258</a>
+<a href="#1259" id="1259">1259</a>
+<a href="#1260" id="1260">1260</a>
+<a href="#1261" id="1261">1261</a>
+<a href="#1262" id="1262">1262</a>
+<a href="#1263" id="1263">1263</a>
+<a href="#1264" id="1264">1264</a>
+<a href="#1265" id="1265">1265</a>
+<a href="#1266" id="1266">1266</a>
+<a href="#1267" id="1267">1267</a>
+<a href="#1268" id="1268">1268</a>
+<a href="#1269" id="1269">1269</a>
+<a href="#1270" id="1270">1270</a>
+<a href="#1271" id="1271">1271</a>
+<a href="#1272" id="1272">1272</a>
+<a href="#1273" id="1273">1273</a>
+<a href="#1274" id="1274">1274</a>
+<a href="#1275" id="1275">1275</a>
+<a href="#1276" id="1276">1276</a>
+<a href="#1277" id="1277">1277</a>
+<a href="#1278" id="1278">1278</a>
+<a href="#1279" id="1279">1279</a>
+<a href="#1280" id="1280">1280</a>
+<a href="#1281" id="1281">1281</a>
+<a href="#1282" id="1282">1282</a>
+<a href="#1283" id="1283">1283</a>
+<a href="#1284" id="1284">1284</a>
+<a href="#1285" id="1285">1285</a>
+<a href="#1286" id="1286">1286</a>
+<a href="#1287" id="1287">1287</a>
+<a href="#1288" id="1288">1288</a>
+<a href="#1289" id="1289">1289</a>
+<a href="#1290" id="1290">1290</a>
+<a href="#1291" id="1291">1291</a>
+<a href="#1292" id="1292">1292</a>
+<a href="#1293" id="1293">1293</a>
+<a href="#1294" id="1294">1294</a>
+<a href="#1295" id="1295">1295</a>
+<a href="#1296" id="1296">1296</a>
+<a href="#1297" id="1297">1297</a>
+<a href="#1298" id="1298">1298</a>
+<a href="#1299" id="1299">1299</a>
+<a href="#1300" id="1300">1300</a>
+<a href="#1301" id="1301">1301</a>
+<a href="#1302" id="1302">1302</a>
+<a href="#1303" id="1303">1303</a>
+<a href="#1304" id="1304">1304</a>
+<a href="#1305" id="1305">1305</a>
+<a href="#1306" id="1306">1306</a>
+<a href="#1307" id="1307">1307</a>
+<a href="#1308" id="1308">1308</a>
+<a href="#1309" id="1309">1309</a>
+<a href="#1310" id="1310">1310</a>
+<a href="#1311" id="1311">1311</a>
+<a href="#1312" id="1312">1312</a>
+<a href="#1313" id="1313">1313</a>
+<a href="#1314" id="1314">1314</a>
+<a href="#1315" id="1315">1315</a>
+<a href="#1316" id="1316">1316</a>
+<a href="#1317" id="1317">1317</a>
+<a href="#1318" id="1318">1318</a>
+<a href="#1319" id="1319">1319</a>
+<a href="#1320" id="1320">1320</a>
+<a href="#1321" id="1321">1321</a>
+<a href="#1322" id="1322">1322</a>
+<a href="#1323" id="1323">1323</a>
+<a href="#1324" id="1324">1324</a>
+<a href="#1325" id="1325">1325</a>
+<a href="#1326" id="1326">1326</a>
+<a href="#1327" id="1327">1327</a>
+<a href="#1328" id="1328">1328</a>
+<a href="#1329" id="1329">1329</a>
+<a href="#1330" id="1330">1330</a>
+<a href="#1331" id="1331">1331</a>
+<a href="#1332" id="1332">1332</a>
+<a href="#1333" id="1333">1333</a>
+<a href="#1334" id="1334">1334</a>
+<a href="#1335" id="1335">1335</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs for building transactions.
 
 </span><span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::error;
@@ -1236,6 +1341,7 @@
 <span class="kw">use </span>std::sync::mpsc::Sender;
 
 <span class="kw">use </span>rand::{CryptoRng, RngCore};
+<span class="kw">use </span>zcash_protocol::consensus::Parameters;
 
 <span class="kw">use crate</span>::{
     consensus::{<span class="self">self</span>, BlockHeight, BranchId, NetworkUpgrade},
@@ -1500,6 +1606,30 @@
     </span><span class="kw">pub fn </span>orchard_meta(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>orchard::builder::BundleMetadata {
         <span class="kw-2">&amp;</span><span class="self">self</span>.orchard_meta
     }
+}
+
+<span class="doccomment">/// The result of [`Builder::build_for_pczt`].
+///
+/// It includes the PCZT components along with metadata describing how spends and outputs
+/// were shuffled in creating the transaction's shielded bundles.
+</span><span class="attr">#[derive(Debug)]
+</span><span class="kw">pub struct </span>PcztResult&lt;P: Parameters&gt; {
+    <span class="kw">pub </span>pczt_parts: PcztParts&lt;P&gt;,
+    <span class="kw">pub </span>sapling_meta: SaplingMetadata,
+    <span class="kw">pub </span>orchard_meta: orchard::builder::BundleMetadata,
+}
+
+<span class="doccomment">/// The components of a PCZT.
+</span><span class="attr">#[derive(Debug)]
+</span><span class="kw">pub struct </span>PcztParts&lt;P: Parameters&gt; {
+    <span class="kw">pub </span>params: P,
+    <span class="kw">pub </span>version: TxVersion,
+    <span class="kw">pub </span>consensus_branch_id: BranchId,
+    <span class="kw">pub </span>lock_time: u32,
+    <span class="kw">pub </span>expiry_height: BlockHeight,
+    <span class="kw">pub </span>transparent: <span class="prelude-ty">Option</span>&lt;transparent::pczt::Bundle&gt;,
+    <span class="kw">pub </span>sapling: <span class="prelude-ty">Option</span>&lt;sapling::pczt::Bundle&gt;,
+    <span class="kw">pub </span>orchard: <span class="prelude-ty">Option</span>&lt;orchard::pczt::Bundle&gt;,
 }
 
 <span class="doccomment">/// Generates a [`Transaction`] from its inputs and outputs.
@@ -2061,6 +2191,86 @@
         // of freeze() should be infalliable.
         </span><span class="prelude-val">Ok</span>(BuildResult {
             transaction: authorized_tx.freeze().unwrap(),
+            sapling_meta,
+            orchard_meta,
+        })
+    }
+
+    <span class="doccomment">/// Builds a PCZT from the configured spends and outputs.
+    ///
+    /// Upon success, returns a struct containing the PCZT components, and the
+    /// [`SaplingMetadata`] and [`orchard::builder::BundleMetadata`] generated during the
+    /// build process.
+    </span><span class="kw">pub fn </span>build_for_pczt&lt;R: RngCore + CryptoRng, FR: FeeRule&gt;(
+        <span class="self">self</span>,
+        <span class="kw-2">mut </span>rng: R,
+        fee_rule: <span class="kw-2">&amp;</span>FR,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;PcztResult&lt;P&gt;, Error&lt;FR::Error&gt;&gt; {
+        <span class="kw">let </span>fee = <span class="self">self</span>.get_fee(fee_rule).map_err(Error::Fee)<span class="question-mark">?</span>;
+        <span class="kw">let </span>consensus_branch_id = BranchId::for_height(<span class="kw-2">&amp;</span><span class="self">self</span>.params, <span class="self">self</span>.target_height);
+
+        <span class="comment">// determine transaction version
+        </span><span class="kw">let </span>version = TxVersion::suggested_for_branch(consensus_branch_id);
+
+        <span class="kw">let </span>consensus_branch_id = BranchId::for_height(<span class="kw-2">&amp;</span><span class="self">self</span>.params, <span class="self">self</span>.target_height);
+
+        <span class="comment">//
+        // Consistency checks
+        //
+
+        // After fees are accounted for, the value balance of the transaction must be zero.
+        </span><span class="kw">let </span>balance_after_fees =
+            (<span class="self">self</span>.value_balance()<span class="question-mark">? </span>- fee.into()).ok_or(BalanceError::Underflow)<span class="question-mark">?</span>;
+
+        <span class="kw">match </span>balance_after_fees.cmp(<span class="kw-2">&amp;</span>Amount::zero()) {
+            Ordering::Less =&gt; {
+                <span class="kw">return </span><span class="prelude-val">Err</span>(Error::InsufficientFunds(-balance_after_fees));
+            }
+            Ordering::Greater =&gt; {
+                <span class="kw">return </span><span class="prelude-val">Err</span>(Error::ChangeRequired(balance_after_fees));
+            }
+            Ordering::Equal =&gt; (),
+        };
+
+        <span class="kw">let </span>transparent_bundle = <span class="self">self</span>.transparent_builder.build_for_pczt();
+
+        <span class="kw">let </span>(sapling_bundle, sapling_meta) = <span class="kw">match </span><span class="self">self
+            </span>.sapling_builder
+            .map(|builder| {
+                builder
+                    .build_for_pczt(<span class="kw-2">&amp;mut </span>rng)
+                    .map_err(Error::SaplingBuild)
+            })
+            .transpose()<span class="question-mark">?
+        </span>{
+            <span class="prelude-val">Some</span>((bundle, meta)) =&gt; (<span class="prelude-val">Some</span>(bundle), meta),
+            <span class="prelude-val">None </span>=&gt; (<span class="prelude-val">None</span>, SaplingMetadata::empty()),
+        };
+
+        <span class="kw">let </span>(orchard_bundle, orchard_meta) = <span class="kw">match </span><span class="self">self
+            </span>.orchard_builder
+            .map(|builder| {
+                builder
+                    .build_for_pczt(<span class="kw-2">&amp;mut </span>rng)
+                    .map_err(Error::OrchardBuild)
+            })
+            .transpose()<span class="question-mark">?
+        </span>{
+            <span class="prelude-val">Some</span>((bundle, meta)) =&gt; (<span class="prelude-val">Some</span>(bundle), meta),
+            <span class="prelude-val">None </span>=&gt; (<span class="prelude-val">None</span>, orchard::builder::BundleMetadata::empty()),
+        };
+
+        <span class="prelude-val">Ok</span>(PcztResult {
+            pczt_parts: PcztParts {
+                params: <span class="self">self</span>.params,
+                version,
+                consensus_branch_id,
+                lock_time: <span class="number">0</span>,
+                expiry_height: <span class="self">self</span>.expiry_height,
+                transparent: transparent_bundle,
+                sapling: sapling_bundle,
+                orchard: orchard_bundle,
+            },
             sapling_meta,
             orchard_meta,
         })

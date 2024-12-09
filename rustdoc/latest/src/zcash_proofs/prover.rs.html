@@ -201,7 +201,17 @@
 <a href="#200" id="200">200</a>
 <a href="#201" id="201">201</a>
 <a href="#202" id="202">202</a>
-<a href="#203" id="203">203</a></pre></div><pre class="rust"><code><span class="doccomment">//! Abstractions over the proving system and parameters for ease of use.
+<a href="#203" id="203">203</a>
+<a href="#204" id="204">204</a>
+<a href="#205" id="205">205</a>
+<a href="#206" id="206">206</a>
+<a href="#207" id="207">207</a>
+<a href="#208" id="208">208</a>
+<a href="#209" id="209">209</a>
+<a href="#210" id="210">210</a>
+<a href="#211" id="211">211</a>
+<a href="#212" id="212">212</a>
+<a href="#213" id="213">213</a></pre></div><pre class="rust"><code><span class="doccomment">//! Abstractions over the proving system and parameters for ease of use.
 
 </span><span class="kw">use </span>bellman::groth16::Proof;
 <span class="kw">use </span>bls12_381::Bls12;
@@ -209,6 +219,8 @@
 
 <span class="kw">use </span>sapling::{
     bundle::GrothProofBytes,
+    circuit::{OutputVerifyingKey, SpendVerifyingKey},
+    keys::EphemeralSecretKey,
     prover::{OutputProver, SpendProver},
     value::{NoteValue, ValueCommitTrapdoor},
     Diversifier, MerklePath, PaymentAddress, ProofGenerationKey, Rseed,
@@ -331,6 +343,14 @@
             output_params: p.output_params,
         }
     }
+
+    <span class="doccomment">/// Returns the verifying keys for the Sapling circuits.
+    </span><span class="kw">pub fn </span>verifying_keys(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; (SpendVerifyingKey, OutputVerifyingKey) {
+        (
+            <span class="self">self</span>.spend_params.verifying_key(),
+            <span class="self">self</span>.output_params.verifying_key(),
+        )
+    }
 }
 
 <span class="kw">impl </span>SpendProver <span class="kw">for </span>LocalTxProver {
@@ -379,7 +399,7 @@
     <span class="kw">type </span>Proof = Proof&lt;Bls12&gt;;
 
     <span class="kw">fn </span>prepare_circuit(
-        esk: jubjub::Fr,
+        esk: <span class="kw-2">&amp;</span>EphemeralSecretKey,
         payment_address: PaymentAddress,
         rcm: jubjub::Fr,
         value: NoteValue,
