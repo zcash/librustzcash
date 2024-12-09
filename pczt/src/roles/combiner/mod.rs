@@ -26,14 +26,29 @@ impl Combiner {
 }
 
 fn merge(lhs: Pczt, rhs: Pczt) -> Result<Pczt, Error> {
+    // Per-protocol bundles are merged first, because each is only interpretable in the
+    // context of its own global.
+    let transparent = lhs
+        .transparent
+        .merge(rhs.transparent, &lhs.global, &rhs.global)
+        .ok_or(Error::DataMismatch)?;
+    let sapling = lhs
+        .sapling
+        .merge(rhs.sapling, &lhs.global, &rhs.global)
+        .ok_or(Error::DataMismatch)?;
+    let orchard = lhs
+        .orchard
+        .merge(rhs.orchard, &lhs.global, &rhs.global)
+        .ok_or(Error::DataMismatch)?;
+
+    // Now that the per-protocol bundles are merged, merge the globals.
+    let global = lhs.global.merge(rhs.global).ok_or(Error::DataMismatch)?;
+
     Ok(Pczt {
-        global: lhs.global.merge(rhs.global).ok_or(Error::DataMismatch)?,
-        transparent: lhs
-            .transparent
-            .merge(rhs.transparent)
-            .ok_or(Error::DataMismatch)?,
-        sapling: lhs.sapling.merge(rhs.sapling).ok_or(Error::DataMismatch)?,
-        orchard: lhs.orchard.merge(rhs.orchard).ok_or(Error::DataMismatch)?,
+        global,
+        transparent,
+        sapling,
+        orchard,
     })
 }
 

@@ -5,7 +5,10 @@ use zcash_primitives::transaction::{
 };
 
 use crate::{
-    common::{FLAG_INPUTS_MODIFIABLE, FLAG_OUTPUTS_MODIFIABLE},
+    common::{
+        FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
+        FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
+    },
     Pczt,
 };
 
@@ -46,10 +49,12 @@ impl IoFinalizer {
             orchard,
         } = pczt;
 
-        // After shielded IO finalization, the inputs and outputs cannot be modified
+        // After shielded IO finalization, the transaction effects cannot be modified
         // because dummy spends will have been signed.
         if has_shielded_spends || has_shielded_outputs {
-            global.tx_modifiable &= !(FLAG_INPUTS_MODIFIABLE | FLAG_OUTPUTS_MODIFIABLE);
+            global.tx_modifiable &= !(FLAG_TRANSPARENT_INPUTS_MODIFIABLE
+                | FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE
+                | FLAG_SHIELDED_MODIFIABLE);
         }
 
         let transparent = transparent.into_parsed().map_err(Error::TransparentParse)?;

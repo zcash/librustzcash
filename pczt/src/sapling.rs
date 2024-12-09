@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
 use crate::{
-    common::Zip32Derivation,
+    common::{Global, Zip32Derivation},
     roles::combiner::{merge_map, merge_optional},
 };
 
@@ -240,7 +240,12 @@ impl Bundle {
     /// Merges this bundle with another.
     ///
     /// Returns `None` if the bundles have conflicting data.
-    pub(crate) fn merge(mut self, other: Self) -> Option<Self> {
+    pub(crate) fn merge(
+        mut self,
+        other: Self,
+        self_global: &Global,
+        other_global: &Global,
+    ) -> Option<Self> {
         // Destructure `other` to ensure we handle everything.
         let Self {
             mut spends,
@@ -264,13 +269,11 @@ impl Bundle {
             }
             // IO Finalizer has run, and neither bundle has excess spends or outputs.
             (Some(_), _) | (_, Some(_)) => (),
-            // IO Finalizer has not run on either bundle. If the other bundle has more
-            // spends or outputs than us, move them over; these cannot conflict by
-            // construction.
+            // IO Finalizer has not run on either bundle.
             (None, None) => {
-                let (other_has_more_spends, other_has_more_outputs) = match (
-                    spends.len().cmp(&self.spends.len()),
-                    outputs.len().cmp(&self.outputs.len()),
+                let (spends_cmp_other, outputs_cmp_other) = match (
+                    self.spends.len().cmp(&spends.len()),
+                    self.outputs.len().cmp(&outputs.len()),
                 ) {
                     // These cases require us to recalculate the value sum, which we can't
                     // do without a parsed bundle.
@@ -279,19 +282,44 @@ impl Bundle {
                     }
                     // These cases mean that at least one of the two value sums is correct
                     // and we can use it directly.
-                    (spends, outputs) => (
-                        matches!(spends, Ordering::Greater),
-                        matches!(outputs, Ordering::Greater),
-                    ),
+                    (spends, outputs) => (spends, outputs),
                 };
 
-                if other_has_more_spends {
-                    self.spends.extend(spends.drain(self.spends.len()..));
+                match (
+                    self_global.shielded_modifiable(),
+                    other_global.shielded_modifiable(),
+                    spends_cmp_other,
+                ) {
+                    // Fail if the merge would add spends to a non-modifiable bundle.
+                    (false, _, Ordering::Less) | (_, false, Ordering::Greater) => return None,
+                    // If the other bundle has more spends than us, move them over; these cannot
+                    // conflict by construction.
+                    (true, _, Ordering::Less) => {
+                        self.spends.extend(spends.drain(self.spends.len()..))
+                    }
+                    // Do nothing otherwise.
+                    (_, _, Ordering::Equal) | (_, true, Ordering::Greater) => (),
                 }
-                if other_has_more_outputs {
-                    self.outputs.extend(outputs.drain(self.outputs.len()..));
+
+                match (
+                    self_global.shielded_modifiable(),
+                    other_global.shielded_modifiable(),
+                    outputs_cmp_other,
+                ) {
+                    // Fail if the merge would add outputs to a non-modifiable bundle.
+                    (false, _, Ordering::Less) | (_, false, Ordering::Greater) => return None,
+                    // If the other bundle has more outputs than us, move them over; these cannot
+                    // conflict by construction.
+                    (true, _, Ordering::Less) => {
+                        self.outputs.extend(outputs.drain(self.outputs.len()..))
+                    }
+                    // Do nothing otherwise.
+                    (_, _, Ordering::Equal) | (_, true, Ordering::Greater) => (),
                 }
-                if other_has_more_spends || other_has_more_outputs {
+
+                if matches!(spends_cmp_other, Ordering::Less)
+                    || matches!(outputs_cmp_other, Ordering::Less)
+                {
                     // We check below that the overlapping spends and outputs match.
                     // Assuming here that they will, we take the other bundle's value sum.
                     self.value_sum = value_sum;

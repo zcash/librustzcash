@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
+use std::{cmp::Ordering, collections::BTreeMap};
 
 use crate::{
-    common::Zip32Derivation,
+    common::{Global, Zip32Derivation},
     roles::combiner::{merge_map, merge_optional},
 };
 
@@ -167,17 +167,45 @@ impl Bundle {
     /// Merges this bundle with another.
     ///
     /// Returns `None` if the bundles have conflicting data.
-    pub(crate) fn merge(mut self, other: Self) -> Option<Self> {
+    pub(crate) fn merge(
+        mut self,
+        other: Self,
+        self_global: &Global,
+        other_global: &Global,
+    ) -> Option<Self> {
         // Destructure `other` to ensure we handle everything.
         let Self {
             mut inputs,
             mut outputs,
         } = other;
 
-        // If the other bundle has more inputs or outputs than us, move them over; these
-        // cannot conflict by construction.
-        self.inputs.extend(inputs.drain(self.inputs.len()..));
-        self.outputs.extend(outputs.drain(self.outputs.len()..));
+        match (
+            self_global.inputs_modifiable(),
+            other_global.inputs_modifiable(),
+            self.inputs.len().cmp(&inputs.len()),
+        ) {
+            // Fail if the merge would add inputs to a non-modifiable bundle.
+            (false, _, Ordering::Less) | (_, false, Ordering::Greater) => return None,
+            // If the other bundle has more inputs than us, move them over; these cannot
+            // conflict by construction.
+            (true, _, Ordering::Less) => self.inputs.extend(inputs.drain(self.inputs.len()..)),
+            // Do nothing otherwise.
+            (_, _, Ordering::Equal) | (_, true, Ordering::Greater) => (),
+        }
+
+        match (
+            self_global.outputs_modifiable(),
+            other_global.outputs_modifiable(),
+            self.outputs.len().cmp(&outputs.len()),
+        ) {
+            // Fail if the merge would add outputs to a non-modifiable bundle.
+            (false, _, Ordering::Less) | (_, false, Ordering::Greater) => return None,
+            // If the other bundle has more outputs than us, move them over; these cannot
+            // conflict by construction.
+            (true, _, Ordering::Less) => self.outputs.extend(outputs.drain(self.outputs.len()..)),
+            // Do nothing otherwise.
+            (_, _, Ordering::Equal) | (_, true, Ordering::Greater) => (),
+        }
 
         // Leverage the early-exit behaviour of zip to confirm that the remaining data in
         // the other bundle matches this one.

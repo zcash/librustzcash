@@ -1,9 +1,17 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    common::{FLAG_INPUTS_MODIFIABLE, FLAG_OUTPUTS_MODIFIABLE},
+    common::{
+        FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
+        FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
+    },
     Pczt, V5_TX_VERSION, V5_VERSION_GROUP_ID,
 };
+
+/// Initial flags allowing any modification.
+const INITIAL_TX_MODIFIABLE: u8 = FLAG_TRANSPARENT_INPUTS_MODIFIABLE
+    | FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE
+    | FLAG_SHIELDED_MODIFIABLE;
 
 const ORCHARD_SPENDS_AND_OUTPUTS_ENABLED: u8 = 0b0000_0011;
 
@@ -61,8 +69,7 @@ impl Creator {
                 fallback_lock_time: self.fallback_lock_time,
                 expiry_height: self.expiry_height,
                 coin_type: self.coin_type,
-                // Spends and outputs modifiable, no SIGHASH_SINGLE.
-                tx_modifiable: FLAG_INPUTS_MODIFIABLE | FLAG_OUTPUTS_MODIFIABLE,
+                tx_modifiable: INITIAL_TX_MODIFIABLE,
                 proprietary: BTreeMap::new(),
             },
             transparent: crate::transparent::Bundle {
@@ -96,7 +103,7 @@ impl Creator {
     pub fn build_from_parts<P: zcash_protocol::consensus::Parameters>(
         parts: zcash_primitives::transaction::builder::PcztParts<P>,
     ) -> Option<Pczt> {
-        use zcash_primitives::transaction::sighash::SighashType;
+        use zcash_primitives::transaction::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_SINGLE};
         use zcash_protocol::consensus::NetworkConstants;
 
         use crate::{common::FLAG_HAS_SIGHASH_SINGLE, SAPLING_TX_VERSION};
@@ -110,12 +117,11 @@ impl Creator {
 
         // Spends and outputs not modifiable.
         let mut tx_modifiable = 0b0000_0000;
-        // Check if any input is using `SIGHASH_SINGLE`.
+        // Check if any input is using `SIGHASH_SINGLE` (with or without `ANYONECANPAY`).
         if parts.transparent.as_ref().map_or(false, |bundle| {
-            bundle
-                .inputs()
-                .iter()
-                .any(|input| input.sighash_type() == &SighashType::SINGLE)
+            bundle.inputs().iter().any(|input| {
+                (input.sighash_type().encode() & !SIGHASH_ANYONECANPAY) == SIGHASH_SINGLE
+            })
         }) {
             tx_modifiable |= FLAG_HAS_SIGHASH_SINGLE;
         }

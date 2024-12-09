@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{cmp::Ordering, collections::BTreeMap};
 
 #[cfg(feature = "orchard")]
 use ff::PrimeField;
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
 use crate::{
-    common::Zip32Derivation,
+    common::{Global, Zip32Derivation},
     roles::combiner::{merge_map, merge_optional},
 };
 
@@ -241,7 +241,12 @@ impl Bundle {
     /// Merges this bundle with another.
     ///
     /// Returns `None` if the bundles have conflicting data.
-    pub(crate) fn merge(mut self, other: Self) -> Option<Self> {
+    pub(crate) fn merge(
+        mut self,
+        other: Self,
+        self_global: &Global,
+        other_global: &Global,
+    ) -> Option<Self> {
         // Destructure `other` to ensure we handle everything.
         let Self {
             mut actions,
@@ -267,18 +272,26 @@ impl Bundle {
             }
             // IO Finalizer has run, and neither bundle has excess spends or outputs.
             (Some(_), _) | (_, Some(_)) => (),
-            // IO Finalizer has not run on either bundle. If the other bundle has more
-            // spends or outputs than us, move them over; these cannot conflict by
-            // construction.
-            (None, None) => {
-                if actions.len() > self.actions.len() {
+            // IO Finalizer has not run on either bundle.
+            (None, None) => match (
+                self_global.shielded_modifiable(),
+                other_global.shielded_modifiable(),
+                self.actions.len().cmp(&actions.len()),
+            ) {
+                // Fail if the merge would add actions to a non-modifiable bundle.
+                (false, _, Ordering::Less) | (_, false, Ordering::Greater) => return None,
+                // If the other bundle has more actions than us, move them over; these
+                // cannot conflict by construction.
+                (true, _, Ordering::Less) => {
                     self.actions.extend(actions.drain(self.actions.len()..));
 
                     // We check below that the overlapping actions match. Assuming here
                     // that they will, we can take the other bundle's value sum.
                     self.value_sum = value_sum;
                 }
-            }
+                // Do nothing otherwise.
+                (_, _, Ordering::Equal) | (_, true, Ordering::Greater) => (),
+            },
         }
 
         if self.anchor != anchor {

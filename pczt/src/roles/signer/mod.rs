@@ -10,7 +10,10 @@ use zcash_primitives::transaction::{
 use zcash_protocol::consensus::BranchId;
 
 use crate::{
-    common::{Global, FLAG_HAS_SIGHASH_SINGLE, FLAG_INPUTS_MODIFIABLE, FLAG_OUTPUTS_MODIFIABLE},
+    common::{
+        Global, FLAG_HAS_SIGHASH_SINGLE, FLAG_SHIELDED_MODIFIABLE,
+        FLAG_TRANSPARENT_INPUTS_MODIFIABLE, FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
+    },
     Pczt,
 };
 
@@ -90,21 +93,26 @@ impl Signer {
             .map_err(Error::TransparentSign)?;
 
         // Update transaction modifiability:
-        // - If the Signer added a signature that does not use SIGHASH_ANYONECANPAY, the
-        //   Input Modifiable flag must be set to False.
+        // - If the Signer added a signature that does not use `SIGHASH_ANYONECANPAY`, the
+        //   Transparent Inputs Modifiable Flag must be set to False (because the
+        //   signature commits to all inputs, not just the one at `index`).
         if input.sighash_type().encode() & SIGHASH_ANYONECANPAY == 0 {
-            self.global.tx_modifiable &= !FLAG_INPUTS_MODIFIABLE;
+            self.global.tx_modifiable &= !FLAG_TRANSPARENT_INPUTS_MODIFIABLE;
         }
-        // - If the Signer added a signature that does not use SIGHASH_NONE, the Outputs
-        //   Modifiable flag must be set to False.
+        // - If the Signer added a signature that does not use `SIGHASH_NONE`, the
+        //   Transparent Outputs Modifiable Flag must be set to False. Note that this
+        //   applies to `SIGHASH_SINGLE` because we could otherwise remove the output at
+        //   `index`, which would not remove the signature.
         if (input.sighash_type().encode() & !SIGHASH_ANYONECANPAY) != SIGHASH_NONE {
-            self.global.tx_modifiable &= !FLAG_OUTPUTS_MODIFIABLE;
+            self.global.tx_modifiable &= !FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE;
         }
-        // - If the Signer added a signature that uses SIGHASH_SINGLE, the Has SIGHASH_SINGLE
-        //   flag must be set to True.
+        // - If the Signer added a signature that uses `SIGHASH_SINGLE`, the Has
+        //   `SIGHASH_SINGLE` flag must be set to True.
         if (input.sighash_type().encode() & !SIGHASH_ANYONECANPAY) == SIGHASH_SINGLE {
             self.global.tx_modifiable |= FLAG_HAS_SIGHASH_SINGLE;
         }
+        // - Always set the Shielded Modifiable Flag to False.
+        self.global.tx_modifiable &= !FLAG_SHIELDED_MODIFIABLE;
 
         Ok(())
     }
@@ -160,6 +168,12 @@ impl Signer {
         spend
             .sign(self.shielded_sighash, ask, OsRng)
             .map_err(Error::SaplingSign)?;
+
+        // Update transaction modifiability: all transaction effects have been committed
+        // to by the signature.
+        self.global.tx_modifiable &= !(FLAG_TRANSPARENT_INPUTS_MODIFIABLE
+            | FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE
+            | FLAG_SHIELDED_MODIFIABLE);
 
         Ok(())
     }
@@ -217,6 +231,12 @@ impl Signer {
         action
             .sign(self.shielded_sighash, ask, OsRng)
             .map_err(Error::OrchardSign)?;
+
+        // Update transaction modifiability: all transaction effects have been committed
+        // to by the signature.
+        self.global.tx_modifiable &= !(FLAG_TRANSPARENT_INPUTS_MODIFIABLE
+            | FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE
+            | FLAG_SHIELDED_MODIFIABLE);
 
         Ok(())
     }

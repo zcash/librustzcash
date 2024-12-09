@@ -5,9 +5,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::roles::combiner::merge_map;
 
-pub(crate) const FLAG_INPUTS_MODIFIABLE: u8 = 0b0000_0001;
-pub(crate) const FLAG_OUTPUTS_MODIFIABLE: u8 = 0b0000_0010;
+pub(crate) const FLAG_TRANSPARENT_INPUTS_MODIFIABLE: u8 = 0b0000_0001;
+pub(crate) const FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE: u8 = 0b0000_0010;
 pub(crate) const FLAG_HAS_SIGHASH_SINGLE: u8 = 0b0000_0100;
+pub(crate) const FLAG_SHIELDED_MODIFIABLE: u8 = 0b1000_0000;
 
 /// Global fields that are relevant to the transaction as a whole.
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
@@ -52,27 +53,29 @@ pub struct Global {
 
     /// A bitfield for various transaction modification flags.
     ///
-    /// - Bit 0 is the Inputs Modifiable Flag and indicates whether inputs can be modified.
+    /// - Bit 0 is the Transparent Inputs Modifiable Flag and indicates whether
+    ///   transparent inputs can be modified.
     ///   - This is set to `true` by the Creator.
-    ///   - This is checked by the Constructor before adding inputs, and may be set to
-    ///     `false` by the Constructor.
+    ///   - This is checked by the Constructor before adding transparent inputs, and may
+    ///     be set to `false` by the Constructor.
     ///   - This is set to `false` by the IO Finalizer if there are shielded spends or
     ///     outputs.
     ///   - This is set to `false` by a Signer that adds a signature that does not use
-    ///     `SIGHASH_ANYONECANPAY`.
+    ///     `SIGHASH_ANYONECANPAY` (which includes all shielded signatures).
     ///   - The Combiner merges this bit towards `false`.
-    /// - Bit 1 is the Outputs Modifiable Flag and indicates whether outputs can be
-    ///   modified.
+    /// - Bit 1 is the Transparent Outputs Modifiable Flag and indicates whether
+    ///   transparent outputs can be modified.
     ///   - This is set to `true` by the Creator.
-    ///   - This is checked by the Constructor before adding outputs, and may be set to
-    ///     `false` by the Constructor.
+    ///   - This is checked by the Constructor before adding transparent outputs, and may
+    ///     be set to `false` by the Constructor.
     ///   - This is set to `false` by the IO Finalizer if there are shielded spends or
     ///     outputs.
     ///   - This is set to `false` by a Signer that adds a signature that does not use
-    ///     `SIGHASH_NONE`.
+    ///     `SIGHASH_NONE` (which includes all shielded signatures).
     ///   - The Combiner merges this bit towards `false`.
-    /// - Bit 2 is the Has `SIGHASH_SINGLE` flag and indicates whether the transaction has
-    ///   a `SIGHASH_SINGLE` signature who's input and output pairing must be preserved.
+    /// - Bit 2 is the Has `SIGHASH_SINGLE` Flag and indicates whether the transaction has
+    ///   a `SIGHASH_SINGLE` transparent signature who's input and output pairing must be
+    ///   preserved.
     ///   - This is set to `false` by the Creator.
     ///   - This is updated by a Constructor.
     ///   - This is set to `true` by a Signer that adds a signature that uses
@@ -80,7 +83,17 @@ pub struct Global {
     ///   - This essentially indicates that the Constructor must iterate the transparent
     ///     inputs to determine whether and how to add a transparent input.
     ///   - The Combiner merges this bit towards `true`.
-    /// - Bits 3-7 must be 0.
+    /// - Bits 3-6 must be 0.
+    /// - Bit 7 is the Shielded Modifiable Flag and indicates whether shielded spends or
+    ///   outputs can be modified.
+    ///   - This is set to `true` by the Creator.
+    ///   - This is checked by the Constructor before adding shielded spends or outputs,
+    ///     and may be set to `false` by the Constructor.
+    ///   - This is set to `false` by the IO Finalizer if there are shielded spends or
+    ///     outputs.
+    ///   - This is set to `false` by every Signer (as all signatures commit to all
+    ///     shielded spends and outputs).
+    ///   - The Combiner merges this bit towards `false`.
     pub(crate) tx_modifiable: u8,
 
     /// Proprietary fields related to the overall transaction.
@@ -89,6 +102,30 @@ pub struct Global {
 }
 
 impl Global {
+    /// Returns whether transparent inputs can be added to or removed from the
+    /// transaction.
+    pub fn inputs_modifiable(&self) -> bool {
+        (self.tx_modifiable & FLAG_TRANSPARENT_INPUTS_MODIFIABLE) != 0
+    }
+
+    /// Returns whether transparent outputs can be added to or removed from the
+    /// transaction.
+    pub fn outputs_modifiable(&self) -> bool {
+        (self.tx_modifiable & FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE) != 0
+    }
+
+    /// Returns whether the transaction has a `SIGHASH_SINGLE` transparent signature who's
+    /// input and output pairing must be preserved.
+    pub fn has_sighash_single(&self) -> bool {
+        (self.tx_modifiable & FLAG_HAS_SIGHASH_SINGLE) != 0
+    }
+
+    /// Returns whether shielded spends or outputs can be added to or removed from the
+    /// transaction.
+    pub fn shielded_modifiable(&self) -> bool {
+        (self.tx_modifiable & FLAG_SHIELDED_MODIFIABLE) != 0
+    }
+
     pub(crate) fn merge(mut self, other: Self) -> Option<Self> {
         let Self {
             tx_version,
@@ -113,19 +150,25 @@ impl Global {
 
         // `tx_modifiable` is explicitly a bitmap; merge it bit-by-bit.
         // - Bit 0 and Bit 1 merge towards `false`.
-        if (tx_modifiable & FLAG_INPUTS_MODIFIABLE) == 0 {
-            self.tx_modifiable &= !FLAG_INPUTS_MODIFIABLE;
+        if (tx_modifiable & FLAG_TRANSPARENT_INPUTS_MODIFIABLE) == 0 {
+            self.tx_modifiable &= !FLAG_TRANSPARENT_INPUTS_MODIFIABLE;
         }
-        if (tx_modifiable & FLAG_OUTPUTS_MODIFIABLE) == 0 {
-            self.tx_modifiable &= !FLAG_OUTPUTS_MODIFIABLE;
+        if (tx_modifiable & FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE) == 0 {
+            self.tx_modifiable &= !FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE;
         }
         // - Bit 2 merges towards `true`.
         if (tx_modifiable & FLAG_HAS_SIGHASH_SINGLE) != 0 {
             self.tx_modifiable |= FLAG_HAS_SIGHASH_SINGLE;
         }
-        // - Bits 3-7 must be 0.
-        if (self.tx_modifiable >> 3) != 0 || (tx_modifiable >> 3) != 0 {
+        // - Bits 3-6 must be 0.
+        if ((self.tx_modifiable & !FLAG_SHIELDED_MODIFIABLE) >> 3) != 0
+            || ((tx_modifiable & !FLAG_SHIELDED_MODIFIABLE) >> 3) != 0
+        {
             return None;
+        }
+        // - Bit 7 merges towards `false`.
+        if (tx_modifiable & FLAG_SHIELDED_MODIFIABLE) == 0 {
+            self.tx_modifiable &= !FLAG_SHIELDED_MODIFIABLE;
         }
 
         if !merge_map(&mut self.proprietary, proprietary) {
@@ -174,7 +217,6 @@ mod tests {
         };
 
         for (left, right, expected) in [
-            (0b0000_0000, 0b1000_0000, None),
             (0b0000_0000, 0b0000_0000, Some(0b0000_0000)),
             (0b0000_0000, 0b0000_0011, Some(0b0000_0000)),
             (0b0000_0001, 0b0000_0011, Some(0b0000_0001)),
@@ -183,6 +225,12 @@ mod tests {
             (0b0000_0000, 0b0000_0100, Some(0b0000_0100)),
             (0b0000_0100, 0b0000_0100, Some(0b0000_0100)),
             (0b0000_0011, 0b0000_0111, Some(0b0000_0111)),
+            (0b0000_0000, 0b0000_1000, None),
+            (0b0000_0000, 0b0001_0000, None),
+            (0b0000_0000, 0b0010_0000, None),
+            (0b0000_0000, 0b0100_0000, None),
+            (0b0000_0000, 0b1000_0000, Some(0b0000_0000)),
+            (0b1000_0000, 0b1000_0000, Some(0b1000_0000)),
         ] {
             let mut a = base.clone();
             a.tx_modifiable = left;
