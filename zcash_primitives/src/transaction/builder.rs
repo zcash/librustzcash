@@ -1194,7 +1194,7 @@ mod tests {
         let mut witness1 = IncrementalWitness::from_tree(tree.clone());
 
         // Fail if there is insufficient input
-        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
+        // 0.0003 z-ZEC out, 0.00015 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
         {
             let build_config = BuildConfig::Standard {
                 sapling_anchor: Some(witness1.root().into()),
@@ -1224,8 +1224,7 @@ mod tests {
             );
         }
 
-        // Fail if there is insufficient input
-        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 burned, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
+        // 0.0003 z-ZEC out, 0.00005 t-ZEC out, 0.0001 burned, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
         #[cfg(zcash_unstable = "nsm")]
         {
             let build_config = BuildConfig::Standard {
@@ -1247,7 +1246,7 @@ mod tests {
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKeyHash([0; 20]),
-                    NonNegativeAmount::const_from_u64(10000),
+                    NonNegativeAmount::const_from_u64(5000),
                 )
                 .unwrap();
             builder.set_burn_amount(Some(NonNegativeAmount::const_from_u64(10000)));
@@ -1275,10 +1274,10 @@ mod tests {
             };
             let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             builder
-                .add_sapling_spend::<Infallible>(&extsk, note1, witness1.path().unwrap())
+                .add_sapling_spend::<Infallible>(&extsk, note1.clone(), witness1.path().unwrap())
                 .unwrap();
             builder
-                .add_sapling_spend::<Infallible>(&extsk, note2, witness2.path().unwrap())
+                .add_sapling_spend::<Infallible>(&extsk, note2.clone(), witness2.path().unwrap())
                 .unwrap();
             builder
                 .add_sapling_output::<Infallible>(
@@ -1304,18 +1303,9 @@ mod tests {
         }
 
         // Succeeds if there is sufficient input
-        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.0006 z-ZEC in
+        // 0.0003 z-ZEC out, 0.00005 t-ZEC out, 0.0001 burned, 0.00015 t-ZEC fee, 0.0006 z-ZEC in
         #[cfg(zcash_unstable = "nsm")]
         {
-            let note1 = to.create_note(
-                sapling::value::NoteValue::from_raw(70000),
-                Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)),
-            );
-            let cmu1 = Node::from_cmu(&note1.cmu());
-            let mut tree = CommitmentTree::<Node, 32>::empty();
-            tree.append(cmu1).unwrap();
-            let witness1 = IncrementalWitness::from_tree(tree.clone());
-
             let build_config = BuildConfig::Standard {
                 sapling_anchor: Some(witness1.root().into()),
                 orchard_anchor: Some(orchard::Anchor::empty_tree()),
@@ -1323,6 +1313,9 @@ mod tests {
             let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             builder
                 .add_sapling_spend::<Infallible>(&extsk, note1, witness1.path().unwrap())
+                .unwrap();
+            builder
+                .add_sapling_spend::<Infallible>(&extsk, note2, witness2.path().unwrap())
                 .unwrap();
             builder
                 .add_sapling_output::<Infallible>(
@@ -1335,13 +1328,16 @@ mod tests {
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKeyHash([0; 20]),
-                    NonNegativeAmount::const_from_u64(20000),
+                    NonNegativeAmount::const_from_u64(5000),
                 )
                 .unwrap();
             builder.set_burn_amount(Some(NonNegativeAmount::const_from_u64(10000)));
-            assert_matches!(
-                builder.mock_build(OsRng),
-                Ok(res) if res.transaction().fee_paid(|_| Err(BalanceError::Overflow)).unwrap() == Amount::const_from_i64(10_000)
+            let res = builder.mock_build(OsRng).unwrap();
+            assert_eq!(
+                res.transaction()
+                    .fee_paid(|_| Err(BalanceError::Overflow))
+                    .unwrap(),
+                Amount::const_from_i64(15_000)
             );
         }
     }
