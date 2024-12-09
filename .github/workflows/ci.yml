@@ -7,27 +7,70 @@ on:
   merge_group:
 
 jobs:
-  test:
-    name: >
-      Test${{
-      matrix.state != 'NOT_A_PUZZLE' && format(' {0}', matrix.state) || ''
-      }} on ${{ matrix.target }}
+  required-test:
+    name: Test ${{ matrix.state }} on ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.state != 'NOT_A_PUZZLE' }}
     strategy:
       matrix:
         target:
           - Linux
-          - macOS
-          - Windows
         state:
-          - NOT_A_PUZZLE
+          - no-Orchard
           - Orchard
           - NU7
 
         include:
           - target: Linux
             os: ubuntu-latest-8cores
+
+          - state: Orchard
+            extra_flags: orchard
+          - state: NU7
+            extra_flags: orchard
+            rustflags: '--cfg zcash_unstable="nu7"'
+
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      RUSTDOCFLAGS: ${{ matrix.rustflags }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - id: prepare
+        uses: ./.github/actions/prepare
+        with:
+          extra-features: ${{ matrix.extra_flags || '' }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run tests
+        run: >
+          cargo test
+          --workspace
+          ${{ steps.prepare.outputs.feature-flags }}
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+
+  test:
+    name: Test ${{ matrix.state }} on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      matrix:
+        target:
+          - macOS
+          - Windows
+        state:
+          - no-Orchard
+          - Orchard
+          - NU7
+
+        include:
           - target: macOS
             os: macOS-latest
           - target: Windows
@@ -52,7 +95,7 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          extra-features: ${{ matrix.state != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
+          extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
         with:
           path: |
@@ -71,7 +114,7 @@ jobs:
         run: git diff --exit-code
 
   test-slow:
-    name: Slow Test
+    name: Slow Test ${{ matrix.state }} on ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     continue-on-error: true
     strategy:
@@ -123,12 +166,8 @@ jobs:
 
   # States that we want to ensure can be built, but that we don't actively run tests for.
   check-msrv:
-    name: >
-      Check${{
-      matrix.state != 'NOT_A_PUZZLE' && format(' {0}', matrix.state) || ''
-      }} build on ${{ matrix.target }}
+    name: Check ${{ matrix.state }} build on ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.state != 'NOT_A_PUZZLE' }}
     strategy:
       matrix:
         target:
@@ -158,7 +197,7 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          extra-features: ${{ matrix.state != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
+          extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
         with:
           path: |
@@ -413,7 +452,7 @@ jobs:
   required-checks:
     name: Required status checks have passed
     needs:
-      - test
+      - required-test
       - check-msrv
       - build-latest
       - build-nodefault
