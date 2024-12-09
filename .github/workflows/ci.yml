@@ -36,6 +36,7 @@ jobs:
           - state: Orchard
             extra_flags: orchard
           - state: NU7
+            extra_flags: orchard
             rustflags: '--cfg zcash_unstable="nu7"'
 
         exclude:
@@ -88,6 +89,7 @@ jobs:
           - state: Orchard
             extra_flags: orchard
           - state: NU7
+            extra_flags: orchard
             rustflags: '--cfg zcash_unstable="nu7"'
 
     env:
