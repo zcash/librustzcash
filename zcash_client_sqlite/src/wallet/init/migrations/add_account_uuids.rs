@@ -289,8 +289,8 @@ impl RusqliteMigration for Migration {
             -- join to the sent_notes table to obtain `from_account_id`
             LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
             -- join on the accounts table to obtain account UUIDs
-            JOIN accounts from_account ON accounts.id = sent_notes.from_account_id
-            JOIN accounts to_account ON accounts.id = ro.account_id
+            JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
+            JOIN accounts to_account ON to_account.id = ro.account_id
             UNION
             -- select all outputs sent from the wallet to external recipients
             SELECT transactions.txid            AS txid,
@@ -307,7 +307,7 @@ impl RusqliteMigration for Migration {
                 ON transactions.id_tx = sent_notes.tx
             LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
             -- join on the accounts table to obtain account UUIDs
-            JOIN accounts from_account ON accounts.id = sent_notes.from_account_id
+            JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
             -- exclude any sent notes for which a row exists in the v_received_outputs view
             WHERE ro.account_id IS NULL",
         )?;
