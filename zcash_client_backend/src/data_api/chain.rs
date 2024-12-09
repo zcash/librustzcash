@@ -501,7 +501,7 @@ impl ScanSummary {
 }
 
 /// The final note commitment tree state for each shielded pool, as of a particular block height.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChainState {
     block_height: BlockHeight,
     block_hash: BlockHash,
