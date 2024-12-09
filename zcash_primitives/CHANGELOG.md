@@ -7,6 +7,17 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction`
+  - `TransactionData::try_map_bundles`
+  - `builder::{PcztResult, PcztParts}`
+  - `builder::Builder::build_for_pczt`
+  - `components::transparent`:
+    - `pczt` module.
+    - `EffectsOnly`
+    - `impl MapAuth<Authorized, Authorized> for ()`
+  - `sighash::SighashType`
+
 ## [0.20.0] - 2024-11-14
 
 ### Added
