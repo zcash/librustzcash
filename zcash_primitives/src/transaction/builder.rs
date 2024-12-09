@@ -1328,7 +1328,7 @@ mod tests {
         let mut witness1 = IncrementalWitness::from_tree(tree.clone()).unwrap();
 
         // Fail if there is insufficient input
-        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
+        // 0.0003 z-ZEC out, 0.00015 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
         {
             let build_config = BuildConfig::Standard {
                 sapling_anchor: Some(witness1.root().into()),
@@ -1385,7 +1385,7 @@ mod tests {
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKeyHash([0; 20]),
-                    NonNegativeAmount::const_from_u64(10000),
+                    NonNegativeAmount::const_from_u64(5000),
                 )
                 .unwrap();
             builder.set_burn_amount(Some(NonNegativeAmount::const_from_u64(10000)));
@@ -1471,6 +1471,9 @@ mod tests {
             let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             builder
                 .add_sapling_spend::<Infallible>(&extsk, note1, witness1.path().unwrap())
+                .unwrap();
+            builder
+                .add_sapling_spend::<Infallible>(&extsk, note2, witness2.path().unwrap())
                 .unwrap();
             builder
                 .add_sapling_output::<Infallible>(
