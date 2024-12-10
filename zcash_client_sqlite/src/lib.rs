@@ -159,9 +159,6 @@ pub(crate) const UA_TRANSPARENT: bool = false;
 #[cfg(feature = "transparent-inputs")]
 pub(crate) const UA_TRANSPARENT: bool = true;
 
-pub(crate) const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
-    UnifiedAddressRequest::unsafe_new(UA_ORCHARD, true, UA_TRANSPARENT);
-
 /// Unique identifier for a specific account tracked by a [`WalletDb`].
 ///
 /// Account identifiers are "one-way stable": a given identifier always points to a
@@ -180,7 +177,8 @@ pub(crate) const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
 /// - Restoring a wallet from a backed-up seed.
 /// - Importing the same viewing key into two different wallet instances.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
-pub struct AccountUuid(Uuid);
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AccountUuid(#[cfg_attr(feature = "serde", serde(with = "uuid::serde::compact"))] Uuid);
 
 impl ConditionallySelectable for AccountUuid {
     fn conditional_select(a: &Self, b: &Self, choice: subtle::Choice) -> Self {
@@ -937,7 +935,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     fn get_next_available_address(
         &mut self,
         account_uuid: Self::AccountId,
-        request: UnifiedAddressRequest,
+        request: Option<UnifiedAddressRequest>,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         self.transactionally(
             |wdb| match wdb.get_unified_full_viewing_keys()?.get(&account_uuid) {
@@ -1940,9 +1938,7 @@ mod tests {
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::consensus;
 
-    use crate::{
-        error::SqliteClientError, testing::db::TestDbFactory, AccountUuid, DEFAULT_UA_REQUEST,
-    };
+    use crate::{error::SqliteClientError, testing::db::TestDbFactory, AccountUuid};
 
     #[cfg(feature = "unstable")]
     use {
@@ -1993,7 +1989,7 @@ mod tests {
 
         let addr2 = st
             .wallet_mut()
-            .get_next_available_address(account.id(), DEFAULT_UA_REQUEST)
+            .get_next_available_address(account.id(), None)
             .unwrap();
         assert!(addr2.is_some());
         assert_ne!(current_addr, addr2);
@@ -2244,7 +2240,7 @@ mod tests {
 
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(
-            ufvk.default_address(DEFAULT_UA_REQUEST)
+            ufvk.default_address(None)
                 .expect("A valid default address exists for the UFVK")
                 .0
                 .transparent()

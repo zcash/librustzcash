@@ -148,6 +148,15 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "0.3.29 -> 0.3.30"
 
+[[audits.getset]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+version = "0.1.3"
+notes = """
+Does what it says on the tin. The proc macro generates unsurprising and obvious
+code, and does not produce unsafe code or access any imports.
+"""
+
 [[audits.h2]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
@@ -608,6 +617,12 @@ notes = "This release adds minor convenience methods and involves no unsafe code
 who = "Kris Nuttycombe <kris@nutty.land>"
 criteria = "safe-to-deploy"
 delta = "0.2.0 -> 0.3.0"
+
+[[audits.zcash_note_encryption]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+version = "0.4.1"
+notes = "Additive-only change that exposes the ability to decrypt by pk_d and esk. No functional changes."
 
 [[audits.zcash_primitives]]
 who = "Kris Nuttycombe <kris@nutty.land>"

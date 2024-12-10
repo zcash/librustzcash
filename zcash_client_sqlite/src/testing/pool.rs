@@ -261,3 +261,11 @@ pub(crate) fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester>() {
         BlockCache::new(),
     )
 }
+
+#[cfg(feature = "pczt-tests")]
+pub(crate) fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::pczt_single_step::<P0, P1, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}

@@ -62,20 +62,6 @@ user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
-[[publisher.orchard]]
-version = "0.10.0"
-when = "2024-10-02"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
-
-[[publisher.sapling-crypto]]
-version = "0.3.0"
-when = "2024-10-02"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
-
 [[publisher.schemerz]]
 version = "0.2.0"
 when = "2024-10-16"
@@ -403,6 +389,12 @@ criteria = "safe-to-deploy"
 version = "0.4.4"
 notes = "Most unsafe is hidden by `inout` dependency; only remaining unsafe is raw-splitting a slice and an unreachable hint. Older versions of this regularly reach ~150k daily downloads."
 
+[[audits.bytecode-alliance.audits.cobs]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+version = "0.2.3"
+notes = "No `unsafe` code in the crate and no usage of `std`"
+
 [[audits.bytecode-alliance.audits.constant_time_eq]]
 who = "Nick Fitzgerald <fitzgen@gmail.com>"
 criteria = "safe-to-deploy"
@@ -427,6 +419,12 @@ version = "0.1.3"
 who = "Benjamin Bouvier <public@benj.me>"
 criteria = "safe-to-deploy"
 delta = "0.9.0 -> 0.10.3"
+
+[[audits.bytecode-alliance.audits.embedded-io]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+version = "0.4.0"
+notes = "No `unsafe` code and only uses `std` in ways one would expect the crate to do so."
 
 [[audits.bytecode-alliance.audits.errno]]
 who = "Dan Gohman <dev@sunfishcode.online>"
@@ -1417,12 +1415,6 @@ version = "0.10.5"
 notes = "Reviewed on https://fxrev.dev/712371."
 aggregated-from = "https://fuchsia.googlesource.com/fuchsia/+/refs/heads/main/third_party/rust_crates/supply-chain/audits.toml?format=TEXT"
 
-[[audits.google.audits.stable_deref_trait]]
-who = "George Burgess IV <gbiv@google.com>"
-criteria = "safe-to-run"
-version = "1.2.0"
-aggregated-from = "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
-
 [[audits.google.audits.static_assertions]]
 who = "Lukasz Anforowicz <lukasza@chromium.org>"
 criteria = "safe-to-deploy"
@@ -1805,6 +1797,11 @@ delta = "1.9.0 -> 1.10.0"
 who = "Ameer Ghani <inahga@divviup.org>"
 criteria = "safe-to-deploy"
 version = "1.12.1"
+
+[[audits.isrg.audits.sha2]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+version = "0.10.2"
 
 [[audits.isrg.audits.sha3]]
 who = "David Cook <dcook@divviup.org>"
@@ -2338,6 +2335,23 @@ aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-ch
 who = "Mike Hommey <mh+mozilla@glandium.org>"
 criteria = "safe-to-deploy"
 delta = "0.6.27 -> 0.6.28"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.sha2]]
+who = "Mike Hommey <mh+mozilla@glandium.org>"
+criteria = "safe-to-deploy"
+delta = "0.10.2 -> 0.10.6"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.sha2]]
+who = "Jeff Muizelaar <jmuizelaar@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.10.6 -> 0.10.8"
+notes = """
+The bulk of this is https://github.com/RustCrypto/hashes/pull/490 which adds aarch64 support along with another PR adding longson.
+I didn't check the implementation thoroughly but there wasn't anything obviously nefarious. 0.10.8 has been out for more than a year
+which suggests no one else has found anything either.
+"""
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.strsim]]

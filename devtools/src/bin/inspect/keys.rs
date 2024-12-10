@@ -7,7 +7,7 @@ use zcash_address::{
     unified::{self, Encoding},
     ToAddress, ZcashAddress,
 };
-use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
+use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::{
     legacy::{
         keys::{AccountPrivKey, IncomingViewingKey},
@@ -220,9 +220,7 @@ pub(crate) fn inspect_sapling_extsk(
                 };
                 eprintln!("- UFVK: {encoded_ufvk}");
 
-                let (default_ua, _) = ufvk
-                    .default_address(UnifiedAddressRequest::unsafe_new(false, true, false))
-                    .expect("should exist");
+                let (default_ua, _) = ufvk.default_address(None).expect("should exist");
                 let encoded_ua = match network {
                     NetworkType::Main => default_ua.encode(&Network::MainNetwork),
                     NetworkType::Test => default_ua.encode(&Network::TestNetwork),

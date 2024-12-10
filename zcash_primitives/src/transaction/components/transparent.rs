@@ -7,15 +7,40 @@ use std::io::{self, Read, Write};
 
 use crate::{
     legacy::{Script, TransparentAddress},
-    transaction::TxId,
+    transaction::{sighash::TransparentAuthorizingContext, TxId},
 };
 
 use super::amount::{Amount, BalanceError, NonNegativeAmount};
 
 pub mod builder;
+pub mod pczt;
 
 pub trait Authorization: Debug {
     type ScriptSig: Debug + Clone + PartialEq;
+}
+
+/// Marker type for a bundle that contains no authorizing data, and the necessary input
+/// information for creating sighashes.
+#[derive(Debug)]
+pub struct EffectsOnly {
+    inputs: Vec<TxOut>,
+}
+
+impl Authorization for EffectsOnly {
+    type ScriptSig = ();
+}
+
+impl TransparentAuthorizingContext for EffectsOnly {
+    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
+        self.inputs.iter().map(|input| input.value).collect()
+    }
+
+    fn input_scriptpubkeys(&self) -> Vec<Script> {
+        self.inputs
+            .iter()
+            .map(|input| input.script_pubkey.clone())
+            .collect()
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -28,6 +53,25 @@ impl Authorization for Authorized {
 pub trait MapAuth<A: Authorization, B: Authorization> {
     fn map_script_sig(&self, s: A::ScriptSig) -> B::ScriptSig;
     fn map_authorization(&self, s: A) -> B;
+}
+
+/// The identity map.
+///
+/// This can be used with [`TransactionData::map_authorization`] when you want to map the
+/// authorization of a subset of a transaction's bundles.
+///
+/// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
+impl MapAuth<Authorized, Authorized> for () {
+    fn map_script_sig(
+        &self,
+        s: <Authorized as Authorization>::ScriptSig,
+    ) -> <Authorized as Authorization>::ScriptSig {
+        s
+    }
+
+    fn map_authorization(&self, s: Authorized) -> Authorized {
+        s
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
