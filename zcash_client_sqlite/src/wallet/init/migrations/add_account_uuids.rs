@@ -274,44 +274,53 @@ impl RusqliteMigration for Migration {
             DROP VIEW v_tx_outputs;
             CREATE VIEW v_tx_outputs AS
             WITH unioned AS (
-            -- select all outputs received by the wallet
-            SELECT transactions.txid            AS txid,
-                   ro.pool                      AS output_pool,
-                   ro.output_index              AS output_index,
-                   from_account.uuid            AS from_account_uuid,
-                   to_account.uuid              AS to_account_uuid,
-                   NULL                         AS to_address,
-                   ro.value                     AS value,
-                   ro.is_change                 AS is_change,
-                   ro.memo                      AS memo
-            FROM v_received_outputs ro
-            JOIN transactions
-                ON transactions.id_tx = ro.transaction_id
-            -- join to the sent_notes table to obtain `from_account_id`
-            LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
-            -- join on the accounts table to obtain account UUIDs
-            LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
-            LEFT JOIN accounts to_account ON to_account.id = ro.account_id
-            UNION ALL
-            -- select all outputs sent from the wallet to external recipients
-            SELECT transactions.txid            AS txid,
-                   sent_notes.output_pool       AS output_pool,
-                   sent_notes.output_index      AS output_index,
-                   from_account.uuid            AS from_account_uuid,
-                   NULL                         AS to_account_uuid,
-                   sent_notes.to_address        AS to_address,
-                   sent_notes.value             AS value,
-                   0                            AS is_change,
-                   sent_notes.memo              AS memo
-            FROM sent_notes
-            JOIN transactions
-                ON transactions.id_tx = sent_notes.tx
-            LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
-            -- join on the accounts table to obtain account UUIDs
-            LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
+                -- select all outputs received by the wallet
+                SELECT transactions.txid            AS txid,
+                       ro.pool                      AS output_pool,
+                       ro.output_index              AS output_index,
+                       from_account.uuid            AS from_account_uuid,
+                       to_account.uuid              AS to_account_uuid,
+                       NULL                         AS to_address,
+                       ro.value                     AS value,
+                       ro.is_change                 AS is_change,
+                       ro.memo                      AS memo
+                FROM v_received_outputs ro
+                JOIN transactions
+                    ON transactions.id_tx = ro.transaction_id
+                -- join to the sent_notes table to obtain `from_account_id`
+                LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
+                -- join on the accounts table to obtain account UUIDs
+                LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
+                LEFT JOIN accounts to_account ON to_account.id = ro.account_id
+                UNION ALL
+                -- select all outputs sent from the wallet to external recipients
+                SELECT transactions.txid            AS txid,
+                       sent_notes.output_pool       AS output_pool,
+                       sent_notes.output_index      AS output_index,
+                       from_account.uuid            AS from_account_uuid,
+                       NULL                         AS to_account_uuid,
+                       sent_notes.to_address        AS to_address,
+                       sent_notes.value             AS value,
+                       0                            AS is_change,
+                       sent_notes.memo              AS memo
+                FROM sent_notes
+                JOIN transactions
+                    ON transactions.id_tx = sent_notes.tx
+                LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
+                -- join on the accounts table to obtain account UUIDs
+                LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
             )
             -- merge duplicate rows while retaining maximum information
-            SELECT txid, output_pool, output_index, max(from_account_uuid), max(to_account_uuid), max(to_address), max(value), max(is_change), max(memo)
+            SELECT
+                txid,
+                output_pool,
+                output_index,
+                max(from_account_uuid) AS from_account_uuid,
+                max(to_account_uuid) AS to_account_uuid,
+                max(to_address) AS to_address,
+                max(value) AS value,
+                max(is_change) AS is_change,
+                max(memo) AS memo
             FROM unioned
             GROUP BY txid, output_pool, output_index",
         )?;
