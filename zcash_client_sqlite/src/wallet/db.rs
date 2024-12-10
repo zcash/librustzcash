@@ -884,6 +884,7 @@ GROUP BY notes.account_id, notes.txid";
 /// that controls the output.
 pub(super) const VIEW_TX_OUTPUTS: &str = "
 CREATE VIEW v_tx_outputs AS
+WITH unioned AS (
 -- select all outputs received by the wallet
 SELECT transactions.txid            AS txid,
        ro.pool                      AS output_pool,
@@ -902,7 +903,7 @@ LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
 -- join on the accounts table to obtain account UUIDs
 LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
 LEFT JOIN accounts to_account ON to_account.id = ro.account_id
-UNION
+UNION ALL
 -- select all outputs sent from the wallet to external recipients
 SELECT transactions.txid            AS txid,
        sent_notes.output_pool       AS output_pool,
@@ -919,8 +920,11 @@ JOIN transactions
 LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
 -- join on the accounts table to obtain account UUIDs
 LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
--- exclude any sent notes for which a row exists in the v_received_outputs view
-WHERE ro.account_id IS NULL";
+)
+-- merge duplicate rows while retaining maximum information
+SELECT txid, output_pool, output_index, max(from_account_uuid), max(to_account_uuid), max(to_address), max(value), max(is_change), max(memo)
+FROM unioned
+GROUP BY txid, output_pool, output_index";
 
 pub(super) fn view_sapling_shard_scan_ranges<P: Parameters>(params: &P) -> String {
     format!(
