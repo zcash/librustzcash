@@ -6,7 +6,7 @@ functionality that allows users to directly spend transparent funds except by se
 shielded internal address belonging to their wallet.</p>
 <p>The important high-level operations provided by this module are <a href="fn.propose_transfer.html" title="fn zcash_client_backend::data_api::wallet::propose_transfer"><code>propose_transfer</code></a>,
 and <a href="fn.create_proposed_transactions.html" title="fn zcash_client_backend::data_api::wallet::create_proposed_transactions"><code>create_proposed_transactions</code></a>.</p>
-<p><a href="fn.propose_transfer.html" title="fn zcash_client_backend::data_api::wallet::propose_transfer"><code>propose_transfer</code></a> takes a <a href="../../../zip321/struct.TransactionRequest.html" title="struct zip321::TransactionRequest"><code>TransactionRequest</code></a> object, selects inputs notes and
+<p><a href="fn.propose_transfer.html" title="fn zcash_client_backend::data_api::wallet::propose_transfer"><code>propose_transfer</code></a> takes a <a href="crate::zip321::TransactionRequest"><code>TransactionRequest</code></a> object, selects inputs notes and
 computes the fees required to satisfy that request, and returns a <a href="../../proposal/struct.Proposal.html" title="struct zcash_client_backend::proposal::Proposal"><code>Proposal</code></a> object that
 describes the transaction to be made.</p>
 <p><a href="fn.create_proposed_transactions.html" title="fn zcash_client_backend::data_api::wallet::create_proposed_transactions"><code>create_proposed_transactions</code></a> constructs one or more Zcash [<code>Transaction</code>]s based upon a
