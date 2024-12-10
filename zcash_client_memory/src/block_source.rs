@@ -12,10 +12,12 @@ use zcash_protocol::consensus::BlockHeight;
 pub struct MemBlockCache(pub(crate) RwLock<BTreeMap<BlockHeight, CompactBlock>>);
 
 impl MemBlockCache {
+    /// Constructs a new empty [`MemBlockCache`].
     pub fn new() -> Self {
         Default::default()
     }
 
+    /// Returns the [`CompactBlock`] at the given height, if it exists in the cache.
     pub fn find_block(&self, block_height: BlockHeight) -> Option<CompactBlock> {
         self.0.read().unwrap().get(&block_height).cloned()
     }
