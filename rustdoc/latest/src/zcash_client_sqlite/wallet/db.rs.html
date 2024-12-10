@@ -1059,7 +1059,11 @@
 <a href="#1058" id="1058">1058</a>
 <a href="#1059" id="1059">1059</a>
 <a href="#1060" id="1060">1060</a>
-<a href="#1061" id="1061">1061</a></pre></div><pre class="rust"><code><span class="doccomment">//! Documentation about the wallet database structure.
+<a href="#1061" id="1061">1061</a>
+<a href="#1062" id="1062">1062</a>
+<a href="#1063" id="1063">1063</a>
+<a href="#1064" id="1064">1064</a>
+<a href="#1065" id="1065">1065</a></pre></div><pre class="rust"><code><span class="doccomment">//! Documentation about the wallet database structure.
 //!
 //! The database structure is managed by [`crate::wallet::init::init_wallet_db`], which
 //! applies migrations (defined in `crate::wallet::init::migrations`) that produce the
@@ -1945,6 +1949,7 @@ GROUP BY notes.account_id, notes.txid"</span>;
 /// that controls the output.
 </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">const </span>VIEW_TX_OUTPUTS: <span class="kw-2">&amp;</span>str = <span class="string">"
 CREATE VIEW v_tx_outputs AS
+WITH unioned AS (
 -- select all outputs received by the wallet
 SELECT transactions.txid            AS txid,
        ro.pool                      AS output_pool,
@@ -1963,7 +1968,7 @@ LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
 -- join on the accounts table to obtain account UUIDs
 LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
 LEFT JOIN accounts to_account ON to_account.id = ro.account_id
-UNION
+UNION ALL
 -- select all outputs sent from the wallet to external recipients
 SELECT transactions.txid            AS txid,
        sent_notes.output_pool       AS output_pool,
@@ -1980,8 +1985,11 @@ JOIN transactions
 LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
 -- join on the accounts table to obtain account UUIDs
 LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
--- exclude any sent notes for which a row exists in the v_received_outputs view
-WHERE ro.account_id IS NULL"</span>;
+)
+-- merge duplicate rows while retaining maximum information
+SELECT txid, output_pool, output_index, max(from_account_uuid), max(to_account_uuid), max(to_address), max(value), max(is_change), max(memo)
+FROM unioned
+GROUP BY txid, output_pool, output_index"</span>;
 
 <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>view_sapling_shard_scan_ranges&lt;P: Parameters&gt;(params: <span class="kw-2">&amp;</span>P) -&gt; String {
     <span class="macro">format!</span>(
