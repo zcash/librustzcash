@@ -230,7 +230,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
         Ok(selection)
     }
 
-    fn utxo_is_spendable(
+    pub(crate) fn utxo_is_spendable(
         &self,
         outpoint: &OutPoint,
         target_height: BlockHeight,

@@ -273,11 +273,11 @@ impl Account {
         Ok(acc)
     }
 
-    pub fn addresses(&self) -> &BTreeMap<DiversifierIndex, UnifiedAddress> {
+    pub(crate) fn addresses(&self) -> &BTreeMap<DiversifierIndex, UnifiedAddress> {
         &self.addresses
     }
 
-    pub fn select_receiving_address(
+    pub(crate) fn select_receiving_address(
         &self,
         network: NetworkType,
         receiver: &Receiver,
@@ -360,7 +360,7 @@ impl Account {
 }
 #[cfg(feature = "transparent-inputs")]
 impl Account {
-    pub fn ephemeral_addresses(
+    pub(crate) fn ephemeral_addresses(
         &self,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Error> {
         Ok(self
@@ -377,7 +377,7 @@ impl Account {
             })
             .collect())
     }
-    pub fn ephemeral_ivk(&self) -> Result<Option<EphemeralIvk>, Error> {
+    pub(crate) fn ephemeral_ivk(&self) -> Result<Option<EphemeralIvk>, Error> {
         self.viewing_key
             .transparent()
             .map(AccountPubKey::derive_ephemeral_ivk)
@@ -385,7 +385,7 @@ impl Account {
             .map_err(Into::into)
     }
 
-    pub fn first_unstored_index(&self) -> Result<u32, Error> {
+    pub(crate) fn first_unstored_index(&self) -> Result<u32, Error> {
         if let Some((idx, _)) = self.ephemeral_addresses.last_key_value() {
             if *idx >= (1 << 31) + GAP_LIMIT {
                 unreachable!("violates constraint index_range_and_address_nullity")
@@ -397,7 +397,7 @@ impl Account {
         }
     }
 
-    pub fn first_unreserved_index(&self) -> Result<u32, Error> {
+    pub(crate) fn first_unreserved_index(&self) -> Result<u32, Error> {
         self.first_unstored_index()?
             .checked_sub(GAP_LIMIT)
             .ok_or(Error::CorruptedData(
@@ -405,7 +405,7 @@ impl Account {
             ))
     }
 
-    pub fn reserve_until(
+    pub(crate) fn reserve_until(
         &mut self,
         next_to_reserve: u32,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Error> {
@@ -448,7 +448,7 @@ impl Account {
     }
 
     #[cfg(feature = "transparent-inputs")]
-    pub fn mark_ephemeral_address_as_used(
+    pub(crate) fn mark_ephemeral_address_as_used(
         &mut self,
         address: &TransparentAddress,
         tx_id: TxId,
@@ -468,7 +468,7 @@ impl Account {
     }
 
     #[cfg(feature = "transparent-inputs")]
-    pub fn mark_ephemeral_address_as_seen(
+    pub(crate) fn mark_ephemeral_address_as_seen(
         &mut self,
         // txns: &TransactionTable,
         address: &TransparentAddress,
