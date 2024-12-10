@@ -43,6 +43,8 @@ pub enum Error {
     BadAccountData(String),
     #[error("Error converting byte vec to array: {0:?}")]
     ByteVecToArrayConversion(Vec<u8>),
+    #[error("Chain height unknown")]
+    ChainHeightUnknown,
     #[error("Conflicting Tx Locator map entry")]
     ConflictingTxLocator,
     #[error("Corrupted Data: {0}")]
@@ -107,6 +109,7 @@ pub enum Error {
     ParseZcashAddress(#[from] zcash_address::ParseError),
     #[error("Unknown zip32 derivation error")]
     UnknownZip32Derivation,
+
     #[error("Error converting int to zip32: {0}")]
     Zip32FromInt(#[from] zip32::TryFromIntError),
 }

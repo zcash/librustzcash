@@ -157,9 +157,7 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         selector: &NoteFilter,
         exclude: &[Self::NoteRef],
     ) -> Result<AccountMeta, Self::Error> {
-        let chain_tip_height = self
-            .chain_height()?
-            .ok_or(Error::Other("unknown chain height".to_string()))?;
+        let chain_tip_height = self.chain_height()?.ok_or(Error::ChainHeightUnknown)?;
 
         let sapling_pool_meta = self.spendable_notes_meta(
             ShieldedProtocol::Sapling,
@@ -232,7 +230,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
         Ok(selection)
     }
 
-    pub fn utxo_is_spendable(
+    fn utxo_is_spendable(
         &self,
         outpoint: &OutPoint,
         target_height: BlockHeight,
