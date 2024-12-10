@@ -38,6 +38,8 @@ and this library adheres to Rust's notion of
     - `AccountIdNotRecognized`
     - `AccountCannotSpend`
     - `Pczt`
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelectorError::UnsupportedAddress`
+  now contains a `ZcashAddress` instead of a `UnifiedAddress`.
 
 ### Deprecated
 - `AccountBalance::unshielded`. Instead use `unshielded_balance` which
