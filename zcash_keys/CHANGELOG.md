@@ -6,6 +6,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::keys::UnifiedKeyError`
+
 ### Changed
 - The `UnifiedAddressRequest` argument to the following methods is now optional:
   - `zcash_keys::keys::UnifiedSpendingKey::address`
@@ -21,6 +24,9 @@ and this library adheres to Rust's notion of
 ### Changed
 - Migrated to `zcash_primitives 0.20.0`
 - MSRV is now 1.77.0.
+
+### Removed
+- `zcash_keys::keys::DerivationError` use `UnifiedKeyError` instead.
 
 ## [0.4.0] - 2024-10-04
 
@@ -67,7 +73,12 @@ and this library adheres to Rust's notion of
 ## [0.2.0] - 2024-03-25
 
 ### Added
-- `zcash_keys::address::Address::has_receiver`
+- `zcash_keys::address`:
+  - `Address::has_receiver`
+  - `UnifiedAddress::{
+      new, expiry_height, expiry_time,
+      unknown_data, unknown_metadata
+     }`
 - `impl Display for zcash_keys::keys::AddressGenerationError`
 - `impl std::error::Error for zcash_keys::keys::AddressGenerationError`
 - `impl From<hdwallet::error::Error> for zcash_keys::keys::DerivationError`
@@ -86,10 +97,15 @@ and this library adheres to Rust's notion of
   must be enabled for the `keys` module to be accessible.
 - Updated to `zcash_primitives-0.15.0`
 
+### Changed
+- `zcash_keys::address::Address` variants now `Box` their contents to
+  avoid large discrepancies in enum variant sizing.
+
 ### Removed
 - `UnifiedFullViewingKey::new` has been placed behind the `test-dependencies`
   feature flag. UFVKs should only be produced by derivation from the USK, or
   parsed from their string representation.
+- `zcash_keys::address::UnifiedAddress::from_receivers`
 
 ### Fixed
 - `UnifiedFullViewingKey::find_address` can now find an address for a diversifier
@@ -124,28 +140,47 @@ The entries below are relative to the `zcash_client_backend` crate as of
 - A new `orchard` feature flag has been added to make it possible to
   build client code without `orchard` dependendencies.
 - `zcash_keys::address::Address::to_zcash_address`
+- A new `sapling` feature flag has been added to make it possible to
+  build client code without `sapling` dependendencies.
+- A new `transparent-inputs` feature flag has been added to make it possible to
+  build client code without providing support for generating transparent
+  addresses.
 
 ### Changed
-- The following methods and enum variants have been placed behind an `orchard`
-  feature flag:
+- The following methods, method arguments, and enum variants have been placed
+  behind the `orchard` feature flag:
+  - `zcash_keys::address::UnifiedAddress::from_receivers` no longer takes an
+    Orchard receiver argument unless the `orchard` feature is enabled.
+  - `zcash_keys::keys::UnifiedFullViewingKey::new` no longer takes
+    an Orchard key argument unless the `orchard` feature is enabled.
   - `zcash_keys::address::UnifiedAddress::orchard`
   - `zcash_keys::keys::DerivationError::Orchard`
   - `zcash_keys::keys::UnifiedSpendingKey::orchard`
+  - `zcash_keys::keys::UnifiedFullViewingKey::orchard`
+- The following methods and method arguments have been placed behind the
+  `sapling` feature flag:
+  - `UnifiedAddress::from_receivers` no longer takes a Sapling receiver
+    argument unless the `sapling` feature is enabled.
+  - `zcash_keys::keys::UnifiedFullViewingKey::new` no longer takes
+    a Sapling key argument unless the `sapling` feature is enabled.
+  - `zcash_keys::address::UnifiedAddress::sapling`
+  - `zcash_keys::keys::UnifiedSpendingKey::sapling`
+  - `zcash_keys::keys::UnifiedFullViewingKey::sapling`
+- The following methods and method arguments have been placed behind the
+  `transparent-inputs` feature flag:
+  - `zcash_keys::keys::UnifiedFullViewingKey::transparent` no longer takes
+    a transparent key argument unless the `transparent-inputs` feature is enabled.
+  - `zcash_keys::keys::UnifiedSpendingKey::transparent`
+  - `zcash_keys::keys::UnifiedFullViewingKey::transparent`
 - `zcash_keys::address`:
   - `RecipientAddress` has been renamed to `Address`.
   - `Address::Shielded` has been renamed to `Address::Sapling`.
-  - `UnifiedAddress::from_receivers` no longer takes an Orchard receiver
-    argument unless the `orchard` feature is enabled.
 - `zcash_keys::keys`:
   - `UnifiedSpendingKey::address` now takes an argument that specifies the
     receivers to be generated in the resulting address. Also, it now returns
     `Result<UnifiedAddress, AddressGenerationError>` instead of
     `Option<UnifiedAddress>` so that we may better report to the user how
     address generation has failed.
-  - `UnifiedSpendingKey::transparent` is now only available when the
-    `transparent-inputs` feature is enabled.
-  - `UnifiedFullViewingKey::new` no longer takes an Orchard full viewing key
-    argument unless the `orchard` feature is enabled.
 
 ### Removed
 - `zcash_keys::address::AddressMetadata`
