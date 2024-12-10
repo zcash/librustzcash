@@ -2072,6 +2072,7 @@ impl AccountBirthday {
         self.recover_until
     }
 
+    /// Returns the [`ChainState`] corresponding to the last block prior to the wallet's birthday
     pub fn prior_chain_state(&self) -> &ChainState {
         &self.prior_chain_state
     }
