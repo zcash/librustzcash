@@ -759,7 +759,10 @@ impl UnifiedFullViewingKey {
         >,
         #[cfg(feature = "sapling")] sapling: Option<sapling::DiversifiableFullViewingKey>,
         #[cfg(feature = "orchard")] orchard: Option<orchard::keys::FullViewingKey>,
-        // TODO: Implement construction of UFVKs with metadata items.
+        unknown_data: Vec<(u32, Vec<u8>)>,
+        expiry_height: Option<BlockHeight>,
+        expiry_time: Option<u64>,
+        unknown_metadata: Vec<(u32, Vec<u8>)>,
     ) -> Result<UnifiedFullViewingKey, UnifiedKeyError> {
         Self::from_checked_parts(
             #[cfg(feature = "transparent-inputs")]
@@ -768,12 +771,10 @@ impl UnifiedFullViewingKey {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
-            // We don't currently allow constructing new UFVKs with unknown items, but we store
-            // this to allow parsing such UFVKs.
-            vec![],
-            None,
-            None,
-            vec![],
+            unknown_data,
+            expiry_height,
+            expiry_time,
+            unknown_metadata,
         )
     }
 
@@ -1212,8 +1213,8 @@ impl UnifiedIncomingViewingKey {
         expiry_height: Option<BlockHeight>,
         expiry_time: Option<u64>,
         unknown_metadata: Vec<(u32, Vec<u8>)>,
-    ) -> UnifiedIncomingViewingKey {
-        UnifiedIncomingViewingKey {
+    ) -> Result<UnifiedIncomingViewingKey, UnifiedKeyError> {
+        Self::from_checked_parts(
             #[cfg(feature = "transparent-inputs")]
             transparent,
             #[cfg(feature = "sapling")]
@@ -1224,7 +1225,7 @@ impl UnifiedIncomingViewingKey {
             expiry_height,
             expiry_time,
             unknown_metadata,
-        }
+        )
     }
 
     fn from_checked_parts(
@@ -1829,6 +1830,10 @@ mod tests {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            vec![],
+            None,
+            None,
+            vec![],
         );
 
         let ufvk = ufvk.expect("Orchard or Sapling fvk is present.");
@@ -2022,7 +2027,8 @@ mod tests {
             None,
             None,
             vec![],
-        );
+        )
+        .unwrap();
 
         let encoded = uivk.render().encode(&NetworkType::Main);
 

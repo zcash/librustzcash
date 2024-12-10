@@ -61,6 +61,11 @@ and this library adheres to Rust's notion of
   - `zcash_keys::keys::UnifiedFullViewingKey::new`
   - `zcash_keys::keys::UnifiedFullViewingKey::from_orchard_fvk`
   - `zcash_keys::keys::UnifiedFullViewingKey::from_sapling_extended_full_viewing_key`
+- `zcash_keys::keys::UnifiedFullViewingKey::new` has been modified to allow
+  construction that includes unknown data as well as metadata fields.
+- `zcash_keys::keys::UnifiedIncomingViewingKey::new` now returns a
+  `Result<UnifiedIncomingViewingKey, UnifiedKeyError>` instead of a
+  potentially invalid value.
 
 ### Removed
 - `zcash_keys::keys::UnifiedAddressRequest::all` (use 
