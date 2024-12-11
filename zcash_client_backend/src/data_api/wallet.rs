@@ -1342,6 +1342,8 @@ where
     FeeRuleT: FeeRule,
     DbT::AccountId: serde::Serialize,
 {
+    use std::collections::HashSet;
+
     let account = wallet_db
         .get_account(account_id)
         .map_err(Error::DataSource)?
@@ -1394,6 +1396,13 @@ where
         })
         .collect::<HashMap<_, _>>();
 
+    #[cfg(feature = "orchard")]
+    let orchard_spends = (0..)
+        .map(|i| build_result.orchard_meta.spend_action_index(i))
+        .take_while(|item| item.is_some())
+        .flatten()
+        .collect::<HashSet<_>>();
+
     let sapling_outputs = build_state
         .sapling_output_meta
         .into_iter()
@@ -1424,22 +1433,28 @@ where
                 updater.update_action_with(index, |mut action_updater| {
                     // If the account has a known derivation, add the Orchard key path to the PCZT.
                     if let Some(derivation) = account_derivation {
-                        // All spent notes are from the same account.
-                        action_updater.set_spend_zip32_derivation(
-                            orchard::pczt::Zip32Derivation::parse(
-                                derivation.seed_fingerprint().to_bytes(),
-                                vec![
-                                    zip32::ChildIndex::hardened(32).index(),
-                                    zip32::ChildIndex::hardened(params.network_type().coin_type())
+                        // orchard_spends will only contain action indices for the real spends, and
+                        // not the dummy inputs
+                        if orchard_spends.contains(&index) {
+                            // All spent notes are from the same account.
+                            action_updater.set_spend_zip32_derivation(
+                                orchard::pczt::Zip32Derivation::parse(
+                                    derivation.seed_fingerprint().to_bytes(),
+                                    vec![
+                                        zip32::ChildIndex::hardened(32).index(),
+                                        zip32::ChildIndex::hardened(
+                                            params.network_type().coin_type(),
+                                        )
                                         .index(),
-                                    zip32::ChildIndex::hardened(u32::from(
-                                        derivation.account_index(),
-                                    ))
-                                    .index(),
-                                ],
-                            )
-                            .expect("valid"),
-                        );
+                                        zip32::ChildIndex::hardened(u32::from(
+                                            derivation.account_index(),
+                                        ))
+                                        .index(),
+                                    ],
+                                )
+                                .expect("valid"),
+                            );
+                        }
                     }
 
                     if let Some(pczt_recipient) = orchard_outputs.get(&index) {
