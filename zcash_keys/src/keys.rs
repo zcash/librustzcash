@@ -119,10 +119,6 @@ impl Display for UnifiedKeyError {
             UnifiedKeyError::Transparent(e) => {
                 write!(_f, "Transparent key derivation error: {}", e)
             }
-            #[cfg(not(any(feature = "orchard", feature = "transparent-inputs")))]
-            other => {
-                unreachable!("Unhandled UnifiedKeyError variant {:?}", other)
-            }
         }
     }
 }
@@ -608,26 +604,26 @@ impl UnifiedAddressRequest {
     /// Returns `None` if the request would result in the generation of an address without any
     /// receivers.
     pub fn new(
-        has_orchard: bool,
-        has_sapling: bool,
-        has_p2pkh: bool,
+        _has_orchard: bool,
+        _has_sapling: bool,
+        _has_p2pkh: bool,
         expiry_height: Option<BlockHeight>,
         expiry_time: Option<u64>,
     ) -> Option<Self> {
         #[cfg(not(feature = "orchard"))]
-        let has_orchard = false;
+        let _has_orchard = false;
         #[cfg(not(feature = "sapling"))]
-        let has_sapling = false;
+        let _has_sapling = false;
         #[cfg(not(feature = "transparent-inputs"))]
-        let has_p2pkh = false;
+        let _has_p2pkh = false;
 
-        if !(has_sapling || has_orchard || has_p2pkh) {
+        if !(_has_sapling || _has_orchard || _has_p2pkh) {
             None
         } else {
             Some(Self {
-                has_orchard,
-                has_sapling,
-                has_p2pkh,
+                has_orchard: _has_orchard,
+                has_sapling: _has_sapling,
+                has_p2pkh: _has_p2pkh,
                 expiry_height,
                 expiry_time,
             })
