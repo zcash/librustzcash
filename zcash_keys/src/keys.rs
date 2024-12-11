@@ -122,10 +122,6 @@ impl Display for UnifiedKeyError {
             UnifiedKeyError::Transparent(e) => {
                 write!(_f, "Transparent key derivation error: {}", e)
             }
-            #[cfg(not(any(feature = "orchard", feature = "transparent-inputs")))]
-            other => {
-                unreachable!("Unhandled UnifiedKeyError variant {:?}", other)
-            }
         }
     }
 }
@@ -658,7 +654,7 @@ impl UnifiedAddressRequest {
         expiry_time: Option<u64>,
     ) -> Result<Self, ()> {
         use ReceiverRequirement::*;
-        if orchard == Omit && sapling == Omit {
+        if orchard == Omit && sapling == Omit && p2pkh == Omit {
             Err(())
         } else {
             Ok(Self {
