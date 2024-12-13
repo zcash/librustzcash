@@ -377,9 +377,22 @@
 <a href="#376" id="376">376</a>
 <a href="#377" id="377">377</a>
 <a href="#378" id="378">378</a>
-<a href="#379" id="379">379</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::{convert::TryInto, error::Error, fmt, str::FromStr};
+<a href="#379" id="379">379</a>
+<a href="#380" id="380">380</a>
+<a href="#381" id="381">381</a>
+<a href="#382" id="382">382</a>
+<a href="#383" id="383">383</a>
+<a href="#384" id="384">384</a>
+<a href="#385" id="385">385</a></pre></div><pre class="rust"><code><span class="kw">use </span>alloc::string::String;
+<span class="kw">use </span>alloc::vec::Vec;
+<span class="kw">use </span>core::convert::TryInto;
+<span class="kw">use </span>core::fmt;
+<span class="kw">use </span>core::str::FromStr;
 
-<span class="kw">use </span>bech32::{<span class="self">self</span>, FromBase32, ToBase32, Variant};
+<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">use </span>std::error::Error;
+
+<span class="kw">use </span>bech32::{primitives::decode::CheckedHrpstring, Bech32, Bech32m, Checksum, Hrp};
 <span class="kw">use </span>zcash_protocol::consensus::{NetworkConstants, NetworkType};
 <span class="kw">use </span>zcash_protocol::constants::{mainnet, regtest, testnet};
 
@@ -417,7 +430,8 @@
     }
 }
 
-<span class="kw">impl </span>Error <span class="kw">for </span>ParseError {}
+<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">impl </span>Error <span class="kw">for </span>ParseError {}
 
 <span class="kw">impl </span>FromStr <span class="kw">for </span>ZcashAddress {
     <span class="kw">type </span><span class="prelude-val">Err </span>= ParseError;
@@ -443,48 +457,48 @@
             }
         }
 
-        <span class="comment">// Try decoding as a Sapling or TEX address (Bech32/Bech32m)
-        </span><span class="kw">if let </span><span class="prelude-val">Ok</span>((hrp, data, variant)) = bech32::decode(s) {
-            <span class="comment">// If we reached this point, the encoding is found to be valid Bech32 or Bech32m.
-            </span><span class="kw">let </span>data = Vec::&lt;u8&gt;::from_base32(<span class="kw-2">&amp;</span>data).map_err(|<span class="kw">_</span>| ParseError::InvalidEncoding)<span class="question-mark">?</span>;
-
-            <span class="kw">match </span>variant {
-                Variant::Bech32 =&gt; {
-                    <span class="kw">let </span>net = <span class="kw">match </span>hrp.as_str() {
-                        mainnet::HRP_SAPLING_PAYMENT_ADDRESS =&gt; NetworkType::Main,
-                        testnet::HRP_SAPLING_PAYMENT_ADDRESS =&gt; NetworkType::Test,
-                        regtest::HRP_SAPLING_PAYMENT_ADDRESS =&gt; NetworkType::Regtest,
-                        <span class="comment">// We will not define new Bech32 address encodings.
-                        </span><span class="kw">_ </span>=&gt; {
-                            <span class="kw">return </span><span class="prelude-val">Err</span>(ParseError::NotZcash);
-                        }
-                    };
-
-                    <span class="kw">return </span>data[..]
-                        .try_into()
-                        .map(AddressKind::Sapling)
-                        .map_err(|<span class="kw">_</span>| ParseError::InvalidEncoding)
-                        .map(|kind| ZcashAddress { net, kind });
+        <span class="comment">// Try decoding as a Sapling address (Bech32)
+        </span><span class="kw">if let </span><span class="prelude-val">Ok</span>(parsed) = CheckedHrpstring::new::&lt;Bech32&gt;(s) {
+            <span class="comment">// If we reached this point, the encoding is found to be valid Bech32.
+            </span><span class="kw">let </span>net = <span class="kw">match </span>parsed.hrp().as_str() {
+                mainnet::HRP_SAPLING_PAYMENT_ADDRESS =&gt; NetworkType::Main,
+                testnet::HRP_SAPLING_PAYMENT_ADDRESS =&gt; NetworkType::Test,
+                regtest::HRP_SAPLING_PAYMENT_ADDRESS =&gt; NetworkType::Regtest,
+                <span class="comment">// We will not define new Bech32 address encodings.
+                </span><span class="kw">_ </span>=&gt; {
+                    <span class="kw">return </span><span class="prelude-val">Err</span>(ParseError::NotZcash);
                 }
-                Variant::Bech32m =&gt; {
-                    <span class="comment">// Try decoding as a TEX address (Bech32m)
-                    </span><span class="kw">let </span>net = <span class="kw">match </span>hrp.as_str() {
-                        mainnet::HRP_TEX_ADDRESS =&gt; NetworkType::Main,
-                        testnet::HRP_TEX_ADDRESS =&gt; NetworkType::Test,
-                        regtest::HRP_TEX_ADDRESS =&gt; NetworkType::Regtest,
-                        <span class="comment">// Not recognized as a Zcash address type
-                        </span><span class="kw">_ </span>=&gt; {
-                            <span class="kw">return </span><span class="prelude-val">Err</span>(ParseError::NotZcash);
-                        }
-                    };
+            };
 
-                    <span class="kw">return </span>data[..]
-                        .try_into()
-                        .map(AddressKind::Tex)
-                        .map_err(|<span class="kw">_</span>| ParseError::InvalidEncoding)
-                        .map(|kind| ZcashAddress { net, kind });
+            <span class="kw">let </span>data = parsed.byte_iter().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+
+            <span class="kw">return </span>data
+                .try_into()
+                .map(AddressKind::Sapling)
+                .map_err(|<span class="kw">_</span>| ParseError::InvalidEncoding)
+                .map(|kind| ZcashAddress { net, kind });
+        }
+
+        <span class="comment">// Try decoding as a TEX address (Bech32m)
+        </span><span class="kw">if let </span><span class="prelude-val">Ok</span>(parsed) = CheckedHrpstring::new::&lt;Bech32m&gt;(s) {
+            <span class="comment">// If we reached this point, the encoding is found to be valid Bech32m.
+            </span><span class="kw">let </span>net = <span class="kw">match </span>parsed.hrp().as_str() {
+                mainnet::HRP_TEX_ADDRESS =&gt; NetworkType::Main,
+                testnet::HRP_TEX_ADDRESS =&gt; NetworkType::Test,
+                regtest::HRP_TEX_ADDRESS =&gt; NetworkType::Regtest,
+                <span class="comment">// Not recognized as a Zcash address type
+                </span><span class="kw">_ </span>=&gt; {
+                    <span class="kw">return </span><span class="prelude-val">Err</span>(ParseError::NotZcash);
                 }
-            }
+            };
+
+            <span class="kw">let </span>data = parsed.byte_iter().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+
+            <span class="kw">return </span>data
+                .try_into()
+                .map(AddressKind::Tex)
+                .map_err(|<span class="kw">_</span>| ParseError::InvalidEncoding)
+                .map(|kind| ZcashAddress { net, kind });
         }
 
         <span class="comment">// The rest use Base58Check.
@@ -523,8 +537,8 @@
     }
 }
 
-<span class="kw">fn </span>encode_bech32(hrp: <span class="kw-2">&amp;</span>str, data: <span class="kw-2">&amp;</span>[u8], variant: Variant) -&gt; String {
-    bech32::encode(hrp, data.to_base32(), variant).expect(<span class="string">"hrp is invalid"</span>)
+<span class="kw">fn </span>encode_bech32&lt;Ck: Checksum&gt;(hrp: <span class="kw-2">&amp;</span>str, data: <span class="kw-2">&amp;</span>[u8]) -&gt; String {
+    bech32::encode::&lt;Ck&gt;(Hrp::parse_unchecked(hrp), data).expect(<span class="string">"encoding is short enough"</span>)
 }
 
 <span class="kw">fn </span>encode_b58(prefix: [u8; <span class="number">2</span>], data: <span class="kw-2">&amp;</span>[u8]) -&gt; String {
@@ -538,17 +552,13 @@
     <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; fmt::Result {
         <span class="kw">let </span>encoded = <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.kind {
             AddressKind::Sprout(data) =&gt; encode_b58(<span class="self">self</span>.net.b58_sprout_address_prefix(), data),
-            AddressKind::Sapling(data) =&gt; encode_bech32(
-                <span class="self">self</span>.net.hrp_sapling_payment_address(),
-                data,
-                Variant::Bech32,
-            ),
+            AddressKind::Sapling(data) =&gt; {
+                encode_bech32::&lt;Bech32&gt;(<span class="self">self</span>.net.hrp_sapling_payment_address(), data)
+            }
             AddressKind::Unified(addr) =&gt; addr.encode(<span class="kw-2">&amp;</span><span class="self">self</span>.net),
             AddressKind::P2pkh(data) =&gt; encode_b58(<span class="self">self</span>.net.b58_pubkey_address_prefix(), data),
             AddressKind::P2sh(data) =&gt; encode_b58(<span class="self">self</span>.net.b58_script_address_prefix(), data),
-            AddressKind::Tex(data) =&gt; {
-                encode_bech32(<span class="self">self</span>.net.hrp_tex_address(), data, Variant::Bech32m)
-            }
+            AddressKind::Tex(data) =&gt; encode_bech32::&lt;Bech32m&gt;(<span class="self">self</span>.net.hrp_tex_address(), data),
         };
         <span class="macro">write!</span>(f, <span class="string">"{}"</span>, encoded)
     }
@@ -556,6 +566,8 @@
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
+    <span class="kw">use </span>alloc::string::ToString;
+
     <span class="kw">use </span>assert_matches::assert_matches;
 
     <span class="kw">use super</span>::<span class="kw-2">*</span>;

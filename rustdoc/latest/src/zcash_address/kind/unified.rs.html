@@ -428,14 +428,37 @@
 <a href="#427" id="427">427</a>
 <a href="#428" id="428">428</a>
 <a href="#429" id="429">429</a>
-<a href="#430" id="430">430</a></pre></div><pre class="rust"><code><span class="doccomment">//! Implementation of [ZIP 316](https://zips.z.cash/zip-0316) Unified Addresses and Viewing Keys.
+<a href="#430" id="430">430</a>
+<a href="#431" id="431">431</a>
+<a href="#432" id="432">432</a>
+<a href="#433" id="433">433</a>
+<a href="#434" id="434">434</a>
+<a href="#435" id="435">435</a>
+<a href="#436" id="436">436</a>
+<a href="#437" id="437">437</a>
+<a href="#438" id="438">438</a>
+<a href="#439" id="439">439</a>
+<a href="#440" id="440">440</a>
+<a href="#441" id="441">441</a>
+<a href="#442" id="442">442</a>
+<a href="#443" id="443">443</a>
+<a href="#444" id="444">444</a>
+<a href="#445" id="445">445</a>
+<a href="#446" id="446">446</a>
+<a href="#447" id="447">447</a>
+<a href="#448" id="448">448</a></pre></div><pre class="rust"><code><span class="doccomment">//! Implementation of [ZIP 316](https://zips.z.cash/zip-0316) Unified Addresses and Viewing Keys.
 
-</span><span class="kw">use </span>bech32::{<span class="self">self</span>, FromBase32, ToBase32, Variant};
-<span class="kw">use </span>std::cmp;
-<span class="kw">use </span>std::convert::{TryFrom, TryInto};
-<span class="kw">use </span>std::error::Error;
-<span class="kw">use </span>std::fmt;
-<span class="kw">use </span>std::num::TryFromIntError;
+</span><span class="kw">use </span>alloc::string::{String, ToString};
+<span class="kw">use </span>alloc::vec::Vec;
+<span class="kw">use </span>core::cmp;
+<span class="kw">use </span>core::convert::{TryFrom, TryInto};
+<span class="kw">use </span>core::fmt;
+<span class="kw">use </span>core::num::TryFromIntError;
+
+<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">use </span>std::error::Error;
+
+<span class="kw">use </span>bech32::{primitives::decode::CheckedHrpstring, Bech32m, Checksum, Hrp};
 
 <span class="kw">use </span><span class="kw">crate</span>::Network;
 
@@ -585,16 +608,18 @@
     }
 }
 
-<span class="kw">impl </span>Error <span class="kw">for </span>ParseError {}
+<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">impl </span>Error <span class="kw">for </span>ParseError {}
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>private {
+    <span class="kw">use </span>alloc::borrow::ToOwned;
+    <span class="kw">use </span>alloc::vec::Vec;
+    <span class="kw">use </span>core::cmp;
+    <span class="kw">use </span>core::convert::{TryFrom, TryInto};
+    <span class="kw">use </span>core2::io::Write;
+
     <span class="kw">use super</span>::{ParseError, Typecode, PADDING_LEN};
     <span class="kw">use </span><span class="kw">crate</span>::Network;
-    <span class="kw">use </span>std::{
-        cmp,
-        convert::{TryFrom, TryInto},
-        io::Write,
-    };
     <span class="kw">use </span>zcash_encoding::CompactSize;
 
     <span class="doccomment">/// A raw address or viewing key.
@@ -618,7 +643,7 @@
     }
 
     <span class="doccomment">/// A Unified Container containing addresses or viewing keys.
-    </span><span class="kw">pub trait </span>SealedContainer: <span class="kw">super</span>::Container + std::marker::Sized {
+    </span><span class="kw">pub trait </span>SealedContainer: <span class="kw">super</span>::Container + core::marker::Sized {
         <span class="kw">const </span>MAINNET: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str;
         <span class="kw">const </span>TESTNET: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str;
         <span class="kw">const </span>REGTEST: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str;
@@ -665,14 +690,13 @@
         </span><span class="kw">fn </span>to_jumbled_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>, hrp: <span class="kw-2">&amp;</span>str) -&gt; Vec&lt;u8&gt; {
             <span class="macro">assert!</span>(hrp.len() &lt;= PADDING_LEN);
 
-            <span class="kw">let </span><span class="kw-2">mut </span>writer = std::io::Cursor::new(Vec::new());
-            <span class="self">self</span>.write_raw_encoding(<span class="kw-2">&amp;mut </span>writer);
+            <span class="kw">let </span><span class="kw-2">mut </span>padded = Vec::new();
+            <span class="self">self</span>.write_raw_encoding(<span class="kw-2">&amp;mut </span>padded);
 
             <span class="kw">let </span><span class="kw-2">mut </span>padding = [<span class="number">0u8</span>; PADDING_LEN];
             padding[<span class="number">0</span>..hrp.len()].copy_from_slice(hrp.as_bytes());
-            writer.write_all(<span class="kw-2">&amp;</span>padding).unwrap();
+            padded.write_all(<span class="kw-2">&amp;</span>padding).unwrap();
 
-            <span class="kw">let </span>padded = writer.into_inner();
             f4jumble::f4jumble(<span class="kw-2">&amp;</span>padded)
                 .unwrap_or_else(|e| <span class="macro">panic!</span>(<span class="string">"f4jumble failed on {:?}: {}"</span>, padded, e))
         }
@@ -680,7 +704,7 @@
         <span class="doccomment">/// Parse the items of the unified container.
         </span><span class="kw">fn </span>parse_items&lt;T: Into&lt;Vec&lt;u8&gt;&gt;&gt;(hrp: <span class="kw-2">&amp;</span>str, buf: T) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="self">Self</span>::Item&gt;, ParseError&gt; {
             <span class="kw">fn </span>read_receiver&lt;R: SealedItem&gt;(
-                <span class="kw-2">mut </span>cursor: <span class="kw-2">&amp;mut </span>std::io::Cursor&lt;<span class="kw-2">&amp;</span>[u8]&gt;,
+                <span class="kw-2">mut </span>cursor: <span class="kw-2">&amp;mut </span>core2::io::Cursor&lt;<span class="kw-2">&amp;</span>[u8]&gt;,
             ) -&gt; <span class="prelude-ty">Result</span>&lt;R, ParseError&gt; {
                 <span class="kw">let </span>typecode = CompactSize::read(<span class="kw-2">&amp;mut </span>cursor)
                     .map(|v| u32::try_from(v).expect(<span class="string">"CompactSize::read enforces MAX_SIZE limit"</span>))
@@ -738,7 +762,7 @@
                 )),
             }<span class="question-mark">?</span>;
 
-            <span class="kw">let </span><span class="kw-2">mut </span>cursor = std::io::Cursor::new(encoded);
+            <span class="kw">let </span><span class="kw-2">mut </span>cursor = core2::io::Cursor::new(encoded);
             <span class="kw">let </span><span class="kw-2">mut </span>result = <span class="macro">vec!</span>[];
             <span class="kw">while </span>cursor.position() &lt; encoded.len().try_into().unwrap() {
                 result.push(read_receiver(<span class="kw-2">&amp;mut </span>cursor)<span class="question-mark">?</span>);
@@ -788,6 +812,22 @@
 
 <span class="kw">use </span>private::SealedItem;
 
+<span class="doccomment">/// The bech32m checksum algorithm, defined in [BIP-350], extended to allow all lengths
+/// supported by [ZIP 316].
+///
+/// [BIP-350]: https://github.com/bitcoin/bips/blob/master/bip-0350.mediawiki
+/// [ZIP 316]: https://zips.z.cash/zip-0316#solution
+</span><span class="attr">#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+</span><span class="kw">pub enum </span>Bech32mZip316 {}
+<span class="kw">impl </span>Checksum <span class="kw">for </span>Bech32mZip316 {
+    <span class="kw">type </span>MidstateRepr = &lt;Bech32m <span class="kw">as </span>Checksum&gt;::MidstateRepr;
+    <span class="comment">// l^MAX from ZIP 316.
+    </span><span class="kw">const </span>CODE_LENGTH: usize = <span class="number">4194368</span>;
+    <span class="kw">const </span>CHECKSUM_LENGTH: usize = Bech32m::CHECKSUM_LENGTH;
+    <span class="kw">const </span>GENERATOR_SH: [u32; <span class="number">5</span>] = Bech32m::GENERATOR_SH;
+    <span class="kw">const </span>TARGET_RESIDUE: u32 = Bech32m::TARGET_RESIDUE;
+}
+
 <span class="doccomment">/// Trait providing common encoding and decoding logic for Unified containers.
 </span><span class="kw">pub trait </span>Encoding: private::SealedContainer {
     <span class="doccomment">/// Constructs a value of a unified container type from a vector
@@ -809,14 +849,14 @@
     /// the order of its components so that it correctly obeys round-trip
     /// serialization invariants.
     </span><span class="kw">fn </span>decode(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;(Network, <span class="self">Self</span>), ParseError&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>((hrp, data, Variant::Bech32m)) = bech32::decode(s) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(parsed) = CheckedHrpstring::new::&lt;Bech32mZip316&gt;(s) {
+            <span class="kw">let </span>hrp = parsed.hrp();
             <span class="kw">let </span>hrp = hrp.as_str();
             <span class="comment">// validate that the HRP corresponds to a known network.
             </span><span class="kw">let </span>net =
                 <span class="self">Self</span>::hrp_network(hrp).ok_or_else(|| ParseError::UnknownPrefix(hrp.to_string()))<span class="question-mark">?</span>;
 
-            <span class="kw">let </span>data = Vec::&lt;u8&gt;::from_base32(<span class="kw-2">&amp;</span>data)
-                .map_err(|e| ParseError::InvalidEncoding(e.to_string()))<span class="question-mark">?</span>;
+            <span class="kw">let </span>data = parsed.byte_iter().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
 
             <span class="self">Self</span>::parse_internal(hrp, data).map(|value| (net, value))
         } <span class="kw">else </span>{
@@ -830,12 +870,8 @@
     /// serialization invariants.
     </span><span class="kw">fn </span>encode(<span class="kw-2">&amp;</span><span class="self">self</span>, network: <span class="kw-2">&amp;</span>Network) -&gt; String {
         <span class="kw">let </span>hrp = <span class="self">Self</span>::network_hrp(network);
-        bech32::encode(
-            hrp,
-            <span class="self">self</span>.to_jumbled_bytes(hrp).to_base32(),
-            Variant::Bech32m,
-        )
-        .expect(<span class="string">"hrp is invalid"</span>)
+        bech32::encode::&lt;Bech32mZip316&gt;(Hrp::parse_unchecked(hrp), <span class="kw-2">&amp;</span><span class="self">self</span>.to_jumbled_bytes(hrp))
+            .expect(<span class="string">"F4Jumble ensures length is short enough by construction"</span>)
     }
 }
 

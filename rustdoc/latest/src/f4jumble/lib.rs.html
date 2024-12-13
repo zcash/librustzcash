@@ -386,7 +386,11 @@
 <a href="#385" id="385">385</a>
 <a href="#386" id="386">386</a>
 <a href="#387" id="387">387</a>
-<a href="#388" id="388">388</a></pre></div><pre class="rust"><code><span class="doccomment">//! This crate provides a mechanism for "jumbling" byte slices in a reversible way.
+<a href="#388" id="388">388</a>
+<a href="#389" id="389">389</a>
+<a href="#390" id="390">390</a>
+<a href="#391" id="391">391</a>
+<a href="#392" id="392">392</a></pre></div><pre class="rust"><code><span class="doccomment">//! This crate provides a mechanism for "jumbling" byte slices in a reversible way.
 //!
 //! Many byte encodings such as [Base64] and [Bech32] do not have "cascading" behaviour:
 //! changing an input byte at one position has no effect on the encoding of bytes at
@@ -441,11 +445,15 @@
 <span class="kw">use </span>core::ops::RangeInclusive;
 <span class="kw">use </span>core::result::Result;
 
+<span class="attr">#[cfg(feature = <span class="string">"alloc"</span>)]
+</span><span class="kw">extern crate </span>alloc;
+
 <span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
 #[macro_use]
 </span><span class="kw">extern crate </span>std;
-<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
-</span><span class="kw">use </span>std::vec::Vec;
+
+<span class="attr">#[cfg(feature = <span class="string">"alloc"</span>)]
+</span><span class="kw">use </span>alloc::vec::Vec;
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>test_vectors;
@@ -652,8 +660,8 @@
 ///     "af1d55f2695aea02440867bbbfae3b08e8da55b625de3fa91432ab7b2c0a7dff9033ee666db1513ba5761ef482919fb8",
 /// );
 /// ```
-</span><span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
-#[cfg_attr(docsrs, doc(cfg(feature = <span class="string">"std"</span>)))]
+</span><span class="attr">#[cfg(feature = <span class="string">"alloc"</span>)]
+#[cfg_attr(docsrs, doc(cfg(feature = <span class="string">"alloc"</span>)))]
 </span><span class="kw">pub fn </span>f4jumble(message: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;, Error&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>result = message.to_vec();
     f4jumble_mut(<span class="kw-2">&amp;mut </span>result).map(|()| result)
@@ -679,8 +687,8 @@
 /// let message_b = f4jumble::f4jumble_inv(&amp;encoded_b).unwrap();
 /// assert_eq!(message_b, b"The package from Sarah arrives tomorrow morning.");
 /// ```
-</span><span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
-#[cfg_attr(docsrs, doc(cfg(feature = <span class="string">"std"</span>)))]
+</span><span class="attr">#[cfg(feature = <span class="string">"alloc"</span>)]
+#[cfg_attr(docsrs, doc(cfg(feature = <span class="string">"alloc"</span>)))]
 </span><span class="kw">pub fn </span>f4jumble_inv(message: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;, Error&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>result = message.to_vec();
     f4jumble_inv_mut(<span class="kw-2">&amp;mut </span>result).map(|()| result)

@@ -146,20 +146,7 @@
 <a href="#145" id="145">145</a>
 <a href="#146" id="146">146</a>
 <a href="#147" id="147">147</a>
-<a href="#148" id="148">148</a>
-<a href="#149" id="149">149</a>
-<a href="#150" id="150">150</a>
-<a href="#151" id="151">151</a>
-<a href="#152" id="152">152</a>
-<a href="#153" id="153">153</a>
-<a href="#154" id="154">154</a>
-<a href="#155" id="155">155</a>
-<a href="#156" id="156">156</a>
-<a href="#157" id="157">157</a>
-<a href="#158" id="158">158</a>
-<a href="#159" id="159">159</a>
-<a href="#160" id="160">160</a>
-<a href="#161" id="161">161</a></pre></div><pre class="rust"><code><span class="kw">use </span>bech32::{FromBase32, ToBase32};
+<a href="#148" id="148">148</a></pre></div><pre class="rust"><code><span class="kw">use </span>bech32::{Bech32, Hrp};
 <span class="kw">use </span>zcash_address::unified::{<span class="self">self</span>, Container, Encoding};
 <span class="kw">use </span>zcash_keys::keys::UnifiedFullViewingKey;
 <span class="kw">use </span>zcash_protocol::{
@@ -191,10 +178,9 @@
             unified::Fvk::Sapling(data) =&gt; {
                 <span class="macro">eprintln!</span>(
                     <span class="string">"   - Sapling ({})"</span>,
-                    bech32::encode(
-                        network.hrp_sapling_extended_full_viewing_key(),
-                        data.to_base32(),
-                        bech32::Variant::Bech32,
+                    bech32::encode::&lt;Bech32&gt;(
+                        Hrp::parse_unchecked(network.hrp_sapling_extended_full_viewing_key()),
+                        <span class="kw-2">&amp;</span>data
                     )
                     .unwrap(),
                 );
@@ -250,32 +236,20 @@
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>inspect_sapling_extfvk(
-    raw: Vec&lt;bech32::u5&gt;,
-    variant: bech32::Variant,
-    network: NetworkType,
-) {
-    <span class="kw">match </span>Vec::&lt;u8&gt;::from_base32(<span class="kw-2">&amp;</span>raw)
-        .map_err(|<span class="kw">_</span>| ())
-        .and_then(|data| sapling::zip32::ExtendedFullViewingKey::read(<span class="kw-2">&amp;</span>data[..]).map_err(|<span class="kw">_</span>| ()))
-    {
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>inspect_sapling_extfvk(data: Vec&lt;u8&gt;, network: NetworkType) {
+    <span class="kw">match </span>sapling::zip32::ExtendedFullViewingKey::read(<span class="kw-2">&amp;</span>data[..]).map_err(|<span class="kw">_</span>| ()) {
         <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; {
             <span class="macro">eprintln!</span>(<span class="string">"Invalid encoding that claims to be a Sapling extended full viewing key"</span>);
         }
         <span class="prelude-val">Ok</span>(extfvk) =&gt; {
             <span class="macro">eprintln!</span>(<span class="string">"Sapling extended full viewing key"</span>);
-            <span class="kw">match </span>variant {
-                bech32::Variant::Bech32 =&gt; (),
-                bech32::Variant::Bech32m =&gt; <span class="macro">eprintln!</span>(<span class="string">"⚠️  Incorrectly encoded with Bech32m"</span>),
-            }
 
             <span class="kw">let </span>default_addr_bytes = extfvk.default_address().<span class="number">1</span>.to_bytes();
             <span class="macro">eprintln!</span>(
                 <span class="string">"- Default address: {}"</span>,
-                bech32::encode(
-                    network.hrp_sapling_payment_address(),
-                    default_addr_bytes.to_base32(),
-                    bech32::Variant::Bech32,
+                bech32::encode::&lt;Bech32&gt;(
+                    Hrp::parse_unchecked(network.hrp_sapling_payment_address()),
+                    <span class="kw-2">&amp;</span>default_addr_bytes,
                 )
                 .unwrap(),
             );

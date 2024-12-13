@@ -388,7 +388,15 @@
 <a href="#387" id="387">387</a>
 <a href="#388" id="388">388</a>
 <a href="#389" id="389">389</a>
-<a href="#390" id="390">390</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::{error::Error, fmt};
+<a href="#390" id="390">390</a>
+<a href="#391" id="391">391</a>
+<a href="#392" id="392">392</a>
+<a href="#393" id="393">393</a>
+<a href="#394" id="394">394</a>
+<a href="#395" id="395">395</a></pre></div><pre class="rust"><code><span class="kw">use </span>core::fmt;
+
+<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">use </span>std::error::Error;
 
 <span class="kw">use crate</span>::{kind::<span class="kw-2">*</span>, AddressKind, Network, ZcashAddress};
 
@@ -433,8 +441,10 @@
     }
 }
 
-<span class="kw">impl </span>Error <span class="kw">for </span>UnsupportedAddress {}
-<span class="kw">impl</span>&lt;E: Error + <span class="lifetime">'static</span>&gt; Error <span class="kw">for </span>ConversionError&lt;E&gt; {
+<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">impl </span>Error <span class="kw">for </span>UnsupportedAddress {}
+<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">impl</span>&lt;E: Error + <span class="lifetime">'static</span>&gt; Error <span class="kw">for </span>ConversionError&lt;E&gt; {
     <span class="kw">fn </span>source(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>(<span class="kw">dyn </span>Error + <span class="lifetime">'static</span>)&gt; {
         <span class="kw">match </span><span class="self">self </span>{
             ConversionError::IncorrectNetwork { .. } | ConversionError::Unsupported(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,

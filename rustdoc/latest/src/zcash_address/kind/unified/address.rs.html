@@ -428,11 +428,19 @@
 <a href="#427" id="427">427</a>
 <a href="#428" id="428">428</a>
 <a href="#429" id="429">429</a>
-<a href="#430" id="430">430</a></pre></div><pre class="rust"><code><span class="kw">use </span>zcash_protocol::PoolType;
+<a href="#430" id="430">430</a>
+<a href="#431" id="431">431</a>
+<a href="#432" id="432">432</a>
+<a href="#433" id="433">433</a>
+<a href="#434" id="434">434</a>
+<a href="#435" id="435">435</a>
+<a href="#436" id="436">436</a>
+<a href="#437" id="437">437</a></pre></div><pre class="rust"><code><span class="kw">use </span>zcash_protocol::PoolType;
 
 <span class="kw">use super</span>::{private::SealedItem, ParseError, Typecode};
 
-<span class="kw">use </span>std::convert::{TryFrom, TryInto};
+<span class="kw">use </span>alloc::vec::Vec;
+<span class="kw">use </span>core::convert::{TryFrom, TryInto};
 
 <span class="doccomment">/// The set of known Receivers for Unified Addresses.
 </span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -491,14 +499,16 @@
 /// # Examples
 ///
 /// ```
-/// # use std::convert::Infallible;
-/// # use std::error::Error;
+/// # use core::convert::Infallible;
 /// use zcash_address::{
 ///     unified::{self, Container, Encoding},
 ///     ConversionError, TryFromRawAddress, ZcashAddress,
 /// };
 ///
-/// # fn main() -&gt; Result&lt;(), Box&lt;dyn Error&gt;&gt; {
+/// # #[cfg(not(feature = "std"))]
+/// # fn main() {}
+/// # #[cfg(feature = "std")]
+/// # fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 /// # let address_from_user = || "u1pg2aaph7jp8rpf6yhsza25722sg5fcn3vaca6ze27hqjw7jvvhhuxkpcg0ge9xh6drsgdkda8qjq5chpehkcpxf87rnjryjqwymdheptpvnljqqrjqzjwkc2ma6hcq666kgwfytxwac8eyex6ndgr6ezte66706e3vaqrd25dzvzkc69kw0jgywtd0cmq52q5lkw6uh7hyvzjse8ksx";
 /// let example_ua: &amp;str = address_from_user();
 ///
@@ -591,6 +601,8 @@
 
 <span class="attr">#[cfg(any(test, feature = <span class="string">"test-dependencies"</span>))]
 </span><span class="kw">pub mod </span>testing {
+    <span class="kw">use </span>alloc::vec::Vec;
+
     <span class="kw">use </span>proptest::{
         array::{uniform11, uniform20, uniform32},
         collection::vec,
@@ -676,6 +688,8 @@
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
+    <span class="kw">use </span>alloc::borrow::ToOwned;
+
     <span class="kw">use </span>assert_matches::assert_matches;
 
     <span class="kw">use crate</span>::{

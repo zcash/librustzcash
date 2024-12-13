@@ -229,25 +229,10 @@
 <a href="#228" id="228">228</a>
 <a href="#229" id="229">229</a>
 <a href="#230" id="230">230</a>
-<a href="#231" id="231">231</a>
-<a href="#232" id="232">232</a>
-<a href="#233" id="233">233</a>
-<a href="#234" id="234">234</a>
-<a href="#235" id="235">235</a>
-<a href="#236" id="236">236</a>
-<a href="#237" id="237">237</a>
-<a href="#238" id="238">238</a>
-<a href="#239" id="239">239</a>
-<a href="#240" id="240">240</a>
-<a href="#241" id="241">241</a>
-<a href="#242" id="242">242</a>
-<a href="#243" id="243">243</a>
-<a href="#244" id="244">244</a>
-<a href="#245" id="245">245</a>
-<a href="#246" id="246">246</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::convert::TryInto;
+<a href="#231" id="231">231</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::convert::TryInto;
 <span class="kw">use </span>std::iter;
 
-<span class="kw">use </span>bech32::{FromBase32, ToBase32};
+<span class="kw">use </span>bech32::{Bech32, Hrp};
 <span class="kw">use </span>secrecy::Zeroize;
 <span class="kw">use </span>zcash_address::{
     unified::{<span class="self">self</span>, Encoding},
@@ -314,10 +299,9 @@
             sapling_extsk.write(<span class="kw-2">&amp;mut </span>sapling_extsk_bytes).unwrap();
             <span class="macro">eprintln!</span>(
                 <span class="string">"     - ExtSK:  {}"</span>,
-                bech32::encode(
-                    network.hrp_sapling_extended_spending_key(),
-                    sapling_extsk_bytes.to_base32(),
-                    bech32::Variant::Bech32,
+                bech32::encode::&lt;Bech32&gt;(
+                    Hrp::parse_unchecked(network.hrp_sapling_extended_spending_key()),
+                    <span class="kw-2">&amp;</span>sapling_extsk_bytes,
                 )
                 .unwrap(),
             );
@@ -326,10 +310,9 @@
             sapling_extfvk.write(<span class="kw-2">&amp;mut </span>sapling_extfvk_bytes).unwrap();
             <span class="macro">eprintln!</span>(
                 <span class="string">"     - ExtFVK: {}"</span>,
-                bech32::encode(
-                    network.hrp_sapling_extended_full_viewing_key(),
-                    sapling_extfvk_bytes.to_base32(),
-                    bech32::Variant::Bech32,
+                bech32::encode::&lt;Bech32&gt;(
+                    Hrp::parse_unchecked(network.hrp_sapling_extended_full_viewing_key()),
+                    <span class="kw-2">&amp;</span>sapling_extfvk_bytes
                 )
                 .unwrap(),
             );
@@ -337,10 +320,9 @@
             <span class="kw">let </span>sapling_addr_bytes = sapling_default_addr.<span class="number">1</span>.to_bytes();
             <span class="macro">eprintln!</span>(
                 <span class="string">"     - Default address: {}"</span>,
-                bech32::encode(
-                    network.hrp_sapling_payment_address(),
-                    sapling_addr_bytes.to_base32(),
-                    bech32::Variant::Bech32,
+                bech32::encode::&lt;Bech32&gt;(
+                    Hrp::parse_unchecked(network.hrp_sapling_payment_address()),
+                    <span class="kw-2">&amp;</span>sapling_addr_bytes,
                 )
                 .unwrap(),
             );
@@ -415,32 +397,20 @@
     </span>);
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>inspect_sapling_extsk(
-    raw: Vec&lt;bech32::u5&gt;,
-    variant: bech32::Variant,
-    network: NetworkType,
-) {
-    <span class="kw">match </span>Vec::&lt;u8&gt;::from_base32(<span class="kw-2">&amp;</span>raw)
-        .map_err(|<span class="kw">_</span>| ())
-        .and_then(|data| sapling::zip32::ExtendedSpendingKey::read(<span class="kw-2">&amp;</span>data[..]).map_err(|<span class="kw">_</span>| ()))
-    {
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>inspect_sapling_extsk(data: Vec&lt;u8&gt;, network: NetworkType) {
+    <span class="kw">match </span>sapling::zip32::ExtendedSpendingKey::read(<span class="kw-2">&amp;</span>data[..]).map_err(|<span class="kw">_</span>| ()) {
         <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; {
             <span class="macro">eprintln!</span>(<span class="string">"Invalid encoding that claims to be a Sapling extended spending key"</span>);
         }
         <span class="prelude-val">Ok</span>(extsk) =&gt; {
             <span class="macro">eprintln!</span>(<span class="string">"Sapling extended spending key"</span>);
-            <span class="kw">match </span>variant {
-                bech32::Variant::Bech32 =&gt; (),
-                bech32::Variant::Bech32m =&gt; <span class="macro">eprintln!</span>(<span class="string">"⚠️  Incorrectly encoded with Bech32m"</span>),
-            }
 
             <span class="kw">let </span>default_addr_bytes = extsk.default_address().<span class="number">1</span>.to_bytes();
             <span class="macro">eprintln!</span>(
                 <span class="string">"- Default address: {}"</span>,
-                bech32::encode(
-                    network.hrp_sapling_payment_address(),
-                    default_addr_bytes.to_base32(),
-                    bech32::Variant::Bech32,
+                bech32::encode::&lt;Bech32&gt;(
+                    Hrp::parse_unchecked(network.hrp_sapling_payment_address()),
+                    <span class="kw-2">&amp;</span>default_addr_bytes,
                 )
                 .unwrap(),
             );
