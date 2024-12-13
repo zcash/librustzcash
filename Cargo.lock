@@ -2777,7 +2777,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.10.0"
-source = "git+https://github.com/zcash/orchard.git?rev=3d951b4201a63f3c07cba8b179dd9abde142cf33#3d951b4201a63f3c07cba8b179dd9abde142cf33"
+source = "git+https://github.com/zcash/orchard.git?rev=7a44e3279b5747819022c4d8f4474fa79b2d9746#7a44e3279b5747819022c4d8f4474fa79b2d9746"
 dependencies = [
  "aes",
  "bitvec",
@@ -3807,7 +3807,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.3.0"
-source = "git+https://github.com/zcash/sapling-crypto.git?rev=231f81911628499a8877be57e66e60c09e55bdea#231f81911628499a8877be57e66e60c09e55bdea"
+source = "git+https://github.com/zcash/sapling-crypto.git?rev=e47d57f5c9c46f05740328f8ef9601f6d697cf34#e47d57f5c9c46f05740328f8ef9601f6d697cf34"
 dependencies = [
  "aes",
  "bellman",

@@ -232,6 +232,14 @@ pub struct Output {
     /// The ZIP 32 derivation path at which the spending key can be found for the output.
     pub(crate) zip32_derivation: Option<Zip32Derivation>,
 
+    /// The user-facing address to which this output is being sent, if any.
+    ///
+    /// - This is set by an Updater.
+    /// - Signers must parse this address (if present) and confirm that it contains
+    ///   `recipient` (either directly, or e.g. as a receiver within a Unified Address).
+    #[getset(get = "pub")]
+    pub(crate) user_address: Option<String>,
+
     /// Proprietary fields related to the note being created.
     #[getset(get = "pub")]
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
@@ -335,6 +343,7 @@ impl Bundle {
                         rseed: output_rseed,
                         ock,
                         zip32_derivation: output_zip32_derivation,
+                        user_address,
                         proprietary: output_proprietary,
                     },
                 rcv,
@@ -367,6 +376,7 @@ impl Bundle {
                 && merge_optional(&mut lhs.output.rseed, output_rseed)
                 && merge_optional(&mut lhs.output.ock, ock)
                 && merge_optional(&mut lhs.output.zip32_derivation, output_zip32_derivation)
+                && merge_optional(&mut lhs.output.user_address, user_address)
                 && merge_map(&mut lhs.output.proprietary, output_proprietary)
                 && merge_optional(&mut lhs.rcv, rcv))
             {
@@ -430,6 +440,7 @@ impl Bundle {
                             )
                         })
                         .transpose()?,
+                    action.output.user_address,
                     action.output.proprietary,
                 )?;
 
@@ -521,6 +532,7 @@ impl Bundle {
                                     .collect(),
                             }
                         }),
+                        user_address: output.user_address().clone(),
                         proprietary: output.proprietary().clone(),
                     },
                     rcv: action.rcv().as_ref().map(|rcv| rcv.to_bytes()),

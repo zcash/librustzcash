@@ -210,6 +210,13 @@ pub struct Output {
     ///   In particular, it is not possible to include entries for non-BIP-32 pubkeys.
     pub(crate) bip32_derivation: BTreeMap<[u8; 33], Bip32Derivation>,
 
+    /// The user-facing address to which this output is being sent, if any.
+    ///
+    /// - This is set by an Updater.
+    /// - Signers must parse this address (if present) and confirm that it contains
+    ///   `recipient` (either directly, or e.g. as a receiver within a Unified Address).
+    pub(crate) user_address: Option<String>,
+
     /// Proprietary fields related to the transparent coin being created.
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }

@@ -94,6 +94,7 @@ impl Output {
         script_pubkey: Vec<u8>,
         redeem_script: Option<Vec<u8>>,
         bip32_derivation: BTreeMap<[u8; 33], Bip32Derivation>,
+        user_address: Option<String>,
         proprietary: BTreeMap<String, Vec<u8>>,
     ) -> Result<Self, ParseError> {
         let value = Zatoshis::from_u64(value).map_err(|_| ParseError::InvalidValue)?;
@@ -109,6 +110,7 @@ impl Output {
             script_pubkey,
             redeem_script,
             bip32_derivation,
+            user_address,
             proprietary,
         })
     }
