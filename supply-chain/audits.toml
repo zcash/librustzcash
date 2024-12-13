@@ -873,6 +873,12 @@ user-id = 1244 # ebfull
 start = "2022-10-19"
 end = "2025-04-22"
 
+[[trusted.zcash_encoding]]
+criteria = "safe-to-deploy"
+user-id = 6289 # Jack Grigg (str4d)
+start = "2021-08-31"
+end = "2025-12-13"
+
 [[trusted.zcash_extensions]]
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)

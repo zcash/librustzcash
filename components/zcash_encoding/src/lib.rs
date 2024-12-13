@@ -3,15 +3,22 @@
 //! `zcash_encoding` is a library that provides common encoding and decoding operations
 //! for stable binary encodings used throughout the Zcash ecosystem.
 
+#![no_std]
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+#[cfg_attr(test, macro_use)]
+extern crate alloc;
+
+use alloc::vec::Vec;
+
+use core::iter::FromIterator;
+use core2::io::{self, Read, Write};
+
+#[cfg(feature = "std")]
 use nonempty::NonEmpty;
-use std::io::{self, Read, Write};
-use std::iter::FromIterator;
 
 /// The maximum allowed value representable as a `[CompactSize]`
 pub const MAX_COMPACT_SIZE: u32 = 0x02000000;
@@ -25,11 +32,16 @@ pub struct CompactSize;
 impl CompactSize {
     /// Reads an integer encoded in compact form.
     pub fn read<R: Read>(mut reader: R) -> io::Result<u64> {
-        let flag = reader.read_u8()?;
+        let mut flag_bytes = [0; 1];
+        reader.read_exact(&mut flag_bytes)?;
+        let flag = flag_bytes[0];
+
         let result = if flag < 253 {
             Ok(flag as u64)
         } else if flag == 253 {
-            match reader.read_u16::<LittleEndian>()? {
+            let mut bytes = [0; 2];
+            reader.read_exact(&mut bytes)?;
+            match u16::from_le_bytes(bytes) {
                 n if n < 253 => Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "non-canonical CompactSize",
@@ -37,7 +49,9 @@ impl CompactSize {
                 n => Ok(n as u64),
             }
         } else if flag == 254 {
-            match reader.read_u32::<LittleEndian>()? {
+            let mut bytes = [0; 4];
+            reader.read_exact(&mut bytes)?;
+            match u32::from_le_bytes(bytes) {
                 n if n < 0x10000 => Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "non-canonical CompactSize",
@@ -45,7 +59,9 @@ impl CompactSize {
                 n => Ok(n as u64),
             }
         } else {
-            match reader.read_u64::<LittleEndian>()? {
+            let mut bytes = [0; 8];
+            reader.read_exact(&mut bytes)?;
+            match u64::from_le_bytes(bytes) {
                 n if n < 0x100000000 => Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "non-canonical CompactSize",
@@ -78,18 +94,18 @@ impl CompactSize {
     /// Writes the provided `usize` value to the provided Writer in compact form.
     pub fn write<W: Write>(mut writer: W, size: usize) -> io::Result<()> {
         match size {
-            s if s < 253 => writer.write_u8(s as u8),
+            s if s < 253 => writer.write_all(&[s as u8]),
             s if s <= 0xFFFF => {
-                writer.write_u8(253)?;
-                writer.write_u16::<LittleEndian>(s as u16)
+                writer.write_all(&[253])?;
+                writer.write_all(&(s as u16).to_le_bytes())
             }
             s if s <= 0xFFFFFFFF => {
-                writer.write_u8(254)?;
-                writer.write_u32::<LittleEndian>(s as u32)
+                writer.write_all(&[254])?;
+                writer.write_all(&(s as u32).to_le_bytes())
             }
             s => {
-                writer.write_u8(255)?;
-                writer.write_u64::<LittleEndian>(s as u64)
+                writer.write_all(&[255])?;
+                writer.write_all(&(s as u64).to_le_bytes())
             }
         }
     }
@@ -155,6 +171,7 @@ impl Vector {
 
     /// Writes a NonEmpty container of values to the stream using the same encoding as
     /// `[Vector::write]`
+    #[cfg(feature = "std")]
     pub fn write_nonempty<W: Write, E, F>(
         mut writer: W,
         vec: &NonEmpty<E>,
@@ -256,7 +273,9 @@ impl Optional {
     where
         F: Fn(R) -> io::Result<T>,
     {
-        match reader.read_u8()? {
+        let mut bytes = [0; 1];
+        reader.read_exact(&mut bytes)?;
+        match bytes[0] {
             0 => Ok(None),
             1 => Ok(Some(func(reader)?)),
             _ => Err(io::Error::new(
@@ -274,9 +293,9 @@ impl Optional {
         F: Fn(W, T) -> io::Result<()>,
     {
         match val {
-            None => writer.write_u8(0),
+            None => writer.write_all(&[0]),
             Some(e) => {
-                writer.write_u8(1)?;
+                writer.write_all(&[1])?;
                 func(writer, e)
             }
         }
@@ -286,7 +305,7 @@ impl Optional {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fmt::Debug;
+    use core::fmt::Debug;
 
     #[test]
     fn compact_size() {
@@ -339,11 +358,14 @@ mod tests {
         macro_rules! eval {
             ($value:expr, $expected:expr) => {
                 let mut data = vec![];
-                Vector::write(&mut data, &$value, |w, e| w.write_u8(*e)).unwrap();
+                Vector::write(&mut data, &$value, |w, e| w.write_all(&[*e])).unwrap();
                 assert_eq!(&data[..], &$expected[..]);
                 let serialized_size = Vector::serialized_size_of_u8_vec(&$value);
                 assert_eq!(serialized_size, $expected.len());
-                match Vector::read(&data[..], |r| r.read_u8()) {
+                match Vector::read(&data[..], |r| {
+                    let mut bytes = [0; 1];
+                    r.read_exact(&mut bytes).map(|_| bytes[0])
+                }) {
                     Ok(v) => assert_eq!(v, $value),
                     Err(e) => panic!("Unexpected error: {:?}", e),
                 }
@@ -382,7 +404,10 @@ mod tests {
 
         macro_rules! eval_u8 {
             ($value:expr, $expected:expr) => {
-                eval!($value, $expected, |w, e| w.write_u8(e), |mut r| r.read_u8())
+                eval!($value, $expected, |w, e| w.write_all(&[e]), |mut r| {
+                    let mut bytes = [0; 1];
+                    r.read_exact(&mut bytes).map(|_| bytes[0])
+                })
             };
         }
 
@@ -391,8 +416,11 @@ mod tests {
                 eval!(
                     $value,
                     $expected,
-                    |w, v| Vector::write(w, &v, |w, e| w.write_u8(*e)),
-                    |r| Vector::read(r, |r| r.read_u8())
+                    |w, v| Vector::write(w, &v, |w, e| w.write_all(&[*e])),
+                    |r| Vector::read(r, |r| {
+                        let mut bytes = [0; 1];
+                        r.read_exact(&mut bytes).map(|_| bytes[0])
+                    })
                 )
             };
         }
