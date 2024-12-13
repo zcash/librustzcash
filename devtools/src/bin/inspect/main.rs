@@ -3,6 +3,8 @@ use std::io;
 use std::io::Cursor;
 use std::process;
 
+use bech32::primitives::decode::CheckedHrpstring;
+use bech32::Bech32;
 use gumdrop::{Options, ParsingStyle};
 use lazy_static::lazy_static;
 use secrecy::Zeroize;
@@ -81,25 +83,26 @@ fn main() {
         keys::view::inspect_uivk(uivk, network);
     } else if let Ok((network, ufvk)) = unified::Ufvk::decode(&opts.data) {
         keys::view::inspect_ufvk(ufvk, network);
-    } else if let Ok((hrp, data, variant)) = bech32::decode(&opts.data) {
-        match hrp.as_str() {
+    } else if let Ok(parsed) = CheckedHrpstring::new::<Bech32>(&opts.data) {
+        let data = parsed.byte_iter().collect::<Vec<_>>();
+        match parsed.hrp().as_str() {
             constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY => {
-                keys::view::inspect_sapling_extfvk(data, variant, NetworkType::Main);
+                keys::view::inspect_sapling_extfvk(data, NetworkType::Main);
             }
             constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY => {
-                keys::view::inspect_sapling_extfvk(data, variant, NetworkType::Test);
+                keys::view::inspect_sapling_extfvk(data, NetworkType::Test);
             }
             constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY => {
-                keys::view::inspect_sapling_extfvk(data, variant, NetworkType::Regtest);
+                keys::view::inspect_sapling_extfvk(data, NetworkType::Regtest);
             }
             constants::mainnet::HRP_SAPLING_EXTENDED_SPENDING_KEY => {
-                keys::inspect_sapling_extsk(data, variant, NetworkType::Main);
+                keys::inspect_sapling_extsk(data, NetworkType::Main);
             }
             constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY => {
-                keys::inspect_sapling_extsk(data, variant, NetworkType::Test);
+                keys::inspect_sapling_extsk(data, NetworkType::Test);
             }
             constants::regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY => {
-                keys::inspect_sapling_extsk(data, variant, NetworkType::Regtest);
+                keys::inspect_sapling_extsk(data, NetworkType::Regtest);
             }
             _ => {
                 // Unknown data format.

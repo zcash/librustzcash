@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Changed
+- Migrated to `bech32 0.11`.
 - The `UnifiedAddressRequest` argument to the following methods is now optional:
   - `zcash_keys::keys::UnifiedSpendingKey::address`
   - `zcash_keys::keys::UnifiedSpendingKey::default_address`

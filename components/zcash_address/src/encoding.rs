@@ -7,7 +7,7 @@ use core::str::FromStr;
 #[cfg(feature = "std")]
 use std::error::Error;
 
-use bech32::{self, FromBase32, ToBase32, Variant};
+use bech32::{primitives::decode::CheckedHrpstring, Bech32, Bech32m, Checksum, Hrp};
 use zcash_protocol::consensus::{NetworkConstants, NetworkType};
 use zcash_protocol::constants::{mainnet, regtest, testnet};
 
@@ -72,48 +72,48 @@ impl FromStr for ZcashAddress {
             }
         }
 
-        // Try decoding as a Sapling or TEX address (Bech32/Bech32m)
-        if let Ok((hrp, data, variant)) = bech32::decode(s) {
-            // If we reached this point, the encoding is found to be valid Bech32 or Bech32m.
-            let data = Vec::<u8>::from_base32(&data).map_err(|_| ParseError::InvalidEncoding)?;
-
-            match variant {
-                Variant::Bech32 => {
-                    let net = match hrp.as_str() {
-                        mainnet::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Main,
-                        testnet::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Test,
-                        regtest::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Regtest,
-                        // We will not define new Bech32 address encodings.
-                        _ => {
-                            return Err(ParseError::NotZcash);
-                        }
-                    };
-
-                    return data[..]
-                        .try_into()
-                        .map(AddressKind::Sapling)
-                        .map_err(|_| ParseError::InvalidEncoding)
-                        .map(|kind| ZcashAddress { net, kind });
+        // Try decoding as a Sapling address (Bech32)
+        if let Ok(parsed) = CheckedHrpstring::new::<Bech32>(s) {
+            // If we reached this point, the encoding is found to be valid Bech32.
+            let net = match parsed.hrp().as_str() {
+                mainnet::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Main,
+                testnet::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Test,
+                regtest::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Regtest,
+                // We will not define new Bech32 address encodings.
+                _ => {
+                    return Err(ParseError::NotZcash);
                 }
-                Variant::Bech32m => {
-                    // Try decoding as a TEX address (Bech32m)
-                    let net = match hrp.as_str() {
-                        mainnet::HRP_TEX_ADDRESS => NetworkType::Main,
-                        testnet::HRP_TEX_ADDRESS => NetworkType::Test,
-                        regtest::HRP_TEX_ADDRESS => NetworkType::Regtest,
-                        // Not recognized as a Zcash address type
-                        _ => {
-                            return Err(ParseError::NotZcash);
-                        }
-                    };
+            };
 
-                    return data[..]
-                        .try_into()
-                        .map(AddressKind::Tex)
-                        .map_err(|_| ParseError::InvalidEncoding)
-                        .map(|kind| ZcashAddress { net, kind });
+            let data = parsed.byte_iter().collect::<Vec<_>>();
+
+            return data
+                .try_into()
+                .map(AddressKind::Sapling)
+                .map_err(|_| ParseError::InvalidEncoding)
+                .map(|kind| ZcashAddress { net, kind });
+        }
+
+        // Try decoding as a TEX address (Bech32m)
+        if let Ok(parsed) = CheckedHrpstring::new::<Bech32m>(s) {
+            // If we reached this point, the encoding is found to be valid Bech32m.
+            let net = match parsed.hrp().as_str() {
+                mainnet::HRP_TEX_ADDRESS => NetworkType::Main,
+                testnet::HRP_TEX_ADDRESS => NetworkType::Test,
+                regtest::HRP_TEX_ADDRESS => NetworkType::Regtest,
+                // Not recognized as a Zcash address type
+                _ => {
+                    return Err(ParseError::NotZcash);
                 }
-            }
+            };
+
+            let data = parsed.byte_iter().collect::<Vec<_>>();
+
+            return data
+                .try_into()
+                .map(AddressKind::Tex)
+                .map_err(|_| ParseError::InvalidEncoding)
+                .map(|kind| ZcashAddress { net, kind });
         }
 
         // The rest use Base58Check.
@@ -152,8 +152,8 @@ impl FromStr for ZcashAddress {
     }
 }
 
-fn encode_bech32(hrp: &str, data: &[u8], variant: Variant) -> String {
-    bech32::encode(hrp, data.to_base32(), variant).expect("hrp is invalid")
+fn encode_bech32<Ck: Checksum>(hrp: &str, data: &[u8]) -> String {
+    bech32::encode::<Ck>(Hrp::parse_unchecked(hrp), data).expect("encoding is short enough")
 }
 
 fn encode_b58(prefix: [u8; 2], data: &[u8]) -> String {
@@ -167,17 +167,13 @@ impl fmt::Display for ZcashAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let encoded = match &self.kind {
             AddressKind::Sprout(data) => encode_b58(self.net.b58_sprout_address_prefix(), data),
-            AddressKind::Sapling(data) => encode_bech32(
-                self.net.hrp_sapling_payment_address(),
-                data,
-                Variant::Bech32,
-            ),
+            AddressKind::Sapling(data) => {
+                encode_bech32::<Bech32>(self.net.hrp_sapling_payment_address(), data)
+            }
             AddressKind::Unified(addr) => addr.encode(&self.net),
             AddressKind::P2pkh(data) => encode_b58(self.net.b58_pubkey_address_prefix(), data),
             AddressKind::P2sh(data) => encode_b58(self.net.b58_script_address_prefix(), data),
-            AddressKind::Tex(data) => {
-                encode_bech32(self.net.hrp_tex_address(), data, Variant::Bech32m)
-            }
+            AddressKind::Tex(data) => encode_bech32::<Bech32m>(self.net.hrp_tex_address(), data),
         };
         write!(f, "{}", encoded)
     }

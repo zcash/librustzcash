@@ -4,6 +4,7 @@
 //! [zcash_primitives::constants] module.
 
 use crate::address::UnifiedAddress;
+use bech32::primitives::decode::CheckedHrpstringError;
 use bs58::{self, decode::Error as Bs58Error};
 use std::fmt;
 use zcash_primitives::consensus::NetworkConstants;
@@ -13,7 +14,7 @@ use zcash_primitives::{consensus, legacy::TransparentAddress};
 
 #[cfg(feature = "sapling")]
 use {
-    bech32::{self, Error, FromBase32, ToBase32, Variant},
+    bech32::{primitives::decode::CheckedHrpstring, Bech32, Hrp},
     sapling::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     std::io::{self, Write},
     zcash_primitives::consensus::NetworkType,
@@ -26,22 +27,29 @@ where
 {
     let mut data: Vec<u8> = vec![];
     write(&mut data).expect("Should be able to write to a Vec");
-    bech32::encode(hrp, data.to_base32(), Variant::Bech32).expect("hrp is invalid")
+    bech32::encode::<Bech32>(Hrp::parse_unchecked(hrp), &data).expect("encoding is short enough")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg(feature = "sapling")]
 pub enum Bech32DecodeError {
-    Bech32Error(Error),
-    IncorrectVariant(Variant),
+    Bech32Error(bech32::DecodeError),
+    Hrp(CheckedHrpstringError),
     ReadError,
     HrpMismatch { expected: String, actual: String },
 }
 
 #[cfg(feature = "sapling")]
-impl From<Error> for Bech32DecodeError {
-    fn from(err: Error) -> Self {
+impl From<bech32::DecodeError> for Bech32DecodeError {
+    fn from(err: bech32::DecodeError) -> Self {
         Bech32DecodeError::Bech32Error(err)
+    }
+}
+
+#[cfg(feature = "sapling")]
+impl From<CheckedHrpstringError> for Bech32DecodeError {
+    fn from(err: CheckedHrpstringError) -> Self {
+        Bech32DecodeError::Hrp(err)
     }
 }
 
@@ -50,11 +58,7 @@ impl fmt::Display for Bech32DecodeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
             Bech32DecodeError::Bech32Error(e) => write!(f, "{}", e),
-            Bech32DecodeError::IncorrectVariant(variant) => write!(
-                f,
-                "Incorrect bech32 encoding (wrong variant: {:?})",
-                variant
-            ),
+            Bech32DecodeError::Hrp(e) => write!(f, "Incorrect HRP encoding: {e}"),
             Bech32DecodeError::ReadError => {
                 write!(f, "Failed to decode key from its binary representation.")
             }
@@ -68,30 +72,21 @@ impl fmt::Display for Bech32DecodeError {
 }
 
 #[cfg(feature = "sapling")]
-impl std::error::Error for Bech32DecodeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match &self {
-            Bech32DecodeError::Bech32Error(e) => Some(e),
-            _ => None,
-        }
-    }
-}
+impl std::error::Error for Bech32DecodeError {}
 
 #[cfg(feature = "sapling")]
 fn bech32_decode<T, F>(hrp: &str, s: &str, read: F) -> Result<T, Bech32DecodeError>
 where
     F: Fn(Vec<u8>) -> Option<T>,
 {
-    let (decoded_hrp, data, variant) = bech32::decode(s)?;
-    if variant != Variant::Bech32 {
-        Err(Bech32DecodeError::IncorrectVariant(variant))
-    } else if decoded_hrp != hrp {
+    let parsed = CheckedHrpstring::new::<Bech32>(s)?;
+    if parsed.hrp().as_str() != hrp {
         Err(Bech32DecodeError::HrpMismatch {
             expected: hrp.to_string(),
-            actual: decoded_hrp,
+            actual: parsed.hrp().as_str().to_owned(),
         })
     } else {
-        read(Vec::<u8>::from_base32(&data)?).ok_or(Bech32DecodeError::ReadError)
+        read(parsed.byte_iter().collect::<Vec<_>>()).ok_or(Bech32DecodeError::ReadError)
     }
 }
 
@@ -274,29 +269,25 @@ pub fn decode_extfvk_with_network(
 ) -> Result<(NetworkType, ExtendedFullViewingKey), Bech32DecodeError> {
     use zcash_protocol::constants::{mainnet, regtest, testnet};
 
-    let (decoded_hrp, data, variant) = bech32::decode(s)?;
-    if variant != Variant::Bech32 {
-        Err(Bech32DecodeError::IncorrectVariant(variant))
-    } else {
-        let network = match &decoded_hrp[..] {
-            mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY => Ok(NetworkType::Main),
-            testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY => Ok(NetworkType::Test),
-            regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY => Ok(NetworkType::Regtest),
-            other => Err(Bech32DecodeError::HrpMismatch {
-                expected: format!(
-                    "One of {}, {}, or {}",
-                    mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
-                    testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
-                    regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
-                ),
-                actual: other.to_string(),
-            }),
-        }?;
-        let fvk = ExtendedFullViewingKey::read(&Vec::<u8>::from_base32(&data)?[..])
-            .map_err(|_| Bech32DecodeError::ReadError)?;
+    let parsed = CheckedHrpstring::new::<Bech32>(s)?;
+    let network = match parsed.hrp().as_str() {
+        mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY => Ok(NetworkType::Main),
+        testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY => Ok(NetworkType::Test),
+        regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY => Ok(NetworkType::Regtest),
+        other => Err(Bech32DecodeError::HrpMismatch {
+            expected: format!(
+                "One of {}, {}, or {}",
+                mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+                testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+                regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+            ),
+            actual: other.to_string(),
+        }),
+    }?;
+    let fvk = ExtendedFullViewingKey::read(&parsed.byte_iter().collect::<Vec<_>>()[..])
+        .map_err(|_| Bech32DecodeError::ReadError)?;
 
-        Ok((network, fvk))
-    }
+    Ok((network, fvk))
 }
 
 /// Writes a [`PaymentAddress`] as a Bech32-encoded string.

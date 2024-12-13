@@ -10,7 +10,7 @@ use core::num::TryFromIntError;
 #[cfg(feature = "std")]
 use std::error::Error;
 
-use bech32::{self, FromBase32, ToBase32, Variant};
+use bech32::{primitives::decode::CheckedHrpstring, Bech32m, Checksum, Hrp};
 
 use crate::Network;
 
@@ -364,6 +364,22 @@ pub(crate) mod private {
 
 use private::SealedItem;
 
+/// The bech32m checksum algorithm, defined in [BIP-350], extended to allow all lengths
+/// supported by [ZIP 316].
+///
+/// [BIP-350]: https://github.com/bitcoin/bips/blob/master/bip-0350.mediawiki
+/// [ZIP 316]: https://zips.z.cash/zip-0316#solution
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Bech32mZip316 {}
+impl Checksum for Bech32mZip316 {
+    type MidstateRepr = <Bech32m as Checksum>::MidstateRepr;
+    // l^MAX from ZIP 316.
+    const CODE_LENGTH: usize = 4194368;
+    const CHECKSUM_LENGTH: usize = Bech32m::CHECKSUM_LENGTH;
+    const GENERATOR_SH: [u32; 5] = Bech32m::GENERATOR_SH;
+    const TARGET_RESIDUE: u32 = Bech32m::TARGET_RESIDUE;
+}
+
 /// Trait providing common encoding and decoding logic for Unified containers.
 pub trait Encoding: private::SealedContainer {
     /// Constructs a value of a unified container type from a vector
@@ -385,14 +401,14 @@ pub trait Encoding: private::SealedContainer {
     /// the order of its components so that it correctly obeys round-trip
     /// serialization invariants.
     fn decode(s: &str) -> Result<(Network, Self), ParseError> {
-        if let Ok((hrp, data, Variant::Bech32m)) = bech32::decode(s) {
+        if let Ok(parsed) = CheckedHrpstring::new::<Bech32mZip316>(s) {
+            let hrp = parsed.hrp();
             let hrp = hrp.as_str();
             // validate that the HRP corresponds to a known network.
             let net =
                 Self::hrp_network(hrp).ok_or_else(|| ParseError::UnknownPrefix(hrp.to_string()))?;
 
-            let data = Vec::<u8>::from_base32(&data)
-                .map_err(|e| ParseError::InvalidEncoding(e.to_string()))?;
+            let data = parsed.byte_iter().collect::<Vec<_>>();
 
             Self::parse_internal(hrp, data).map(|value| (net, value))
         } else {
@@ -406,12 +422,8 @@ pub trait Encoding: private::SealedContainer {
     /// serialization invariants.
     fn encode(&self, network: &Network) -> String {
         let hrp = Self::network_hrp(network);
-        bech32::encode(
-            hrp,
-            self.to_jumbled_bytes(hrp).to_base32(),
-            Variant::Bech32m,
-        )
-        .expect("hrp is invalid")
+        bech32::encode::<Bech32mZip316>(Hrp::parse_unchecked(hrp), &self.to_jumbled_bytes(hrp))
+            .expect("F4Jumble ensures length is short enough by construction")
     }
 }
 
