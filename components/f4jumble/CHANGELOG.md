@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.1.1] - 2024-12-13
 ### Added
 - `alloc` feature flag as a mid-point between full `no-std` support and the
   `std` feature flag.

@@ -1502,7 +1502,7 @@ dependencies = [
 
 [[package]]
 name = "f4jumble"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "blake2b_simd",
  "hex",
