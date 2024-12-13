@@ -190,5 +190,5 @@ debug = true
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
 
 [patch.crates-io]
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "bcd08e1d23e70c42a338f3e3f79d6f4c0c219805" }
-sapling-crypto = { git = "https://github.com/zcash/sapling-crypto.git", rev = "29cff9683cdf2f0c522ff3224081dfb4fbc80248" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "3d951b4201a63f3c07cba8b179dd9abde142cf33" }
+sapling-crypto = { git = "https://github.com/zcash/sapling-crypto.git", rev = "231f81911628499a8877be57e66e60c09e55bdea" }

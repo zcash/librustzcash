@@ -140,37 +140,16 @@ impl Signer {
             .get_mut(index)
             .ok_or(Error::InvalidIndex)?;
 
-        // Check consistency of the input being signed.
-        let note_from_fields = spend
-            .recipient()
-            .zip(spend.value().as_ref())
-            .zip(spend.rseed().as_ref())
-            .map(|((recipient, value), rseed)| {
-                sapling::Note::from_parts(recipient, *value, *rseed)
-            });
-
-        if let Some(note) = note_from_fields {
-            let tx_spend = self
-                .tx_data
-                .sapling_bundle()
-                .expect("index checked above")
-                .shielded_spends()
-                .get(index)
-                .expect("index checked above");
-
-            let proof_generation_key = spend
-                .proof_generation_key()
-                .as_ref()
-                .ok_or(Error::MissingProofGenerationKey)?;
-
-            let nk = proof_generation_key.to_viewing_key().nk;
-
-            let merkle_path = spend.witness().as_ref().ok_or(Error::MissingWitness)?;
-
-            if &note.nf(&nk, merkle_path.position().into()) != tx_spend.nullifier() {
-                return Err(Error::InvalidNullifier);
-            }
+        // Check consistency of the input being signed if we have its note components.
+        match spend.verify_nullifier(None) {
+            Err(
+                sapling::pczt::VerifyError::MissingRecipient
+                | sapling::pczt::VerifyError::MissingValue
+                | sapling::pczt::VerifyError::MissingRandomSeed,
+            ) => Ok(()),
+            r => r,
         }
+        .map_err(Error::SaplingVerify)?;
 
         spend
             .sign(self.shielded_sighash, ask, OsRng)
@@ -201,39 +180,17 @@ impl Signer {
             .get_mut(index)
             .ok_or(Error::InvalidIndex)?;
 
-        // Check consistency of the input being signed.
-        let note_from_fields = action
-            .spend()
-            .recipient()
-            .zip(action.spend().value().as_ref())
-            .zip(action.spend().rho().as_ref())
-            .zip(action.spend().rseed().as_ref())
-            .map(|(((recipient, value), rho), rseed)| {
-                orchard::Note::from_parts(recipient, *value, *rho, *rseed)
-                    .into_option()
-                    .ok_or(Error::InvalidNote)
-            })
-            .transpose()?;
-
-        if let Some(note) = note_from_fields {
-            let tx_action = self
-                .tx_data
-                .orchard_bundle()
-                .expect("index checked above")
-                .actions()
-                .get(index)
-                .expect("index checked above");
-
-            let fvk = action
-                .spend()
-                .fvk()
-                .as_ref()
-                .ok_or(Error::MissingFullViewingKey)?;
-
-            if &note.nullifier(fvk) != tx_action.nullifier() {
-                return Err(Error::InvalidNullifier);
-            }
+        // Check consistency of the input being signed if we have its note components.
+        match action.spend().verify_nullifier(None) {
+            Err(
+                orchard::pczt::VerifyError::MissingRecipient
+                | orchard::pczt::VerifyError::MissingValue
+                | orchard::pczt::VerifyError::MissingRho
+                | orchard::pczt::VerifyError::MissingRandomSeed,
+            ) => Ok(()),
+            r => r,
         }
+        .map_err(Error::OrchardVerify)?;
 
         action
             .sign(self.shielded_sighash, ask, OsRng)
@@ -317,17 +274,14 @@ pub enum Error {
     Global(GlobalError),
     IncompatibleLockTimes,
     InvalidIndex,
-    InvalidNote,
-    InvalidNullifier,
-    MissingFullViewingKey,
-    MissingProofGenerationKey,
-    MissingWitness,
     OrchardExtract(orchard::pczt::TxExtractorError),
     OrchardParse(orchard::pczt::ParseError),
     OrchardSign(orchard::pczt::SignerError),
+    OrchardVerify(orchard::pczt::VerifyError),
     SaplingExtract(sapling::pczt::TxExtractorError),
     SaplingParse(sapling::pczt::ParseError),
     SaplingSign(sapling::pczt::SignerError),
+    SaplingVerify(sapling::pczt::VerifyError),
     TransparentExtract(transparent::pczt::TxExtractorError),
     TransparentParse(transparent::pczt::ParseError),
     TransparentSign(transparent::pczt::SignerError),
