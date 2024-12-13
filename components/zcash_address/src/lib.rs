@@ -124,10 +124,19 @@
 //! }
 //! ```
 
+#![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
+
+#[macro_use]
+extern crate alloc;
+
+#[cfg(feature = "std")]
+extern crate std;
+
+use alloc::string::String;
 
 mod convert;
 mod encoding;
@@ -150,49 +159,6 @@ use zcash_protocol::PoolType;
 pub struct ZcashAddress {
     net: Network,
     kind: AddressKind,
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for ZcashAddress {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.encode())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for ZcashAddress {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use std::fmt;
-        struct AddrVisitor;
-
-        impl<'de> serde::de::Visitor<'de> for AddrVisitor {
-            type Value = ZcashAddress;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a valid Zcash address string")
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<ZcashAddress, E>
-            where
-                E: serde::de::Error,
-            {
-                ZcashAddress::try_from_encoded(value).map_err(|_| {
-                    serde::de::Error::invalid_value(
-                        serde::de::Unexpected::Str(value),
-                        &"a valid Zcash address string",
-                    )
-                })
-            }
-        }
-
-        deserializer.deserialize_str(AddrVisitor)
-    }
 }
 
 /// Known kinds of Zcash addresses.
@@ -349,7 +315,7 @@ impl ZcashAddress {
 
 #[cfg(feature = "test-dependencies")]
 pub mod testing {
-    use std::convert::TryInto;
+    use core::convert::TryInto;
 
     use proptest::{array::uniform20, collection::vec, prelude::any, prop_compose, prop_oneof};
 

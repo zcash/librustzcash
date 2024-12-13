@@ -1,4 +1,7 @@
-use std::{error::Error, fmt};
+use core::fmt;
+
+#[cfg(feature = "std")]
+use std::error::Error;
 
 use crate::{kind::*, AddressKind, Network, ZcashAddress};
 
@@ -43,7 +46,9 @@ impl<E: fmt::Display> fmt::Display for ConversionError<E> {
     }
 }
 
+#[cfg(feature = "std")]
 impl Error for UnsupportedAddress {}
+#[cfg(feature = "std")]
 impl<E: Error + 'static> Error for ConversionError<E> {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {

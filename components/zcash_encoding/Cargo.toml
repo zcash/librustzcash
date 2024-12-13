@@ -16,7 +16,7 @@ categories = ["cryptography::cryptocurrencies", "encoding"]
 keywords = ["zcash"]
 
 [dependencies]
-core2 = { version = "0.3", default-features = false, features = ["alloc"] }
+core2.workspace = true
 nonempty = { workspace = true, optional = true }
 
 [features]

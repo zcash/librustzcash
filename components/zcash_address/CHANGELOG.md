@@ -6,9 +6,14 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.6.2] - 2024-12-13
+### Fixed
+- Migrated to `f4jumble 0.1.1` to fix `no-std` support.
+
+## [0.6.1] - 2024-12-13
 ### Added
-- `impl serde::{Serialize, Deserialize} for zcash_address::ZcashAddress` behind
-  the `serde` feature flag.
+- `no-std` support, via a default-enabled `std` feature flag.
 
 ## [0.6.0] - 2024-10-02
 ### Changed

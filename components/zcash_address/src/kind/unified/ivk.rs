@@ -1,4 +1,5 @@
-use std::convert::{TryFrom, TryInto};
+use alloc::vec::Vec;
+use core::convert::{TryFrom, TryInto};
 
 use super::{
     private::{SealedContainer, SealedItem},
@@ -87,10 +88,12 @@ impl SealedItem for Ivk {
 /// # Examples
 ///
 /// ```
-/// # use std::error::Error;
 /// use zcash_address::unified::{self, Container, Encoding};
 ///
-/// # fn main() -> Result<(), Box<dyn Error>> {
+/// # #[cfg(not(feature = "std"))]
+/// # fn main() {}
+/// # #[cfg(feature = "std")]
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// # let uivk_from_user = || "uivk1djetqg3fws7y7qu5tekynvcdhz69gsyq07ewvppmzxdqhpfzdgmx8urnkqzv7ylz78ez43ux266pqjhecd59fzhn7wpe6zarnzh804hjtkyad25ryqla5pnc8p5wdl3phj9fczhz64zprun3ux7y9jc08567xryumuz59rjmg4uuflpjqwnq0j0tzce0x74t4tv3gfjq7nczkawxy6y7hse733ae3vw7qfjd0ss0pytvezxp42p6rrpzeh6t2zrz7zpjk0xhngcm6gwdppxs58jkx56gsfflugehf5vjlmu7vj3393gj6u37wenavtqyhdvcdeaj86s6jczl4zq";
 /// let example_uivk: &str = uivk_from_user();
 ///
@@ -149,6 +152,9 @@ impl SealedContainer for Uivk {
 
 #[cfg(test)]
 mod tests {
+    use alloc::borrow::ToOwned;
+    use alloc::vec::Vec;
+
     use assert_matches::assert_matches;
 
     use proptest::{

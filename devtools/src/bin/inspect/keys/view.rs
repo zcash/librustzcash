@@ -1,4 +1,4 @@
-use bech32::{FromBase32, ToBase32};
+use bech32::{Bech32, Hrp};
 use zcash_address::unified::{self, Container, Encoding};
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_protocol::{
@@ -30,10 +30,9 @@ pub(crate) fn inspect_ufvk(ufvk: unified::Ufvk, network: NetworkType) {
             unified::Fvk::Sapling(data) => {
                 eprintln!(
                     "   - Sapling ({})",
-                    bech32::encode(
-                        network.hrp_sapling_extended_full_viewing_key(),
-                        data.to_base32(),
-                        bech32::Variant::Bech32,
+                    bech32::encode::<Bech32>(
+                        Hrp::parse_unchecked(network.hrp_sapling_extended_full_viewing_key()),
+                        &data
                     )
                     .unwrap(),
                 );
@@ -89,32 +88,20 @@ pub(crate) fn inspect_uivk(uivk: unified::Uivk, network: NetworkType) {
     }
 }
 
-pub(crate) fn inspect_sapling_extfvk(
-    raw: Vec<bech32::u5>,
-    variant: bech32::Variant,
-    network: NetworkType,
-) {
-    match Vec::<u8>::from_base32(&raw)
-        .map_err(|_| ())
-        .and_then(|data| sapling::zip32::ExtendedFullViewingKey::read(&data[..]).map_err(|_| ()))
-    {
+pub(crate) fn inspect_sapling_extfvk(data: Vec<u8>, network: NetworkType) {
+    match sapling::zip32::ExtendedFullViewingKey::read(&data[..]).map_err(|_| ()) {
         Err(_) => {
             eprintln!("Invalid encoding that claims to be a Sapling extended full viewing key");
         }
         Ok(extfvk) => {
             eprintln!("Sapling extended full viewing key");
-            match variant {
-                bech32::Variant::Bech32 => (),
-                bech32::Variant::Bech32m => eprintln!("⚠️  Incorrectly encoded with Bech32m"),
-            }
 
             let default_addr_bytes = extfvk.default_address().1.to_bytes();
             eprintln!(
                 "- Default address: {}",
-                bech32::encode(
-                    network.hrp_sapling_payment_address(),
-                    default_addr_bytes.to_base32(),
-                    bech32::Variant::Bech32,
+                bech32::encode::<Bech32>(
+                    Hrp::parse_unchecked(network.hrp_sapling_payment_address()),
+                    &default_addr_bytes,
                 )
                 .unwrap(),
             );

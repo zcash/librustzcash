@@ -1,4 +1,5 @@
-use std::convert::{TryFrom, TryInto};
+use alloc::vec::Vec;
+use core::convert::{TryFrom, TryInto};
 
 use super::{
     private::{SealedContainer, SealedItem},
@@ -82,10 +83,12 @@ impl SealedItem for Fvk {
 /// # Examples
 ///
 /// ```
-/// # use std::error::Error;
 /// use zcash_address::unified::{self, Container, Encoding};
 ///
-/// # fn main() -> Result<(), Box<dyn Error>> {
+/// # #[cfg(not(feature = "std"))]
+/// # fn main() {}
+/// # #[cfg(feature = "std")]
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// # let ufvk_from_user = || "uview1cgrqnry478ckvpr0f580t6fsahp0a5mj2e9xl7hv2d2jd4ldzy449mwwk2l9yeuts85wjls6hjtghdsy5vhhvmjdw3jxl3cxhrg3vs296a3czazrycrr5cywjhwc5c3ztfyjdhmz0exvzzeyejamyp0cr9z8f9wj0953fzht0m4lenk94t70ruwgjxag2tvp63wn9ftzhtkh20gyre3w5s24f6wlgqxnjh40gd2lxe75sf3z8h5y2x0atpxcyf9t3em4h0evvsftluruqne6w4sm066sw0qe5y8qg423grple5fftxrqyy7xmqmatv7nzd7tcjadu8f7mqz4l83jsyxy4t8pkayytyk7nrp467ds85knekdkvnd7hqkfer8mnqd7pv";
 /// let example_ufvk: &str = ufvk_from_user();
 ///
@@ -144,6 +147,9 @@ impl SealedContainer for Ufvk {
 
 #[cfg(test)]
 mod tests {
+    use alloc::borrow::ToOwned;
+    use alloc::vec::Vec;
+
     use assert_matches::assert_matches;
 
     use proptest::{array::uniform1, array::uniform32, prelude::*, sample::select};

@@ -1,7 +1,7 @@
 use std::convert::TryInto;
 use std::iter;
 
-use bech32::{FromBase32, ToBase32};
+use bech32::{Bech32, Hrp};
 use secrecy::Zeroize;
 use zcash_address::{
     unified::{self, Encoding},
@@ -68,10 +68,9 @@ pub(crate) fn inspect_mnemonic(mnemonic: bip0039::Mnemonic, context: Option<Cont
             sapling_extsk.write(&mut sapling_extsk_bytes).unwrap();
             eprintln!(
                 "     - ExtSK:  {}",
-                bech32::encode(
-                    network.hrp_sapling_extended_spending_key(),
-                    sapling_extsk_bytes.to_base32(),
-                    bech32::Variant::Bech32,
+                bech32::encode::<Bech32>(
+                    Hrp::parse_unchecked(network.hrp_sapling_extended_spending_key()),
+                    &sapling_extsk_bytes,
                 )
                 .unwrap(),
             );
@@ -80,10 +79,9 @@ pub(crate) fn inspect_mnemonic(mnemonic: bip0039::Mnemonic, context: Option<Cont
             sapling_extfvk.write(&mut sapling_extfvk_bytes).unwrap();
             eprintln!(
                 "     - ExtFVK: {}",
-                bech32::encode(
-                    network.hrp_sapling_extended_full_viewing_key(),
-                    sapling_extfvk_bytes.to_base32(),
-                    bech32::Variant::Bech32,
+                bech32::encode::<Bech32>(
+                    Hrp::parse_unchecked(network.hrp_sapling_extended_full_viewing_key()),
+                    &sapling_extfvk_bytes
                 )
                 .unwrap(),
             );
@@ -91,10 +89,9 @@ pub(crate) fn inspect_mnemonic(mnemonic: bip0039::Mnemonic, context: Option<Cont
             let sapling_addr_bytes = sapling_default_addr.1.to_bytes();
             eprintln!(
                 "     - Default address: {}",
-                bech32::encode(
-                    network.hrp_sapling_payment_address(),
-                    sapling_addr_bytes.to_base32(),
-                    bech32::Variant::Bech32,
+                bech32::encode::<Bech32>(
+                    Hrp::parse_unchecked(network.hrp_sapling_payment_address()),
+                    &sapling_addr_bytes,
                 )
                 .unwrap(),
             );
@@ -169,32 +166,20 @@ pub(crate) fn inspect_mnemonic(mnemonic: bip0039::Mnemonic, context: Option<Cont
     );
 }
 
-pub(crate) fn inspect_sapling_extsk(
-    raw: Vec<bech32::u5>,
-    variant: bech32::Variant,
-    network: NetworkType,
-) {
-    match Vec::<u8>::from_base32(&raw)
-        .map_err(|_| ())
-        .and_then(|data| sapling::zip32::ExtendedSpendingKey::read(&data[..]).map_err(|_| ()))
-    {
+pub(crate) fn inspect_sapling_extsk(data: Vec<u8>, network: NetworkType) {
+    match sapling::zip32::ExtendedSpendingKey::read(&data[..]).map_err(|_| ()) {
         Err(_) => {
             eprintln!("Invalid encoding that claims to be a Sapling extended spending key");
         }
         Ok(extsk) => {
             eprintln!("Sapling extended spending key");
-            match variant {
-                bech32::Variant::Bech32 => (),
-                bech32::Variant::Bech32m => eprintln!("⚠️  Incorrectly encoded with Bech32m"),
-            }
 
             let default_addr_bytes = extsk.default_address().1.to_bytes();
             eprintln!(
                 "- Default address: {}",
-                bech32::encode(
-                    network.hrp_sapling_payment_address(),
-                    default_addr_bytes.to_base32(),
-                    bech32::Variant::Bech32,
+                bech32::encode::<Bech32>(
+                    Hrp::parse_unchecked(network.hrp_sapling_payment_address()),
+                    &default_addr_bytes,
                 )
                 .unwrap(),
             );

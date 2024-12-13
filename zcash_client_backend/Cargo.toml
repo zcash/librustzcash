@@ -185,7 +185,6 @@ pczt = [
   "pczt/zcp-builder",
   "dep:postcard",
   "dep:serde",
-  "zcash_address/serde",
 ]
 
 ## Exposes a wallet synchronization function that implements the necessary state machine.

@@ -419,9 +419,9 @@ checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
 name = "bech32"
-version = "0.9.1"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
+checksum = "d965446196e3b7decd44aa7ee49e31d630118f90ef12f97900f262eb915c951d"
 
 [[package]]
 name = "bellman"
@@ -1502,7 +1502,7 @@ dependencies = [
 
 [[package]]
 name = "f4jumble"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "blake2b_simd",
  "hex",
@@ -6143,14 +6143,14 @@ dependencies = [
 
 [[package]]
 name = "zcash_address"
-version = "0.6.0"
+version = "0.6.2"
 dependencies = [
  "assert_matches",
  "bech32",
  "bs58",
+ "core2",
  "f4jumble",
  "proptest",
- "serde",
  "zcash_encoding",
  "zcash_protocol",
 ]

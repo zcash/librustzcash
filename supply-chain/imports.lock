@@ -1,6 +1,14 @@
 
 # cargo-vet imports lock
 
+[[unpublished.f4jumble]]
+version = "0.1.1"
+audited_as = "0.1.0"
+
+[[unpublished.zcash_address]]
+version = "0.6.2"
+audited_as = "0.6.1"
+
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
@@ -238,8 +246,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_address]]
-version = "0.6.0"
-when = "2024-10-02"
+version = "0.6.1"
+when = "2024-12-13"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
