@@ -16,8 +16,12 @@ categories = ["cryptography::cryptocurrencies", "encoding"]
 keywords = ["zcash"]
 
 [dependencies]
-byteorder.workspace = true
-nonempty.workspace = true
+core2 = { version = "0.3", default-features = false, features = ["alloc"] }
+nonempty = { workspace = true, optional = true }
+
+[features]
+default = ["std"]
+std = ["core2/std", "dep:nonempty"]
 
 [lib]
 bench = false
