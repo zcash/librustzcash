@@ -574,7 +574,19 @@
 <a href="#573" id="573">573</a>
 <a href="#574" id="574">574</a>
 <a href="#575" id="575">575</a>
-<a href="#576" id="576">576</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
+<a href="#576" id="576">576</a>
+<a href="#577" id="577">577</a>
+<a href="#578" id="578">578</a>
+<a href="#579" id="579">579</a>
+<a href="#580" id="580">580</a>
+<a href="#581" id="581">581</a>
+<a href="#582" id="582">582</a>
+<a href="#583" id="583">583</a>
+<a href="#584" id="584">584</a>
+<a href="#585" id="585">585</a>
+<a href="#586" id="586">586</a>
+<a href="#587" id="587">587</a>
+<a href="#588" id="588">588</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::collections::BTreeMap;
 
 <span class="kw">use </span>getset::Getters;
@@ -807,6 +819,14 @@
     <span class="doccomment">/// The ZIP 32 derivation path at which the spending key can be found for the output.
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) zip32_derivation: <span class="prelude-ty">Option</span>&lt;Zip32Derivation&gt;,
 
+    <span class="doccomment">/// The user-facing address to which this output is being sent, if any.
+    ///
+    /// - This is set by an Updater.
+    /// - Signers must parse this address (if present) and confirm that it contains
+    ///   `recipient` (either directly, or e.g. as a receiver within a Unified Address).
+    </span><span class="attr">#[getset(get = <span class="string">"pub"</span>)]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) user_address: <span class="prelude-ty">Option</span>&lt;String&gt;,
+
     <span class="doccomment">/// Proprietary fields related to the note being spent.
     </span><span class="attr">#[getset(get = <span class="string">"pub"</span>)]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) proprietary: BTreeMap&lt;String, Vec&lt;u8&gt;&gt;,
@@ -967,6 +987,7 @@
                 rcv,
                 ock,
                 zip32_derivation,
+                user_address,
                 proprietary,
             } = rhs;
 
@@ -986,6 +1007,7 @@
                 &amp;&amp; merge_optional(<span class="kw-2">&amp;mut </span>lhs.rcv, rcv)
                 &amp;&amp; merge_optional(<span class="kw-2">&amp;mut </span>lhs.ock, ock)
                 &amp;&amp; merge_optional(<span class="kw-2">&amp;mut </span>lhs.zip32_derivation, zip32_derivation)
+                &amp;&amp; merge_optional(<span class="kw-2">&amp;mut </span>lhs.user_address, user_address)
                 &amp;&amp; merge_map(<span class="kw-2">&amp;mut </span>lhs.proprietary, proprietary))
             {
                 <span class="kw">return </span><span class="prelude-val">None</span>;
@@ -1057,6 +1079,7 @@
                             )
                         })
                         .transpose()<span class="question-mark">?</span>,
+                    output.user_address,
                     output.proprietary,
                 )
             })
@@ -1137,6 +1160,7 @@
                     seed_fingerprint: <span class="kw-2">*</span>z.seed_fingerprint(),
                     derivation_path: z.derivation_path().iter().map(|i| i.index()).collect(),
                 }),
+                user_address: output.user_address().clone(),
                 proprietary: output.proprietary().clone(),
             })
             .collect();

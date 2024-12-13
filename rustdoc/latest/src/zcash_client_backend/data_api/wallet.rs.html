@@ -2038,7 +2038,54 @@
 <a href="#2037" id="2037">2037</a>
 <a href="#2038" id="2038">2038</a>
 <a href="#2039" id="2039">2039</a>
-<a href="#2040" id="2040">2040</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Functions for creating Zcash transactions that spend funds belonging to the wallet
+<a href="#2040" id="2040">2040</a>
+<a href="#2041" id="2041">2041</a>
+<a href="#2042" id="2042">2042</a>
+<a href="#2043" id="2043">2043</a>
+<a href="#2044" id="2044">2044</a>
+<a href="#2045" id="2045">2045</a>
+<a href="#2046" id="2046">2046</a>
+<a href="#2047" id="2047">2047</a>
+<a href="#2048" id="2048">2048</a>
+<a href="#2049" id="2049">2049</a>
+<a href="#2050" id="2050">2050</a>
+<a href="#2051" id="2051">2051</a>
+<a href="#2052" id="2052">2052</a>
+<a href="#2053" id="2053">2053</a>
+<a href="#2054" id="2054">2054</a>
+<a href="#2055" id="2055">2055</a>
+<a href="#2056" id="2056">2056</a>
+<a href="#2057" id="2057">2057</a>
+<a href="#2058" id="2058">2058</a>
+<a href="#2059" id="2059">2059</a>
+<a href="#2060" id="2060">2060</a>
+<a href="#2061" id="2061">2061</a>
+<a href="#2062" id="2062">2062</a>
+<a href="#2063" id="2063">2063</a>
+<a href="#2064" id="2064">2064</a>
+<a href="#2065" id="2065">2065</a>
+<a href="#2066" id="2066">2066</a>
+<a href="#2067" id="2067">2067</a>
+<a href="#2068" id="2068">2068</a>
+<a href="#2069" id="2069">2069</a>
+<a href="#2070" id="2070">2070</a>
+<a href="#2071" id="2071">2071</a>
+<a href="#2072" id="2072">2072</a>
+<a href="#2073" id="2073">2073</a>
+<a href="#2074" id="2074">2074</a>
+<a href="#2075" id="2075">2075</a>
+<a href="#2076" id="2076">2076</a>
+<a href="#2077" id="2077">2077</a>
+<a href="#2078" id="2078">2078</a>
+<a href="#2079" id="2079">2079</a>
+<a href="#2080" id="2080">2080</a>
+<a href="#2081" id="2081">2081</a>
+<a href="#2082" id="2082">2082</a>
+<a href="#2083" id="2083">2083</a>
+<a href="#2084" id="2084">2084</a>
+<a href="#2085" id="2085">2085</a>
+<a href="#2086" id="2086">2086</a>
+<a href="#2087" id="2087">2087</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Functions for creating Zcash transactions that spend funds belonging to the wallet
 //!
 //! This module contains several different ways of creating Zcash transactions. This module is
 //! designed around the idea that a Zcash wallet holds its funds in notes in either the Orchard
@@ -2172,32 +2219,30 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
 </span><span class="attr">#[cfg(feature = <span class="string">"pczt"</span>)]
 #[derive(Serialize, Deserialize)]
 </span><span class="kw">enum </span>PcztRecipient&lt;AccountId&gt; {
-    External(ZcashAddress),
-    EphemeralTransparent {
-        receiving_account: AccountId,
-    },
-    InternalAccount {
-        receiving_account: AccountId,
-        external_address: <span class="prelude-ty">Option</span>&lt;ZcashAddress&gt;,
-    },
+    External,
+    EphemeralTransparent { receiving_account: AccountId },
+    InternalAccount { receiving_account: AccountId },
 }
 
 <span class="attr">#[cfg(feature = <span class="string">"pczt"</span>)]
 </span><span class="kw">impl</span>&lt;AccountId: Copy&gt; PcztRecipient&lt;AccountId&gt; {
-    <span class="kw">fn </span>from_recipient&lt;N, O&gt;(recipient: Recipient&lt;AccountId, N, O&gt;) -&gt; <span class="self">Self </span>{
+    <span class="kw">fn </span>from_recipient&lt;N, O&gt;(recipient: Recipient&lt;AccountId, N, O&gt;) -&gt; (<span class="self">Self</span>, <span class="prelude-ty">Option</span>&lt;ZcashAddress&gt;) {
         <span class="kw">match </span>recipient {
-            Recipient::External(addr, <span class="kw">_</span>) =&gt; PcztRecipient::External(addr),
+            Recipient::External(addr, <span class="kw">_</span>) =&gt; (PcztRecipient::External, <span class="prelude-val">Some</span>(addr)),
             Recipient::EphemeralTransparent {
                 receiving_account, ..
-            } =&gt; PcztRecipient::EphemeralTransparent { receiving_account },
+            } =&gt; (
+                PcztRecipient::EphemeralTransparent { receiving_account },
+                <span class="prelude-val">None</span>,
+            ),
             Recipient::InternalAccount {
                 receiving_account,
                 external_address,
                 ..
-            } =&gt; PcztRecipient::InternalAccount {
-                receiving_account,
+            } =&gt; (
+                PcztRecipient::InternalAccount { receiving_account },
                 external_address,
-            },
+            ),
         }
     }
 }
@@ -3497,7 +3542,10 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
                         }
                     }
 
-                    <span class="kw">if let </span><span class="prelude-val">Some</span>(pczt_recipient) = orchard_outputs.get(<span class="kw-2">&amp;</span>index) {
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>((pczt_recipient, external_address)) = orchard_outputs.get(<span class="kw-2">&amp;</span>index) {
+                        <span class="kw">if let </span><span class="prelude-val">Some</span>(user_address) = external_address {
+                            action_updater.set_output_user_address(user_address.encode());
+                        }
                         action_updater.set_output_proprietary(
                             PROPRIETARY_OUTPUT_INFO.into(),
                             postcard::to_allocvec(pczt_recipient).expect(
@@ -3549,8 +3597,11 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
             }
 
             <span class="kw">for </span>index <span class="kw">in </span><span class="number">0</span>..updater.bundle().outputs().len() {
-                <span class="kw">if let </span><span class="prelude-val">Some</span>(pczt_recipient) = sapling_outputs.get(<span class="kw-2">&amp;</span>index) {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>((pczt_recipient, external_address)) = sapling_outputs.get(<span class="kw-2">&amp;</span>index) {
                     updater.update_output_with(index, |<span class="kw-2">mut </span>output_updater| {
+                        <span class="kw">if let </span><span class="prelude-val">Some</span>(user_address) = external_address {
+                            output_updater.set_user_address(user_address.encode());
+                        }
                         output_updater.set_proprietary(
                             PROPRIETARY_OUTPUT_INFO.into(),
                             postcard::to_allocvec(pczt_recipient).expect(
@@ -3629,9 +3680,14 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
                 </span>build_state.transparent_output_meta.into_iter().enumerate()
             {
                 updater.update_output_with(index, |<span class="kw-2">mut </span>output_updater| {
+                    <span class="kw">let </span>(pczt_recipient, external_address) =
+                        PcztRecipient::from_recipient(recipient);
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>(user_address) = external_address {
+                        output_updater.set_user_address(user_address.encode());
+                    }
                     output_updater.set_proprietary(
                         PROPRIETARY_OUTPUT_INFO.into(),
-                        postcard::to_allocvec(<span class="kw-2">&amp;</span>PcztRecipient::from_recipient(recipient))
+                        postcard::to_allocvec(<span class="kw-2">&amp;</span>pczt_recipient)
                             .expect(<span class="string">"postcard encoding of pczt recipient metadata should not fail"</span>),
                     );
                     <span class="prelude-val">Ok</span>(())
@@ -3704,25 +3760,34 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
                 orchard::Note::from_parts(recipient, value, rho, rseed).into_option()
             };
 
+            <span class="kw">let </span>external_address = act
+                .output()
+                .user_address()
+                .as_deref()
+                .map(ZcashAddress::try_from_encoded)
+                .transpose()
+                .map_err(|e| PcztError::Invalid(<span class="macro">format!</span>(<span class="string">"Invalid user_address: {}"</span>, e)))<span class="question-mark">?</span>;
+
             <span class="kw">let </span>pczt_recipient = act
                 .output()
                 .proprietary()
                 .get(PROPRIETARY_OUTPUT_INFO)
                 .map(|v| postcard::from_bytes::&lt;PcztRecipient&lt;DbT::AccountId&gt;&gt;(v))
-                .transpose()<span class="question-mark">?</span>;
+                .transpose()
+                .map_err(|e: postcard::Error| {
+                    PcztError::Invalid(<span class="macro">format!</span>(
+                        <span class="string">"Postcard decoding of proprietary output info failed: {}"</span>,
+                        e
+                    ))
+                })<span class="question-mark">?
+                </span>.map(|pczt_recipient| (pczt_recipient, external_address));
 
             <span class="comment">// If the pczt recipient is not present, this is a dummy note; if the note is not
             // present, then the PCZT has been pruned to make this output unrecoverable and so we
             // also ignore it.
             </span><span class="prelude-val">Ok</span>(pczt_recipient.zip(note()))
         })
-        .collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;()
-        .map_err(|e: postcard::Error| {
-            PcztError::Invalid(<span class="macro">format!</span>(
-                <span class="string">"Postcard decoding of proprietary output info failed: {}"</span>,
-                e
-            ))
-        })<span class="question-mark">?</span>;
+        .collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, PcztError&gt;&gt;()<span class="question-mark">?</span>;
 
     <span class="kw">let </span>sapling_output_info = finalized
         .sapling()
@@ -3744,42 +3809,61 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
                 <span class="prelude-val">Some</span>(::sapling::Note::from_parts(recipient, value, rseed))
             };
 
+            <span class="kw">let </span>external_address = out
+                .user_address()
+                .as_deref()
+                .map(ZcashAddress::try_from_encoded)
+                .transpose()
+                .map_err(|e| PcztError::Invalid(<span class="macro">format!</span>(<span class="string">"Invalid user_address: {}"</span>, e)))<span class="question-mark">?</span>;
+
             <span class="kw">let </span>pczt_recipient = out
                 .proprietary()
                 .get(PROPRIETARY_OUTPUT_INFO)
                 .map(|v| postcard::from_bytes::&lt;PcztRecipient&lt;DbT::AccountId&gt;&gt;(v))
-                .transpose()<span class="question-mark">?</span>;
+                .transpose()
+                .map_err(|e: postcard::Error| {
+                    PcztError::Invalid(<span class="macro">format!</span>(
+                        <span class="string">"Postcard decoding of proprietary output info failed: {}"</span>,
+                        e
+                    ))
+                })<span class="question-mark">?
+                </span>.map(|pczt_recipient| (pczt_recipient, external_address));
 
             <span class="comment">// If the pczt recipient is not present, this is a dummy note; if the note is not
             // present, then the PCZT has been pruned to make this output unrecoverable and so we
             // also ignore it.
             </span><span class="prelude-val">Ok</span>(pczt_recipient.zip(note()))
         })
-        .collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;()
-        .map_err(|e: postcard::Error| {
-            PcztError::Invalid(<span class="macro">format!</span>(
-                <span class="string">"Postcard decoding of proprietary output info failed: {}"</span>,
-                e
-            ))
-        })<span class="question-mark">?</span>;
+        .collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, PcztError&gt;&gt;()<span class="question-mark">?</span>;
 
     <span class="kw">let </span>transparent_output_info = finalized
         .transparent()
         .outputs()
         .iter()
         .map(|out| {
-            out.proprietary()
+            <span class="kw">let </span>external_address = out
+                .user_address()
+                .as_deref()
+                .map(ZcashAddress::try_from_encoded)
+                .transpose()
+                .map_err(|e| PcztError::Invalid(<span class="macro">format!</span>(<span class="string">"Invalid user_address: {}"</span>, e)))<span class="question-mark">?</span>;
+
+            <span class="kw">let </span>pczt_recipient = out
+                .proprietary()
                 .get(PROPRIETARY_OUTPUT_INFO)
                 .map(|v| postcard::from_bytes::&lt;PcztRecipient&lt;DbT::AccountId&gt;&gt;(v))
                 .transpose()
+                .map_err(|e: postcard::Error| {
+                    PcztError::Invalid(<span class="macro">format!</span>(
+                        <span class="string">"Postcard decoding of proprietary output info failed: {}"</span>,
+                        e
+                    ))
+                })<span class="question-mark">?
+                </span>.map(|pczt_recipient| (pczt_recipient, external_address));
+
+            <span class="prelude-val">Ok</span>(pczt_recipient)
         })
-        .collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;()
-        .map_err(|e: postcard::Error| {
-            PcztError::Invalid(<span class="macro">format!</span>(
-                <span class="string">"Postcard decoding of proprietary output info failed: {}"</span>,
-                e
-            ))
-        })<span class="question-mark">?</span>;
+        .collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, PcztError&gt;&gt;()<span class="question-mark">?</span>;
 
     <span class="kw">let </span>utxos_map = finalized
         .transparent()
@@ -3815,6 +3899,7 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
         output_pool: ShieldedProtocol,
         output_index: usize,
         pczt_recipient: PcztRecipient&lt;AccountId&gt;,
+        external_address: <span class="prelude-ty">Option</span>&lt;ZcashAddress&gt;,
         note_value: <span class="kw">impl </span>Fn(<span class="kw-2">&amp;</span>D::Note) -&gt; u64,
         memo_bytes: <span class="kw">impl </span>Fn(<span class="kw-2">&amp;</span>D::Memo) -&gt; <span class="kw-2">&amp;</span>[u8; <span class="number">512</span>],
         wallet_note: <span class="kw">impl </span>Fn(D::Note) -&gt; Note,
@@ -3826,21 +3911,23 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
         });
 
         <span class="kw">let </span>note_value = NonNegativeAmount::try_from(note_value(<span class="kw-2">&amp;</span>note))<span class="question-mark">?</span>;
-        <span class="kw">let </span>recipient = <span class="kw">match </span>pczt_recipient {
-            PcztRecipient::External(addr) =&gt; {
+        <span class="kw">let </span>recipient = <span class="kw">match </span>(pczt_recipient, external_address) {
+            (PcztRecipient::External, <span class="prelude-val">Some</span>(addr)) =&gt; {
                 <span class="prelude-val">Ok</span>(Recipient::External(addr, PoolType::Shielded(output_pool)))
             }
-            PcztRecipient::EphemeralTransparent { .. } =&gt; <span class="prelude-val">Err</span>(PcztError::Invalid(
+            (PcztRecipient::External, <span class="prelude-val">None</span>) =&gt; <span class="prelude-val">Err</span>(PcztError::Invalid(
+                <span class="string">"external recipient needs to have its user_address field set"</span>.into(),
+            )),
+            (PcztRecipient::EphemeralTransparent { .. }, <span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(PcztError::Invalid(
                 <span class="string">"shielded output cannot be EphemeralTransparent"</span>.into(),
             )),
-            PcztRecipient::InternalAccount {
-                receiving_account,
-                external_address,
-            } =&gt; <span class="prelude-val">Ok</span>(Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note: wallet_note(note),
-            }),
+            (PcztRecipient::InternalAccount { receiving_account }, external_address) =&gt; {
+                <span class="prelude-val">Ok</span>(Recipient::InternalAccount {
+                    receiving_account,
+                    external_address,
+                    note: wallet_note(note),
+                })
+            }
         }<span class="question-mark">?</span>;
 
         <span class="prelude-val">Ok</span>(SentTransactionOutput::from_parts(
@@ -3862,7 +3949,7 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
                 .zip(orchard_output_info)
                 .enumerate()
                 .filter_map(|(output_index, (action, output_info))| {
-                    output_info.map(|(pczt_recipient, note)| {
+                    output_info.map(|((pczt_recipient, external_address), note)| {
                         <span class="kw">let </span>domain = OrchardDomain::for_action(action);
                         to_sent_transaction_output::&lt;<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>, DbT, <span class="kw">_</span>&gt;(
                             domain,
@@ -3871,6 +3958,7 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
                             ShieldedProtocol::Orchard,
                             output_index,
                             pczt_recipient,
+                            external_address,
                             |note| note.value().inner(),
                             |memo| memo,
                             Note::Orchard,
@@ -3891,7 +3979,7 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
                 .zip(sapling_output_info)
                 .enumerate()
                 .filter_map(|(output_index, (action, output_info))| {
-                    output_info.map(|(pczt_recipient, note)| {
+                    output_info.map(|((pczt_recipient, external_address), note)| {
                         <span class="kw">let </span>domain =
                             SaplingDomain::new(sapling::note_encryption::Zip212Enforcement::On);
                         to_sent_transaction_output::&lt;<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>, DbT, <span class="kw">_</span>&gt;(
@@ -3901,6 +3989,7 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
                             ShieldedProtocol::Sapling,
                             output_index,
                             pczt_recipient,
+                            external_address,
                             |note| note.value().inner(),
                             |memo| memo,
                             Note::Sapling,
@@ -3922,18 +4011,21 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
                 .zip(transparent_output_info)
                 .enumerate()
                 .filter_map(|(output_index, (output, output_info))| {
-                    output_info.map(|pczt_recipient| {
+                    output_info.map(|(pczt_recipient, external_address)| {
                         <span class="comment">// This assumes that transparent outputs are pushed onto `transparent_output_meta`
                         // with the same indices they have in the transaction's transparent outputs.
                         // We do not reorder transparent outputs; there is no reason to do so because it
                         // would not usefully improve privacy.
                         </span><span class="kw">let </span>outpoint = OutPoint::new(txid.into(), output_index <span class="kw">as </span>u32);
 
-                        <span class="kw">let </span>recipient = <span class="kw">match </span>pczt_recipient {
-                            PcztRecipient::External(addr) =&gt; {
+                        <span class="kw">let </span>recipient = <span class="kw">match </span>(pczt_recipient, external_address) {
+                            (PcztRecipient::External, <span class="prelude-val">Some</span>(addr)) =&gt; {
                                 <span class="prelude-val">Ok</span>(Recipient::External(addr, PoolType::Transparent))
                             }
-                            PcztRecipient::EphemeralTransparent { receiving_account } =&gt; output
+                            (PcztRecipient::External, <span class="prelude-val">None</span>) =&gt; <span class="prelude-val">Err</span>(PcztError::Invalid(
+                                <span class="string">"external recipient needs to have its user_address field set"</span>.into(),
+                            )),
+                            (PcztRecipient::EphemeralTransparent { receiving_account }, <span class="kw">_</span>) =&gt; output
                                 .recipient_address()
                                 .ok_or(PcztError::Invalid(
                                     <span class="string">"Ephemeral outputs cannot have a non-standard script_pubkey"
@@ -3944,10 +4036,12 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
                                     ephemeral_address,
                                     outpoint_metadata: outpoint,
                                 }),
-                            PcztRecipient::InternalAccount {
-                                receiving_account,
-                                external_address,
-                            } =&gt; <span class="prelude-val">Err</span>(PcztError::Invalid(
+                            (
+                                PcztRecipient::InternalAccount {
+                                    receiving_account,
+                                },
+                                <span class="kw">_</span>,
+                            ) =&gt; <span class="prelude-val">Err</span>(PcztError::Invalid(
                                 <span class="string">"Transparent output cannot be InternalAccount"</span>.into(),
                             )),
                         }<span class="question-mark">?</span>;

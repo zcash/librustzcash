@@ -386,7 +386,8 @@
 <a href="#385" id="385">385</a>
 <a href="#386" id="386">386</a>
 <a href="#387" id="387">387</a>
-<a href="#388" id="388">388</a></pre></div><pre class="rust"><code><span class="doccomment">//! Types and functions for building transparent transaction components.
+<a href="#388" id="388">388</a>
+<a href="#389" id="389">389</a></pre></div><pre class="rust"><code><span class="doccomment">//! Types and functions for building transparent transaction components.
 
 </span><span class="kw">use </span>std::collections::BTreeMap;
 <span class="kw">use </span>std::fmt;
@@ -663,6 +664,7 @@
                     // script.
                     </span>redeem_script: <span class="prelude-val">None</span>,
                     bip32_derivation: BTreeMap::new(),
+                    user_address: <span class="prelude-val">None</span>,
                     proprietary: BTreeMap::new(),
                 })
                 .collect();

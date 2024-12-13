@@ -137,7 +137,9 @@
 <a href="#136" id="136">136</a>
 <a href="#137" id="137">137</a>
 <a href="#138" id="138">138</a>
-<a href="#139" id="139">139</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeMap;
+<a href="#139" id="139">139</a>
+<a href="#140" id="140">140</a>
+<a href="#141" id="141">141</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeMap;
 
 <span class="kw">use </span>bip32::ChildNumber;
 <span class="kw">use </span>zcash_protocol::value::Zatoshis;
@@ -233,6 +235,7 @@
         script_pubkey: Vec&lt;u8&gt;,
         redeem_script: <span class="prelude-ty">Option</span>&lt;Vec&lt;u8&gt;&gt;,
         bip32_derivation: BTreeMap&lt;[u8; <span class="number">33</span>], Bip32Derivation&gt;,
+        user_address: <span class="prelude-ty">Option</span>&lt;String&gt;,
         proprietary: BTreeMap&lt;String, Vec&lt;u8&gt;&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, ParseError&gt; {
         <span class="kw">let </span>value = Zatoshis::from_u64(value).map_err(|<span class="kw">_</span>| ParseError::InvalidValue)<span class="question-mark">?</span>;
@@ -248,6 +251,7 @@
             script_pubkey,
             redeem_script,
             bip32_derivation,
+            user_address,
             proprietary,
         })
     }

@@ -151,7 +151,12 @@
 <a href="#150" id="150">150</a>
 <a href="#151" id="151">151</a>
 <a href="#152" id="152">152</a>
-<a href="#153" id="153">153</a></pre></div><pre class="rust"><code><span class="kw">use </span>ripemd::Ripemd160;
+<a href="#153" id="153">153</a>
+<a href="#154" id="154">154</a>
+<a href="#155" id="155">155</a>
+<a href="#156" id="156">156</a>
+<a href="#157" id="157">157</a>
+<a href="#158" id="158">158</a></pre></div><pre class="rust"><code><span class="kw">use </span>ripemd::Ripemd160;
 <span class="kw">use </span>sha2::{Digest, Sha256};
 
 <span class="kw">use </span><span class="kw">crate</span>::legacy::{Script, TransparentAddress};
@@ -286,6 +291,11 @@
     <span class="doccomment">/// Sets the BIP 32 derivation path for the given pubkey.
     </span><span class="kw">pub fn </span>set_bip32_derivation(<span class="kw-2">&amp;mut </span><span class="self">self</span>, pubkey: [u8; <span class="number">33</span>], derivation: Bip32Derivation) {
         <span class="self">self</span>.<span class="number">0</span>.bip32_derivation.insert(pubkey, derivation);
+    }
+
+    <span class="doccomment">/// Sets the user-facing address that the new note is being sent to.
+    </span><span class="kw">pub fn </span>set_user_address(<span class="kw-2">&amp;mut </span><span class="self">self</span>, user_address: String) {
+        <span class="self">self</span>.<span class="number">0</span>.user_address = <span class="prelude-val">Some</span>(user_address);
     }
 
     <span class="doccomment">/// Stores the given proprietary value at the given key.
