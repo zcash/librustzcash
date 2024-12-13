@@ -11,7 +11,8 @@ use {
         },
         Network, ToAddress, ZcashAddress,
     },
-    std::iter,
+    alloc::string::ToString,
+    core::iter,
 };
 
 #[test]

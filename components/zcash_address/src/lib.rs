@@ -124,10 +124,19 @@
 //! }
 //! ```
 
+#![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
+
+#[macro_use]
+extern crate alloc;
+
+#[cfg(feature = "std")]
+extern crate std;
+
+use alloc::string::String;
 
 mod convert;
 mod encoding;
@@ -168,7 +177,7 @@ impl<'de> serde::Deserialize<'de> for ZcashAddress {
     where
         D: serde::Deserializer<'de>,
     {
-        use std::fmt;
+        use core::fmt;
         struct AddrVisitor;
 
         impl<'de> serde::de::Visitor<'de> for AddrVisitor {
@@ -349,7 +358,7 @@ impl ZcashAddress {
 
 #[cfg(feature = "test-dependencies")]
 pub mod testing {
-    use std::convert::TryInto;
+    use core::convert::TryInto;
 
     use proptest::{array::uniform20, collection::vec, prelude::any, prop_compose, prop_oneof};
 

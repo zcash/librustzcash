@@ -6148,6 +6148,7 @@ dependencies = [
  "assert_matches",
  "bech32",
  "bs58",
+ "core2",
  "f4jumble",
  "proptest",
  "serde",

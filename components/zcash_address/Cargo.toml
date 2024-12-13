@@ -21,6 +21,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 bech32.workspace = true
 bs58.workspace = true
+core2.workspace = true
 f4jumble = { version = "0.1", path = "../f4jumble" }
 zcash_protocol.workspace = true
 zcash_encoding.workspace = true
@@ -32,6 +33,12 @@ assert_matches.workspace = true
 proptest.workspace = true
 
 [features]
+default = ["std"]
+std = [
+    "core2/std",
+    "zcash_encoding/std",
+    "zcash_protocol/std",
+]
 test-dependencies = ["dep:proptest"]
 serde = ["dep:serde"]
 

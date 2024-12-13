@@ -1,4 +1,11 @@
-use std::{convert::TryInto, error::Error, fmt, str::FromStr};
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::convert::TryInto;
+use core::fmt;
+use core::str::FromStr;
+
+#[cfg(feature = "std")]
+use std::error::Error;
 
 use bech32::{self, FromBase32, ToBase32, Variant};
 use zcash_protocol::consensus::{NetworkConstants, NetworkType};
@@ -38,6 +45,7 @@ impl fmt::Display for ParseError {
     }
 }
 
+#[cfg(feature = "std")]
 impl Error for ParseError {}
 
 impl FromStr for ZcashAddress {
@@ -177,6 +185,8 @@ impl fmt::Display for ZcashAddress {
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::ToString;
+
     use assert_matches::assert_matches;
 
     use super::*;

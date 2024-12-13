@@ -1,11 +1,16 @@
 //! Implementation of [ZIP 316](https://zips.z.cash/zip-0316) Unified Addresses and Viewing Keys.
 
-use bech32::{self, FromBase32, ToBase32, Variant};
-use std::cmp;
-use std::convert::{TryFrom, TryInto};
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::cmp;
+use core::convert::{TryFrom, TryInto};
+use core::fmt;
+use core::num::TryFromIntError;
+
+#[cfg(feature = "std")]
 use std::error::Error;
-use std::fmt;
-use std::num::TryFromIntError;
+
+use bech32::{self, FromBase32, ToBase32, Variant};
 
 use crate::Network;
 
@@ -155,16 +160,18 @@ impl fmt::Display for ParseError {
     }
 }
 
+#[cfg(feature = "std")]
 impl Error for ParseError {}
 
 pub(crate) mod private {
+    use alloc::borrow::ToOwned;
+    use alloc::vec::Vec;
+    use core::cmp;
+    use core::convert::{TryFrom, TryInto};
+    use core2::io::Write;
+
     use super::{ParseError, Typecode, PADDING_LEN};
     use crate::Network;
-    use std::{
-        cmp,
-        convert::{TryFrom, TryInto},
-        io::Write,
-    };
     use zcash_encoding::CompactSize;
 
     /// A raw address or viewing key.
@@ -188,7 +195,7 @@ pub(crate) mod private {
     }
 
     /// A Unified Container containing addresses or viewing keys.
-    pub trait SealedContainer: super::Container + std::marker::Sized {
+    pub trait SealedContainer: super::Container + core::marker::Sized {
         const MAINNET: &'static str;
         const TESTNET: &'static str;
         const REGTEST: &'static str;
@@ -235,14 +242,13 @@ pub(crate) mod private {
         fn to_jumbled_bytes(&self, hrp: &str) -> Vec<u8> {
             assert!(hrp.len() <= PADDING_LEN);
 
-            let mut writer = std::io::Cursor::new(Vec::new());
-            self.write_raw_encoding(&mut writer);
+            let mut padded = Vec::new();
+            self.write_raw_encoding(&mut padded);
 
             let mut padding = [0u8; PADDING_LEN];
             padding[0..hrp.len()].copy_from_slice(hrp.as_bytes());
-            writer.write_all(&padding).unwrap();
+            padded.write_all(&padding).unwrap();
 
-            let padded = writer.into_inner();
             f4jumble::f4jumble(&padded)
                 .unwrap_or_else(|e| panic!("f4jumble failed on {:?}: {}", padded, e))
         }
@@ -250,7 +256,7 @@ pub(crate) mod private {
         /// Parse the items of the unified container.
         fn parse_items<T: Into<Vec<u8>>>(hrp: &str, buf: T) -> Result<Vec<Self::Item>, ParseError> {
             fn read_receiver<R: SealedItem>(
-                mut cursor: &mut std::io::Cursor<&[u8]>,
+                mut cursor: &mut core2::io::Cursor<&[u8]>,
             ) -> Result<R, ParseError> {
                 let typecode = CompactSize::read(&mut cursor)
                     .map(|v| u32::try_from(v).expect("CompactSize::read enforces MAX_SIZE limit"))
@@ -308,7 +314,7 @@ pub(crate) mod private {
                 )),
             }?;
 
-            let mut cursor = std::io::Cursor::new(encoded);
+            let mut cursor = core2::io::Cursor::new(encoded);
             let mut result = vec![];
             while cursor.position() < encoded.len().try_into().unwrap() {
                 result.push(read_receiver(&mut cursor)?);

@@ -35,9 +35,9 @@ categories = ["cryptography::cryptocurrencies"]
 equihash = { version = "0.2", path = "components/equihash" }
 zcash_address = { version = "0.6", path = "components/zcash_address" }
 zcash_client_backend = { version = "0.15", path = "zcash_client_backend" }
-zcash_encoding = { version = "0.2.1", path = "components/zcash_encoding" }
+zcash_encoding = { version = "0.2.1", path = "components/zcash_encoding", default-features = false }
 zcash_keys = { version = "0.5", path = "zcash_keys" }
-zcash_protocol = { version = "0.4.1", path = "components/zcash_protocol" }
+zcash_protocol = { version = "0.4.1", path = "components/zcash_protocol", default-features = false }
 zip321 = { version = "0.2", path = "components/zip321" }
 
 zcash_note_encryption = "0.4.1"
@@ -93,7 +93,7 @@ document-features = "0.2"
 # Encodings
 base64 = "0.22"
 bech32 = "0.9"
-bs58 = { version = "0.5", features = ["check"] }
+bs58 = { version = "0.5", default-features = false, features = ["alloc", "check"] }
 byteorder = "1"
 hex = "0.4"
 percent-encoding = "2.1.0"
@@ -111,6 +111,9 @@ webpki-roots = "0.25"
 # Logging and metrics
 memuse = "0.2.1"
 tracing = "0.1"
+
+# No-std support
+core2 = { version = "0.3", default-features = false, features = ["alloc"] }
 
 # Parallel processing
 crossbeam-channel = "0.5"
