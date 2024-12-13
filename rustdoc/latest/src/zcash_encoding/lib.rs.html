@@ -409,20 +409,55 @@
 <a href="#408" id="408">408</a>
 <a href="#409" id="409">409</a>
 <a href="#410" id="410">410</a>
-<a href="#411" id="411">411</a></pre></div><pre class="rust"><code><span class="doccomment">//! *Zcash binary encodings.*
+<a href="#411" id="411">411</a>
+<a href="#412" id="412">412</a>
+<a href="#413" id="413">413</a>
+<a href="#414" id="414">414</a>
+<a href="#415" id="415">415</a>
+<a href="#416" id="416">416</a>
+<a href="#417" id="417">417</a>
+<a href="#418" id="418">418</a>
+<a href="#419" id="419">419</a>
+<a href="#420" id="420">420</a>
+<a href="#421" id="421">421</a>
+<a href="#422" id="422">422</a>
+<a href="#423" id="423">423</a>
+<a href="#424" id="424">424</a>
+<a href="#425" id="425">425</a>
+<a href="#426" id="426">426</a>
+<a href="#427" id="427">427</a>
+<a href="#428" id="428">428</a>
+<a href="#429" id="429">429</a>
+<a href="#430" id="430">430</a>
+<a href="#431" id="431">431</a>
+<a href="#432" id="432">432</a>
+<a href="#433" id="433">433</a>
+<a href="#434" id="434">434</a>
+<a href="#435" id="435">435</a>
+<a href="#436" id="436">436</a>
+<a href="#437" id="437">437</a>
+<a href="#438" id="438">438</a>
+<a href="#439" id="439">439</a></pre></div><pre class="rust"><code><span class="doccomment">//! *Zcash binary encodings.*
 //!
 //! `zcash_encoding` is a library that provides common encoding and decoding operations
 //! for stable binary encodings used throughout the Zcash ecosystem.
 
+</span><span class="attr">#![no_std]
 </span><span class="comment">// Catch documentation errors caused by code changes.
 </span><span class="attr">#![deny(rustdoc::broken_intra_doc_links)]
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
-</span><span class="kw">use </span>byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-<span class="kw">use </span>nonempty::NonEmpty;
-<span class="kw">use </span>std::io::{<span class="self">self</span>, Read, Write};
-<span class="kw">use </span>std::iter::FromIterator;
+#[cfg_attr(test, macro_use)]
+</span><span class="kw">extern crate </span>alloc;
+
+<span class="kw">use </span>alloc::vec::Vec;
+
+<span class="kw">use </span>core::iter::FromIterator;
+<span class="kw">use </span>core2::io::{<span class="self">self</span>, Read, Write};
+
+<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">use </span>nonempty::NonEmpty;
 
 <span class="doccomment">/// The maximum allowed value representable as a `[CompactSize]`
 </span><span class="kw">pub const </span>MAX_COMPACT_SIZE: u32 = <span class="number">0x02000000</span>;
@@ -436,11 +471,16 @@
 <span class="kw">impl </span>CompactSize {
     <span class="doccomment">/// Reads an integer encoded in compact form.
     </span><span class="kw">pub fn </span>read&lt;R: Read&gt;(<span class="kw-2">mut </span>reader: R) -&gt; io::Result&lt;u64&gt; {
-        <span class="kw">let </span>flag = reader.read_u8()<span class="question-mark">?</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>flag_bytes = [<span class="number">0</span>; <span class="number">1</span>];
+        reader.read_exact(<span class="kw-2">&amp;mut </span>flag_bytes)<span class="question-mark">?</span>;
+        <span class="kw">let </span>flag = flag_bytes[<span class="number">0</span>];
+
         <span class="kw">let </span>result = <span class="kw">if </span>flag &lt; <span class="number">253 </span>{
             <span class="prelude-val">Ok</span>(flag <span class="kw">as </span>u64)
         } <span class="kw">else if </span>flag == <span class="number">253 </span>{
-            <span class="kw">match </span>reader.read_u16::&lt;LittleEndian&gt;()<span class="question-mark">? </span>{
+            <span class="kw">let </span><span class="kw-2">mut </span>bytes = [<span class="number">0</span>; <span class="number">2</span>];
+            reader.read_exact(<span class="kw-2">&amp;mut </span>bytes)<span class="question-mark">?</span>;
+            <span class="kw">match </span>u16::from_le_bytes(bytes) {
                 n <span class="kw">if </span>n &lt; <span class="number">253 </span>=&gt; <span class="prelude-val">Err</span>(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     <span class="string">"non-canonical CompactSize"</span>,
@@ -448,7 +488,9 @@
                 n =&gt; <span class="prelude-val">Ok</span>(n <span class="kw">as </span>u64),
             }
         } <span class="kw">else if </span>flag == <span class="number">254 </span>{
-            <span class="kw">match </span>reader.read_u32::&lt;LittleEndian&gt;()<span class="question-mark">? </span>{
+            <span class="kw">let </span><span class="kw-2">mut </span>bytes = [<span class="number">0</span>; <span class="number">4</span>];
+            reader.read_exact(<span class="kw-2">&amp;mut </span>bytes)<span class="question-mark">?</span>;
+            <span class="kw">match </span>u32::from_le_bytes(bytes) {
                 n <span class="kw">if </span>n &lt; <span class="number">0x10000 </span>=&gt; <span class="prelude-val">Err</span>(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     <span class="string">"non-canonical CompactSize"</span>,
@@ -456,7 +498,9 @@
                 n =&gt; <span class="prelude-val">Ok</span>(n <span class="kw">as </span>u64),
             }
         } <span class="kw">else </span>{
-            <span class="kw">match </span>reader.read_u64::&lt;LittleEndian&gt;()<span class="question-mark">? </span>{
+            <span class="kw">let </span><span class="kw-2">mut </span>bytes = [<span class="number">0</span>; <span class="number">8</span>];
+            reader.read_exact(<span class="kw-2">&amp;mut </span>bytes)<span class="question-mark">?</span>;
+            <span class="kw">match </span>u64::from_le_bytes(bytes) {
                 n <span class="kw">if </span>n &lt; <span class="number">0x100000000 </span>=&gt; <span class="prelude-val">Err</span>(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     <span class="string">"non-canonical CompactSize"</span>,
@@ -489,18 +533,18 @@
     <span class="doccomment">/// Writes the provided `usize` value to the provided Writer in compact form.
     </span><span class="kw">pub fn </span>write&lt;W: Write&gt;(<span class="kw-2">mut </span>writer: W, size: usize) -&gt; io::Result&lt;()&gt; {
         <span class="kw">match </span>size {
-            s <span class="kw">if </span>s &lt; <span class="number">253 </span>=&gt; writer.write_u8(s <span class="kw">as </span>u8),
+            s <span class="kw">if </span>s &lt; <span class="number">253 </span>=&gt; writer.write_all(<span class="kw-2">&amp;</span>[s <span class="kw">as </span>u8]),
             s <span class="kw">if </span>s &lt;= <span class="number">0xFFFF </span>=&gt; {
-                writer.write_u8(<span class="number">253</span>)<span class="question-mark">?</span>;
-                writer.write_u16::&lt;LittleEndian&gt;(s <span class="kw">as </span>u16)
+                writer.write_all(<span class="kw-2">&amp;</span>[<span class="number">253</span>])<span class="question-mark">?</span>;
+                writer.write_all(<span class="kw-2">&amp;</span>(s <span class="kw">as </span>u16).to_le_bytes())
             }
             s <span class="kw">if </span>s &lt;= <span class="number">0xFFFFFFFF </span>=&gt; {
-                writer.write_u8(<span class="number">254</span>)<span class="question-mark">?</span>;
-                writer.write_u32::&lt;LittleEndian&gt;(s <span class="kw">as </span>u32)
+                writer.write_all(<span class="kw-2">&amp;</span>[<span class="number">254</span>])<span class="question-mark">?</span>;
+                writer.write_all(<span class="kw-2">&amp;</span>(s <span class="kw">as </span>u32).to_le_bytes())
             }
             s =&gt; {
-                writer.write_u8(<span class="number">255</span>)<span class="question-mark">?</span>;
-                writer.write_u64::&lt;LittleEndian&gt;(s <span class="kw">as </span>u64)
+                writer.write_all(<span class="kw-2">&amp;</span>[<span class="number">255</span>])<span class="question-mark">?</span>;
+                writer.write_all(<span class="kw-2">&amp;</span>(s <span class="kw">as </span>u64).to_le_bytes())
             }
         }
     }
@@ -566,6 +610,7 @@
 
     <span class="doccomment">/// Writes a NonEmpty container of values to the stream using the same encoding as
     /// `[Vector::write]`
+    </span><span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
     </span><span class="kw">pub fn </span>write_nonempty&lt;W: Write, E, F&gt;(
         <span class="kw-2">mut </span>writer: W,
         vec: <span class="kw-2">&amp;</span>NonEmpty&lt;E&gt;,
@@ -667,7 +712,9 @@
     <span class="kw">where
         </span>F: Fn(R) -&gt; io::Result&lt;T&gt;,
     {
-        <span class="kw">match </span>reader.read_u8()<span class="question-mark">? </span>{
+        <span class="kw">let </span><span class="kw-2">mut </span>bytes = [<span class="number">0</span>; <span class="number">1</span>];
+        reader.read_exact(<span class="kw-2">&amp;mut </span>bytes)<span class="question-mark">?</span>;
+        <span class="kw">match </span>bytes[<span class="number">0</span>] {
             <span class="number">0 </span>=&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
             <span class="number">1 </span>=&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(func(reader)<span class="question-mark">?</span>)),
             <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(io::Error::new(
@@ -685,9 +732,9 @@
         </span>F: Fn(W, T) -&gt; io::Result&lt;()&gt;,
     {
         <span class="kw">match </span>val {
-            <span class="prelude-val">None </span>=&gt; writer.write_u8(<span class="number">0</span>),
+            <span class="prelude-val">None </span>=&gt; writer.write_all(<span class="kw-2">&amp;</span>[<span class="number">0</span>]),
             <span class="prelude-val">Some</span>(e) =&gt; {
-                writer.write_u8(<span class="number">1</span>)<span class="question-mark">?</span>;
+                writer.write_all(<span class="kw-2">&amp;</span>[<span class="number">1</span>])<span class="question-mark">?</span>;
                 func(writer, e)
             }
         }
@@ -697,7 +744,7 @@
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
     <span class="kw">use super</span>::<span class="kw-2">*</span>;
-    <span class="kw">use </span>std::fmt::Debug;
+    <span class="kw">use </span>core::fmt::Debug;
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>compact_size() {
@@ -750,11 +797,14 @@
         <span class="macro">macro_rules!</span> eval {
             (<span class="macro-nonterminal">$value</span>:expr, <span class="macro-nonterminal">$expected</span>:expr) =&gt; {
                 <span class="kw">let </span><span class="kw-2">mut </span>data = <span class="macro">vec!</span>[];
-                Vector::write(<span class="kw-2">&amp;mut </span>data, <span class="kw-2">&amp;</span><span class="macro-nonterminal">$value</span>, |w, e| w.write_u8(<span class="kw-2">*</span>e)).unwrap();
+                Vector::write(<span class="kw-2">&amp;mut </span>data, <span class="kw-2">&amp;</span><span class="macro-nonterminal">$value</span>, |w, e| w.write_all(<span class="kw-2">&amp;</span>[<span class="kw-2">*</span>e])).unwrap();
                 <span class="macro">assert_eq!</span>(<span class="kw-2">&amp;</span>data[..], <span class="kw-2">&amp;</span><span class="macro-nonterminal">$expected</span>[..]);
                 <span class="kw">let </span>serialized_size = Vector::serialized_size_of_u8_vec(<span class="kw-2">&amp;</span><span class="macro-nonterminal">$value</span>);
                 <span class="macro">assert_eq!</span>(serialized_size, <span class="macro-nonterminal">$expected</span>.len());
-                <span class="kw">match </span>Vector::read(<span class="kw-2">&amp;</span>data[..], |r| r.read_u8()) {
+                <span class="kw">match </span>Vector::read(<span class="kw-2">&amp;</span>data[..], |r| {
+                    <span class="kw">let </span><span class="kw-2">mut </span>bytes = [<span class="number">0</span>; <span class="number">1</span>];
+                    r.read_exact(<span class="kw-2">&amp;mut </span>bytes).map(|<span class="kw">_</span>| bytes[<span class="number">0</span>])
+                }) {
                     <span class="prelude-val">Ok</span>(v) =&gt; <span class="macro">assert_eq!</span>(v, <span class="macro-nonterminal">$value</span>),
                     <span class="prelude-val">Err</span>(e) =&gt; <span class="macro">panic!</span>(<span class="string">"Unexpected error: {:?}"</span>, e),
                 }
@@ -793,7 +843,10 @@
 
         <span class="macro">macro_rules!</span> eval_u8 {
             (<span class="macro-nonterminal">$value</span>:expr, <span class="macro-nonterminal">$expected</span>:expr) =&gt; {
-                <span class="macro">eval!</span>(<span class="macro-nonterminal">$value</span>, <span class="macro-nonterminal">$expected</span>, |w, e| w.write_u8(e), |<span class="kw-2">mut </span>r| r.read_u8())
+                <span class="macro">eval!</span>(<span class="macro-nonterminal">$value</span>, <span class="macro-nonterminal">$expected</span>, |w, e| w.write_all(<span class="kw-2">&amp;</span>[e]), |<span class="kw-2">mut </span>r| {
+                    <span class="kw">let </span><span class="kw-2">mut </span>bytes = [<span class="number">0</span>; <span class="number">1</span>];
+                    r.read_exact(<span class="kw-2">&amp;mut </span>bytes).map(|<span class="kw">_</span>| bytes[<span class="number">0</span>])
+                })
             };
         }
 
@@ -802,8 +855,11 @@
                 <span class="macro">eval!</span>(
                     <span class="macro-nonterminal">$value</span>,
                     <span class="macro-nonterminal">$expected</span>,
-                    |w, v| Vector::write(w, <span class="kw-2">&amp;</span>v, |w, e| w.write_u8(<span class="kw-2">*</span>e)),
-                    |r| Vector::read(r, |r| r.read_u8())
+                    |w, v| Vector::write(w, <span class="kw-2">&amp;</span>v, |w, e| w.write_all(<span class="kw-2">&amp;</span>[<span class="kw-2">*</span>e])),
+                    |r| Vector::read(r, |r| {
+                        <span class="kw">let </span><span class="kw-2">mut </span>bytes = [<span class="number">0</span>; <span class="number">1</span>];
+                        r.read_exact(<span class="kw-2">&amp;mut </span>bytes).map(|<span class="kw">_</span>| bytes[<span class="number">0</span>])
+                    })
                 )
             };
         }
