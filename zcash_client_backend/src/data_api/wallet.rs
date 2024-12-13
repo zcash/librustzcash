@@ -132,32 +132,30 @@ struct ProposalInfo<AccountId> {
 #[cfg(feature = "pczt")]
 #[derive(Serialize, Deserialize)]
 enum PcztRecipient<AccountId> {
-    External(ZcashAddress),
-    EphemeralTransparent {
-        receiving_account: AccountId,
-    },
-    InternalAccount {
-        receiving_account: AccountId,
-        external_address: Option<ZcashAddress>,
-    },
+    External,
+    EphemeralTransparent { receiving_account: AccountId },
+    InternalAccount { receiving_account: AccountId },
 }
 
 #[cfg(feature = "pczt")]
 impl<AccountId: Copy> PcztRecipient<AccountId> {
-    fn from_recipient<N, O>(recipient: Recipient<AccountId, N, O>) -> Self {
+    fn from_recipient<N, O>(recipient: Recipient<AccountId, N, O>) -> (Self, Option<ZcashAddress>) {
         match recipient {
-            Recipient::External(addr, _) => PcztRecipient::External(addr),
+            Recipient::External(addr, _) => (PcztRecipient::External, Some(addr)),
             Recipient::EphemeralTransparent {
                 receiving_account, ..
-            } => PcztRecipient::EphemeralTransparent { receiving_account },
+            } => (
+                PcztRecipient::EphemeralTransparent { receiving_account },
+                None,
+            ),
             Recipient::InternalAccount {
                 receiving_account,
                 external_address,
                 ..
-            } => PcztRecipient::InternalAccount {
-                receiving_account,
+            } => (
+                PcztRecipient::InternalAccount { receiving_account },
                 external_address,
-            },
+            ),
         }
     }
 }
@@ -1457,7 +1455,10 @@ where
                         }
                     }
 
-                    if let Some(pczt_recipient) = orchard_outputs.get(&index) {
+                    if let Some((pczt_recipient, external_address)) = orchard_outputs.get(&index) {
+                        if let Some(user_address) = external_address {
+                            action_updater.set_output_user_address(user_address.encode());
+                        }
                         action_updater.set_output_proprietary(
                             PROPRIETARY_OUTPUT_INFO.into(),
                             postcard::to_allocvec(pczt_recipient).expect(
@@ -1509,8 +1510,11 @@ where
             }
 
             for index in 0..updater.bundle().outputs().len() {
-                if let Some(pczt_recipient) = sapling_outputs.get(&index) {
+                if let Some((pczt_recipient, external_address)) = sapling_outputs.get(&index) {
                     updater.update_output_with(index, |mut output_updater| {
+                        if let Some(user_address) = external_address {
+                            output_updater.set_user_address(user_address.encode());
+                        }
                         output_updater.set_proprietary(
                             PROPRIETARY_OUTPUT_INFO.into(),
                             postcard::to_allocvec(pczt_recipient).expect(
@@ -1589,9 +1593,14 @@ where
                 build_state.transparent_output_meta.into_iter().enumerate()
             {
                 updater.update_output_with(index, |mut output_updater| {
+                    let (pczt_recipient, external_address) =
+                        PcztRecipient::from_recipient(recipient);
+                    if let Some(user_address) = external_address {
+                        output_updater.set_user_address(user_address.encode());
+                    }
                     output_updater.set_proprietary(
                         PROPRIETARY_OUTPUT_INFO.into(),
-                        postcard::to_allocvec(&PcztRecipient::from_recipient(recipient))
+                        postcard::to_allocvec(&pczt_recipient)
                             .expect("postcard encoding of pczt recipient metadata should not fail"),
                     );
                     Ok(())
@@ -1664,25 +1673,34 @@ where
                 orchard::Note::from_parts(recipient, value, rho, rseed).into_option()
             };
 
+            let external_address = act
+                .output()
+                .user_address()
+                .as_deref()
+                .map(ZcashAddress::try_from_encoded)
+                .transpose()
+                .map_err(|e| PcztError::Invalid(format!("Invalid user_address: {}", e)))?;
+
             let pczt_recipient = act
                 .output()
                 .proprietary()
                 .get(PROPRIETARY_OUTPUT_INFO)
                 .map(|v| postcard::from_bytes::<PcztRecipient<DbT::AccountId>>(v))
-                .transpose()?;
+                .transpose()
+                .map_err(|e: postcard::Error| {
+                    PcztError::Invalid(format!(
+                        "Postcard decoding of proprietary output info failed: {}",
+                        e
+                    ))
+                })?
+                .map(|pczt_recipient| (pczt_recipient, external_address));
 
             // If the pczt recipient is not present, this is a dummy note; if the note is not
             // present, then the PCZT has been pruned to make this output unrecoverable and so we
             // also ignore it.
             Ok(pczt_recipient.zip(note()))
         })
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e: postcard::Error| {
-            PcztError::Invalid(format!(
-                "Postcard decoding of proprietary output info failed: {}",
-                e
-            ))
-        })?;
+        .collect::<Result<Vec<_>, PcztError>>()?;
 
     let sapling_output_info = finalized
         .sapling()
@@ -1704,42 +1722,61 @@ where
                 Some(::sapling::Note::from_parts(recipient, value, rseed))
             };
 
+            let external_address = out
+                .user_address()
+                .as_deref()
+                .map(ZcashAddress::try_from_encoded)
+                .transpose()
+                .map_err(|e| PcztError::Invalid(format!("Invalid user_address: {}", e)))?;
+
             let pczt_recipient = out
                 .proprietary()
                 .get(PROPRIETARY_OUTPUT_INFO)
                 .map(|v| postcard::from_bytes::<PcztRecipient<DbT::AccountId>>(v))
-                .transpose()?;
+                .transpose()
+                .map_err(|e: postcard::Error| {
+                    PcztError::Invalid(format!(
+                        "Postcard decoding of proprietary output info failed: {}",
+                        e
+                    ))
+                })?
+                .map(|pczt_recipient| (pczt_recipient, external_address));
 
             // If the pczt recipient is not present, this is a dummy note; if the note is not
             // present, then the PCZT has been pruned to make this output unrecoverable and so we
             // also ignore it.
             Ok(pczt_recipient.zip(note()))
         })
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e: postcard::Error| {
-            PcztError::Invalid(format!(
-                "Postcard decoding of proprietary output info failed: {}",
-                e
-            ))
-        })?;
+        .collect::<Result<Vec<_>, PcztError>>()?;
 
     let transparent_output_info = finalized
         .transparent()
         .outputs()
         .iter()
         .map(|out| {
-            out.proprietary()
+            let external_address = out
+                .user_address()
+                .as_deref()
+                .map(ZcashAddress::try_from_encoded)
+                .transpose()
+                .map_err(|e| PcztError::Invalid(format!("Invalid user_address: {}", e)))?;
+
+            let pczt_recipient = out
+                .proprietary()
                 .get(PROPRIETARY_OUTPUT_INFO)
                 .map(|v| postcard::from_bytes::<PcztRecipient<DbT::AccountId>>(v))
                 .transpose()
+                .map_err(|e: postcard::Error| {
+                    PcztError::Invalid(format!(
+                        "Postcard decoding of proprietary output info failed: {}",
+                        e
+                    ))
+                })?
+                .map(|pczt_recipient| (pczt_recipient, external_address));
+
+            Ok(pczt_recipient)
         })
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e: postcard::Error| {
-            PcztError::Invalid(format!(
-                "Postcard decoding of proprietary output info failed: {}",
-                e
-            ))
-        })?;
+        .collect::<Result<Vec<_>, PcztError>>()?;
 
     let utxos_map = finalized
         .transparent()
@@ -1775,6 +1812,7 @@ where
         output_pool: ShieldedProtocol,
         output_index: usize,
         pczt_recipient: PcztRecipient<AccountId>,
+        external_address: Option<ZcashAddress>,
         note_value: impl Fn(&D::Note) -> u64,
         memo_bytes: impl Fn(&D::Memo) -> &[u8; 512],
         wallet_note: impl Fn(D::Note) -> Note,
@@ -1786,21 +1824,23 @@ where
         });
 
         let note_value = NonNegativeAmount::try_from(note_value(&note))?;
-        let recipient = match pczt_recipient {
-            PcztRecipient::External(addr) => {
+        let recipient = match (pczt_recipient, external_address) {
+            (PcztRecipient::External, Some(addr)) => {
                 Ok(Recipient::External(addr, PoolType::Shielded(output_pool)))
             }
-            PcztRecipient::EphemeralTransparent { .. } => Err(PcztError::Invalid(
+            (PcztRecipient::External, None) => Err(PcztError::Invalid(
+                "external recipient needs to have its user_address field set".into(),
+            )),
+            (PcztRecipient::EphemeralTransparent { .. }, _) => Err(PcztError::Invalid(
                 "shielded output cannot be EphemeralTransparent".into(),
             )),
-            PcztRecipient::InternalAccount {
-                receiving_account,
-                external_address,
-            } => Ok(Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note: wallet_note(note),
-            }),
+            (PcztRecipient::InternalAccount { receiving_account }, external_address) => {
+                Ok(Recipient::InternalAccount {
+                    receiving_account,
+                    external_address,
+                    note: wallet_note(note),
+                })
+            }
         }?;
 
         Ok(SentTransactionOutput::from_parts(
@@ -1822,7 +1862,7 @@ where
                 .zip(orchard_output_info)
                 .enumerate()
                 .filter_map(|(output_index, (action, output_info))| {
-                    output_info.map(|(pczt_recipient, note)| {
+                    output_info.map(|((pczt_recipient, external_address), note)| {
                         let domain = OrchardDomain::for_action(action);
                         to_sent_transaction_output::<_, _, _, DbT, _>(
                             domain,
@@ -1831,6 +1871,7 @@ where
                             ShieldedProtocol::Orchard,
                             output_index,
                             pczt_recipient,
+                            external_address,
                             |note| note.value().inner(),
                             |memo| memo,
                             Note::Orchard,
@@ -1851,7 +1892,7 @@ where
                 .zip(sapling_output_info)
                 .enumerate()
                 .filter_map(|(output_index, (action, output_info))| {
-                    output_info.map(|(pczt_recipient, note)| {
+                    output_info.map(|((pczt_recipient, external_address), note)| {
                         let domain =
                             SaplingDomain::new(sapling::note_encryption::Zip212Enforcement::On);
                         to_sent_transaction_output::<_, _, _, DbT, _>(
@@ -1861,6 +1902,7 @@ where
                             ShieldedProtocol::Sapling,
                             output_index,
                             pczt_recipient,
+                            external_address,
                             |note| note.value().inner(),
                             |memo| memo,
                             Note::Sapling,
@@ -1882,18 +1924,21 @@ where
                 .zip(transparent_output_info)
                 .enumerate()
                 .filter_map(|(output_index, (output, output_info))| {
-                    output_info.map(|pczt_recipient| {
+                    output_info.map(|(pczt_recipient, external_address)| {
                         // This assumes that transparent outputs are pushed onto `transparent_output_meta`
                         // with the same indices they have in the transaction's transparent outputs.
                         // We do not reorder transparent outputs; there is no reason to do so because it
                         // would not usefully improve privacy.
                         let outpoint = OutPoint::new(txid.into(), output_index as u32);
 
-                        let recipient = match pczt_recipient {
-                            PcztRecipient::External(addr) => {
+                        let recipient = match (pczt_recipient, external_address) {
+                            (PcztRecipient::External, Some(addr)) => {
                                 Ok(Recipient::External(addr, PoolType::Transparent))
                             }
-                            PcztRecipient::EphemeralTransparent { receiving_account } => output
+                            (PcztRecipient::External, None) => Err(PcztError::Invalid(
+                                "external recipient needs to have its user_address field set".into(),
+                            )),
+                            (PcztRecipient::EphemeralTransparent { receiving_account }, _) => output
                                 .recipient_address()
                                 .ok_or(PcztError::Invalid(
                                     "Ephemeral outputs cannot have a non-standard script_pubkey"
@@ -1904,10 +1949,12 @@ where
                                     ephemeral_address,
                                     outpoint_metadata: outpoint,
                                 }),
-                            PcztRecipient::InternalAccount {
-                                receiving_account,
-                                external_address,
-                            } => Err(PcztError::Invalid(
+                            (
+                                PcztRecipient::InternalAccount {
+                                    receiving_account,
+                                },
+                                _,
+                            ) => Err(PcztError::Invalid(
                                 "Transparent output cannot be InternalAccount".into(),
                             )),
                         }?;

@@ -135,6 +135,11 @@ impl<'a> OutputUpdater<'a> {
         self.0.bip32_derivation.insert(pubkey, derivation);
     }
 
+    /// Sets the user-facing address that the new note is being sent to.
+    pub fn set_user_address(&mut self, user_address: String) {
+        self.0.user_address = Some(user_address);
+    }
+
     /// Stores the given proprietary value at the given key.
     pub fn set_proprietary(&mut self, key: String, value: Vec<u8>) {
         self.0.proprietary.insert(key, value);

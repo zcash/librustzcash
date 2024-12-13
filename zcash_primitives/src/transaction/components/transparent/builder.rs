@@ -275,6 +275,7 @@ impl TransparentBuilder {
                     // script.
                     redeem_script: None,
                     bip32_derivation: BTreeMap::new(),
+                    user_address: None,
                     proprietary: BTreeMap::new(),
                 })
                 .collect();

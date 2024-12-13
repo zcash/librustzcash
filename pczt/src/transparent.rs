@@ -158,6 +158,14 @@ pub struct Output {
     #[serde_as(as = "BTreeMap<[_; 33], _>")]
     pub(crate) bip32_derivation: BTreeMap<[u8; 33], Zip32Derivation>,
 
+    /// The user-facing address to which this output is being sent, if any.
+    ///
+    /// - This is set by an Updater.
+    /// - Signers must parse this address (if present) and confirm that it contains
+    ///   `recipient` (either directly, or e.g. as a receiver within a Unified Address).
+    #[getset(get = "pub")]
+    pub(crate) user_address: Option<String>,
+
     /// Proprietary fields related to the note being spent.
     #[getset(get = "pub")]
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
@@ -267,6 +275,7 @@ impl Bundle {
                 script_pubkey,
                 redeem_script,
                 bip32_derivation,
+                user_address,
                 proprietary,
             } = rhs;
 
@@ -276,6 +285,7 @@ impl Bundle {
 
             if !(merge_optional(&mut lhs.redeem_script, redeem_script)
                 && merge_map(&mut lhs.bip32_derivation, bip32_derivation)
+                && merge_optional(&mut lhs.user_address, user_address)
                 && merge_map(&mut lhs.proprietary, proprietary))
             {
                 return None;
@@ -346,6 +356,7 @@ impl Bundle {
                             .map(|v| (k, v))
                         })
                         .collect::<Result<_, _>>()?,
+                    output.user_address,
                     output.proprietary,
                 )
             })
@@ -430,6 +441,7 @@ impl Bundle {
                         )
                     })
                     .collect(),
+                user_address: output.user_address().clone(),
                 proprietary: output.proprietary().clone(),
             })
             .collect();
