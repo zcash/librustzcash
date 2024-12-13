@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.6.2] - 2024-12-13
+### Fixed
+- Migrated to `f4jumble 0.1.1` to fix `no-std` support.
+
 ## [0.6.1] - 2024-12-13
 ### Added
 - `no-std` support, via a default-enabled `std` feature flag.
