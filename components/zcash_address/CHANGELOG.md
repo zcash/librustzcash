@@ -8,8 +8,6 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Added
 - `no-std` support, via a default-enabled `std` feature flag.
-- `impl serde::{Serialize, Deserialize} for zcash_address::ZcashAddress` behind
-  the `serde` feature flag.
 
 ## [0.6.0] - 2024-10-02
 ### Changed

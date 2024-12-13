@@ -6151,7 +6151,6 @@ dependencies = [
  "core2",
  "f4jumble",
  "proptest",
- "serde",
  "zcash_encoding",
  "zcash_protocol",
 ]

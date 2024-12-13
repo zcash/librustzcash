@@ -26,7 +26,6 @@ f4jumble = { version = "0.1", path = "../f4jumble" }
 zcash_protocol.workspace = true
 zcash_encoding.workspace = true
 proptest = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 assert_matches.workspace = true
@@ -40,7 +39,6 @@ std = [
     "zcash_protocol/std",
 ]
 test-dependencies = ["dep:proptest"]
-serde = ["dep:serde"]
 
 [lib]
 bench = false
