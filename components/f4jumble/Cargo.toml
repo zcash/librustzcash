@@ -32,4 +32,8 @@ proptest = "1"
 
 [features]
 default = ["std"]
-std = ["blake2b_simd/std"]
+alloc = []
+std = [
+    "alloc",
+    "blake2b_simd/std",
+]

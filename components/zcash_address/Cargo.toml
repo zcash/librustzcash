@@ -22,7 +22,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 bech32.workspace = true
 bs58.workspace = true
 core2.workspace = true
-f4jumble = { version = "0.1", path = "../f4jumble" }
+f4jumble = { version = "0.1", path = "../f4jumble", default-features = false, features = ["alloc"] }
 zcash_protocol.workspace = true
 zcash_encoding.workspace = true
 proptest = { workspace = true, optional = true }
@@ -35,6 +35,7 @@ proptest.workspace = true
 default = ["std"]
 std = [
     "core2/std",
+    "f4jumble/std",
     "zcash_encoding/std",
     "zcash_protocol/std",
 ]
