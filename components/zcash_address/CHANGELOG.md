@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.6.1] - 2024-12-13
 ### Added
 - `no-std` support, via a default-enabled `std` feature flag.
 

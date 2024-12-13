@@ -1,6 +1,10 @@
 
 # cargo-vet imports lock
 
+[[unpublished.zcash_address]]
+version = "0.6.1"
+audited_as = "0.6.0"
+
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
