@@ -21,12 +21,12 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # - Logging and metrics
-memuse.workspace = true
+memuse = { workspace = true, optional = true }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 # - Documentation
-document-features.workspace = true
+document-features = { workspace = true, optional = true }
 
 # - Test dependencies
 proptest = { workspace = true, optional = true }
@@ -37,6 +37,8 @@ incrementalmerkletree-testing = { workspace = true, optional = true }
 proptest.workspace = true
 
 [features]
+default = ["std"]
+std = ["document-features", "dep:memuse"]
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
     "dep:incrementalmerkletree",

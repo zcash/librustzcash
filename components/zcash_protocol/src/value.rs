@@ -1,9 +1,13 @@
-use std::convert::{Infallible, TryFrom};
-use std::error;
-use std::iter::Sum;
-use std::num::NonZeroU64;
-use std::ops::{Add, Div, Mul, Neg, Sub};
+use core::convert::{Infallible, TryFrom};
+use core::fmt;
+use core::iter::Sum;
+use core::num::NonZeroU64;
+use core::ops::{Add, Div, Mul, Neg, Sub};
 
+#[cfg(feature = "std")]
+use std::error;
+
+#[cfg(feature = "std")]
 use memuse::DynamicUsage;
 
 pub const COIN: u64 = 1_0000_0000;
@@ -21,6 +25,7 @@ pub const MAX_BALANCE: i64 = MAX_MONEY as i64;
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
 pub struct ZatBalance(i64);
 
+#[cfg(feature = "std")]
 memuse::impl_no_dynamic_usage!(ZatBalance);
 
 impl ZatBalance {
@@ -442,10 +447,11 @@ pub enum BalanceError {
     Underflow,
 }
 
+#[cfg(feature = "std")]
 impl error::Error for BalanceError {}
 
-impl std::fmt::Display for BalanceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl fmt::Display for BalanceError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
             BalanceError::Overflow => {
                 write!(
