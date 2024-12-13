@@ -415,13 +415,25 @@
 <a href="#414" id="414">414</a>
 <a href="#415" id="415">415</a>
 <a href="#416" id="416">416</a>
-<a href="#417" id="417">417</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs for handling encrypted memos.
+<a href="#417" id="417">417</a>
+<a href="#418" id="418">418</a>
+<a href="#419" id="419">419</a>
+<a href="#420" id="420">420</a>
+<a href="#421" id="421">421</a>
+<a href="#422" id="422">422</a>
+<a href="#423" id="423">423</a>
+<a href="#424" id="424">424</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs for handling encrypted memos.
 
-</span><span class="kw">use </span>std::cmp::Ordering;
-<span class="kw">use </span>std::error;
-<span class="kw">use </span>std::fmt;
-<span class="kw">use </span>std::ops::Deref;
-<span class="kw">use </span>std::str;
+</span><span class="kw">use </span>alloc::borrow::ToOwned;
+<span class="kw">use </span>alloc::boxed::Box;
+<span class="kw">use </span>alloc::string::String;
+<span class="kw">use </span>core::cmp::Ordering;
+<span class="kw">use </span>core::fmt;
+<span class="kw">use </span>core::ops::Deref;
+<span class="kw">use </span>core::str;
+
+<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">use </span>std::error;
 
 <span class="doccomment">/// Format a byte array as a colon-delimited hex string.
 ///
@@ -447,7 +459,7 @@
 <span class="doccomment">/// Errors that may result from attempting to construct an invalid memo.
 </span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq)]
 </span><span class="kw">pub enum </span>Error {
-    InvalidUtf8(std::str::Utf8Error),
+    InvalidUtf8(core::str::Utf8Error),
     TooLong(usize),
 }
 
@@ -460,7 +472,8 @@
     }
 }
 
-<span class="kw">impl </span>error::Error <span class="kw">for </span>Error {}
+<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">impl </span>error::Error <span class="kw">for </span>Error {}
 
 <span class="doccomment">/// The unencrypted memo bytes received alongside a shielded note in a Zcash transaction.
 </span><span class="attr">#[derive(Clone)]
@@ -698,7 +711,8 @@
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
-    <span class="kw">use </span>std::str::FromStr;
+    <span class="kw">use </span>alloc::boxed::Box;
+    <span class="kw">use </span>alloc::str::FromStr;
 
     <span class="kw">use super</span>::{Error, Memo, MemoBytes};
 

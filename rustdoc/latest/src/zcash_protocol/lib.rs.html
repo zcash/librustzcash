@@ -57,24 +57,38 @@
 <a href="#56" id="56">56</a>
 <a href="#57" id="57">57</a>
 <a href="#58" id="58">58</a>
-<a href="#59" id="59">59</a></pre></div><pre class="rust"><code><span class="doccomment">//! *A crate for Zcash protocol constants and value types.*
+<a href="#59" id="59">59</a>
+<a href="#60" id="60">60</a>
+<a href="#61" id="61">61</a>
+<a href="#62" id="62">62</a>
+<a href="#63" id="63">63</a>
+<a href="#64" id="64">64</a>
+<a href="#65" id="65">65</a>
+<a href="#66" id="66">66</a></pre></div><pre class="rust"><code><span class="doccomment">//! *A crate for Zcash protocol constants and value types.*
 //!
 //! `zcash_protocol` contains Rust structs, traits and functions that provide the network constants
 //! for the Zcash main and test networks, as well types for representing ZEC amounts and value
 //! balances.
 //!
-//! ## Feature flags
-</span><span class="attr">#![doc = <span class="macro">document_features::document_features!</span>()]
+</span><span class="attr">#![cfg_attr(feature = <span class="string">"std"</span>, doc = <span class="string">"## Feature flags"</span>)]
+#![cfg_attr(feature = <span class="string">"std"</span>, doc = <span class="macro">document_features::document_features!</span>())]
 </span><span class="doccomment">//!
 
-</span><span class="attr">#![cfg_attr(docsrs, feature(doc_cfg))]
+</span><span class="attr">#![no_std]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 </span><span class="comment">// Catch documentation errors caused by code changes.
 </span><span class="attr">#![deny(rustdoc::broken_intra_doc_links)]
 </span><span class="comment">// Temporary until we have addressed all Result&lt;T, ()&gt; cases.
 </span><span class="attr">#![allow(clippy::result_unit_err)]
 
-</span><span class="kw">use </span>core::fmt;
+#[cfg_attr(any(test, feature = <span class="string">"test-dependencies"</span>), macro_use)]
+</span><span class="kw">extern crate </span>alloc;
+
+<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">extern crate </span>std;
+
+<span class="kw">use </span>core::fmt;
 
 <span class="kw">pub mod </span>consensus;
 <span class="kw">pub mod </span>constants;
