@@ -15,9 +15,14 @@ pub mod amount {
 pub mod orchard;
 pub mod sapling;
 pub mod sprout;
-pub mod transparent;
 #[cfg(zcash_unstable = "zfuture")]
 pub mod tze;
+
+pub mod transparent {
+    pub use transparent::builder;
+    pub use transparent::bundle::*;
+    pub use transparent::pczt;
+}
 
 pub use self::{
     amount::Amount,

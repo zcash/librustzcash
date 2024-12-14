@@ -1,6 +1,6 @@
-use zcash_primitives::transaction::components::transparent::{
+use transparent::{
+    bundle::{Authorization, Authorized, Bundle, MapAuth},
     pczt::{ParseError, TxExtractorError, Unbound},
-    Authorization, Authorized, Bundle, MapAuth,
 };
 
 pub(super) fn extract_bundle(

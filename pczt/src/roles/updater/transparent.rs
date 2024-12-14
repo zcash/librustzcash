@@ -1,6 +1,4 @@
-use zcash_primitives::transaction::components::transparent::pczt::{
-    ParseError, Updater, UpdaterError,
-};
+use transparent::pczt::{ParseError, Updater, UpdaterError};
 
 use crate::Pczt;
 

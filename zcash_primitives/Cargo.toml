@@ -57,6 +57,9 @@ incrementalmerkletree = { workspace = true, features = ["legacy-api"] }
 # - Test dependencies
 proptest = { workspace = true, optional = true }
 
+# - Transparent protocol
+transparent.workspace = true
+
 # - Transparent inputs
 #   - `Error` type exposed
 bip32.workspace = true
@@ -111,7 +114,11 @@ default = ["multicore"]
 multicore = ["orchard/multicore", "sapling/multicore"]
 
 ## Enables spending transparent notes with the transaction builder.
-transparent-inputs = ["bip32/secp256k1-ffi", "dep:secp256k1"]
+transparent-inputs = [
+    "transparent/transparent-inputs",
+    "bip32/secp256k1-ffi",
+    "dep:secp256k1",
+]
 
 ### A temporary feature flag that exposes granular APIs needed by `zcashd`. These APIs
 ### should not be relied upon and will be removed in a future release.
@@ -122,6 +129,7 @@ test-dependencies = [
     "dep:proptest",
     "orchard/test-dependencies",
     "sapling/test-dependencies",
+    "transparent/test-dependencies",
     "zcash_protocol/test-dependencies",
 ]
 

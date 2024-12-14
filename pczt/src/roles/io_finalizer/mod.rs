@@ -1,7 +1,6 @@
 use rand_core::OsRng;
 use zcash_primitives::transaction::{
-    components::transparent, sighash::SignableInput, sighash_v5::v5_signature_hash,
-    txid::TxIdDigester,
+    sighash::SignableInput, sighash_v5::v5_signature_hash, txid::TxIdDigester,
 };
 
 use crate::{

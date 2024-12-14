@@ -25,7 +25,8 @@ serde_with = "3"
 
 # Payment protocols
 # - Transparent
-secp256k1 = { workspace = true, optional = true  }
+secp256k1 = { workspace = true, optional = true }
+transparent = { workspace = true, optional = true }
 
 # - Sapling
 bls12_381 = { workspace = true, optional = true }
@@ -46,7 +47,10 @@ getset = "0.1"
 incrementalmerkletree.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 shardtree.workspace = true
-zcash_primitives = { workspace = true, features = ["test-dependencies",  "transparent-inputs"] }
+zcash_primitives = { workspace = true, features = [
+    "test-dependencies",
+    "transparent-inputs",
+] }
 zcash_proofs = { workspace = true, features = ["bundled-prover"] }
 zip32.workspace = true
 
@@ -67,13 +71,26 @@ sapling = [
     "dep:zcash_note_encryption",
     "dep:zcash_protocol",
 ]
-transparent = ["dep:secp256k1", "dep:zcash_primitives", "dep:zcash_protocol"]
+transparent = ["dep:secp256k1", "dep:transparent", "dep:zcash_protocol"]
 zcp-builder = ["dep:zcash_primitives", "dep:zcash_protocol"]
-io-finalizer = ["orchard", "sapling"]
+io-finalizer = ["dep:zcash_primitives", "orchard", "sapling", "transparent"]
 prover = ["dep:rand_core", "sapling?/temporary-zcashd"]
-signer = ["dep:blake2b_simd", "dep:rand_core", "orchard", "sapling", "transparent"]
+signer = [
+    "dep:blake2b_simd",
+    "dep:rand_core",
+    "dep:zcash_primitives",
+    "orchard",
+    "sapling",
+    "transparent",
+]
 spend-finalizer = ["transparent"]
-tx-extractor = ["dep:rand_core", "orchard", "sapling", "transparent"]
+tx-extractor = [
+    "dep:rand_core",
+    "dep:zcash_primitives",
+    "orchard",
+    "sapling",
+    "transparent",
+]
 
 [[test]]
 name = "end_to_end"

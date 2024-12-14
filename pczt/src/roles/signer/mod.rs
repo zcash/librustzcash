@@ -1,7 +1,6 @@
 use blake2b_simd::Hash as Blake2bHash;
 use rand_core::OsRng;
 use zcash_primitives::transaction::{
-    components::transparent,
     sighash::{SignableInput, SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE},
     sighash_v5::v5_signature_hash,
     txid::TxIdDigester,
@@ -261,7 +260,7 @@ pub(crate) fn pczt_to_tx_data(
 pub(crate) struct EffectsOnly;
 
 impl Authorization for EffectsOnly {
-    type TransparentAuth = transparent::EffectsOnly;
+    type TransparentAuth = transparent::bundle::EffectsOnly;
     type SaplingAuth = sapling::bundle::EffectsOnly;
     type OrchardAuth = orchard::bundle::EffectsOnly;
     #[cfg(zcash_unstable = "zfuture")]

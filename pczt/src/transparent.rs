@@ -9,9 +9,6 @@ use getset::Getters;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
-#[cfg(feature = "transparent")]
-use zcash_primitives::transaction::components::transparent;
-
 /// PCZT fields that are specific to producing the transaction's transparent bundle (if
 /// any).
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]

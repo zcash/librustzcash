@@ -21,7 +21,7 @@ use crate::{
     transaction::{
         components::{
             amount::{Amount, BalanceError},
-            transparent::{self, builder::TransparentBuilder, TxOut},
+            transparent::{builder::TransparentBuilder, TxOut},
         },
         fees::{
             transparent::{InputView, OutputView},
@@ -504,7 +504,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     pub fn add_transparent_input(
         &mut self,
         pubkey: secp256k1::PublicKey,
-        utxo: transparent::OutPoint,
+        utxo: transparent::bundle::OutPoint,
         coin: TxOut,
     ) -> Result<(), transparent::builder::Error> {
         self.transparent_builder.add_input(pubkey, utxo, coin)

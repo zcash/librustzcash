@@ -2964,6 +2964,7 @@ dependencies = [
  "zcash_primitives",
  "zcash_proofs",
  "zcash_protocol",
+ "zcash_transparent",
  "zip32",
 ]
 
@@ -6391,6 +6392,7 @@ dependencies = [
  "zcash_note_encryption",
  "zcash_protocol",
  "zcash_spec",
+ "zcash_transparent",
  "zip32",
 ]
 
@@ -6441,6 +6443,25 @@ dependencies = [
 [[package]]
 name = "zcash_transparent"
 version = "0.0.0"
+dependencies = [
+ "bip32",
+ "blake2b_simd",
+ "bs58",
+ "byteorder",
+ "document-features",
+ "getset",
+ "hex",
+ "proptest",
+ "ripemd",
+ "secp256k1",
+ "sha2",
+ "subtle",
+ "zcash_address",
+ "zcash_encoding",
+ "zcash_protocol",
+ "zcash_spec",
+ "zip32",
+]
 
 [[package]]
 name = "zerocopy"
