@@ -1,0 +1,19 @@
+[package]
+name = "zcash_transparent"
+description = "Rust implementations of the Zcash transparent protocol"
+version = "0.0.0"
+authors = [
+    "Jack Grigg <jack@electriccoin.co>",
+    "Kris Nuttycombe <kris@electriccoin.co>",
+    "Daira-Emma Hopwood <daira@electriccoin.co>",
+]
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+categories.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
