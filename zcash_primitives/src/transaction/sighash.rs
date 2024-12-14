@@ -1,13 +1,10 @@
 use blake2b_simd::Hash as Blake2bHash;
 
 use super::{
-    components::amount::NonNegativeAmount, sighash_v4::v4_signature_hash,
-    sighash_v5::v5_signature_hash, Authorization, TransactionData, TxDigests, TxVersion,
+    sighash_v4::v4_signature_hash, sighash_v5::v5_signature_hash, Authorization, TransactionData,
+    TxDigests, TxVersion,
 };
-use crate::{
-    legacy::Script,
-    sapling::{self, bundle::GrothProofBytes},
-};
+use crate::sapling::{self, bundle::GrothProofBytes};
 
 #[cfg(zcash_unstable = "zfuture")]
 use {super::components::Amount, crate::extensions::transparent::Precondition};
@@ -16,13 +13,7 @@ pub use transparent::sighash::*;
 
 pub enum SignableInput<'a> {
     Shielded,
-    Transparent {
-        hash_type: u8,
-        index: usize,
-        script_code: &'a Script,
-        script_pubkey: &'a Script,
-        value: NonNegativeAmount,
-    },
+    Transparent(transparent::sighash::SignableInput<'a>),
     #[cfg(zcash_unstable = "zfuture")]
     Tze {
         index: usize,
@@ -35,7 +26,7 @@ impl<'a> SignableInput<'a> {
     pub fn hash_type(&self) -> u8 {
         match self {
             SignableInput::Shielded => SIGHASH_ALL,
-            SignableInput::Transparent { hash_type, .. } => *hash_type,
+            SignableInput::Transparent(input) => input.hash_type().encode(),
             #[cfg(zcash_unstable = "zfuture")]
             SignableInput::Tze { .. } => SIGHASH_ALL,
         }

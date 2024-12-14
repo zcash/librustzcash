@@ -1,7 +1,7 @@
 use ripemd::Ripemd160;
 use sha2::{Digest, Sha256};
 
-use crate::legacy::TransparentAddress;
+use crate::address::TransparentAddress;
 
 impl super::Input {
     /// Verifies the consistency of this transparent input.

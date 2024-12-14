@@ -1249,6 +1249,7 @@ dependencies = [
  "zcash_primitives",
  "zcash_proofs",
  "zcash_protocol",
+ "zcash_transparent",
 ]
 
 [[package]]
@@ -6424,7 +6425,9 @@ dependencies = [
 name = "zcash_protocol"
 version = "0.4.2"
 dependencies = [
+ "core2",
  "document-features",
+ "hex",
  "incrementalmerkletree",
  "incrementalmerkletree-testing",
  "memuse",

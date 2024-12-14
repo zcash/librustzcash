@@ -186,8 +186,8 @@ pub fn v4_signature_hash<
             );
         } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
             match (tx.transparent_bundle.as_ref(), signable_input) {
-                (Some(b), SignableInput::Transparent { index, .. }) if index < &b.vout.len() => {
-                    h.update(single_output_hash(&b.vout[*index]).as_bytes())
+                (Some(b), SignableInput::Transparent(input)) if input.index() < &b.vout.len() => {
+                    h.update(single_output_hash(&b.vout[*input.index()]).as_bytes())
                 }
                 _ => h.update(&[0; 32]),
             };
@@ -235,18 +235,13 @@ pub fn v4_signature_hash<
 
         match signable_input {
             SignableInput::Shielded => (),
-            SignableInput::Transparent {
-                index,
-                script_code,
-                value,
-                ..
-            } => {
+            SignableInput::Transparent(input) => {
                 if let Some(bundle) = tx.transparent_bundle.as_ref() {
                     let mut data = vec![];
-                    bundle.vin[*index].prevout.write(&mut data).unwrap();
-                    script_code.write(&mut data).unwrap();
-                    data.extend_from_slice(&value.to_i64_le_bytes());
-                    data.extend_from_slice(&bundle.vin[*index].sequence.to_le_bytes());
+                    bundle.vin[*input.index()].prevout.write(&mut data).unwrap();
+                    input.script_code().write(&mut data).unwrap();
+                    data.extend_from_slice(&input.value().to_i64_le_bytes());
+                    data.extend_from_slice(&bundle.vin[*input.index()].sequence.to_le_bytes());
                     h.update(&data);
                 } else {
                     panic!(

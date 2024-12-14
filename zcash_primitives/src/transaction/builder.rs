@@ -806,10 +806,14 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             .clone()
             .map(|b| {
                 b.apply_signatures(
-                    #[cfg(feature = "transparent-inputs")]
-                    &unauthed_tx,
-                    #[cfg(feature = "transparent-inputs")]
-                    &txid_parts,
+                    |input| {
+                        *signature_hash(
+                            &unauthed_tx,
+                            &SignableInput::Transparent(input),
+                            &txid_parts,
+                        )
+                        .as_ref()
+                    },
                     transparent_signing_set,
                 )
             })

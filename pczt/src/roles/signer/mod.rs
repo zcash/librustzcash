@@ -95,7 +95,21 @@ impl Signer {
         // TODO
 
         input
-            .sign(index, &self.tx_data, &self.txid_parts, sk, &self.secp)
+            .sign(
+                index,
+                |input| {
+                    v5_signature_hash(
+                        &self.tx_data,
+                        &SignableInput::Transparent(input),
+                        &self.txid_parts,
+                    )
+                    .as_ref()
+                    .try_into()
+                    .unwrap()
+                },
+                sk,
+                &self.secp,
+            )
             .map_err(Error::TransparentSign)?;
 
         // Update transaction modifiability:

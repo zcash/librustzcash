@@ -4,12 +4,9 @@ use std::collections::BTreeMap;
 
 use bip32::ChildNumber;
 use getset::Getters;
-use zcash_protocol::value::Zatoshis;
+use zcash_protocol::{value::Zatoshis, TxId};
 
-use crate::{
-    legacy::Script,
-    transaction::{sighash::SighashType, TxId},
-};
+use crate::{address::Script, sighash::SighashType};
 
 mod parse;
 pub use parse::ParseError;
@@ -37,7 +34,7 @@ pub use tx_extractor::{TxExtractorError, Unbound};
 /// This struct is for representing Sapling in a partially-created transaction. If you
 /// have a fully-created transaction, use [the regular `Bundle` struct].
 ///
-/// [the regular `Bundle` struct]: super::Bundle
+/// [the regular `Bundle` struct]: crate::bundle::Bundle
 #[derive(Debug, Getters)]
 #[getset(get = "pub")]
 pub struct Bundle {
@@ -68,7 +65,7 @@ impl Bundle {
 /// This struct is for representing transparent spends in a partially-created transaction.
 /// If you have a fully-created transaction, use [the regular `TxIn` struct].
 ///
-/// [the regular `TxIn` struct]: super::TxIn
+/// [the regular `TxIn` struct]: crate::bundle::TxIn
 #[derive(Debug, Getters)]
 #[getset(get = "pub")]
 pub struct Input {
@@ -185,7 +182,7 @@ pub struct Input {
 /// transaction. If you have a fully-created transaction, use
 /// [the regular `TxOut` struct].
 ///
-/// [the regular `TxOut` struct]: super::TxOut
+/// [the regular `TxOut` struct]: crate::bundle::TxOut
 #[derive(Debug, Getters)]
 #[getset(get = "pub")]
 pub struct Output {

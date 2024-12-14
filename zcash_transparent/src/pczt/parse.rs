@@ -1,12 +1,9 @@
 use std::collections::BTreeMap;
 
 use bip32::ChildNumber;
-use zcash_protocol::value::Zatoshis;
+use zcash_protocol::{value::Zatoshis, TxId};
 
-use crate::{
-    legacy::Script,
-    transaction::{sighash::SighashType, TxId},
-};
+use crate::{address::Script, sighash::SighashType};
 
 use super::{Bip32Derivation, Bundle, Input, Output};
 

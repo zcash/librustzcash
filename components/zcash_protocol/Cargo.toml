@@ -28,6 +28,10 @@ memuse = { workspace = true, optional = true }
 # - Documentation
 document-features = { workspace = true, optional = true }
 
+# - Encodings
+core2.workspace = true
+hex.workspace = true
+
 # - Test dependencies
 proptest = { workspace = true, optional = true }
 incrementalmerkletree = { workspace = true, optional = true }

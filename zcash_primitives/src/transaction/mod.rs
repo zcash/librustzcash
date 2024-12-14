@@ -13,9 +13,7 @@ mod tests;
 
 use blake2b_simd::Hash as Blake2bHash;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use memuse::DynamicUsage;
 use std::convert::TryFrom;
-use std::fmt;
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
@@ -60,63 +58,7 @@ const ZFUTURE_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
 #[cfg(zcash_unstable = "zfuture")]
 const ZFUTURE_TX_VERSION: u32 = 0x0000FFFF;
 
-/// The identifier for a Zcash transaction.
-///
-/// - For v1-4 transactions, this is a double-SHA-256 hash of the encoded transaction.
-///   This means that it is malleable, and only a reliable identifier for transactions
-///   that have been mined.
-/// - For v5 transactions onwards, this identifier is derived only from "effecting" data,
-///   and is non-malleable in all contexts.
-#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
-pub struct TxId([u8; 32]);
-
-memuse::impl_no_dynamic_usage!(TxId);
-
-impl fmt::Debug for TxId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // The (byte-flipped) hex string is more useful than the raw bytes, because we can
-        // look that up in RPC methods and block explorers.
-        let txid_str = self.to_string();
-        f.debug_tuple("TxId").field(&txid_str).finish()
-    }
-}
-
-impl fmt::Display for TxId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut data = self.0;
-        data.reverse();
-        formatter.write_str(&hex::encode(data))
-    }
-}
-
-impl AsRef<[u8; 32]> for TxId {
-    fn as_ref(&self) -> &[u8; 32] {
-        &self.0
-    }
-}
-
-impl From<TxId> for [u8; 32] {
-    fn from(value: TxId) -> Self {
-        value.0
-    }
-}
-
-impl TxId {
-    pub fn from_bytes(bytes: [u8; 32]) -> Self {
-        TxId(bytes)
-    }
-
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut hash = [0u8; 32];
-        reader.read_exact(&mut hash)?;
-        Ok(TxId::from_bytes(hash))
-    }
-
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.0)?;
-        Ok(())
-    }
-}
+pub use zcash_protocol::TxId;
 
 /// The set of defined transaction format versions.
 ///
@@ -611,12 +553,12 @@ impl Transaction {
 
     fn from_data_v4(data: TransactionData<Authorized>) -> io::Result<Self> {
         let mut tx = Transaction {
-            txid: TxId([0; 32]),
+            txid: TxId::from_bytes([0; 32]),
             data,
         };
         let mut writer = HashWriter::default();
         tx.write(&mut writer)?;
-        tx.txid.0.copy_from_slice(&writer.into_hash());
+        tx.txid = TxId::from_bytes(writer.into_hash().into());
         Ok(tx)
     }
 
@@ -706,7 +648,7 @@ impl Transaction {
         txid.copy_from_slice(&hash_bytes);
 
         Ok(Transaction {
-            txid: TxId(txid),
+            txid: TxId::from_bytes(txid),
             data: TransactionData {
                 version,
                 consensus_branch_id,

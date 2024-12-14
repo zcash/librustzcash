@@ -1,3 +1,4 @@
+use getset::Getters;
 use zcash_protocol::value::Zatoshis;
 
 use crate::{address::Script, bundle::Authorization};
@@ -54,4 +55,35 @@ pub trait TransparentAuthorizingContext: Authorization {
     /// without requiring the full data of the previous transactions
     /// providing these inputs.
     fn input_scriptpubkeys(&self) -> Vec<Script>;
+}
+
+/// A transparent input that is signable because we know its value and `script_pubkey`.
+#[derive(Debug, Getters)]
+#[getset(get = "pub")]
+pub struct SignableInput<'a> {
+    pub(crate) hash_type: SighashType,
+    pub(crate) index: usize,
+    pub(crate) script_code: &'a Script,
+    pub(crate) script_pubkey: &'a Script,
+    pub(crate) value: Zatoshis,
+}
+
+#[cfg(feature = "test-dependencies")]
+impl<'a> SignableInput<'a> {
+    /// Constructs a signable input from its parts.
+    pub fn from_parts(
+        hash_type: SighashType,
+        index: usize,
+        script_code: &'a Script,
+        script_pubkey: &'a Script,
+        value: Zatoshis,
+    ) -> Self {
+        Self {
+            hash_type,
+            index,
+            script_code,
+            script_pubkey,
+            value,
+        }
+    }
 }
