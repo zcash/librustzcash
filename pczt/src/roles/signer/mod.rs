@@ -258,7 +258,7 @@ pub(crate) fn pczt_to_tx_data(
     ))
 }
 
-pub(crate) struct EffectsOnly;
+pub struct EffectsOnly;
 
 impl Authorization for EffectsOnly {
     type TransparentAuth = transparent::EffectsOnly;

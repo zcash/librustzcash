@@ -44,6 +44,9 @@
 use getset::Getters;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "signer")]
+use {roles::signer::EffectsOnly, zcash_primitives::transaction::TransactionData};
+
 pub mod roles;
 
 pub mod common;
@@ -106,6 +109,23 @@ impl Pczt {
         bytes.extend_from_slice(MAGIC_BYTES);
         bytes.extend_from_slice(&PCZT_VERSION_1.to_le_bytes());
         postcard::to_extend(self, bytes).expect("can serialize into memory")
+    }
+
+    /// Gets the effects of this transaction.
+    #[cfg(feature = "signer")]
+    pub fn into_effects(self) -> Option<TransactionData<EffectsOnly>> {
+        let Self {
+            global,
+            transparent,
+            sapling,
+            orchard,
+        } = self;
+
+        let transparent = transparent.into_parsed().ok()?;
+        let sapling = sapling.into_parsed().ok()?;
+        let orchard = orchard.into_parsed().ok()?;
+
+        roles::signer::pczt_to_tx_data(&global, &transparent, &sapling, &orchard).ok()
     }
 }
 
