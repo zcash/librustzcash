@@ -1,0 +1,1 @@
+searchState.loadedDescShard("zcash_transparent", 0, "")
