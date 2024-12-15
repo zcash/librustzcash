@@ -1,6 +1,8 @@
 //! PCZT support for transparent Zcash.
 
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 use bip32::ChildNumber;
 use getset::Getters;

@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use getset::Getters;
 use zcash_protocol::value::Zatoshis;
 

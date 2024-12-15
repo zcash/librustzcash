@@ -6452,6 +6452,7 @@ dependencies = [
  "blake2b_simd",
  "bs58",
  "byteorder",
+ "core2",
  "document-features",
  "getset",
  "hex",

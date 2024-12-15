@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use zcash_protocol::value::Zatoshis;
 
 use crate::{
@@ -57,7 +58,7 @@ impl super::Bundle {
                 Ok(TxIn {
                     prevout,
                     script_sig: script_sig(input)?,
-                    sequence: input.sequence.unwrap_or(std::u32::MAX),
+                    sequence: input.sequence.unwrap_or(u32::MAX),
                 })
             })
             .collect::<Result<Vec<_>, E>>()?;

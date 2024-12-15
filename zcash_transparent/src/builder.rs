@@ -1,7 +1,8 @@
 //! Types and functions for building transparent transaction components.
 
-use std::collections::BTreeMap;
-use std::fmt;
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
+use core::fmt;
 
 use zcash_protocol::value::{BalanceError, ZatBalance as Amount, Zatoshis as NonNegativeAmount};
 
@@ -287,7 +288,7 @@ impl TxIn<Unauthorized> {
         TxIn {
             prevout,
             script_sig: (),
-            sequence: std::u32::MAX,
+            sequence: u32::MAX,
         }
     }
 }
@@ -362,7 +363,7 @@ impl Bundle<Unauthorized> {
             });
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let script_sigs = std::iter::empty::<Result<Script, Error>>();
+        let script_sigs = core::iter::empty::<Result<Script, Error>>();
 
         Ok(Bundle {
             vin: self

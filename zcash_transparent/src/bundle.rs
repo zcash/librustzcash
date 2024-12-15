@@ -1,12 +1,15 @@
 //! Structs representing the components within Zcash transactions.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use zcash_protocol::TxId;
 
-use std::fmt::Debug;
-use std::io::{self, Read, Write};
+use alloc::vec::Vec;
+use core::fmt::Debug;
+use core2::io::{self, Read, Write};
 
-use zcash_protocol::value::{BalanceError, ZatBalance as Amount, Zatoshis as NonNegativeAmount};
+use zcash_protocol::{
+    value::{BalanceError, ZatBalance as Amount, Zatoshis as NonNegativeAmount},
+    TxId,
+};
 
 use crate::{
     address::{Script, TransparentAddress},
