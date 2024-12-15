@@ -186,7 +186,11 @@ mod tests {
     use assert_matches::assert_matches;
 
     use super::*;
-    use crate::{kind::unified, Network};
+    use crate::{
+        kind::unified,
+        unified::{Item, Receiver, Revision},
+        Network,
+    };
 
     fn encoding(encoded: &str, decoded: ZcashAddress) {
         assert_eq!(decoded.to_string(), encoded);
@@ -236,21 +240,30 @@ mod tests {
             "u1qpatys4zruk99pg59gcscrt7y6akvl9vrhcfyhm9yxvxz7h87q6n8cgrzzpe9zru68uq39uhmlpp5uefxu0su5uqyqfe5zp3tycn0ecl",
             ZcashAddress {
                 net: Network::Main,
-                kind: AddressKind::Unified(unified::Address(vec![unified::address::Receiver::Sapling([0; 43])])),
+                kind: AddressKind::Unified(unified::Address {
+                    revision: Revision::R0,
+                    receivers: vec![Item::Data(Receiver::Sapling([0; 43]))]
+                }),
             },
         );
         encoding(
             "utest10c5kutapazdnf8ztl3pu43nkfsjx89fy3uuff8tsmxm6s86j37pe7uz94z5jhkl49pqe8yz75rlsaygexk6jpaxwx0esjr8wm5ut7d5s",
             ZcashAddress {
                 net: Network::Test,
-                kind: AddressKind::Unified(unified::Address(vec![unified::address::Receiver::Sapling([0; 43])])),
+                kind: AddressKind::Unified(unified::Address {
+                    revision: Revision::R0,
+                    receivers: vec![Item::Data(Receiver::Sapling([0; 43]))]
+                }),
             },
         );
         encoding(
             "uregtest15xk7vj4grjkay6mnfl93dhsflc2yeunhxwdh38rul0rq3dfhzzxgm5szjuvtqdha4t4p2q02ks0jgzrhjkrav70z9xlvq0plpcjkd5z3",
             ZcashAddress {
                 net: Network::Regtest,
-                kind: AddressKind::Unified(unified::Address(vec![unified::address::Receiver::Sapling([0; 43])])),
+                kind: AddressKind::Unified(unified::Address {
+                    revision: Revision::R0,
+                    receivers: vec![Item::Data(Receiver::Sapling([0; 43]))]
+                }),
             },
         );
 

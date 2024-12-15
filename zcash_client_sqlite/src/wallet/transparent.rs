@@ -3,24 +3,25 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::OptionalExtension;
 use rusqlite::{named_params, Connection, Row};
-use zcash_client_backend::data_api::TransactionDataRequest;
-use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
-use zip32::{DiversifierIndex, Scope};
 
-use zcash_address::unified::{Ivk, Uivk};
+use zcash_address::unified::{Container as _, Encoding as _, Item, Ivk, Uivk};
 use zcash_client_backend::{
-    data_api::AccountBalance,
+    data_api::{AccountBalance, TransactionDataRequest},
     wallet::{TransparentAddressMetadata, WalletTransparentOutput},
 };
 use zcash_keys::{address::Address, encoding::AddressCodec};
 use zcash_primitives::{
     legacy::{
-        keys::{IncomingViewingKey, NonHardenedChildIndex},
+        keys::{ExternalIvk, IncomingViewingKey, NonHardenedChildIndex},
         Script, TransparentAddress,
     },
-    transaction::components::{amount::NonNegativeAmount, Amount, OutPoint, TxOut},
+    transaction::{
+        builder::DEFAULT_TX_EXPIRY_DELTA,
+        components::{amount::NonNegativeAmount, Amount, OutPoint, TxOut},
+    },
 };
 use zcash_protocol::consensus::{self, BlockHeight};
+use zip32::{DiversifierIndex, Scope};
 
 use super::{chain_tip_height, get_account_ids};
 use crate::AccountUuid;
@@ -132,9 +133,6 @@ pub(crate) fn uivk_legacy_transparent_address<P: consensus::Parameters>(
     params: &P,
     uivk_str: &str,
 ) -> Result<Option<(TransparentAddress, NonHardenedChildIndex)>, SqliteClientError> {
-    use zcash_address::unified::{Container as _, Encoding as _};
-    use zcash_primitives::legacy::keys::ExternalIvk;
-
     let (network, uivk) = Uivk::decode(uivk_str)
         .map_err(|e| SqliteClientError::CorruptedData(format!("Unable to parse UIVK: {e}")))?;
 
@@ -152,9 +150,9 @@ pub(crate) fn uivk_legacy_transparent_address<P: consensus::Parameters>(
     }
 
     // Derive the default transparent address (if it wasn't already part of a derived UA).
-    for item in uivk.items() {
-        if let Ivk::P2pkh(tivk_bytes) = item {
-            let tivk = ExternalIvk::deserialize(&tivk_bytes)?;
+    for item in uivk.items_as_parsed() {
+        if let Item::Data(Ivk::P2pkh(tivk_bytes)) = item {
+            let tivk = ExternalIvk::deserialize(tivk_bytes)?;
             return Ok(Some(tivk.default_address()));
         }
     }
