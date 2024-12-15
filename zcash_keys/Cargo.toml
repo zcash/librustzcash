@@ -21,7 +21,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 zcash_address.workspace = true
 zcash_encoding.workspace = true
-zcash_primitives.workspace = true
 zcash_protocol.workspace = true
 zip32.workspace = true
 
@@ -37,6 +36,7 @@ bs58.workspace = true
 
 # - Transparent protocols
 bip32 = { workspace = true, optional = true }
+transparent.workspace = true
 
 # - Logging and metrics
 memuse.workspace = true

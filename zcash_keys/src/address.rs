@@ -1,10 +1,10 @@
 //! Structs for handling supported address types.
 
+use transparent::address::TransparentAddress;
 use zcash_address::{
     unified::{self, Container, Encoding, Typecode},
     ConversionError, ToAddress, TryFromRawAddress, ZcashAddress,
 };
-use zcash_primitives::legacy::TransparentAddress;
 use zcash_protocol::consensus::{self, NetworkType};
 
 #[cfg(feature = "sapling")]
@@ -433,7 +433,7 @@ impl Address {
 ))]
 pub mod testing {
     use proptest::prelude::*;
-    use zcash_primitives::consensus::Network;
+    use zcash_protocol::consensus::Network;
 
     use crate::keys::{testing::arb_unified_spending_key, UnifiedAddressRequest};
 
@@ -441,7 +441,7 @@ pub mod testing {
 
     #[cfg(feature = "sapling")]
     use sapling::testing::arb_payment_address;
-    use zcash_primitives::legacy::testing::arb_transparent_addr;
+    use transparent::address::testing::arb_transparent_addr;
 
     pub fn arb_unified_addr(
         params: Network,

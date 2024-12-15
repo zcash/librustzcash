@@ -9,12 +9,15 @@ use crate::{
     address::{Script, TransparentAddress},
     bundle::{Authorization, Authorized, Bundle, TxIn, TxOut},
     pczt,
-    sighash::{SighashType, SignableInput, TransparentAuthorizingContext},
+    sighash::{SignableInput, TransparentAuthorizingContext},
 };
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::{bundle::OutPoint, sighash::SIGHASH_ALL},
+    crate::{
+        bundle::OutPoint,
+        sighash::{SighashType, SIGHASH_ALL},
+    },
     sha2::Digest,
 };
 
