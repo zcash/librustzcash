@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/sighash.rs`."><title>sighash.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (327c7ee43 2024-12-13)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/</div>sighash.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/sighash.rs`."><title>sighash.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (0aeaa5eb2 2024-12-14)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/</div>sighash.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -65,133 +65,22 @@
 <a href="#64" id="64">64</a>
 <a href="#65" id="65">65</a>
 <a href="#66" id="66">66</a>
-<a href="#67" id="67">67</a>
-<a href="#68" id="68">68</a>
-<a href="#69" id="69">69</a>
-<a href="#70" id="70">70</a>
-<a href="#71" id="71">71</a>
-<a href="#72" id="72">72</a>
-<a href="#73" id="73">73</a>
-<a href="#74" id="74">74</a>
-<a href="#75" id="75">75</a>
-<a href="#76" id="76">76</a>
-<a href="#77" id="77">77</a>
-<a href="#78" id="78">78</a>
-<a href="#79" id="79">79</a>
-<a href="#80" id="80">80</a>
-<a href="#81" id="81">81</a>
-<a href="#82" id="82">82</a>
-<a href="#83" id="83">83</a>
-<a href="#84" id="84">84</a>
-<a href="#85" id="85">85</a>
-<a href="#86" id="86">86</a>
-<a href="#87" id="87">87</a>
-<a href="#88" id="88">88</a>
-<a href="#89" id="89">89</a>
-<a href="#90" id="90">90</a>
-<a href="#91" id="91">91</a>
-<a href="#92" id="92">92</a>
-<a href="#93" id="93">93</a>
-<a href="#94" id="94">94</a>
-<a href="#95" id="95">95</a>
-<a href="#96" id="96">96</a>
-<a href="#97" id="97">97</a>
-<a href="#98" id="98">98</a>
-<a href="#99" id="99">99</a>
-<a href="#100" id="100">100</a>
-<a href="#101" id="101">101</a>
-<a href="#102" id="102">102</a>
-<a href="#103" id="103">103</a>
-<a href="#104" id="104">104</a>
-<a href="#105" id="105">105</a>
-<a href="#106" id="106">106</a>
-<a href="#107" id="107">107</a>
-<a href="#108" id="108">108</a>
-<a href="#109" id="109">109</a>
-<a href="#110" id="110">110</a>
-<a href="#111" id="111">111</a>
-<a href="#112" id="112">112</a>
-<a href="#113" id="113">113</a>
-<a href="#114" id="114">114</a>
-<a href="#115" id="115">115</a>
-<a href="#116" id="116">116</a>
-<a href="#117" id="117">117</a>
-<a href="#118" id="118">118</a>
-<a href="#119" id="119">119</a>
-<a href="#120" id="120">120</a>
-<a href="#121" id="121">121</a>
-<a href="#122" id="122">122</a>
-<a href="#123" id="123">123</a>
-<a href="#124" id="124">124</a>
-<a href="#125" id="125">125</a>
-<a href="#126" id="126">126</a>
-<a href="#127" id="127">127</a>
-<a href="#128" id="128">128</a>
-<a href="#129" id="129">129</a>
-<a href="#130" id="130">130</a></pre></div><pre class="rust"><code><span class="kw">use </span>blake2b_simd::Hash <span class="kw">as </span>Blake2bHash;
+<a href="#67" id="67">67</a></pre></div><pre class="rust"><code><span class="kw">use </span>blake2b_simd::Hash <span class="kw">as </span>Blake2bHash;
 
 <span class="kw">use super</span>::{
-    components::{amount::NonNegativeAmount, transparent},
-    sighash_v4::v4_signature_hash,
-    sighash_v5::v5_signature_hash,
-    Authorization, TransactionData, TxDigests, TxVersion,
+    sighash_v4::v4_signature_hash, sighash_v5::v5_signature_hash, Authorization, TransactionData,
+    TxDigests, TxVersion,
 };
-<span class="kw">use crate</span>::{
-    legacy::Script,
-    sapling::{<span class="self">self</span>, bundle::GrothProofBytes},
-};
+<span class="kw">use </span><span class="kw">crate</span>::sapling::{<span class="self">self</span>, bundle::GrothProofBytes};
 
 <span class="attr">#[cfg(zcash_unstable = <span class="string">"zfuture"</span>)]
 </span><span class="kw">use </span>{<span class="kw">super</span>::components::Amount, <span class="kw">crate</span>::extensions::transparent::Precondition};
 
-<span class="kw">pub const </span>SIGHASH_ALL: u8 = <span class="number">0x01</span>;
-<span class="kw">pub const </span>SIGHASH_NONE: u8 = <span class="number">0x02</span>;
-<span class="kw">pub const </span>SIGHASH_SINGLE: u8 = <span class="number">0x03</span>;
-<span class="kw">pub const </span>SIGHASH_MASK: u8 = <span class="number">0x1f</span>;
-<span class="kw">pub const </span>SIGHASH_ANYONECANPAY: u8 = <span class="number">0x80</span>;
-
-<span class="doccomment">/// A [ZIP 244] sighash type.
-///
-/// [ZIP 244]: https://zips.z.cash/zip-0244#s-2a-hash-type
-</span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-</span><span class="kw">pub struct </span>SighashType(u8);
-
-<span class="kw">impl </span>SighashType {
-    <span class="kw">pub const </span>ALL: <span class="self">Self </span>= <span class="self">Self</span>(SIGHASH_ALL);
-    <span class="kw">pub const </span>NONE: <span class="self">Self </span>= <span class="self">Self</span>(SIGHASH_NONE);
-    <span class="kw">pub const </span>SINGLE: <span class="self">Self </span>= <span class="self">Self</span>(SIGHASH_SINGLE);
-    <span class="kw">pub const </span>ALL_ANYONECANPAY: <span class="self">Self </span>= <span class="self">Self</span>(SIGHASH_ALL | SIGHASH_ANYONECANPAY);
-    <span class="kw">pub const </span>NONE_ANYONECANPAY: <span class="self">Self </span>= <span class="self">Self</span>(SIGHASH_NONE | SIGHASH_ANYONECANPAY);
-    <span class="kw">pub const </span>SINGLE_ANYONECANPAY: <span class="self">Self </span>= <span class="self">Self</span>(SIGHASH_SINGLE | SIGHASH_ANYONECANPAY);
-
-    <span class="doccomment">/// Parses the given `hash_type` using the [ZIP 244] rules.
-    ///
-    /// [ZIP 244]: https://zips.z.cash/zip-0244#s-2a-hash-type
-    </span><span class="kw">pub fn </span>parse(hash_type: u8) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
-        <span class="kw">match </span>hash_type &amp; !SIGHASH_ANYONECANPAY {
-            SIGHASH_ALL | SIGHASH_NONE | SIGHASH_SINGLE =&gt; <span class="prelude-val">Some</span>(<span class="self">Self</span>(hash_type)),
-            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-        }
-    }
-
-    <span class="doccomment">/// Encodes this `SighashType` using the [ZIP 244] rules.
-    ///
-    /// [ZIP 244]: https://zips.z.cash/zip-0244#s-2a-hash-type
-    </span><span class="kw">pub fn </span>encode(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u8 {
-        <span class="comment">// Correct by construction.
-        </span><span class="self">self</span>.<span class="number">0
-    </span>}
-}
+<span class="kw">pub use </span>transparent::sighash::<span class="kw-2">*</span>;
 
 <span class="kw">pub enum </span>SignableInput&lt;<span class="lifetime">'a</span>&gt; {
     Shielded,
-    Transparent {
-        hash_type: u8,
-        index: usize,
-        script_code: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Script,
-        script_pubkey: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Script,
-        value: NonNegativeAmount,
-    },
+    Transparent(transparent::sighash::SignableInput&lt;<span class="lifetime">'a</span>&gt;),
     <span class="attr">#[cfg(zcash_unstable = <span class="string">"zfuture"</span>)]
     </span>Tze {
         index: usize,
@@ -204,7 +93,7 @@
     <span class="kw">pub fn </span>hash_type(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u8 {
         <span class="kw">match </span><span class="self">self </span>{
             SignableInput::Shielded =&gt; SIGHASH_ALL,
-            SignableInput::Transparent { hash_type, .. } =&gt; <span class="kw-2">*</span>hash_type,
+            SignableInput::Transparent(input) =&gt; input.hash_type().encode(),
             <span class="attr">#[cfg(zcash_unstable = <span class="string">"zfuture"</span>)]
             </span>SignableInput::Tze { .. } =&gt; SIGHASH_ALL,
         }
@@ -217,21 +106,6 @@
     <span class="kw">fn </span>as_ref(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[u8; <span class="number">32</span>] {
         <span class="self">self</span>.<span class="number">0</span>.as_ref().try_into().unwrap()
     }
-}
-
-<span class="doccomment">/// Additional context that is needed to compute signature hashes
-/// for transactions that include transparent inputs or outputs.
-</span><span class="kw">pub trait </span>TransparentAuthorizingContext: transparent::Authorization {
-    <span class="doccomment">/// Returns the list of all transparent input amounts, provided
-    /// so that wallets can commit to the transparent input breakdown
-    /// without requiring the full data of the previous transactions
-    /// providing these inputs.
-    </span><span class="kw">fn </span>input_amounts(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;NonNegativeAmount&gt;;
-    <span class="doccomment">/// Returns the list of all transparent input scriptPubKeys, provided
-    /// so that wallets can commit to the transparent input breakdown
-    /// without requiring the full data of the previous transactions
-    /// providing these inputs.
-    </span><span class="kw">fn </span>input_scriptpubkeys(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;Script&gt;;
 }
 
 <span class="doccomment">/// Computes the signature hash for an input to a transaction, given

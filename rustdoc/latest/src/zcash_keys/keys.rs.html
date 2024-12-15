@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_keys/src/keys.rs`."><title>keys.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_keys" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (327c7ee43 2024-12-13)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_keys/</div>keys.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_keys/src/keys.rs`."><title>keys.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_keys" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (0aeaa5eb2 2024-12-14)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_keys/</div>keys.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -1768,7 +1768,10 @@
 <a href="#1767" id="1767">1767</a>
 <a href="#1768" id="1768">1768</a>
 <a href="#1769" id="1769">1769</a>
-<a href="#1770" id="1770">1770</a></pre></div><pre class="rust"><code><span class="doccomment">//! Helper functions for managing light client key material.
+<a href="#1770" id="1770">1770</a>
+<a href="#1771" id="1771">1771</a>
+<a href="#1772" id="1772">1772</a>
+<a href="#1773" id="1773">1773</a></pre></div><pre class="rust"><code><span class="doccomment">//! Helper functions for managing light client key material.
 </span><span class="kw">use </span>std::{
     error,
     fmt::{<span class="self">self</span>, Display},
@@ -1786,14 +1789,14 @@
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">use </span>{
     std::convert::TryInto,
-    zcash_primitives::legacy::keys::{<span class="self">self </span><span class="kw">as </span>legacy, IncomingViewingKey, NonHardenedChildIndex},
+    transparent::keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
 
 <span class="attr">#[cfg(all(
     feature = <span class="string">"transparent-inputs"</span>,
     any(test, feature = <span class="string">"test-dependencies"</span>)
 ))]
-</span><span class="kw">use </span>zcash_primitives::legacy::TransparentAddress;
+</span><span class="kw">use </span>transparent::address::TransparentAddress;
 
 <span class="attr">#[cfg(feature = <span class="string">"unstable"</span>)]
 </span><span class="kw">use </span>{
@@ -1801,7 +1804,7 @@
     std::convert::TryFrom,
     std::io::{Read, Write},
     zcash_encoding::CompactSize,
-    zcash_primitives::consensus::BranchId,
+    zcash_protocol::consensus::BranchId,
 };
 
 <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
@@ -1976,7 +1979,7 @@
 </span><span class="attr">#[derive(Clone, Debug)]
 </span><span class="kw">pub struct </span>UnifiedSpendingKey {
     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-    </span>transparent: legacy::AccountPrivKey,
+    </span>transparent: transparent::keys::AccountPrivKey,
     <span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)]
     </span>sapling: sapling::ExtendedSpendingKey,
     <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
@@ -1995,7 +1998,7 @@
 
         UnifiedSpendingKey::from_checked_parts(
             <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-            </span>legacy::AccountPrivKey::from_seed(_params, seed, _account)
+            </span>transparent::keys::AccountPrivKey::from_seed(_params, seed, _account)
                 .map_err(DerivationError::Transparent)<span class="question-mark">?</span>,
             <span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)]
             </span>sapling::spending_key(seed, _params.coin_type(), _account),
@@ -2008,7 +2011,7 @@
     <span class="doccomment">/// Construct a USK from its constituent parts, after verifying that UIVK derivation can
     /// succeed.
     </span><span class="kw">fn </span>from_checked_parts(
-        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)] </span>transparent: legacy::AccountPrivKey,
+        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)] </span>transparent: transparent::keys::AccountPrivKey,
         <span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)] </span>sapling: sapling::ExtendedSpendingKey,
         <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)] </span>orchard: orchard::keys::SpendingKey,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;UnifiedSpendingKey, DerivationError&gt; {
@@ -2042,7 +2045,7 @@
     <span class="doccomment">/// Returns the transparent component of the unified key at the
     /// BIP44 path `m/44'/&lt;coin_type&gt;'/&lt;account&gt;'`.
     </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-    </span><span class="kw">pub fn </span>transparent(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>legacy::AccountPrivKey {
+    </span><span class="kw">pub fn </span>transparent(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>transparent::keys::AccountPrivKey {
         <span class="kw-2">&amp;</span><span class="self">self</span>.transparent
     }
 
@@ -2187,7 +2190,7 @@
                     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
                     </span>{
                         transparent = <span class="prelude-val">Some</span>(
-                            legacy::AccountPrivKey::from_bytes(<span class="kw-2">&amp;</span>key)
+                            transparent::keys::AccountPrivKey::from_bytes(<span class="kw-2">&amp;</span>key)
                                 .ok_or(DecodingError::KeyDataInvalid(Typecode::P2pkh))<span class="question-mark">?</span>,
                         );
                     }
@@ -2401,7 +2404,7 @@
 </span><span class="attr">#[derive(Clone, Debug)]
 </span><span class="kw">pub struct </span>UnifiedFullViewingKey {
     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-    </span>transparent: <span class="prelude-ty">Option</span>&lt;legacy::AccountPubKey&gt;,
+    </span>transparent: <span class="prelude-ty">Option</span>&lt;transparent::keys::AccountPubKey&gt;,
     <span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)]
     </span>sapling: <span class="prelude-ty">Option</span>&lt;sapling::DiversifiableFullViewingKey&gt;,
     <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
@@ -2417,7 +2420,9 @@
     /// be used instead.
     </span><span class="attr">#[cfg(any(test, feature = <span class="string">"test-dependencies"</span>))]
     </span><span class="kw">pub fn </span>new(
-        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)] </span>transparent: <span class="prelude-ty">Option</span>&lt;legacy::AccountPubKey&gt;,
+        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)] </span>transparent: <span class="prelude-ty">Option</span>&lt;
+            transparent::keys::AccountPubKey,
+        &gt;,
         <span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)] </span>sapling: <span class="prelude-ty">Option</span>&lt;sapling::DiversifiableFullViewingKey&gt;,
         <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)] </span>orchard: <span class="prelude-ty">Option</span>&lt;orchard::keys::FullViewingKey&gt;,
         <span class="comment">// TODO: Implement construction of UFVKs with metadata items.
@@ -2472,7 +2477,9 @@
     <span class="doccomment">/// Construct a UFVK from its constituent parts, after verifying that UIVK derivation can
     /// succeed.
     </span><span class="kw">fn </span>from_checked_parts(
-        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)] </span>transparent: <span class="prelude-ty">Option</span>&lt;legacy::AccountPubKey&gt;,
+        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)] </span>transparent: <span class="prelude-ty">Option</span>&lt;
+            transparent::keys::AccountPubKey,
+        &gt;,
         <span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)] </span>sapling: <span class="prelude-ty">Option</span>&lt;sapling::DiversifiableFullViewingKey&gt;,
         <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)] </span>orchard: <span class="prelude-ty">Option</span>&lt;orchard::keys::FullViewingKey&gt;,
         unknown: Vec&lt;(u32, Vec&lt;u8&gt;)&gt;,
@@ -2558,7 +2565,7 @@
                     data.to_vec(),
                 ))),
                 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-                </span>unified::Fvk::P2pkh(data) =&gt; legacy::AccountPubKey::deserialize(data)
+                </span>unified::Fvk::P2pkh(data) =&gt; transparent::keys::AccountPubKey::deserialize(data)
                     .map_err(|<span class="kw">_</span>| DecodingError::KeyDataInvalid(Typecode::P2pkh))
                     .map(|tfvk| {
                         transparent = <span class="prelude-val">Some</span>(tfvk);
@@ -2644,7 +2651,7 @@
     <span class="doccomment">/// Returns the transparent component of the unified key at the
     /// BIP44 path `m/44'/&lt;coin_type&gt;'/&lt;account&gt;'`.
     </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-    </span><span class="kw">pub fn </span>transparent(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>legacy::AccountPubKey&gt; {
+    </span><span class="kw">pub fn </span>transparent(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>transparent::keys::AccountPubKey&gt; {
         <span class="self">self</span>.transparent.as_ref()
     }
 
@@ -2707,7 +2714,7 @@
 </span><span class="attr">#[derive(Clone, Debug)]
 </span><span class="kw">pub struct </span>UnifiedIncomingViewingKey {
     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-    </span>transparent: <span class="prelude-ty">Option</span>&lt;zcash_primitives::legacy::keys::ExternalIvk&gt;,
+    </span>transparent: <span class="prelude-ty">Option</span>&lt;transparent::keys::ExternalIvk&gt;,
     <span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)]
     </span>sapling: <span class="prelude-ty">Option</span>&lt;::sapling::zip32::IncomingViewingKey&gt;,
     <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
@@ -2724,9 +2731,7 @@
     /// be used instead.
     </span><span class="attr">#[cfg(any(test, feature = <span class="string">"test-dependencies"</span>))]
     </span><span class="kw">pub fn </span>new(
-        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)] </span>transparent: <span class="prelude-ty">Option</span>&lt;
-            zcash_primitives::legacy::keys::ExternalIvk,
-        &gt;,
+        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)] </span>transparent: <span class="prelude-ty">Option</span>&lt;transparent::keys::ExternalIvk&gt;,
         <span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)] </span>sapling: <span class="prelude-ty">Option</span>&lt;::sapling::zip32::IncomingViewingKey&gt;,
         <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)] </span>orchard: <span class="prelude-ty">Option</span>&lt;orchard::keys::IncomingViewingKey&gt;,
         <span class="comment">// TODO: Implement construction of UIVKs with metadata items.
@@ -2803,7 +2808,7 @@
                     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
                     </span>{
                         transparent = <span class="prelude-val">Some</span>(
-                            legacy::ExternalIvk::deserialize(data)
+                            transparent::keys::ExternalIvk::deserialize(data)
                                 .map_err(|<span class="kw">_</span>| DecodingError::KeyDataInvalid(Typecode::P2pkh))<span class="question-mark">?</span>,
                         );
                     }
@@ -2869,7 +2874,7 @@
 
     <span class="doccomment">/// Returns the Transparent external IVK, if present.
     </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-    </span><span class="kw">pub fn </span>transparent(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;zcash_primitives::legacy::keys::ExternalIvk&gt; {
+    </span><span class="kw">pub fn </span>transparent(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;transparent::keys::ExternalIvk&gt; {
         <span class="kw-2">&amp;</span><span class="self">self</span>.transparent
     }
 
@@ -3056,7 +3061,8 @@
     <span class="kw">use </span>proptest::prelude::<span class="kw-2">*</span>;
 
     <span class="kw">use </span><span class="kw">super</span>::UnifiedSpendingKey;
-    <span class="kw">use </span>zcash_primitives::{consensus::Network, zip32::AccountId};
+    <span class="kw">use </span>zcash_protocol::consensus::Network;
+    <span class="kw">use </span>zip32::AccountId;
 
     <span class="kw">pub fn </span>arb_unified_spending_key(params: Network) -&gt; <span class="kw">impl </span>Strategy&lt;Value = UnifiedSpendingKey&gt; {
         prop::array::uniform32(prop::num::u8::ANY).prop_flat_map(<span class="kw">move </span>|seed| {
@@ -3096,8 +3102,8 @@
     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     </span><span class="kw">use </span>{
         <span class="kw">crate</span>::{address::Address, encoding::AddressCodec},
+        transparent::keys::{AccountPrivKey, IncomingViewingKey},
         zcash_address::test_vectors,
-        zcash_primitives::legacy::keys::{AccountPrivKey, IncomingViewingKey},
         zip32::DiversifierIndex,
     };
 
@@ -3123,7 +3129,7 @@
     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     #[test]
     </span><span class="kw">fn </span>pk_to_taddr() {
-        <span class="kw">use </span>zcash_primitives::legacy::keys::NonHardenedChildIndex;
+        <span class="kw">use </span>transparent::keys::NonHardenedChildIndex;
 
         <span class="kw">let </span>taddr = AccountPrivKey::from_seed(<span class="kw-2">&amp;</span>MAIN_NETWORK, <span class="kw-2">&amp;</span>seed(), AccountId::ZERO)
             .unwrap()

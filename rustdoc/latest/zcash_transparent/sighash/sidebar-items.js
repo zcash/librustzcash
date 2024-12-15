@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SIGHASH_ALL","SIGHASH_ANYONECANPAY","SIGHASH_MASK","SIGHASH_NONE","SIGHASH_SINGLE"],"struct":["SighashType","SignableInput"],"trait":["TransparentAuthorizingContext"]};

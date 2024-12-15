@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["PoolType","ShieldedProtocol"],"mod":["consensus","constants","local_consensus","memo","value"]};
+window.SIDEBAR_ITEMS = {"enum":["PoolType","ShieldedProtocol"],"mod":["consensus","constants","local_consensus","memo","value"],"struct":["TxId"]};
