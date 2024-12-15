@@ -1,19 +1,17 @@
 //! Structs representing the components within Zcash transactions.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use zcash_protocol::TxId;
 
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
 
+use zcash_protocol::value::{BalanceError, ZatBalance as Amount, Zatoshis as NonNegativeAmount};
+
 use crate::{
-    legacy::{Script, TransparentAddress},
-    transaction::{sighash::TransparentAuthorizingContext, TxId},
+    address::{Script, TransparentAddress},
+    sighash::TransparentAuthorizingContext,
 };
-
-use super::amount::{Amount, BalanceError, NonNegativeAmount};
-
-pub mod builder;
-pub mod pczt;
 
 pub trait Authorization: Debug {
     type ScriptSig: Debug + Clone + PartialEq;
@@ -23,7 +21,7 @@ pub trait Authorization: Debug {
 /// information for creating sighashes.
 #[derive(Debug)]
 pub struct EffectsOnly {
-    inputs: Vec<TxOut>,
+    pub(crate) inputs: Vec<TxOut>,
 }
 
 impl Authorization for EffectsOnly {
@@ -56,11 +54,6 @@ pub trait MapAuth<A: Authorization, B: Authorization> {
 }
 
 /// The identity map.
-///
-/// This can be used with [`TransactionData::map_authorization`] when you want to map the
-/// authorization of a subset of a transaction's bundles.
-///
-/// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
 impl MapAuth<Authorized, Authorized> for () {
     fn map_script_sig(
         &self,
@@ -138,8 +131,8 @@ impl<A: Authorization> Bundle<A> {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OutPoint {
-    hash: TxId,
-    n: u32,
+    pub(crate) hash: TxId,
+    pub(crate) n: u32,
 }
 
 impl OutPoint {
@@ -156,7 +149,7 @@ impl OutPoint {
     #[cfg(any(test, feature = "test-dependencies"))]
     pub const fn fake() -> Self {
         OutPoint {
-            hash: TxId([1u8; 32]),
+            hash: TxId::from_bytes([1u8; 32]),
             n: 1,
         }
     }
@@ -262,8 +255,9 @@ pub mod testing {
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::sample::select;
+    use zcash_protocol::value::testing::arb_zatoshis;
 
-    use crate::{legacy::Script, transaction::components::amount::testing::arb_nonnegative_amount};
+    use crate::address::Script;
 
     use super::{Authorized, Bundle, OutPoint, TxIn, TxOut};
 
@@ -301,7 +295,7 @@ pub mod testing {
     }
 
     prop_compose! {
-        pub fn arb_txout()(value in arb_nonnegative_amount(), script_pubkey in arb_script()) -> TxOut {
+        pub fn arb_txout()(value in arb_zatoshis(), script_pubkey in arb_script()) -> TxOut {
             TxOut { value, script_pubkey }
         }
     }

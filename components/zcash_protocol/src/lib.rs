@@ -31,6 +31,9 @@ pub mod local_consensus;
 pub mod memo;
 pub mod value;
 
+mod txid;
+pub use txid::TxId;
+
 /// A Zcash shielded transfer protocol.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ShieldedProtocol {

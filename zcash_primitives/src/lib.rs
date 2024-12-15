@@ -20,7 +20,6 @@
 pub mod block;
 pub use zcash_protocol::consensus;
 pub use zcash_protocol::constants;
-pub mod legacy;
 pub use zcash_protocol::memo;
 pub mod merkle_tree;
 use sapling;
@@ -28,3 +27,9 @@ pub mod transaction;
 pub use zip32;
 #[cfg(zcash_unstable = "zfuture")]
 pub mod extensions;
+
+pub mod legacy {
+    pub use transparent::address::*;
+    #[cfg(feature = "transparent-inputs")]
+    pub use transparent::keys;
+}

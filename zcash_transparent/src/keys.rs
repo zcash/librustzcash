@@ -11,7 +11,7 @@ use zcash_protocol::consensus::{self, NetworkConstants};
 use zcash_spec::PrfExpand;
 use zip32::AccountId;
 
-use super::TransparentAddress;
+use crate::address::TransparentAddress;
 
 /// The scope of a transparent key.
 ///

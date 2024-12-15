@@ -1,23 +1,25 @@
 //! Encoding and decoding functions for Zcash key and address structs.
 //!
 //! Human-Readable Prefixes (HRPs) for Bech32 encodings are located in the
-//! [zcash_primitives::constants] module.
+//! [zcash_protocol::constants] module.
 
 use crate::address::UnifiedAddress;
-use bech32::primitives::decode::CheckedHrpstringError;
 use bs58::{self, decode::Error as Bs58Error};
 use std::fmt;
-use zcash_primitives::consensus::NetworkConstants;
 
+use transparent::address::TransparentAddress;
 use zcash_address::unified::{self, Encoding};
-use zcash_primitives::{consensus, legacy::TransparentAddress};
+use zcash_protocol::consensus::{self, NetworkConstants};
 
 #[cfg(feature = "sapling")]
 use {
-    bech32::{primitives::decode::CheckedHrpstring, Bech32, Hrp},
+    bech32::{
+        primitives::decode::{CheckedHrpstring, CheckedHrpstringError},
+        Bech32, Hrp,
+    },
     sapling::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     std::io::{self, Write},
-    zcash_primitives::consensus::NetworkType,
+    zcash_protocol::consensus::NetworkType,
 };
 
 #[cfg(feature = "sapling")]
@@ -413,8 +415,6 @@ pub fn decode_payment_address(
 ///     ),
 ///     "t26YoyZ1iPgiMEWL4zGUm74eVWfhyDMXzY2",
 /// );
-/// ```
-/// [`TransparentAddress`]: zcash_primitives::legacy::TransparentAddress
 pub fn encode_transparent_address(
     pubkey_version: &[u8],
     script_version: &[u8],
@@ -481,8 +481,6 @@ pub fn encode_transparent_address_p<P: consensus::Parameters>(
 ///     ),
 ///     Ok(Some(TransparentAddress::ScriptHash([0; 20]))),
 /// );
-/// ```
-/// [`TransparentAddress`]: zcash_primitives::legacy::TransparentAddress
 pub fn decode_transparent_address(
     pubkey_version: &[u8],
     script_version: &[u8],

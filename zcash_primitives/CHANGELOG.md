@@ -24,8 +24,8 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::transaction::components::transparent`:
   - `builder::TransparentBuilder::add_input` now takes `secp256k1::PublicKey`
     instead of `secp256k1::SecretKey`.
-  - `Bundle<Unauthorized>::apply_signatures` now takes an additional argument
-    `&TransparentSigningSet`.
+  - `Bundle<Unauthorized>::apply_signatures` has had its arguments replaced with
+    a function providing the sighash calculation, and `&TransparentSigningSet`.
   - `builder::Error` has a new variant `MissingSigningKey`.
 - `zcash_primitives::transaction::builder`:
   - `Builder::add_orchard_spend` now takes `orchard::keys::FullViewingKey`
@@ -38,6 +38,9 @@ and this library adheres to Rust's notion of
     - `&TransparentSigningSet`
     - `&[sapling::zip32::ExtendedSpendingKey]`
     - `&[orchard::keys::SpendAuthorizingKey]`
+- `zcash_primitives::transaction::sighash`:
+  - `SignableInput::Transparent` is now a wrapper around
+    `zcash_transparent::sighash::SignableInput`.
 
 ## [0.20.0] - 2024-11-14
 

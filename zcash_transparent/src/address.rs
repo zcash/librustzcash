@@ -9,9 +9,6 @@ use std::ops::Shl;
 
 use zcash_encoding::Vector;
 
-#[cfg(feature = "transparent-inputs")]
-pub mod keys;
-
 /// Defined script opcodes.
 ///
 /// Most of the opcodes are unused by this crate, but we define them so that the alternate

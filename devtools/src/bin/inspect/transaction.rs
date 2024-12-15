@@ -3,6 +3,7 @@ use std::{
     convert::{TryFrom, TryInto},
 };
 
+use ::transparent::sighash::SighashType;
 use bellman::groth16;
 use group::GroupEncoding;
 use orchard::note_encryption::OrchardDomain;
@@ -283,7 +284,7 @@ pub(crate) fn inspect(
                                 let sig = secp256k1::ecdsa::Signature::from_der(
                                     &txin.script_sig.0[1..1 + sig_len],
                                 );
-                                let hash_type = txin.script_sig.0[1 + sig_len];
+                                let hash_type = SighashType::parse(txin.script_sig.0[1 + sig_len]);
                                 let pubkey_bytes = &txin.script_sig.0[1 + sig_len + 2..];
                                 let pubkey = secp256k1::PublicKey::from_slice(pubkey_bytes);
 
@@ -293,13 +294,18 @@ pub(crate) fn inspect(
                                         i, e
                                     );
                                 }
+                                if hash_type.is_none() {
+                                    eprintln!("    ⚠️  Txin {} has invalid sighash type", i);
+                                }
                                 if let Err(e) = pubkey {
                                     eprintln!(
                                         "    ⚠️  Txin {} has invalid pubkey encoding: {}",
                                         i, e
                                     );
                                 }
-                                if let (Ok(sig), Ok(pubkey)) = (sig, pubkey) {
+                                if let (Ok(sig), Some(hash_type), Ok(pubkey)) =
+                                    (sig, hash_type, pubkey)
+                                {
                                     #[allow(deprecated)]
                                     if pubkey_to_address(&pubkey) != addr {
                                         eprintln!("    ⚠️  Txin {} pubkey does not match coin's script_pubkey", i);
@@ -307,14 +313,16 @@ pub(crate) fn inspect(
 
                                     let sighash = signature_hash(
                                         tx,
-                                        &SignableInput::Transparent {
-                                            hash_type,
-                                            index: i,
-                                            // For P2PKH these are the same.
-                                            script_code: &coin.script_pubkey,
-                                            script_pubkey: &coin.script_pubkey,
-                                            value: coin.value,
-                                        },
+                                        &SignableInput::Transparent(
+                                            ::transparent::sighash::SignableInput::from_parts(
+                                                hash_type,
+                                                i,
+                                                // For P2PKH these are the same.
+                                                &coin.script_pubkey,
+                                                &coin.script_pubkey,
+                                                coin.value,
+                                            ),
+                                        ),
                                         txid_parts,
                                     );
                                     let msg = secp256k1::Message::from_slice(sighash.as_ref())

@@ -1,7 +1,7 @@
 use ripemd::Ripemd160;
 use sha2::{Digest, Sha256};
 
-use crate::legacy::{Script, TransparentAddress};
+use crate::address::{Script, TransparentAddress};
 
 use super::{Bip32Derivation, Bundle, Input, Output};
 

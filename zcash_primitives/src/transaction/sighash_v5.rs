@@ -89,10 +89,10 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
                 txid_digests.sequence_digest
             };
 
-            let outputs_digest = if let SignableInput::Transparent { index, .. } = input {
+            let outputs_digest = if let SignableInput::Transparent(input) = input {
                 if flag_single {
-                    if *index < bundle.vout.len() {
-                        transparent_outputs_hash(&[&bundle.vout[*index]])
+                    if *input.index() < bundle.vout.len() {
+                        transparent_outputs_hash(&[&bundle.vout[*input.index()]])
                     } else {
                         transparent_outputs_hash::<TxOut>(&[])
                     }
@@ -110,17 +110,11 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
             //S.2g.iii: scriptPubKey (field encoding)
             //S.2g.iv:  nSequence    (4-byte unsigned little-endian)
             let mut ch = hasher(ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION);
-            if let SignableInput::Transparent {
-                index,
-                script_pubkey,
-                value,
-                ..
-            } = input
-            {
-                let txin = &bundle.vin[*index];
+            if let SignableInput::Transparent(input) = input {
+                let txin = &bundle.vin[*input.index()];
                 txin.prevout.write(&mut ch).unwrap();
-                ch.write_all(&value.to_i64_le_bytes()).unwrap();
-                script_pubkey.write(&mut ch).unwrap();
+                ch.write_all(&input.value().to_i64_le_bytes()).unwrap();
+                input.script_pubkey().write(&mut ch).unwrap();
                 ch.write_all(&txin.sequence.to_le_bytes()).unwrap();
             }
             let txin_sig_digest = ch.finalize();

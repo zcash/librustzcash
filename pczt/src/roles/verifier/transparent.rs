@@ -1,5 +1,3 @@
-use zcash_primitives::transaction::components::transparent;
-
 use crate::Pczt;
 
 impl super::Verifier {

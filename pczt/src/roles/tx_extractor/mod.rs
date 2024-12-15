@@ -151,7 +151,7 @@ impl<'a> TransactionExtractor<'a> {
 struct Unbound;
 
 impl Authorization for Unbound {
-    type TransparentAuth = zcash_primitives::transaction::components::transparent::pczt::Unbound;
+    type TransparentAuth = ::transparent::pczt::Unbound;
     type SaplingAuth = ::sapling::pczt::Unbound;
     type OrchardAuth = ::orchard::pczt::Unbound;
     #[cfg(zcash_unstable = "zfuture")]
@@ -250,7 +250,7 @@ impl LockTimeInput for crate::transparent::Input {
 }
 
 #[cfg(feature = "transparent")]
-impl LockTimeInput for zcash_primitives::transaction::components::transparent::pczt::Input {
+impl LockTimeInput for ::transparent::pczt::Input {
     fn required_time_lock_time(&self) -> Option<u32> {
         *self.required_time_lock_time()
     }

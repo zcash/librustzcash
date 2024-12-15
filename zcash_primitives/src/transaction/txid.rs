@@ -420,7 +420,7 @@ pub fn to_txid(
         digests.tze_digests.as_ref(),
     );
 
-    TxId(<[u8; 32]>::try_from(txid_digest.as_bytes()).unwrap())
+    TxId::from_bytes(<[u8; 32]>::try_from(txid_digest.as_bytes()).unwrap())
 }
 
 /// Digester which constructs a digest of only the witness data.

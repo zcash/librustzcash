@@ -27,6 +27,7 @@ zcash_protocol = {workspace = true, features = ["local-consensus"] }
 
 # Transparent
 secp256k1.workspace = true
+transparent.workspace = true
 
 # Sprout
 ed25519-zebra = "4"

@@ -3,26 +3,21 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use zcash_protocol::value::{BalanceError, ZatBalance as Amount, Zatoshis as NonNegativeAmount};
+
 use crate::{
-    legacy::{Script, TransparentAddress},
-    transaction::{
-        components::{
-            amount::{Amount, BalanceError, NonNegativeAmount},
-            transparent::{self, Authorization, Authorized, Bundle, TxIn, TxOut},
-        },
-        sighash::TransparentAuthorizingContext,
-    },
+    address::{Script, TransparentAddress},
+    bundle::{Authorization, Authorized, Bundle, TxIn, TxOut},
+    pczt,
+    sighash::{SignableInput, TransparentAuthorizingContext},
 };
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::transaction::{
-        self as tx,
-        components::transparent::OutPoint,
-        sighash::{signature_hash, SighashType, SignableInput, SIGHASH_ALL},
-        TransactionData, TxDigests,
+    crate::{
+        bundle::OutPoint,
+        sighash::{SighashType, SIGHASH_ALL},
     },
-    blake2b_simd::Hash as Blake2bHash,
     sha2::Digest,
 };
 
@@ -206,7 +201,7 @@ impl TransparentBuilder {
         (Amount::from(input_sum) - Amount::from(output_sum)).ok_or(BalanceError::Underflow)
     }
 
-    pub fn build(self) -> Option<transparent::Bundle<Unauthorized>> {
+    pub fn build(self) -> Option<Bundle<Unauthorized>> {
         #[cfg(feature = "transparent-inputs")]
         let vin: Vec<TxIn<Unauthorized>> = self
             .inputs
@@ -220,7 +215,7 @@ impl TransparentBuilder {
         if vin.is_empty() && self.vout.is_empty() {
             None
         } else {
-            Some(transparent::Bundle {
+            Some(Bundle {
                 vin,
                 vout: self.vout,
                 authorization: Unauthorized {
@@ -231,12 +226,13 @@ impl TransparentBuilder {
         }
     }
 
-    pub(crate) fn build_for_pczt(self) -> Option<transparent::pczt::Bundle> {
+    /// Builds a bundle containing the given inputs and outputs, for inclusion in a PCZT.
+    pub fn build_for_pczt(self) -> Option<pczt::Bundle> {
         #[cfg(feature = "transparent-inputs")]
         let inputs = self
             .inputs
             .iter()
-            .map(|i| transparent::pczt::Input {
+            .map(|i| pczt::Input {
                 prevout_txid: i.utxo.hash,
                 prevout_index: i.utxo.n,
                 sequence: None,
@@ -267,7 +263,7 @@ impl TransparentBuilder {
             let outputs = self
                 .vout
                 .into_iter()
-                .map(|o| transparent::pczt::Output {
+                .map(|o| pczt::Output {
                     value: o.value,
                     script_pubkey: o.script_pubkey,
                     // We don't currently support spending P2SH coins, so we only ever see
@@ -280,7 +276,7 @@ impl TransparentBuilder {
                 })
                 .collect();
 
-            Some(transparent::pczt::Bundle { inputs, outputs })
+            Some(pczt::Bundle { inputs, outputs })
         }
     }
 }
@@ -323,12 +319,15 @@ impl TransparentAuthorizingContext for Unauthorized {
 }
 
 impl Bundle<Unauthorized> {
-    pub fn apply_signatures(
+    #[cfg_attr(not(feature = "transparent-inputs"), allow(unused_variables))]
+    pub fn apply_signatures<F>(
         self,
-        #[cfg(feature = "transparent-inputs")] mtx: &TransactionData<tx::Unauthorized>,
-        #[cfg(feature = "transparent-inputs")] txid_parts_cache: &TxDigests<Blake2bHash>,
+        calculate_sighash: F,
         signing_set: &TransparentSigningSet,
-    ) -> Result<Bundle<Authorized>, Error> {
+    ) -> Result<Bundle<Authorized>, Error>
+    where
+        F: Fn(SignableInput) -> [u8; 32],
+    {
         #[cfg(feature = "transparent-inputs")]
         let script_sigs = self
             .authorization
@@ -343,17 +342,13 @@ impl Bundle<Unauthorized> {
                     .find(|(_, pubkey)| pubkey == &info.pubkey)
                     .ok_or(Error::MissingSigningKey)?;
 
-                let sighash = signature_hash(
-                    mtx,
-                    &SignableInput::Transparent {
-                        hash_type: SIGHASH_ALL,
-                        index,
-                        script_code: &info.coin.script_pubkey, // for p2pkh, always the same as script_pubkey
-                        script_pubkey: &info.coin.script_pubkey,
-                        value: info.coin.value,
-                    },
-                    txid_parts_cache,
-                );
+                let sighash = calculate_sighash(SignableInput {
+                    hash_type: SighashType::ALL,
+                    index,
+                    script_code: &info.coin.script_pubkey, // for p2pkh, always the same as script_pubkey
+                    script_pubkey: &info.coin.script_pubkey,
+                    value: info.coin.value,
+                });
 
                 let msg = secp256k1::Message::from_slice(sighash.as_ref()).expect("32 bytes");
                 let sig = signing_set.secp.sign_ecdsa(&msg, sk);
@@ -369,7 +364,7 @@ impl Bundle<Unauthorized> {
         #[cfg(not(feature = "transparent-inputs"))]
         let script_sigs = std::iter::empty::<Result<Script, Error>>();
 
-        Ok(transparent::Bundle {
+        Ok(Bundle {
             vin: self
                 .vin
                 .iter()

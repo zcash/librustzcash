@@ -16,14 +16,14 @@ use zcash_protocol::consensus::NetworkConstants;
 #[cfg(feature = "transparent-inputs")]
 use {
     std::convert::TryInto,
-    zcash_primitives::legacy::keys::{self as legacy, IncomingViewingKey, NonHardenedChildIndex},
+    transparent::keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
 
 #[cfg(all(
     feature = "transparent-inputs",
     any(test, feature = "test-dependencies")
 ))]
-use zcash_primitives::legacy::TransparentAddress;
+use transparent::address::TransparentAddress;
 
 #[cfg(feature = "unstable")]
 use {
@@ -31,7 +31,7 @@ use {
     std::convert::TryFrom,
     std::io::{Read, Write},
     zcash_encoding::CompactSize,
-    zcash_primitives::consensus::BranchId,
+    zcash_protocol::consensus::BranchId,
 };
 
 #[cfg(feature = "orchard")]
@@ -206,7 +206,7 @@ impl Era {
 #[derive(Clone, Debug)]
 pub struct UnifiedSpendingKey {
     #[cfg(feature = "transparent-inputs")]
-    transparent: legacy::AccountPrivKey,
+    transparent: transparent::keys::AccountPrivKey,
     #[cfg(feature = "sapling")]
     sapling: sapling::ExtendedSpendingKey,
     #[cfg(feature = "orchard")]
@@ -225,7 +225,7 @@ impl UnifiedSpendingKey {
 
         UnifiedSpendingKey::from_checked_parts(
             #[cfg(feature = "transparent-inputs")]
-            legacy::AccountPrivKey::from_seed(_params, seed, _account)
+            transparent::keys::AccountPrivKey::from_seed(_params, seed, _account)
                 .map_err(DerivationError::Transparent)?,
             #[cfg(feature = "sapling")]
             sapling::spending_key(seed, _params.coin_type(), _account),
@@ -238,7 +238,7 @@ impl UnifiedSpendingKey {
     /// Construct a USK from its constituent parts, after verifying that UIVK derivation can
     /// succeed.
     fn from_checked_parts(
-        #[cfg(feature = "transparent-inputs")] transparent: legacy::AccountPrivKey,
+        #[cfg(feature = "transparent-inputs")] transparent: transparent::keys::AccountPrivKey,
         #[cfg(feature = "sapling")] sapling: sapling::ExtendedSpendingKey,
         #[cfg(feature = "orchard")] orchard: orchard::keys::SpendingKey,
     ) -> Result<UnifiedSpendingKey, DerivationError> {
@@ -272,7 +272,7 @@ impl UnifiedSpendingKey {
     /// Returns the transparent component of the unified key at the
     /// BIP44 path `m/44'/<coin_type>'/<account>'`.
     #[cfg(feature = "transparent-inputs")]
-    pub fn transparent(&self) -> &legacy::AccountPrivKey {
+    pub fn transparent(&self) -> &transparent::keys::AccountPrivKey {
         &self.transparent
     }
 
@@ -417,7 +417,7 @@ impl UnifiedSpendingKey {
                     #[cfg(feature = "transparent-inputs")]
                     {
                         transparent = Some(
-                            legacy::AccountPrivKey::from_bytes(&key)
+                            transparent::keys::AccountPrivKey::from_bytes(&key)
                                 .ok_or(DecodingError::KeyDataInvalid(Typecode::P2pkh))?,
                         );
                     }
@@ -631,7 +631,7 @@ impl From<bip32::Error> for DerivationError {
 #[derive(Clone, Debug)]
 pub struct UnifiedFullViewingKey {
     #[cfg(feature = "transparent-inputs")]
-    transparent: Option<legacy::AccountPubKey>,
+    transparent: Option<transparent::keys::AccountPubKey>,
     #[cfg(feature = "sapling")]
     sapling: Option<sapling::DiversifiableFullViewingKey>,
     #[cfg(feature = "orchard")]
@@ -647,7 +647,9 @@ impl UnifiedFullViewingKey {
     /// be used instead.
     #[cfg(any(test, feature = "test-dependencies"))]
     pub fn new(
-        #[cfg(feature = "transparent-inputs")] transparent: Option<legacy::AccountPubKey>,
+        #[cfg(feature = "transparent-inputs")] transparent: Option<
+            transparent::keys::AccountPubKey,
+        >,
         #[cfg(feature = "sapling")] sapling: Option<sapling::DiversifiableFullViewingKey>,
         #[cfg(feature = "orchard")] orchard: Option<orchard::keys::FullViewingKey>,
         // TODO: Implement construction of UFVKs with metadata items.
@@ -702,7 +704,9 @@ impl UnifiedFullViewingKey {
     /// Construct a UFVK from its constituent parts, after verifying that UIVK derivation can
     /// succeed.
     fn from_checked_parts(
-        #[cfg(feature = "transparent-inputs")] transparent: Option<legacy::AccountPubKey>,
+        #[cfg(feature = "transparent-inputs")] transparent: Option<
+            transparent::keys::AccountPubKey,
+        >,
         #[cfg(feature = "sapling")] sapling: Option<sapling::DiversifiableFullViewingKey>,
         #[cfg(feature = "orchard")] orchard: Option<orchard::keys::FullViewingKey>,
         unknown: Vec<(u32, Vec<u8>)>,
@@ -788,7 +792,7 @@ impl UnifiedFullViewingKey {
                     data.to_vec(),
                 ))),
                 #[cfg(feature = "transparent-inputs")]
-                unified::Fvk::P2pkh(data) => legacy::AccountPubKey::deserialize(data)
+                unified::Fvk::P2pkh(data) => transparent::keys::AccountPubKey::deserialize(data)
                     .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh))
                     .map(|tfvk| {
                         transparent = Some(tfvk);
@@ -874,7 +878,7 @@ impl UnifiedFullViewingKey {
     /// Returns the transparent component of the unified key at the
     /// BIP44 path `m/44'/<coin_type>'/<account>'`.
     #[cfg(feature = "transparent-inputs")]
-    pub fn transparent(&self) -> Option<&legacy::AccountPubKey> {
+    pub fn transparent(&self) -> Option<&transparent::keys::AccountPubKey> {
         self.transparent.as_ref()
     }
 
@@ -937,7 +941,7 @@ impl UnifiedFullViewingKey {
 #[derive(Clone, Debug)]
 pub struct UnifiedIncomingViewingKey {
     #[cfg(feature = "transparent-inputs")]
-    transparent: Option<zcash_primitives::legacy::keys::ExternalIvk>,
+    transparent: Option<transparent::keys::ExternalIvk>,
     #[cfg(feature = "sapling")]
     sapling: Option<::sapling::zip32::IncomingViewingKey>,
     #[cfg(feature = "orchard")]
@@ -954,9 +958,7 @@ impl UnifiedIncomingViewingKey {
     /// be used instead.
     #[cfg(any(test, feature = "test-dependencies"))]
     pub fn new(
-        #[cfg(feature = "transparent-inputs")] transparent: Option<
-            zcash_primitives::legacy::keys::ExternalIvk,
-        >,
+        #[cfg(feature = "transparent-inputs")] transparent: Option<transparent::keys::ExternalIvk>,
         #[cfg(feature = "sapling")] sapling: Option<::sapling::zip32::IncomingViewingKey>,
         #[cfg(feature = "orchard")] orchard: Option<orchard::keys::IncomingViewingKey>,
         // TODO: Implement construction of UIVKs with metadata items.
@@ -1033,7 +1035,7 @@ impl UnifiedIncomingViewingKey {
                     #[cfg(feature = "transparent-inputs")]
                     {
                         transparent = Some(
-                            legacy::ExternalIvk::deserialize(data)
+                            transparent::keys::ExternalIvk::deserialize(data)
                                 .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh))?,
                         );
                     }
@@ -1099,7 +1101,7 @@ impl UnifiedIncomingViewingKey {
 
     /// Returns the Transparent external IVK, if present.
     #[cfg(feature = "transparent-inputs")]
-    pub fn transparent(&self) -> &Option<zcash_primitives::legacy::keys::ExternalIvk> {
+    pub fn transparent(&self) -> &Option<transparent::keys::ExternalIvk> {
         &self.transparent
     }
 
@@ -1286,7 +1288,8 @@ pub mod testing {
     use proptest::prelude::*;
 
     use super::UnifiedSpendingKey;
-    use zcash_primitives::{consensus::Network, zip32::AccountId};
+    use zcash_protocol::consensus::Network;
+    use zip32::AccountId;
 
     pub fn arb_unified_spending_key(params: Network) -> impl Strategy<Value = UnifiedSpendingKey> {
         prop::array::uniform32(prop::num::u8::ANY).prop_flat_map(move |seed| {
@@ -1326,8 +1329,8 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     use {
         crate::{address::Address, encoding::AddressCodec},
+        transparent::keys::{AccountPrivKey, IncomingViewingKey},
         zcash_address::test_vectors,
-        zcash_primitives::legacy::keys::{AccountPrivKey, IncomingViewingKey},
         zip32::DiversifierIndex,
     };
 
@@ -1353,7 +1356,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn pk_to_taddr() {
-        use zcash_primitives::legacy::keys::NonHardenedChildIndex;
+        use transparent::keys::NonHardenedChildIndex;
 
         let taddr = AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId::ZERO)
             .unwrap()

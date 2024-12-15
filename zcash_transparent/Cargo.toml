@@ -14,6 +14,57 @@ license.workspace = true
 categories.workspace = true
 
 [dependencies]
+zcash_address.workspace = true
+zcash_encoding.workspace = true
+zcash_protocol.workspace = true
+zip32.workspace = true
+
+# Dependencies exposed in a public API:
+# (Breaking upgrades to these require a breaking upgrade to this crate.)
+# - Digests (output types exposed)
+blake2b_simd.workspace = true
+sha2.workspace = true
+
+# - Secret management
+subtle.workspace = true
+
+# - Shielded protocols
+zcash_spec.workspace = true
+
+# - Test dependencies
+proptest = { workspace = true, optional = true }
+
+# - Transparent inputs
+#   - `Error` type exposed
+bip32.workspace = true
+#   - `SecretKey` and `PublicKey` types exposed
+secp256k1 = { workspace = true, optional = true }
+
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Boilerplate
+getset.workspace = true
+
+# - Documentation
+document-features.workspace = true
+
+# - Encodings
+bs58.workspace = true
+byteorder.workspace = true
+hex.workspace = true
+
+# - Transparent protocol
+ripemd.workspace = true
+
+[features]
+## Enables spending transparent notes with the transaction builder.
+transparent-inputs = ["bip32/secp256k1-ffi", "dep:secp256k1"]
+
+## Exposes APIs that are useful for testing, such as `proptest` strategies.
+test-dependencies = [
+    "dep:proptest",
+    "zcash_protocol/test-dependencies",
+]
 
 [lints]
 workspace = true
