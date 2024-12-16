@@ -316,11 +316,12 @@
 <a href="#315" id="315">315</a>
 <a href="#316" id="316">316</a>
 <a href="#317" id="317">317</a>
-<a href="#318" id="318">318</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs representing the components within Zcash transactions.
+<a href="#318" id="318">318</a>
+<a href="#319" id="319">319</a>
+<a href="#320" id="320">320</a>
+<a href="#321" id="321">321</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs representing the components within Zcash transactions.
 
-</span><span class="kw">use </span>byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-
-<span class="kw">use </span>alloc::vec::Vec;
+</span><span class="kw">use </span>alloc::vec::Vec;
 <span class="kw">use </span>core::fmt::Debug;
 <span class="kw">use </span>core2::io::{<span class="self">self</span>, Read, Write};
 
@@ -478,13 +479,14 @@
     <span class="kw">pub fn </span>read&lt;R: Read&gt;(<span class="kw-2">mut </span>reader: R) -&gt; io::Result&lt;<span class="self">Self</span>&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>hash = [<span class="number">0u8</span>; <span class="number">32</span>];
         reader.read_exact(<span class="kw-2">&amp;mut </span>hash)<span class="question-mark">?</span>;
-        <span class="kw">let </span>n = reader.read_u32::&lt;LittleEndian&gt;()<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(OutPoint::new(hash, n))
+        <span class="kw">let </span><span class="kw-2">mut </span>n = [<span class="number">0</span>; <span class="number">4</span>];
+        reader.read_exact(<span class="kw-2">&amp;mut </span>n)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(OutPoint::new(hash, u32::from_le_bytes(n)))
     }
 
     <span class="kw">pub fn </span>write&lt;W: Write&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut </span>writer: W) -&gt; io::Result&lt;()&gt; {
         writer.write_all(<span class="self">self</span>.hash.as_ref())<span class="question-mark">?</span>;
-        writer.write_u32::&lt;LittleEndian&gt;(<span class="self">self</span>.n)
+        writer.write_all(<span class="kw-2">&amp;</span><span class="self">self</span>.n.to_le_bytes())
     }
 
     <span class="doccomment">/// Returns `true` if this `OutPoint` is "null" in the Bitcoin sense: it has txid set to
@@ -522,7 +524,11 @@
     <span class="kw">pub fn </span>read&lt;R: Read&gt;(<span class="kw-2">mut </span>reader: <span class="kw-2">&amp;mut </span>R) -&gt; io::Result&lt;<span class="self">Self</span>&gt; {
         <span class="kw">let </span>prevout = OutPoint::read(<span class="kw-2">&amp;mut </span>reader)<span class="question-mark">?</span>;
         <span class="kw">let </span>script_sig = Script::read(<span class="kw-2">&amp;mut </span>reader)<span class="question-mark">?</span>;
-        <span class="kw">let </span>sequence = reader.read_u32::&lt;LittleEndian&gt;()<span class="question-mark">?</span>;
+        <span class="kw">let </span>sequence = {
+            <span class="kw">let </span><span class="kw-2">mut </span>sequence = [<span class="number">0</span>; <span class="number">4</span>];
+            reader.read_exact(<span class="kw-2">&amp;mut </span>sequence)<span class="question-mark">?</span>;
+            u32::from_le_bytes(sequence)
+        };
 
         <span class="prelude-val">Ok</span>(TxIn {
             prevout,
@@ -534,7 +540,7 @@
     <span class="kw">pub fn </span>write&lt;W: Write&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut </span>writer: W) -&gt; io::Result&lt;()&gt; {
         <span class="self">self</span>.prevout.write(<span class="kw-2">&amp;mut </span>writer)<span class="question-mark">?</span>;
         <span class="self">self</span>.script_sig.write(<span class="kw-2">&amp;mut </span>writer)<span class="question-mark">?</span>;
-        writer.write_u32::&lt;LittleEndian&gt;(<span class="self">self</span>.sequence)
+        writer.write_all(<span class="kw-2">&amp;</span><span class="self">self</span>.sequence.to_le_bytes())
     }
 }
 

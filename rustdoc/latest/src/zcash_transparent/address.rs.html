@@ -506,11 +506,10 @@
 <a href="#505" id="505">505</a>
 <a href="#506" id="506">506</a>
 <a href="#507" id="507">507</a>
-<a href="#508" id="508">508</a></pre></div><pre class="rust"><code><span class="doccomment">//! Support for legacy transparent addresses and scripts.
+<a href="#508" id="508">508</a>
+<a href="#509" id="509">509</a></pre></div><pre class="rust"><code><span class="doccomment">//! Support for legacy transparent addresses and scripts.
 
-</span><span class="kw">use </span>byteorder::{ReadBytesExt, WriteBytesExt};
-
-<span class="kw">use </span>alloc::string::String;
+</span><span class="kw">use </span>alloc::string::String;
 <span class="kw">use </span>alloc::vec::Vec;
 <span class="kw">use </span>core::fmt;
 <span class="kw">use </span>core::ops::Shl;
@@ -822,12 +821,15 @@
 
 <span class="kw">impl </span>Script {
     <span class="kw">pub fn </span>read&lt;R: Read&gt;(<span class="kw-2">mut </span>reader: R) -&gt; io::Result&lt;<span class="self">Self</span>&gt; {
-        <span class="kw">let </span>script = Vector::read(<span class="kw-2">&amp;mut </span>reader, |r| r.read_u8())<span class="question-mark">?</span>;
+        <span class="kw">let </span>script = Vector::read(<span class="kw-2">&amp;mut </span>reader, |r| {
+            <span class="kw">let </span><span class="kw-2">mut </span>bytes = [<span class="number">0</span>; <span class="number">1</span>];
+            r.read_exact(<span class="kw-2">&amp;mut </span>bytes).map(|<span class="kw">_</span>| bytes[<span class="number">0</span>])
+        })<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(Script(script))
     }
 
     <span class="kw">pub fn </span>write&lt;W: Write&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut </span>writer: W) -&gt; io::Result&lt;()&gt; {
-        Vector::write(<span class="kw-2">&amp;mut </span>writer, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>, |w, e| w.write_u8(<span class="kw-2">*</span>e))
+        Vector::write(<span class="kw-2">&amp;mut </span>writer, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>, |w, e| w.write_all(<span class="kw-2">&amp;</span>[<span class="kw-2">*</span>e]))
     }
 
     <span class="doccomment">/// Returns the length of this script as encoded (including the initial CompactSize).
