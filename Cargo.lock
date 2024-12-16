@@ -2609,9 +2609,8 @@ dependencies = [
 
 [[package]]
 name = "nonempty"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9e591e719385e6ebaeb5ce5d3887f7d5676fceca6411d1925ccc95745f3d6f7"
+version = "0.10.0"
+source = "git+https://github.com/nuttycom/nonempty.git?rev=38d37189faecb2a0e3d6adc05aa24e1b93c2483b#38d37189faecb2a0e3d6adc05aa24e1b93c2483b"
 
 [[package]]
 name = "notify"
@@ -2789,8 +2788,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02f7152474406422f572de163e0bc63b2126cdbfe17bc849efbbde36fcfe647e"
+source = "git+https://github.com/zcash/orchard.git?rev=e0cc7ac53ad8c97661b312a8b1c064f4cd3c6629#e0cc7ac53ad8c97661b312a8b1c064f4cd3c6629"
 dependencies = [
  "aes",
  "bitvec",
