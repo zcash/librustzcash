@@ -1,5 +1,8 @@
 //! Structs for handling supported address types.
 
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+
 use transparent::address::TransparentAddress;
 use zcash_address::{
     unified::{self, Container, Encoding, Typecode},
@@ -215,7 +218,7 @@ impl UnifiedAddress {
 
     /// Returns the set of receiver typecodes.
     pub fn receiver_types(&self) -> Vec<Typecode> {
-        let result = std::iter::empty();
+        let result = core::iter::empty();
         #[cfg(feature = "orchard")]
         let result = result.chain(self.orchard.map(|_| Typecode::Orchard));
         #[cfg(feature = "sapling")]

@@ -1,8 +1,7 @@
 //! Helper functions for managing light client key material.
-use std::{
-    error,
-    fmt::{self, Display},
-};
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::fmt::{self, Display};
 
 use zcash_address::unified::{self, Container, Encoding, Typecode, Ufvk, Uivk};
 use zcash_protocol::consensus;
@@ -15,7 +14,7 @@ use zcash_protocol::consensus::NetworkConstants;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    std::convert::TryInto,
+    core::convert::TryInto,
     transparent::keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
 
@@ -28,8 +27,8 @@ use transparent::address::TransparentAddress;
 #[cfg(feature = "unstable")]
 use {
     byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt},
-    std::convert::TryFrom,
-    std::io::{Read, Write},
+    core::convert::TryFrom,
+    core2::io::{Read, Write},
     zcash_encoding::CompactSize,
     zcash_protocol::consensus::BranchId,
 };
@@ -151,8 +150,8 @@ pub enum DecodingError {
     KeyDataInvalid(Typecode),
 }
 
-impl std::fmt::Display for DecodingError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for DecodingError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             #[cfg(feature = "unstable")]
             DecodingError::ReadError(s) => write!(f, "Read error: {}", s),
@@ -341,7 +340,7 @@ impl UnifiedSpendingKey {
     #[allow(clippy::unnecessary_unwrap)]
     #[cfg(feature = "unstable")]
     pub fn from_bytes(era: Era, encoded: &[u8]) -> Result<Self, DecodingError> {
-        let mut source = std::io::Cursor::new(encoded);
+        let mut source = core2::io::Cursor::new(encoded);
         let decoded_era = source
             .read_u32::<LittleEndian>()
             .map_err(|_| DecodingError::ReadError("era"))
@@ -548,7 +547,7 @@ impl fmt::Display for AddressGenerationError {
     }
 }
 
-impl error::Error for AddressGenerationError {}
+impl std::error::Error for AddressGenerationError {}
 
 /// Specification for how a unified address should be generated from a unified viewing key.
 #[derive(Clone, Copy, Debug)]
@@ -827,7 +826,7 @@ impl UnifiedFullViewingKey {
 
     /// Returns the string encoding of this `UnifiedFullViewingKey` for the given network.
     fn to_ufvk(&self) -> Ufvk {
-        let items = std::iter::empty().chain(self.unknown.iter().map(|(typecode, data)| {
+        let items = core::iter::empty().chain(self.unknown.iter().map(|(typecode, data)| {
             unified::Fvk::Unknown {
                 typecode: *typecode,
                 data: data.clone(),
@@ -1067,7 +1066,7 @@ impl UnifiedIncomingViewingKey {
 
     /// Converts this unified incoming viewing key to a unified encoding.
     fn render(&self) -> Uivk {
-        let items = std::iter::empty().chain(self.unknown.iter().map(|(typecode, data)| {
+        let items = core::iter::empty().chain(self.unknown.iter().map(|(typecode, data)| {
             unified::Ivk::Unknown {
                 typecode: *typecode,
                 data: data.clone(),
@@ -1329,6 +1328,8 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     use {
         crate::{address::Address, encoding::AddressCodec},
+        alloc::string::ToString,
+        alloc::vec::Vec,
         transparent::keys::{AccountPrivKey, IncomingViewingKey},
         zcash_address::test_vectors,
         zip32::DiversifierIndex,

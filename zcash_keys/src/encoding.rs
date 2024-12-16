@@ -4,8 +4,10 @@
 //! [zcash_protocol::constants] module.
 
 use crate::address::UnifiedAddress;
+use alloc::borrow::ToOwned;
+use alloc::string::{String, ToString};
 use bs58::{self, decode::Error as Bs58Error};
-use std::fmt;
+use core::fmt;
 
 use transparent::address::TransparentAddress;
 use zcash_address::unified::{self, Encoding};
@@ -13,12 +15,13 @@ use zcash_protocol::consensus::{self, NetworkConstants};
 
 #[cfg(feature = "sapling")]
 use {
+    alloc::vec::Vec,
     bech32::{
         primitives::decode::{CheckedHrpstring, CheckedHrpstringError},
         Bech32, Hrp,
     },
+    core2::io::{self, Write},
     sapling::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
-    std::io::{self, Write},
     zcash_protocol::consensus::NetworkType,
 };
 
@@ -95,7 +98,7 @@ where
 /// A trait for encoding and decoding Zcash addresses.
 pub trait AddressCodec<P>
 where
-    Self: std::marker::Sized,
+    Self: core::marker::Sized,
 {
     type Error;
 
