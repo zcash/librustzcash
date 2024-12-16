@@ -173,7 +173,7 @@ impl UnifiedAddress {
         &self.unknown
     }
 
-    fn to_address(&self, net: NetworkType) -> ZcashAddress {
+    pub fn to_address(&self, net: NetworkType) -> ZcashAddress {
         let items = self
             .unknown
             .iter()

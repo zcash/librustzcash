@@ -35,7 +35,7 @@ mod txid;
 pub use txid::TxId;
 
 /// A Zcash shielded transfer protocol.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ShieldedProtocol {
     /// The Sapling protocol
     Sapling,
