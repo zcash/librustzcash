@@ -1,4 +1,6 @@
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 use bip32::ChildNumber;
 use zcash_protocol::{value::Zatoshis, TxId};

@@ -1,12 +1,14 @@
 //! Support for legacy transparent addresses and scripts.
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
+
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::fmt;
+use core::ops::Shl;
+use core2::io::{self, Read, Write};
+
 use zcash_address::TryFromRawAddress;
-
-use std::fmt;
-use std::io::{self, Read, Write};
-use std::ops::Shl;
-
 use zcash_encoding::Vector;
 
 /// Defined script opcodes.

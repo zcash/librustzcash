@@ -1,5 +1,7 @@
 //! Transparent key components.
 
+use alloc::string::ToString;
+use alloc::vec::Vec;
 use bip32::{
     ChildNumber, ExtendedKey, ExtendedKeyAttrs, ExtendedPrivateKey, ExtendedPublicKey, Prefix,
 };
@@ -341,7 +343,7 @@ pub(crate) mod private {
 ///
 /// [BIP32]: https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
-pub trait IncomingViewingKey: private::SealedChangeLevelKey + std::marker::Sized {
+pub trait IncomingViewingKey: private::SealedChangeLevelKey + core::marker::Sized {
     /// Derives a transparent address at the provided child index.
     #[allow(deprecated)]
     fn derive_address(

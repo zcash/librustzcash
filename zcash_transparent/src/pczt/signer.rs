@@ -1,4 +1,5 @@
 use crate::sighash::SignableInput;
+use alloc::vec::Vec;
 
 impl super::Input {
     /// Signs the transparent spend with the given spend authorizing key.

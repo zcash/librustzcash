@@ -1,3 +1,5 @@
+use alloc::string::String;
+use alloc::vec::Vec;
 use ripemd::Ripemd160;
 use sha2::{Digest, Sha256};
 
