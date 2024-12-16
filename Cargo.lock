@@ -6451,7 +6451,6 @@ dependencies = [
  "bip32",
  "blake2b_simd",
  "bs58",
- "byteorder",
  "core2",
  "document-features",
  "getset",

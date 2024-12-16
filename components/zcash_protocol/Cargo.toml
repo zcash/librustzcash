@@ -42,7 +42,8 @@ proptest.workspace = true
 
 [features]
 default = ["std"]
-std = ["document-features", "dep:memuse"]
+std = ["dep:document-features", "dep:memuse"]
+
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
     "dep:incrementalmerkletree",
