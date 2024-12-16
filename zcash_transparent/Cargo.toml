@@ -18,13 +18,15 @@ zcash_address.workspace = true
 zcash_encoding.workspace = true
 zcash_protocol.workspace = true
 zip32.workspace = true
-core2.workspace = true
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - Digests (output types exposed)
 blake2b_simd.workspace = true
 sha2.workspace = true
+
+# - Encodings
+core2.workspace = true
 
 # - Secret management
 subtle.workspace = true
@@ -47,17 +49,21 @@ secp256k1 = { workspace = true, optional = true }
 getset.workspace = true
 
 # - Documentation
-document-features.workspace = true
+document-features = { workspace = true, optional = true }
 
 # - Encodings
 bs58.workspace = true
-byteorder.workspace = true
 hex.workspace = true
 
 # - Transparent protocol
 ripemd.workspace = true
 
 [features]
+default = ["std"]
+std = [
+    "dep:document-features",
+]
+
 ## Enables spending transparent notes with the transaction builder.
 transparent-inputs = ["bip32/secp256k1-ffi", "dep:secp256k1"]
 

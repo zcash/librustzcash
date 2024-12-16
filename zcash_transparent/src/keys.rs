@@ -263,6 +263,40 @@ impl AccountPubKey {
             .public_key())
     }
 
+    /// Derives the public key corresponding to the given full BIP 32 path.
+    ///
+    /// This enforces that the path has a prefix that could have been used to derive this
+    /// `AccountPubKey`.
+    pub fn derive_pubkey_at_bip32_path<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        expected_account_index: AccountId,
+        path: &[ChildNumber],
+    ) -> Result<secp256k1::PublicKey, bip32::Error> {
+        if path.len() > 3 {
+            Err(bip32::Error::ChildNumber)
+        } else {
+            match path.split_at(3) {
+                (
+                    [ChildNumber(44 | ChildNumber::HARDENED_FLAG), coin_type, account_index],
+                    sub_path,
+                ) if coin_type.is_hardened()
+                    && coin_type.index() == params.network_type().coin_type()
+                    && account_index.is_hardened()
+                    && account_index.index() == expected_account_index.into() =>
+                {
+                    sub_path
+                        .iter()
+                        .try_fold(self.0.clone(), |acc, child_index| {
+                            acc.derive_child(*child_index)
+                        })
+                        .map(|k| *k.public_key())
+                }
+                _ => Err(bip32::Error::ChildNumber),
+            }
+        }
+    }
+
     /// Derives the internal ovk and external ovk corresponding to this
     /// transparent fvk. As specified in [ZIP 316][transparent-ovk].
     ///

@@ -1,7 +1,5 @@
 //! Structs representing the components within Zcash transactions.
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-
 use alloc::vec::Vec;
 use core::fmt::Debug;
 use core2::io::{self, Read, Write};
@@ -160,13 +158,14 @@ impl OutPoint {
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut hash = [0u8; 32];
         reader.read_exact(&mut hash)?;
-        let n = reader.read_u32::<LittleEndian>()?;
-        Ok(OutPoint::new(hash, n))
+        let mut n = [0; 4];
+        reader.read_exact(&mut n)?;
+        Ok(OutPoint::new(hash, u32::from_le_bytes(n)))
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(self.hash.as_ref())?;
-        writer.write_u32::<LittleEndian>(self.n)
+        writer.write_all(&self.n.to_le_bytes())
     }
 
     /// Returns `true` if this `OutPoint` is "null" in the Bitcoin sense: it has txid set to
@@ -204,7 +203,11 @@ impl TxIn<Authorized> {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let prevout = OutPoint::read(&mut reader)?;
         let script_sig = Script::read(&mut reader)?;
-        let sequence = reader.read_u32::<LittleEndian>()?;
+        let sequence = {
+            let mut sequence = [0; 4];
+            reader.read_exact(&mut sequence)?;
+            u32::from_le_bytes(sequence)
+        };
 
         Ok(TxIn {
             prevout,
@@ -216,7 +219,7 @@ impl TxIn<Authorized> {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.prevout.write(&mut writer)?;
         self.script_sig.write(&mut writer)?;
-        writer.write_u32::<LittleEndian>(self.sequence)
+        writer.write_all(&self.sequence.to_le_bytes())
     }
 }
 
