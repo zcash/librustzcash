@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.21.0] - 2024-12-16
+
 ### Added
 - `zcash_primitives::legacy::Script::address`
 - `zcash_primitives::transaction`
