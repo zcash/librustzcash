@@ -15,5 +15,8 @@ pub mod sighash;
 #[cfg(feature = "transparent-inputs")]
 pub mod keys;
 
+#[cfg(test)]
+mod test_vectors;
+
 #[macro_use]
 extern crate alloc;
