@@ -11,6 +11,9 @@ and this library adheres to Rust's notion of
 - `zcash_transparent::keys::AccountPubKey::derive_pubkey_at_bip32_path` now
   returns the correct result for valid paths instead of an error or panic.
 
+### Added
+- `zcash_transparent::pczt::Bip32Derivation::extract_bip_44_fields`
+
 ## [0.1.0] - 2024-12-16
 
 The entries below are relative to the `zcash_primitives` crate as of the tag
