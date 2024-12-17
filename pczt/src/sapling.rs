@@ -1,5 +1,7 @@
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::cmp::Ordering;
 
 use getset::Getters;
 use serde::{Deserialize, Serialize};

@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use rand_core::OsRng;
 use zcash_primitives::{
@@ -155,7 +155,7 @@ impl Authorization for Unbound {
     type SaplingAuth = ::sapling::pczt::Unbound;
     type OrchardAuth = ::orchard::pczt::Unbound;
     #[cfg(zcash_unstable = "zfuture")]
-    type TzeAuth = std::convert::Infallible;
+    type TzeAuth = core::convert::Infallible;
 }
 
 /// Errors that can occur while extracting a transaction from a PCZT.

@@ -1,4 +1,6 @@
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 use getset::Getters;
 use serde::{Deserialize, Serialize};
@@ -199,7 +201,7 @@ pub(crate) struct Zip32Derivation {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use alloc::collections::BTreeMap;
 
     use super::Global;
 

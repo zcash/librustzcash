@@ -41,6 +41,13 @@
 //! - Transaction Extractor (anyone can execute)
 //!   - Creates bindingSig and extracts the final transaction.
 
+#![no_std]
+
+#[macro_use]
+extern crate alloc;
+
+use alloc::vec::Vec;
+
 use getset::Getters;
 use serde::{Deserialize, Serialize};
 

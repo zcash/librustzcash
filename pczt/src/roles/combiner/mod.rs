@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 
 use crate::Pczt;
 
