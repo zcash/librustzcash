@@ -41,6 +41,7 @@ pub struct Input {
     /// - This is set by the Constructor.
     /// - If omitted, the sequence number is assumed to be the final sequence number
     ///   (`0xffffffff`).
+    #[getset(get = "pub")]
     pub(crate) sequence: Option<u32>,
 
     /// The minimum Unix timstamp that this input requires to be set as the transaction's
@@ -66,6 +67,7 @@ pub struct Input {
     // needed for computing the binding signatures.
     #[getset(get = "pub")]
     pub(crate) value: u64,
+    #[getset(get = "pub")]
     pub(crate) script_pubkey: Vec<u8>,
 
     /// The script required to spend this output, if it is P2SH.
@@ -88,6 +90,7 @@ pub struct Input {
     ///   cannot produce signatures for this sighash type must not provide a signature.
     /// - Spend Finalizers must fail to finalize inputs which have signatures not matching
     ///   this sighash type.
+    #[getset(get = "pub")]
     pub(crate) sighash_type: u8,
 
     /// A map from a pubkey to the BIP 32 derivation path at which its corresponding
@@ -98,6 +101,7 @@ pub struct Input {
     /// - Individual entries may be required by a Signer.
     /// - It is not required that the map include entries for all of the used pubkeys.
     ///   In particular, it is not possible to include entries for non-BIP-32 pubkeys.
+    #[getset(get = "pub")]
     #[serde_as(as = "BTreeMap<[_; 33], _>")]
     pub(crate) bip32_derivation: BTreeMap<[u8; 33], Zip32Derivation>,
 
@@ -139,7 +143,9 @@ pub struct Output {
     // These are required fields that are part of the final transaction, and are filled in
     // by the Constructor when adding an output.
     //
+    #[getset(get = "pub")]
     pub(crate) value: u64,
+    #[getset(get = "pub")]
     pub(crate) script_pubkey: Vec<u8>,
 
     /// The script required to spend this output, if it is P2SH.
@@ -155,6 +161,7 @@ pub struct Output {
     /// - Individual entries may be required by a Signer.
     /// - It is not required that the map include entries for all of the used pubkeys.
     ///   In particular, it is not possible to include entries for non-BIP-32 pubkeys.
+    #[getset(get = "pub")]
     #[serde_as(as = "BTreeMap<[_; 33], _>")]
     pub(crate) bip32_derivation: BTreeMap<[u8; 33], Zip32Derivation>,
 

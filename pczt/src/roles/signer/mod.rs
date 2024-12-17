@@ -16,7 +16,7 @@ use crate::{
     Pczt,
 };
 
-use super::tx_extractor::determine_lock_time;
+use crate::common::determine_lock_time;
 
 const V5_TX_VERSION: u32 = 5;
 const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
