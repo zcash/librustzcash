@@ -669,7 +669,8 @@
 <a href="#668" id="668">668</a>
 <a href="#669" id="669">669</a>
 <a href="#670" id="670">670</a>
-<a href="#671" id="671">671</a></pre></div><pre class="rust"><code><span class="doccomment">//! Encoding and decoding functions for Zcash key and address structs.
+<a href="#671" id="671">671</a>
+<a href="#672" id="672">672</a></pre></div><pre class="rust"><code><span class="doccomment">//! Encoding and decoding functions for Zcash key and address structs.
 //!
 //! Human-Readable Prefixes (HRPs) for Bech32 encodings are located in the
 //! [zcash_protocol::constants] module.
@@ -747,7 +748,7 @@
     }
 }
 
-<span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)]
+<span class="attr">#[cfg(all(feature = <span class="string">"sapling"</span>, feature = <span class="string">"std"</span>))]
 </span><span class="kw">impl </span>std::error::Error <span class="kw">for </span>Bech32DecodeError {}
 
 <span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)]
@@ -806,7 +807,8 @@
     }
 }
 
-<span class="kw">impl </span>std::error::Error <span class="kw">for </span>TransparentCodecError {}
+<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">impl </span>std::error::Error <span class="kw">for </span>TransparentCodecError {}
 
 <span class="kw">impl</span>&lt;P: consensus::Parameters&gt; AddressCodec&lt;P&gt; <span class="kw">for </span>TransparentAddress {
     <span class="kw">type </span>Error = TransparentCodecError;

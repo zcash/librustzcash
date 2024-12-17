@@ -29,13 +29,16 @@
 <a href="#28" id="28">28</a>
 <a href="#29" id="29">29</a>
 <a href="#30" id="30">30</a>
-<a href="#31" id="31">31</a></pre></div><pre class="rust"><code><span class="doccomment">//! *A crate for Zcash key and address management.*
+<a href="#31" id="31">31</a>
+<a href="#32" id="32">32</a>
+<a href="#33" id="33">33</a></pre></div><pre class="rust"><code><span class="doccomment">//! *A crate for Zcash key and address management.*
 //!
 //! `zcash_keys` contains Rust structs, traits and functions for creating Zcash spending
 //! and viewing keys and addresses.
 //!
 //! ## Feature flags
-</span><span class="attr">#![doc = <span class="macro">document_features::document_features!</span>()]
+</span><span class="attr">#![cfg_attr(feature = <span class="string">"std"</span>, doc = <span class="string">"## Feature flags"</span>)]
+#![cfg_attr(feature = <span class="string">"std"</span>, doc = <span class="macro">document_features::document_features!</span>())]
 </span><span class="doccomment">//!
 
 </span><span class="attr">#![no_std]
@@ -49,7 +52,8 @@
 #[macro_use]
 </span><span class="kw">extern crate </span>alloc;
 
-<span class="kw">extern crate </span>std;
+<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">extern crate </span>std;
 
 <span class="kw">pub mod </span>address;
 <span class="kw">pub mod </span>encoding;
