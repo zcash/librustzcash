@@ -16,7 +16,8 @@ and this library adheres to Rust's notion of
   - `wallet::extract_and_store_transaction_from_pczt`
 
 ### Changed
-- Migrated to `sapling-crypto 0.4`, `zcash_keys 0.6`, `zcash_primitives 0.21`.
+- Migrated to `sapling-crypto 0.4`, `zcash_keys 0.6`, `zcash_primitives 0.21`,
+  `zcash_proofs 0.21`.
 - `zcash_client_backend::data_api::AccountBalance`: Refactored to use `Balance`
   for transparent funds (issue #1411). It now has an `unshielded_balance()`
   method that returns `Balance`, allowing the unshielded spendable, unshielded

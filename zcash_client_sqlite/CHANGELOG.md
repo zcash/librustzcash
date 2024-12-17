@@ -11,7 +11,8 @@ and this library adheres to Rust's notion of
 - `zcash_client_sqlite::AccountUuid`
 
 ### Changed
-- Migrated to `sapling-crypto 0.4`, `zcash_keys 0.6`, `zcash_primitives 0.21`.
+- Migrated to `sapling-crypto 0.4`, `zcash_keys 0.6`, `zcash_primitives 0.21`,
+  `zcash_proofs 0.21`.
 - The `v_transactions` view has been modified:
   - The `account_id` column has been replaced with `account_uuid`.
 - The `v_tx_outputs` view has been modified:
