@@ -17,7 +17,10 @@
 <a href="#16" id="16">16</a>
 <a href="#17" id="17">17</a>
 <a href="#18" id="18">18</a>
-<a href="#19" id="19">19</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Zcash transparent protocol
+<a href="#19" id="19">19</a>
+<a href="#20" id="20">20</a>
+<a href="#21" id="21">21</a>
+<a href="#22" id="22">22</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Zcash transparent protocol
 //!
 </span><span class="attr">#![cfg_attr(feature = <span class="string">"std"</span>, doc = <span class="string">"## Feature flags"</span>)]
 #![cfg_attr(feature = <span class="string">"std"</span>, doc = <span class="macro">document_features::document_features!</span>())]
@@ -33,6 +36,9 @@
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">pub mod </span>keys;
+
+<span class="attr">#[cfg(test)]
+</span><span class="kw">mod </span>test_vectors;
 
 <span class="attr">#[macro_use]
 </span><span class="kw">extern crate </span>alloc;
