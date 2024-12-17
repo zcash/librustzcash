@@ -1035,7 +1035,7 @@
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
     <span class="kw">use </span>zcash_address::test_vectors;
-    <span class="kw">use </span>zcash_primitives::consensus::MAIN_NETWORK;
+    <span class="kw">use </span>zcash_protocol::consensus::MAIN_NETWORK;
 
     <span class="kw">use super</span>::{Address, UnifiedAddress};
 
@@ -1043,7 +1043,7 @@
     </span><span class="kw">use </span><span class="kw">crate</span>::keys::sapling;
 
     <span class="attr">#[cfg(any(feature = <span class="string">"orchard"</span>, feature = <span class="string">"sapling"</span>))]
-    </span><span class="kw">use </span>zcash_primitives::zip32::AccountId;
+    </span><span class="kw">use </span>zip32::AccountId;
 
     <span class="attr">#[test]
     #[cfg(any(feature = <span class="string">"orchard"</span>, feature = <span class="string">"sapling"</span>))]

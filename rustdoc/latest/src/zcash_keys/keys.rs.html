@@ -1772,7 +1772,8 @@
 <a href="#1771" id="1771">1771</a>
 <a href="#1772" id="1772">1772</a>
 <a href="#1773" id="1773">1773</a>
-<a href="#1774" id="1774">1774</a></pre></div><pre class="rust"><code><span class="doccomment">//! Helper functions for managing light client key material.
+<a href="#1774" id="1774">1774</a>
+<a href="#1775" id="1775">1775</a></pre></div><pre class="rust"><code><span class="doccomment">//! Helper functions for managing light client key material.
 </span><span class="kw">use </span>alloc::string::{String, ToString};
 <span class="kw">use </span>alloc::vec::Vec;
 <span class="kw">use </span>core::fmt::{<span class="self">self</span>, Display};
@@ -1830,7 +1831,7 @@
     /// # Examples
     ///
     /// ```
-    /// use zcash_primitives::constants::testnet::COIN_TYPE;
+    /// use zcash_protocol::constants::testnet::COIN_TYPE;
     /// use zcash_keys::keys::sapling;
     /// use zip32::AccountId;
     ///
@@ -3085,7 +3086,8 @@
 
     <span class="kw">use </span>proptest::prelude::proptest;
 
-    <span class="kw">use </span>{zcash_primitives::consensus::MAIN_NETWORK, zip32::AccountId};
+    <span class="kw">use </span>zcash_protocol::consensus::MAIN_NETWORK;
+    <span class="kw">use </span>zip32::AccountId;
 
     <span class="attr">#[cfg(any(feature = <span class="string">"sapling"</span>, feature = <span class="string">"orchard"</span>))]
     </span><span class="kw">use </span>{
@@ -3327,7 +3329,7 @@
     <span class="attr">#[test]
     #[cfg(any(feature = <span class="string">"orchard"</span>, feature = <span class="string">"sapling"</span>))]
     </span><span class="kw">fn </span>uivk_round_trip() {
-        <span class="kw">use </span>zcash_primitives::consensus::NetworkType;
+        <span class="kw">use </span>zcash_protocol::consensus::NetworkType;
 
         <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
         </span><span class="kw">let </span>orchard = {
