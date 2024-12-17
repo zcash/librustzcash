@@ -8,6 +8,8 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - Migrated to `bech32 0.11`.
+- Migrated to `sapling-crypto` version `0.4`.
+- Removed dependency on `zcash_primitives`.
 - The `UnifiedAddressRequest` argument to the following methods is now optional:
   - `zcash_keys::keys::UnifiedSpendingKey::address`
   - `zcash_keys::keys::UnifiedSpendingKey::default_address`

@@ -10,6 +10,9 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_proofs::prover::LocalTxProver::verifying_keys`
 
+### Changed
+- Migrated to `sapling-crypto` version `0.4`.
+
 ## [0.20.0] - 2024-11-14
 
 ### Changed

@@ -3822,8 +3822,9 @@ dependencies = [
 
 [[package]]
 name = "sapling-crypto"
-version = "0.3.0"
-source = "git+https://github.com/zcash/sapling-crypto.git?rev=e47d57f5c9c46f05740328f8ef9601f6d697cf34#e47d57f5c9c46f05740328f8ef9601f6d697cf34"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85c2acdbbab83d554fc2dceea5f7d6d3da71e57adb18a6c80b8901bd0eee54b0"
 dependencies = [
  "aes",
  "bellman",

@@ -62,7 +62,7 @@ blake2s_simd = { version = "1", default-features = false }
 bls12_381 = "0.8"
 jubjub = "0.10"
 redjubjub = "0.7"
-sapling = { package = "sapling-crypto", version = "0.3", default-features = false }
+sapling = { package = "sapling-crypto", version = "0.4", default-features = false }
 
 # - Orchard
 nonempty = "0.7"
@@ -196,4 +196,3 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zf
 
 [patch.crates-io]
 orchard = { git = "https://github.com/zcash/orchard.git", rev = "f99b6565a78763b58dac792d7492c55067bae680" }
-sapling-crypto = { git = "https://github.com/zcash/sapling-crypto.git", rev = "e47d57f5c9c46f05740328f8ef9601f6d697cf34" }

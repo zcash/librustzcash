@@ -21,6 +21,7 @@ and this library adheres to Rust's notion of
   - `sighash::SighashType`
 
 ### Changed
+- Migrated to `sapling-crypto` version `0.4`.
 - `zcash_primitives::transaction::components::transparent`:
   - `builder::TransparentBuilder::add_input` now takes `secp256k1::PublicKey`
     instead of `secp256k1::SecretKey`.
