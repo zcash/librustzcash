@@ -71,7 +71,7 @@ pasta_curves = "0.5"
 # - Transparent
 bip32 = { version = "0.5", default-features = false }
 ripemd = { version = "0.1", default-features = false }
-secp256k1 = { version = "0.27", default-features = false, features = ["alloc"] }
+secp256k1 = { version = "0.29", default-features = false, features = ["alloc"] }
 transparent = { package = "zcash_transparent", version = "0.1", path = "zcash_transparent", default-features = false }
 
 # Boilerplate & missing stdlib
@@ -195,5 +195,6 @@ debug = true
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
 
 [patch.crates-io]
+bip32 = { git = "https://github.com/KeystoneHQ/crates.git", rev = "9873e8fd56007d792fa60d6e844fdb75d527c858" }
 nonempty = { git = "https://github.com/nuttycom/nonempty.git", rev = "38d37189faecb2a0e3d6adc05aa24e1b93c2483b" }
 orchard = { git = "https://github.com/zcash/orchard.git", rev = "e0cc7ac53ad8c97661b312a8b1c064f4cd3c6629" }

@@ -325,7 +325,7 @@ pub(crate) fn inspect(
                                         ),
                                         txid_parts,
                                     );
-                                    let msg = secp256k1::Message::from_slice(sighash.as_ref())
+                                    let msg = secp256k1::Message::from_digest_slice(sighash.as_ref())
                                         .expect("signature_hash() returns correct length");
 
                                     if let Err(e) = ctx.verify_ecdsa(&msg, &sig, &pubkey) {
