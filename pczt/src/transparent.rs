@@ -1,4 +1,7 @@
-use std::{cmp::Ordering, collections::BTreeMap};
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::cmp::Ordering;
 
 use crate::{
     common::{Global, Zip32Derivation},
