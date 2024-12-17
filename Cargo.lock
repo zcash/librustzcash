@@ -6474,7 +6474,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_transparent"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bip32",
  "blake2b_simd",
