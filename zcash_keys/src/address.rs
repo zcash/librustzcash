@@ -476,7 +476,7 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use zcash_address::test_vectors;
-    use zcash_primitives::consensus::MAIN_NETWORK;
+    use zcash_protocol::consensus::MAIN_NETWORK;
 
     use super::{Address, UnifiedAddress};
 
@@ -484,7 +484,7 @@ mod tests {
     use crate::keys::sapling;
 
     #[cfg(any(feature = "orchard", feature = "sapling"))]
-    use zcash_primitives::zip32::AccountId;
+    use zip32::AccountId;
 
     #[test]
     #[cfg(any(feature = "orchard", feature = "sapling"))]

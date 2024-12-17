@@ -6338,7 +6338,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bech32",
  "bip32",
@@ -6362,7 +6362,6 @@ dependencies = [
  "tracing",
  "zcash_address",
  "zcash_encoding",
- "zcash_primitives",
  "zcash_protocol",
  "zcash_transparent",
  "zip32",
