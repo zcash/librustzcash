@@ -7,5 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `nonempty 0.11`
+
 ## [0.1.0] - 2024-12-16
 Initial release supporting the PCZT v1 format.

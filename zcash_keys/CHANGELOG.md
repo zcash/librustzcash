@@ -6,6 +6,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `no-std` compatibility (`alloc` is required). A default-enabled `std` feature
+  flag has been added gating the `std::error::Error` usage.
+
+### Changed
+- Migrated to `nonempty 0.11`
+
 ## [0.6.0] - 2024-12-16
 
 ### Changed

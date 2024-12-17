@@ -76,7 +76,7 @@ impl fmt::Display for Bech32DecodeError {
     }
 }
 
-#[cfg(feature = "sapling")]
+#[cfg(all(feature = "sapling", feature = "std"))]
 impl std::error::Error for Bech32DecodeError {}
 
 #[cfg(feature = "sapling")]
@@ -135,6 +135,7 @@ impl fmt::Display for TransparentCodecError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for TransparentCodecError {}
 
 impl<P: consensus::Parameters> AddressCodec<P> for TransparentAddress {
