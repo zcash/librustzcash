@@ -58,6 +58,10 @@ hex.workspace = true
 # - Transparent protocol
 ripemd.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
+zcash_protocol = { workspace = true, features = ["test-dependencies"] }
+
 [features]
 default = ["std"]
 std = [
