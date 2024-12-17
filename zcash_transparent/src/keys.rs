@@ -522,10 +522,74 @@ impl ExternalOvk {
 mod tests {
     use bip32::ChildNumber;
     use subtle::ConstantTimeEq;
+    use zcash_protocol::consensus::MAIN_NETWORK;
 
     use super::AccountPubKey;
     use super::NonHardenedChildIndex;
-    use crate::test_vectors;
+    #[allow(deprecated)]
+    use crate::keys::pubkey_to_address;
+    use crate::{
+        address::TransparentAddress,
+        keys::{AccountPrivKey, IncomingViewingKey, TransparentKeyScope},
+        test_vectors,
+    };
+
+    #[test]
+    #[allow(deprecated)]
+    fn address_derivation() {
+        let seed = [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31,
+        ];
+
+        for account_index in 0..5 {
+            let account_index = zip32::AccountId::try_from(account_index).unwrap();
+            let account_sk =
+                AccountPrivKey::from_seed(&MAIN_NETWORK, &seed, account_index).unwrap();
+            let account_pubkey = account_sk.to_account_pubkey();
+
+            let external_ivk = account_pubkey.derive_external_ivk().unwrap();
+            let (address, address_index) = external_ivk.default_address();
+
+            let address_pubkey = account_pubkey
+                .derive_address_pubkey(TransparentKeyScope::EXTERNAL, address_index)
+                .unwrap();
+            assert_eq!(pubkey_to_address(&address_pubkey), address);
+        }
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn bip_32_test_vectors() {
+        let seed = [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31,
+        ];
+
+        for tv in test_vectors::bip_32() {
+            let account_sk = AccountPrivKey::from_seed(
+                &MAIN_NETWORK,
+                &seed,
+                zip32::AccountId::try_from(tv.account).unwrap(),
+            )
+            .unwrap();
+            let account_pubkey = account_sk.to_account_pubkey();
+
+            let mut key_bytes = [0u8; 65];
+            key_bytes[..32].copy_from_slice(&tv.c);
+            key_bytes[32..].copy_from_slice(&tv.pk);
+            assert_eq!(account_pubkey.serialize(), key_bytes);
+
+            let (internal_ovk, external_ovk) = account_pubkey.ovks_for_shielding();
+            assert_eq!(internal_ovk.as_bytes(), tv.internal_ovk);
+            assert_eq!(external_ovk.as_bytes(), tv.external_ovk);
+
+            // The test vectors are broken here: they should be deriving an address at the
+            // address level, but instead use the account pubkey as an address.
+            let address = TransparentAddress::PublicKeyHash(tv.address);
+            assert_eq!(pubkey_to_address(account_pubkey.0.public_key()), address);
+        }
+    }
 
     #[test]
     fn check_ovk_test_vectors() {
