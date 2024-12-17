@@ -33,6 +33,7 @@ rand_core.workspace = true
 # - Encodings
 bech32.workspace = true
 bs58.workspace = true
+core2.workspace = true
 
 # - Transparent protocols
 bip32 = { workspace = true, optional = true }
