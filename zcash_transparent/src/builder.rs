@@ -351,7 +351,8 @@ impl Bundle<Unauthorized> {
                     value: info.coin.value,
                 });
 
-                let msg = secp256k1::Message::from_digest_slice(sighash.as_ref()).expect("32 bytes");
+                let msg =
+                    secp256k1::Message::from_digest_slice(sighash.as_ref()).expect("32 bytes");
                 let sig = signing_set.secp.sign_ecdsa(&msg, sk);
 
                 // Signature has to have "SIGHASH_ALL" appended to it
