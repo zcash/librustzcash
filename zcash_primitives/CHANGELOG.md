@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `nonempty 0.11`
+
 ## [0.21.0] - 2024-12-16
 
 ### Added

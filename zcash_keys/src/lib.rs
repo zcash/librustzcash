@@ -4,7 +4,8 @@
 //! and viewing keys and addresses.
 //!
 //! ## Feature flags
-#![doc = document_features::document_features!()]
+#![cfg_attr(feature = "std", doc = "## Feature flags")]
+#![cfg_attr(feature = "std", doc = document_features::document_features!())]
 //!
 
 #![no_std]
@@ -18,6 +19,7 @@
 #[macro_use]
 extern crate alloc;
 
+#[cfg(feature = "std")]
 extern crate std;
 
 pub mod address;

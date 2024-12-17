@@ -77,13 +77,6 @@ user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
 
-[[publisher.orchard]]
-version = "0.10.1"
-when = "2024-12-17"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
-
 [[publisher.pczt]]
 version = "0.1.0"
 when = "2024-12-17"

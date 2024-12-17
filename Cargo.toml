@@ -65,18 +65,18 @@ redjubjub = "0.7"
 sapling = { package = "sapling-crypto", version = "0.4", default-features = false }
 
 # - Orchard
-nonempty = "0.7"
 orchard = { version = "0.10.1", default-features = false }
 pasta_curves = "0.5"
 
 # - Transparent
 bip32 = { version = "0.5", default-features = false }
 ripemd = { version = "0.1", default-features = false }
-secp256k1 = { version = "0.27", default-features = false, features = ["alloc"] }
+secp256k1 = { version = "0.29", default-features = false, features = ["alloc"] }
 transparent = { package = "zcash_transparent", version = "0.1", path = "zcash_transparent", default-features = false }
 
 # Boilerplate & missing stdlib
 getset = "0.1"
+nonempty = { version = "0.11", default-features = false }
 
 # CSPRNG
 rand = { version = "0.8", default-features = false }
@@ -193,3 +193,7 @@ debug = true
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
+
+[patch.crates-io]
+bip32 = { git = "https://github.com/KeystoneHQ/crates.git", rev = "9873e8fd56007d792fa60d6e844fdb75d527c858" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "cd3e0901ccac2c630dd7fd03eb496d5030c1bbfe" }

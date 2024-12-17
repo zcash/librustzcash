@@ -113,6 +113,7 @@ impl Display for DerivationError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for DerivationError {}
 
 /// A version identifier for the encoding of unified spending keys.
@@ -180,6 +181,7 @@ impl core::fmt::Display for DecodingError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for DecodingError {}
 
 #[cfg(feature = "unstable")]
@@ -547,6 +549,7 @@ impl fmt::Display for AddressGenerationError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for AddressGenerationError {}
 
 /// Specification for how a unified address should be generated from a unified viewing key.
@@ -1308,7 +1311,6 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-
     use proptest::prelude::proptest;
 
     use zcash_protocol::consensus::MAIN_NETWORK;

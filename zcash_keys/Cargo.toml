@@ -59,7 +59,7 @@ proptest = { workspace = true, optional = true }
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 # - Documentation
-document-features.workspace = true
+document-features = { workspace = true, optional = true }
 
 # - Encodings
 byteorder = { workspace = true, optional = true }
@@ -76,6 +76,9 @@ orchard = { workspace = true, features = ["circuit"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 
 [features]
+default = ["std"]
+std = ["dep:document-features"]
+
 ## Enables use of transparent key parts and addresses
 transparent-inputs = [
   "dep:bip32", 

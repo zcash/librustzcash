@@ -460,9 +460,8 @@ dependencies = [
 
 [[package]]
 name = "bip32"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e141fb0f8be1c7b45887af94c88b182472b57c96b56773250ae00cd6a14a164"
+version = "0.5.2"
+source = "git+https://github.com/KeystoneHQ/crates.git?rev=9873e8fd56007d792fa60d6e844fdb75d527c858#9873e8fd56007d792fa60d6e844fdb75d527c858"
 dependencies = [
  "bs58",
  "hmac",
@@ -2609,9 +2608,9 @@ dependencies = [
 
 [[package]]
 name = "nonempty"
-version = "0.7.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9e591e719385e6ebaeb5ce5d3887f7d5676fceca6411d1925ccc95745f3d6f7"
+checksum = "549e471b99ccaf2f89101bec68f4d244457d5a95a9c3d0672e9564124397741d"
 
 [[package]]
 name = "notify"
@@ -2789,8 +2788,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02f7152474406422f572de163e0bc63b2126cdbfe17bc849efbbde36fcfe647e"
+source = "git+https://github.com/zcash/orchard.git?rev=cd3e0901ccac2c630dd7fd03eb496d5030c1bbfe#cd3e0901ccac2c630dd7fd03eb496d5030c1bbfe"
 dependencies = [
  "aes",
  "bitvec",
@@ -3911,9 +3909,9 @@ dependencies = [
 
 [[package]]
 name = "secp256k1"
-version = "0.27.0"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25996b82292a7a57ed3508f052cfff8640d38d32018784acd714758b43da9c8f"
+checksum = "9465315bc9d4566e1724f0fffcbcc446268cb522e60f9a27bcded6b19c108113"
 dependencies = [
  "rand",
  "secp256k1-sys",
@@ -3921,9 +3919,9 @@ dependencies = [
 
 [[package]]
 name = "secp256k1-sys"
-version = "0.8.1"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70a129b9e9efbfb223753b9163c4ab3b13cff7fd9c7f010fbac25ab4099fa07e"
+checksum = "d4387882333d3aa8cb20530a17c69a3752e97837832f34f6dccc760e715001d9"
 dependencies = [
  "cc",
 ]
