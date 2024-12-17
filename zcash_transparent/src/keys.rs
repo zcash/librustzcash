@@ -522,7 +522,7 @@ impl ExternalOvk {
 mod tests {
     use bip32::ChildNumber;
     use subtle::ConstantTimeEq;
-    use zcash_protocol::consensus::MAIN_NETWORK;
+    use zcash_protocol::consensus::{NetworkConstants, MAIN_NETWORK};
 
     use super::AccountPubKey;
     use super::NonHardenedChildIndex;
@@ -555,6 +555,46 @@ mod tests {
                 .derive_address_pubkey(TransparentKeyScope::EXTERNAL, address_index)
                 .unwrap();
             assert_eq!(pubkey_to_address(&address_pubkey), address);
+
+            let expected_path = [
+                ChildNumber::new(44, true).unwrap(),
+                ChildNumber::new(MAIN_NETWORK.coin_type(), true).unwrap(),
+                ChildNumber::new(account_index.into(), true).unwrap(),
+                TransparentKeyScope::EXTERNAL.into(),
+                address_index.into(),
+            ];
+
+            // For short paths, we get an error.
+            for i in 0..3 {
+                assert_eq!(
+                    account_pubkey.derive_pubkey_at_bip32_path(
+                        &MAIN_NETWORK,
+                        account_index,
+                        &expected_path[..i]
+                    ),
+                    Err(bip32::Error::ChildNumber),
+                );
+            }
+
+            // The truncated-by-one path gives the external IVK.
+            assert_eq!(
+                account_pubkey.derive_pubkey_at_bip32_path(
+                    &MAIN_NETWORK,
+                    account_index,
+                    &expected_path[..4],
+                ),
+                Ok(*external_ivk.0.public_key()),
+            );
+
+            // The full path gives the correct pubkey.
+            assert_eq!(
+                account_pubkey.derive_pubkey_at_bip32_path(
+                    &MAIN_NETWORK,
+                    account_index,
+                    &expected_path,
+                ),
+                Ok(address_pubkey),
+            );
         }
     }
 
