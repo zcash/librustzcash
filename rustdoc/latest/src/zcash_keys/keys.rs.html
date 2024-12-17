@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_keys/src/keys.rs`."><title>keys.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_keys" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (c26db435b 2024-12-15)" data-channel="nightly" data-search-js="search-92e6798f.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_keys/</div>keys.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_keys/src/keys.rs`."><title>keys.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_keys" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (6d9f6ae36 2024-12-16)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_keys/</div>keys.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -1771,11 +1771,11 @@
 <a href="#1770" id="1770">1770</a>
 <a href="#1771" id="1771">1771</a>
 <a href="#1772" id="1772">1772</a>
-<a href="#1773" id="1773">1773</a></pre></div><pre class="rust"><code><span class="doccomment">//! Helper functions for managing light client key material.
-</span><span class="kw">use </span>std::{
-    error,
-    fmt::{<span class="self">self</span>, Display},
-};
+<a href="#1773" id="1773">1773</a>
+<a href="#1774" id="1774">1774</a></pre></div><pre class="rust"><code><span class="doccomment">//! Helper functions for managing light client key material.
+</span><span class="kw">use </span>alloc::string::{String, ToString};
+<span class="kw">use </span>alloc::vec::Vec;
+<span class="kw">use </span>core::fmt::{<span class="self">self</span>, Display};
 
 <span class="kw">use </span>zcash_address::unified::{<span class="self">self</span>, Container, Encoding, Typecode, Ufvk, Uivk};
 <span class="kw">use </span>zcash_protocol::consensus;
@@ -1788,7 +1788,7 @@
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">use </span>{
-    std::convert::TryInto,
+    core::convert::TryInto,
     transparent::keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
 
@@ -1801,8 +1801,8 @@
 <span class="attr">#[cfg(feature = <span class="string">"unstable"</span>)]
 </span><span class="kw">use </span>{
     byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt},
-    std::convert::TryFrom,
-    std::io::{Read, Write},
+    core::convert::TryFrom,
+    core2::io::{Read, Write},
     zcash_encoding::CompactSize,
     zcash_protocol::consensus::BranchId,
 };
@@ -1924,8 +1924,8 @@
     </span>KeyDataInvalid(Typecode),
 }
 
-<span class="kw">impl </span>std::fmt::Display <span class="kw">for </span>DecodingError {
-    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; std::fmt::Result {
+<span class="kw">impl </span>core::fmt::Display <span class="kw">for </span>DecodingError {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>core::fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; core::fmt::Result {
         <span class="kw">match </span><span class="self">self </span>{
             <span class="attr">#[cfg(feature = <span class="string">"unstable"</span>)]
             </span>DecodingError::ReadError(s) =&gt; <span class="macro">write!</span>(f, <span class="string">"Read error: {}"</span>, s),
@@ -2114,7 +2114,7 @@
     </span><span class="attr">#[allow(clippy::unnecessary_unwrap)]
     #[cfg(feature = <span class="string">"unstable"</span>)]
     </span><span class="kw">pub fn </span>from_bytes(era: Era, encoded: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, DecodingError&gt; {
-        <span class="kw">let </span><span class="kw-2">mut </span>source = std::io::Cursor::new(encoded);
+        <span class="kw">let </span><span class="kw-2">mut </span>source = core2::io::Cursor::new(encoded);
         <span class="kw">let </span>decoded_era = source
             .read_u32::&lt;LittleEndian&gt;()
             .map_err(|<span class="kw">_</span>| DecodingError::ReadError(<span class="string">"era"</span>))
@@ -2321,7 +2321,7 @@
     }
 }
 
-<span class="kw">impl </span>error::Error <span class="kw">for </span>AddressGenerationError {}
+<span class="kw">impl </span>std::error::Error <span class="kw">for </span>AddressGenerationError {}
 
 <span class="doccomment">/// Specification for how a unified address should be generated from a unified viewing key.
 </span><span class="attr">#[derive(Clone, Copy, Debug)]
@@ -2600,7 +2600,7 @@
 
     <span class="doccomment">/// Returns the string encoding of this `UnifiedFullViewingKey` for the given network.
     </span><span class="kw">fn </span>to_ufvk(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Ufvk {
-        <span class="kw">let </span>items = std::iter::empty().chain(<span class="self">self</span>.unknown.iter().map(|(typecode, data)| {
+        <span class="kw">let </span>items = core::iter::empty().chain(<span class="self">self</span>.unknown.iter().map(|(typecode, data)| {
             unified::Fvk::Unknown {
                 typecode: <span class="kw-2">*</span>typecode,
                 data: data.clone(),
@@ -2840,7 +2840,7 @@
 
     <span class="doccomment">/// Converts this unified incoming viewing key to a unified encoding.
     </span><span class="kw">fn </span>render(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Uivk {
-        <span class="kw">let </span>items = std::iter::empty().chain(<span class="self">self</span>.unknown.iter().map(|(typecode, data)| {
+        <span class="kw">let </span>items = core::iter::empty().chain(<span class="self">self</span>.unknown.iter().map(|(typecode, data)| {
             unified::Ivk::Unknown {
                 typecode: <span class="kw-2">*</span>typecode,
                 data: data.clone(),
@@ -3102,6 +3102,8 @@
     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     </span><span class="kw">use </span>{
         <span class="kw">crate</span>::{address::Address, encoding::AddressCodec},
+        alloc::string::ToString,
+        alloc::vec::Vec,
         transparent::keys::{AccountPrivKey, IncomingViewingKey},
         zcash_address::test_vectors,
         zip32::DiversifierIndex,
