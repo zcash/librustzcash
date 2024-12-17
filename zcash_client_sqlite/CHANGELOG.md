@@ -12,7 +12,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - Migrated to `sapling-crypto 0.4`, `zcash_keys 0.6`, `zcash_primitives 0.21`,
-  `zcash_proofs 0.21`.
+  `zcash_proofs 0.21`, `zcash_client_backend 0.16`
 - The `v_transactions` view has been modified:
   - The `account_id` column has been replaced with `account_uuid`.
 - The `v_tx_outputs` view has been modified:
