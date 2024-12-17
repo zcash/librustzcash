@@ -254,6 +254,26 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "2.11.2 -> 2.12.0"
 
+[[audits.nonempty]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+version = "0.11.0"
+notes = """
+Additional use of `unsafe` to wrap `NonZeroUsize::new_unchecked`; in both cases
+the argument to this method is `<Vec length or capacity> + 1`; in general this
+is safe with the exception that if an existing `Vec` has length or capacity
+`usize::MAX` this could wrap into zero; it would be better to use the safe
+operation and then `expect` to generate a panic, rather than risk undefined
+behavior.
+
+Additions are:
+- no_std support
+- sorting
+- `nonzero` module (just wrappers
+- `serde` support
+- `nonempty macro` (trivial, verified safe)
+"""
+
 [[audits.num-bigint]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
