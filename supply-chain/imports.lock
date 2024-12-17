@@ -323,11 +323,11 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_protocol]]
-version = "0.4.2"
-when = "2024-12-13"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.4.3"
+when = "2024-12-17"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_spec]]
 version = "0.1.0"
