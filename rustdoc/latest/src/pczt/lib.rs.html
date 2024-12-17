@@ -141,7 +141,14 @@
 <a href="#140" id="140">140</a>
 <a href="#141" id="141">141</a>
 <a href="#142" id="142">142</a>
-<a href="#143" id="143">143</a></pre></div><pre class="rust"><code><span class="doccomment">//! The Partially Created Zcash Transaction (PCZT) format.
+<a href="#143" id="143">143</a>
+<a href="#144" id="144">144</a>
+<a href="#145" id="145">145</a>
+<a href="#146" id="146">146</a>
+<a href="#147" id="147">147</a>
+<a href="#148" id="148">148</a>
+<a href="#149" id="149">149</a>
+<a href="#150" id="150">150</a></pre></div><pre class="rust"><code><span class="doccomment">//! The Partially Created Zcash Transaction (PCZT) format.
 //!
 //! Goal is to split up the parts of creating a transaction across distinct entities.
 //! The entity roles roughly match BIP 174: Partially Signed Bitcoin Transaction Format.
@@ -184,7 +191,14 @@
 //! - Transaction Extractor (anyone can execute)
 //!   - Creates bindingSig and extracts the final transaction.
 
-</span><span class="kw">use </span>getset::Getters;
+</span><span class="attr">#![no_std]
+
+#[macro_use]
+</span><span class="kw">extern crate </span>alloc;
+
+<span class="kw">use </span>alloc::vec::Vec;
+
+<span class="kw">use </span>getset::Getters;
 <span class="kw">use </span>serde::{Deserialize, Serialize};
 
 <span class="attr">#[cfg(feature = <span class="string">"signer"</span>)]

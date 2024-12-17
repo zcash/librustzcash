@@ -248,7 +248,11 @@
 <a href="#247" id="247">247</a>
 <a href="#248" id="248">248</a>
 <a href="#249" id="249">249</a>
-<a href="#250" id="250">250</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeMap;
+<a href="#250" id="250">250</a>
+<a href="#251" id="251">251</a>
+<a href="#252" id="252">252</a></pre></div><pre class="rust"><code><span class="kw">use </span>alloc::collections::BTreeMap;
+<span class="kw">use </span>alloc::string::String;
+<span class="kw">use </span>alloc::vec::Vec;
 
 <span class="kw">use </span>getset::Getters;
 <span class="kw">use </span>serde::{Deserialize, Serialize};
@@ -449,7 +453,7 @@
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
-    <span class="kw">use </span>std::collections::BTreeMap;
+    <span class="kw">use </span>alloc::collections::BTreeMap;
 
     <span class="kw">use </span><span class="kw">super</span>::Global;
 
