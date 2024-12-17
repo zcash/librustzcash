@@ -273,17 +273,17 @@ impl AccountPubKey {
         expected_account_index: AccountId,
         path: &[ChildNumber],
     ) -> Result<secp256k1::PublicKey, bip32::Error> {
-        if path.len() > 3 {
+        if path.len() < 3 {
             Err(bip32::Error::ChildNumber)
         } else {
             match path.split_at(3) {
-                (
-                    [ChildNumber(44 | ChildNumber::HARDENED_FLAG), coin_type, account_index],
-                    sub_path,
-                ) if coin_type.is_hardened()
-                    && coin_type.index() == params.network_type().coin_type()
-                    && account_index.is_hardened()
-                    && account_index.index() == expected_account_index.into() =>
+                ([purpose, coin_type, account_index], sub_path)
+                    if purpose.is_hardened()
+                        && purpose.index() == 44
+                        && coin_type.is_hardened()
+                        && coin_type.index() == params.network_type().coin_type()
+                        && account_index.is_hardened()
+                        && account_index.index() == expected_account_index.into() =>
                 {
                     sub_path
                         .iter()
