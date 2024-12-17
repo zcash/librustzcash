@@ -67,6 +67,9 @@ audit-as-crates-io = true
 [policy.zcash_protocol]
 audit-as-crates-io = true
 
+[policy.zcash_transparent]
+audit-as-crates-io = true
+
 [policy.zip321]
 audit-as-crates-io = true
 
