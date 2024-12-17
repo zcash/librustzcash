@@ -35,17 +35,17 @@ categories = ["cryptography::cryptocurrencies"]
 # Intra-workspace dependencies
 equihash = { version = "0.2", path = "components/equihash" }
 zcash_address = { version = "0.6", path = "components/zcash_address", default-features = false }
-zcash_client_backend = { version = "0.15", path = "zcash_client_backend" }
+zcash_client_backend = { version = "0.16", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.2.1", path = "components/zcash_encoding", default-features = false }
-zcash_keys = { version = "0.5", path = "zcash_keys" }
+zcash_keys = { version = "0.6", path = "zcash_keys" }
 zcash_protocol = { version = "0.4.1", path = "components/zcash_protocol", default-features = false }
 zip321 = { version = "0.2", path = "components/zip321" }
 
 zcash_note_encryption = "0.4.1"
-zcash_primitives = { version = "0.20", path = "zcash_primitives", default-features = false }
-zcash_proofs = { version = "0.20", path = "zcash_proofs", default-features = false }
+zcash_primitives = { version = "0.21", path = "zcash_primitives", default-features = false }
+zcash_proofs = { version = "0.21", path = "zcash_proofs", default-features = false }
 
-pczt = { version = "0.0", path = "pczt" }
+pczt = { version = "0.1", path = "pczt" }
 
 # Shielded protocols
 bellman = { version = "0.14", default-features = false, features = ["groth16"] }
@@ -62,18 +62,18 @@ blake2s_simd = { version = "1", default-features = false }
 bls12_381 = "0.8"
 jubjub = "0.10"
 redjubjub = "0.7"
-sapling = { package = "sapling-crypto", version = "0.3", default-features = false }
+sapling = { package = "sapling-crypto", version = "0.4", default-features = false }
 
 # - Orchard
 nonempty = "0.7"
-orchard = { version = "0.10", default-features = false }
+orchard = { version = "0.10.1", default-features = false }
 pasta_curves = "0.5"
 
 # - Transparent
 bip32 = { version = "0.5", default-features = false }
 ripemd = { version = "0.1", default-features = false }
 secp256k1 = { version = "0.27", default-features = false, features = ["alloc"] }
-transparent = { package = "zcash_transparent", version = "0.0", path = "zcash_transparent", default-features = false }
+transparent = { package = "zcash_transparent", version = "0.1", path = "zcash_transparent", default-features = false }
 
 # Boilerplate & missing stdlib
 getset = "0.1"
@@ -193,7 +193,3 @@ debug = true
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
-
-[patch.crates-io]
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "f99b6565a78763b58dac792d7492c55067bae680" }
-sapling-crypto = { git = "https://github.com/zcash/sapling-crypto.git", rev = "e47d57f5c9c46f05740328f8ef9601f6d697cf34" }

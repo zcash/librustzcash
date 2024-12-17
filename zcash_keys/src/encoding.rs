@@ -202,10 +202,9 @@ impl<P: consensus::Parameters> AddressCodec<P> for UnifiedAddress {
 /// # Examples
 ///
 /// ```
-/// use zcash_primitives::{
-///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_SPENDING_KEY},
-///     zip32::AccountId,
-/// };
+/// use zcash_protocol::constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_SPENDING_KEY};
+/// use zip32::AccountId;
+///
 /// use zcash_keys::{
 ///     encoding::encode_extended_spending_key,
 ///     keys::sapling,
@@ -237,10 +236,8 @@ pub fn decode_extended_spending_key(
 ///
 /// ```
 /// use ::sapling::zip32::ExtendedFullViewingKey;
-/// use zcash_primitives::{
-///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY},
-///     zip32::AccountId,
-/// };
+/// use zcash_protocol::constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY};
+/// use zip32::AccountId;
 /// use zcash_keys::{
 ///     encoding::encode_extended_full_viewing_key,
 ///     keys::sapling,
@@ -305,9 +302,7 @@ pub fn decode_extfvk_with_network(
 /// use zcash_keys::{
 ///     encoding::encode_payment_address,
 /// };
-/// use zcash_primitives::{
-///     constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
-/// };
+/// use zcash_protocol::constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS;
 ///
 /// let pa = PaymentAddress::from_bytes(&[
 ///     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x8e, 0x11,
@@ -351,9 +346,7 @@ pub fn encode_payment_address_p<P: consensus::Parameters>(
 /// use zcash_keys::{
 ///     encoding::decode_payment_address,
 /// };
-/// use zcash_primitives::{
-///     consensus::{TEST_NETWORK, NetworkConstants, Parameters},
-/// };
+/// use zcash_protocol::consensus::{TEST_NETWORK, NetworkConstants, Parameters};
 ///
 /// let pa = PaymentAddress::from_bytes(&[
 ///     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x8e, 0x11,
@@ -393,13 +386,9 @@ pub fn decode_payment_address(
 /// # Examples
 ///
 /// ```
-/// use zcash_keys::{
-///     encoding::encode_transparent_address,
-/// };
-/// use zcash_primitives::{
-///     consensus::{TEST_NETWORK, NetworkConstants, Parameters},
-///     legacy::TransparentAddress,
-/// };
+/// use zcash_keys::encoding::encode_transparent_address;
+/// use zcash_protocol::consensus::{TEST_NETWORK, NetworkConstants, Parameters};
+/// use transparent::address::TransparentAddress;
 ///
 /// assert_eq!(
 ///     encode_transparent_address(
@@ -459,10 +448,8 @@ pub fn encode_transparent_address_p<P: consensus::Parameters>(
 /// # Examples
 ///
 /// ```
-/// use zcash_primitives::{
-///     consensus::{TEST_NETWORK, NetworkConstants, Parameters},
-///     legacy::TransparentAddress,
-/// };
+/// use zcash_protocol::consensus::{TEST_NETWORK, NetworkConstants, Parameters};
+/// use transparent::address::TransparentAddress;
 /// use zcash_keys::{
 ///     encoding::decode_transparent_address,
 /// };
@@ -515,7 +502,7 @@ mod tests_sapling {
         Bech32DecodeError,
     };
     use sapling::{zip32::ExtendedSpendingKey, PaymentAddress};
-    use zcash_primitives::constants;
+    use zcash_protocol::constants;
 
     #[test]
     fn extended_spending_key() {

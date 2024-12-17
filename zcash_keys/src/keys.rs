@@ -56,7 +56,7 @@ pub mod sapling {
     /// # Examples
     ///
     /// ```
-    /// use zcash_primitives::constants::testnet::COIN_TYPE;
+    /// use zcash_protocol::constants::testnet::COIN_TYPE;
     /// use zcash_keys::keys::sapling;
     /// use zip32::AccountId;
     ///
@@ -1311,7 +1311,8 @@ mod tests {
 
     use proptest::prelude::proptest;
 
-    use {zcash_primitives::consensus::MAIN_NETWORK, zip32::AccountId};
+    use zcash_protocol::consensus::MAIN_NETWORK;
+    use zip32::AccountId;
 
     #[cfg(any(feature = "sapling", feature = "orchard"))]
     use {
@@ -1553,7 +1554,7 @@ mod tests {
     #[test]
     #[cfg(any(feature = "orchard", feature = "sapling"))]
     fn uivk_round_trip() {
-        use zcash_primitives::consensus::NetworkType;
+        use zcash_protocol::consensus::NetworkType;
 
         #[cfg(feature = "orchard")]
         let orchard = {

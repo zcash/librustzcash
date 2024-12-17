@@ -7,8 +7,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.21.0] - 2024-12-16
 ### Added
 - `zcash_proofs::prover::LocalTxProver::verifying_keys`
+
+### Changed
+- Migrated to `sapling-crypto` version `0.4`, `zcash_primitives 0.21`.
 
 ## [0.20.0] - 2024-11-14
 

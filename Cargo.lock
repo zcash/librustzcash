@@ -2788,8 +2788,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchard"
-version = "0.10.0"
-source = "git+https://github.com/zcash/orchard.git?rev=f99b6565a78763b58dac792d7492c55067bae680#f99b6565a78763b58dac792d7492c55067bae680"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02f7152474406422f572de163e0bc63b2126cdbfe17bc849efbbde36fcfe647e"
 dependencies = [
  "aes",
  "bitvec",
@@ -2956,7 +2957,7 @@ dependencies = [
 
 [[package]]
 name = "pczt"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "blake2b_simd",
  "bls12_381",
@@ -3822,8 +3823,9 @@ dependencies = [
 
 [[package]]
 name = "sapling-crypto"
-version = "0.3.0"
-source = "git+https://github.com/zcash/sapling-crypto.git?rev=e47d57f5c9c46f05740328f8ef9601f6d697cf34#e47d57f5c9c46f05740328f8ef9601f6d697cf34"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85c2acdbbab83d554fc2dceea5f7d6d3da71e57adb18a6c80b8901bd0eee54b0"
 dependencies = [
  "aes",
  "bellman",
@@ -6184,7 +6186,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "ambassador",
  "arti-client",
@@ -6253,7 +6255,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_sqlite"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "ambassador",
  "assert_matches",
@@ -6336,7 +6338,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bech32",
  "bip32",
@@ -6360,7 +6362,6 @@ dependencies = [
  "tracing",
  "zcash_address",
  "zcash_encoding",
- "zcash_primitives",
  "zcash_protocol",
  "zcash_transparent",
  "zip32",
@@ -6381,7 +6382,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "aes",
  "assert_matches",
@@ -6426,7 +6427,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -6472,7 +6473,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_transparent"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bip32",
  "blake2b_simd",
