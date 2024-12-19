@@ -1,19 +1,20 @@
 //! Transparent key components.
 
-use alloc::string::ToString;
-use alloc::vec::Vec;
-use bip32::{
-    ChildNumber, ExtendedKey, ExtendedKeyAttrs, ExtendedPrivateKey, ExtendedPublicKey, Prefix,
-};
-use secp256k1::PublicKey;
-use sha2::{Digest, Sha256};
+use bip32::ChildNumber;
 use subtle::{Choice, ConstantTimeEq};
 
-use zcash_protocol::consensus::{self, NetworkConstants};
-use zcash_spec::PrfExpand;
-use zip32::AccountId;
-
-use crate::address::TransparentAddress;
+#[cfg(feature = "transparent-inputs")]
+use {
+    crate::address::TransparentAddress,
+    alloc::string::ToString,
+    alloc::vec::Vec,
+    bip32::{ExtendedKey, ExtendedKeyAttrs, ExtendedPrivateKey, ExtendedPublicKey, Prefix},
+    secp256k1::PublicKey,
+    sha2::{Digest, Sha256},
+    zcash_protocol::consensus::{self, NetworkConstants},
+    zcash_spec::PrfExpand,
+    zip32::AccountId,
+};
 
 /// The scope of a transparent key.
 ///
@@ -123,8 +124,10 @@ impl From<NonHardenedChildIndex> for ChildNumber {
 ///
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 #[derive(Clone, Debug)]
+#[cfg(feature = "transparent-inputs")]
 pub struct AccountPrivKey(ExtendedPrivateKey<secp256k1::SecretKey>);
 
+#[cfg(feature = "transparent-inputs")]
 impl AccountPrivKey {
     /// Performs derivation of the extended private key for the BIP44 path:
     /// `m/44'/<coin_type>'/<account>'`.
@@ -221,9 +224,11 @@ impl AccountPrivKey {
 /// full viewing key.
 ///
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
+#[cfg(feature = "transparent-inputs")]
 #[derive(Clone, Debug)]
 pub struct AccountPubKey(ExtendedPublicKey<PublicKey>);
 
+#[cfg(feature = "transparent-inputs")]
 impl AccountPubKey {
     /// Derives the BIP44 public key at the external "change level" path
     /// `m/44'/<coin_type>'/<account>'/0`.
@@ -344,6 +349,7 @@ impl AccountPubKey {
 }
 
 /// Derives the P2PKH transparent address corresponding to the given pubkey.
+#[cfg(feature = "transparent-inputs")]
 #[deprecated(note = "This function will be removed from the public API in an upcoming refactor.")]
 pub fn pubkey_to_address(pubkey: &secp256k1::PublicKey) -> TransparentAddress {
     TransparentAddress::PublicKeyHash(
@@ -351,6 +357,7 @@ pub fn pubkey_to_address(pubkey: &secp256k1::PublicKey) -> TransparentAddress {
     )
 }
 
+#[cfg(feature = "transparent-inputs")]
 pub(crate) mod private {
     use super::TransparentKeyScope;
     use bip32::ExtendedPublicKey;
@@ -377,6 +384,7 @@ pub(crate) mod private {
 ///
 /// [BIP32]: https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
+#[cfg(feature = "transparent-inputs")]
 pub trait IncomingViewingKey: private::SealedChangeLevelKey + core::marker::Sized {
     /// Derives a transparent address at the provided child index.
     #[allow(deprecated)]
@@ -438,9 +446,11 @@ pub trait IncomingViewingKey: private::SealedChangeLevelKey + core::marker::Size
 /// This allows derivation of child addresses that may be provided to external parties.
 ///
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
+#[cfg(feature = "transparent-inputs")]
 #[derive(Clone, Debug)]
 pub struct ExternalIvk(ExtendedPublicKey<PublicKey>);
 
+#[cfg(feature = "transparent-inputs")]
 impl private::SealedChangeLevelKey for ExternalIvk {
     const SCOPE: TransparentKeyScope = TransparentKeyScope(0);
 
@@ -453,6 +463,7 @@ impl private::SealedChangeLevelKey for ExternalIvk {
     }
 }
 
+#[cfg(feature = "transparent-inputs")]
 impl IncomingViewingKey for ExternalIvk {}
 
 /// An incoming viewing key at the [BIP44] "internal" path
@@ -462,9 +473,11 @@ impl IncomingViewingKey for ExternalIvk {}
 /// not be shared with external parties.
 ///
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
+#[cfg(feature = "transparent-inputs")]
 #[derive(Clone, Debug)]
 pub struct InternalIvk(ExtendedPublicKey<PublicKey>);
 
+#[cfg(feature = "transparent-inputs")]
 impl private::SealedChangeLevelKey for InternalIvk {
     const SCOPE: TransparentKeyScope = TransparentKeyScope(1);
 
@@ -477,12 +490,14 @@ impl private::SealedChangeLevelKey for InternalIvk {
     }
 }
 
+#[cfg(feature = "transparent-inputs")]
 impl IncomingViewingKey for InternalIvk {}
 
 /// An incoming viewing key at the "ephemeral" path
 /// `m/44'/<coin_type>'/<account>'/2`.
 ///
 /// This allows derivation of ephemeral addresses for use within the wallet.
+#[cfg(feature = "transparent-inputs")]
 #[derive(Clone, Debug)]
 pub struct EphemeralIvk(ExtendedPublicKey<PublicKey>);
 

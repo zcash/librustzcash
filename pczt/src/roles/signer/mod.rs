@@ -139,6 +139,9 @@ impl Signer {
 
     /// Signs the Sapling spend at the given index with the given spend authorizing key.
     ///
+    /// Requires the spend's `proof_generation_key` field to be set (because the API does
+    /// not take an FVK).
+    ///
     /// It is the caller's responsibility to perform any semantic validity checks on the
     /// PCZT (for example, comfirming that the change amounts are correct) before calling
     /// this method.
@@ -178,6 +181,8 @@ impl Signer {
     }
 
     /// Signs the Orchard spend at the given index with the given spend authorizing key.
+    ///
+    /// Requires the spend's `fvk` field to be set (because the API does not take an FVK).
     ///
     /// It is the caller's responsibility to perform any semantic validity checks on the
     /// PCZT (for example, comfirming that the change amounts are correct) before calling
