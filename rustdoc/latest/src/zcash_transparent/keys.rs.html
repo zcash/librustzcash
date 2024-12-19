@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_transparent/src/keys.rs`."><title>keys.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_transparent" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (6d9f6ae36 2024-12-16)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_transparent/</div>keys.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_transparent/src/keys.rs`."><title>keys.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_transparent" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (a4cb3c831 2024-12-17)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_transparent/</div>keys.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -696,22 +696,38 @@
 <a href="#695" id="695">695</a>
 <a href="#696" id="696">696</a>
 <a href="#697" id="697">697</a>
-<a href="#698" id="698">698</a></pre></div><pre class="rust"><code><span class="doccomment">//! Transparent key components.
+<a href="#698" id="698">698</a>
+<a href="#699" id="699">699</a>
+<a href="#700" id="700">700</a>
+<a href="#701" id="701">701</a>
+<a href="#702" id="702">702</a>
+<a href="#703" id="703">703</a>
+<a href="#704" id="704">704</a>
+<a href="#705" id="705">705</a>
+<a href="#706" id="706">706</a>
+<a href="#707" id="707">707</a>
+<a href="#708" id="708">708</a>
+<a href="#709" id="709">709</a>
+<a href="#710" id="710">710</a>
+<a href="#711" id="711">711</a>
+<a href="#712" id="712">712</a>
+<a href="#713" id="713">713</a></pre></div><pre class="rust"><code><span class="doccomment">//! Transparent key components.
 
-</span><span class="kw">use </span>alloc::string::ToString;
-<span class="kw">use </span>alloc::vec::Vec;
-<span class="kw">use </span>bip32::{
-    ChildNumber, ExtendedKey, ExtendedKeyAttrs, ExtendedPrivateKey, ExtendedPublicKey, Prefix,
-};
-<span class="kw">use </span>secp256k1::PublicKey;
-<span class="kw">use </span>sha2::{Digest, Sha256};
+</span><span class="kw">use </span>bip32::ChildNumber;
 <span class="kw">use </span>subtle::{Choice, ConstantTimeEq};
 
-<span class="kw">use </span>zcash_protocol::consensus::{<span class="self">self</span>, NetworkConstants};
-<span class="kw">use </span>zcash_spec::PrfExpand;
-<span class="kw">use </span>zip32::AccountId;
-
-<span class="kw">use </span><span class="kw">crate</span>::address::TransparentAddress;
+<span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+</span><span class="kw">use </span>{
+    <span class="kw">crate</span>::address::TransparentAddress,
+    alloc::string::ToString,
+    alloc::vec::Vec,
+    bip32::{ExtendedKey, ExtendedKeyAttrs, ExtendedPrivateKey, ExtendedPublicKey, Prefix},
+    secp256k1::PublicKey,
+    sha2::{Digest, Sha256},
+    zcash_protocol::consensus::{<span class="self">self</span>, NetworkConstants},
+    zcash_spec::PrfExpand,
+    zip32::AccountId,
+};
 
 <span class="doccomment">/// The scope of a transparent key.
 ///
@@ -821,9 +837,11 @@
 ///
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 </span><span class="attr">#[derive(Clone, Debug)]
+#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">pub struct </span>AccountPrivKey(ExtendedPrivateKey&lt;secp256k1::SecretKey&gt;);
 
-<span class="kw">impl </span>AccountPrivKey {
+<span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+</span><span class="kw">impl </span>AccountPrivKey {
     <span class="doccomment">/// Performs derivation of the extended private key for the BIP44 path:
     /// `m/44'/&lt;coin_type&gt;'/&lt;account&gt;'`.
     ///
@@ -919,10 +937,12 @@
 /// full viewing key.
 ///
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
-</span><span class="attr">#[derive(Clone, Debug)]
+</span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+#[derive(Clone, Debug)]
 </span><span class="kw">pub struct </span>AccountPubKey(ExtendedPublicKey&lt;PublicKey&gt;);
 
-<span class="kw">impl </span>AccountPubKey {
+<span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+</span><span class="kw">impl </span>AccountPubKey {
     <span class="doccomment">/// Derives the BIP44 public key at the external "change level" path
     /// `m/44'/&lt;coin_type&gt;'/&lt;account&gt;'/0`.
     </span><span class="kw">pub fn </span>derive_external_ivk(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;ExternalIvk, bip32::Error&gt; {
@@ -1042,14 +1062,16 @@
 }
 
 <span class="doccomment">/// Derives the P2PKH transparent address corresponding to the given pubkey.
-</span><span class="attr">#[deprecated(note = <span class="string">"This function will be removed from the public API in an upcoming refactor."</span>)]
+</span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+#[deprecated(note = <span class="string">"This function will be removed from the public API in an upcoming refactor."</span>)]
 </span><span class="kw">pub fn </span>pubkey_to_address(pubkey: <span class="kw-2">&amp;</span>secp256k1::PublicKey) -&gt; TransparentAddress {
     TransparentAddress::PublicKeyHash(
         <span class="kw-2">*</span>ripemd::Ripemd160::digest(Sha256::digest(pubkey.serialize())).as_ref(),
     )
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>private {
+<span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>private {
     <span class="kw">use </span><span class="kw">super</span>::TransparentKeyScope;
     <span class="kw">use </span>bip32::ExtendedPublicKey;
     <span class="kw">use </span>secp256k1::PublicKey;
@@ -1075,6 +1097,7 @@
 ///
 /// [BIP32]: https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
+</span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">pub trait </span>IncomingViewingKey: private::SealedChangeLevelKey + core::marker::Sized {
     <span class="doccomment">/// Derives a transparent address at the provided child index.
     </span><span class="attr">#[allow(deprecated)]
@@ -1136,10 +1159,12 @@
 /// This allows derivation of child addresses that may be provided to external parties.
 ///
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
-</span><span class="attr">#[derive(Clone, Debug)]
+</span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+#[derive(Clone, Debug)]
 </span><span class="kw">pub struct </span>ExternalIvk(ExtendedPublicKey&lt;PublicKey&gt;);
 
-<span class="kw">impl </span>private::SealedChangeLevelKey <span class="kw">for </span>ExternalIvk {
+<span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+</span><span class="kw">impl </span>private::SealedChangeLevelKey <span class="kw">for </span>ExternalIvk {
     <span class="kw">const </span>SCOPE: TransparentKeyScope = TransparentKeyScope(<span class="number">0</span>);
 
     <span class="kw">fn </span>extended_pubkey(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>ExtendedPublicKey&lt;PublicKey&gt; {
@@ -1151,7 +1176,8 @@
     }
 }
 
-<span class="kw">impl </span>IncomingViewingKey <span class="kw">for </span>ExternalIvk {}
+<span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+</span><span class="kw">impl </span>IncomingViewingKey <span class="kw">for </span>ExternalIvk {}
 
 <span class="doccomment">/// An incoming viewing key at the [BIP44] "internal" path
 /// `m/44'/&lt;coin_type&gt;'/&lt;account&gt;'/1`.
@@ -1160,10 +1186,12 @@
 /// not be shared with external parties.
 ///
 /// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
-</span><span class="attr">#[derive(Clone, Debug)]
+</span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+#[derive(Clone, Debug)]
 </span><span class="kw">pub struct </span>InternalIvk(ExtendedPublicKey&lt;PublicKey&gt;);
 
-<span class="kw">impl </span>private::SealedChangeLevelKey <span class="kw">for </span>InternalIvk {
+<span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+</span><span class="kw">impl </span>private::SealedChangeLevelKey <span class="kw">for </span>InternalIvk {
     <span class="kw">const </span>SCOPE: TransparentKeyScope = TransparentKeyScope(<span class="number">1</span>);
 
     <span class="kw">fn </span>extended_pubkey(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>ExtendedPublicKey&lt;PublicKey&gt; {
@@ -1175,13 +1203,15 @@
     }
 }
 
-<span class="kw">impl </span>IncomingViewingKey <span class="kw">for </span>InternalIvk {}
+<span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+</span><span class="kw">impl </span>IncomingViewingKey <span class="kw">for </span>InternalIvk {}
 
 <span class="doccomment">/// An incoming viewing key at the "ephemeral" path
 /// `m/44'/&lt;coin_type&gt;'/&lt;account&gt;'/2`.
 ///
 /// This allows derivation of ephemeral addresses for use within the wallet.
-</span><span class="attr">#[derive(Clone, Debug)]
+</span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+#[derive(Clone, Debug)]
 </span><span class="kw">pub struct </span>EphemeralIvk(ExtendedPublicKey&lt;PublicKey&gt;);
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
