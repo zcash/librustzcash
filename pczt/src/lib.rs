@@ -16,6 +16,11 @@
 //! - Updater (anyone can contribute)
 //!   - Adds information necessary for subsequent entities to proceed, such as key paths
 //!     for signing spends.
+//! - Redactor (anyone can execute)
+//!   - Removes information that is unnecessary for subsequent entities to proceed.
+//!   - This can be useful e.g. when creating a transaction that has inputs from multiple
+//!     independent Signers; each can receive a PCZT with just the information they need
+//!     to sign, but (e.g.) not the `alpha` values for other Signers.
 //! - Prover (capability holders can contribute)
 //!   - Needs all private information for a single spend or output.
 //!   - In practice, the Updater that adds a given spend or output will either act as
