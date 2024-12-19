@@ -1,10 +1,12 @@
-use ::transparent::sighash::SighashType;
+use alloc::vec::Vec;
 use blake2b_simd::Hash as Blake2bHash;
-use std::ops::Deref;
+use core::ops::Deref;
 
 use proptest::prelude::*;
 
-use ::transparent::{address::Script, sighash::TransparentAuthorizingContext};
+use ::transparent::{
+    address::Script, sighash::SighashType, sighash::TransparentAuthorizingContext,
+};
 use zcash_protocol::{consensus::BranchId, value::Zatoshis};
 
 use super::{

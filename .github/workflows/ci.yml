@@ -258,7 +258,6 @@ jobs:
       matrix:
         target:
           - wasm32-wasi
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -318,6 +317,9 @@ jobs:
       - name: Add pczt as a dependency of the synthetic crate
         working-directory: ./ci-build
         run: cargo add --no-default-features --path ../crates/pczt
+      - name: Add zcash_primitives as a dependency of the synthetic crate
+        working-directory: ./ci-build
+        run: cargo add --no-default-features --path ../crates/zcash_primitives
       - name: Add lazy_static with the spin_no_std feature
         working-directory: ./ci-build
         run: cargo add lazy_static --features "spin_no_std"

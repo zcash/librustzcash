@@ -1,9 +1,9 @@
-use std::borrow::Borrow;
-use std::convert::TryFrom;
-use std::io::Write;
+use crate::encoding::{StateWrite, WriteBytesExt};
+use core::borrow::Borrow;
+use core::convert::TryFrom;
+use core2::io::Write;
 
-use blake2b_simd::{Hash as Blake2bHash, Params, State};
-use byteorder::{LittleEndian, WriteBytesExt};
+use blake2b_simd::{Hash as Blake2bHash, Params};
 use ff::PrimeField;
 
 use ::orchard::bundle::{self as orchard};
@@ -62,8 +62,8 @@ const ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthSapliHash";
 #[cfg(zcash_unstable = "zfuture")]
 const ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxAuthTZE__Hash";
 
-fn hasher(personal: &[u8; 16]) -> State {
-    Params::new().hash_length(32).personal(personal).to_state()
+fn hasher(personal: &[u8; 16]) -> StateWrite {
+    StateWrite(Params::new().hash_length(32).personal(personal).to_state())
 }
 
 /// Sequentially append the serialized value of each transparent input
@@ -87,7 +87,7 @@ pub(crate) fn transparent_sequence_hash<TransparentAuth: transparent::Authorizat
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_SEQUENCE_HASH_PERSONALIZATION);
     for t_in in vin {
-        h.write_u32::<LittleEndian>(t_in.sequence).unwrap();
+        h.write_u32_le(t_in.sequence).unwrap();
     }
     h.finalize()
 }
@@ -226,13 +226,11 @@ fn hash_header_txid_data(
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_HEADERS_HASH_PERSONALIZATION);
 
-    h.write_u32::<LittleEndian>(version.header()).unwrap();
-    h.write_u32::<LittleEndian>(version.version_group_id())
-        .unwrap();
-    h.write_u32::<LittleEndian>(consensus_branch_id.into())
-        .unwrap();
-    h.write_u32::<LittleEndian>(lock_time).unwrap();
-    h.write_u32::<LittleEndian>(expiry_height.into()).unwrap();
+    h.write_u32_le(version.header()).unwrap();
+    h.write_u32_le(version.version_group_id()).unwrap();
+    h.write_u32_le(consensus_branch_id.into()).unwrap();
+    h.write_u32_le(lock_time).unwrap();
+    h.write_u32_le(expiry_height.into()).unwrap();
 
     h.finalize()
 }
@@ -372,7 +370,7 @@ pub(crate) fn to_hash(
     let mut personal = [0; 16];
     personal[..12].copy_from_slice(ZCASH_TX_PERSONALIZATION_PREFIX);
     (&mut personal[12..])
-        .write_u32::<LittleEndian>(consensus_branch_id.into())
+        .write_u32_le(consensus_branch_id.into())
         .unwrap();
 
     let mut h = hasher(&personal);
@@ -519,7 +517,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         let mut personal = [0; 16];
         personal[..12].copy_from_slice(ZCASH_AUTH_PERSONALIZATION_PREFIX);
         (&mut personal[12..])
-            .write_u32::<LittleEndian>(consensus_branch_id.into())
+            .write_u32_le(consensus_branch_id.into())
             .unwrap();
 
         let mut h = hasher(&personal);

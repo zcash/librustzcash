@@ -1,6 +1,8 @@
 //! Types and functions for building TZE transaction components
 
-use std::fmt;
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use core::fmt;
 
 use crate::{
     extensions::transparent::{self as tze, ToPayload},

@@ -29,7 +29,7 @@ zcash_address.workspace = true
 zcash_encoding.workspace = true
 zcash_keys = { workspace = true, features = ["sapling"] }
 zcash_note_encryption.workspace = true
-zcash_primitives.workspace = true
+zcash_primitives = { workspace = true, features = ["std", "circuits"] }
 zcash_protocol.workspace = true
 zip32.workspace = true
 zip321.workspace = true

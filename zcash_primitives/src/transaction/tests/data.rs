@@ -140,6 +140,7 @@ pub mod tx_read_write {
 }
 
 pub mod zip_0143 {
+    use alloc::vec::Vec;
     use transparent::address::Script;
     use zcash_protocol::consensus;
 
@@ -1954,6 +1955,7 @@ pub mod zip_0143 {
 }
 
 pub mod zip_0243 {
+    use alloc::vec::Vec;
     use transparent::address::Script;
     use zcash_protocol::consensus;
 
@@ -5688,6 +5690,7 @@ pub mod zip_0243 {
 }
 
 pub mod zip_0244 {
+    use alloc::vec::Vec;
     pub struct TestVector {
         pub tx: Vec<u8>,
         pub txid: [u8; 32],

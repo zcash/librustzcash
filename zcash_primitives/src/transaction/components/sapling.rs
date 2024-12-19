@@ -1,5 +1,6 @@
+use alloc::vec::Vec;
+use core2::io::{self, Read, Write};
 use ff::PrimeField;
-use std::io::{self, Read, Write};
 
 use ::sapling::{
     bundle::{
@@ -109,13 +110,13 @@ fn read_cmu<R: Read>(mut reader: R) -> io::Result<ExtractedNoteCommitment> {
 
 /// Consensus rules (§7.3) & (§7.4):
 /// - Canonical encoding is enforced here
-pub fn read_base<R: Read>(mut reader: R, field: &str) -> io::Result<jubjub::Base> {
+pub fn read_base<R: Read>(mut reader: R, _field: &str) -> io::Result<jubjub::Base> {
     let mut f = [0u8; 32];
     reader.read_exact(&mut f)?;
     Option::from(jubjub::Base::from_repr(f)).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("{} not in field", field),
+            "base value not a valid field element",
         )
     })
 }
@@ -145,7 +146,7 @@ fn read_rk<R: Read>(mut reader: R) -> io::Result<redjubjub::VerificationKey<Spen
     let mut bytes = [0; 32];
     reader.read_exact(&mut bytes)?;
     redjubjub::VerificationKey::try_from(bytes)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "verification key is invalid"))
 }
 
 /// Consensus rules (§4.4):

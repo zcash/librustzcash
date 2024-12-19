@@ -1,6 +1,7 @@
 //! Core traits and structs for Transparent Zcash Extensions.
 
-use std::fmt;
+use alloc::vec::Vec;
+use core::fmt;
 
 use crate::transaction::components::tze::{self, TzeOut};
 use zcash_protocol::value::Zatoshis;

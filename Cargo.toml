@@ -33,7 +33,7 @@ categories = ["cryptography::cryptocurrencies"]
 # part of a public API, and which can be updated without a SemVer bump.
 [workspace.dependencies]
 # Intra-workspace dependencies
-equihash = { version = "0.2", path = "components/equihash" }
+equihash = { version = "0.2", path = "components/equihash", default-features = false }
 zcash_address = { version = "0.6", path = "components/zcash_address", default-features = false }
 zcash_client_backend = { version = "0.16", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.2.1", path = "components/zcash_encoding", default-features = false }
@@ -61,7 +61,7 @@ bitvec = { version = "1", default-features = false, features = ["alloc"] }
 blake2s_simd = { version = "1", default-features = false }
 bls12_381 = "0.8"
 jubjub = "0.10"
-redjubjub = "0.7"
+redjubjub = { version = "0.7", default-features = false }
 sapling = { package = "sapling-crypto", version = "0.4", default-features = false }
 
 # - Orchard
@@ -195,4 +195,6 @@ debug = true
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
 
 [patch.crates-io]
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "cd3e0901ccac2c630dd7fd03eb496d5030c1bbfe" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "c684e9185a0449efb00428f807d3bf286b5dae03" }
+redjubjub = { git = "https://github.com/ZcashFoundation/redjubjub", rev = "eae848c5c14d9c795d000dd9f4c4762d1aee7ee1" }
+sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "e607c52d13bb7ade66293f9ab8d07e311f4ad868" }

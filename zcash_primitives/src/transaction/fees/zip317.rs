@@ -2,6 +2,7 @@
 //!
 //! [`FeeRule`]: crate::transaction::fees::FeeRule
 //! [ZIP 317]: https//zips.z.cash/zip-0317
+use alloc::vec::Vec;
 use core::cmp::max;
 
 use ::transparent::bundle::OutPoint;
@@ -136,8 +137,8 @@ impl From<BalanceError> for FeeError {
     }
 }
 
-impl std::fmt::Display for FeeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl core::fmt::Display for FeeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match &self {
             FeeError::Balance(e) => write!(
                 f,
