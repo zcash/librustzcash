@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Deprecated
+- `zcash_address::Network` (use `zcash_protocol::consensus::NetworkType` instead).
+
 ## [0.6.2] - 2024-12-13
 ### Fixed
 - Migrated to `f4jumble 0.1.1` to fix `no-std` support.

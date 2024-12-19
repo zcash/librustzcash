@@ -10,6 +10,28 @@ and this library adheres to Rust's notion of
 ### Changed
 - Migrated to `nonempty 0.11`
 
+### Deprecated
+- `zcash_primitives::consensus` (use `zcash_protocol::consensus` instead)
+- `zcash_primitives::constants` (use `zcash_protocol::constants` instead)
+- `zcash_primitives::memo` (use `zcash_protocol::memo` instead)
+- `zcash_primitives::zip32` (use the `zip32` crate instead)
+- `zcash_primitives::legacy` (use the `zcash_transparent` crate instead)
+- `zcash_primitives::transaction::components::Amount` (use `zcash_protocol::value::ZatBalance` instead)
+- `zcash_primitives::transaction::components::amount`:
+  - `BalanceError` (use `zcash_protocol::value::BalanceError` instead)
+  - `Amount` (use `zcash_protocol::value::ZatBalance` instead)
+  - `NonNegativeAmount` (use `zcash_protocol::value::Zatoshis` instead)
+  - `COIN` (use `zcash_protocol::value::COIN` instead)
+  - module `testing` (use `zcash_protocol::value::testing` instead)
+    - `arb_positive_amount` (use `zcash_protocol::value::testing::arb_positive_zat_balance` instead.)
+    - `arb_amount` (use `zcash_protocol::value::testing::arb_zat_balance` instead.)
+    - `arb_nonnegative_amount` (use `::zcash_protocol::value::testing::arb_zatoshis` instead.)
+
+### Removed
+- `zcash_primitives::transaction::sighash::TransparentAuthorizingContext` was
+  removed as there is no way to deprecate a previously-reexported trait name.
+  Use `zcash_transparent::sighash::TransparentAuthorizingContext` instead.
+
 ## [0.21.0] - 2024-12-16
 
 ### Added
