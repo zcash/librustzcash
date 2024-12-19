@@ -483,13 +483,14 @@ mod tests {
             0xea, 0xdb, 0xc5, 0x20, 0x62, 0xf9, 0x6f, 0xa9, 0x86, 0xcc,
         ];
 
-        // We can't actually exercise this error, because at present the only transparent
-        // receivers we can use are P2PKH and P2SH (which cannot be used together), and
-        // with only one of them we don't have sufficient data for F4Jumble (so we hit a
-        // different error).
         assert_matches!(
-            Address::parse_internal(Address::MAINNET_R0, &encoded[..]),
-            Err(ParseError::InvalidEncoding(_))
+            std::dbg!(Address::parse_internal(Address::MAINNET_R0, &encoded[..])),
+            Err(ParseError::OnlyTransparent)
+        );
+
+        assert_matches!(
+            Address::parse_internal(Address::MAINNET_R1, &encoded[..]),
+            Ok(addr) if addr.receivers().len() == 1
         );
     }
 

@@ -606,7 +606,7 @@ pub(crate) mod private {
                 }
             }
 
-            if only_transparent && revision == Revision::R0 {
+            if std::dbg!(only_transparent) && std::dbg!(revision == Revision::R0) {
                 Err(ParseError::OnlyTransparent)
             } else {
                 // All checks pass!
