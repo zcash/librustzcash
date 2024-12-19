@@ -5,22 +5,20 @@ use std::fmt::{self, Debug, Display};
 
 use shardtree::error::ShardTreeError;
 use zcash_address::ConversionError;
-use zcash_primitives::transaction::components::amount::NonNegativeAmount;
-use zcash_primitives::transaction::{
-    builder,
-    components::{amount::BalanceError, transparent},
+use zcash_keys::address::UnifiedAddress;
+use zcash_primitives::transaction::builder;
+use zcash_protocol::{
+    value::{BalanceError, Zatoshis},
+    PoolType,
 };
 
-use crate::address::UnifiedAddress;
-use crate::data_api::wallet::input_selection::InputSelectorError;
-use crate::fees::ChangeError;
-use crate::proposal::ProposalError;
-use crate::PoolType;
+use crate::{
+    data_api::wallet::input_selection::InputSelectorError, fees::ChangeError,
+    proposal::ProposalError, wallet::NoteId,
+};
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::TransparentAddress;
-
-use crate::wallet::NoteId;
+use ::transparent::address::TransparentAddress;
 
 /// Errors that can occur as a consequence of wallet operations.
 #[derive(Debug)]
@@ -62,8 +60,8 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
 
     /// Unable to create a new spend because the wallet balance is not sufficient.
     InsufficientFunds {
-        available: NonNegativeAmount,
-        required: NonNegativeAmount,
+        available: Zatoshis,
+        required: Zatoshis,
     },
 
     /// The wallet must first perform a scan of the blockchain before other
@@ -354,7 +352,7 @@ impl<DE, TE, SE, FE, CE, N> From<sapling::builder::Error> for Error<DE, TE, SE, 
 }
 
 impl<DE, TE, SE, FE, CE, N> From<transparent::builder::Error> for Error<DE, TE, SE, FE, CE, N> {
-    fn from(e: transparent::builder::Error) -> Self {
+    fn from(e: ::transparent::builder::Error) -> Self {
         Error::Builder(builder::Error::TransparentBuild(e))
     }
 }

@@ -18,18 +18,17 @@
 #![allow(clippy::single_component_path_imports)]
 
 pub mod block;
-pub use zcash_protocol::consensus;
-pub use zcash_protocol::constants;
-pub use zcash_protocol::memo;
+//pub use zcash_protocol::consensus;
+//pub use zcash_protocol::constants;
+//pub use zcash_protocol::memo;
 pub mod merkle_tree;
-use sapling;
 pub mod transaction;
-pub use zip32;
+//pub use zip32;
 #[cfg(zcash_unstable = "zfuture")]
 pub mod extensions;
 
-pub mod legacy {
-    pub use transparent::address::*;
-    #[cfg(feature = "transparent-inputs")]
-    pub use transparent::keys;
-}
+//pub mod legacy {
+//    pub use transparent::address::*;
+//    #[cfg(feature = "transparent-inputs")]
+//    pub use transparent::keys;
+//}

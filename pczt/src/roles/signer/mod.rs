@@ -1,10 +1,10 @@
 use blake2b_simd::Hash as Blake2bHash;
 use rand_core::OsRng;
+
+use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE};
 use zcash_primitives::transaction::{
-    sighash::{SignableInput, SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE},
-    sighash_v5::v5_signature_hash,
-    txid::TxIdDigester,
-    Authorization, TransactionData, TxDigests, TxVersion,
+    sighash::SignableInput, sighash_v5::v5_signature_hash, txid::TxIdDigester, Authorization,
+    TransactionData, TxDigests, TxVersion,
 };
 use zcash_protocol::consensus::BranchId;
 

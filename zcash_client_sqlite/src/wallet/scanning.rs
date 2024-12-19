@@ -6,14 +6,14 @@ use std::ops::Range;
 use std::rc::Rc;
 use tracing::{debug, trace};
 
-use zcash_client_backend::{
-    data_api::{
-        scanning::{spanning_tree::SpanningTree, ScanPriority, ScanRange},
-        SAPLING_SHARD_HEIGHT,
-    },
+use zcash_client_backend::data_api::{
+    scanning::{spanning_tree::SpanningTree, ScanPriority, ScanRange},
+    SAPLING_SHARD_HEIGHT,
+};
+use zcash_protocol::{
+    consensus::{self, BlockHeight, NetworkUpgrade},
     ShieldedProtocol,
 };
-use zcash_primitives::consensus::{self, BlockHeight, NetworkUpgrade};
 
 use crate::{
     error::SqliteClientError,
@@ -27,7 +27,7 @@ use super::wallet_birthday;
 use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT};
 
 #[cfg(not(feature = "orchard"))]
-use zcash_client_backend::PoolType;
+use zcash_protocol::PoolType;
 
 pub(crate) fn priority_code(priority: &ScanPriority) -> i64 {
     use ScanPriority::*;
@@ -572,12 +572,12 @@ pub(crate) mod tests {
         },
         AccountBirthday, Ratio, WalletRead, WalletWrite,
     };
-    use zcash_primitives::{
-        block::BlockHash,
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::{
         consensus::{BlockHeight, NetworkUpgrade, Parameters},
-        transaction::components::amount::NonNegativeAmount,
+        local_consensus::LocalNetwork,
+        value::Zatoshis,
     };
-    use zcash_protocol::local_consensus::LocalNetwork;
 
     use crate::{
         error::SqliteClientError,
@@ -602,7 +602,7 @@ pub(crate) mod tests {
             fees::{standard, DustOutputPolicy, StandardFeeRule},
             wallet::OvkPolicy,
         },
-        zcash_primitives::memo::Memo,
+        zcash_protocol::memo::Memo,
     };
 
     #[test]
@@ -684,7 +684,7 @@ pub(crate) mod tests {
         let sapling_activation_height = st.sapling_activation_height();
 
         let dfvk = T::test_account_fvk(&st);
-        let value = NonNegativeAmount::const_from_u64(50000);
+        let value = Zatoshis::const_from_u64(50000);
         let initial_height = sapling_activation_height + initial_height_offset;
         st.generate_block_at(
             initial_height,
@@ -703,7 +703,7 @@ pub(crate) mod tests {
             st.generate_next_block(
                 &dfvk,
                 AddressType::DefaultExternal,
-                NonNegativeAmount::const_from_u64(10000),
+                Zatoshis::const_from_u64(10000),
             );
         }
 
@@ -1131,7 +1131,7 @@ pub(crate) mod tests {
                 &dfvk,
                 AddressType::DefaultExternal,
                 // 1235 notes into the second shard
-                NonNegativeAmount::const_from_u64(10000),
+                Zatoshis::const_from_u64(10000),
             )],
             frontier_tree_size + 10,
             frontier_tree_size + 10,
@@ -1335,7 +1335,7 @@ pub(crate) mod tests {
             &[FakeCompactOutput::new(
                 &dfvk,
                 AddressType::DefaultExternal,
-                NonNegativeAmount::const_from_u64(10000),
+                Zatoshis::const_from_u64(10000),
             )],
             frontier_tree_size + 10,
             frontier_tree_size + 10,
@@ -1638,7 +1638,7 @@ pub(crate) mod tests {
                         ofvk.clone()
                     },
                     AddressType::DefaultExternal,
-                    NonNegativeAmount::const_from_u64(100000),
+                    Zatoshis::const_from_u64(100000),
                 )
             };
 
@@ -1751,18 +1751,18 @@ pub(crate) mod tests {
         st.scan_cached_blocks(birthday.height() + 12, 112);
 
         // We haven't yet discovered our note, so balances should still be zero
-        assert_eq!(st.get_total_balance(account.id()), NonNegativeAmount::ZERO);
+        assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
 
         // Now scan the historic range; this should discover our note, which should now be
         // spendable.
         st.scan_cached_blocks(birthday.height(), 12);
         assert_eq!(
             st.get_total_balance(account.id()),
-            NonNegativeAmount::const_from_u64(100000)
+            Zatoshis::const_from_u64(100000)
         );
         assert_eq!(
             st.get_spendable_balance(account.id(), 10),
-            NonNegativeAmount::const_from_u64(100000)
+            Zatoshis::const_from_u64(100000)
         );
 
         // Spend the note.
@@ -1770,7 +1770,7 @@ pub(crate) mod tests {
         let to = OrchardPoolTester::sk_default_address(&to_extsk);
         let request = zip321::TransactionRequest::new(vec![zip321::Payment::without_memo(
             to.to_zcash_address(st.network()),
-            NonNegativeAmount::const_from_u64(10000),
+            Zatoshis::const_from_u64(10000),
         )])
         .unwrap();
 
@@ -1840,26 +1840,23 @@ pub(crate) mod tests {
         st.scan_cached_blocks(birthday.height() + 13, 112);
 
         // We haven't yet discovered our note, so balances should still be zero
-        assert_eq!(st.get_total_balance(account.id()), NonNegativeAmount::ZERO);
+        assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
 
         // Now scan the historic range; this should discover our note but not
         // complete the tree. The note should not be considered spendable.
         st.scan_cached_blocks(birthday.height(), 12);
         assert_eq!(
             st.get_total_balance(account.id()),
-            NonNegativeAmount::const_from_u64(100000)
+            Zatoshis::const_from_u64(100000)
         );
-        assert_eq!(
-            st.get_spendable_balance(account.id(), 10),
-            NonNegativeAmount::ZERO
-        );
+        assert_eq!(st.get_spendable_balance(account.id(), 10), Zatoshis::ZERO);
 
         // Attempting to spend the note should fail to generate a proposal
         let to_extsk = OrchardPoolTester::sk(&[0xf5; 32]);
         let to = OrchardPoolTester::sk_default_address(&to_extsk);
         let request = zip321::TransactionRequest::new(vec![zip321::Payment::without_memo(
             to.to_zcash_address(st.network()),
-            NonNegativeAmount::const_from_u64(10000),
+            Zatoshis::const_from_u64(10000),
         )])
         .unwrap();
 

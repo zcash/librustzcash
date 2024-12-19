@@ -41,11 +41,15 @@ use sapling::{
 };
 use shardtree::error::{QueryError, ShardTreeError};
 use std::num::NonZeroU32;
-use zcash_keys::keys::UnifiedFullViewingKey;
+use zcash_keys::{
+    address::Address,
+    keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
+};
+use zcash_protocol::{PoolType, ShieldedProtocol};
+use zip321::{self, Payment};
 
 use super::InputSource;
 use crate::{
-    address::Address,
     data_api::{
         error::Error, Account, SentTransaction, SentTransactionOutput, WalletCommitmentTrees,
         WalletRead, WalletWrite,
@@ -54,43 +58,40 @@ use crate::{
     fees::{
         standard::SingleOutputChangeStrategy, ChangeStrategy, DustOutputPolicy, StandardFeeRule,
     },
-    keys::UnifiedSpendingKey,
     proposal::{Proposal, ProposalError, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
-    zip321::{self, Payment},
-    PoolType, ShieldedProtocol,
 };
-use zcash_primitives::{
-    legacy::TransparentAddress,
-    transaction::{
-        builder::{BuildConfig, BuildResult, Builder},
-        components::{
-            amount::NonNegativeAmount, sapling::zip212_enforcement,
-            transparent::builder::TransparentSigningSet, OutPoint,
-        },
-        fees::FeeRule,
-        Transaction, TxId,
-    },
+
+use ::transparent::{
+    address::TransparentAddress, builder::TransparentSigningSet, bundle::OutPoint,
+};
+use zcash_primitives::transaction::{
+    builder::{BuildConfig, BuildResult, Builder},
+    components::sapling::zip212_enforcement,
+    fees::FeeRule,
+    Transaction, TxId,
 };
 use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     memo::MemoBytes,
+    value::Zatoshis,
 };
 use zip32::Scope;
 
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{fees::ChangeValue, proposal::StepOutput, wallet::TransparentAddressMetadata},
+    ::transparent::bundle::TxOut,
     core::convert::Infallible,
     input_selection::ShieldingSelector,
     std::collections::HashMap,
     zcash_keys::encoding::AddressCodec,
-    zcash_primitives::transaction::components::TxOut,
 };
 
 #[cfg(feature = "pczt")]
 use {
     crate::data_api::error::PcztError,
+    ::transparent::pczt::Bip32Derivation,
     bip32::ChildNumber,
     orchard::note_encryption::OrchardDomain,
     pczt::roles::{
@@ -101,7 +102,6 @@ use {
     serde::{Deserialize, Serialize},
     zcash_address::ZcashAddress,
     zcash_note_encryption::try_output_recovery_with_pkd_esk,
-    zcash_primitives::transaction::components::transparent::pczt::Bip32Derivation,
     zcash_protocol::{
         consensus::NetworkConstants,
         value::{BalanceError, ZatBalance},
@@ -331,7 +331,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     spend_from_account: <DbT as InputSource>::AccountId,
     min_confirmations: NonZeroU32,
     to: &Address,
-    amount: NonNegativeAmount,
+    amount: Zatoshis,
     memo: Option<MemoBytes>,
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedProtocol,
@@ -395,7 +395,7 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     params: &ParamsT,
     input_selector: &InputsT,
     change_strategy: &ChangeT,
-    shielding_threshold: NonNegativeAmount,
+    shielding_threshold: Zatoshis,
     from_addrs: &[TransparentAddress],
     to_account: <DbT as InputSource>::AccountId,
     min_confirmations: u32,
@@ -431,7 +431,7 @@ where
 struct StepResult<AccountId> {
     build_result: BuildResult,
     outputs: Vec<SentTransactionOutput<AccountId>>,
-    fee_amount: NonNegativeAmount,
+    fee_amount: Zatoshis,
     #[cfg(feature = "transparent-inputs")]
     utxos_spent: Vec<OutPoint>,
 }
@@ -546,18 +546,18 @@ struct BuildState<'a, P, AccountId> {
     #[cfg(feature = "orchard")]
     orchard_output_meta: Vec<(
         Recipient<AccountId, PoolType, OutPoint>,
-        NonNegativeAmount,
+        Zatoshis,
         Option<MemoBytes>,
     )>,
     sapling_output_meta: Vec<(
         Recipient<AccountId, PoolType, OutPoint>,
-        NonNegativeAmount,
+        Zatoshis,
         Option<MemoBytes>,
     )>,
     transparent_output_meta: Vec<(
         Recipient<AccountId, Note, ()>,
         TransparentAddress,
-        NonNegativeAmount,
+        Zatoshis,
         StepOutputIndex,
     )>,
     #[cfg(feature = "transparent-inputs")]
@@ -884,20 +884,14 @@ where
     };
 
     #[cfg(feature = "orchard")]
-    let mut orchard_output_meta: Vec<(
-        Recipient<_, PoolType, _>,
-        NonNegativeAmount,
-        Option<MemoBytes>,
-    )> = vec![];
-    let mut sapling_output_meta: Vec<(
-        Recipient<_, PoolType, _>,
-        NonNegativeAmount,
-        Option<MemoBytes>,
-    )> = vec![];
+    let mut orchard_output_meta: Vec<(Recipient<_, PoolType, _>, Zatoshis, Option<MemoBytes>)> =
+        vec![];
+    let mut sapling_output_meta: Vec<(Recipient<_, PoolType, _>, Zatoshis, Option<MemoBytes>)> =
+        vec![];
     let mut transparent_output_meta: Vec<(
         Recipient<_, _, ()>,
         TransparentAddress,
-        NonNegativeAmount,
+        Zatoshis,
         StepOutputIndex,
     )> = vec![];
 
@@ -1823,7 +1817,7 @@ where
             MemoBytes::from_bytes(memo_bytes(&m)).expect("Memo is the correct length.")
         });
 
-        let note_value = NonNegativeAmount::try_from(note_value(&note))?;
+        let note_value = Zatoshis::try_from(note_value(&note))?;
         let recipient = match (pczt_recipient, external_address) {
             (PcztRecipient::External, Some(addr)) => {
                 Ok(Recipient::External(addr, PoolType::Shielded(output_pool)))
@@ -1977,7 +1971,7 @@ where
     outputs.extend(sapling_outputs.into_iter().flatten());
     outputs.extend(transparent_outputs.into_iter().flatten());
 
-    let fee_amount = NonNegativeAmount::try_from(transaction.fee_paid(|outpoint| {
+    let fee_amount = Zatoshis::try_from(transaction.fee_paid(|outpoint| {
         utxos_map
             .get(outpoint)
             .copied()
@@ -2052,7 +2046,7 @@ pub fn shield_transparent_funds<DbT, ParamsT, InputsT, ChangeT>(
     output_prover: &impl OutputProver,
     input_selector: &InputsT,
     change_strategy: &ChangeT,
-    shielding_threshold: NonNegativeAmount,
+    shielding_threshold: Zatoshis,
     usk: &UnifiedSpendingKey,
     from_addrs: &[TransparentAddress],
     to_account: <DbT as InputSource>::AccountId,

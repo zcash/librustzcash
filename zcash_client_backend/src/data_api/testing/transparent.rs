@@ -10,13 +10,14 @@ use crate::{
     wallet::WalletTransparentOutput,
 };
 use assert_matches::assert_matches;
-use sapling::zip32::ExtendedSpendingKey;
-use zcash_primitives::{
-    block::BlockHash,
-    legacy::TransparentAddress,
-    transaction::components::{amount::NonNegativeAmount, OutPoint, TxOut},
+
+use ::transparent::{
+    address::TransparentAddress,
+    bundle::{OutPoint, TxOut},
 };
-use zcash_protocol::local_consensus::LocalNetwork;
+use sapling::zip32::ExtendedSpendingKey;
+use zcash_primitives::block::BlockHash;
+use zcash_protocol::{local_consensus::LocalNetwork, value::Zatoshis};
 
 use super::TestAccount;
 
@@ -54,7 +55,7 @@ fn check_balance<DSF>(
             .unwrap()
             .get(taddr)
             .cloned()
-            .unwrap_or(NonNegativeAmount::ZERO),
+            .unwrap_or(Zatoshis::ZERO),
         expected.total(),
     );
     assert_eq!(
@@ -63,7 +64,7 @@ fn check_balance<DSF>(
             .unwrap()
             .into_iter()
             .map(|utxo| utxo.value())
-            .sum::<Option<NonNegativeAmount>>(),
+            .sum::<Option<Zatoshis>>(),
         Some(expected.spendable_value()),
     );
 
@@ -78,7 +79,7 @@ fn check_balance<DSF>(
                 .unwrap()
                 .into_iter()
                 .map(|utxo| utxo.value())
-                .sum::<Option<NonNegativeAmount>>(),
+                .sum::<Option<Zatoshis>>(),
             Some(expected.spendable_value()),
         );
     }
@@ -113,7 +114,7 @@ where
     assert!(bal_absent.is_empty());
 
     // Create a fake transparent output.
-    let value = NonNegativeAmount::const_from_u64(100000);
+    let value = Zatoshis::const_from_u64(100000);
     let outpoint = OutPoint::fake();
     let txout = TxOut {
         value,
@@ -196,7 +197,7 @@ where
 
     // Initialize the wallet with chain data that has no shielded notes for us.
     let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
-    let not_our_value = NonNegativeAmount::const_from_u64(10000);
+    let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
     for _ in 1..10 {
@@ -208,7 +209,7 @@ where
     check_balance::<DSF>(&st, &account, taddr, 0, &Balance::ZERO);
 
     // Create a fake transparent output.
-    let value = NonNegativeAmount::from_u64(100000).unwrap();
+    let value = Zatoshis::from_u64(100000).unwrap();
     let txout = TxOut {
         value,
         script_pubkey: taddr.script(),
@@ -304,7 +305,7 @@ where
 
     // Initialize the wallet with chain data that has no shielded notes for us.
     let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
-    let not_our_value = NonNegativeAmount::const_from_u64(10000);
+    let not_our_value = Zatoshis::const_from_u64(10000);
     let (start_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
     for _ in 1..10 {
@@ -322,7 +323,7 @@ where
     );
 
     // Create a fake transparent output.
-    let value = NonNegativeAmount::from_u64(100000).unwrap();
+    let value = Zatoshis::from_u64(100000).unwrap();
     let txout = TxOut {
         value,
         script_pubkey: taddr.script(),

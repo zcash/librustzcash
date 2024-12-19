@@ -164,13 +164,11 @@ mod tests {
     };
 
     use super::{Ivk, ParseError, Typecode, Uivk};
-    use crate::{
-        kind::unified::{
-            private::{SealedContainer, SealedItem},
-            Container, Encoding,
-        },
-        Network,
+    use crate::kind::unified::{
+        private::{SealedContainer, SealedItem},
+        Container, Encoding,
     };
+    use zcash_protocol::consensus::NetworkType;
 
     prop_compose! {
         fn uniform64()(a in uniform32(0u8..), b in uniform32(0u8..)) -> [u8; 64] {
@@ -219,7 +217,7 @@ mod tests {
     proptest! {
         #[test]
         fn uivk_roundtrip(
-            network in select(vec![Network::Main, Network::Test, Network::Regtest]),
+            network in select(vec![NetworkType::Main, NetworkType::Test, NetworkType::Regtest]),
             uivk in arb_unified_ivk(),
         ) {
             let encoded = uivk.encode(&network);
@@ -308,7 +306,7 @@ mod tests {
     fn duplicate_typecode() {
         // Construct and serialize an invalid UIVK.
         let uivk = Uivk(vec![Ivk::Sapling([1; 64]), Ivk::Sapling([2; 64])]);
-        let encoded = uivk.encode(&Network::Main);
+        let encoded = uivk.encode(&NetworkType::Main);
         assert_eq!(
             Uivk::decode(&encoded),
             Err(ParseError::DuplicateTypecode(Typecode::Sapling))

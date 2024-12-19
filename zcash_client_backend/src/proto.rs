@@ -13,22 +13,25 @@ use sapling::{self, note::ExtractedNoteCommitment, Node};
 use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
+    merkle_tree::read_commitment_tree,
+    transaction::TxId,
+};
+use zcash_protocol::{
     consensus::BlockHeight,
     memo::{self, MemoBytes},
-    merkle_tree::read_commitment_tree,
-    transaction::{components::amount::NonNegativeAmount, TxId},
+    value::Zatoshis,
+    PoolType, ShieldedProtocol,
 };
+use zip321::{TransactionRequest, Zip321Error};
 
 use crate::{
     data_api::{chain::ChainState, InputSource},
     fees::{ChangeValue, StandardFeeRule, TransactionBalance},
     proposal::{Proposal, ProposalError, ShieldedInputs, Step, StepOutput, StepOutputIndex},
-    zip321::{TransactionRequest, Zip321Error},
-    PoolType, ShieldedProtocol,
 };
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::transaction::components::OutPoint;
+use transparent::bundle::OutPoint;
 
 #[cfg(feature = "orchard")]
 use orchard::tree::MerkleHashOrchard;
@@ -745,7 +748,7 @@ impl proposal::Proposal {
                             .proposed_change
                             .iter()
                             .map(|cv| -> Result<ChangeValue, ProposalDecodingError<_>> {
-                                let value = NonNegativeAmount::from_u64(cv.value)
+                                let value = Zatoshis::from_u64(cv.value)
                                     .map_err(|_| ProposalDecodingError::BalanceInvalid)?;
                                 let memo = cv
                                     .memo
@@ -779,7 +782,7 @@ impl proposal::Proposal {
                                 }
                             })
                             .collect::<Result<Vec<_>, _>>()?,
-                        NonNegativeAmount::from_u64(proto_balance.fee_required)
+                        Zatoshis::from_u64(proto_balance.fee_required)
                             .map_err(|_| ProposalDecodingError::BalanceInvalid)?,
                     )
                     .map_err(|_| ProposalDecodingError::BalanceInvalid)?;

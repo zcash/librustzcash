@@ -155,13 +155,11 @@ mod tests {
     use proptest::{array::uniform1, array::uniform32, prelude::*, sample::select};
 
     use super::{Fvk, ParseError, Typecode, Ufvk};
-    use crate::{
-        kind::unified::{
-            private::{SealedContainer, SealedItem},
-            Container, Encoding,
-        },
-        Network,
+    use crate::kind::unified::{
+        private::{SealedContainer, SealedItem},
+        Container, Encoding,
     };
+    use zcash_protocol::consensus::NetworkType;
 
     prop_compose! {
         fn uniform128()(a in uniform96(), b in uniform32(0u8..)) -> [u8; 128] {
@@ -226,7 +224,7 @@ mod tests {
     proptest! {
         #[test]
         fn ufvk_roundtrip(
-            network in select(vec![Network::Main, Network::Test, Network::Regtest]),
+            network in select(vec![NetworkType::Main, NetworkType::Test, NetworkType::Regtest]),
             ufvk in arb_unified_fvk(),
         ) {
             let encoded = ufvk.encode(&network);

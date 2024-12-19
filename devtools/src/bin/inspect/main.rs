@@ -9,17 +9,20 @@ use gumdrop::{Options, ParsingStyle};
 use lazy_static::lazy_static;
 use secrecy::Zeroize;
 use tokio::runtime::Runtime;
+
 use zcash_address::{
     unified::{self, Encoding},
     ZcashAddress,
 };
-use zcash_primitives::{block::BlockHeader, consensus::BranchId, transaction::Transaction};
+use zcash_primitives::{block::BlockHeader, transaction::Transaction};
 use zcash_proofs::{default_params_folder, load_parameters, ZcashParameters};
-use zcash_protocol::consensus::NetworkType;
+use zcash_protocol::{
+    consensus::{BranchId, NetworkType},
+    constants,
+};
 
 mod context;
 use context::{Context, ZUint256};
-use zcash_protocol::constants;
 
 mod address;
 mod block;

@@ -87,21 +87,6 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        rusqlite::{named_params, Connection},
-        secrecy::{ExposeSecret, Secret, SecretVec},
-        tempfile::NamedTempFile,
-        zcash_client_backend::{
-            data_api::{AccountBirthday, AccountSource},
-            wallet::TransparentAddressMetadata,
-        },
-        zcash_keys::keys::UnifiedSpendingKey,
-        zcash_primitives::{block::BlockHash, legacy::keys::NonHardenedChildIndex},
-        zcash_protocol::consensus::Network,
-        zip32::{fingerprint::SeedFingerprint, AccountId as Zip32AccountId},
-    };
-
-    #[cfg(feature = "transparent-inputs")]
-    use {
         crate::{
             error::SqliteClientError,
             wallet::{
@@ -109,7 +94,19 @@ mod tests {
             },
             AccountRef, WalletDb,
         },
+        ::transparent::keys::NonHardenedChildIndex,
+        rusqlite::{named_params, Connection},
+        secrecy::{ExposeSecret, Secret, SecretVec},
+        tempfile::NamedTempFile,
         zcash_client_backend::data_api::GAP_LIMIT,
+        zcash_client_backend::{
+            data_api::{AccountBirthday, AccountSource},
+            wallet::TransparentAddressMetadata,
+        },
+        zcash_keys::keys::UnifiedSpendingKey,
+        zcash_primitives::block::BlockHash,
+        zcash_protocol::consensus::Network,
+        zip32::{fingerprint::SeedFingerprint, AccountId as Zip32AccountId},
     };
 
     /// This is a minimized copy of [`wallet::create_account`] as of the time of the

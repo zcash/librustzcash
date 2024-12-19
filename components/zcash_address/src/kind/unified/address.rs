@@ -254,11 +254,11 @@ mod tests {
     use alloc::borrow::ToOwned;
 
     use assert_matches::assert_matches;
+    use zcash_protocol::consensus::NetworkType;
 
     use crate::{
         kind::unified::{private::SealedContainer, Container, Encoding},
         unified::address::testing::arb_unified_address,
-        Network,
     };
 
     use proptest::{prelude::*, sample::select};
@@ -268,7 +268,7 @@ mod tests {
     proptest! {
         #[test]
         fn ua_roundtrip(
-            network in select(vec![Network::Main, Network::Test, Network::Regtest]),
+            network in select(vec![NetworkType::Main, NetworkType::Test, NetworkType::Regtest]),
             ua in arb_unified_address(),
         ) {
             let encoded = ua.encode(&network);

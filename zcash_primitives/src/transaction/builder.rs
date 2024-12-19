@@ -1,40 +1,36 @@
 //! Structs for building transactions.
 
+use rand::{CryptoRng, RngCore};
 use std::cmp::Ordering;
 use std::error;
 use std::fmt;
 use std::sync::mpsc::Sender;
 
-use rand::{CryptoRng, RngCore};
-use zcash_protocol::consensus::Parameters;
-
-use crate::{
-    consensus::{self, BlockHeight, BranchId, NetworkUpgrade},
-    legacy::TransparentAddress,
+use ::sapling::{
+    self,
+    builder::SaplingMetadata,
+    prover::{OutputProver, SpendProver},
+    Note, PaymentAddress,
+};
+use ::transparent::{address::TransparentAddress, builder::TransparentBuilder, bundle::TxOut};
+use zcash_protocol::{
+    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::MemoBytes,
-    sapling::{
-        self,
-        builder::SaplingMetadata,
-        prover::{OutputProver, SpendProver},
-        Note, PaymentAddress,
+    value::{BalanceError, ZatBalance, Zatoshis},
+};
+
+use crate::transaction::{
+    fees::{
+        transparent::{InputView, OutputView},
+        FeeRule,
     },
-    transaction::{
-        components::{
-            amount::{Amount, BalanceError},
-            transparent::{builder::TransparentBuilder, TxOut},
-        },
-        fees::{
-            transparent::{InputView, OutputView},
-            FeeRule,
-        },
-        sighash::{signature_hash, SignableInput},
-        txid::TxIdDigester,
-        Transaction, TransactionData, TxVersion, Unauthorized,
-    },
+    sighash::{signature_hash, SignableInput},
+    txid::TxIdDigester,
+    Transaction, TransactionData, TxVersion, Unauthorized,
 };
 
 #[cfg(feature = "transparent-inputs")]
-use crate::transaction::components::transparent::builder::TransparentInputInfo;
+use ::transparent::builder::TransparentInputInfo;
 
 #[cfg(not(feature = "transparent-inputs"))]
 use std::convert::Infallible;
@@ -51,9 +47,8 @@ use crate::{
     },
 };
 
-use super::components::amount::NonNegativeAmount;
 use super::components::sapling::zip212_enforcement;
-use super::components::transparent::builder::TransparentSigningSet;
+use ::transparent::builder::TransparentSigningSet;
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
@@ -80,10 +75,10 @@ impl<FE: fmt::Display> fmt::Display for FeeError<FE> {
 pub enum Error<FE> {
     /// Insufficient funds were provided to the transaction builder; the given
     /// additional amount is required in order to construct the transaction.
-    InsufficientFunds(Amount),
+    InsufficientFunds(ZatBalance),
     /// The transaction has inputs in excess of outputs and fees; the user must
     /// add a change output.
-    ChangeRequired(Amount),
+    ChangeRequired(ZatBalance),
     /// An error occurred in computing the fees for a transaction.
     Fee(FeeError<FE>),
     /// An overflow or underflow occurred when computing value balances
@@ -484,7 +479,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         &mut self,
         ovk: Option<sapling::keys::OutgoingViewingKey>,
         to: PaymentAddress,
-        value: NonNegativeAmount,
+        value: Zatoshis,
         memo: MemoBytes,
     ) -> Result<(), Error<FE>> {
         self.sapling_builder
@@ -514,23 +509,25 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     pub fn add_transparent_output(
         &mut self,
         to: &TransparentAddress,
-        value: NonNegativeAmount,
+        value: Zatoshis,
     ) -> Result<(), transparent::builder::Error> {
         self.transparent_builder.add_output(to, value)
     }
 
     /// Returns the sum of the transparent, Sapling, Orchard, and TZE value balances.
-    fn value_balance(&self) -> Result<Amount, BalanceError> {
+    fn value_balance(&self) -> Result<ZatBalance, BalanceError> {
         let value_balances = [
             self.transparent_builder.value_balance()?,
             self.sapling_builder
                 .as_ref()
-                .map_or_else(Amount::zero, |builder| builder.value_balance::<Amount>()),
+                .map_or_else(ZatBalance::zero, |builder| {
+                    builder.value_balance::<ZatBalance>()
+                }),
             self.orchard_builder.as_ref().map_or_else(
-                || Ok(Amount::zero()),
+                || Ok(ZatBalance::zero()),
                 |builder| {
                     builder
-                        .value_balance::<Amount>()
+                        .value_balance::<ZatBalance>()
                         .map_err(|_| BalanceError::Overflow)
                 },
             )?,
@@ -548,10 +545,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     ///
     /// This fee is a function of the spends and outputs that have been added to the builder,
     /// pursuant to the specified [`FeeRule`].
-    pub fn get_fee<FR: FeeRule>(
-        &self,
-        fee_rule: &FR,
-    ) -> Result<NonNegativeAmount, FeeError<FR::Error>> {
+    pub fn get_fee<FR: FeeRule>(&self, fee_rule: &FR) -> Result<Zatoshis, FeeError<FR::Error>> {
         #[cfg(feature = "transparent-inputs")]
         let transparent_inputs = self.transparent_builder.inputs();
 
@@ -597,7 +591,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     pub fn get_fee_zfuture<FR: FeeRule + FutureFeeRule>(
         &self,
         fee_rule: &FR,
-    ) -> Result<NonNegativeAmount, FeeError<FR::Error>> {
+    ) -> Result<Zatoshis, FeeError<FR::Error>> {
         #[cfg(feature = "transparent-inputs")]
         let transparent_inputs = self.transparent_builder.inputs();
 
@@ -709,7 +703,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         mut rng: R,
         spend_prover: &SP,
         output_prover: &OP,
-        fee: NonNegativeAmount,
+        fee: Zatoshis,
     ) -> Result<BuildResult, Error<FE>> {
         let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
 
@@ -724,7 +718,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         let balance_after_fees =
             (self.value_balance()? - fee.into()).ok_or(BalanceError::Underflow)?;
 
-        match balance_after_fees.cmp(&Amount::zero()) {
+        match balance_after_fees.cmp(&ZatBalance::zero()) {
             Ordering::Less => {
                 return Err(Error::InsufficientFunds(-balance_after_fees));
             }
@@ -907,7 +901,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         let balance_after_fees =
             (self.value_balance()? - fee.into()).ok_or(BalanceError::Underflow)?;
 
-        match balance_after_fees.cmp(&Amount::zero()) {
+        match balance_after_fees.cmp(&ZatBalance::zero()) {
             Ordering::Less => {
                 return Err(Error::InsufficientFunds(-balance_after_fees));
             }
@@ -988,7 +982,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Extensio
     fn add_tze_output<G: ToPayload>(
         &mut self,
         extension_id: u32,
-        value: Amount,
+        value: ZatBalance,
         guarded_by: &G,
     ) -> Result<(), Self::BuildError> {
         self.tze_builder.add_output(extension_id, value, guarded_by)
@@ -1000,15 +994,15 @@ mod testing {
     use rand::RngCore;
     use rand_core::CryptoRng;
 
-    use super::{BuildResult, Builder, Error};
-    use crate::{
-        consensus,
-        sapling::{
-            self,
-            prover::mock::{MockOutputProver, MockSpendProver},
-        },
-        transaction::{components::transparent::builder::TransparentSigningSet, fees::zip317},
+    use ::sapling::{
+        self,
+        prover::mock::{MockOutputProver, MockSpendProver},
     };
+    use ::transparent::builder::TransparentSigningSet;
+    use zcash_protocol::consensus;
+
+    use super::{BuildResult, Builder, Error};
+    use crate::transaction::fees::zip317;
 
     impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
         /// Build the transaction using mocked randomness and proving capabilities.
@@ -1063,30 +1057,25 @@ mod tests {
     use incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness};
     use rand_core::OsRng;
 
-    use crate::{
-        consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
-        legacy::TransparentAddress,
-        memo::MemoBytes,
-        sapling::{self, zip32::ExtendedSpendingKey, Node, Rseed},
-        transaction::{
-            builder::BuildConfig,
-            components::{
-                amount::{Amount, BalanceError, NonNegativeAmount},
-                transparent::builder::TransparentSigningSet,
-            },
-        },
-    };
-
     use super::{Builder, Error};
+    use crate::transaction::builder::BuildConfig;
+
+    use ::sapling::{self, zip32::ExtendedSpendingKey, Node, Rseed};
+    use ::transparent::{address::TransparentAddress, builder::TransparentSigningSet};
+    use zcash_protocol::{
+        consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
+        memo::MemoBytes,
+        value::{BalanceError, ZatBalance, Zatoshis},
+    };
 
     #[cfg(zcash_unstable = "zfuture")]
     #[cfg(feature = "transparent-inputs")]
     use super::TzeBuilder;
 
     #[cfg(feature = "transparent-inputs")]
-    use crate::{
-        legacy::keys::{AccountPrivKey, IncomingViewingKey},
-        transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, OutPoint, TxOut},
+    use {
+        crate::transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, OutPoint, TxOut},
+        ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
         zip32::AccountId,
     };
 
@@ -1095,10 +1084,9 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn binding_sig_absent_if_no_shielded_spend_or_output() {
-        use crate::consensus::NetworkUpgrade;
-        use crate::legacy::keys::NonHardenedChildIndex;
         use crate::transaction::builder::{self, TransparentBuilder};
-        use crate::transaction::components::transparent::builder::TransparentSigningSet;
+        use ::transparent::{builder::TransparentSigningSet, keys::NonHardenedChildIndex};
+        use zcash_protocol::consensus::NetworkUpgrade;
 
         let sapling_activation_height = TEST_NETWORK
             .activation_height(NetworkUpgrade::Sapling)
@@ -1130,7 +1118,7 @@ mod tests {
             .unwrap();
         let pubkey = transparent_signing_set.add_key(sk);
         let prev_coin = TxOut {
-            value: NonNegativeAmount::const_from_u64(50000),
+            value: Zatoshis::const_from_u64(50000),
             script_pubkey: tsk
                 .to_account_pubkey()
                 .derive_external_ivk()
@@ -1147,7 +1135,7 @@ mod tests {
         builder
             .add_transparent_output(
                 &TransparentAddress::PublicKeyHash([0; 20]),
-                NonNegativeAmount::const_from_u64(40000),
+                Zatoshis::const_from_u64(40000),
             )
             .unwrap();
 
@@ -1193,7 +1181,7 @@ mod tests {
         builder
             .add_transparent_output(
                 &TransparentAddress::PublicKeyHash([0; 20]),
-                NonNegativeAmount::const_from_u64(35000),
+                Zatoshis::const_from_u64(35000),
             )
             .unwrap();
 
@@ -1248,14 +1236,14 @@ mod tests {
                 .add_sapling_output::<Infallible>(
                     ovk,
                     to,
-                    NonNegativeAmount::const_from_u64(50000),
+                    Zatoshis::const_from_u64(50000),
                     MemoBytes::empty(),
                 )
                 .unwrap();
             assert_matches!(
                 builder.mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng),
                 Err(Error::InsufficientFunds(expected)) if
-                    expected == (NonNegativeAmount::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
+                    expected == (Zatoshis::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
             );
         }
 
@@ -1270,13 +1258,13 @@ mod tests {
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKeyHash([0; 20]),
-                    NonNegativeAmount::const_from_u64(50000),
+                    Zatoshis::const_from_u64(50000),
                 )
                 .unwrap();
             assert_matches!(
                 builder.mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected ==
-                    (NonNegativeAmount::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
+                    (Zatoshis::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
             );
         }
 
@@ -1308,19 +1296,19 @@ mod tests {
                 .add_sapling_output::<Infallible>(
                     ovk,
                     to,
-                    NonNegativeAmount::const_from_u64(30000),
+                    Zatoshis::const_from_u64(30000),
                     MemoBytes::empty(),
                 )
                 .unwrap();
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKeyHash([0; 20]),
-                    NonNegativeAmount::const_from_u64(15000),
+                    Zatoshis::const_from_u64(15000),
                 )
                 .unwrap();
             assert_matches!(
                 builder.mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng),
-                Err(Error::InsufficientFunds(expected)) if expected == Amount::const_from_i64(1)
+                Err(Error::InsufficientFunds(expected)) if expected == ZatBalance::const_from_i64(1)
             );
         }
 
@@ -1359,14 +1347,14 @@ mod tests {
                 .add_sapling_output::<Infallible>(
                     ovk,
                     to,
-                    NonNegativeAmount::const_from_u64(30000),
+                    Zatoshis::const_from_u64(30000),
                     MemoBytes::empty(),
                 )
                 .unwrap();
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKeyHash([0; 20]),
-                    NonNegativeAmount::const_from_u64(15000),
+                    Zatoshis::const_from_u64(15000),
                 )
                 .unwrap();
             let res = builder
@@ -1376,7 +1364,7 @@ mod tests {
                 res.transaction()
                     .fee_paid(|_| Err(BalanceError::Overflow))
                     .unwrap(),
-                Amount::const_from_i64(15_000)
+                ZatBalance::const_from_i64(15_000)
             );
         }
     }

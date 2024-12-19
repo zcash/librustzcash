@@ -7,24 +7,22 @@ use std::{
     fmt::{self, Debug, Display},
 };
 
+use ::transparent::bundle::TxOut;
 use nonempty::NonEmpty;
 use zcash_address::ConversionError;
-use zcash_primitives::{
+use zcash_keys::address::{Address, UnifiedAddress};
+use zcash_protocol::{
     consensus::{self, BlockHeight},
-    transaction::components::{
-        amount::{BalanceError, NonNegativeAmount},
-        TxOut,
-    },
+    value::{BalanceError, Zatoshis},
+    PoolType, ShieldedProtocol,
 };
+use zip321::TransactionRequest;
 
 use crate::{
-    address::{Address, UnifiedAddress},
     data_api::{InputSource, SimpleNoteRetention, SpendableNotes},
     fees::{sapling, ChangeError, ChangeStrategy},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
-    zip321::TransactionRequest,
-    PoolType, ShieldedProtocol,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -32,11 +30,11 @@ use {
     crate::{
         fees::EphemeralBalance,
         proposal::{Step, StepOutput, StepOutputIndex},
-        zip321::Payment,
     },
+    ::transparent::{address::TransparentAddress, bundle::OutPoint},
     std::collections::BTreeSet,
     std::convert::Infallible,
-    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
+    zip321::Payment,
 };
 
 #[cfg(feature = "orchard")]
@@ -58,8 +56,8 @@ pub enum InputSelectorError<DbErrT, SelectorErrT, ChangeErrT, N> {
     /// Insufficient funds were available to satisfy the payment request that inputs were being
     /// selected to attempt to satisfy.
     InsufficientFunds {
-        available: NonNegativeAmount,
-        required: NonNegativeAmount,
+        available: Zatoshis,
+        required: Zatoshis,
     },
     /// The data source does not have enough information to choose an expiry height
     /// for the transaction.
@@ -230,7 +228,7 @@ pub trait ShieldingSelector {
         params: &ParamsT,
         wallet_db: &Self::InputSource,
         change_strategy: &ChangeT,
-        shielding_threshold: NonNegativeAmount,
+        shielding_threshold: Zatoshis,
         source_addrs: &[TransparentAddress],
         to_account: <Self::InputSource as InputSource>::AccountId,
         target_height: BlockHeight,
@@ -296,35 +294,35 @@ impl<DbErrT, ChangeErrT, N> From<BalanceError>
     }
 }
 
-pub(crate) struct SaplingPayment(NonNegativeAmount);
+pub(crate) struct SaplingPayment(Zatoshis);
 
 #[cfg(test)]
 impl SaplingPayment {
-    pub(crate) fn new(amount: NonNegativeAmount) -> Self {
+    pub(crate) fn new(amount: Zatoshis) -> Self {
         SaplingPayment(amount)
     }
 }
 
 impl sapling::OutputView for SaplingPayment {
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         self.0
     }
 }
 
 #[cfg(feature = "orchard")]
-pub(crate) struct OrchardPayment(NonNegativeAmount);
+pub(crate) struct OrchardPayment(Zatoshis);
 
 #[cfg(test)]
 #[cfg(feature = "orchard")]
 impl OrchardPayment {
-    pub(crate) fn new(amount: NonNegativeAmount) -> Self {
+    pub(crate) fn new(amount: Zatoshis) -> Self {
         OrchardPayment(amount)
     }
 }
 
 #[cfg(feature = "orchard")]
 impl orchard_fees::OutputView for OrchardPayment {
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         self.0
     }
 }
@@ -403,7 +401,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         // outputs will be computed from the constructed `tr1_transparent_outputs` value
         // constructed below.
         #[cfg(feature = "transparent-inputs")]
-        let mut total_ephemeral = NonNegativeAmount::ZERO;
+        let mut total_ephemeral = Zatoshis::ZERO;
 
         for (idx, payment) in transaction_request.payments() {
             let recipient_address: Address = payment
@@ -483,8 +481,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         }
 
         let mut shielded_inputs = SpendableNotes::empty();
-        let mut prior_available = NonNegativeAmount::ZERO;
-        let mut amount_required = NonNegativeAmount::ZERO;
+        let mut prior_available = Zatoshis::ZERO;
+        let mut amount_required = Zatoshis::ZERO;
         let mut exclude: Vec<DbT::NoteRef> = vec![];
 
         // This loop is guaranteed to terminate because on each iteration we check that the amount
@@ -567,7 +565,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             &sapling::EmptyBundleView,
                             #[cfg(feature = "orchard")]
                             &orchard_fees::EmptyBundleView,
-                            Some(&EphemeralBalance::Input(NonNegativeAmount::ZERO)),
+                            Some(&EphemeralBalance::Input(Zatoshis::ZERO)),
                             &wallet_meta,
                         ) {
                         Err(ChangeError::InsufficientFunds { required, .. }) => required,
@@ -575,7 +573,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             unreachable!("no inputs were supplied")
                         }
                         Err(other) => return Err(InputSelectorError::Change(other)),
-                        Ok(_) => NonNegativeAmount::ZERO, // shouldn't happen
+                        Ok(_) => Zatoshis::ZERO, // shouldn't happen
                     };
 
                     // Now recompute to obtain the `TransactionBalance` and verify that it
@@ -784,7 +782,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         params: &ParamsT,
         wallet_db: &Self::InputSource,
         change_strategy: &ChangeT,
-        shielding_threshold: NonNegativeAmount,
+        shielding_threshold: Zatoshis,
         source_addrs: &[TransparentAddress],
         to_account: <Self::InputSource as InputSource>::AccountId,
         target_height: BlockHeight,

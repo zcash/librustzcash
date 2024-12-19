@@ -3,19 +3,18 @@ use std::{
     num::{NonZeroU64, NonZeroUsize},
 };
 
-use zcash_primitives::{
+use ::transparent::bundle::OutPoint;
+use zcash_primitives::transaction::fees::{
+    transparent::{self, InputSize},
+    zip317::{self as prim_zip317},
+    FeeRule,
+};
+use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    transaction::{
-        components::{amount::NonNegativeAmount, OutPoint},
-        fees::{
-            transparent::{self, InputSize},
-            zip317::{self as prim_zip317},
-            FeeRule,
-        },
-    },
+    value::Zatoshis,
+    PoolType, ShieldedProtocol,
 };
-use zcash_protocol::{PoolType, ShieldedProtocol};
 
 use crate::data_api::InputSource;
 
@@ -46,7 +45,7 @@ impl FeeRule for StandardFeeRule {
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
-    ) -> Result<NonNegativeAmount, Self::Error> {
+    ) -> Result<Zatoshis, Self::Error> {
         #[allow(deprecated)]
         match self {
             Self::Zip317 => prim_zip317::FeeRule::standard().fee_required(
@@ -72,26 +71,22 @@ pub struct ChangeValue(ChangeValueInner);
 enum ChangeValueInner {
     Shielded {
         protocol: ShieldedProtocol,
-        value: NonNegativeAmount,
+        value: Zatoshis,
         memo: Option<MemoBytes>,
     },
     #[cfg(feature = "transparent-inputs")]
-    EphemeralTransparent { value: NonNegativeAmount },
+    EphemeralTransparent { value: Zatoshis },
 }
 
 impl ChangeValue {
     /// Constructs a new ephemeral transparent output value.
     #[cfg(feature = "transparent-inputs")]
-    pub fn ephemeral_transparent(value: NonNegativeAmount) -> Self {
+    pub fn ephemeral_transparent(value: Zatoshis) -> Self {
         Self(ChangeValueInner::EphemeralTransparent { value })
     }
 
     /// Constructs a new change value that will be created as a shielded output.
-    pub fn shielded(
-        protocol: ShieldedProtocol,
-        value: NonNegativeAmount,
-        memo: Option<MemoBytes>,
-    ) -> Self {
+    pub fn shielded(protocol: ShieldedProtocol, value: Zatoshis, memo: Option<MemoBytes>) -> Self {
         Self(ChangeValueInner::Shielded {
             protocol,
             value,
@@ -100,13 +95,13 @@ impl ChangeValue {
     }
 
     /// Constructs a new change value that will be created as a Sapling output.
-    pub fn sapling(value: NonNegativeAmount, memo: Option<MemoBytes>) -> Self {
+    pub fn sapling(value: Zatoshis, memo: Option<MemoBytes>) -> Self {
         Self::shielded(ShieldedProtocol::Sapling, value, memo)
     }
 
     /// Constructs a new change value that will be created as an Orchard output.
     #[cfg(feature = "orchard")]
-    pub fn orchard(value: NonNegativeAmount, memo: Option<MemoBytes>) -> Self {
+    pub fn orchard(value: Zatoshis, memo: Option<MemoBytes>) -> Self {
         Self::shielded(ShieldedProtocol::Orchard, value, memo)
     }
 
@@ -120,7 +115,7 @@ impl ChangeValue {
     }
 
     /// Returns the value of the change or ephemeral output to be created, in zatoshis.
-    pub fn value(&self) -> NonNegativeAmount {
+    pub fn value(&self) -> Zatoshis {
         match &self.0 {
             ChangeValueInner::Shielded { value, .. } => *value,
             #[cfg(feature = "transparent-inputs")]
@@ -158,24 +153,21 @@ impl ChangeValue {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransactionBalance {
     proposed_change: Vec<ChangeValue>,
-    fee_required: NonNegativeAmount,
+    fee_required: Zatoshis,
 
     // A cache for the sum of proposed change and fee; we compute it on construction anyway, so we
     // cache the resulting value.
-    total: NonNegativeAmount,
+    total: Zatoshis,
 }
 
 impl TransactionBalance {
     /// Constructs a new balance from its constituent parts.
-    pub fn new(
-        proposed_change: Vec<ChangeValue>,
-        fee_required: NonNegativeAmount,
-    ) -> Result<Self, ()> {
+    pub fn new(proposed_change: Vec<ChangeValue>, fee_required: Zatoshis) -> Result<Self, ()> {
         let total = proposed_change
             .iter()
             .map(|c| c.value())
             .chain(Some(fee_required).into_iter())
-            .sum::<Option<NonNegativeAmount>>()
+            .sum::<Option<Zatoshis>>()
             .ok_or(())?;
 
         Ok(Self {
@@ -192,12 +184,12 @@ impl TransactionBalance {
 
     /// Returns the fee computed for the transaction, assuming that the suggested
     /// change outputs are added to the transaction.
-    pub fn fee_required(&self) -> NonNegativeAmount {
+    pub fn fee_required(&self) -> Zatoshis {
         self.fee_required
     }
 
     /// Returns the sum of the proposed change outputs and the required fee.
-    pub fn total(&self) -> NonNegativeAmount {
+    pub fn total(&self) -> Zatoshis {
         self.total
     }
 }
@@ -209,10 +201,10 @@ pub enum ChangeError<E, NoteRefT> {
     /// required outputs and fees.
     InsufficientFunds {
         /// The total of the inputs provided to change selection
-        available: NonNegativeAmount,
+        available: Zatoshis,
         /// The total amount of input value required to fund the requested outputs,
         /// including the required fees.
-        required: NonNegativeAmount,
+        required: Zatoshis,
     },
     /// Some of the inputs provided to the transaction have value less than the
     /// marginal fee, and could not be determined to have any economic value in
@@ -317,7 +309,7 @@ pub enum DustAction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DustOutputPolicy {
     action: DustAction,
-    dust_threshold: Option<NonNegativeAmount>,
+    dust_threshold: Option<Zatoshis>,
 }
 
 impl DustOutputPolicy {
@@ -327,7 +319,7 @@ impl DustOutputPolicy {
     /// of the dust threshold to the change strategy that is evaluating the strategy; this
     /// is recommended, but an explicit value (including zero) may be provided to explicitly
     /// override the determination of the change strategy.
-    pub fn new(action: DustAction, dust_threshold: Option<NonNegativeAmount>) -> Self {
+    pub fn new(action: DustAction, dust_threshold: Option<Zatoshis>) -> Self {
         Self {
             action,
             dust_threshold,
@@ -340,7 +332,7 @@ impl DustOutputPolicy {
     }
     /// Returns a value that will be used to override the dust determination logic of the
     /// change policy, if any.
-    pub fn dust_threshold(&self) -> Option<NonNegativeAmount> {
+    pub fn dust_threshold(&self) -> Option<Zatoshis> {
         self.dust_threshold
     }
 }
@@ -361,7 +353,7 @@ impl Default for DustOutputPolicy {
 #[derive(Clone, Copy, Debug)]
 pub struct SplitPolicy {
     target_output_count: NonZeroUsize,
-    min_split_output_value: Option<NonNegativeAmount>,
+    min_split_output_value: Option<Zatoshis>,
 }
 
 impl SplitPolicy {
@@ -370,13 +362,13 @@ impl SplitPolicy {
     /// when retrieving wallet metadata.
     ///
     /// [`MARGINAL_FEE`]: zcash_primitives::transaction::fees::zip317::MARGINAL_FEE
-    pub(crate) const MIN_NOTE_VALUE: NonNegativeAmount = NonNegativeAmount::const_from_u64(500000);
+    pub(crate) const MIN_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(500000);
 
     /// Constructs a new [`SplitPolicy`] that splits change to ensure the given number of spendable
     /// outputs exists within an account, each having at least the specified minimum note value.
     pub fn with_min_output_value(
         target_output_count: NonZeroUsize,
-        min_split_output_value: NonNegativeAmount,
+        min_split_output_value: Zatoshis,
     ) -> Self {
         Self {
             target_output_count,
@@ -399,7 +391,7 @@ impl SplitPolicy {
     }
 
     /// Returns the minimum value for a note resulting from splitting of change.
-    pub fn min_split_output_value(&self) -> Option<NonNegativeAmount> {
+    pub fn min_split_output_value(&self) -> Option<Zatoshis> {
         self.min_split_output_value
     }
 
@@ -412,8 +404,8 @@ impl SplitPolicy {
     pub fn split_count(
         &self,
         existing_notes: Option<usize>,
-        existing_notes_total: Option<NonNegativeAmount>,
-        total_change: NonNegativeAmount,
+        existing_notes_total: Option<Zatoshis>,
+        total_change: Zatoshis,
     ) -> NonZeroUsize {
         fn to_nonzero_u64(value: usize) -> NonZeroU64 {
             NonZeroU64::new(u64::try_from(value).expect("usize fits into u64"))
@@ -464,8 +456,8 @@ impl SplitPolicy {
 /// [ZIP 320]: https://zips.z.cash/zip-0320
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EphemeralBalance {
-    Input(NonNegativeAmount),
-    Output(NonNegativeAmount),
+    Input(Zatoshis),
+    Output(Zatoshis),
 }
 
 impl EphemeralBalance {
@@ -477,14 +469,14 @@ impl EphemeralBalance {
         matches!(self, EphemeralBalance::Output(_))
     }
 
-    pub fn ephemeral_input_amount(&self) -> Option<NonNegativeAmount> {
+    pub fn ephemeral_input_amount(&self) -> Option<Zatoshis> {
         match self {
             EphemeralBalance::Input(v) => Some(*v),
             EphemeralBalance::Output(_) => None,
         }
     }
 
-    pub fn ephemeral_output_amount(&self) -> Option<NonNegativeAmount> {
+    pub fn ephemeral_output_amount(&self) -> Option<Zatoshis> {
         match self {
             EphemeralBalance::Input(_) => None,
             EphemeralBalance::Output(v) => Some(*v),
@@ -563,13 +555,9 @@ pub trait ChangeStrategy {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use zcash_primitives::transaction::{
-        components::{
-            amount::NonNegativeAmount,
-            transparent::{OutPoint, TxOut},
-        },
-        fees::transparent,
-    };
+    use ::transparent::bundle::{OutPoint, TxOut};
+    use zcash_primitives::transaction::fees::transparent;
+    use zcash_protocol::value::Zatoshis;
 
     use super::sapling;
 
@@ -590,14 +578,14 @@ pub(crate) mod tests {
 
     pub(crate) struct TestSaplingInput {
         pub note_id: u32,
-        pub value: NonNegativeAmount,
+        pub value: Zatoshis,
     }
 
     impl sapling::InputView<u32> for TestSaplingInput {
         fn note_id(&self) -> &u32 {
             &self.note_id
         }
-        fn value(&self) -> NonNegativeAmount {
+        fn value(&self) -> Zatoshis {
             self.value
         }
     }

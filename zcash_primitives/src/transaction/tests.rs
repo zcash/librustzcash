@@ -4,13 +4,12 @@ use std::ops::Deref;
 
 use proptest::prelude::*;
 
-use crate::{
-    consensus::BranchId, legacy::Script, transaction::components::amount::NonNegativeAmount,
-};
+use ::transparent::{address::Script, sighash::TransparentAuthorizingContext};
+use zcash_protocol::{consensus::BranchId, value::Zatoshis};
 
 use super::{
     sapling,
-    sighash::{SignableInput, TransparentAuthorizingContext},
+    sighash::SignableInput,
     sighash_v4::v4_signature_hash,
     sighash_v5::v5_signature_hash,
     testing::arb_tx,
@@ -140,7 +139,7 @@ fn zip_0143() {
                     n as usize,
                     &tv.script_code,
                     &tv.script_code,
-                    NonNegativeAmount::from_nonnegative_i64(tv.amount).unwrap(),
+                    Zatoshis::from_nonnegative_i64(tv.amount).unwrap(),
                 ))
             }
             _ => SignableInput::Shielded,
@@ -164,7 +163,7 @@ fn zip_0243() {
                     n as usize,
                     &tv.script_code,
                     &tv.script_code,
-                    NonNegativeAmount::from_nonnegative_i64(tv.amount).unwrap(),
+                    Zatoshis::from_nonnegative_i64(tv.amount).unwrap(),
                 ))
             }
             _ => SignableInput::Shielded,
@@ -179,7 +178,7 @@ fn zip_0243() {
 
 #[derive(Debug)]
 struct TestTransparentAuth {
-    input_amounts: Vec<NonNegativeAmount>,
+    input_amounts: Vec<Zatoshis>,
     input_scriptpubkeys: Vec<Script>,
 }
 
@@ -188,7 +187,7 @@ impl transparent::Authorization for TestTransparentAuth {
 }
 
 impl TransparentAuthorizingContext for TestTransparentAuth {
-    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
+    fn input_amounts(&self) -> Vec<Zatoshis> {
         self.input_amounts.clone()
     }
 
@@ -223,7 +222,7 @@ fn zip_0244() {
         let input_amounts = tv
             .amounts
             .iter()
-            .map(|amount| NonNegativeAmount::from_nonnegative_i64(*amount).unwrap())
+            .map(|amount| Zatoshis::from_nonnegative_i64(*amount).unwrap())
             .collect();
         let input_scriptpubkeys = tv
             .script_pubkeys

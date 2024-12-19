@@ -46,7 +46,6 @@ use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
 use zcash_client_backend::{
-    address::UnifiedAddress,
     data_api::{
         self,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
@@ -56,22 +55,27 @@ use zcash_client_backend::{
         SentTransaction, SpendableNotes, TransactionDataRequest, WalletCommitmentTrees, WalletRead,
         WalletSummary, WalletWrite, Zip32Derivation, SAPLING_SHARD_HEIGHT,
     },
+    proto::compact_formats::CompactBlock,
+    wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
+    TransferType,
+};
+use zcash_keys::{
+    address::UnifiedAddress,
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
     },
-    proto::compact_formats::CompactBlock,
-    wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
-    ShieldedProtocol, TransferType,
 };
-
 use zcash_primitives::{
     block::BlockHash,
+    transaction::{Transaction, TxId},
+};
+use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::Memo,
-    transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
-    zip32::{self, DiversifierIndex},
+    value::Zatoshis,
+    ShieldedProtocol,
 };
-use zip32::fingerprint::SeedFingerprint;
+use zip32::{self, fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
@@ -88,9 +92,9 @@ use {
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    ::transparent::{address::TransparentAddress, bundle::OutPoint},
     zcash_client_backend::wallet::TransparentAddressMetadata,
-    zcash_keys::encoding::AddressCodec,
-    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
+    zcash_keys::encoding::AddressCodec as _,
 };
 
 #[cfg(feature = "multicore")]
@@ -317,7 +321,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
     fn select_spendable_notes(
         &self,
         account: Self::AccountId,
-        target_value: NonNegativeAmount,
+        target_value: Zatoshis,
         sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
@@ -628,7 +632,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         &self,
         account: Self::AccountId,
         max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
         wallet::transparent::get_transparent_balances(
             self.conn.borrow(),
             &self.params,
@@ -758,7 +762,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletTest for W
             .map(|res| {
                 let (amount, external_recipient, ephemeral_address) = res?;
                 Ok::<_, <Self as WalletRead>::Error>(OutputOfSentTx::from_parts(
-                    NonNegativeAmount::from_u64(amount)?,
+                    Zatoshis::from_u64(amount)?,
                     external_recipient,
                     ephemeral_address,
                 ))
@@ -1941,10 +1945,7 @@ mod tests {
     use crate::{error::SqliteClientError, testing::db::TestDbFactory, AccountUuid};
 
     #[cfg(feature = "unstable")]
-    use {
-        zcash_client_backend::keys::sapling,
-        zcash_primitives::transaction::components::amount::NonNegativeAmount,
-    };
+    use zcash_keys::keys::sapling;
 
     #[test]
     fn validate_seed() {
@@ -2255,8 +2256,8 @@ mod tests {
     #[test]
     pub(crate) fn fsblockdb_api() {
         use zcash_client_backend::data_api::testing::AddressType;
-        use zcash_primitives::zip32;
-        use zcash_protocol::consensus::NetworkConstants;
+        use zcash_protocol::{consensus::NetworkConstants, value::Zatoshis};
+        use zip32;
 
         use crate::testing::FsBlockCache;
 
@@ -2276,12 +2277,12 @@ mod tests {
         let (h1, meta1, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(5),
+            Zatoshis::const_from_u64(5),
         );
         let (h2, meta2, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(10),
+            Zatoshis::const_from_u64(10),
         );
 
         // The BlockMeta DB is not updated until we do so explicitly.

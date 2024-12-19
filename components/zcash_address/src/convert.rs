@@ -3,7 +3,9 @@ use core::fmt;
 #[cfg(feature = "std")]
 use std::error::Error;
 
-use crate::{kind::*, AddressKind, Network, ZcashAddress};
+use zcash_protocol::consensus::NetworkType;
+
+use crate::{kind::*, AddressKind, ZcashAddress};
 
 /// An error indicating that an address type is not supported for conversion.
 #[derive(Debug)]
@@ -19,7 +21,10 @@ impl fmt::Display for UnsupportedAddress {
 #[derive(Debug)]
 pub enum ConversionError<E> {
     /// The address is for the wrong network.
-    IncorrectNetwork { expected: Network, actual: Network },
+    IncorrectNetwork {
+        expected: NetworkType,
+        actual: NetworkType,
+    },
     /// The address type is not supported by the target type.
     Unsupported(UnsupportedAddress),
     /// A conversion error returned by the target type.
@@ -60,7 +65,7 @@ impl<E: Error + 'static> Error for ConversionError<E> {
 
 /// A helper trait for converting a [`ZcashAddress`] into a network-agnostic type.
 ///
-/// A blanket implementation of [`TryFromAddress`] is provided for `(Network, T)` where
+/// A blanket implementation of [`TryFromAddress`] is provided for `(NetworkType, T)` where
 /// `T: TryFromRawAddress`.
 ///
 /// [`ZcashAddress`]: crate::ZcashAddress
@@ -68,7 +73,8 @@ impl<E: Error + 'static> Error for ConversionError<E> {
 /// # Examples
 ///
 /// ```
-/// use zcash_address::{ConversionError, Network, TryFromRawAddress, UnsupportedAddress, ZcashAddress};
+/// use zcash_address::{ConversionError, TryFromRawAddress, UnsupportedAddress, ZcashAddress};
+/// use zcash_protocol::consensus::NetworkType;
 ///
 /// #[derive(Debug, PartialEq)]
 /// struct MySapling([u8; 43]);
@@ -90,7 +96,7 @@ impl<E: Error + 'static> Error for ConversionError<E> {
 ///
 /// // You can use `ZcashAddress::convert_if_network` to get your type directly.
 /// let addr: ZcashAddress = addr_string.parse().unwrap();
-/// let converted = addr.convert_if_network::<MySapling>(Network::Main);
+/// let converted = addr.convert_if_network::<MySapling>(NetworkType::Main);
 /// assert!(converted.is_ok());
 /// assert_eq!(converted.unwrap(), MySapling([0; 43]));
 ///
@@ -98,7 +104,7 @@ impl<E: Error + 'static> Error for ConversionError<E> {
 /// let addr: ZcashAddress = addr_string.parse().unwrap();
 /// let converted = addr.convert::<(_, MySapling)>();
 /// assert!(converted.is_ok());
-/// assert_eq!(converted.unwrap(), (Network::Main, MySapling([0; 43])));
+/// assert_eq!(converted.unwrap(), (NetworkType::Main, MySapling([0; 43])));
 ///
 /// // For an unsupported address type, we get an error.
 /// let addr: ZcashAddress = "t1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs".parse().unwrap();
@@ -158,7 +164,8 @@ pub trait TryFromRawAddress: Sized {
 /// # Examples
 ///
 /// ```
-/// use zcash_address::{ConversionError, Network, TryFromAddress, UnsupportedAddress, ZcashAddress};
+/// use zcash_address::{ConversionError, TryFromAddress, UnsupportedAddress, ZcashAddress};
+/// use zcash_protocol::consensus::NetworkType;
 ///
 /// #[derive(Debug)]
 /// struct MySapling([u8; 43]);
@@ -171,7 +178,7 @@ pub trait TryFromRawAddress: Sized {
 ///     type Error = &'static str;
 ///
 ///     fn try_from_sapling(
-///         net: Network,
+///         net: NetworkType,
 ///         data: [u8; 43],
 ///     ) -> Result<Self, ConversionError<Self::Error>> {
 ///         Ok(MySapling(data))
@@ -197,13 +204,16 @@ pub trait TryFromAddress: Sized {
     /// [`Self::try_from_sapling`] as a valid Sapling address).
     type Error;
 
-    fn try_from_sprout(net: Network, data: [u8; 64]) -> Result<Self, ConversionError<Self::Error>> {
+    fn try_from_sprout(
+        net: NetworkType,
+        data: [u8; 64],
+    ) -> Result<Self, ConversionError<Self::Error>> {
         let _ = (net, data);
         Err(ConversionError::Unsupported(UnsupportedAddress("Sprout")))
     }
 
     fn try_from_sapling(
-        net: Network,
+        net: NetworkType,
         data: [u8; 43],
     ) -> Result<Self, ConversionError<Self::Error>> {
         let _ = (net, data);
@@ -211,7 +221,7 @@ pub trait TryFromAddress: Sized {
     }
 
     fn try_from_unified(
-        net: Network,
+        net: NetworkType,
         data: unified::Address,
     ) -> Result<Self, ConversionError<Self::Error>> {
         let _ = (net, data);
@@ -219,7 +229,7 @@ pub trait TryFromAddress: Sized {
     }
 
     fn try_from_transparent_p2pkh(
-        net: Network,
+        net: NetworkType,
         data: [u8; 20],
     ) -> Result<Self, ConversionError<Self::Error>> {
         let _ = (net, data);
@@ -229,7 +239,7 @@ pub trait TryFromAddress: Sized {
     }
 
     fn try_from_transparent_p2sh(
-        net: Network,
+        net: NetworkType,
         data: [u8; 20],
     ) -> Result<Self, ConversionError<Self::Error>> {
         let _ = (net, data);
@@ -238,7 +248,10 @@ pub trait TryFromAddress: Sized {
         )))
     }
 
-    fn try_from_tex(net: Network, data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
+    fn try_from_tex(
+        net: NetworkType,
+        data: [u8; 20],
+    ) -> Result<Self, ConversionError<Self::Error>> {
         let _ = (net, data);
         Err(ConversionError::Unsupported(UnsupportedAddress(
             "transparent-source restricted P2PKH",
@@ -246,42 +259,48 @@ pub trait TryFromAddress: Sized {
     }
 }
 
-impl<T: TryFromRawAddress> TryFromAddress for (Network, T) {
+impl<T: TryFromRawAddress> TryFromAddress for (NetworkType, T) {
     type Error = T::Error;
 
-    fn try_from_sprout(net: Network, data: [u8; 64]) -> Result<Self, ConversionError<Self::Error>> {
+    fn try_from_sprout(
+        net: NetworkType,
+        data: [u8; 64],
+    ) -> Result<Self, ConversionError<Self::Error>> {
         T::try_from_raw_sprout(data).map(|addr| (net, addr))
     }
 
     fn try_from_sapling(
-        net: Network,
+        net: NetworkType,
         data: [u8; 43],
     ) -> Result<Self, ConversionError<Self::Error>> {
         T::try_from_raw_sapling(data).map(|addr| (net, addr))
     }
 
     fn try_from_unified(
-        net: Network,
+        net: NetworkType,
         data: unified::Address,
     ) -> Result<Self, ConversionError<Self::Error>> {
         T::try_from_raw_unified(data).map(|addr| (net, addr))
     }
 
     fn try_from_transparent_p2pkh(
-        net: Network,
+        net: NetworkType,
         data: [u8; 20],
     ) -> Result<Self, ConversionError<Self::Error>> {
         T::try_from_raw_transparent_p2pkh(data).map(|addr| (net, addr))
     }
 
     fn try_from_transparent_p2sh(
-        net: Network,
+        net: NetworkType,
         data: [u8; 20],
     ) -> Result<Self, ConversionError<Self::Error>> {
         T::try_from_raw_transparent_p2sh(data).map(|addr| (net, addr))
     }
 
-    fn try_from_tex(net: Network, data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
+    fn try_from_tex(
+        net: NetworkType,
+        data: [u8; 20],
+    ) -> Result<Self, ConversionError<Self::Error>> {
         T::try_from_raw_tex(data).map(|addr| (net, addr))
     }
 }
@@ -298,44 +317,45 @@ impl<T: TryFromRawAddress> TryFromAddress for (Network, T) {
 /// # Examples
 ///
 /// ```
-/// use zcash_address::{ToAddress, Network, ZcashAddress};
+/// use zcash_address::{ToAddress, ZcashAddress};
+/// use zcash_protocol::consensus::NetworkType;
 ///
 /// #[derive(Debug)]
 /// struct MySapling([u8; 43]);
 ///
 /// impl MySapling {
 ///     /// Encodes this Sapling address for the given network.
-///     fn encode(&self, net: Network) -> ZcashAddress {
+///     fn encode(&self, net: NetworkType) -> ZcashAddress {
 ///         ZcashAddress::from_sapling(net, self.0)
 ///     }
 /// }
 ///
 /// let addr = MySapling([0; 43]);
-/// let encoded = addr.encode(Network::Main);
+/// let encoded = addr.encode(NetworkType::Main);
 /// assert_eq!(
 ///     encoded.to_string(),
 ///     "zs1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpq6d8g",
 /// );
 /// ```
 pub trait ToAddress: private::Sealed {
-    fn from_sprout(net: Network, data: [u8; 64]) -> Self;
+    fn from_sprout(net: NetworkType, data: [u8; 64]) -> Self;
 
-    fn from_sapling(net: Network, data: [u8; 43]) -> Self;
+    fn from_sapling(net: NetworkType, data: [u8; 43]) -> Self;
 
-    fn from_unified(net: Network, data: unified::Address) -> Self;
+    fn from_unified(net: NetworkType, data: unified::Address) -> Self;
 
-    fn from_transparent_p2pkh(net: Network, data: [u8; 20]) -> Self;
+    fn from_transparent_p2pkh(net: NetworkType, data: [u8; 20]) -> Self;
 
-    fn from_transparent_p2sh(net: Network, data: [u8; 20]) -> Self;
+    fn from_transparent_p2sh(net: NetworkType, data: [u8; 20]) -> Self;
 
-    fn from_tex(net: Network, data: [u8; 20]) -> Self;
+    fn from_tex(net: NetworkType, data: [u8; 20]) -> Self;
 }
 
 impl ToAddress for ZcashAddress {
-    fn from_sprout(net: Network, data: [u8; 64]) -> Self {
+    fn from_sprout(net: NetworkType, data: [u8; 64]) -> Self {
         ZcashAddress {
-            net: if let Network::Regtest = net {
-                Network::Test
+            net: if let NetworkType::Regtest = net {
+                NetworkType::Test
             } else {
                 net
             },
@@ -343,24 +363,24 @@ impl ToAddress for ZcashAddress {
         }
     }
 
-    fn from_sapling(net: Network, data: [u8; 43]) -> Self {
+    fn from_sapling(net: NetworkType, data: [u8; 43]) -> Self {
         ZcashAddress {
             net,
             kind: AddressKind::Sapling(data),
         }
     }
 
-    fn from_unified(net: Network, data: unified::Address) -> Self {
+    fn from_unified(net: NetworkType, data: unified::Address) -> Self {
         ZcashAddress {
             net,
             kind: AddressKind::Unified(data),
         }
     }
 
-    fn from_transparent_p2pkh(net: Network, data: [u8; 20]) -> Self {
+    fn from_transparent_p2pkh(net: NetworkType, data: [u8; 20]) -> Self {
         ZcashAddress {
-            net: if let Network::Regtest = net {
-                Network::Test
+            net: if let NetworkType::Regtest = net {
+                NetworkType::Test
             } else {
                 net
             },
@@ -368,10 +388,10 @@ impl ToAddress for ZcashAddress {
         }
     }
 
-    fn from_transparent_p2sh(net: Network, data: [u8; 20]) -> Self {
+    fn from_transparent_p2sh(net: NetworkType, data: [u8; 20]) -> Self {
         ZcashAddress {
-            net: if let Network::Regtest = net {
-                Network::Test
+            net: if let NetworkType::Regtest = net {
+                NetworkType::Test
             } else {
                 net
             },
@@ -379,7 +399,7 @@ impl ToAddress for ZcashAddress {
         }
     }
 
-    fn from_tex(net: Network, data: [u8; 20]) -> Self {
+    fn from_tex(net: NetworkType, data: [u8; 20]) -> Self {
         ZcashAddress {
             net,
             kind: AddressKind::Tex(data),
