@@ -1,4 +1,4 @@
-use zcash_protocol::PoolType;
+use zcash_protocol::{constants, PoolType};
 
 use super::{private::SealedItem, ParseError, Typecode};
 
@@ -136,17 +136,17 @@ impl super::private::SealedContainer for Address {
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const MAINNET: &'static str = "u";
+    const MAINNET: &'static str = constants::mainnet::HRP_UNIFIED_ADDRESS;
 
     /// The HRP for a Bech32m-encoded testnet Unified Address.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const TESTNET: &'static str = "utest";
+    const TESTNET: &'static str = constants::testnet::HRP_UNIFIED_ADDRESS;
 
     /// The HRP for a Bech32m-encoded regtest Unified Address.
-    const REGTEST: &'static str = "uregtest";
+    const REGTEST: &'static str = constants::regtest::HRP_UNIFIED_ADDRESS;
 
     fn from_inner(receivers: Vec<Self::Item>) -> Self {
         Self(receivers)
