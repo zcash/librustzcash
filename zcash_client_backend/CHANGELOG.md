@@ -9,6 +9,8 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - Migrated to `nonempty 0.11`
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelectorError::UnsupportedAddress`
+  now contains a `ZcashAddress` instead of a `UnifiedAddress`.
 
 ## [0.16.0] - 2024-12-16
 

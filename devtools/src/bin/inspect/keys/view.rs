@@ -1,10 +1,35 @@
 use bech32::{Bech32, Hrp};
-use zcash_address::unified::{self, Container, Encoding};
+use chrono::DateTime;
+
+use zcash_address::unified::{self, Container, Encoding, MetadataItem};
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_protocol::{
     consensus::{Network, NetworkConstants, NetworkType},
     local_consensus::LocalNetwork,
 };
+
+fn inspect_metadata_item(item: &MetadataItem) {
+    match item {
+        unified::MetadataItem::ExpiryHeight(h) => {
+            eprintln!("   - Expiry Height: {}", h);
+        }
+        unified::MetadataItem::ExpiryTime(t) => {
+            eprintln!(
+                "   - Expiry Time: {}",
+                i64::try_from(*t)
+                    .ok()
+                    .and_then(|secs| DateTime::from_timestamp(secs, 0))
+                    .map_or(format!("Invalid expiry timestamp: {}", t), |t| t
+                        .to_rfc3339())
+            );
+        }
+        unified::MetadataItem::Unknown { typecode, data } => {
+            eprintln!("   - Unknown Metadata Item");
+            eprintln!("     - Typecode: {}", typecode);
+            eprintln!("     - Payload: {}", hex::encode(data));
+        }
+    }
+}
 
 pub(crate) fn inspect_ufvk(ufvk: unified::Ufvk, network: NetworkType) {
     eprintln!("Unified full viewing key");
@@ -17,34 +42,42 @@ pub(crate) fn inspect_ufvk(ufvk: unified::Ufvk, network: NetworkType) {
         }
     );
     eprintln!(" - Items:");
-    for item in ufvk.items() {
+    for item in ufvk.items_as_parsed() {
         match item {
-            unified::Fvk::Orchard(data) => {
-                eprintln!(
-                    "   - Orchard ({})",
-                    unified::Ufvk::try_from_items(vec![unified::Fvk::Orchard(data)])
+            unified::Item::Data(d) => match d {
+                unified::Fvk::Orchard(data) => {
+                    eprintln!(
+                        "   - Orchard ({})",
+                        unified::Ufvk::try_from_items(
+                            ufvk.revision(),
+                            vec![unified::Item::Data(unified::Fvk::Orchard(*data))]
+                        )
                         .unwrap()
                         .encode(&network)
-                );
-            }
-            unified::Fvk::Sapling(data) => {
-                eprintln!(
-                    "   - Sapling ({})",
-                    bech32::encode::<Bech32>(
-                        Hrp::parse_unchecked(network.hrp_sapling_extended_full_viewing_key()),
-                        &data
-                    )
-                    .unwrap(),
-                );
-            }
-            unified::Fvk::P2pkh(data) => {
-                eprintln!("   - Transparent P2PKH");
-                eprintln!("     - Payload: {}", hex::encode(data));
-            }
-            unified::Fvk::Unknown { typecode, data } => {
-                eprintln!("   - Unknown");
-                eprintln!("     - Typecode: {}", typecode);
-                eprintln!("     - Payload: {}", hex::encode(data));
+                    );
+                }
+                unified::Fvk::Sapling(data) => {
+                    eprintln!(
+                        "   - Sapling ({})",
+                        bech32::encode::<Bech32>(
+                            Hrp::parse_unchecked(network.hrp_sapling_extended_full_viewing_key()),
+                            data
+                        )
+                        .unwrap(),
+                    );
+                }
+                unified::Fvk::P2pkh(data) => {
+                    eprintln!("   - Transparent P2PKH");
+                    eprintln!("     - Payload: {}", hex::encode(data));
+                }
+                unified::Fvk::Unknown { typecode, data } => {
+                    eprintln!("   - Unknown");
+                    eprintln!("     - Typecode: {}", typecode);
+                    eprintln!("     - Payload: {}", hex::encode(data));
+                }
+            },
+            unified::Item::Metadata(m) => {
+                inspect_metadata_item(m);
             }
         }
     }
@@ -61,29 +94,35 @@ pub(crate) fn inspect_uivk(uivk: unified::Uivk, network: NetworkType) {
         }
     );
     eprintln!(" - Items:");
-    for item in uivk.items() {
+    for item in uivk.items_as_parsed() {
         match item {
-            unified::Ivk::Orchard(data) => {
-                eprintln!(
-                    "   - Orchard ({})",
-                    unified::Uivk::try_from_items(vec![unified::Ivk::Orchard(data)])
+            unified::Item::Data(d) => match d {
+                unified::Ivk::Orchard(data) => {
+                    eprintln!(
+                        "   - Orchard ({})",
+                        unified::Uivk::try_from_items(
+                            uivk.revision(),
+                            vec![unified::Item::Data(unified::Ivk::Orchard(*data))]
+                        )
                         .unwrap()
                         .encode(&network)
-                );
-            }
-            unified::Ivk::Sapling(data) => {
-                eprintln!("   - Sapling");
-                eprintln!("     - Payload: {}", hex::encode(data));
-            }
-            unified::Ivk::P2pkh(data) => {
-                eprintln!("   - Transparent P2PKH");
-                eprintln!("     - Payload: {}", hex::encode(data));
-            }
-            unified::Ivk::Unknown { typecode, data } => {
-                eprintln!("   - Unknown");
-                eprintln!("     - Typecode: {}", typecode);
-                eprintln!("     - Payload: {}", hex::encode(data));
-            }
+                    );
+                }
+                unified::Ivk::Sapling(data) => {
+                    eprintln!("   - Sapling");
+                    eprintln!("     - Payload: {}", hex::encode(data));
+                }
+                unified::Ivk::P2pkh(data) => {
+                    eprintln!("   - Transparent P2PKH");
+                    eprintln!("     - Payload: {}", hex::encode(data));
+                }
+                unified::Ivk::Unknown { typecode, data } => {
+                    eprintln!("   - Unknown Data Item");
+                    eprintln!("     - Typecode: {}", typecode);
+                    eprintln!("     - Payload: {}", hex::encode(data));
+                }
+            },
+            unified::Item::Metadata(m) => inspect_metadata_item(m),
         }
     }
 }
