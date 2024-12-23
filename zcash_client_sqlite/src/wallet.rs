@@ -753,9 +753,9 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     let transparent_item: Option<Vec<u8>> = None;
 
     let mut stmt = conn.prepare(
-        "SELECT name, uuid, account_kind, 
-                hd_seed_fingerprint, hd_account_index, key_source, 
-                ufvk, has_spend_key
+        "SELECT name, uuid, account_kind,
+                hd_seed_fingerprint, hd_account_index, key_source,
+                ufvk, uivk, has_spend_key
          FROM accounts
          WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
             OR sapling_fvk_item_cache = :sapling_fvk_item_cache
@@ -769,36 +769,7 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
                 ":sapling_fvk_item_cache": sapling_item,
                 ":p2pkh_fvk_item_cache": transparent_item,
             ],
-            |row| {
-                let account_name = row.get("name")?;
-                let account_uuid = AccountUuid(row.get("uuid")?);
-                let kind = parse_account_source(
-                    row.get("account_kind")?,
-                    row.get("hd_seed_fingerprint")?,
-                    row.get("hd_account_index")?,
-                    row.get("has_spend_key")?,
-                    row.get("key_source")?,
-                )?;
-
-                // We looked up the account by FVK components, so the UFVK column must be
-                // non-null.
-                let ufvk_str: String = row.get("ufvk")?;
-                let viewing_key = ViewingKey::Full(Box::new(
-                    UnifiedFullViewingKey::decode(params, &ufvk_str).map_err(|e| {
-                        SqliteClientError::CorruptedData(format!(
-                            "Could not decode unified full viewing key for account {}: {}",
-                            account_uuid.0, e
-                        ))
-                    })?,
-                ));
-
-                Ok(Account {
-                    name: account_name,
-                    uuid: account_uuid,
-                    kind,
-                    viewing_key,
-                })
-            },
+            |row| parse_account_row(row, params),
         )?
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -809,6 +780,50 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     } else {
         Ok(accounts.into_iter().next())
     }
+}
+
+fn parse_account_row<P: consensus::Parameters>(
+    row: &rusqlite::Row<'_>,
+    params: &P,
+) -> Result<Account, SqliteClientError> {
+    let account_name = row.get("name")?;
+    let account_uuid = AccountUuid(row.get("uuid")?);
+    let kind = parse_account_source(
+        row.get("account_kind")?,
+        row.get("hd_seed_fingerprint")?,
+        row.get("hd_account_index")?,
+        row.get("has_spend_key")?,
+        row.get("key_source")?,
+    )?;
+
+    let ufvk_str: Option<String> = row.get("ufvk")?;
+    let viewing_key = if let Some(ufvk_str) = ufvk_str {
+        ViewingKey::Full(Box::new(
+            UnifiedFullViewingKey::decode(params, &ufvk_str).map_err(|e| {
+                SqliteClientError::CorruptedData(format!(
+                    "Could not decode unified full viewing key for account {}: {}",
+                    account_uuid.0, e
+                ))
+            })?,
+        ))
+    } else {
+        let uivk_str: String = row.get("uivk")?;
+        ViewingKey::Incoming(Box::new(
+            UnifiedIncomingViewingKey::decode(params, &uivk_str).map_err(|e| {
+                SqliteClientError::CorruptedData(format!(
+                    "Could not decode unified incoming viewing key for account {}: {}",
+                    account_uuid.0, e
+                ))
+            })?,
+        ))
+    };
+
+    Ok(Account {
+        name: account_name,
+        uuid: account_uuid,
+        kind,
+        viewing_key,
+    })
 }
 
 /// Returns the account id corresponding to a given [`SeedFingerprint`]
@@ -1919,50 +1934,22 @@ pub(crate) fn get_account<P: Parameters>(
     params: &P,
     account_uuid: AccountUuid,
 ) -> Result<Option<Account>, SqliteClientError> {
-    let mut sql = conn.prepare_cached(
+    let mut stmt = conn.prepare_cached(
         r#"
-        SELECT name, account_kind, hd_seed_fingerprint, hd_account_index, key_source, ufvk, uivk, has_spend_key
+        SELECT name, uuid, account_kind,
+               hd_seed_fingerprint, hd_account_index, key_source,
+               ufvk, uivk, has_spend_key
         FROM accounts
         WHERE uuid = :account_uuid
         "#,
     )?;
 
-    let mut result = sql.query(named_params![":account_uuid": account_uuid.0])?;
-    let row = result.next()?;
-    match row {
-        Some(row) => {
-            let account_name = row.get("name")?;
-            let kind = parse_account_source(
-                row.get("account_kind")?,
-                row.get("hd_seed_fingerprint")?,
-                row.get("hd_account_index")?,
-                row.get("has_spend_key")?,
-                row.get("key_source")?,
-            )?;
+    let mut rows = stmt.query_and_then::<_, SqliteClientError, _, _>(
+        named_params![":account_uuid": account_uuid.0],
+        |row| parse_account_row(row, params),
+    )?;
 
-            let ufvk_str: Option<String> = row.get("ufvk")?;
-            let viewing_key = if let Some(ufvk_str) = ufvk_str {
-                ViewingKey::Full(Box::new(
-                    UnifiedFullViewingKey::decode(params, &ufvk_str[..])
-                        .map_err(SqliteClientError::BadAccountData)?,
-                ))
-            } else {
-                let uivk_str: String = row.get("uivk")?;
-                ViewingKey::Incoming(Box::new(
-                    UnifiedIncomingViewingKey::decode(params, &uivk_str[..])
-                        .map_err(SqliteClientError::BadAccountData)?,
-                ))
-            };
-
-            Ok(Some(Account {
-                name: account_name,
-                uuid: account_uuid,
-                kind,
-                viewing_key,
-            }))
-        }
-        None => Ok(None),
-    }
+    rows.next().transpose()
 }
 
 /// Returns the minimum and maximum heights of blocks in the chain which may be scanned.
