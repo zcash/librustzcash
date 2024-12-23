@@ -733,6 +733,73 @@ pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
     Ok(res)
 }
 
+fn parse_account_row<P: consensus::Parameters>(
+    row: &rusqlite::Row<'_>,
+    params: &P,
+) -> Result<Account, SqliteClientError> {
+    let account_name = row.get("name")?;
+    let account_uuid = AccountUuid(row.get("uuid")?);
+    let kind = parse_account_source(
+        row.get("account_kind")?,
+        row.get("hd_seed_fingerprint")?,
+        row.get("hd_account_index")?,
+        row.get("has_spend_key")?,
+        row.get("key_source")?,
+    )?;
+
+    let ufvk_str: Option<String> = row.get("ufvk")?;
+    let viewing_key = if let Some(ufvk_str) = ufvk_str {
+        ViewingKey::Full(Box::new(
+            UnifiedFullViewingKey::decode(params, &ufvk_str).map_err(|e| {
+                SqliteClientError::CorruptedData(format!(
+                    "Could not decode unified full viewing key for account {}: {}",
+                    account_uuid.0, e
+                ))
+            })?,
+        ))
+    } else {
+        let uivk_str: String = row.get("uivk")?;
+        ViewingKey::Incoming(Box::new(
+            UnifiedIncomingViewingKey::decode(params, &uivk_str).map_err(|e| {
+                SqliteClientError::CorruptedData(format!(
+                    "Could not decode unified incoming viewing key for account {}: {}",
+                    account_uuid.0, e
+                ))
+            })?,
+        ))
+    };
+
+    Ok(Account {
+        name: account_name,
+        uuid: account_uuid,
+        kind,
+        viewing_key,
+    })
+}
+
+pub(crate) fn get_account<P: Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    account_uuid: AccountUuid,
+) -> Result<Option<Account>, SqliteClientError> {
+    let mut stmt = conn.prepare_cached(
+        r#"
+        SELECT name, uuid, account_kind,
+               hd_seed_fingerprint, hd_account_index, key_source,
+               ufvk, uivk, has_spend_key
+        FROM accounts
+        WHERE uuid = :account_uuid
+        "#,
+    )?;
+
+    let mut rows = stmt.query_and_then::<_, SqliteClientError, _, _>(
+        named_params![":account_uuid": account_uuid.0],
+        |row| parse_account_row(row, params),
+    )?;
+
+    rows.next().transpose()
+}
+
 /// Returns the account id corresponding to a given [`UnifiedFullViewingKey`],
 /// if any.
 pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
@@ -780,50 +847,6 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     } else {
         Ok(accounts.into_iter().next())
     }
-}
-
-fn parse_account_row<P: consensus::Parameters>(
-    row: &rusqlite::Row<'_>,
-    params: &P,
-) -> Result<Account, SqliteClientError> {
-    let account_name = row.get("name")?;
-    let account_uuid = AccountUuid(row.get("uuid")?);
-    let kind = parse_account_source(
-        row.get("account_kind")?,
-        row.get("hd_seed_fingerprint")?,
-        row.get("hd_account_index")?,
-        row.get("has_spend_key")?,
-        row.get("key_source")?,
-    )?;
-
-    let ufvk_str: Option<String> = row.get("ufvk")?;
-    let viewing_key = if let Some(ufvk_str) = ufvk_str {
-        ViewingKey::Full(Box::new(
-            UnifiedFullViewingKey::decode(params, &ufvk_str).map_err(|e| {
-                SqliteClientError::CorruptedData(format!(
-                    "Could not decode unified full viewing key for account {}: {}",
-                    account_uuid.0, e
-                ))
-            })?,
-        ))
-    } else {
-        let uivk_str: String = row.get("uivk")?;
-        ViewingKey::Incoming(Box::new(
-            UnifiedIncomingViewingKey::decode(params, &uivk_str).map_err(|e| {
-                SqliteClientError::CorruptedData(format!(
-                    "Could not decode unified incoming viewing key for account {}: {}",
-                    account_uuid.0, e
-                ))
-            })?,
-        ))
-    };
-
-    Ok(Account {
-        name: account_name,
-        uuid: account_uuid,
-        kind,
-        viewing_key,
-    })
 }
 
 /// Returns the account id corresponding to a given [`SeedFingerprint`]
@@ -1927,29 +1950,6 @@ pub(crate) fn get_account_uuid(
     )
     .optional()?
     .ok_or(SqliteClientError::AccountUnknown)
-}
-
-pub(crate) fn get_account<P: Parameters>(
-    conn: &rusqlite::Connection,
-    params: &P,
-    account_uuid: AccountUuid,
-) -> Result<Option<Account>, SqliteClientError> {
-    let mut stmt = conn.prepare_cached(
-        r#"
-        SELECT name, uuid, account_kind,
-               hd_seed_fingerprint, hd_account_index, key_source,
-               ufvk, uivk, has_spend_key
-        FROM accounts
-        WHERE uuid = :account_uuid
-        "#,
-    )?;
-
-    let mut rows = stmt.query_and_then::<_, SqliteClientError, _, _>(
-        named_params![":account_uuid": account_uuid.0],
-        |row| parse_account_row(row, params),
-    )?;
-
-    rows.next().transpose()
 }
 
 /// Returns the minimum and maximum heights of blocks in the chain which may be scanned.

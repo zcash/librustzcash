@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
-use zcash_protocol::constants;
 use core::convert::{TryFrom, TryInto};
+use zcash_protocol::constants;
 
 use super::{
     private::{SealedContainer, SealedItem},
