@@ -900,7 +900,19 @@ pub(crate) fn queue_transparent_spend_detection<P: consensus::Parameters>(
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::{db::TestDbFactory, BlockCache};
+    use secrecy::Secret;
+    use transparent::keys::NonHardenedChildIndex;
+    use zcash_client_backend::{
+        data_api::{testing::TestBuilder, Account as _, WalletWrite, GAP_LIMIT},
+        wallet::TransparentAddressMetadata,
+    };
+    use zcash_primitives::block::BlockHash;
+
+    use crate::{
+        testing::{db::TestDbFactory, BlockCache},
+        wallet::{get_account_ref, transparent::ephemeral},
+        WalletDb,
+    };
 
     #[test]
     fn put_received_transparent_utxo() {
@@ -923,5 +935,48 @@ mod tests {
             TestDbFactory::default(),
             BlockCache::new(),
         );
+    }
+
+    #[test]
+    fn ephemeral_address_management() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let birthday = st.test_account().unwrap().birthday().clone();
+        let account0_uuid = st.test_account().unwrap().account().id();
+        let account0_id = get_account_ref(&st.wallet().db().conn, account0_uuid).unwrap();
+
+        let check = |db: &WalletDb<_, _>, account_id| {
+            eprintln!("checking {account_id:?}");
+            assert_matches!(ephemeral::first_unstored_index(&db.conn, account_id), Ok(addr_index) if addr_index == GAP_LIMIT);
+            assert_matches!(ephemeral::first_unreserved_index(&db.conn, account_id), Ok(addr_index) if addr_index == 0);
+
+            let known_addrs =
+                ephemeral::get_known_ephemeral_addresses(&db.conn, &db.params, account_id, None)
+                    .unwrap();
+
+            let expected_metadata: Vec<TransparentAddressMetadata> = (0..GAP_LIMIT)
+                .map(|i| ephemeral::metadata(NonHardenedChildIndex::from_index(i).unwrap()))
+                .collect();
+            let actual_metadata: Vec<TransparentAddressMetadata> =
+                known_addrs.into_iter().map(|(_, meta)| meta).collect();
+            assert_eq!(actual_metadata, expected_metadata);
+        };
+
+        check(st.wallet().db(), account0_id);
+
+        // Creating a new account should initialize `ephemeral_addresses` for that account.
+        let seed1 = vec![0x01; 32];
+        let (account1_uuid, _usk) = st
+            .wallet_mut()
+            .db_mut()
+            .create_account("test1", &Secret::new(seed1), &birthday, None)
+            .unwrap();
+        let account1_id = get_account_ref(&st.wallet().db().conn, account1_uuid).unwrap();
+        assert_ne!(account0_id, account1_id);
+        check(st.wallet().db(), account1_id);
     }
 }
