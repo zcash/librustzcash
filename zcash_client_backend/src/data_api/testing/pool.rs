@@ -827,7 +827,13 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     // the start of the gap to index 12. This also tests the `index_range` parameter.
     let newer_known_addrs = st
         .wallet()
-        .get_known_ephemeral_addresses(account_id, Some(5..100))
+        .get_known_ephemeral_addresses(
+            account_id,
+            Some(
+                NonHardenedChildIndex::from_index(5).unwrap()
+                    ..NonHardenedChildIndex::from_index(100).unwrap(),
+            ),
+        )
         .unwrap();
     assert_eq!(newer_known_addrs.len(), (GAP_LIMIT as usize) + 12 - 5);
     assert!(newer_known_addrs.starts_with(&new_known_addrs[5..]));

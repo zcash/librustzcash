@@ -8,11 +8,6 @@ use std::{
     num::NonZeroU32,
 };
 
-use ::sapling::{
-    note_encryption::{sapling_note_encryption, SaplingDomain},
-    util::generate_random_rseed,
-    zip32::DiversifiableFullViewingKey,
-};
 use assert_matches::assert_matches;
 use group::ff::Field;
 use incrementalmerkletree::{Marking, Retention};
@@ -23,6 +18,11 @@ use secrecy::{ExposeSecret, Secret, SecretVec};
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 use subtle::ConditionallySelectable;
 
+use ::sapling::{
+    note_encryption::{sapling_note_encryption, SaplingDomain},
+    util::generate_random_rseed,
+    zip32::DiversifiableFullViewingKey,
+};
 use zcash_address::ZcashAddress;
 use zcash_keys::{
     address::{Address, UnifiedAddress},
@@ -44,6 +44,21 @@ use zcash_protocol::{
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 use zip321::Payment;
 
+use super::{
+    chain::{scan_cached_blocks, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
+    error::Error,
+    scanning::ScanRange,
+    wallet::{
+        create_proposed_transactions,
+        input_selection::{GreedyInputSelector, InputSelector},
+        propose_standard_transfer_to_address, propose_transfer,
+    },
+    Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
+    BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery, ScannedBlock,
+    SeedRelevance, SentTransaction, SpendableNotes, TransactionDataRequest, TransactionStatus,
+    WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
+    SAPLING_SHARD_HEIGHT,
+};
 use crate::{
     fees::{
         standard::{self, SingleOutputChangeStrategy},
@@ -56,26 +71,12 @@ use crate::{
     wallet::{Note, NoteId, OvkPolicy, ReceivedNote, WalletTransparentOutput},
 };
 
-use super::{
-    chain::{scan_cached_blocks, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
-    scanning::ScanRange,
-    wallet::{
-        create_proposed_transactions,
-        input_selection::{GreedyInputSelector, InputSelector},
-        propose_standard_transfer_to_address, propose_transfer,
-    },
-    Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
-    BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
-    SentTransaction, SpendableNotes, TransactionDataRequest, TransactionStatus,
-    WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
-    SAPLING_SHARD_HEIGHT,
-};
-use super::{error::Error, NoteFilter};
-
 #[cfg(feature = "transparent-inputs")]
 use {
-    super::wallet::input_selection::ShieldingSelector, crate::wallet::TransparentAddressMetadata,
-    ::transparent::address::TransparentAddress, std::ops::Range,
+    super::wallet::input_selection::ShieldingSelector,
+    crate::wallet::TransparentAddressMetadata,
+    ::transparent::{address::TransparentAddress, keys::NonHardenedChildIndex},
+    std::ops::Range,
 };
 
 #[cfg(feature = "orchard")]
@@ -2624,7 +2625,7 @@ impl WalletRead for MockWalletDb {
     fn get_known_ephemeral_addresses(
         &self,
         _account: Self::AccountId,
-        _index_range: Option<Range<u32>>,
+        _index_range: Option<Range<NonHardenedChildIndex>>,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         Ok(vec![])
     }

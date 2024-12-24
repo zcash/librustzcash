@@ -92,9 +92,9 @@ use {
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    ::transparent::{address::TransparentAddress, bundle::OutPoint},
+    ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     zcash_client_backend::wallet::TransparentAddressMetadata,
-    zcash_keys::encoding::AddressCodec as _,
+    zcash_keys::encoding::AddressCodec,
 };
 
 #[cfg(feature = "multicore")]
@@ -659,14 +659,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     fn get_known_ephemeral_addresses(
         &self,
         account: Self::AccountId,
-        index_range: Option<Range<u32>>,
+        index_range: Option<Range<NonHardenedChildIndex>>,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         let account_id = wallet::get_account_ref(self.conn.borrow(), account)?;
         wallet::transparent::ephemeral::get_known_ephemeral_addresses(
             self.conn.borrow(),
             &self.params,
             account_id,
-            index_range,
+            index_range.map(|i| i.start.index()..i.end.index()),
         )
     }
 

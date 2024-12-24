@@ -74,15 +74,12 @@ use zcash_keys::{
         UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey, UnifiedSpendingKey,
     },
 };
-use zcash_primitives::{
-    block::BlockHash,
-    transaction::{Transaction, TxId},
-};
+use zcash_primitives::{block::BlockHash, transaction::Transaction};
 use zcash_protocol::{
     consensus::BlockHeight,
     memo::{Memo, MemoBytes},
     value::{BalanceError, Zatoshis},
-    ShieldedProtocol,
+    ShieldedProtocol, TxId,
 };
 use zip32::fingerprint::SeedFingerprint;
 
@@ -99,8 +96,8 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::TransparentAddressMetadata,
-    ::transparent::{address::TransparentAddress, bundle::OutPoint},
     std::ops::Range,
+    transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
 };
 
 #[cfg(feature = "test-dependencies")]
@@ -1465,7 +1462,7 @@ pub trait WalletRead {
     fn get_known_ephemeral_addresses(
         &self,
         _account: Self::AccountId,
-        _index_range: Option<Range<u32>>,
+        _index_range: Option<Range<NonHardenedChildIndex>>,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         Ok(vec![])
     }
