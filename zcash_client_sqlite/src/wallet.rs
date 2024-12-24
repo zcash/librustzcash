@@ -84,7 +84,6 @@ use std::ops::RangeInclusive;
 
 use tracing::{debug, warn};
 
-use ::transparent::bundle::OutPoint;
 use zcash_address::ZcashAddress;
 use zcash_client_backend::{
     data_api::{
@@ -114,8 +113,9 @@ use zcash_protocol::{
     value::{ZatBalance, Zatoshis},
     PoolType, ShieldedProtocol,
 };
-use zip32::{self, DiversifierIndex, Scope};
+use zip32::{DiversifierIndex, Scope};
 
+use self::scanning::{parse_priority_code, priority_code, replace_queue_entries};
 use crate::{
     error::SqliteClientError,
     wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
@@ -125,9 +125,7 @@ use crate::{
 use crate::{AccountUuid, TxRef, VERIFY_LOOKAHEAD};
 
 #[cfg(feature = "transparent-inputs")]
-use ::transparent::bundle::TxOut;
-
-use self::scanning::{parse_priority_code, priority_code, replace_queue_entries};
+use ::transparent::bundle::{OutPoint, TxOut};
 
 #[cfg(feature = "orchard")]
 use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT};
@@ -2269,55 +2267,53 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
         match output.recipient() {
             Recipient::InternalAccount {
                 receiving_account,
-                note: Note::Sapling(note),
+                note,
                 ..
-            } => {
-                sapling::put_received_note(
-                    wdb.conn.0,
-                    &DecryptedOutput::new(
-                        output.output_index(),
-                        note.clone(),
-                        *receiving_account,
-                        output
-                            .memo()
-                            .map_or_else(MemoBytes::empty, |memo| memo.clone()),
-                        TransferType::WalletInternal,
-                    ),
-                    tx_ref,
-                    None,
-                )?;
-            }
-            #[cfg(feature = "orchard")]
-            Recipient::InternalAccount {
-                receiving_account,
-                note: Note::Orchard(note),
-                ..
-            } => {
-                orchard::put_received_note(
-                    wdb.conn.0,
-                    &DecryptedOutput::new(
-                        output.output_index(),
-                        *note,
-                        *receiving_account,
-                        output
-                            .memo()
-                            .map_or_else(MemoBytes::empty, |memo| memo.clone()),
-                        TransferType::WalletInternal,
-                    ),
-                    tx_ref,
-                    None,
-                )?;
-            }
+            } => match note.as_ref() {
+                Note::Sapling(note) => {
+                    sapling::put_received_note(
+                        wdb.conn.0,
+                        &DecryptedOutput::new(
+                            output.output_index(),
+                            note.clone(),
+                            *receiving_account,
+                            output
+                                .memo()
+                                .map_or_else(MemoBytes::empty, |memo| memo.clone()),
+                            TransferType::WalletInternal,
+                        ),
+                        tx_ref,
+                        None,
+                    )?;
+                }
+                #[cfg(feature = "orchard")]
+                Note::Orchard(note) => {
+                    orchard::put_received_note(
+                        wdb.conn.0,
+                        &DecryptedOutput::new(
+                            output.output_index(),
+                            *note,
+                            *receiving_account,
+                            output
+                                .memo()
+                                .map_or_else(MemoBytes::empty, |memo| memo.clone()),
+                            TransferType::WalletInternal,
+                        ),
+                        tx_ref,
+                        None,
+                    )?;
+                }
+            },
             #[cfg(feature = "transparent-inputs")]
             Recipient::EphemeralTransparent {
                 receiving_account,
                 ephemeral_address,
-                outpoint_metadata,
+                outpoint,
             } => {
                 transparent::put_transparent_output(
                     wdb.conn.0,
                     &wdb.params,
-                    outpoint_metadata,
+                    outpoint,
                     &TxOut {
                         value: output.value(),
                         script_pubkey: ephemeral_address.script(),
@@ -2733,11 +2729,14 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
             TransferType::Outgoing => {
                 let recipient = {
                     let receiver = Receiver::Sapling(output.note().recipient());
-                    let wallet_address =
+                    let recipient_address =
                         select_receiving_address(params, conn, *output.account(), &receiver)?
                             .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
 
-                    Recipient::External(wallet_address, PoolType::SAPLING)
+                    Recipient::External {
+                        recipient_address,
+                        output_pool: PoolType::SAPLING,
+                    }
                 };
 
                 put_sent_output(
@@ -2757,7 +2756,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                 let recipient = Recipient::InternalAccount {
                     receiving_account: *output.account(),
                     external_address: None,
-                    note: Note::Sapling(output.note().clone()),
+                    note: Box::new(Note::Sapling(output.note().clone())),
                 };
 
                 put_sent_output(
@@ -2791,7 +2790,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                                 }),
                             )
                         },
-                        note: Note::Sapling(output.note().clone()),
+                        note: Box::new(Note::Sapling(output.note().clone())),
                     };
 
                     put_sent_output(
@@ -2819,11 +2818,14 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
             TransferType::Outgoing => {
                 let recipient = {
                     let receiver = Receiver::Orchard(output.note().recipient());
-                    let wallet_address =
+                    let recipient_address =
                         select_receiving_address(params, conn, *output.account(), &receiver)?
                             .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
 
-                    Recipient::External(wallet_address, PoolType::ORCHARD)
+                    Recipient::External {
+                        recipient_address,
+                        output_pool: PoolType::ORCHARD,
+                    }
                 };
 
                 put_sent_output(
@@ -2843,7 +2845,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                 let recipient = Recipient::InternalAccount {
                     receiving_account: *output.account(),
                     external_address: None,
-                    note: Note::Orchard(*output.note()),
+                    note: Box::new(Note::Orchard(*output.note())),
                 };
 
                 put_sent_output(
@@ -2878,7 +2880,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                                 }),
                             )
                         },
-                        note: Note::Orchard(*output.note()),
+                        note: Box::new(Note::Orchard(*output.note())),
                     };
 
                     put_sent_output(
@@ -2989,14 +2991,17 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                     let receiver = Receiver::Transparent(address);
 
                     #[cfg(feature = "transparent-inputs")]
-                    let recipient_addr =
+                    let recipient_address =
                         select_receiving_address(params, conn, account_uuid, &receiver)?
                             .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
 
                     #[cfg(not(feature = "transparent-inputs"))]
-                    let recipient_addr = receiver.to_zcash_address(params.network_type());
+                    let recipient_address = receiver.to_zcash_address(params.network_type());
 
-                    let recipient = Recipient::External(recipient_addr, PoolType::TRANSPARENT);
+                    let recipient = Recipient::External {
+                        recipient_address,
+                        output_pool: PoolType::TRANSPARENT,
+                    };
 
                     put_sent_output(
                         conn,
@@ -3295,13 +3300,23 @@ pub(crate) fn notify_tx_retrieved(
 // and `put_sent_output`
 fn recipient_params<P: consensus::Parameters>(
     conn: &Connection,
-    params: &P,
+    _params: &P,
     from: AccountUuid,
-    to: &Recipient<AccountUuid, Note, OutPoint>,
+    to: &Recipient<AccountUuid>,
 ) -> Result<(AccountRef, Option<String>, Option<AccountRef>, PoolType), SqliteClientError> {
     let from_account_id = get_account_ref(conn, from)?;
     match to {
-        Recipient::External(addr, pool) => Ok((from_account_id, Some(addr.encode()), None, *pool)),
+        Recipient::External {
+            recipient_address,
+            output_pool,
+            ..
+        } => Ok((
+            from_account_id,
+            Some(recipient_address.encode()),
+            None,
+            *output_pool,
+        )),
+        #[cfg(feature = "transparent-inputs")]
         Recipient::EphemeralTransparent {
             receiving_account,
             ephemeral_address,
@@ -3310,7 +3325,7 @@ fn recipient_params<P: consensus::Parameters>(
             let to_account = get_account_ref(conn, *receiving_account)?;
             Ok((
                 from_account_id,
-                Some(ephemeral_address.encode(params)),
+                Some(ephemeral_address.encode(_params)),
                 Some(to_account),
                 PoolType::TRANSPARENT,
             ))
@@ -3414,7 +3429,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
     from_account_uuid: AccountUuid,
     tx_ref: TxRef,
     output_index: usize,
-    recipient: &Recipient<AccountUuid, Note, OutPoint>,
+    recipient: &Recipient<AccountUuid>,
     value: Zatoshis,
     memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {

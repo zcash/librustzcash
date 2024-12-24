@@ -68,7 +68,6 @@ use std::{
 use incrementalmerkletree::{frontier::Frontier, Retention};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 
-use ::transparent::bundle::OutPoint;
 use zcash_keys::{
     address::UnifiedAddress,
     keys::{
@@ -99,7 +98,8 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::wallet::TransparentAddressMetadata, ::transparent::address::TransparentAddress,
+    crate::wallet::TransparentAddressMetadata,
+    ::transparent::{address::TransparentAddress, bundle::OutPoint},
     std::ops::Range,
 };
 
@@ -1966,7 +1966,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
 /// This type is capable of representing both shielded and transparent outputs.
 pub struct SentTransactionOutput<AccountId> {
     output_index: usize,
-    recipient: Recipient<AccountId, Note, OutPoint>,
+    recipient: Recipient<AccountId>,
     value: Zatoshis,
     memo: Option<MemoBytes>,
 }
@@ -1983,7 +1983,7 @@ impl<AccountId> SentTransactionOutput<AccountId> {
     /// * `memo` - the memo that was sent with this output
     pub fn from_parts(
         output_index: usize,
-        recipient: Recipient<AccountId, Note, OutPoint>,
+        recipient: Recipient<AccountId>,
         value: Zatoshis,
         memo: Option<MemoBytes>,
     ) -> Self {
@@ -2006,7 +2006,7 @@ impl<AccountId> SentTransactionOutput<AccountId> {
     }
     /// Returns the recipient address of the transaction, or the account id and
     /// resulting note/outpoint for wallet-internal outputs.
-    pub fn recipient(&self) -> &Recipient<AccountId, Note, OutPoint> {
+    pub fn recipient(&self) -> &Recipient<AccountId> {
         &self.recipient
     }
     /// Returns the value of the newly created output.
