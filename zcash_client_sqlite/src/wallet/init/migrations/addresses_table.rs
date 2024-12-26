@@ -3,8 +3,12 @@ use std::collections::HashSet;
 use rusqlite::{named_params, Transaction};
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_keys::{address::Address, keys::UnifiedFullViewingKey};
-use zcash_keys::{address::UnifiedAddress, encoding::AddressCodec, keys::UnifiedAddressRequest};
+
+use zcash_keys::{
+    address::{Address, UnifiedAddress},
+    encoding::AddressCodec,
+    keys::{ReceiverRequirement::*, UnifiedAddressRequest, UnifiedFullViewingKey},
+};
 use zcash_protocol::consensus;
 use zip32::{AccountId, DiversifierIndex};
 
@@ -87,7 +91,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 ));
             };
             let (expected_address, idx) = ufvk.default_address(Some(
-                UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT),
+                UnifiedAddressRequest::unsafe_new(Omit, Require, UA_TRANSPARENT),
             ))?;
             if decoded_address != expected_address {
                 return Err(WalletMigrationError::CorruptedData(format!(
@@ -159,7 +163,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             )?;
 
             let (address, d_idx) = ufvk.default_address(Some(
-                UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT),
+                UnifiedAddressRequest::unsafe_new(Omit, Require, UA_TRANSPARENT),
             ))?;
             insert_address(transaction, &self.params, account, d_idx, &address)?;
         }

@@ -62,7 +62,8 @@ use zcash_client_backend::{
 use zcash_keys::{
     address::UnifiedAddress,
     keys::{
-        AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
+        AddressGenerationError, ReceiverRequirement, UnifiedAddressRequest, UnifiedFullViewingKey,
+        UnifiedSpendingKey,
     },
 };
 use zcash_primitives::{
@@ -154,14 +155,14 @@ pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
 pub(crate) const ORCHARD_TABLES_PREFIX: &str = "orchard";
 
 #[cfg(not(feature = "orchard"))]
-pub(crate) const UA_ORCHARD: bool = false;
+pub(crate) const UA_ORCHARD: ReceiverRequirement = ReceiverRequirement::Omit;
 #[cfg(feature = "orchard")]
-pub(crate) const UA_ORCHARD: bool = true;
+pub(crate) const UA_ORCHARD: ReceiverRequirement = ReceiverRequirement::Require;
 
 #[cfg(not(feature = "transparent-inputs"))]
-pub(crate) const UA_TRANSPARENT: bool = false;
+pub(crate) const UA_TRANSPARENT: ReceiverRequirement = ReceiverRequirement::Omit;
 #[cfg(feature = "transparent-inputs")]
-pub(crate) const UA_TRANSPARENT: bool = true;
+pub(crate) const UA_TRANSPARENT: ReceiverRequirement = ReceiverRequirement::Require;
 
 /// Unique identifier for a specific account tracked by a [`WalletDb`].
 ///

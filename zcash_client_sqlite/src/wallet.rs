@@ -292,10 +292,7 @@ pub(crate) fn seed_matches_derived_account<P: consensus::Parameters>(
         let usk = UnifiedSpendingKey::from_seed(params, &seed.expose_secret()[..], account_index)
             .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
 
-        let (seed_addr, _) = usk.to_unified_full_viewing_key().default_address(Some(
-            UnifiedAddressRequest::all().expect("At least one supported pool feature is enabled."),
-        ))?;
-
+        let (seed_addr, _) = usk.to_unified_full_viewing_key().default_address(None)?;
         let (uivk_addr, _) = uivk.default_address(None)?;
 
         #[cfg(not(feature = "orchard"))]

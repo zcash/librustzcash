@@ -443,7 +443,10 @@ mod tests {
     use zcash_keys::{
         address::Address,
         encoding::{encode_extended_full_viewing_key, encode_payment_address},
-        keys::{sapling, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+        keys::{
+            sapling, ReceiverRequirement::*, UnifiedAddressRequest, UnifiedFullViewingKey,
+            UnifiedSpendingKey,
+        },
     };
     use zcash_primitives::transaction::{TransactionData, TxVersion};
     use zcash_protocol::consensus::{self, BlockHeight, BranchId, Network, NetworkConstants};
@@ -984,7 +987,7 @@ mod tests {
 
             // Unified addresses at the time of the addition of migrations did not contain an
             // Orchard component.
-            let ua_request = UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT);
+            let ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, UA_TRANSPARENT);
             let address_str = Address::Unified(
                 ufvk.default_address(Some(ua_request))
                     .expect("A valid default address exists for the UFVK")
@@ -1111,7 +1114,7 @@ mod tests {
                 assert_eq!(tv.unified_addr, ua.encode(&Network::MainNetwork));
 
                 // hardcoded with knowledge of what's coming next
-                let ua_request = UnifiedAddressRequest::unsafe_new(false, true, true);
+                let ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, Require);
                 db_data
                     .get_next_available_address(account_id, Some(ua_request))
                     .unwrap()
