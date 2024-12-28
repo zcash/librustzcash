@@ -6,6 +6,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::Address::to_transparent_address`
+
 ## [0.4.0] - 2024-10-04
 
 ### Added

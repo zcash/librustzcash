@@ -421,6 +421,18 @@ impl Address {
             },
         }
     }
+
+    /// Returns the transparent address corresponding to this address, if it is a transparent
+    /// address, a Unified address with a transparent receiver, or ZIP 320 (TEX) address.
+    pub fn to_transparent_address(&self) -> Option<TransparentAddress> {
+        match self {
+            #[cfg(feature = "sapling")]
+            Address::Sapling(_) => None,
+            Address::Transparent(addr) => Some(*addr),
+            Address::Unified(ua) => ua.transparent().copied(),
+            Address::Tex(addr_bytes) => Some(TransparentAddress::PublicKeyHash(*addr_bytes)),
+        }
+    }
 }
 
 #[cfg(all(
