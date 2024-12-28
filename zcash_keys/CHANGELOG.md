@@ -10,6 +10,7 @@ and this library adheres to Rust's notion of
 - `no-std` compatibility (`alloc` is required). A default-enabled `std` feature
   flag has been added gating the `std::error::Error` usage.
 - `zcash_keys::keys::ReceiverRequirement`
+- `zcash_keys::Address::to_transparent_address`
 
 ### Changed
 - Migrated to `nonempty 0.11`
