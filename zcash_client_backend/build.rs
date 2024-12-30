@@ -72,7 +72,7 @@ fn build() -> io::Result<()> {
             ".cash.z.wallet.sdk.rpc.CompactOrchardAction",
             "crate::proto::compact_formats::CompactOrchardAction",
         )
-        .compile(&[SERVICE_PROTO], &["proto/"])?;
+        .compile_protos(&[SERVICE_PROTO], &["proto/"])?;
 
     // Build the proposal types.
     tonic_build::compile_protos(PROPOSAL_PROTO)?;
