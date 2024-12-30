@@ -9,6 +9,18 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - Migrated to `nonempty 0.11`
+- `zcash_client_backend::wallet::Recipient` has changed:
+  - The `Recipient::External` variant is now a structured variant.
+  - The `Recipient::EphemeralTransparent` variant is now only available if
+    `zcash_client_backend` is built using the `transparent-inputs` feature flag.
+  - The `N` and `O` type pararameters to this type have been replaced by
+    concrete uses of `Box<Note>` and `Outpoint` instead. The
+    `map_internal_account_note` and `map_ephemeral_transparent_outpoint` and
+    `internal_account_note_transpose_option` methods have consequently been
+    removed.
+- `zcash_client_backend::data_api::WalletRead::get_known_ephemeral_addresses`
+  now takes a `Range<zcash_transparent::keys::NonHardenedChildIndex>` as its
+  argument instead of a `Range<u32>`
 
 ### Deprecated
 - `zcash_client_backend::address` (use `zcash_keys::address` instead)

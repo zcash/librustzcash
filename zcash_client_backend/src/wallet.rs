@@ -1,11 +1,12 @@
 //! Structs representing transaction data scanned from the block chain by a wallet or
 //! light client.
 
+use incrementalmerkletree::Position;
+
 use ::transparent::{
     address::TransparentAddress,
     bundle::{OutPoint, TxOut},
 };
-use incrementalmerkletree::Position;
 use zcash_address::ZcashAddress;
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::transaction::{fees::transparent as transparent_fees, TxId};
@@ -60,109 +61,29 @@ impl NoteId {
 }
 
 /// A type that represents the recipient of a transaction output:
+///
 /// * a recipient address;
 /// * for external unified addresses, the pool to which the payment is sent;
-/// * for ephemeral transparent addresses, the internal account ID and metadata about the outpoint;
 /// * for wallet-internal outputs, the internal account ID and metadata about the note.
+/// * if the `transparent-inputs` feature is enabled, for ephemeral transparent outputs, the
+///   internal account ID and metadata about the outpoint;
 #[derive(Debug, Clone)]
-pub enum Recipient<AccountId, N, O> {
-    External(ZcashAddress, PoolType),
+pub enum Recipient<AccountId> {
+    External {
+        recipient_address: ZcashAddress,
+        output_pool: PoolType,
+    },
+    #[cfg(feature = "transparent-inputs")]
     EphemeralTransparent {
         receiving_account: AccountId,
         ephemeral_address: TransparentAddress,
-        outpoint_metadata: O,
+        outpoint: OutPoint,
     },
     InternalAccount {
         receiving_account: AccountId,
         external_address: Option<ZcashAddress>,
-        note: N,
+        note: Box<Note>,
     },
-}
-
-impl<AccountId, N, O> Recipient<AccountId, N, O> {
-    /// Return a copy of this `Recipient` with `f` applied to the note metadata, if any.
-    pub fn map_internal_account_note<B, F: FnOnce(N) -> B>(
-        self,
-        f: F,
-    ) -> Recipient<AccountId, B, O> {
-        match self {
-            Recipient::External(addr, pool) => Recipient::External(addr, pool),
-            Recipient::EphemeralTransparent {
-                receiving_account,
-                ephemeral_address,
-                outpoint_metadata,
-            } => Recipient::EphemeralTransparent {
-                receiving_account,
-                ephemeral_address,
-                outpoint_metadata,
-            },
-            Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note,
-            } => Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note: f(note),
-            },
-        }
-    }
-
-    /// Return a copy of this `Recipient` with `f` applied to the output metadata, if any.
-    pub fn map_ephemeral_transparent_outpoint<B, F: FnOnce(O) -> B>(
-        self,
-        f: F,
-    ) -> Recipient<AccountId, N, B> {
-        match self {
-            Recipient::External(addr, pool) => Recipient::External(addr, pool),
-            Recipient::EphemeralTransparent {
-                receiving_account,
-                ephemeral_address,
-                outpoint_metadata,
-            } => Recipient::EphemeralTransparent {
-                receiving_account,
-                ephemeral_address,
-                outpoint_metadata: f(outpoint_metadata),
-            },
-            Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note,
-            } => Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note,
-            },
-        }
-    }
-}
-
-impl<AccountId, N, O> Recipient<AccountId, Option<N>, O> {
-    /// Return a copy of this `Recipient` with optional note metadata transposed to
-    /// an optional result.
-    pub fn internal_account_note_transpose_option(self) -> Option<Recipient<AccountId, N, O>> {
-        match self {
-            Recipient::External(addr, pool) => Some(Recipient::External(addr, pool)),
-            Recipient::EphemeralTransparent {
-                receiving_account,
-                ephemeral_address,
-                outpoint_metadata,
-            } => Some(Recipient::EphemeralTransparent {
-                receiving_account,
-                ephemeral_address,
-                outpoint_metadata,
-            }),
-            Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note,
-            } => note.map(|n0| Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note: n0,
-            }),
-        }
-    }
 }
 
 /// The shielded subset of a [`Transaction`]'s data that is relevant to a particular wallet.

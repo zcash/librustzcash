@@ -166,6 +166,7 @@ lightwalletd-tonic-transport = ["lightwalletd-tonic", "tonic?/transport"]
 ## Enables receiving transparent funds and shielding them.
 transparent-inputs = [
     "dep:bip32",
+    "transparent/transparent-inputs",
     "zcash_keys/transparent-inputs",
     "zcash_primitives/transparent-inputs",
 ]

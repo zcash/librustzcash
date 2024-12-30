@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 use core::convert::{TryFrom, TryInto};
+use zcash_protocol::constants;
 
 use super::{
     private::{SealedContainer, SealedItem},
@@ -128,17 +129,21 @@ impl SealedContainer for Ufvk {
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const MAINNET: &'static str = "uview";
+    const MAINNET: &'static str = constants::mainnet::HRP_UNIFIED_FVK;
 
     /// The HRP for a Bech32m-encoded testnet Unified FVK.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const TESTNET: &'static str = "uviewtest";
+    const TESTNET: &'static str = constants::testnet::HRP_UNIFIED_FVK;
 
     /// The HRP for a Bech32m-encoded regtest Unified FVK.
-    const REGTEST: &'static str = "uviewregtest";
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    const REGTEST: &'static str = constants::regtest::HRP_UNIFIED_FVK;
 
     fn from_inner(fvks: Vec<Self::Item>) -> Self {
         Self(fvks)

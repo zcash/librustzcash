@@ -123,6 +123,7 @@ test-dependencies = [
 ## Enables receiving transparent funds and sending to transparent recipients
 transparent-inputs = [
   "dep:bip32",
+  "transparent/transparent-inputs",
   "zcash_keys/transparent-inputs",
   "zcash_client_backend/transparent-inputs"
 ]

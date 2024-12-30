@@ -393,7 +393,8 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn migrate_from_wm2() {
         use ::transparent::keys::NonHardenedChildIndex;
-        use zcash_keys::keys::UnifiedAddressRequest;
+        use zcash_client_backend::keys::UnifiedAddressRequest;
+        use zcash_keys::keys::ReceiverRequirement::*;
         use zcash_protocol::value::Zatoshis;
 
         use crate::UA_TRANSPARENT;
@@ -441,8 +442,8 @@ mod tests {
         let ufvk = usk.to_unified_full_viewing_key();
         let (ua, _) = ufvk
             .default_address(Some(UnifiedAddressRequest::unsafe_new(
-                false,
-                true,
+                Omit,
+                Require,
                 UA_TRANSPARENT,
             )))
             .expect("A valid default address exists for the UFVK");

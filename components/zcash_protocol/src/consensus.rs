@@ -189,6 +189,27 @@ pub trait NetworkConstants: Clone {
     ///
     /// [ZIP 320]: https://zips.z.cash/zip-0320
     fn hrp_tex_address(&self) -> &'static str;
+
+    /// The HRP for a Bech32m-encoded mainnet Unified Address.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    fn hrp_unified_address(&self) -> &'static str;
+
+    /// The HRP for a Bech32m-encoded mainnet Unified FVK.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    fn hrp_unified_fvk(&self) -> &'static str;
+
+    /// The HRP for a Bech32m-encoded mainnet Unified IVK.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    fn hrp_unified_ivk(&self) -> &'static str;
 }
 
 /// The enumeration of known Zcash network types.
@@ -272,6 +293,30 @@ impl NetworkConstants for NetworkType {
             NetworkType::Regtest => regtest::HRP_TEX_ADDRESS,
         }
     }
+
+    fn hrp_unified_address(&self) -> &'static str {
+        match self {
+            NetworkType::Main => mainnet::HRP_UNIFIED_ADDRESS,
+            NetworkType::Test => testnet::HRP_UNIFIED_ADDRESS,
+            NetworkType::Regtest => regtest::HRP_UNIFIED_ADDRESS,
+        }
+    }
+
+    fn hrp_unified_fvk(&self) -> &'static str {
+        match self {
+            NetworkType::Main => mainnet::HRP_UNIFIED_FVK,
+            NetworkType::Test => testnet::HRP_UNIFIED_FVK,
+            NetworkType::Regtest => regtest::HRP_UNIFIED_FVK,
+        }
+    }
+
+    fn hrp_unified_ivk(&self) -> &'static str {
+        match self {
+            NetworkType::Main => mainnet::HRP_UNIFIED_IVK,
+            NetworkType::Test => testnet::HRP_UNIFIED_IVK,
+            NetworkType::Regtest => regtest::HRP_UNIFIED_IVK,
+        }
+    }
 }
 
 /// Zcash consensus parameters.
@@ -321,6 +366,18 @@ impl<P: Parameters> NetworkConstants for P {
 
     fn hrp_tex_address(&self) -> &'static str {
         self.network_type().hrp_tex_address()
+    }
+
+    fn hrp_unified_address(&self) -> &'static str {
+        self.network_type().hrp_unified_address()
+    }
+
+    fn hrp_unified_fvk(&self) -> &'static str {
+        self.network_type().hrp_unified_fvk()
+    }
+
+    fn hrp_unified_ivk(&self) -> &'static str {
+        self.network_type().hrp_unified_ivk()
     }
 }
 
