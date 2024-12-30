@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/testing/pool.rs`."><title>pool.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/testing/</div>pool.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/testing/pool.rs`."><title>pool.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/testing/</div>pool.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -3202,15 +3202,7 @@
 <a href="#3201" id="3201">3201</a>
 <a href="#3202" id="3202">3202</a>
 <a href="#3203" id="3203">3203</a>
-<a href="#3204" id="3204">3204</a>
-<a href="#3205" id="3205">3205</a>
-<a href="#3206" id="3206">3206</a>
-<a href="#3207" id="3207">3207</a>
-<a href="#3208" id="3208">3208</a>
-<a href="#3209" id="3209">3209</a>
-<a href="#3210" id="3210">3210</a>
-<a href="#3211" id="3211">3211</a>
-<a href="#3212" id="3212">3212</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::{
+<a href="#3204" id="3204">3204</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::{
     cmp::Eq,
     convert::Infallible,
     hash::Hash,
@@ -3223,12 +3215,11 @@
 <span class="kw">use </span>secrecy::Secret;
 <span class="kw">use </span>shardtree::error::ShardTreeError;
 
+<span class="kw">use </span>::transparent::address::TransparentAddress;
 <span class="kw">use </span>zcash_keys::{address::Address, keys::UnifiedSpendingKey};
 <span class="kw">use </span>zcash_primitives::{
     block::BlockHash,
-    legacy::TransparentAddress,
     transaction::{
-        components::amount::NonNegativeAmount,
         fees::zip317::{FeeRule <span class="kw">as </span>Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
         Transaction,
     },
@@ -3278,23 +3269,23 @@
         proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex},
         wallet::{TransparentAddressMetadata, WalletTransparentOutput},
     },
+    ::transparent::{
+        bundle::{OutPoint, TxOut},
+        keys::{NonHardenedChildIndex, TransparentKeyScope},
+    },
     nonempty::NonEmpty,
     rand_core::OsRng,
     std::{collections::HashSet, str::FromStr},
-    zcash_primitives::{
-        legacy::keys::{NonHardenedChildIndex, TransparentKeyScope},
-        transaction::{
-            builder::{BuildConfig, Builder},
-            components::{OutPoint, TxOut},
-            fees::zip317,
-        },
+    zcash_primitives::transaction::{
+        builder::{BuildConfig, Builder},
+        fees::zip317,
     },
     zcash_proofs::prover::LocalTxProver,
     zcash_protocol::value::ZatBalance,
 };
 
 <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-</span><span class="kw">use </span><span class="kw">crate</span>::PoolType;
+</span><span class="kw">use </span>zcash_protocol::PoolType;
 
 <span class="attr">#[cfg(feature = <span class="string">"pczt"</span>)]
 </span><span class="kw">use </span>pczt::roles::{prover::Prover, signer::Signer};
@@ -3591,7 +3582,7 @@
         DustOutputPolicy::default(),
         SplitPolicy::with_min_output_value(
             NonZeroUsize::new(<span class="number">2</span>).unwrap(),
-            NonNegativeAmount::const_from_u64(<span class="number">100_0000</span>),
+            Zatoshis::const_from_u64(<span class="number">100_0000</span>),
         ),
     );
 
@@ -3694,7 +3685,7 @@
         DustOutputPolicy::default(),
         SplitPolicy::with_min_output_value(
             NonZeroUsize::new(<span class="number">8</span>).unwrap(),
-            NonNegativeAmount::const_from_u64(<span class="number">10_0000</span>),
+            Zatoshis::const_from_u64(<span class="number">10_0000</span>),
         ),
     );
 
@@ -3721,7 +3712,7 @@
     </span>DSF: DataStoreFactory,
     &lt;DSF <span class="kw">as </span>DataStoreFactory&gt;::AccountId: std::fmt::Debug,
 {
-    <span class="kw">use </span>zcash_primitives::transaction::components::transparent::builder::TransparentSigningSet;
+    <span class="kw">use </span>::transparent::builder::TransparentSigningSet;
 
     <span class="kw">use </span><span class="kw">crate</span>::data_api::{OutputOfSentTx, GAP_LIMIT};
 
@@ -3752,8 +3743,8 @@
         h
     };
 
-    <span class="kw">let </span>value = NonNegativeAmount::const_from_u64(<span class="number">100000</span>);
-    <span class="kw">let </span>transfer_amount = NonNegativeAmount::const_from_u64(<span class="number">50000</span>);
+    <span class="kw">let </span>value = Zatoshis::const_from_u64(<span class="number">100000</span>);
+    <span class="kw">let </span>transfer_amount = Zatoshis::const_from_u64(<span class="number">50000</span>);
 
     <span class="kw">let </span>run_test = |st: <span class="kw-2">&amp;mut </span>TestState&lt;<span class="kw">_</span>, DSF::DataStore, <span class="kw">_</span>&gt;, expected_index| {
         <span class="comment">// Add funds to the wallet.
@@ -4141,8 +4132,8 @@
         <span class="macro">assert_eq!</span>(st.get_spendable_balance(account_id, <span class="number">1</span>), value);
     };
 
-    <span class="kw">let </span>value = NonNegativeAmount::const_from_u64(<span class="number">100000</span>);
-    <span class="kw">let </span>transfer_amount = NonNegativeAmount::const_from_u64(<span class="number">50000</span>);
+    <span class="kw">let </span>value = Zatoshis::const_from_u64(<span class="number">100000</span>);
+    <span class="kw">let </span>transfer_amount = Zatoshis::const_from_u64(<span class="number">50000</span>);
 
     <span class="comment">// Add funds to the wallet.
     </span>add_funds(<span class="kw-2">&amp;mut </span>st, value);
@@ -4218,7 +4209,7 @@
 
     <span class="kw">let </span>req = TransactionRequest::new(<span class="macro">vec!</span>[Payment::without_memo(
         to.to_zcash_address(st.network()),
-        NonNegativeAmount::const_from_u64(<span class="number">1</span>),
+        Zatoshis::const_from_u64(<span class="number">1</span>),
     )])
     .unwrap();
 
@@ -4260,7 +4251,7 @@
             StandardFeeRule::Zip317,
             NonZeroU32::new(<span class="number">1</span>).unwrap(),
             <span class="kw-2">&amp;</span>to,
-            NonNegativeAmount::const_from_u64(<span class="number">1</span>),
+            Zatoshis::const_from_u64(<span class="number">1</span>),
             <span class="prelude-val">None</span>,
             <span class="prelude-val">None</span>,
             T::SHIELDED_PROTOCOL,
@@ -4284,7 +4275,7 @@
     <span class="kw">let </span>dfvk = T::test_account_fvk(<span class="kw-2">&amp;</span>st);
 
     <span class="comment">// Add funds to the wallet in a single note
-    </span><span class="kw">let </span>value = NonNegativeAmount::const_from_u64(<span class="number">50000</span>);
+    </span><span class="kw">let </span>value = Zatoshis::const_from_u64(<span class="number">50000</span>);
     <span class="kw">let </span>(h1, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h1, <span class="number">1</span>);
 
@@ -4294,10 +4285,7 @@
 
     <span class="comment">// Value is considered pending at 10 confirmations.
     </span><span class="macro">assert_eq!</span>(st.get_pending_shielded_balance(account_id, <span class="number">10</span>), value);
-    <span class="macro">assert_eq!</span>(
-        st.get_spendable_balance(account_id, <span class="number">10</span>),
-        NonNegativeAmount::ZERO
-    );
+    <span class="macro">assert_eq!</span>(st.get_spendable_balance(account_id, <span class="number">10</span>), Zatoshis::ZERO);
 
     <span class="comment">// If none of the wallet's accounts have a recover-until height, then there
     // is no recovery phase for the wallet, and therefore the denominator in the
@@ -4339,7 +4327,7 @@
             StandardFeeRule::Zip317,
             NonZeroU32::new(<span class="number">2</span>).unwrap(),
             <span class="kw-2">&amp;</span>to,
-            NonNegativeAmount::const_from_u64(<span class="number">70000</span>),
+            Zatoshis::const_from_u64(<span class="number">70000</span>),
             <span class="prelude-val">None</span>,
             <span class="prelude-val">None</span>,
             T::SHIELDED_PROTOCOL,
@@ -4348,8 +4336,8 @@
             available,
             required
         })
-        <span class="kw">if </span>available == NonNegativeAmount::const_from_u64(<span class="number">50000</span>)
-            &amp;&amp; required == NonNegativeAmount::const_from_u64(<span class="number">80000</span>)
+        <span class="kw">if </span>available == Zatoshis::const_from_u64(<span class="number">50000</span>)
+            &amp;&amp; required == Zatoshis::const_from_u64(<span class="number">80000</span>)
     );
 
     <span class="comment">// Mine blocks SAPLING_ACTIVATION_HEIGHT + 2 to 9 until just before the second
@@ -4369,7 +4357,7 @@
             StandardFeeRule::Zip317,
             NonZeroU32::new(<span class="number">10</span>).unwrap(),
             <span class="kw-2">&amp;</span>to,
-            NonNegativeAmount::const_from_u64(<span class="number">70000</span>),
+            Zatoshis::const_from_u64(<span class="number">70000</span>),
             <span class="prelude-val">None</span>,
             <span class="prelude-val">None</span>,
             T::SHIELDED_PROTOCOL,
@@ -4378,8 +4366,8 @@
             available,
             required
         })
-        <span class="kw">if </span>available == NonNegativeAmount::const_from_u64(<span class="number">50000</span>)
-            &amp;&amp; required == NonNegativeAmount::const_from_u64(<span class="number">80000</span>)
+        <span class="kw">if </span>available == Zatoshis::const_from_u64(<span class="number">50000</span>)
+            &amp;&amp; required == Zatoshis::const_from_u64(<span class="number">80000</span>)
     );
 
     <span class="comment">// Mine block 11 so that the second note becomes verified
@@ -4399,7 +4387,7 @@
     );
 
     <span class="comment">// Should now be able to generate a proposal
-    </span><span class="kw">let </span>amount_sent = NonNegativeAmount::from_u64(<span class="number">70000</span>).unwrap();
+    </span><span class="kw">let </span>amount_sent = Zatoshis::from_u64(<span class="number">70000</span>).unwrap();
     <span class="kw">let </span>min_confirmations = NonZeroU32::new(<span class="number">10</span>).unwrap();
     <span class="kw">let </span>proposal = st
         .propose_standard_transfer::&lt;Infallible&gt;(
@@ -4429,9 +4417,8 @@
     <span class="comment">// TODO: send to an account so that we can check its balance.
     </span><span class="macro">assert_eq!</span>(
         st.get_total_balance(account_id),
-        ((value * <span class="number">11u64</span>).unwrap()
-            - (amount_sent + NonNegativeAmount::from_u64(<span class="number">10000</span>).unwrap()).unwrap())
-        .unwrap()
+        ((value * <span class="number">11u64</span>).unwrap() - (amount_sent + Zatoshis::from_u64(<span class="number">10000</span>).unwrap()).unwrap())
+            .unwrap()
     );
 }
 
@@ -4452,7 +4439,7 @@
     <span class="kw">let </span>fee_rule = StandardFeeRule::Zip317;
 
     <span class="comment">// Add funds to the wallet in a single note
-    </span><span class="kw">let </span>value = NonNegativeAmount::const_from_u64(<span class="number">50000</span>);
+    </span><span class="kw">let </span>value = Zatoshis::const_from_u64(<span class="number">50000</span>);
     <span class="kw">let </span>(h1, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h1, <span class="number">1</span>);
 
@@ -4470,7 +4457,7 @@
             fee_rule,
             min_confirmations,
             <span class="kw-2">&amp;</span>to,
-            NonNegativeAmount::const_from_u64(<span class="number">15000</span>),
+            Zatoshis::const_from_u64(<span class="number">15000</span>),
             <span class="prelude-val">None</span>,
             <span class="prelude-val">None</span>,
             T::SHIELDED_PROTOCOL,
@@ -4490,7 +4477,7 @@
             fee_rule,
             NonZeroU32::new(<span class="number">1</span>).unwrap(),
             <span class="kw-2">&amp;</span>to,
-            NonNegativeAmount::const_from_u64(<span class="number">2000</span>),
+            Zatoshis::const_from_u64(<span class="number">2000</span>),
             <span class="prelude-val">None</span>,
             <span class="prelude-val">None</span>,
             T::SHIELDED_PROTOCOL,
@@ -4499,7 +4486,7 @@
             available,
             required
         })
-        <span class="kw">if </span>available == NonNegativeAmount::ZERO &amp;&amp; required == NonNegativeAmount::const_from_u64(<span class="number">12000</span>)
+        <span class="kw">if </span>available == Zatoshis::ZERO &amp;&amp; required == Zatoshis::const_from_u64(<span class="number">12000</span>)
     );
 
     <span class="comment">// Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 41 (that don't send us funds)
@@ -4520,7 +4507,7 @@
             fee_rule,
             NonZeroU32::new(<span class="number">1</span>).unwrap(),
             <span class="kw-2">&amp;</span>to,
-            NonNegativeAmount::const_from_u64(<span class="number">2000</span>),
+            Zatoshis::const_from_u64(<span class="number">2000</span>),
             <span class="prelude-val">None</span>,
             <span class="prelude-val">None</span>,
             T::SHIELDED_PROTOCOL,
@@ -4529,7 +4516,7 @@
             available,
             required
         })
-        <span class="kw">if </span>available == NonNegativeAmount::ZERO &amp;&amp; required == NonNegativeAmount::const_from_u64(<span class="number">12000</span>)
+        <span class="kw">if </span>available == Zatoshis::ZERO &amp;&amp; required == Zatoshis::const_from_u64(<span class="number">12000</span>)
     );
 
     <span class="comment">// Mine block SAPLING_ACTIVATION_HEIGHT + 42 so that the first transaction expires
@@ -4545,7 +4532,7 @@
     <span class="macro">assert_eq!</span>(st.get_spendable_balance(account_id, <span class="number">1</span>), value);
 
     <span class="comment">// Second spend should now succeed
-    </span><span class="kw">let </span>amount_sent2 = NonNegativeAmount::const_from_u64(<span class="number">2000</span>);
+    </span><span class="kw">let </span>amount_sent2 = Zatoshis::const_from_u64(<span class="number">2000</span>);
     <span class="kw">let </span>min_confirmations = NonZeroU32::new(<span class="number">1</span>).unwrap();
     <span class="kw">let </span>proposal = st
         .propose_standard_transfer::&lt;Infallible&gt;(
@@ -4574,7 +4561,7 @@
     <span class="comment">// TODO: send to an account so that we can check its balance.
     </span><span class="macro">assert_eq!</span>(
         st.get_total_balance(account_id),
-        (value - (amount_sent2 + NonNegativeAmount::from_u64(<span class="number">10000</span>).unwrap()).unwrap()).unwrap()
+        (value - (amount_sent2 + Zatoshis::from_u64(<span class="number">10000</span>).unwrap()).unwrap()).unwrap()
     );
 }
 
@@ -4595,7 +4582,7 @@
     <span class="kw">let </span>dfvk = T::test_account_fvk(<span class="kw-2">&amp;</span>st);
 
     <span class="comment">// Add funds to the wallet in a single note
-    </span><span class="kw">let </span>value = NonNegativeAmount::const_from_u64(<span class="number">50000</span>);
+    </span><span class="kw">let </span>value = Zatoshis::const_from_u64(<span class="number">50000</span>);
     <span class="kw">let </span>(h1, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h1, <span class="number">1</span>);
 
@@ -4625,7 +4612,7 @@
             fee_rule,
             min_confirmations,
             <span class="kw-2">&amp;</span>addr2,
-            NonNegativeAmount::const_from_u64(<span class="number">15000</span>),
+            Zatoshis::const_from_u64(<span class="number">15000</span>),
             <span class="prelude-val">None</span>,
             <span class="prelude-val">None</span>,
             T::SHIELDED_PROTOCOL,
@@ -4685,7 +4672,7 @@
     <span class="kw">let </span>dfvk = T::test_account_fvk(<span class="kw-2">&amp;</span>st);
 
     <span class="comment">// Add funds to the wallet in a single note
-    </span><span class="kw">let </span>value = NonNegativeAmount::const_from_u64(<span class="number">70000</span>);
+    </span><span class="kw">let </span>value = Zatoshis::const_from_u64(<span class="number">70000</span>);
     <span class="kw">let </span>(h, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h, <span class="number">1</span>);
 
@@ -4704,7 +4691,7 @@
             fee_rule,
             min_confirmations,
             <span class="kw-2">&amp;</span>to,
-            NonNegativeAmount::const_from_u64(<span class="number">50000</span>),
+            Zatoshis::const_from_u64(<span class="number">50000</span>),
             <span class="prelude-val">None</span>,
             <span class="prelude-val">None</span>,
             T::SHIELDED_PROTOCOL,
@@ -4733,7 +4720,7 @@
     <span class="kw">let </span>dfvk = T::test_account_fvk(<span class="kw-2">&amp;</span>st);
 
     <span class="comment">// Add funds to the wallet in a single note owned by the internal spending key
-    </span><span class="kw">let </span>value = NonNegativeAmount::const_from_u64(<span class="number">70000</span>);
+    </span><span class="kw">let </span>value = Zatoshis::const_from_u64(<span class="number">70000</span>);
     <span class="kw">let </span>(h, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::Internal, value);
     st.scan_cached_blocks(h, <span class="number">1</span>);
 
@@ -4743,10 +4730,7 @@
 
     <span class="comment">// Value is considered pending at 10 confirmations.
     </span><span class="macro">assert_eq!</span>(st.get_pending_shielded_balance(account_id, <span class="number">10</span>), value);
-    <span class="macro">assert_eq!</span>(
-        st.get_spendable_balance(account_id, <span class="number">10</span>),
-        NonNegativeAmount::ZERO
-    );
+    <span class="macro">assert_eq!</span>(st.get_spendable_balance(account_id, <span class="number">10</span>), Zatoshis::ZERO);
 
     <span class="kw">let </span>change_note_scope = st
         .wallet()
@@ -4767,7 +4751,7 @@
             fee_rule,
             min_confirmations,
             <span class="kw-2">&amp;</span>to,
-            NonNegativeAmount::const_from_u64(<span class="number">50000</span>),
+            Zatoshis::const_from_u64(<span class="number">50000</span>),
             <span class="prelude-val">None</span>,
             <span class="prelude-val">None</span>,
             T::SHIELDED_PROTOCOL,
@@ -4809,17 +4793,17 @@
     <span class="kw">let </span>dfvk2 = T::sk_to_fvk(T::usk_to_sk(<span class="kw-2">&amp;</span>usk2));
 
     <span class="comment">// Add funds to the wallet in a single note
-    </span><span class="kw">let </span>value = NonNegativeAmount::from_u64(<span class="number">100000</span>).unwrap();
+    </span><span class="kw">let </span>value = Zatoshis::from_u64(<span class="number">100000</span>).unwrap();
     <span class="kw">let </span>(h, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h, <span class="number">1</span>);
 
     <span class="comment">// Spendable balance matches total balance
     </span><span class="macro">assert_eq!</span>(st.get_total_balance(account1), value);
     <span class="macro">assert_eq!</span>(st.get_spendable_balance(account1, <span class="number">1</span>), value);
-    <span class="macro">assert_eq!</span>(st.get_total_balance(account2), NonNegativeAmount::ZERO);
+    <span class="macro">assert_eq!</span>(st.get_total_balance(account2), Zatoshis::ZERO);
 
-    <span class="kw">let </span>amount_sent = NonNegativeAmount::from_u64(<span class="number">20000</span>).unwrap();
-    <span class="kw">let </span>amount_legacy_change = NonNegativeAmount::from_u64(<span class="number">30000</span>).unwrap();
+    <span class="kw">let </span>amount_sent = Zatoshis::from_u64(<span class="number">20000</span>).unwrap();
+    <span class="kw">let </span>amount_legacy_change = Zatoshis::from_u64(<span class="number">30000</span>).unwrap();
     <span class="kw">let </span>addr = T::fvk_default_address(<span class="kw-2">&amp;</span>dfvk);
     <span class="kw">let </span>addr2 = T::fvk_default_address(<span class="kw-2">&amp;</span>dfvk2);
     <span class="kw">let </span>req = TransactionRequest::new(<span class="macro">vec!</span>[
@@ -4909,7 +4893,7 @@
     </span><span class="kw">let </span>(h1, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(
         <span class="kw-2">&amp;</span>dfvk,
         AddressType::Internal,
-        NonNegativeAmount::const_from_u64(<span class="number">50000</span>),
+        Zatoshis::const_from_u64(<span class="number">50000</span>),
     );
 
     <span class="comment">// Add 10 dust notes to the wallet
@@ -4917,14 +4901,14 @@
         st.generate_next_block(
             <span class="kw-2">&amp;</span>dfvk,
             AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(<span class="number">1000</span>),
+            Zatoshis::const_from_u64(<span class="number">1000</span>),
         );
     }
 
     st.scan_cached_blocks(h1, <span class="number">11</span>);
 
     <span class="comment">// Spendable balance matches total balance
-    </span><span class="kw">let </span>total = NonNegativeAmount::const_from_u64(<span class="number">60000</span>);
+    </span><span class="kw">let </span>total = Zatoshis::const_from_u64(<span class="number">60000</span>);
     <span class="macro">assert_eq!</span>(st.get_total_balance(account_id), total);
     <span class="macro">assert_eq!</span>(st.get_spendable_balance(account_id, <span class="number">1</span>), total);
 
@@ -4935,7 +4919,7 @@
     <span class="comment">// This first request will fail due to insufficient non-dust funds
     </span><span class="kw">let </span>req = TransactionRequest::new(<span class="macro">vec!</span>[Payment::without_memo(
         T::fvk_default_address(<span class="kw-2">&amp;</span>dfvk).to_zcash_address(st.network()),
-        NonNegativeAmount::const_from_u64(<span class="number">50000</span>),
+        Zatoshis::const_from_u64(<span class="number">50000</span>),
     )])
     .unwrap();
 
@@ -4949,15 +4933,15 @@
             NonZeroU32::new(<span class="number">1</span>).unwrap(),
         ),
         <span class="prelude-val">Err</span>(Error::InsufficientFunds { available, required })
-            <span class="kw">if </span>available == NonNegativeAmount::const_from_u64(<span class="number">51000</span>)
-            &amp;&amp; required == NonNegativeAmount::const_from_u64(<span class="number">60000</span>)
+            <span class="kw">if </span>available == Zatoshis::const_from_u64(<span class="number">51000</span>)
+            &amp;&amp; required == Zatoshis::const_from_u64(<span class="number">60000</span>)
     );
 
     <span class="comment">// This request will succeed, spending a single dust input to pay the 10000
     // ZAT fee in addition to the 41000 ZAT output to the recipient
     </span><span class="kw">let </span>req = TransactionRequest::new(<span class="macro">vec!</span>[Payment::without_memo(
         T::fvk_default_address(<span class="kw-2">&amp;</span>dfvk).to_zcash_address(st.network()),
-        NonNegativeAmount::const_from_u64(<span class="number">41000</span>),
+        Zatoshis::const_from_u64(<span class="number">41000</span>),
     )])
     .unwrap();
 
@@ -4980,7 +4964,7 @@
     // in the total balance.
     </span><span class="macro">assert_eq!</span>(
         st.get_total_balance(account_id),
-        (total - NonNegativeAmount::const_from_u64(<span class="number">10000</span>)).unwrap()
+        (total - Zatoshis::const_from_u64(<span class="number">10000</span>)).unwrap()
     );
 }
 
@@ -5010,14 +4994,14 @@
     </span><span class="kw">let </span>(h, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(
         <span class="kw-2">&amp;</span>dfvk,
         AddressType::Internal,
-        NonNegativeAmount::const_from_u64(<span class="number">50000</span>),
+        Zatoshis::const_from_u64(<span class="number">50000</span>),
     );
     st.scan_cached_blocks(h, <span class="number">1</span>);
 
     <span class="kw">let </span>utxo = WalletTransparentOutput::from_parts(
         OutPoint::fake(),
         TxOut {
-            value: NonNegativeAmount::const_from_u64(<span class="number">100000</span>),
+            value: Zatoshis::const_from_u64(<span class="number">100000</span>),
             script_pubkey: taddr.script(),
         },
         <span class="prelude-val">Some</span>(h),
@@ -5035,7 +5019,7 @@
         .shield_transparent_funds(
             <span class="kw-2">&amp;</span>input_selector,
             <span class="kw-2">&amp;</span>change_strategy,
-            NonNegativeAmount::from_u64(<span class="number">10000</span>).unwrap(),
+            Zatoshis::from_u64(<span class="number">10000</span>).unwrap(),
             account.usk(),
             <span class="kw-2">&amp;</span>[<span class="kw-2">*</span>taddr],
             account.id(),
@@ -5129,7 +5113,7 @@
         .build();
 
     <span class="comment">// Generate 9 blocks that have no value for us, starting at the birthday height.
-    </span><span class="kw">let </span>not_our_value = NonNegativeAmount::const_from_u64(<span class="number">10000</span>);
+    </span><span class="kw">let </span>not_our_value = Zatoshis::const_from_u64(<span class="number">10000</span>);
     <span class="kw">let </span>not_our_key = T::random_fvk(st.rng_mut());
     <span class="kw">let </span>(initial_height, <span class="kw">_</span>, <span class="kw">_</span>) =
         st.generate_next_block(<span class="kw-2">&amp;</span>not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -5141,7 +5125,7 @@
     </span><span class="kw">let </span>(received_tx_height, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(
         <span class="kw-2">&amp;</span>T::test_account_fvk(<span class="kw-2">&amp;</span>st),
         AddressType::DefaultExternal,
-        NonNegativeAmount::const_from_u64(<span class="number">500000</span>),
+        Zatoshis::const_from_u64(<span class="number">500000</span>),
     );
 
     <span class="comment">// Generate some more blocks to get above our anchor height
@@ -5159,7 +5143,7 @@
     <span class="kw">let </span>spendable = T::select_spendable_notes(
         <span class="kw-2">&amp;</span>st,
         account_id,
-        NonNegativeAmount::const_from_u64(<span class="number">300000</span>),
+        Zatoshis::const_from_u64(<span class="number">300000</span>),
         received_tx_height + <span class="number">10</span>,
         <span class="kw-2">&amp;</span>[],
     )
@@ -5174,7 +5158,7 @@
     </span><span class="kw">let </span>spendable = T::select_spendable_notes(
         <span class="kw-2">&amp;</span>st,
         account_id,
-        NonNegativeAmount::const_from_u64(<span class="number">300000</span>),
+        Zatoshis::const_from_u64(<span class="number">300000</span>),
         received_tx_height + <span class="number">10</span>,
         <span class="kw-2">&amp;</span>[],
     )
@@ -5200,14 +5184,14 @@
     </span>st.generate_next_block(
         <span class="kw-2">&amp;</span>dfvk,
         AddressType::DefaultExternal,
-        NonNegativeAmount::const_from_u64(<span class="number">500000</span>),
+        Zatoshis::const_from_u64(<span class="number">500000</span>),
     );
     st.scan_cached_blocks(account.birthday().height(), <span class="number">1</span>);
 
     <span class="comment">// Create a gap of 10 blocks having no shielded outputs, then add a block that doesn't
     // belong to us so that we can get a checkpoint in the tree.
     </span><span class="kw">let </span>not_our_key = T::sk_to_fvk(<span class="kw-2">&amp;</span>T::sk(<span class="kw-2">&amp;</span>[<span class="number">0xf5</span>; <span class="number">32</span>]));
-    <span class="kw">let </span>not_our_value = NonNegativeAmount::const_from_u64(<span class="number">10000</span>);
+    <span class="kw">let </span>not_our_value = Zatoshis::const_from_u64(<span class="number">10000</span>);
     st.generate_block_at(
         account.birthday().height() + <span class="number">10</span>,
         BlockHash([<span class="number">0</span>; <span class="number">32</span>]),
@@ -5228,7 +5212,7 @@
     </span><span class="kw">let </span>spendable = T::select_spendable_notes(
         <span class="kw-2">&amp;</span>st,
         account.id(),
-        NonNegativeAmount::const_from_u64(<span class="number">300000</span>),
+        Zatoshis::const_from_u64(<span class="number">300000</span>),
         account.birthday().height() + <span class="number">5</span>,
         <span class="kw-2">&amp;</span>[],
     )
@@ -5242,7 +5226,7 @@
     <span class="kw">let </span>to = T::fvk_default_address(<span class="kw-2">&amp;</span>not_our_key);
     <span class="kw">let </span>req = TransactionRequest::new(<span class="macro">vec!</span>[Payment::without_memo(
         to.to_zcash_address(st.network()),
-        NonNegativeAmount::const_from_u64(<span class="number">10000</span>),
+        Zatoshis::const_from_u64(<span class="number">10000</span>),
     )])
     .unwrap();
 
@@ -5279,7 +5263,7 @@
     <span class="kw">let </span>p1_fvk = P1::test_account_fvk(<span class="kw-2">&amp;</span>st);
     <span class="kw">let </span>p1_to = P1::fvk_default_address(<span class="kw-2">&amp;</span>p1_fvk);
 
-    <span class="kw">let </span>note_value = NonNegativeAmount::const_from_u64(<span class="number">350000</span>);
+    <span class="kw">let </span>note_value = Zatoshis::const_from_u64(<span class="number">350000</span>);
     st.generate_next_block(<span class="kw-2">&amp;</span>p0_fvk, AddressType::DefaultExternal, note_value);
     st.scan_cached_blocks(account.birthday().height(), <span class="number">2</span>);
 
@@ -5287,7 +5271,7 @@
     <span class="macro">assert_eq!</span>(st.get_total_balance(account.id()), initial_balance);
     <span class="macro">assert_eq!</span>(st.get_spendable_balance(account.id(), <span class="number">1</span>), initial_balance);
 
-    <span class="kw">let </span>transfer_amount = NonNegativeAmount::const_from_u64(<span class="number">200000</span>);
+    <span class="kw">let </span>transfer_amount = Zatoshis::const_from_u64(<span class="number">200000</span>);
     <span class="kw">let </span>p0_to_p1 = TransactionRequest::new(<span class="macro">vec!</span>[Payment::without_memo(
         p1_to.to_zcash_address(st.network()),
         transfer_amount,
@@ -5312,7 +5296,7 @@
     <span class="kw">let </span>step0 = <span class="kw-2">&amp;</span>proposal0.steps().head;
 
     <span class="comment">// We expect 4 logical actions, two per pool (due to padding).
-    </span><span class="kw">let </span>expected_fee = NonNegativeAmount::const_from_u64(<span class="number">20000</span>);
+    </span><span class="kw">let </span>expected_fee = Zatoshis::const_from_u64(<span class="number">20000</span>);
     <span class="macro">assert_eq!</span>(step0.balance().fee_required(), expected_fee);
 
     <span class="kw">let </span>expected_change = (note_value - transfer_amount - expected_fee).unwrap();
@@ -5368,7 +5352,7 @@
     <span class="kw">let </span>p1_fvk = P1::test_account_fvk(<span class="kw-2">&amp;</span>st);
     <span class="kw">let </span>p1_to = P1::fvk_default_address(<span class="kw-2">&amp;</span>p1_fvk);
 
-    <span class="kw">let </span>note_value = NonNegativeAmount::const_from_u64(<span class="number">350000</span>);
+    <span class="kw">let </span>note_value = Zatoshis::const_from_u64(<span class="number">350000</span>);
     st.generate_next_block(<span class="kw-2">&amp;</span>p0_fvk, AddressType::DefaultExternal, note_value);
     st.generate_next_block(<span class="kw-2">&amp;</span>p1_fvk, AddressType::DefaultExternal, note_value);
     st.scan_cached_blocks(account.birthday().height(), <span class="number">2</span>);
@@ -5377,7 +5361,7 @@
     <span class="macro">assert_eq!</span>(st.get_total_balance(account.id()), initial_balance);
     <span class="macro">assert_eq!</span>(st.get_spendable_balance(account.id(), <span class="number">1</span>), initial_balance);
 
-    <span class="kw">let </span>transfer_amount = NonNegativeAmount::const_from_u64(<span class="number">200000</span>);
+    <span class="kw">let </span>transfer_amount = Zatoshis::const_from_u64(<span class="number">200000</span>);
     <span class="kw">let </span>p0_to_p1 = TransactionRequest::new(<span class="macro">vec!</span>[Payment::without_memo(
         p1_to.to_zcash_address(st.network()),
         transfer_amount,
@@ -5405,7 +5389,7 @@
 
     <span class="comment">// We expect 2 logical actions, since either pool can pay the full balance required
     // and note selection should choose the fully-private path.
-    </span><span class="kw">let </span>expected_fee = NonNegativeAmount::const_from_u64(<span class="number">10000</span>);
+    </span><span class="kw">let </span>expected_fee = Zatoshis::const_from_u64(<span class="number">10000</span>);
     <span class="macro">assert_eq!</span>(step0.balance().fee_required(), expected_fee);
 
     <span class="kw">let </span>expected_change = (note_value - transfer_amount - expected_fee).unwrap();
@@ -5458,7 +5442,7 @@
     <span class="kw">let </span>p1_fvk = P1::test_account_fvk(<span class="kw-2">&amp;</span>st);
     <span class="kw">let </span>(p1_to, <span class="kw">_</span>) = account.usk().default_transparent_address();
 
-    <span class="kw">let </span>note_value = NonNegativeAmount::const_from_u64(<span class="number">350000</span>);
+    <span class="kw">let </span>note_value = Zatoshis::const_from_u64(<span class="number">350000</span>);
     st.generate_next_block(<span class="kw-2">&amp;</span>p0_fvk, AddressType::DefaultExternal, note_value);
     st.generate_next_block(<span class="kw-2">&amp;</span>p1_fvk, AddressType::DefaultExternal, note_value);
     st.scan_cached_blocks(account.birthday().height(), <span class="number">2</span>);
@@ -5467,7 +5451,7 @@
     <span class="macro">assert_eq!</span>(st.get_total_balance(account.id()), initial_balance);
     <span class="macro">assert_eq!</span>(st.get_spendable_balance(account.id(), <span class="number">1</span>), initial_balance);
 
-    <span class="kw">let </span>transfer_amount = NonNegativeAmount::const_from_u64(<span class="number">200000</span>);
+    <span class="kw">let </span>transfer_amount = Zatoshis::const_from_u64(<span class="number">200000</span>);
     <span class="kw">let </span>p0_to_p1 = TransactionRequest::new(<span class="macro">vec!</span>[Payment::without_memo(
         Address::Transparent(p1_to).to_zcash_address(st.network()),
         transfer_amount,
@@ -5494,7 +5478,7 @@
     <span class="kw">let </span>step0 = <span class="kw-2">&amp;</span>proposal0.steps().head;
 
     <span class="comment">// We expect 3 logical actions, one for the transparent output and two for the source pool.
-    </span><span class="kw">let </span>expected_fee = NonNegativeAmount::const_from_u64(<span class="number">15000</span>);
+    </span><span class="kw">let </span>expected_fee = Zatoshis::const_from_u64(<span class="number">15000</span>);
     <span class="macro">assert_eq!</span>(step0.balance().fee_required(), expected_fee);
 
     <span class="kw">let </span>expected_change = (note_value - transfer_amount - expected_fee).unwrap();
@@ -5547,7 +5531,7 @@
 
     <span class="comment">// Add some funds to the wallet; we add two notes to allow successive spends. Also,
     // we will generate a note in the P1 pool to ensure that we have some tree state.
-    </span><span class="kw">let </span>note_value = NonNegativeAmount::const_from_u64(<span class="number">500000</span>);
+    </span><span class="kw">let </span>note_value = Zatoshis::const_from_u64(<span class="number">500000</span>);
     <span class="kw">let </span>(start_height, <span class="kw">_</span>, <span class="kw">_</span>) =
         st.generate_next_block(<span class="kw-2">&amp;</span>p0_fvk, AddressType::DefaultExternal, note_value);
     st.generate_next_block(<span class="kw-2">&amp;</span>p0_fvk, AddressType::DefaultExternal, note_value);
@@ -5579,7 +5563,7 @@
         single_output_change_strategy(StandardFeeRule::Zip317, <span class="prelude-val">None</span>, P1::SHIELDED_PROTOCOL);
 
     <span class="comment">// First, send funds just to P0
-    </span><span class="kw">let </span>transfer_amount = NonNegativeAmount::const_from_u64(<span class="number">200000</span>);
+    </span><span class="kw">let </span>transfer_amount = Zatoshis::const_from_u64(<span class="number">200000</span>);
     <span class="kw">let </span>p0_transfer = TransactionRequest::new(<span class="macro">vec!</span>[Payment::without_memo(
         P0::random_address(st.rng_mut()).to_zcash_address(st.network()),
         transfer_amount,
@@ -5597,7 +5581,7 @@
         .unwrap();
     st.generate_next_block_including(<span class="kw-2">*</span>res.first());
 
-    <span class="kw">let </span>expected_fee = NonNegativeAmount::const_from_u64(<span class="number">10000</span>);
+    <span class="kw">let </span>expected_fee = Zatoshis::const_from_u64(<span class="number">10000</span>);
     <span class="kw">let </span>expected_change = (note_value - transfer_amount - expected_fee).unwrap();
     <span class="macro">assert_eq!</span>(
         st.get_total_balance(acct_id),
@@ -5708,7 +5692,7 @@
     <span class="kw">let </span>p0_fvk = P0::random_fvk(st.rng_mut());
     <span class="kw">let </span>p1_fvk = P1::random_fvk(st.rng_mut());
 
-    <span class="kw">let </span>note_value = NonNegativeAmount::const_from_u64(<span class="number">10000</span>);
+    <span class="kw">let </span>note_value = Zatoshis::const_from_u64(<span class="number">10000</span>);
     <span class="comment">// Generate 100 P0 blocks, then 100 P1 blocks, then another 100 P0 blocks.
     </span><span class="kw">for _ in </span><span class="number">0</span>..<span class="number">10 </span>{
         <span class="kw">for _ in </span><span class="number">0</span>..<span class="number">10 </span>{
@@ -5745,7 +5729,7 @@
     </span><span class="kw">let </span>(h1, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(
         <span class="kw-2">&amp;</span>dfvk,
         AddressType::DefaultExternal,
-        NonNegativeAmount::const_from_u64(<span class="number">5</span>),
+        Zatoshis::const_from_u64(<span class="number">5</span>),
     );
 
     <span class="comment">// Scan the cache
@@ -5755,7 +5739,7 @@
     </span><span class="kw">let </span>(h2, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(
         <span class="kw-2">&amp;</span>dfvk,
         AddressType::DefaultExternal,
-        NonNegativeAmount::const_from_u64(<span class="number">7</span>),
+        Zatoshis::const_from_u64(<span class="number">7</span>),
     );
 
     <span class="comment">// Scanning should detect no inconsistencies
@@ -5780,12 +5764,12 @@
     </span><span class="kw">let </span>(h, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(
         <span class="kw-2">&amp;</span>dfvk,
         AddressType::DefaultExternal,
-        NonNegativeAmount::const_from_u64(<span class="number">5</span>),
+        Zatoshis::const_from_u64(<span class="number">5</span>),
     );
     <span class="kw">let </span>(last_contiguous_height, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(
         <span class="kw-2">&amp;</span>dfvk,
         AddressType::DefaultExternal,
-        NonNegativeAmount::const_from_u64(<span class="number">7</span>),
+        Zatoshis::const_from_u64(<span class="number">7</span>),
     );
 
     <span class="comment">// Scanning the cache should find no inconsistencies
@@ -5799,7 +5783,7 @@
         <span class="kw-2">&amp;</span>[FakeCompactOutput::new(
             <span class="kw-2">&amp;</span>dfvk,
             AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(<span class="number">8</span>),
+            Zatoshis::const_from_u64(<span class="number">8</span>),
         )],
         <span class="number">2</span>,
         <span class="number">2</span>,
@@ -5808,7 +5792,7 @@
     st.generate_next_block(
         <span class="kw-2">&amp;</span>dfvk,
         AddressType::DefaultExternal,
-        NonNegativeAmount::const_from_u64(<span class="number">3</span>),
+        Zatoshis::const_from_u64(<span class="number">3</span>),
     );
 
     <span class="comment">// Data+cache chain should be invalid at the data/cache boundary
@@ -5840,8 +5824,8 @@
     </span><span class="macro">assert_eq!</span>(st.get_wallet_summary(<span class="number">0</span>), <span class="prelude-val">None</span>);
 
     <span class="comment">// Create fake CompactBlocks sending value to the address
-    </span><span class="kw">let </span>value = NonNegativeAmount::const_from_u64(<span class="number">5</span>);
-    <span class="kw">let </span>value2 = NonNegativeAmount::const_from_u64(<span class="number">7</span>);
+    </span><span class="kw">let </span>value = Zatoshis::const_from_u64(<span class="number">5</span>);
+    <span class="kw">let </span>value2 = Zatoshis::const_from_u64(<span class="number">7</span>);
     <span class="kw">let </span>(h, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value);
     st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value2);
 
@@ -6034,7 +6018,7 @@
     <span class="kw">let </span>account = st.test_account().cloned().unwrap();
     <span class="kw">let </span>dfvk = T::test_account_fvk(<span class="kw-2">&amp;</span>st);
 
-    <span class="kw">let </span>value = NonNegativeAmount::const_from_u64(<span class="number">50000</span>);
+    <span class="kw">let </span>value = Zatoshis::const_from_u64(<span class="number">50000</span>);
     <span class="kw">let </span>(h1, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h1, <span class="number">1</span>);
     <span class="macro">assert_eq!</span>(st.get_total_balance(account.id()), value);
@@ -6050,13 +6034,13 @@
     </span>st.scan_cached_blocks(h2, <span class="number">1</span>);
     <span class="macro">assert_eq!</span>(
         st.get_total_balance(account.id()),
-        NonNegativeAmount::const_from_u64(<span class="number">150_000</span>)
+        Zatoshis::const_from_u64(<span class="number">150_000</span>)
     );
 
     <span class="comment">// We can spend the received notes
     </span><span class="kw">let </span>req = TransactionRequest::new(<span class="macro">vec!</span>[Payment::without_memo(
         T::fvk_default_address(<span class="kw-2">&amp;</span>dfvk).to_zcash_address(st.network()),
-        NonNegativeAmount::const_from_u64(<span class="number">110_000</span>),
+        Zatoshis::const_from_u64(<span class="number">110_000</span>),
     )])
     .unwrap();
 
@@ -6097,7 +6081,7 @@
     </span><span class="macro">assert_eq!</span>(st.get_wallet_summary(<span class="number">0</span>), <span class="prelude-val">None</span>);
 
     <span class="comment">// Create a fake CompactBlock sending value to the address
-    </span><span class="kw">let </span>value = NonNegativeAmount::const_from_u64(<span class="number">5</span>);
+    </span><span class="kw">let </span>value = Zatoshis::const_from_u64(<span class="number">5</span>);
     <span class="kw">let </span>(h1, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value);
 
     <span class="comment">// Scan the cache
@@ -6110,7 +6094,7 @@
     </span><span class="macro">assert_eq!</span>(st.get_total_balance(account.id()), value);
 
     <span class="comment">// Create a second fake CompactBlock sending more value to the address
-    </span><span class="kw">let </span>value2 = NonNegativeAmount::const_from_u64(<span class="number">7</span>);
+    </span><span class="kw">let </span>value2 = Zatoshis::const_from_u64(<span class="number">7</span>);
     <span class="kw">let </span>(h2, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value2);
 
     <span class="comment">// Scan the cache again
@@ -6147,7 +6131,7 @@
     </span><span class="macro">assert_eq!</span>(st.get_wallet_summary(<span class="number">0</span>), <span class="prelude-val">None</span>);
 
     <span class="comment">// Create a fake CompactBlock sending value to the address
-    </span><span class="kw">let </span>value = NonNegativeAmount::const_from_u64(<span class="number">5</span>);
+    </span><span class="kw">let </span>value = Zatoshis::const_from_u64(<span class="number">5</span>);
     <span class="kw">let </span>(received_height, <span class="kw">_</span>, nf) =
         st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value);
 
@@ -6160,7 +6144,7 @@
     <span class="comment">// Create a second fake CompactBlock spending value from the address
     </span><span class="kw">let </span>not_our_key = T::sk_to_fvk(<span class="kw-2">&amp;</span>T::sk(<span class="kw-2">&amp;</span>[<span class="number">0xf5</span>; <span class="number">32</span>]));
     <span class="kw">let </span>to2 = T::fvk_default_address(<span class="kw-2">&amp;</span>not_our_key);
-    <span class="kw">let </span>value2 = NonNegativeAmount::const_from_u64(<span class="number">2</span>);
+    <span class="kw">let </span>value2 = Zatoshis::const_from_u64(<span class="number">2</span>);
     <span class="kw">let </span>(spent_height, <span class="kw">_</span>) = st.generate_next_block_spending(<span class="kw-2">&amp;</span>dfvk, (nf, value), to2, value2);
 
     <span class="comment">// Scan the cache again
@@ -6193,14 +6177,14 @@
     </span><span class="macro">assert_eq!</span>(st.get_wallet_summary(<span class="number">0</span>), <span class="prelude-val">None</span>);
 
     <span class="comment">// Create a fake CompactBlock sending value to the address
-    </span><span class="kw">let </span>value = NonNegativeAmount::const_from_u64(<span class="number">5</span>);
+    </span><span class="kw">let </span>value = Zatoshis::const_from_u64(<span class="number">5</span>);
     <span class="kw">let </span>(received_height, <span class="kw">_</span>, nf) =
         st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value);
 
     <span class="comment">// Create a second fake CompactBlock spending value from the address
     </span><span class="kw">let </span>not_our_key = T::sk_to_fvk(<span class="kw-2">&amp;</span>T::sk(<span class="kw-2">&amp;</span>[<span class="number">0xf5</span>; <span class="number">32</span>]));
     <span class="kw">let </span>to2 = T::fvk_default_address(<span class="kw-2">&amp;</span>not_our_key);
-    <span class="kw">let </span>value2 = NonNegativeAmount::const_from_u64(<span class="number">2</span>);
+    <span class="kw">let </span>value2 = Zatoshis::const_from_u64(<span class="number">2</span>);
     <span class="kw">let </span>(spent_height, <span class="kw">_</span>) = st.generate_next_block_spending(<span class="kw-2">&amp;</span>dfvk, (nf, value), to2, value2);
 
     <span class="comment">// Scan the spending block first.
@@ -6240,11 +6224,11 @@
     <span class="kw">let </span>dfvk = T::test_account_fvk(<span class="kw-2">&amp;</span>st);
 
     <span class="comment">// Create 10 blocks with successively increasing value
-    </span><span class="kw">let </span>value = NonNegativeAmount::const_from_u64(<span class="number">100_0000</span>);
+    </span><span class="kw">let </span>value = Zatoshis::const_from_u64(<span class="number">100_0000</span>);
     <span class="kw">let </span>(h0, <span class="kw">_</span>, <span class="kw">_</span>) = st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value);
     <span class="kw">let </span><span class="kw-2">mut </span>note_values = <span class="macro">vec!</span>[value];
     <span class="kw">for </span>i <span class="kw">in </span><span class="number">2</span>..=<span class="number">10 </span>{
-        <span class="kw">let </span>value = NonNegativeAmount::const_from_u64(i * <span class="number">100_0000</span>);
+        <span class="kw">let </span>value = Zatoshis::const_from_u64(i * <span class="number">100_0000</span>);
         st.generate_next_block(<span class="kw-2">&amp;</span>dfvk, AddressType::DefaultExternal, value);
         note_values.push(value);
     }
@@ -6261,12 +6245,12 @@
 
     test_meta(
         <span class="kw-2">&amp;</span>st,
-        NoteFilter::ExceedsMinValue(NonNegativeAmount::const_from_u64(<span class="number">1000_0000</span>)),
+        NoteFilter::ExceedsMinValue(Zatoshis::const_from_u64(<span class="number">1000_0000</span>)),
         <span class="prelude-val">Some</span>(<span class="number">1</span>),
     );
     test_meta(
         <span class="kw-2">&amp;</span>st,
-        NoteFilter::ExceedsMinValue(NonNegativeAmount::const_from_u64(<span class="number">500_0000</span>)),
+        NoteFilter::ExceedsMinValue(Zatoshis::const_from_u64(<span class="number">500_0000</span>)),
         <span class="prelude-val">Some</span>(<span class="number">6</span>),
     );
     test_meta(
@@ -6352,14 +6336,14 @@
     <span class="kw">let </span>p1_to = P1::fvk_default_address(<span class="kw-2">&amp;</span>p1_fvk);
 
     <span class="comment">// Only mine a block in P0 to ensure the transactions source is there.
-    </span><span class="kw">let </span>note_value = NonNegativeAmount::const_from_u64(<span class="number">350000</span>);
+    </span><span class="kw">let </span>note_value = Zatoshis::const_from_u64(<span class="number">350000</span>);
     st.generate_next_block(<span class="kw-2">&amp;</span>p0_fvk, AddressType::DefaultExternal, note_value);
     st.scan_cached_blocks(account.birthday().height(), <span class="number">1</span>);
 
     <span class="macro">assert_eq!</span>(st.get_total_balance(account.id()), note_value);
     <span class="macro">assert_eq!</span>(st.get_spendable_balance(account.id(), <span class="number">1</span>), note_value);
 
-    <span class="kw">let </span>transfer_amount = NonNegativeAmount::const_from_u64(<span class="number">200000</span>);
+    <span class="kw">let </span>transfer_amount = Zatoshis::const_from_u64(<span class="number">200000</span>);
     <span class="kw">let </span>p0_to_p1 = TransactionRequest::new(<span class="macro">vec!</span>[Payment::without_memo(
         p1_to.to_zcash_address(st.network()),
         transfer_amount,

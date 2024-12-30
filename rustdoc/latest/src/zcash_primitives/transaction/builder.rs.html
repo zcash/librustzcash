@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/builder.rs`."><title>builder.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/</div>builder.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/builder.rs`."><title>builder.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/</div>builder.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -1365,59 +1365,38 @@
 <a href="#1364" id="1364">1364</a>
 <a href="#1365" id="1365">1365</a>
 <a href="#1366" id="1366">1366</a>
-<a href="#1367" id="1367">1367</a>
-<a href="#1368" id="1368">1368</a>
-<a href="#1369" id="1369">1369</a>
-<a href="#1370" id="1370">1370</a>
-<a href="#1371" id="1371">1371</a>
-<a href="#1372" id="1372">1372</a>
-<a href="#1373" id="1373">1373</a>
-<a href="#1374" id="1374">1374</a>
-<a href="#1375" id="1375">1375</a>
-<a href="#1376" id="1376">1376</a>
-<a href="#1377" id="1377">1377</a>
-<a href="#1378" id="1378">1378</a>
-<a href="#1379" id="1379">1379</a>
-<a href="#1380" id="1380">1380</a>
-<a href="#1381" id="1381">1381</a>
-<a href="#1382" id="1382">1382</a>
-<a href="#1383" id="1383">1383</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs for building transactions.
+<a href="#1367" id="1367">1367</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs for building transactions.
 
-</span><span class="kw">use </span>std::cmp::Ordering;
+</span><span class="kw">use </span>rand::{CryptoRng, RngCore};
+<span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::error;
 <span class="kw">use </span>std::fmt;
 <span class="kw">use </span>std::sync::mpsc::Sender;
 
-<span class="kw">use </span>rand::{CryptoRng, RngCore};
-<span class="kw">use </span>zcash_protocol::consensus::Parameters;
-
-<span class="kw">use crate</span>::{
-    consensus::{<span class="self">self</span>, BlockHeight, BranchId, NetworkUpgrade},
-    legacy::TransparentAddress,
+<span class="kw">use </span>::sapling::{
+    builder::SaplingMetadata,
+    prover::{OutputProver, SpendProver},
+    Note, PaymentAddress,
+};
+<span class="kw">use </span>::transparent::{address::TransparentAddress, builder::TransparentBuilder, bundle::TxOut};
+<span class="kw">use </span>zcash_protocol::{
+    consensus::{<span class="self">self</span>, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::MemoBytes,
-    sapling::{
-        <span class="self">self</span>,
-        builder::SaplingMetadata,
-        prover::{OutputProver, SpendProver},
-        Note, PaymentAddress,
+    value::{BalanceError, ZatBalance, Zatoshis},
+};
+
+<span class="kw">use </span><span class="kw">crate</span>::transaction::{
+    fees::{
+        transparent::{InputView, OutputView},
+        FeeRule,
     },
-    transaction::{
-        components::{
-            amount::{Amount, BalanceError},
-            transparent::{builder::TransparentBuilder, TxOut},
-        },
-        fees::{
-            transparent::{InputView, OutputView},
-            FeeRule,
-        },
-        sighash::{signature_hash, SignableInput},
-        txid::TxIdDigester,
-        Transaction, TransactionData, TxVersion, Unauthorized,
-    },
+    sighash::{signature_hash, SignableInput},
+    txid::TxIdDigester,
+    Transaction, TransactionData, TxVersion, Unauthorized,
 };
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-</span><span class="kw">use </span><span class="kw">crate</span>::transaction::components::transparent::builder::TransparentInputInfo;
+</span><span class="kw">use </span>::transparent::builder::TransparentInputInfo;
 
 <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
 </span><span class="kw">use </span>std::convert::Infallible;
@@ -1434,9 +1413,8 @@
     },
 };
 
-<span class="kw">use </span><span class="kw">super</span>::components::amount::NonNegativeAmount;
 <span class="kw">use </span><span class="kw">super</span>::components::sapling::zip212_enforcement;
-<span class="kw">use </span><span class="kw">super</span>::components::transparent::builder::TransparentSigningSet;
+<span class="kw">use </span>::transparent::builder::TransparentSigningSet;
 
 <span class="doccomment">/// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// &lt;https://zips.z.cash/zip-0203#changes-for-blossom&gt;
@@ -1463,10 +1441,10 @@
 </span><span class="kw">pub enum </span>Error&lt;FE&gt; {
     <span class="doccomment">/// Insufficient funds were provided to the transaction builder; the given
     /// additional amount is required in order to construct the transaction.
-    </span>InsufficientFunds(Amount),
+    </span>InsufficientFunds(ZatBalance),
     <span class="doccomment">/// The transaction has inputs in excess of outputs and fees; the user must
     /// add a change output.
-    </span>ChangeRequired(Amount),
+    </span>ChangeRequired(ZatBalance),
     <span class="doccomment">/// An error occurred in computing the fees for a transaction.
     </span>Fee(FeeError&lt;FE&gt;),
     <span class="doccomment">/// An overflow or underflow occurred when computing value balances
@@ -1867,7 +1845,7 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         ovk: <span class="prelude-ty">Option</span>&lt;sapling::keys::OutgoingViewingKey&gt;,
         to: PaymentAddress,
-        value: NonNegativeAmount,
+        value: Zatoshis,
         memo: MemoBytes,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), Error&lt;FE&gt;&gt; {
         <span class="self">self</span>.sapling_builder
@@ -1897,23 +1875,25 @@
     </span><span class="kw">pub fn </span>add_transparent_output(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         to: <span class="kw-2">&amp;</span>TransparentAddress,
-        value: NonNegativeAmount,
+        value: Zatoshis,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), transparent::builder::Error&gt; {
         <span class="self">self</span>.transparent_builder.add_output(to, value)
     }
 
     <span class="doccomment">/// Returns the sum of the transparent, Sapling, Orchard, and TZE value balances.
-    </span><span class="kw">fn </span>value_balance(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Amount, BalanceError&gt; {
+    </span><span class="kw">fn </span>value_balance(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;ZatBalance, BalanceError&gt; {
         <span class="kw">let </span>value_balances = [
             <span class="self">self</span>.transparent_builder.value_balance()<span class="question-mark">?</span>,
             <span class="self">self</span>.sapling_builder
                 .as_ref()
-                .map_or_else(Amount::zero, |builder| builder.value_balance::&lt;Amount&gt;()),
+                .map_or_else(ZatBalance::zero, |builder| {
+                    builder.value_balance::&lt;ZatBalance&gt;()
+                }),
             <span class="self">self</span>.orchard_builder.as_ref().map_or_else(
-                || <span class="prelude-val">Ok</span>(Amount::zero()),
+                || <span class="prelude-val">Ok</span>(ZatBalance::zero()),
                 |builder| {
                     builder
-                        .value_balance::&lt;Amount&gt;()
+                        .value_balance::&lt;ZatBalance&gt;()
                         .map_err(|<span class="kw">_</span>| BalanceError::Overflow)
                 },
             )<span class="question-mark">?</span>,
@@ -1931,10 +1911,7 @@
     ///
     /// This fee is a function of the spends and outputs that have been added to the builder,
     /// pursuant to the specified [`FeeRule`].
-    </span><span class="kw">pub fn </span>get_fee&lt;FR: FeeRule&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        fee_rule: <span class="kw-2">&amp;</span>FR,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;NonNegativeAmount, FeeError&lt;FR::Error&gt;&gt; {
+    </span><span class="kw">pub fn </span>get_fee&lt;FR: FeeRule&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, fee_rule: <span class="kw-2">&amp;</span>FR) -&gt; <span class="prelude-ty">Result</span>&lt;Zatoshis, FeeError&lt;FR::Error&gt;&gt; {
         <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
         </span><span class="kw">let </span>transparent_inputs = <span class="self">self</span>.transparent_builder.inputs();
 
@@ -1980,7 +1957,7 @@
     </span><span class="kw">pub fn </span>get_fee_zfuture&lt;FR: FeeRule + FutureFeeRule&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         fee_rule: <span class="kw-2">&amp;</span>FR,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;NonNegativeAmount, FeeError&lt;FR::Error&gt;&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Zatoshis, FeeError&lt;FR::Error&gt;&gt; {
         <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
         </span><span class="kw">let </span>transparent_inputs = <span class="self">self</span>.transparent_builder.inputs();
 
@@ -2092,7 +2069,7 @@
         <span class="kw-2">mut </span>rng: R,
         spend_prover: <span class="kw-2">&amp;</span>SP,
         output_prover: <span class="kw-2">&amp;</span>OP,
-        fee: NonNegativeAmount,
+        fee: Zatoshis,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;BuildResult, Error&lt;FE&gt;&gt; {
         <span class="kw">let </span>consensus_branch_id = BranchId::for_height(<span class="kw-2">&amp;</span><span class="self">self</span>.params, <span class="self">self</span>.target_height);
 
@@ -2107,7 +2084,7 @@
         </span><span class="kw">let </span>balance_after_fees =
             (<span class="self">self</span>.value_balance()<span class="question-mark">? </span>- fee.into()).ok_or(BalanceError::Underflow)<span class="question-mark">?</span>;
 
-        <span class="kw">match </span>balance_after_fees.cmp(<span class="kw-2">&amp;</span>Amount::zero()) {
+        <span class="kw">match </span>balance_after_fees.cmp(<span class="kw-2">&amp;</span>ZatBalance::zero()) {
             Ordering::Less =&gt; {
                 <span class="kw">return </span><span class="prelude-val">Err</span>(Error::InsufficientFunds(-balance_after_fees));
             }
@@ -2290,7 +2267,7 @@
         </span><span class="kw">let </span>balance_after_fees =
             (<span class="self">self</span>.value_balance()<span class="question-mark">? </span>- fee.into()).ok_or(BalanceError::Underflow)<span class="question-mark">?</span>;
 
-        <span class="kw">match </span>balance_after_fees.cmp(<span class="kw-2">&amp;</span>Amount::zero()) {
+        <span class="kw">match </span>balance_after_fees.cmp(<span class="kw-2">&amp;</span>ZatBalance::zero()) {
             Ordering::Less =&gt; {
                 <span class="kw">return </span><span class="prelude-val">Err</span>(Error::InsufficientFunds(-balance_after_fees));
             }
@@ -2371,7 +2348,7 @@
     <span class="kw">fn </span>add_tze_output&lt;G: ToPayload&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         extension_id: u32,
-        value: Amount,
+        value: ZatBalance,
         guarded_by: <span class="kw-2">&amp;</span>G,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::BuildError&gt; {
         <span class="self">self</span>.tze_builder.add_output(extension_id, value, guarded_by)
@@ -2383,15 +2360,12 @@
     <span class="kw">use </span>rand::RngCore;
     <span class="kw">use </span>rand_core::CryptoRng;
 
+    <span class="kw">use </span>::sapling::prover::mock::{MockOutputProver, MockSpendProver};
+    <span class="kw">use </span>::transparent::builder::TransparentSigningSet;
+    <span class="kw">use </span>zcash_protocol::consensus;
+
     <span class="kw">use super</span>::{BuildResult, Builder, Error};
-    <span class="kw">use crate</span>::{
-        consensus,
-        sapling::{
-            <span class="self">self</span>,
-            prover::mock::{MockOutputProver, MockSpendProver},
-        },
-        transaction::{components::transparent::builder::TransparentSigningSet, fees::zip317},
-    };
+    <span class="kw">use </span><span class="kw">crate</span>::transaction::fees::zip317;
 
     <span class="kw">impl</span>&lt;<span class="lifetime">'a</span>, P: consensus::Parameters, U: sapling::builder::ProverProgress&gt; Builder&lt;<span class="lifetime">'a</span>, P, U&gt; {
         <span class="doccomment">/// Build the transaction using mocked randomness and proving capabilities.
@@ -2446,30 +2420,25 @@
     <span class="kw">use </span>incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness};
     <span class="kw">use </span>rand_core::OsRng;
 
-    <span class="kw">use crate</span>::{
-        consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
-        legacy::TransparentAddress,
-        memo::MemoBytes,
-        sapling::{<span class="self">self</span>, zip32::ExtendedSpendingKey, Node, Rseed},
-        transaction::{
-            builder::BuildConfig,
-            components::{
-                amount::{Amount, BalanceError, NonNegativeAmount},
-                transparent::builder::TransparentSigningSet,
-            },
-        },
-    };
-
     <span class="kw">use super</span>::{Builder, Error};
+    <span class="kw">use </span><span class="kw">crate</span>::transaction::builder::BuildConfig;
+
+    <span class="kw">use </span>::sapling::{zip32::ExtendedSpendingKey, Node, Rseed};
+    <span class="kw">use </span>::transparent::{address::TransparentAddress, builder::TransparentSigningSet};
+    <span class="kw">use </span>zcash_protocol::{
+        consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
+        memo::MemoBytes,
+        value::{BalanceError, ZatBalance, Zatoshis},
+    };
 
     <span class="attr">#[cfg(zcash_unstable = <span class="string">"zfuture"</span>)]
     #[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     </span><span class="kw">use </span><span class="kw">super</span>::TzeBuilder;
 
     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-    </span><span class="kw">use crate</span>::{
-        legacy::keys::{AccountPrivKey, IncomingViewingKey},
-        transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, OutPoint, TxOut},
+    </span><span class="kw">use </span>{
+        <span class="kw">crate</span>::transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, OutPoint, TxOut},
+        ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
         zip32::AccountId,
     };
 
@@ -2478,10 +2447,9 @@
     </span><span class="attr">#[test]
     #[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     </span><span class="kw">fn </span>binding_sig_absent_if_no_shielded_spend_or_output() {
-        <span class="kw">use </span><span class="kw">crate</span>::consensus::NetworkUpgrade;
-        <span class="kw">use </span><span class="kw">crate</span>::legacy::keys::NonHardenedChildIndex;
         <span class="kw">use </span><span class="kw">crate</span>::transaction::builder::{<span class="self">self</span>, TransparentBuilder};
-        <span class="kw">use </span><span class="kw">crate</span>::transaction::components::transparent::builder::TransparentSigningSet;
+        <span class="kw">use </span>::transparent::{builder::TransparentSigningSet, keys::NonHardenedChildIndex};
+        <span class="kw">use </span>zcash_protocol::consensus::NetworkUpgrade;
 
         <span class="kw">let </span>sapling_activation_height = TEST_NETWORK
             .activation_height(NetworkUpgrade::Sapling)
@@ -2513,7 +2481,7 @@
             .unwrap();
         <span class="kw">let </span>pubkey = transparent_signing_set.add_key(sk);
         <span class="kw">let </span>prev_coin = TxOut {
-            value: NonNegativeAmount::const_from_u64(<span class="number">50000</span>),
+            value: Zatoshis::const_from_u64(<span class="number">50000</span>),
             script_pubkey: tsk
                 .to_account_pubkey()
                 .derive_external_ivk()
@@ -2530,7 +2498,7 @@
         </span>builder
             .add_transparent_output(
                 <span class="kw-2">&amp;</span>TransparentAddress::PublicKeyHash([<span class="number">0</span>; <span class="number">20</span>]),
-                NonNegativeAmount::const_from_u64(<span class="number">40000</span>),
+                Zatoshis::const_from_u64(<span class="number">40000</span>),
             )
             .unwrap();
 
@@ -2576,7 +2544,7 @@
         builder
             .add_transparent_output(
                 <span class="kw-2">&amp;</span>TransparentAddress::PublicKeyHash([<span class="number">0</span>; <span class="number">20</span>]),
-                NonNegativeAmount::const_from_u64(<span class="number">35000</span>),
+                Zatoshis::const_from_u64(<span class="number">35000</span>),
             )
             .unwrap();
 
@@ -2631,14 +2599,14 @@
                 .add_sapling_output::&lt;Infallible&gt;(
                     ovk,
                     to,
-                    NonNegativeAmount::const_from_u64(<span class="number">50000</span>),
+                    Zatoshis::const_from_u64(<span class="number">50000</span>),
                     MemoBytes::empty(),
                 )
                 .unwrap();
             <span class="macro">assert_matches!</span>(
                 builder.mock_build(<span class="kw-2">&amp;</span>TransparentSigningSet::new(), extsks, <span class="kw-2">&amp;</span>[], OsRng),
                 <span class="prelude-val">Err</span>(Error::InsufficientFunds(expected)) <span class="kw">if
-                    </span>expected == (NonNegativeAmount::const_from_u64(<span class="number">50000</span>) + MINIMUM_FEE).unwrap().into()
+                    </span>expected == (Zatoshis::const_from_u64(<span class="number">50000</span>) + MINIMUM_FEE).unwrap().into()
             );
         }
 
@@ -2653,13 +2621,13 @@
             builder
                 .add_transparent_output(
                     <span class="kw-2">&amp;</span>TransparentAddress::PublicKeyHash([<span class="number">0</span>; <span class="number">20</span>]),
-                    NonNegativeAmount::const_from_u64(<span class="number">50000</span>),
+                    Zatoshis::const_from_u64(<span class="number">50000</span>),
                 )
                 .unwrap();
             <span class="macro">assert_matches!</span>(
                 builder.mock_build(<span class="kw-2">&amp;</span>TransparentSigningSet::new(), extsks, <span class="kw-2">&amp;</span>[], OsRng),
                 <span class="prelude-val">Err</span>(Error::InsufficientFunds(expected)) <span class="kw">if </span>expected ==
-                    (NonNegativeAmount::const_from_u64(<span class="number">50000</span>) + MINIMUM_FEE).unwrap().into()
+                    (Zatoshis::const_from_u64(<span class="number">50000</span>) + MINIMUM_FEE).unwrap().into()
             );
         }
 
@@ -2691,19 +2659,19 @@
                 .add_sapling_output::&lt;Infallible&gt;(
                     ovk,
                     to,
-                    NonNegativeAmount::const_from_u64(<span class="number">30000</span>),
+                    Zatoshis::const_from_u64(<span class="number">30000</span>),
                     MemoBytes::empty(),
                 )
                 .unwrap();
             builder
                 .add_transparent_output(
                     <span class="kw-2">&amp;</span>TransparentAddress::PublicKeyHash([<span class="number">0</span>; <span class="number">20</span>]),
-                    NonNegativeAmount::const_from_u64(<span class="number">15000</span>),
+                    Zatoshis::const_from_u64(<span class="number">15000</span>),
                 )
                 .unwrap();
             <span class="macro">assert_matches!</span>(
                 builder.mock_build(<span class="kw-2">&amp;</span>TransparentSigningSet::new(), extsks, <span class="kw-2">&amp;</span>[], OsRng),
-                <span class="prelude-val">Err</span>(Error::InsufficientFunds(expected)) <span class="kw">if </span>expected == Amount::const_from_i64(<span class="number">1</span>)
+                <span class="prelude-val">Err</span>(Error::InsufficientFunds(expected)) <span class="kw">if </span>expected == ZatBalance::const_from_i64(<span class="number">1</span>)
             );
         }
 
@@ -2742,14 +2710,14 @@
                 .add_sapling_output::&lt;Infallible&gt;(
                     ovk,
                     to,
-                    NonNegativeAmount::const_from_u64(<span class="number">30000</span>),
+                    Zatoshis::const_from_u64(<span class="number">30000</span>),
                     MemoBytes::empty(),
                 )
                 .unwrap();
             builder
                 .add_transparent_output(
                     <span class="kw-2">&amp;</span>TransparentAddress::PublicKeyHash([<span class="number">0</span>; <span class="number">20</span>]),
-                    NonNegativeAmount::const_from_u64(<span class="number">15000</span>),
+                    Zatoshis::const_from_u64(<span class="number">15000</span>),
                 )
                 .unwrap();
             <span class="kw">let </span>res = builder
@@ -2759,7 +2727,7 @@
                 res.transaction()
                     .fee_paid(|<span class="kw">_</span>| <span class="prelude-val">Err</span>(BalanceError::Overflow))
                     .unwrap(),
-                Amount::const_from_i64(<span class="number">15_000</span>)
+                ZatBalance::const_from_i64(<span class="number">15_000</span>)
             );
         }
     }

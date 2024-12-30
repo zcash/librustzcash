@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/fees/zip317.rs`."><title>zip317.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/fees/</div>zip317.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/fees/zip317.rs`."><title>zip317.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/fees/</div>zip317.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -193,30 +193,24 @@
 <a href="#192" id="192">192</a>
 <a href="#193" id="193">193</a>
 <a href="#194" id="194">194</a>
-<a href="#195" id="195">195</a>
-<a href="#196" id="196">196</a>
-<a href="#197" id="197">197</a>
-<a href="#198" id="198">198</a></pre></div><pre class="rust"><code><span class="doccomment">//! Types related to implementing a [`FeeRule`] provides [ZIP 317] fee calculation.
+<a href="#195" id="195">195</a></pre></div><pre class="rust"><code><span class="doccomment">//! Types related to implementing a [`FeeRule`] provides [ZIP 317] fee calculation.
 //!
 //! [`FeeRule`]: crate::transaction::fees::FeeRule
 //! [ZIP 317]: https//zips.z.cash/zip-0317
 </span><span class="kw">use </span>core::cmp::max;
 
-<span class="kw">use crate</span>::{
+<span class="kw">use </span>::transparent::bundle::OutPoint;
+<span class="kw">use </span>zcash_protocol::{
     consensus::{<span class="self">self</span>, BlockHeight},
-    transaction::{
-        components::{
-            amount::{BalanceError, NonNegativeAmount},
-            transparent::OutPoint,
-        },
-        fees::transparent,
-    },
+    value::{BalanceError, Zatoshis},
 };
+
+<span class="kw">use </span><span class="kw">crate</span>::transaction::fees::transparent;
 
 <span class="doccomment">/// The standard [ZIP 317] marginal fee.
 ///
 /// [ZIP 317]: https//zips.z.cash/zip-0317
-</span><span class="kw">pub const </span>MARGINAL_FEE: NonNegativeAmount = NonNegativeAmount::const_from_u64(<span class="number">5_000</span>);
+</span><span class="kw">pub const </span>MARGINAL_FEE: Zatoshis = Zatoshis::const_from_u64(<span class="number">5_000</span>);
 
 <span class="doccomment">/// The minimum number of logical actions that must be paid according to [ZIP 317].
 ///
@@ -237,7 +231,7 @@
 /// `MARGINAL_FEE * GRACE_ACTIONS`.
 ///
 /// [ZIP 317]: https//zips.z.cash/zip-0317
-</span><span class="kw">pub const </span>MINIMUM_FEE: NonNegativeAmount = NonNegativeAmount::const_from_u64(<span class="number">10_000</span>);
+</span><span class="kw">pub const </span>MINIMUM_FEE: Zatoshis = Zatoshis::const_from_u64(<span class="number">10_000</span>);
 
 <span class="doccomment">/// A [`FeeRule`] implementation that implements the [ZIP 317] fee rule.
 ///
@@ -253,7 +247,7 @@
 /// [ZIP 317]: https//zips.z.cash/zip-0317
 </span><span class="attr">#[derive(Clone, Debug)]
 </span><span class="kw">pub struct </span>FeeRule {
-    marginal_fee: NonNegativeAmount,
+    marginal_fee: Zatoshis,
     grace_actions: usize,
     p2pkh_standard_input_size: usize,
     p2pkh_standard_output_size: usize,
@@ -286,7 +280,7 @@
     /// zero.
     </span><span class="attr">#[cfg(feature = <span class="string">"non-standard-fees"</span>)]
     </span><span class="kw">pub fn </span>non_standard(
-        marginal_fee: NonNegativeAmount,
+        marginal_fee: Zatoshis,
         grace_actions: usize,
         p2pkh_standard_input_size: usize,
         p2pkh_standard_output_size: usize,
@@ -304,7 +298,7 @@
     }
 
     <span class="doccomment">/// Returns the ZIP 317 marginal fee.
-    </span><span class="kw">pub fn </span>marginal_fee(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; NonNegativeAmount {
+    </span><span class="kw">pub fn </span>marginal_fee(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Zatoshis {
         <span class="self">self</span>.marginal_fee
     }
     <span class="doccomment">/// Returns the ZIP 317 number of grace actions
@@ -362,7 +356,7 @@
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;NonNegativeAmount, <span class="self">Self</span>::Error&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Zatoshis, <span class="self">Self</span>::Error&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>t_in_total_size: usize = <span class="number">0</span>;
         <span class="kw">let </span><span class="kw-2">mut </span>non_p2pkh_outpoints = <span class="macro">vec!</span>[];
         <span class="kw">for </span>sz <span class="kw">in </span>transparent_input_sizes.into_iter() {

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_transparent/src/builder.rs`."><title>builder.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_transparent" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_transparent/</div>builder.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_transparent/src/builder.rs`."><title>builder.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_transparent" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_transparent/</div>builder.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -379,17 +379,13 @@
 <a href="#378" id="378">378</a>
 <a href="#379" id="379">379</a>
 <a href="#380" id="380">380</a>
-<a href="#381" id="381">381</a>
-<a href="#382" id="382">382</a>
-<a href="#383" id="383">383</a>
-<a href="#384" id="384">384</a>
-<a href="#385" id="385">385</a></pre></div><pre class="rust"><code><span class="doccomment">//! Types and functions for building transparent transaction components.
+<a href="#381" id="381">381</a></pre></div><pre class="rust"><code><span class="doccomment">//! Types and functions for building transparent transaction components.
 
 </span><span class="kw">use </span>alloc::collections::BTreeMap;
 <span class="kw">use </span>alloc::vec::Vec;
 <span class="kw">use </span>core::fmt;
 
-<span class="kw">use </span>zcash_protocol::value::{BalanceError, ZatBalance <span class="kw">as </span>Amount, Zatoshis <span class="kw">as </span>NonNegativeAmount};
+<span class="kw">use </span>zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
 
 <span class="kw">use crate</span>::{
     address::{Script, TransparentAddress},
@@ -552,11 +548,7 @@
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="kw">pub fn </span>add_output(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        to: <span class="kw-2">&amp;</span>TransparentAddress,
-        value: NonNegativeAmount,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), Error&gt; {
+    <span class="kw">pub fn </span>add_output(<span class="kw-2">&amp;mut </span><span class="self">self</span>, to: <span class="kw-2">&amp;</span>TransparentAddress, value: Zatoshis) -&gt; <span class="prelude-ty">Result</span>&lt;(), Error&gt; {
         <span class="self">self</span>.vout.push(TxOut {
             value,
             script_pubkey: to.script(),
@@ -565,26 +557,26 @@
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="kw">pub fn </span>value_balance(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Amount, BalanceError&gt; {
+    <span class="kw">pub fn </span>value_balance(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;ZatBalance, BalanceError&gt; {
         <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
         </span><span class="kw">let </span>input_sum = <span class="self">self
             </span>.inputs
             .iter()
             .map(|input| input.coin.value)
-            .sum::&lt;<span class="prelude-ty">Option</span>&lt;NonNegativeAmount&gt;&gt;()
+            .sum::&lt;<span class="prelude-ty">Option</span>&lt;Zatoshis&gt;&gt;()
             .ok_or(BalanceError::Overflow)<span class="question-mark">?</span>;
 
         <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
-        </span><span class="kw">let </span>input_sum = NonNegativeAmount::ZERO;
+        </span><span class="kw">let </span>input_sum = Zatoshis::ZERO;
 
         <span class="kw">let </span>output_sum = <span class="self">self
             </span>.vout
             .iter()
             .map(|vo| vo.value)
-            .sum::&lt;<span class="prelude-ty">Option</span>&lt;NonNegativeAmount&gt;&gt;()
+            .sum::&lt;<span class="prelude-ty">Option</span>&lt;Zatoshis&gt;&gt;()
             .ok_or(BalanceError::Overflow)<span class="question-mark">?</span>;
 
-        (Amount::from(input_sum) - Amount::from(output_sum)).ok_or(BalanceError::Underflow)
+        (ZatBalance::from(input_sum) - ZatBalance::from(output_sum)).ok_or(BalanceError::Underflow)
     }
 
     <span class="kw">pub fn </span>build(<span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Bundle&lt;Unauthorized&gt;&gt; {
@@ -680,7 +672,7 @@
 
 <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
 </span><span class="kw">impl </span>TransparentAuthorizingContext <span class="kw">for </span>Unauthorized {
-    <span class="kw">fn </span>input_amounts(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;NonNegativeAmount&gt; {
+    <span class="kw">fn </span>input_amounts(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;Zatoshis&gt; {
         <span class="macro">vec!</span>[]
     }
 
@@ -691,7 +683,7 @@
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">impl </span>TransparentAuthorizingContext <span class="kw">for </span>Unauthorized {
-    <span class="kw">fn </span>input_amounts(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;NonNegativeAmount&gt; {
+    <span class="kw">fn </span>input_amounts(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;Zatoshis&gt; {
         <span class="kw">return </span><span class="self">self</span>.inputs.iter().map(|txin| txin.coin.value).collect();
     }
 

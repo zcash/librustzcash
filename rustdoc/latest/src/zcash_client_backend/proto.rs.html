@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/proto.rs`."><title>proto.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>proto.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/proto.rs`."><title>proto.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>proto.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -823,7 +823,10 @@
 <a href="#822" id="822">822</a>
 <a href="#823" id="823">823</a>
 <a href="#824" id="824">824</a>
-<a href="#825" id="825">825</a></pre></div><pre class="rust"><code><span class="doccomment">//! This module contains generated code for handling light client protobuf structs.
+<a href="#825" id="825">825</a>
+<a href="#826" id="826">826</a>
+<a href="#827" id="827">827</a>
+<a href="#828" id="828">828</a></pre></div><pre class="rust"><code><span class="doccomment">//! This module contains generated code for handling light client protobuf structs.
 
 </span><span class="kw">use </span>incrementalmerkletree::frontier::CommitmentTree;
 <span class="kw">use </span>nonempty::NonEmpty;
@@ -838,22 +841,25 @@
 <span class="kw">use </span>zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
 <span class="kw">use </span>zcash_primitives::{
     block::{BlockHash, BlockHeader},
+    merkle_tree::read_commitment_tree,
+    transaction::TxId,
+};
+<span class="kw">use </span>zcash_protocol::{
     consensus::BlockHeight,
     memo::{<span class="self">self</span>, MemoBytes},
-    merkle_tree::read_commitment_tree,
-    transaction::{components::amount::NonNegativeAmount, TxId},
+    value::Zatoshis,
+    PoolType, ShieldedProtocol,
 };
+<span class="kw">use </span>zip321::{TransactionRequest, Zip321Error};
 
 <span class="kw">use crate</span>::{
     data_api::{chain::ChainState, InputSource},
     fees::{ChangeValue, StandardFeeRule, TransactionBalance},
     proposal::{Proposal, ProposalError, ShieldedInputs, Step, StepOutput, StepOutputIndex},
-    zip321::{TransactionRequest, Zip321Error},
-    PoolType, ShieldedProtocol,
 };
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-</span><span class="kw">use </span>zcash_primitives::transaction::components::OutPoint;
+</span><span class="kw">use </span>transparent::bundle::OutPoint;
 
 <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
 </span><span class="kw">use </span>orchard::tree::MerkleHashOrchard;
@@ -1570,7 +1576,7 @@
                             .proposed_change
                             .iter()
                             .map(|cv| -&gt; <span class="prelude-ty">Result</span>&lt;ChangeValue, ProposalDecodingError&lt;<span class="kw">_</span>&gt;&gt; {
-                                <span class="kw">let </span>value = NonNegativeAmount::from_u64(cv.value)
+                                <span class="kw">let </span>value = Zatoshis::from_u64(cv.value)
                                     .map_err(|<span class="kw">_</span>| ProposalDecodingError::BalanceInvalid)<span class="question-mark">?</span>;
                                 <span class="kw">let </span>memo = cv
                                     .memo
@@ -1604,7 +1610,7 @@
                                 }
                             })
                             .collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>,
-                        NonNegativeAmount::from_u64(proto_balance.fee_required)
+                        Zatoshis::from_u64(proto_balance.fee_required)
                             .map_err(|<span class="kw">_</span>| ProposalDecodingError::BalanceInvalid)<span class="question-mark">?</span>,
                     )
                     .map_err(|<span class="kw">_</span>| ProposalDecodingError::BalanceInvalid)<span class="question-mark">?</span>;

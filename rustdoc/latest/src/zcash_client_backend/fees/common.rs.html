@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/fees/common.rs`."><title>common.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/fees/</div>common.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/fees/common.rs`."><title>common.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/fees/</div>common.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -784,15 +784,15 @@
 <a href="#783" id="783">783</a></pre></div><pre class="rust"><code><span class="kw">use </span>core::cmp::{max, min};
 <span class="kw">use </span>std::num::{NonZeroU64, NonZeroUsize};
 
-<span class="kw">use </span>zcash_primitives::{
+<span class="kw">use </span>zcash_primitives::transaction::fees::{
+    transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE, FeeRule,
+};
+<span class="kw">use </span>zcash_protocol::{
     consensus::{<span class="self">self</span>, BlockHeight},
     memo::MemoBytes,
-    transaction::{
-        components::amount::{BalanceError, NonNegativeAmount},
-        fees::{transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE, FeeRule},
-    },
+    value::{BalanceError, Zatoshis},
+    ShieldedProtocol,
 };
-<span class="kw">use </span>zcash_protocol::ShieldedProtocol;
 
 <span class="kw">use </span><span class="kw">crate</span>::data_api::AccountMeta;
 
@@ -805,19 +805,19 @@
 </span><span class="kw">use </span><span class="kw">super</span>::orchard <span class="kw">as </span>orchard_fees;
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>NetFlows {
-    t_in: NonNegativeAmount,
-    t_out: NonNegativeAmount,
-    sapling_in: NonNegativeAmount,
-    sapling_out: NonNegativeAmount,
-    orchard_in: NonNegativeAmount,
-    orchard_out: NonNegativeAmount,
+    t_in: Zatoshis,
+    t_out: Zatoshis,
+    sapling_in: Zatoshis,
+    sapling_out: Zatoshis,
+    orchard_in: Zatoshis,
+    orchard_out: Zatoshis,
 }
 
 <span class="kw">impl </span>NetFlows {
-    <span class="kw">fn </span>total_in(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;NonNegativeAmount, BalanceError&gt; {
+    <span class="kw">fn </span>total_in(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Zatoshis, BalanceError&gt; {
         (<span class="self">self</span>.t_in + <span class="self">self</span>.sapling_in + <span class="self">self</span>.orchard_in).ok_or(BalanceError::Overflow)
     }
-    <span class="kw">fn </span>total_out(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;NonNegativeAmount, BalanceError&gt; {
+    <span class="kw">fn </span>total_out(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Zatoshis, BalanceError&gt; {
         (<span class="self">self</span>.t_out + <span class="self">self</span>.sapling_out + <span class="self">self</span>.orchard_out).ok_or(BalanceError::Overflow)
     }
     <span class="doccomment">/// Returns true iff the flows excluding change are fully transparent.
@@ -875,7 +875,7 @@
         .sum::&lt;<span class="prelude-ty">Option</span>&lt;<span class="kw">_</span>&gt;&gt;()
         .ok_or_else(overflow)<span class="question-mark">?</span>;
     <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
-    </span><span class="kw">let </span>orchard_in = NonNegativeAmount::ZERO;
+    </span><span class="kw">let </span>orchard_in = Zatoshis::ZERO;
 
     <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
     </span><span class="kw">let </span>orchard_out = orchard
@@ -885,7 +885,7 @@
         .sum::&lt;<span class="prelude-ty">Option</span>&lt;<span class="kw">_</span>&gt;&gt;()
         .ok_or_else(overflow)<span class="question-mark">?</span>;
     <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
-    </span><span class="kw">let </span>orchard_out = NonNegativeAmount::ZERO;
+    </span><span class="kw">let </span>orchard_out = Zatoshis::ZERO;
 
     <span class="prelude-val">Ok</span>(NetFlows {
         t_in,
@@ -951,10 +951,10 @@
     params: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>P,
     fee_rule: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>F,
     dust_output_policy: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>DustOutputPolicy,
-    default_dust_threshold: NonNegativeAmount,
+    default_dust_threshold: Zatoshis,
     split_policy: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>SplitPolicy,
     fallback_change_pool: ShieldedProtocol,
-    marginal_fee: NonNegativeAmount,
+    marginal_fee: Zatoshis,
     grace_actions: usize,
 }
 
@@ -964,10 +964,10 @@
         params: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>P,
         fee_rule: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>F,
         dust_output_policy: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>DustOutputPolicy,
-        default_dust_threshold: NonNegativeAmount,
+        default_dust_threshold: Zatoshis,
         split_policy: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>SplitPolicy,
         fallback_change_pool: ShieldedProtocol,
-        marginal_fee: NonNegativeAmount,
+        marginal_fee: Zatoshis,
         grace_actions: usize,
     ) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
@@ -1251,10 +1251,10 @@
                         .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))<span class="question-mark">?</span>;
                     (
                         new_fee_with_change,
-                        (fee_with_change - new_fee_with_change).unwrap_or(NonNegativeAmount::ZERO),
+                        (fee_with_change - new_fee_with_change).unwrap_or(Zatoshis::ZERO),
                     )
                 } <span class="kw">else </span>{
-                    (fee_with_change, NonNegativeAmount::ZERO)
+                    (fee_with_change, Zatoshis::ZERO)
                 };
 
             <span class="kw">let </span>simple_case = || {
@@ -1329,7 +1329,7 @@
                             (
                                 <span class="macro">vec!</span>[ChangeValue::shielded(
                                     change_pool,
-                                    NonNegativeAmount::ZERO,
+                                    Zatoshis::ZERO,
                                     change_memo.cloned(),
                                 )],
                                 fee_with_dust,
@@ -1373,7 +1373,7 @@
     transparent_outputs: <span class="kw-2">&amp;</span>[<span class="kw">impl </span>transparent::OutputView],
     sapling: <span class="kw-2">&amp;</span><span class="kw">impl </span>sapling_fees::BundleView&lt;NoteRefT&gt;,
     <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)] </span>orchard: <span class="kw-2">&amp;</span><span class="kw">impl </span>orchard_fees::BundleView&lt;NoteRefT&gt;,
-    marginal_fee: NonNegativeAmount,
+    marginal_fee: Zatoshis,
     grace_actions: usize,
     possible_change: <span class="kw-2">&amp;</span>[OutputManifest],
     ephemeral_balance: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>EphemeralBalance&gt;,

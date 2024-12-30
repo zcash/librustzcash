@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -2352,7 +2352,6 @@
 <span class="kw">use </span>uuid::Uuid;
 
 <span class="kw">use </span>zcash_client_backend::{
-    address::UnifiedAddress,
     data_api::{
         <span class="self">self</span>,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
@@ -2362,22 +2361,27 @@
         SentTransaction, SpendableNotes, TransactionDataRequest, WalletCommitmentTrees, WalletRead,
         WalletSummary, WalletWrite, Zip32Derivation, SAPLING_SHARD_HEIGHT,
     },
+    proto::compact_formats::CompactBlock,
+    wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
+    TransferType,
+};
+<span class="kw">use </span>zcash_keys::{
+    address::UnifiedAddress,
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
     },
-    proto::compact_formats::CompactBlock,
-    wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
-    ShieldedProtocol, TransferType,
 };
-
 <span class="kw">use </span>zcash_primitives::{
     block::BlockHash,
+    transaction::{Transaction, TxId},
+};
+<span class="kw">use </span>zcash_protocol::{
     consensus::{<span class="self">self</span>, BlockHeight},
     memo::Memo,
-    transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
-    zip32::{<span class="self">self</span>, DiversifierIndex},
+    value::Zatoshis,
+    ShieldedProtocol,
 };
-<span class="kw">use </span>zip32::fingerprint::SeedFingerprint;
+<span class="kw">use </span>zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 <span class="kw">use crate</span>::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
@@ -2394,9 +2398,9 @@
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">use </span>{
+    ::transparent::{address::TransparentAddress, bundle::OutPoint},
     zcash_client_backend::wallet::TransparentAddressMetadata,
-    zcash_keys::encoding::AddressCodec,
-    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
+    zcash_keys::encoding::AddressCodec <span class="kw">as _</span>,
 };
 
 <span class="attr">#[cfg(feature = <span class="string">"multicore"</span>)]
@@ -2623,7 +2627,7 @@
     <span class="kw">fn </span>select_spendable_notes(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         account: <span class="self">Self</span>::AccountId,
-        target_value: NonNegativeAmount,
+        target_value: Zatoshis,
         sources: <span class="kw-2">&amp;</span>[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: <span class="kw-2">&amp;</span>[<span class="self">Self</span>::NoteRef],
@@ -2934,7 +2938,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         account: <span class="self">Self</span>::AccountId,
         max_height: BlockHeight,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;HashMap&lt;TransparentAddress, NonNegativeAmount&gt;, <span class="self">Self</span>::Error&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;HashMap&lt;TransparentAddress, Zatoshis&gt;, <span class="self">Self</span>::Error&gt; {
         wallet::transparent::get_transparent_balances(
             <span class="self">self</span>.conn.borrow(),
             <span class="kw-2">&amp;</span><span class="self">self</span>.params,
@@ -3064,7 +3068,7 @@
             </span>.map(|res| {
                 <span class="kw">let </span>(amount, external_recipient, ephemeral_address) = res<span class="question-mark">?</span>;
                 <span class="prelude-val">Ok</span>::&lt;<span class="kw">_</span>, &lt;<span class="self">Self </span><span class="kw">as </span>WalletRead&gt;::Error&gt;(OutputOfSentTx::from_parts(
-                    NonNegativeAmount::from_u64(amount)<span class="question-mark">?</span>,
+                    Zatoshis::from_u64(amount)<span class="question-mark">?</span>,
                     external_recipient,
                     ephemeral_address,
                 ))
@@ -4247,10 +4251,7 @@
     <span class="kw">use crate</span>::{error::SqliteClientError, testing::db::TestDbFactory, AccountUuid};
 
     <span class="attr">#[cfg(feature = <span class="string">"unstable"</span>)]
-    </span><span class="kw">use </span>{
-        zcash_client_backend::keys::sapling,
-        zcash_primitives::transaction::components::amount::NonNegativeAmount,
-    };
+    </span><span class="kw">use </span>zcash_keys::keys::sapling;
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>validate_seed() {
@@ -4561,8 +4562,7 @@
     #[test]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>fsblockdb_api() {
         <span class="kw">use </span>zcash_client_backend::data_api::testing::AddressType;
-        <span class="kw">use </span>zcash_primitives::zip32;
-        <span class="kw">use </span>zcash_protocol::consensus::NetworkConstants;
+        <span class="kw">use </span>zcash_protocol::{consensus::NetworkConstants, value::Zatoshis};
 
         <span class="kw">use </span><span class="kw">crate</span>::testing::FsBlockCache;
 
@@ -4582,12 +4582,12 @@
         <span class="kw">let </span>(h1, meta1, <span class="kw">_</span>) = st.generate_next_block(
             <span class="kw-2">&amp;</span>dfvk,
             AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(<span class="number">5</span>),
+            Zatoshis::const_from_u64(<span class="number">5</span>),
         );
         <span class="kw">let </span>(h2, meta2, <span class="kw">_</span>) = st.generate_next_block(
             <span class="kw-2">&amp;</span>dfvk,
             AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(<span class="number">10</span>),
+            Zatoshis::const_from_u64(<span class="number">10</span>),
         );
 
         <span class="comment">// The BlockMeta DB is not updated until we do so explicitly.

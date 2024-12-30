@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/add_transaction_views.rs`."><title>add_transaction_views.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>add_transaction_views.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/add_transaction_views.rs`."><title>add_transaction_views.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>add_transaction_views.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -490,22 +490,17 @@
 <a href="#489" id="489">489</a>
 <a href="#490" id="490">490</a>
 <a href="#491" id="491">491</a>
-<a href="#492" id="492">492</a>
-<a href="#493" id="493">493</a>
-<a href="#494" id="494">494</a>
-<a href="#495" id="495">495</a></pre></div><pre class="rust"><code><span class="doccomment">//! Migration that adds transaction summary views &amp; add fee information to transactions.
+<a href="#492" id="492">492</a></pre></div><pre class="rust"><code><span class="doccomment">//! Migration that adds transaction summary views &amp; add fee information to transactions.
 </span><span class="kw">use </span>std::collections::HashSet;
 
 <span class="kw">use </span>rusqlite::{<span class="self">self</span>, types::ToSql, OptionalExtension};
 <span class="kw">use </span>schemerz_rusqlite::RusqliteMigration;
 <span class="kw">use </span>uuid::Uuid;
 
-<span class="kw">use </span>zcash_primitives::{
+<span class="kw">use </span>zcash_primitives::transaction::Transaction;
+<span class="kw">use </span>zcash_protocol::{
     consensus::BranchId,
-    transaction::{
-        components::amount::{Amount, BalanceError},
-        Transaction,
-    },
+    value::{BalanceError, ZatBalance},
 };
 
 <span class="kw">use super</span>::{add_utxo_account, sent_notes_to_internal};
@@ -600,7 +595,7 @@
                     op_amount.map_or_else(
                         || <span class="prelude-val">Err</span>(FeeError::UtxoNotFound),
                         |i| {
-                            Amount::from_i64(i).map_err(|<span class="kw">_</span>| {
+                            ZatBalance::from_i64(i).map_err(|<span class="kw">_</span>| {
                                 FeeError::CorruptedData(<span class="macro">format!</span>(
                                     <span class="string">"UTXO amount out of range in outpoint {:?}"</span>,
                                     op
@@ -770,8 +765,9 @@
     <span class="kw">use </span>rusqlite::{<span class="self">self</span>, params};
     <span class="kw">use </span>tempfile::NamedTempFile;
 
-    <span class="kw">use </span>zcash_client_backend::keys::UnifiedSpendingKey;
-    <span class="kw">use </span>zcash_primitives::{consensus::Network, zip32::AccountId};
+    <span class="kw">use </span>zcash_keys::keys::UnifiedSpendingKey;
+    <span class="kw">use </span>zcash_protocol::consensus::Network;
+    <span class="kw">use </span>zip32::AccountId;
 
     <span class="kw">use crate</span>::{
         wallet::init::{init_wallet_db_internal, migrations::addresses_table},
@@ -781,17 +777,16 @@
     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     </span><span class="kw">use </span>{
         <span class="kw">crate</span>::wallet::init::migrations::{ufvk_support, utxos_table},
-        zcash_client_backend::encoding::AddressCodec,
-        zcash_primitives::{
+        ::transparent::{
+            address::Script,
+            bundle::{<span class="self">self </span><span class="kw">as </span>transparent, Authorized, OutPoint, TxIn, TxOut},
+            keys::IncomingViewingKey,
+        },
+        zcash_keys::encoding::AddressCodec,
+        zcash_primitives::transaction::{TransactionData, TxVersion},
+        zcash_protocol::{
             consensus::{BlockHeight, BranchId},
-            legacy::{keys::IncomingViewingKey, Script},
-            transaction::{
-                components::{
-                    transparent::{<span class="self">self</span>, Authorized, OutPoint},
-                    Amount, TxIn, TxOut,
-                },
-                TransactionData, TxVersion,
-            },
+            value::ZatBalance,
         },
     };
 
@@ -889,10 +884,9 @@
     <span class="attr">#[test]
     #[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     </span><span class="kw">fn </span>migrate_from_wm2() {
-        <span class="kw">use </span>zcash_client_backend::keys::UnifiedAddressRequest;
-        <span class="kw">use </span>zcash_primitives::{
-            legacy::keys::NonHardenedChildIndex, transaction::components::amount::NonNegativeAmount,
-        };
+        <span class="kw">use </span>::transparent::keys::NonHardenedChildIndex;
+        <span class="kw">use </span>zcash_keys::keys::UnifiedAddressRequest;
+        <span class="kw">use </span>zcash_protocol::value::Zatoshis;
 
         <span class="kw">use </span><span class="kw">crate</span>::UA_TRANSPARENT;
 
@@ -920,7 +914,7 @@
                     sequence: <span class="number">0</span>,
                 }],
                 vout: <span class="macro">vec!</span>[TxOut {
-                    value: NonNegativeAmount::const_from_u64(<span class="number">1100000000</span>),
+                    value: Zatoshis::const_from_u64(<span class="number">1100000000</span>),
                     script_pubkey: Script(<span class="macro">vec!</span>[]),
                 }],
                 authorization: Authorized,
@@ -981,11 +975,11 @@
         <span class="kw">let </span>fee = db_data
             .conn
             .query_row(<span class="string">"SELECT fee FROM transactions WHERE id_tx = 0"</span>, [], |row| {
-                <span class="prelude-val">Ok</span>(Amount::from_i64(row.get(<span class="number">0</span>)<span class="question-mark">?</span>).unwrap())
+                <span class="prelude-val">Ok</span>(ZatBalance::from_i64(row.get(<span class="number">0</span>)<span class="question-mark">?</span>).unwrap())
             })
             .unwrap();
 
-        <span class="macro">assert_eq!</span>(fee, Amount::from_i64(<span class="number">300000000</span>).unwrap());
+        <span class="macro">assert_eq!</span>(fee, ZatBalance::from_i64(<span class="number">300000000</span>).unwrap());
     }
 }
 </code></pre></div></section></main></body></html>

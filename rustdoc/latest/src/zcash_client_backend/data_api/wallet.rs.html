@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/wallet.rs`."><title>wallet.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/</div>wallet.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/wallet.rs`."><title>wallet.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/</div>wallet.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -2079,13 +2079,7 @@
 <a href="#2078" id="2078">2078</a>
 <a href="#2079" id="2079">2079</a>
 <a href="#2080" id="2080">2080</a>
-<a href="#2081" id="2081">2081</a>
-<a href="#2082" id="2082">2082</a>
-<a href="#2083" id="2083">2083</a>
-<a href="#2084" id="2084">2084</a>
-<a href="#2085" id="2085">2085</a>
-<a href="#2086" id="2086">2086</a>
-<a href="#2087" id="2087">2087</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Functions for creating Zcash transactions that spend funds belonging to the wallet
+<a href="#2081" id="2081">2081</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Functions for creating Zcash transactions that spend funds belonging to the wallet
 //!
 //! This module contains several different ways of creating Zcash transactions. This module is
 //! designed around the idea that a Zcash wallet holds its funds in notes in either the Orchard
@@ -2128,11 +2122,15 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
 };
 <span class="kw">use </span>shardtree::error::{QueryError, ShardTreeError};
 <span class="kw">use </span>std::num::NonZeroU32;
-<span class="kw">use </span>zcash_keys::keys::UnifiedFullViewingKey;
+<span class="kw">use </span>zcash_keys::{
+    address::Address,
+    keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
+};
+<span class="kw">use </span>zcash_protocol::{PoolType, ShieldedProtocol};
+<span class="kw">use </span>zip321::Payment;
 
 <span class="kw">use </span><span class="kw">super</span>::InputSource;
 <span class="kw">use crate</span>::{
-    address::Address,
     data_api::{
         error::Error, Account, SentTransaction, SentTransactionOutput, WalletCommitmentTrees,
         WalletRead, WalletWrite,
@@ -2141,43 +2139,40 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
     fees::{
         standard::SingleOutputChangeStrategy, ChangeStrategy, DustOutputPolicy, StandardFeeRule,
     },
-    keys::UnifiedSpendingKey,
     proposal::{Proposal, ProposalError, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
-    zip321::{<span class="self">self</span>, Payment},
-    PoolType, ShieldedProtocol,
 };
-<span class="kw">use </span>zcash_primitives::{
-    legacy::TransparentAddress,
-    transaction::{
-        builder::{BuildConfig, BuildResult, Builder},
-        components::{
-            amount::NonNegativeAmount, sapling::zip212_enforcement,
-            transparent::builder::TransparentSigningSet, OutPoint,
-        },
-        fees::FeeRule,
-        Transaction, TxId,
-    },
+
+<span class="kw">use </span>::transparent::{
+    address::TransparentAddress, builder::TransparentSigningSet, bundle::OutPoint,
+};
+<span class="kw">use </span>zcash_primitives::transaction::{
+    builder::{BuildConfig, BuildResult, Builder},
+    components::sapling::zip212_enforcement,
+    fees::FeeRule,
+    Transaction, TxId,
 };
 <span class="kw">use </span>zcash_protocol::{
     consensus::{<span class="self">self</span>, BlockHeight, NetworkUpgrade},
     memo::MemoBytes,
+    value::Zatoshis,
 };
 <span class="kw">use </span>zip32::Scope;
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">use </span>{
     <span class="kw">crate</span>::{fees::ChangeValue, proposal::StepOutput, wallet::TransparentAddressMetadata},
+    ::transparent::bundle::TxOut,
     core::convert::Infallible,
     input_selection::ShieldingSelector,
     std::collections::HashMap,
     zcash_keys::encoding::AddressCodec,
-    zcash_primitives::transaction::components::TxOut,
 };
 
 <span class="attr">#[cfg(feature = <span class="string">"pczt"</span>)]
 </span><span class="kw">use </span>{
     <span class="kw">crate</span>::data_api::error::PcztError,
+    ::transparent::pczt::Bip32Derivation,
     bip32::ChildNumber,
     orchard::note_encryption::OrchardDomain,
     pczt::roles::{
@@ -2188,7 +2183,6 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
     serde::{Deserialize, Serialize},
     zcash_address::ZcashAddress,
     zcash_note_encryption::try_output_recovery_with_pkd_esk,
-    zcash_primitives::transaction::components::transparent::pczt::Bip32Derivation,
     zcash_protocol::{
         consensus::NetworkConstants,
         value::{BalanceError, ZatBalance},
@@ -2418,7 +2412,7 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
     spend_from_account: &lt;DbT <span class="kw">as </span>InputSource&gt;::AccountId,
     min_confirmations: NonZeroU32,
     to: <span class="kw-2">&amp;</span>Address,
-    amount: NonNegativeAmount,
+    amount: Zatoshis,
     memo: <span class="prelude-ty">Option</span>&lt;MemoBytes&gt;,
     change_memo: <span class="prelude-ty">Option</span>&lt;MemoBytes&gt;,
     fallback_change_pool: ShieldedProtocol,
@@ -2482,7 +2476,7 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
     params: <span class="kw-2">&amp;</span>ParamsT,
     input_selector: <span class="kw-2">&amp;</span>InputsT,
     change_strategy: <span class="kw-2">&amp;</span>ChangeT,
-    shielding_threshold: NonNegativeAmount,
+    shielding_threshold: Zatoshis,
     from_addrs: <span class="kw-2">&amp;</span>[TransparentAddress],
     to_account: &lt;DbT <span class="kw">as </span>InputSource&gt;::AccountId,
     min_confirmations: u32,
@@ -2518,7 +2512,7 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
 <span class="kw">struct </span>StepResult&lt;AccountId&gt; {
     build_result: BuildResult,
     outputs: Vec&lt;SentTransactionOutput&lt;AccountId&gt;&gt;,
-    fee_amount: NonNegativeAmount,
+    fee_amount: Zatoshis,
     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     </span>utxos_spent: Vec&lt;OutPoint&gt;,
 }
@@ -2633,18 +2627,18 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
     <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
     </span>orchard_output_meta: Vec&lt;(
         Recipient&lt;AccountId, PoolType, OutPoint&gt;,
-        NonNegativeAmount,
+        Zatoshis,
         <span class="prelude-ty">Option</span>&lt;MemoBytes&gt;,
     )&gt;,
     sapling_output_meta: Vec&lt;(
         Recipient&lt;AccountId, PoolType, OutPoint&gt;,
-        NonNegativeAmount,
+        Zatoshis,
         <span class="prelude-ty">Option</span>&lt;MemoBytes&gt;,
     )&gt;,
     transparent_output_meta: Vec&lt;(
         Recipient&lt;AccountId, Note, ()&gt;,
         TransparentAddress,
-        NonNegativeAmount,
+        Zatoshis,
         StepOutputIndex,
     )&gt;,
     <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
@@ -2971,20 +2965,14 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
     };
 
     <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-    </span><span class="kw">let </span><span class="kw-2">mut </span>orchard_output_meta: Vec&lt;(
-        Recipient&lt;<span class="kw">_</span>, PoolType, <span class="kw">_</span>&gt;,
-        NonNegativeAmount,
-        <span class="prelude-ty">Option</span>&lt;MemoBytes&gt;,
-    )&gt; = <span class="macro">vec!</span>[];
-    <span class="kw">let </span><span class="kw-2">mut </span>sapling_output_meta: Vec&lt;(
-        Recipient&lt;<span class="kw">_</span>, PoolType, <span class="kw">_</span>&gt;,
-        NonNegativeAmount,
-        <span class="prelude-ty">Option</span>&lt;MemoBytes&gt;,
-    )&gt; = <span class="macro">vec!</span>[];
+    </span><span class="kw">let </span><span class="kw-2">mut </span>orchard_output_meta: Vec&lt;(Recipient&lt;<span class="kw">_</span>, PoolType, <span class="kw">_</span>&gt;, Zatoshis, <span class="prelude-ty">Option</span>&lt;MemoBytes&gt;)&gt; =
+        <span class="macro">vec!</span>[];
+    <span class="kw">let </span><span class="kw-2">mut </span>sapling_output_meta: Vec&lt;(Recipient&lt;<span class="kw">_</span>, PoolType, <span class="kw">_</span>&gt;, Zatoshis, <span class="prelude-ty">Option</span>&lt;MemoBytes&gt;)&gt; =
+        <span class="macro">vec!</span>[];
     <span class="kw">let </span><span class="kw-2">mut </span>transparent_output_meta: Vec&lt;(
         Recipient&lt;<span class="kw">_</span>, <span class="kw">_</span>, ()&gt;,
         TransparentAddress,
-        NonNegativeAmount,
+        Zatoshis,
         StepOutputIndex,
     )&gt; = <span class="macro">vec!</span>[];
 
@@ -3910,7 +3898,7 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
             MemoBytes::from_bytes(memo_bytes(<span class="kw-2">&amp;</span>m)).expect(<span class="string">"Memo is the correct length."</span>)
         });
 
-        <span class="kw">let </span>note_value = NonNegativeAmount::try_from(note_value(<span class="kw-2">&amp;</span>note))<span class="question-mark">?</span>;
+        <span class="kw">let </span>note_value = Zatoshis::try_from(note_value(<span class="kw-2">&amp;</span>note))<span class="question-mark">?</span>;
         <span class="kw">let </span>recipient = <span class="kw">match </span>(pczt_recipient, external_address) {
             (PcztRecipient::External, <span class="prelude-val">Some</span>(addr)) =&gt; {
                 <span class="prelude-val">Ok</span>(Recipient::External(addr, PoolType::Shielded(output_pool)))
@@ -4064,7 +4052,7 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
     outputs.extend(sapling_outputs.into_iter().flatten());
     outputs.extend(transparent_outputs.into_iter().flatten());
 
-    <span class="kw">let </span>fee_amount = NonNegativeAmount::try_from(transaction.fee_paid(|outpoint| {
+    <span class="kw">let </span>fee_amount = Zatoshis::try_from(transaction.fee_paid(|outpoint| {
         utxos_map
             .get(outpoint)
             .copied()
@@ -4139,7 +4127,7 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
     output_prover: <span class="kw-2">&amp;</span><span class="kw">impl </span>OutputProver,
     input_selector: <span class="kw-2">&amp;</span>InputsT,
     change_strategy: <span class="kw-2">&amp;</span>ChangeT,
-    shielding_threshold: NonNegativeAmount,
+    shielding_threshold: Zatoshis,
     usk: <span class="kw-2">&amp;</span>UnifiedSpendingKey,
     from_addrs: <span class="kw-2">&amp;</span>[TransparentAddress],
     to_account: &lt;DbT <span class="kw">as </span>InputSource&gt;::AccountId,

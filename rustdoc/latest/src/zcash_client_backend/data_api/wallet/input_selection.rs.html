@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/wallet/input_selection.rs`."><title>input_selection.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/wallet/</div>input_selection.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/wallet/input_selection.rs`."><title>input_selection.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/wallet/</div>input_selection.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -863,9 +863,7 @@
 <a href="#862" id="862">862</a>
 <a href="#863" id="863">863</a>
 <a href="#864" id="864">864</a>
-<a href="#865" id="865">865</a>
-<a href="#866" id="866">866</a>
-<a href="#867" id="867">867</a></pre></div><pre class="rust"><code><span class="doccomment">//! Types related to the process of selecting inputs to be spent given a transaction request.
+<a href="#865" id="865">865</a></pre></div><pre class="rust"><code><span class="doccomment">//! Types related to the process of selecting inputs to be spent given a transaction request.
 
 </span><span class="kw">use </span>core::marker::PhantomData;
 <span class="kw">use </span>std::{
@@ -874,24 +872,22 @@
     fmt::{<span class="self">self</span>, Debug, Display},
 };
 
+<span class="kw">use </span>::transparent::bundle::TxOut;
 <span class="kw">use </span>nonempty::NonEmpty;
 <span class="kw">use </span>zcash_address::ConversionError;
-<span class="kw">use </span>zcash_primitives::{
+<span class="kw">use </span>zcash_keys::address::{Address, UnifiedAddress};
+<span class="kw">use </span>zcash_protocol::{
     consensus::{<span class="self">self</span>, BlockHeight},
-    transaction::components::{
-        amount::{BalanceError, NonNegativeAmount},
-        TxOut,
-    },
+    value::{BalanceError, Zatoshis},
+    PoolType, ShieldedProtocol,
 };
+<span class="kw">use </span>zip321::TransactionRequest;
 
 <span class="kw">use crate</span>::{
-    address::{Address, UnifiedAddress},
     data_api::{InputSource, SimpleNoteRetention, SpendableNotes},
     fees::{sapling, ChangeError, ChangeStrategy},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
-    zip321::TransactionRequest,
-    PoolType, ShieldedProtocol,
 };
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
@@ -899,11 +895,11 @@
     <span class="kw">crate</span>::{
         fees::EphemeralBalance,
         proposal::{Step, StepOutput, StepOutputIndex},
-        zip321::Payment,
     },
+    ::transparent::{address::TransparentAddress, bundle::OutPoint},
     std::collections::BTreeSet,
     std::convert::Infallible,
-    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
+    zip321::Payment,
 };
 
 <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
@@ -925,8 +921,8 @@
     <span class="doccomment">/// Insufficient funds were available to satisfy the payment request that inputs were being
     /// selected to attempt to satisfy.
     </span>InsufficientFunds {
-        available: NonNegativeAmount,
-        required: NonNegativeAmount,
+        available: Zatoshis,
+        required: Zatoshis,
     },
     <span class="doccomment">/// The data source does not have enough information to choose an expiry height
     /// for the transaction.
@@ -1097,7 +1093,7 @@
         params: <span class="kw-2">&amp;</span>ParamsT,
         wallet_db: <span class="kw-2">&amp;</span><span class="self">Self</span>::InputSource,
         change_strategy: <span class="kw-2">&amp;</span>ChangeT,
-        shielding_threshold: NonNegativeAmount,
+        shielding_threshold: Zatoshis,
         source_addrs: <span class="kw-2">&amp;</span>[TransparentAddress],
         to_account: &lt;<span class="self">Self</span>::InputSource <span class="kw">as </span>InputSource&gt;::AccountId,
         target_height: BlockHeight,
@@ -1163,35 +1159,35 @@
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>SaplingPayment(NonNegativeAmount);
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>SaplingPayment(Zatoshis);
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">impl </span>SaplingPayment {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(amount: NonNegativeAmount) -&gt; <span class="self">Self </span>{
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(amount: Zatoshis) -&gt; <span class="self">Self </span>{
         SaplingPayment(amount)
     }
 }
 
 <span class="kw">impl </span>sapling::OutputView <span class="kw">for </span>SaplingPayment {
-    <span class="kw">fn </span>value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; NonNegativeAmount {
+    <span class="kw">fn </span>value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Zatoshis {
         <span class="self">self</span>.<span class="number">0
     </span>}
 }
 
 <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OrchardPayment(NonNegativeAmount);
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OrchardPayment(Zatoshis);
 
 <span class="attr">#[cfg(test)]
 #[cfg(feature = <span class="string">"orchard"</span>)]
 </span><span class="kw">impl </span>OrchardPayment {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(amount: NonNegativeAmount) -&gt; <span class="self">Self </span>{
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(amount: Zatoshis) -&gt; <span class="self">Self </span>{
         OrchardPayment(amount)
     }
 }
 
 <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
 </span><span class="kw">impl </span>orchard_fees::OutputView <span class="kw">for </span>OrchardPayment {
-    <span class="kw">fn </span>value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; NonNegativeAmount {
+    <span class="kw">fn </span>value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Zatoshis {
         <span class="self">self</span>.<span class="number">0
     </span>}
 }
@@ -1270,7 +1266,7 @@
         // outputs will be computed from the constructed `tr1_transparent_outputs` value
         // constructed below.
         </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-        </span><span class="kw">let </span><span class="kw-2">mut </span>total_ephemeral = NonNegativeAmount::ZERO;
+        </span><span class="kw">let </span><span class="kw-2">mut </span>total_ephemeral = Zatoshis::ZERO;
 
         <span class="kw">for </span>(idx, payment) <span class="kw">in </span>transaction_request.payments() {
             <span class="kw">let </span>recipient_address: Address = payment
@@ -1350,8 +1346,8 @@
         }
 
         <span class="kw">let </span><span class="kw-2">mut </span>shielded_inputs = SpendableNotes::empty();
-        <span class="kw">let </span><span class="kw-2">mut </span>prior_available = NonNegativeAmount::ZERO;
-        <span class="kw">let </span><span class="kw-2">mut </span>amount_required = NonNegativeAmount::ZERO;
+        <span class="kw">let </span><span class="kw-2">mut </span>prior_available = Zatoshis::ZERO;
+        <span class="kw">let </span><span class="kw-2">mut </span>amount_required = Zatoshis::ZERO;
         <span class="kw">let </span><span class="kw-2">mut </span>exclude: Vec&lt;DbT::NoteRef&gt; = <span class="macro">vec!</span>[];
 
         <span class="comment">// This loop is guaranteed to terminate because on each iteration we check that the amount
@@ -1434,7 +1430,7 @@
                             <span class="kw-2">&amp;</span>sapling::EmptyBundleView,
                             <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
                             </span><span class="kw-2">&amp;</span>orchard_fees::EmptyBundleView,
-                            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>EphemeralBalance::Input(NonNegativeAmount::ZERO)),
+                            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>EphemeralBalance::Input(Zatoshis::ZERO)),
                             <span class="kw-2">&amp;</span>wallet_meta,
                         ) {
                         <span class="prelude-val">Err</span>(ChangeError::InsufficientFunds { required, .. }) =&gt; required,
@@ -1442,7 +1438,7 @@
                             <span class="macro">unreachable!</span>(<span class="string">"no inputs were supplied"</span>)
                         }
                         <span class="prelude-val">Err</span>(other) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(InputSelectorError::Change(other)),
-                        <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; NonNegativeAmount::ZERO, <span class="comment">// shouldn't happen
+                        <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; Zatoshis::ZERO, <span class="comment">// shouldn't happen
                     </span>};
 
                     <span class="comment">// Now recompute to obtain the `TransactionBalance` and verify that it
@@ -1651,7 +1647,7 @@
         params: <span class="kw-2">&amp;</span>ParamsT,
         wallet_db: <span class="kw-2">&amp;</span><span class="self">Self</span>::InputSource,
         change_strategy: <span class="kw-2">&amp;</span>ChangeT,
-        shielding_threshold: NonNegativeAmount,
+        shielding_threshold: Zatoshis,
         source_addrs: <span class="kw-2">&amp;</span>[TransparentAddress],
         to_account: &lt;<span class="self">Self</span>::InputSource <span class="kw">as </span>InputSource&gt;::AccountId,
         target_height: BlockHeight,

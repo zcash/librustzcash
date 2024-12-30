@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `components/zcash_address/src/encoding.rs`."><title>encoding.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_address" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_address/</div>encoding.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `components/zcash_address/src/encoding.rs`."><title>encoding.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_address" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_address/</div>encoding.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -383,7 +383,8 @@
 <a href="#382" id="382">382</a>
 <a href="#383" id="383">383</a>
 <a href="#384" id="384">384</a>
-<a href="#385" id="385">385</a></pre></div><pre class="rust"><code><span class="kw">use </span>alloc::string::String;
+<a href="#385" id="385">385</a>
+<a href="#386" id="386">386</a></pre></div><pre class="rust"><code><span class="kw">use </span>alloc::string::String;
 <span class="kw">use </span>alloc::vec::Vec;
 <span class="kw">use </span>core::convert::TryInto;
 <span class="kw">use </span>core::fmt;
@@ -571,7 +572,8 @@
     <span class="kw">use </span>assert_matches::assert_matches;
 
     <span class="kw">use super</span>::<span class="kw-2">*</span>;
-    <span class="kw">use crate</span>::{kind::unified, Network};
+    <span class="kw">use </span><span class="kw">crate</span>::kind::unified;
+    <span class="kw">use </span>zcash_protocol::consensus::NetworkType;
 
     <span class="kw">fn </span>encoding(encoded: <span class="kw-2">&amp;</span>str, decoded: ZcashAddress) {
         <span class="macro">assert_eq!</span>(decoded.to_string(), encoded);
@@ -582,11 +584,11 @@
     </span><span class="kw">fn </span>sprout() {
         encoding(
             <span class="string">"zc8E5gYid86n4bo2Usdq1cpr7PpfoJGzttwBHEEgGhGkLUg7SPPVFNB2AkRFXZ7usfphup5426dt1buMmY3fkYeRrQGLa8y"</span>,
-            ZcashAddress { net: Network::Main, kind: AddressKind::Sprout([<span class="number">0</span>; <span class="number">64</span>]) },
+            ZcashAddress { net: NetworkType::Main, kind: AddressKind::Sprout([<span class="number">0</span>; <span class="number">64</span>]) },
         );
         encoding(
             <span class="string">"ztJ1EWLKcGwF2S4NA17pAJVdco8Sdkz4AQPxt1cLTEfNuyNswJJc2BbBqYrsRZsp31xbVZwhF7c7a2L9jsF3p3ZwRWpqqyS"</span>,
-            ZcashAddress { net: Network::Test, kind: AddressKind::Sprout([<span class="number">0</span>; <span class="number">64</span>]) },
+            ZcashAddress { net: NetworkType::Test, kind: AddressKind::Sprout([<span class="number">0</span>; <span class="number">64</span>]) },
         );
     }
 
@@ -595,21 +597,21 @@
         encoding(
             <span class="string">"zs1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpq6d8g"</span>,
             ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::Sapling([<span class="number">0</span>; <span class="number">43</span>]),
             },
         );
         encoding(
             <span class="string">"ztestsapling1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqfhgwqu"</span>,
             ZcashAddress {
-                net: Network::Test,
+                net: NetworkType::Test,
                 kind: AddressKind::Sapling([<span class="number">0</span>; <span class="number">43</span>]),
             },
         );
         encoding(
             <span class="string">"zregtestsapling1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqknpr3m"</span>,
             ZcashAddress {
-                net: Network::Regtest,
+                net: NetworkType::Regtest,
                 kind: AddressKind::Sapling([<span class="number">0</span>; <span class="number">43</span>]),
             },
         );
@@ -620,21 +622,21 @@
         encoding(
             <span class="string">"u1qpatys4zruk99pg59gcscrt7y6akvl9vrhcfyhm9yxvxz7h87q6n8cgrzzpe9zru68uq39uhmlpp5uefxu0su5uqyqfe5zp3tycn0ecl"</span>,
             ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::Unified(unified::Address(<span class="macro">vec!</span>[unified::address::Receiver::Sapling([<span class="number">0</span>; <span class="number">43</span>])])),
             },
         );
         encoding(
             <span class="string">"utest10c5kutapazdnf8ztl3pu43nkfsjx89fy3uuff8tsmxm6s86j37pe7uz94z5jhkl49pqe8yz75rlsaygexk6jpaxwx0esjr8wm5ut7d5s"</span>,
             ZcashAddress {
-                net: Network::Test,
+                net: NetworkType::Test,
                 kind: AddressKind::Unified(unified::Address(<span class="macro">vec!</span>[unified::address::Receiver::Sapling([<span class="number">0</span>; <span class="number">43</span>])])),
             },
         );
         encoding(
             <span class="string">"uregtest15xk7vj4grjkay6mnfl93dhsflc2yeunhxwdh38rul0rq3dfhzzxgm5szjuvtqdha4t4p2q02ks0jgzrhjkrav70z9xlvq0plpcjkd5z3"</span>,
             ZcashAddress {
-                net: Network::Regtest,
+                net: NetworkType::Regtest,
                 kind: AddressKind::Unified(unified::Address(<span class="macro">vec!</span>[unified::address::Receiver::Sapling([<span class="number">0</span>; <span class="number">43</span>])])),
             },
         );
@@ -651,28 +653,28 @@
         encoding(
             <span class="string">"t1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs"</span>,
             ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::P2pkh([<span class="number">0</span>; <span class="number">20</span>]),
             },
         );
         encoding(
             <span class="string">"tm9iMLAuYMzJ6jtFLcA7rzUmfreGuKvr7Ma"</span>,
             ZcashAddress {
-                net: Network::Test,
+                net: NetworkType::Test,
                 kind: AddressKind::P2pkh([<span class="number">0</span>; <span class="number">20</span>]),
             },
         );
         encoding(
             <span class="string">"t3JZcvsuaXE6ygokL4XUiZSTrQBUoPYFnXJ"</span>,
             ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::P2sh([<span class="number">0</span>; <span class="number">20</span>]),
             },
         );
         encoding(
             <span class="string">"t26YoyZ1iPgiMEWL4zGUm74eVWfhyDMXzY2"</span>,
             ZcashAddress {
-                net: Network::Test,
+                net: NetworkType::Test,
                 kind: AddressKind::P2sh([<span class="number">0</span>; <span class="number">20</span>]),
             },
         );
@@ -685,7 +687,7 @@
 
         <span class="comment">// Transcode P2PKH to TEX
         </span><span class="kw">let </span>p2pkh_zaddr: ZcashAddress = p2pkh_str.parse().unwrap();
-        <span class="macro">assert_matches!</span>(p2pkh_zaddr.net, Network::Main);
+        <span class="macro">assert_matches!</span>(p2pkh_zaddr.net, NetworkType::Main);
         <span class="kw">if let </span>AddressKind::P2pkh(zaddr_data) = p2pkh_zaddr.kind {
             <span class="kw">let </span>tex_zaddr = ZcashAddress {
                 net: p2pkh_zaddr.net,
@@ -699,7 +701,7 @@
 
         <span class="comment">// Transcode TEX to P2PKH
         </span><span class="kw">let </span>tex_zaddr: ZcashAddress = tex_str.parse().unwrap();
-        <span class="macro">assert_matches!</span>(tex_zaddr.net, Network::Main);
+        <span class="macro">assert_matches!</span>(tex_zaddr.net, NetworkType::Main);
         <span class="kw">if let </span>AddressKind::Tex(zaddr_data) = tex_zaddr.kind {
             <span class="kw">let </span>p2pkh_zaddr = ZcashAddress {
                 net: tex_zaddr.net,
@@ -719,7 +721,7 @@
 
         <span class="comment">// Transcode P2PKH to TEX
         </span><span class="kw">let </span>p2pkh_zaddr: ZcashAddress = p2pkh_str.parse().unwrap();
-        <span class="macro">assert_matches!</span>(p2pkh_zaddr.net, Network::Test);
+        <span class="macro">assert_matches!</span>(p2pkh_zaddr.net, NetworkType::Test);
         <span class="kw">if let </span>AddressKind::P2pkh(zaddr_data) = p2pkh_zaddr.kind {
             <span class="kw">let </span>tex_zaddr = ZcashAddress {
                 net: p2pkh_zaddr.net,
@@ -733,7 +735,7 @@
 
         <span class="comment">// Transcode TEX to P2PKH
         </span><span class="kw">let </span>tex_zaddr: ZcashAddress = tex_str.parse().unwrap();
-        <span class="macro">assert_matches!</span>(tex_zaddr.net, Network::Test);
+        <span class="macro">assert_matches!</span>(tex_zaddr.net, NetworkType::Test);
         <span class="kw">if let </span>AddressKind::Tex(zaddr_data) = tex_zaddr.kind {
             <span class="kw">let </span>p2pkh_zaddr = ZcashAddress {
                 net: tex_zaddr.net,
@@ -751,14 +753,14 @@
         <span class="macro">assert_eq!</span>(
             <span class="string">" t1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs"</span>.parse(),
             <span class="prelude-val">Ok</span>(ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::P2pkh([<span class="number">0</span>; <span class="number">20</span>])
             }),
         );
         <span class="macro">assert_eq!</span>(
             <span class="string">"t1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs "</span>.parse(),
             <span class="prelude-val">Ok</span>(ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::P2pkh([<span class="number">0</span>; <span class="number">20</span>])
             }),
         );

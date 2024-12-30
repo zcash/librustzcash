@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/testing.rs`."><title>testing.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/</div>testing.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/testing.rs`."><title>testing.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/</div>testing.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -2824,20 +2824,7 @@
 <a href="#2823" id="2823">2823</a>
 <a href="#2824" id="2824">2824</a>
 <a href="#2825" id="2825">2825</a>
-<a href="#2826" id="2826">2826</a>
-<a href="#2827" id="2827">2827</a>
-<a href="#2828" id="2828">2828</a>
-<a href="#2829" id="2829">2829</a>
-<a href="#2830" id="2830">2830</a>
-<a href="#2831" id="2831">2831</a>
-<a href="#2832" id="2832">2832</a>
-<a href="#2833" id="2833">2833</a>
-<a href="#2834" id="2834">2834</a>
-<a href="#2835" id="2835">2835</a>
-<a href="#2836" id="2836">2836</a>
-<a href="#2837" id="2837">2837</a>
-<a href="#2838" id="2838">2838</a>
-<a href="#2839" id="2839">2839</a></pre></div><pre class="rust"><code><span class="doccomment">//! Utilities for testing wallets based upon the [`crate::data_api`] traits.
+<a href="#2826" id="2826">2826</a></pre></div><pre class="rust"><code><span class="doccomment">//! Utilities for testing wallets based upon the [`crate::data_api`] traits.
 
 </span><span class="kw">use </span>std::{
     collections::{BTreeMap, HashMap},
@@ -2863,41 +2850,36 @@
 <span class="kw">use </span>subtle::ConditionallySelectable;
 
 <span class="kw">use </span>zcash_address::ZcashAddress;
-<span class="kw">use </span>zcash_keys::address::Address;
+<span class="kw">use </span>zcash_keys::{
+    address::{Address, UnifiedAddress},
+    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+};
 <span class="kw">use </span>zcash_note_encryption::Domain;
 <span class="kw">use </span>zcash_primitives::{
     block::BlockHash,
-    consensus::{BlockHeight, Network},
-    memo::Memo,
-    transaction::{
-        components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
-        fees::FeeRule,
-        Transaction, TxId,
-    },
+    transaction::{components::sapling::zip212_enforcement, fees::FeeRule, Transaction, TxId},
 };
 <span class="kw">use </span>zcash_proofs::prover::LocalTxProver;
 <span class="kw">use </span>zcash_protocol::{
-    consensus::{<span class="self">self</span>, NetworkUpgrade, Parameters <span class="kw">as _</span>},
+    consensus::{<span class="self">self</span>, BlockHeight, Network, NetworkUpgrade, Parameters <span class="kw">as _</span>},
     local_consensus::LocalNetwork,
-    memo::MemoBytes,
+    memo::{Memo, MemoBytes},
     value::{ZatBalance, Zatoshis},
+    ShieldedProtocol,
 };
 <span class="kw">use </span>zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 <span class="kw">use </span>zip321::Payment;
 
 <span class="kw">use crate</span>::{
-    address::UnifiedAddress,
     fees::{
         standard::{<span class="self">self</span>, SingleOutputChangeStrategy},
         ChangeStrategy, DustOutputPolicy, StandardFeeRule,
     },
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     proposal::Proposal,
     proto::compact_formats::{
         <span class="self">self</span>, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
     },
     wallet::{Note, NoteId, OvkPolicy, ReceivedNote, WalletTransparentOutput},
-    ShieldedProtocol,
 };
 
 <span class="kw">use super</span>::{
@@ -2919,7 +2901,7 @@
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">use </span>{
     <span class="kw">super</span>::wallet::input_selection::ShieldingSelector, <span class="kw">crate</span>::wallet::TransparentAddressMetadata,
-    std::ops::Range, zcash_primitives::legacy::TransparentAddress,
+    ::transparent::address::TransparentAddress, std::ops::Range,
 };
 
 <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
@@ -3364,7 +3346,7 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         fvk: <span class="kw-2">&amp;</span>Fvk,
         address_type: AddressType,
-        value: NonNegativeAmount,
+        value: Zatoshis,
     ) -&gt; (BlockHeight, Cache::InsertResult, Fvk::Nullifier) {
         <span class="kw">let </span>pre_activation_block = CachedBlock::none(<span class="self">self</span>.sapling_activation_height() - <span class="number">1</span>);
         <span class="kw">let </span>prior_cached_block = <span class="self">self</span>.latest_cached_block().unwrap_or(<span class="kw-2">&amp;</span>pre_activation_block);
@@ -3530,9 +3512,9 @@
     </span><span class="kw">pub fn </span>generate_next_block_spending&lt;Fvk: TestFvk&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         fvk: <span class="kw-2">&amp;</span>Fvk,
-        note: (Fvk::Nullifier, NonNegativeAmount),
+        note: (Fvk::Nullifier, Zatoshis),
         to: <span class="kw">impl </span>Into&lt;Address&gt;,
-        value: NonNegativeAmount,
+        value: Zatoshis,
     ) -&gt; (BlockHeight, Cache::InsertResult) {
         <span class="kw">let </span>prior_cached_block = <span class="self">self
             </span>.latest_cached_block()
@@ -3714,7 +3696,7 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         from_account: <span class="kw-2">&amp;</span>TestAccount&lt;DbT::Account&gt;,
         to: ZcashAddress,
-        value: NonNegativeAmount,
+        value: Zatoshis,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;
         NonEmpty&lt;TxId&gt;,
         <span class="kw">super</span>::wallet::TransferErrT&lt;
@@ -3833,7 +3815,7 @@
         fee_rule: StandardFeeRule,
         min_confirmations: NonZeroU32,
         to: <span class="kw-2">&amp;</span>Address,
-        amount: NonNegativeAmount,
+        amount: Zatoshis,
         memo: <span class="prelude-ty">Option</span>&lt;MemoBytes&gt;,
         change_memo: <span class="prelude-ty">Option</span>&lt;MemoBytes&gt;,
         fallback_change_pool: ShieldedProtocol,
@@ -3877,7 +3859,7 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         input_selector: <span class="kw-2">&amp;</span>InputsT,
         change_strategy: <span class="kw-2">&amp;</span>ChangeT,
-        shielding_threshold: NonNegativeAmount,
+        shielding_threshold: Zatoshis,
         from_addrs: <span class="kw-2">&amp;</span>[TransparentAddress],
         to_account: &lt;InputsT::InputSource <span class="kw">as </span>InputSource&gt;::AccountId,
         min_confirmations: u32,
@@ -3999,7 +3981,7 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         input_selector: <span class="kw-2">&amp;</span>InputsT,
         change_strategy: <span class="kw-2">&amp;</span>ChangeT,
-        shielding_threshold: NonNegativeAmount,
+        shielding_threshold: Zatoshis,
         usk: <span class="kw-2">&amp;</span>UnifiedSpendingKey,
         from_addrs: <span class="kw-2">&amp;</span>[TransparentAddress],
         to_account: &lt;DbT <span class="kw">as </span>InputSource&gt;::AccountId,
@@ -4043,17 +4025,13 @@
     }
 
     <span class="doccomment">/// Returns the total balance in the given account at this point in the test.
-    </span><span class="kw">pub fn </span>get_total_balance(<span class="kw-2">&amp;</span><span class="self">self</span>, account: AccountIdT) -&gt; NonNegativeAmount {
+    </span><span class="kw">pub fn </span>get_total_balance(<span class="kw-2">&amp;</span><span class="self">self</span>, account: AccountIdT) -&gt; Zatoshis {
         <span class="self">self</span>.with_account_balance(account, <span class="number">0</span>, |balance| balance.total())
     }
 
     <span class="doccomment">/// Returns the balance in the given account that is spendable with the given number
     /// of confirmations at this point in the test.
-    </span><span class="kw">pub fn </span>get_spendable_balance(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        account: AccountIdT,
-        min_confirmations: u32,
-    ) -&gt; NonNegativeAmount {
+    </span><span class="kw">pub fn </span>get_spendable_balance(<span class="kw-2">&amp;</span><span class="self">self</span>, account: AccountIdT, min_confirmations: u32) -&gt; Zatoshis {
         <span class="self">self</span>.with_account_balance(account, min_confirmations, |balance| {
             balance.spendable_value()
         })
@@ -4065,7 +4043,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         account: AccountIdT,
         min_confirmations: u32,
-    ) -&gt; NonNegativeAmount {
+    ) -&gt; Zatoshis {
         <span class="self">self</span>.with_account_balance(account, min_confirmations, |balance| {
             balance.value_pending_spendability() + balance.change_pending_confirmation()
         })
@@ -4075,11 +4053,7 @@
     <span class="doccomment">/// Returns the amount of change in the given account that is not yet spendable with
     /// the given number of confirmations at this point in the test.
     </span><span class="attr">#[allow(dead_code)]
-    </span><span class="kw">pub fn </span>get_pending_change(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        account: AccountIdT,
-        min_confirmations: u32,
-    ) -&gt; NonNegativeAmount {
+    </span><span class="kw">pub fn </span>get_pending_change(<span class="kw-2">&amp;</span><span class="self">self</span>, account: AccountIdT, min_confirmations: u32) -&gt; Zatoshis {
         <span class="self">self</span>.with_account_balance(account, min_confirmations, |balance| {
             balance.change_pending_confirmation()
         })
@@ -4566,7 +4540,7 @@
         params: <span class="kw-2">&amp;</span>P,
         height: BlockHeight,
         req: AddressType,
-        value: NonNegativeAmount,
+        value: Zatoshis,
         initial_sapling_tree_size: u32,
         <span class="comment">// we don't require an initial Orchard tree size because we don't need it to compute
         // the nullifier.
@@ -4588,7 +4562,7 @@
         height: BlockHeight,
         nf: <span class="self">Self</span>::Nullifier,
         req: AddressType,
-        value: NonNegativeAmount,
+        value: Zatoshis,
         initial_sapling_tree_size: u32,
         <span class="comment">// we don't require an initial Orchard tree size because we don't need it to compute
         // the nullifier.
@@ -4694,7 +4668,7 @@
         params: <span class="kw-2">&amp;</span>P,
         height: BlockHeight,
         req: AddressType,
-        value: NonNegativeAmount,
+        value: Zatoshis,
         initial_sapling_tree_size: u32,
         rng: <span class="kw-2">&amp;mut </span>R,
     ) -&gt; <span class="self">Self</span>::Nullifier {
@@ -4721,7 +4695,7 @@
         height: BlockHeight,
         nf: <span class="self">Self</span>::Nullifier,
         req: AddressType,
-        value: NonNegativeAmount,
+        value: Zatoshis,
         initial_sapling_tree_size: u32,
         rng: <span class="kw-2">&amp;mut </span>R,
     ) -&gt; <span class="self">Self</span>::Nullifier {
@@ -4770,7 +4744,7 @@
         <span class="kw">let </span>(cact, <span class="kw">_</span>) = compact_orchard_action(
             revealed_spent_note_nullifier,
             recipient,
-            NonNegativeAmount::ZERO,
+            Zatoshis::ZERO,
             <span class="self">self</span>.orchard_ovk(zip32::Scope::Internal),
             rng,
         );
@@ -4783,7 +4757,7 @@
         <span class="kw">_</span>: <span class="kw-2">&amp;</span>P,
         <span class="kw">_</span>: BlockHeight,
         req: AddressType,
-        value: NonNegativeAmount,
+        value: Zatoshis,
         <span class="kw">_</span>: u32, <span class="comment">// the position is not required for computing the Orchard nullifier
         </span><span class="kw-2">mut </span>rng: <span class="kw-2">&amp;mut </span>R,
     ) -&gt; <span class="self">Self</span>::Nullifier {
@@ -4818,7 +4792,7 @@
         <span class="kw">_</span>: BlockHeight,
         revealed_spent_note_nullifier: <span class="self">Self</span>::Nullifier,
         address_type: AddressType,
-        value: NonNegativeAmount,
+        value: Zatoshis,
         <span class="kw">_</span>: u32, <span class="comment">// the position is not required for computing the Orchard nullifier
         </span>rng: <span class="kw-2">&amp;mut </span>R,
     ) -&gt; <span class="self">Self</span>::Nullifier {
@@ -4867,7 +4841,7 @@
     params: <span class="kw-2">&amp;</span>P,
     height: BlockHeight,
     recipient: ::sapling::PaymentAddress,
-    value: NonNegativeAmount,
+    value: Zatoshis,
     ovk: <span class="prelude-ty">Option</span>&lt;::sapling::keys::OutgoingViewingKey&gt;,
     rng: <span class="kw-2">&amp;mut </span>R,
 ) -&gt; (CompactSaplingOutput, ::sapling::Note) {
@@ -4899,7 +4873,7 @@
 </span><span class="kw">fn </span>compact_orchard_action&lt;R: RngCore + CryptoRng&gt;(
     nf_old: ::orchard::note::Nullifier,
     recipient: ::orchard::Address,
-    value: NonNegativeAmount,
+    value: Zatoshis,
     ovk: <span class="prelude-ty">Option</span>&lt;::orchard::keys::OutgoingViewingKey&gt;,
     rng: <span class="kw-2">&amp;mut </span>R,
 ) -&gt; (CompactOrchardAction, ::orchard::Note) {
@@ -4943,12 +4917,12 @@
 </span><span class="kw">pub struct </span>FakeCompactOutput&lt;Fvk&gt; {
     fvk: Fvk,
     address_type: AddressType,
-    value: NonNegativeAmount,
+    value: Zatoshis,
 }
 
 <span class="kw">impl</span>&lt;Fvk&gt; FakeCompactOutput&lt;Fvk&gt; {
     <span class="doccomment">/// Constructs a new fake output with the given properties.
-    </span><span class="kw">pub fn </span>new(fvk: Fvk, address_type: AddressType, value: NonNegativeAmount) -&gt; <span class="self">Self </span>{
+    </span><span class="kw">pub fn </span>new(fvk: Fvk, address_type: AddressType, value: Zatoshis) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             fvk,
             address_type,
@@ -5058,10 +5032,10 @@
     params: <span class="kw-2">&amp;</span>P,
     height: BlockHeight,
     prev_hash: BlockHash,
-    (nf, in_value): (Fvk::Nullifier, NonNegativeAmount),
+    (nf, in_value): (Fvk::Nullifier, Zatoshis),
     fvk: <span class="kw-2">&amp;</span>Fvk,
     to: Address,
-    value: NonNegativeAmount,
+    value: Zatoshis,
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
     <span class="kw-2">mut </span>rng: <span class="kw">impl </span>RngCore + CryptoRng,
@@ -5292,7 +5266,7 @@
     <span class="kw">fn </span>select_spendable_notes(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         _account: <span class="self">Self</span>::AccountId,
-        _target_value: NonNegativeAmount,
+        _target_value: Zatoshis,
         _sources: <span class="kw-2">&amp;</span>[ShieldedProtocol],
         _anchor_height: BlockHeight,
         _exclude: <span class="kw-2">&amp;</span>[<span class="self">Self</span>::NoteRef],
@@ -5459,7 +5433,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         _account: <span class="self">Self</span>::AccountId,
         _max_height: BlockHeight,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;HashMap&lt;TransparentAddress, NonNegativeAmount&gt;, <span class="self">Self</span>::Error&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;HashMap&lt;TransparentAddress, Zatoshis&gt;, <span class="self">Self</span>::Error&gt; {
         <span class="prelude-val">Ok</span>(HashMap::new())
     }
 

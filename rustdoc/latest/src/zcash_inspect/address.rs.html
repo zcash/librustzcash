@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `devtools/src/bin/inspect/address.rs`."><title>address.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_inspect" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_inspect/</div>address.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `devtools/src/bin/inspect/address.rs`."><title>address.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_inspect" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_inspect/</div>address.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -162,10 +162,18 @@
 <a href="#161" id="161">161</a>
 <a href="#162" id="162">162</a>
 <a href="#163" id="163">163</a>
-<a href="#164" id="164">164</a></pre></div><pre class="rust"><code><span class="kw">use </span>zcash_address::{
+<a href="#164" id="164">164</a>
+<a href="#165" id="165">165</a>
+<a href="#166" id="166">166</a>
+<a href="#167" id="167">167</a>
+<a href="#168" id="168">168</a>
+<a href="#169" id="169">169</a>
+<a href="#170" id="170">170</a>
+<a href="#171" id="171">171</a></pre></div><pre class="rust"><code><span class="kw">use </span>zcash_address::{
     unified::{<span class="self">self</span>, Container, Encoding},
-    ConversionError, Network, ToAddress, ZcashAddress,
+    ConversionError, ToAddress, ZcashAddress,
 };
+<span class="kw">use </span>zcash_protocol::consensus::NetworkType;
 
 <span class="attr">#[allow(dead_code)]
 </span><span class="kw">enum </span>AddressKind {
@@ -178,14 +186,17 @@
 }
 
 <span class="kw">struct </span>Address {
-    net: Network,
+    net: NetworkType,
     kind: AddressKind,
 }
 
 <span class="kw">impl </span>zcash_address::TryFromAddress <span class="kw">for </span>Address {
     <span class="kw">type </span>Error = ();
 
-    <span class="kw">fn </span>try_from_sprout(net: Network, data: [u8; <span class="number">64</span>]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, ConversionError&lt;<span class="self">Self</span>::Error&gt;&gt; {
+    <span class="kw">fn </span>try_from_sprout(
+        net: NetworkType,
+        data: [u8; <span class="number">64</span>],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, ConversionError&lt;<span class="self">Self</span>::Error&gt;&gt; {
         <span class="prelude-val">Ok</span>(Address {
             net,
             kind: AddressKind::Sprout(data),
@@ -193,7 +204,7 @@
     }
 
     <span class="kw">fn </span>try_from_sapling(
-        net: Network,
+        net: NetworkType,
         data: [u8; <span class="number">43</span>],
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, ConversionError&lt;<span class="self">Self</span>::Error&gt;&gt; {
         <span class="prelude-val">Ok</span>(Address {
@@ -203,7 +214,7 @@
     }
 
     <span class="kw">fn </span>try_from_unified(
-        net: Network,
+        net: NetworkType,
         data: unified::Address,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, ConversionError&lt;<span class="self">Self</span>::Error&gt;&gt; {
         <span class="prelude-val">Ok</span>(Address {
@@ -213,7 +224,7 @@
     }
 
     <span class="kw">fn </span>try_from_transparent_p2pkh(
-        net: Network,
+        net: NetworkType,
         data: [u8; <span class="number">20</span>],
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, ConversionError&lt;<span class="self">Self</span>::Error&gt;&gt; {
         <span class="prelude-val">Ok</span>(Address {
@@ -223,7 +234,7 @@
     }
 
     <span class="kw">fn </span>try_from_transparent_p2sh(
-        net: Network,
+        net: NetworkType,
         data: [u8; <span class="number">20</span>],
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, ConversionError&lt;<span class="self">Self</span>::Error&gt;&gt; {
         <span class="prelude-val">Ok</span>(Address {
@@ -232,7 +243,10 @@
         })
     }
 
-    <span class="kw">fn </span>try_from_tex(net: Network, data: [u8; <span class="number">20</span>]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, ConversionError&lt;<span class="self">Self</span>::Error&gt;&gt; {
+    <span class="kw">fn </span>try_from_tex(
+        net: NetworkType,
+        data: [u8; <span class="number">20</span>],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, ConversionError&lt;<span class="self">Self</span>::Error&gt;&gt; {
         <span class="prelude-val">Ok</span>(Address {
             net,
             kind: AddressKind::Tex(data),
@@ -251,9 +265,9 @@
             <span class="macro">eprintln!</span>(
                 <span class="string">" - Network: {}"</span>,
                 <span class="kw">match </span>addr.net {
-                    Network::Main =&gt; <span class="string">"main"</span>,
-                    Network::Test =&gt; <span class="string">"testnet"</span>,
-                    Network::Regtest =&gt; <span class="string">"regtest"</span>,
+                    NetworkType::Main =&gt; <span class="string">"main"</span>,
+                    NetworkType::Test =&gt; <span class="string">"testnet"</span>,
+                    NetworkType::Regtest =&gt; <span class="string">"regtest"</span>,
                 }
             );
             <span class="macro">eprintln!</span>(

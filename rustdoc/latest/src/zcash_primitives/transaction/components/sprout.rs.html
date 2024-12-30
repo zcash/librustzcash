@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/components/sprout.rs`."><title>sprout.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/components/</div>sprout.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/components/sprout.rs`."><title>sprout.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../../static.files/storage-59e33391.js"></script><script defer src="../../../../static.files/src-script-56102188.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/components/</div>sprout.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -193,11 +193,13 @@
 <a href="#192" id="192">192</a>
 <a href="#193" id="193">193</a>
 <a href="#194" id="194">194</a>
-<a href="#195" id="195">195</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs representing the components within Zcash transactions.
+<a href="#195" id="195">195</a>
+<a href="#196" id="196">196</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs representing the components within Zcash transactions.
 
 </span><span class="kw">use </span>std::io::{<span class="self">self</span>, Read, Write};
 
-<span class="kw">use super</span>::{amount::Amount, GROTH_PROOF_SIZE};
+<span class="kw">use </span><span class="kw">super</span>::GROTH_PROOF_SIZE;
+<span class="kw">use </span>zcash_protocol::value::ZatBalance;
 
 <span class="comment">// π_A + π_A' + π_B + π_B' + π_C + π_C' + π_K + π_H
 </span><span class="kw">const </span>PHGR_PROOF_SIZE: usize = <span class="number">33 </span>+ <span class="number">33 </span>+ <span class="number">65 </span>+ <span class="number">33 </span>+ <span class="number">33 </span>+ <span class="number">33 </span>+ <span class="number">33 </span>+ <span class="number">33</span>;
@@ -217,10 +219,10 @@
     /// its value is added to the transparent value pool; when it
     /// is negative, its value is subtracted from the transparent
     /// value pool.
-    </span><span class="kw">pub fn </span>value_balance(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Amount&gt; {
+    </span><span class="kw">pub fn </span>value_balance(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;ZatBalance&gt; {
         <span class="self">self</span>.joinsplits
             .iter()
-            .try_fold(Amount::zero(), |total, js| total + js.net_value())
+            .try_fold(ZatBalance::zero(), |total, js| total + js.net_value())
     }
 }
 
@@ -242,8 +244,8 @@
 
 <span class="attr">#[derive(Clone)]
 </span><span class="kw">pub struct </span>JsDescription {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) vpub_old: Amount,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) vpub_new: Amount,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) vpub_old: ZatBalance,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) vpub_new: ZatBalance,
     <span class="kw">pub</span>(<span class="kw">crate</span>) anchor: [u8; <span class="number">32</span>],
     <span class="kw">pub</span>(<span class="kw">crate</span>) nullifiers: [[u8; <span class="number">32</span>]; ZC_NUM_JS_INPUTS],
     <span class="kw">pub</span>(<span class="kw">crate</span>) commitments: [[u8; <span class="number">32</span>]; ZC_NUM_JS_OUTPUTS],
@@ -284,7 +286,7 @@
         </span><span class="kw">let </span>vpub_old = {
             <span class="kw">let </span><span class="kw-2">mut </span>tmp = [<span class="number">0u8</span>; <span class="number">8</span>];
             reader.read_exact(<span class="kw-2">&amp;mut </span>tmp)<span class="question-mark">?</span>;
-            Amount::from_u64_le_bytes(tmp)
+            ZatBalance::from_u64_le_bytes(tmp)
         }
         .map_err(|<span class="kw">_</span>| io::Error::new(io::ErrorKind::InvalidData, <span class="string">"vpub_old out of range"</span>))<span class="question-mark">?</span>;
 
@@ -292,7 +294,7 @@
         </span><span class="kw">let </span>vpub_new = {
             <span class="kw">let </span><span class="kw-2">mut </span>tmp = [<span class="number">0u8</span>; <span class="number">8</span>];
             reader.read_exact(<span class="kw-2">&amp;mut </span>tmp)<span class="question-mark">?</span>;
-            Amount::from_u64_le_bytes(tmp)
+            ZatBalance::from_u64_le_bytes(tmp)
         }
         .map_err(|<span class="kw">_</span>| io::Error::new(io::ErrorKind::InvalidData, <span class="string">"vpub_new out of range"</span>))<span class="question-mark">?</span>;
 
@@ -384,7 +386,7 @@
     /// its value is added to the transparent value pool; when it
     /// is negative, its value is subtracted from the transparent
     /// value pool.
-    </span><span class="kw">pub fn </span>net_value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Amount {
+    </span><span class="kw">pub fn </span>net_value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ZatBalance {
         (<span class="self">self</span>.vpub_new - <span class="self">self</span>.vpub_old).expect(<span class="string">"difference is in range [-MAX_MONEY..=MAX_MONEY]"</span>)
     }
 }

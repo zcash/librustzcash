@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/error.rs`."><title>error.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/</div>error.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/data_api/error.rs`."><title>error.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/data_api/</div>error.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -423,31 +423,27 @@
 <a href="#422" id="422">422</a>
 <a href="#423" id="423">423</a>
 <a href="#424" id="424">424</a>
-<a href="#425" id="425">425</a>
-<a href="#426" id="426">426</a>
-<a href="#427" id="427">427</a></pre></div><pre class="rust"><code><span class="doccomment">//! Types for wallet error handling.
+<a href="#425" id="425">425</a></pre></div><pre class="rust"><code><span class="doccomment">//! Types for wallet error handling.
 
 </span><span class="kw">use </span>std::error;
 <span class="kw">use </span>std::fmt::{<span class="self">self</span>, Debug, Display};
 
 <span class="kw">use </span>shardtree::error::ShardTreeError;
 <span class="kw">use </span>zcash_address::ConversionError;
-<span class="kw">use </span>zcash_primitives::transaction::components::amount::NonNegativeAmount;
-<span class="kw">use </span>zcash_primitives::transaction::{
-    builder,
-    components::{amount::BalanceError, transparent},
+<span class="kw">use </span>zcash_keys::address::UnifiedAddress;
+<span class="kw">use </span>zcash_primitives::transaction::builder;
+<span class="kw">use </span>zcash_protocol::{
+    value::{BalanceError, Zatoshis},
+    PoolType,
 };
 
-<span class="kw">use </span><span class="kw">crate</span>::address::UnifiedAddress;
-<span class="kw">use </span><span class="kw">crate</span>::data_api::wallet::input_selection::InputSelectorError;
-<span class="kw">use </span><span class="kw">crate</span>::fees::ChangeError;
-<span class="kw">use </span><span class="kw">crate</span>::proposal::ProposalError;
-<span class="kw">use </span><span class="kw">crate</span>::PoolType;
+<span class="kw">use crate</span>::{
+    data_api::wallet::input_selection::InputSelectorError, fees::ChangeError,
+    proposal::ProposalError, wallet::NoteId,
+};
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-</span><span class="kw">use </span>zcash_primitives::legacy::TransparentAddress;
-
-<span class="kw">use </span><span class="kw">crate</span>::wallet::NoteId;
+</span><span class="kw">use </span>::transparent::address::TransparentAddress;
 
 <span class="doccomment">/// Errors that can occur as a consequence of wallet operations.
 </span><span class="attr">#[derive(Debug)]
@@ -489,8 +485,8 @@
 
     <span class="doccomment">/// Unable to create a new spend because the wallet balance is not sufficient.
     </span>InsufficientFunds {
-        available: NonNegativeAmount,
-        required: NonNegativeAmount,
+        available: Zatoshis,
+        required: Zatoshis,
     },
 
     <span class="doccomment">/// The wallet must first perform a scan of the blockchain before other
@@ -781,7 +777,7 @@
 }
 
 <span class="kw">impl</span>&lt;DE, TE, SE, FE, CE, N&gt; From&lt;transparent::builder::Error&gt; <span class="kw">for </span>Error&lt;DE, TE, SE, FE, CE, N&gt; {
-    <span class="kw">fn </span>from(e: transparent::builder::Error) -&gt; <span class="self">Self </span>{
+    <span class="kw">fn </span>from(e: ::transparent::builder::Error) -&gt; <span class="self">Self </span>{
         Error::Builder(builder::Error::TransparentBuild(e))
     }
 }

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -89,7 +89,23 @@
 <a href="#88" id="88">88</a>
 <a href="#89" id="89">89</a>
 <a href="#90" id="90">90</a>
-<a href="#91" id="91">91</a></pre></div><pre class="rust"><code><span class="doccomment">//! *A crate for implementing Zcash light clients.*
+<a href="#91" id="91">91</a>
+<a href="#92" id="92">92</a>
+<a href="#93" id="93">93</a>
+<a href="#94" id="94">94</a>
+<a href="#95" id="95">95</a>
+<a href="#96" id="96">96</a>
+<a href="#97" id="97">97</a>
+<a href="#98" id="98">98</a>
+<a href="#99" id="99">99</a>
+<a href="#100" id="100">100</a>
+<a href="#101" id="101">101</a>
+<a href="#102" id="102">102</a>
+<a href="#103" id="103">103</a>
+<a href="#104" id="104">104</a>
+<a href="#105" id="105">105</a>
+<a href="#106" id="106">106</a>
+<a href="#107" id="107">107</a></pre></div><pre class="rust"><code><span class="doccomment">//! *A crate for implementing Zcash light clients.*
 //!
 //! `zcash_client_backend` contains Rust structs and traits for creating shielded Zcash
 //! light clients.
@@ -152,18 +168,14 @@
 </span><span class="comment">// Temporary until we have addressed all Result&lt;T, ()&gt; cases.
 </span><span class="attr">#![allow(clippy::result_unit_err)]
 
-</span><span class="kw">pub use </span>zcash_keys::address;
-<span class="kw">pub mod </span>data_api;
+</span><span class="kw">pub mod </span>data_api;
 <span class="kw">mod </span>decrypt;
-<span class="kw">pub use </span>zcash_keys::encoding;
 <span class="kw">pub mod </span>fees;
-<span class="kw">pub use </span>zcash_keys::keys;
 <span class="kw">pub mod </span>proposal;
 <span class="kw">pub mod </span>proto;
 <span class="kw">pub mod </span>scan;
 <span class="kw">pub mod </span>scanning;
 <span class="kw">pub mod </span>wallet;
-<span class="kw">pub use </span>zip321;
 
 <span class="attr">#[cfg(feature = <span class="string">"sync"</span>)]
 </span><span class="kw">pub mod </span>sync;
@@ -175,7 +187,27 @@
 </span><span class="kw">pub mod </span>tor;
 
 <span class="kw">pub use </span>decrypt::{decrypt_transaction, DecryptedOutput, TransferType};
-<span class="kw">pub use </span>zcash_protocol::{PoolType, ShieldedProtocol};
+
+<span class="attr">#[deprecated(note = <span class="string">"This module is deprecated; use `::zcash_keys::address` instead."</span>)]
+</span><span class="kw">pub mod </span>address {
+    <span class="kw">pub use </span>zcash_keys::address::<span class="kw-2">*</span>;
+}
+<span class="attr">#[deprecated(note = <span class="string">"This module is deprecated; use `::zcash_keys::encoding` instead."</span>)]
+</span><span class="kw">pub mod </span>encoding {
+    <span class="kw">pub use </span>zcash_keys::encoding::<span class="kw-2">*</span>;
+}
+<span class="attr">#[deprecated(note = <span class="string">"This module is deprecated; use `::zcash_keys::keys` instead."</span>)]
+</span><span class="kw">pub mod </span>keys {
+    <span class="kw">pub use </span>zcash_keys::keys::<span class="kw-2">*</span>;
+}
+<span class="attr">#[deprecated(note = <span class="string">"use ::zcash_protocol::PoolType instead"</span>)]
+</span><span class="kw">pub type </span>PoolType = zcash_protocol::PoolType;
+<span class="attr">#[deprecated(note = <span class="string">"use ::zcash_protocol::ShieldedProtocol instead"</span>)]
+</span><span class="kw">pub type </span>ShieldedProtocol = zcash_protocol::ShieldedProtocol;
+<span class="attr">#[deprecated(note = <span class="string">"This module is deprecated; use the `zip321` crate instead."</span>)]
+</span><span class="kw">pub mod </span>zip321 {
+    <span class="kw">pub use </span>zip321::<span class="kw-2">*</span>;
+}
 
 <span class="attr">#[cfg(test)]
 #[macro_use]

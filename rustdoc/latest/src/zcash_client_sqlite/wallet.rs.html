@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet.rs`."><title>wallet.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>wallet.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet.rs`."><title>wallet.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>wallet.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -3883,10 +3883,7 @@
 <a href="#3882" id="3882">3882</a>
 <a href="#3883" id="3883">3883</a>
 <a href="#3884" id="3884">3884</a>
-<a href="#3885" id="3885">3885</a>
-<a href="#3886" id="3886">3886</a>
-<a href="#3887" id="3887">3887</a>
-<a href="#3888" id="3888">3888</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for querying information in the wallet database.
+<a href="#3885" id="3885">3885</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for querying information in the wallet database.
 //!
 //! These functions should generally not be used directly; instead,
 //! their functionality is available via the [`WalletRead`] and
@@ -3972,6 +3969,7 @@
 
 <span class="kw">use </span>tracing::{debug, warn};
 
+<span class="kw">use </span>::transparent::bundle::OutPoint;
 <span class="kw">use </span>zcash_address::ZcashAddress;
 <span class="kw">use </span>zcash_client_backend::{
     data_api::{
@@ -3979,27 +3977,27 @@
         Account <span class="kw">as _</span>, AccountBalance, AccountBirthday, AccountSource, BlockMetadata, Ratio,
         SentTransaction, SentTransactionOutput, WalletSummary, SAPLING_SHARD_HEIGHT,
     },
-    encoding::AddressCodec,
-    keys::UnifiedFullViewingKey,
     wallet::{Note, NoteId, Recipient, WalletTx},
-    DecryptedOutput, PoolType, ShieldedProtocol,
+    DecryptedOutput,
 };
 <span class="kw">use </span>zcash_keys::{
     address::{Address, Receiver, UnifiedAddress},
+    encoding::AddressCodec,
     keys::{
-        AddressGenerationError, UnifiedAddressRequest, UnifiedIncomingViewingKey,
-        UnifiedSpendingKey,
+        AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey,
+        UnifiedIncomingViewingKey, UnifiedSpendingKey,
     },
 };
 <span class="kw">use </span>zcash_primitives::{
     block::BlockHash,
+    merkle_tree::read_commitment_tree,
+    transaction::{Transaction, TransactionData, TxId},
+};
+<span class="kw">use </span>zcash_protocol::{
     consensus::{<span class="self">self</span>, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
-    merkle_tree::read_commitment_tree,
-    transaction::{
-        components::{amount::NonNegativeAmount, Amount, OutPoint},
-        Transaction, TransactionData, TxId,
-    },
+    value::{ZatBalance, Zatoshis},
+    PoolType, ShieldedProtocol,
 };
 <span class="kw">use </span>zip32::{<span class="self">self</span>, DiversifierIndex, Scope};
 
@@ -4012,7 +4010,7 @@
 <span class="kw">use crate</span>::{AccountUuid, TxRef, VERIFY_LOOKAHEAD};
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-</span><span class="kw">use </span>zcash_primitives::transaction::components::TxOut;
+</span><span class="kw">use </span>::transparent::bundle::TxOut;
 
 <span class="kw">use </span><span class="self">self</span>::scanning::{parse_priority_code, priority_code, replace_queue_entries};
 
@@ -5320,12 +5318,7 @@
         with_pool_balance: F,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt;
     <span class="kw">where
-        </span>F: Fn(
-            <span class="kw-2">&amp;mut </span>AccountBalance,
-            NonNegativeAmount,
-            NonNegativeAmount,
-            NonNegativeAmount,
-        ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt;,
+        </span>F: Fn(<span class="kw-2">&amp;mut </span>AccountBalance, Zatoshis, Zatoshis, Zatoshis) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt;,
     {
         <span class="comment">// If the shard containing the summary height contains any unscanned ranges that start below or
         // including that height, none of our shielded balance is currently spendable.
@@ -5382,7 +5375,7 @@
             <span class="kw">let </span>account = AccountUuid(row.get::&lt;<span class="kw">_</span>, Uuid&gt;(<span class="number">0</span>)<span class="question-mark">?</span>);
 
             <span class="kw">let </span>value_raw = row.get::&lt;<span class="kw">_</span>, i64&gt;(<span class="number">1</span>)<span class="question-mark">?</span>;
-            <span class="kw">let </span>value = NonNegativeAmount::from_nonnegative_i64(value_raw).map_err(|<span class="kw">_</span>| {
+            <span class="kw">let </span>value = Zatoshis::from_nonnegative_i64(value_raw).map_err(|<span class="kw">_</span>| {
                 SqliteClientError::CorruptedData(<span class="macro">format!</span>(
                     <span class="string">"Negative received note value: {}"</span>,
                     value_raw
@@ -5417,7 +5410,7 @@
                 is_change &amp;&amp; received_height.iter().all(|h| h &gt; <span class="kw-2">&amp;</span>summary_height);
 
             <span class="kw">let </span>(spendable_value, change_pending_confirmation, value_pending_spendability) = {
-                <span class="kw">let </span>zero = NonNegativeAmount::ZERO;
+                <span class="kw">let </span>zero = Zatoshis::ZERO;
                 <span class="kw">if </span>is_spendable {
                     (value, zero, zero)
                 } <span class="kw">else if </span>is_pending_change {
@@ -7030,7 +7023,7 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>put_tx_data(
     conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
     tx: <span class="kw-2">&amp;</span>Transaction,
-    fee: <span class="prelude-ty">Option</span>&lt;NonNegativeAmount&gt;,
+    fee: <span class="prelude-ty">Option</span>&lt;Zatoshis&gt;,
     created_at: <span class="prelude-ty">Option</span>&lt;time::OffsetDateTime&gt;,
     target_height: <span class="prelude-ty">Option</span>&lt;BlockHeight&gt;,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;TxRef, SqliteClientError&gt; {
@@ -7291,7 +7284,7 @@
         <span class="string">":from_account_id"</span>: from_account_id.<span class="number">0</span>,
         <span class="string">":to_address"</span>: <span class="kw-2">&amp;</span>to_address,
         <span class="string">":to_account_id"</span>: to_account_id.map(|a| a.<span class="number">0</span>),
-        <span class="string">":value"</span>: <span class="kw-2">&amp;</span>i64::from(Amount::from(output.value())),
+        <span class="string">":value"</span>: <span class="kw-2">&amp;</span>i64::from(ZatBalance::from(output.value())),
         <span class="string">":memo"</span>: memo_repr(output.memo())
     ];
 
@@ -7320,7 +7313,7 @@
     tx_ref: TxRef,
     output_index: usize,
     recipient: <span class="kw-2">&amp;</span>Recipient&lt;AccountUuid, Note, OutPoint&gt;,
-    value: NonNegativeAmount,
+    value: Zatoshis,
     memo: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt;,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>stmt_upsert_sent_output = conn.prepare_cached(
@@ -7347,7 +7340,7 @@
         <span class="string">":from_account_id"</span>: from_account_id.<span class="number">0</span>,
         <span class="string">":to_address"</span>: <span class="kw-2">&amp;</span>to_address,
         <span class="string">":to_account_id"</span>: <span class="kw-2">&amp;</span>to_account_id.map(|a| a.<span class="number">0</span>),
-        <span class="string">":value"</span>: <span class="kw-2">&amp;</span>i64::from(Amount::from(value)),
+        <span class="string">":value"</span>: <span class="kw-2">&amp;</span>i64::from(ZatBalance::from(value)),
         <span class="string">":memo"</span>: memo_repr(memo)
     ];
 
@@ -7622,7 +7615,8 @@
         testing::{AddressType, DataStoreFactory, FakeCompactOutput, TestBuilder, TestState},
         Account <span class="kw">as _</span>, AccountSource, WalletRead, WalletWrite,
     };
-    <span class="kw">use </span>zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
+    <span class="kw">use </span>zcash_primitives::block::BlockHash;
+    <span class="kw">use </span>zcash_protocol::value::Zatoshis;
 
     <span class="kw">use crate</span>::{
         testing::{db::TestDbFactory, BlockCache},
@@ -7719,7 +7713,7 @@
 
         <span class="comment">// Scan a block above the wallet's birthday height.
         </span><span class="kw">let </span>not_our_key = ExtendedSpendingKey::master(<span class="kw-2">&amp;</span>[]).to_diversifiable_full_viewing_key();
-        <span class="kw">let </span>not_our_value = NonNegativeAmount::const_from_u64(<span class="number">10000</span>);
+        <span class="kw">let </span>not_our_value = Zatoshis::const_from_u64(<span class="number">10000</span>);
         <span class="kw">let </span>start_height = st.sapling_activation_height();
         <span class="kw">let _ </span>= st.generate_block_at(
             start_height,

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/fees/zip317.rs`."><title>zip317.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/fees/</div>zip317.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/fees/zip317.rs`."><title>zip317.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/fees/</div>zip317.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -783,21 +783,7 @@
 <a href="#782" id="782">782</a>
 <a href="#783" id="783">783</a>
 <a href="#784" id="784">784</a>
-<a href="#785" id="785">785</a>
-<a href="#786" id="786">786</a>
-<a href="#787" id="787">787</a>
-<a href="#788" id="788">788</a>
-<a href="#789" id="789">789</a>
-<a href="#790" id="790">790</a>
-<a href="#791" id="791">791</a>
-<a href="#792" id="792">792</a>
-<a href="#793" id="793">793</a>
-<a href="#794" id="794">794</a>
-<a href="#795" id="795">795</a>
-<a href="#796" id="796">796</a>
-<a href="#797" id="797">797</a>
-<a href="#798" id="798">798</a>
-<a href="#799" id="799">799</a></pre></div><pre class="rust"><code><span class="doccomment">//! Change strategies designed to implement the ZIP 317 fee rules.
+<a href="#785" id="785">785</a></pre></div><pre class="rust"><code><span class="doccomment">//! Change strategies designed to implement the ZIP 317 fee rules.
 //!
 //! Change selection in ZIP 317 requires careful handling of low-valued inputs
 //! to ensure that inputs added to a transaction do not cause fees to rise by
@@ -805,17 +791,17 @@
 
 </span><span class="kw">use </span>std::marker::PhantomData;
 
-<span class="kw">use </span>zcash_primitives::{
+<span class="kw">use </span>zcash_primitives::transaction::fees::{transparent, zip317 <span class="kw">as </span>prim_zip317, FeeRule};
+<span class="kw">use </span>zcash_protocol::{
     consensus::{<span class="self">self</span>, BlockHeight},
     memo::MemoBytes,
-    transaction::fees::{transparent, zip317 <span class="kw">as </span>prim_zip317, FeeRule},
+    value::{BalanceError, Zatoshis},
+    ShieldedProtocol,
 };
-<span class="kw">use </span>zcash_protocol::value::{BalanceError, Zatoshis};
 
 <span class="kw">use crate</span>::{
     data_api::{AccountMeta, InputSource, NoteFilter},
     fees::StandardFeeRule,
-    ShieldedProtocol,
 };
 
 <span class="kw">use super</span>::{
@@ -1065,13 +1051,12 @@
 </span><span class="kw">mod </span>tests {
     <span class="kw">use </span>std::{convert::Infallible, num::NonZeroUsize};
 
-    <span class="kw">use </span>zcash_primitives::{
+    <span class="kw">use </span>::transparent::{address::Script, bundle::TxOut};
+    <span class="kw">use </span>zcash_primitives::transaction::fees::zip317::FeeRule <span class="kw">as </span>Zip317FeeRule;
+    <span class="kw">use </span>zcash_protocol::{
         consensus::{Network, NetworkUpgrade, Parameters},
-        legacy::Script,
-        transaction::{
-            components::{amount::NonNegativeAmount, transparent::TxOut},
-            fees::zip317::FeeRule <span class="kw">as </span>Zip317FeeRule,
-        },
+        value::Zatoshis,
+        ShieldedProtocol,
     };
 
     <span class="kw">use </span><span class="kw">super</span>::SingleOutputChangeStrategy;
@@ -1084,7 +1069,6 @@
             zip317::MultiOutputChangeStrategy,
             ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy, SplitPolicy,
         },
-        ShieldedProtocol,
     };
 
     <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
@@ -1114,11 +1098,9 @@
                 sapling::builder::BundleType::DEFAULT,
                 <span class="kw-2">&amp;</span>[TestSaplingInput {
                     note_id: <span class="number">0</span>,
-                    value: NonNegativeAmount::const_from_u64(<span class="number">55000</span>),
+                    value: Zatoshis::const_from_u64(<span class="number">55000</span>),
                 }][..],
-                <span class="kw-2">&amp;</span>[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                    <span class="number">40000</span>,
-                ))][..],
+                <span class="kw-2">&amp;</span>[SaplingPayment::new(Zatoshis::const_from_u64(<span class="number">40000</span>))][..],
             ),
             <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
             </span><span class="kw-2">&amp;</span>orchard_fees::EmptyBundleView,
@@ -1129,8 +1111,8 @@
         <span class="macro">assert_matches!</span>(
             result,
             <span class="prelude-val">Ok</span>(balance) <span class="kw">if
-                </span>balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">5000</span>), <span class="prelude-val">None</span>)] &amp;&amp;
-                balance.fee_required() == NonNegativeAmount::const_from_u64(<span class="number">10000</span>)
+                </span>balance.proposed_change() == [ChangeValue::sapling(Zatoshis::const_from_u64(<span class="number">5000</span>), <span class="prelude-val">None</span>)] &amp;&amp;
+                balance.fee_required() == Zatoshis::const_from_u64(<span class="number">10000</span>)
         );
     }
 
@@ -1143,7 +1125,7 @@
             DustOutputPolicy::default(),
             SplitPolicy::with_min_output_value(
                 NonZeroUsize::new(<span class="number">5</span>).unwrap(),
-                NonNegativeAmount::const_from_u64(<span class="number">100_0000</span>),
+                Zatoshis::const_from_u64(<span class="number">100_0000</span>),
             ),
         );
 
@@ -1161,11 +1143,9 @@
                         sapling::builder::BundleType::DEFAULT,
                         <span class="kw-2">&amp;</span>[TestSaplingInput {
                             note_id: <span class="number">0</span>,
-                            value: NonNegativeAmount::const_from_u64(<span class="number">750_0000</span>),
+                            value: Zatoshis::const_from_u64(<span class="number">750_0000</span>),
                         }][..],
-                        <span class="kw-2">&amp;</span>[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                            <span class="number">100_0000</span>,
-                        ))][..],
+                        <span class="kw-2">&amp;</span>[SaplingPayment::new(Zatoshis::const_from_u64(<span class="number">100_0000</span>))][..],
                     ),
                     <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
                     </span><span class="kw-2">&amp;</span>orchard_fees::EmptyBundleView,
@@ -1175,27 +1155,27 @@
             };
 
             <span class="macro">assert_matches!</span>(
-                balance(<span class="number">0</span>, NonNegativeAmount::ZERO),
+                balance(<span class="number">0</span>, Zatoshis::ZERO),
                 <span class="prelude-val">Ok</span>(balance) <span class="kw">if
                     </span>balance.proposed_change() == [
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">129_4000</span>), <span class="prelude-val">None</span>),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">129_4000</span>), <span class="prelude-val">None</span>),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">129_4000</span>), <span class="prelude-val">None</span>),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">129_4000</span>), <span class="prelude-val">None</span>),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">129_4000</span>), <span class="prelude-val">None</span>),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(<span class="number">129_4000</span>), <span class="prelude-val">None</span>),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(<span class="number">129_4000</span>), <span class="prelude-val">None</span>),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(<span class="number">129_4000</span>), <span class="prelude-val">None</span>),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(<span class="number">129_4000</span>), <span class="prelude-val">None</span>),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(<span class="number">129_4000</span>), <span class="prelude-val">None</span>),
                     ] &amp;&amp;
-                    balance.fee_required() == NonNegativeAmount::const_from_u64(<span class="number">30000</span>)
+                    balance.fee_required() == Zatoshis::const_from_u64(<span class="number">30000</span>)
             );
 
             <span class="macro">assert_matches!</span>(
-                balance(<span class="number">2</span>, NonNegativeAmount::const_from_u64(<span class="number">100_0000</span>)),
+                balance(<span class="number">2</span>, Zatoshis::const_from_u64(<span class="number">100_0000</span>)),
                 <span class="prelude-val">Ok</span>(balance) <span class="kw">if
                     </span>balance.proposed_change() == [
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">216_0000</span>), <span class="prelude-val">None</span>),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">216_0000</span>), <span class="prelude-val">None</span>),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">216_0000</span>), <span class="prelude-val">None</span>),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(<span class="number">216_0000</span>), <span class="prelude-val">None</span>),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(<span class="number">216_0000</span>), <span class="prelude-val">None</span>),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(<span class="number">216_0000</span>), <span class="prelude-val">None</span>),
                     ] &amp;&amp;
-                    balance.fee_required() == NonNegativeAmount::const_from_u64(<span class="number">20000</span>)
+                    balance.fee_required() == Zatoshis::const_from_u64(<span class="number">20000</span>)
             );
         }
 
@@ -1213,18 +1193,16 @@
                     sapling::builder::BundleType::DEFAULT,
                     <span class="kw-2">&amp;</span>[TestSaplingInput {
                         note_id: <span class="number">0</span>,
-                        value: NonNegativeAmount::const_from_u64(<span class="number">600_0000</span>),
+                        value: Zatoshis::const_from_u64(<span class="number">600_0000</span>),
                     }][..],
-                    <span class="kw-2">&amp;</span>[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                        <span class="number">100_0000</span>,
-                    ))][..],
+                    <span class="kw-2">&amp;</span>[SaplingPayment::new(Zatoshis::const_from_u64(<span class="number">100_0000</span>))][..],
                 ),
                 <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
                 </span><span class="kw-2">&amp;</span>orchard_fees::EmptyBundleView,
                 <span class="prelude-val">None</span>,
                 <span class="kw-2">&amp;</span>AccountMeta::new(
-                    <span class="prelude-val">Some</span>(PoolMeta::new(<span class="number">0</span>, NonNegativeAmount::ZERO)),
-                    <span class="prelude-val">Some</span>(PoolMeta::new(<span class="number">0</span>, NonNegativeAmount::ZERO)),
+                    <span class="prelude-val">Some</span>(PoolMeta::new(<span class="number">0</span>, Zatoshis::ZERO)),
+                    <span class="prelude-val">Some</span>(PoolMeta::new(<span class="number">0</span>, Zatoshis::ZERO)),
                 ),
             );
 
@@ -1232,12 +1210,12 @@
                 result,
                 <span class="prelude-val">Ok</span>(balance) <span class="kw">if
                     </span>balance.proposed_change() == [
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">124_7500</span>), <span class="prelude-val">None</span>),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">124_2500</span>), <span class="prelude-val">None</span>),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">124_2500</span>), <span class="prelude-val">None</span>),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">124_2500</span>), <span class="prelude-val">None</span>),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(<span class="number">124_7500</span>), <span class="prelude-val">None</span>),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(<span class="number">124_2500</span>), <span class="prelude-val">None</span>),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(<span class="number">124_2500</span>), <span class="prelude-val">None</span>),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(<span class="number">124_2500</span>), <span class="prelude-val">None</span>),
                     ] &amp;&amp;
-                    balance.fee_required() == NonNegativeAmount::const_from_u64(<span class="number">25000</span>)
+                    balance.fee_required() == Zatoshis::const_from_u64(<span class="number">25000</span>)
             );
         }
     }
@@ -1264,16 +1242,14 @@
                 sapling::builder::BundleType::DEFAULT,
                 <span class="kw-2">&amp;</span>[TestSaplingInput {
                     note_id: <span class="number">0</span>,
-                    value: NonNegativeAmount::const_from_u64(<span class="number">55000</span>),
+                    value: Zatoshis::const_from_u64(<span class="number">55000</span>),
                 }][..],
                 <span class="kw-2">&amp;</span>[] <span class="kw">as </span><span class="kw-2">&amp;</span>[Infallible],
             ),
             <span class="kw-2">&amp;</span>(
                 orchard::builder::BundleType::DEFAULT,
                 <span class="kw-2">&amp;</span>[] <span class="kw">as </span><span class="kw-2">&amp;</span>[Infallible],
-                <span class="kw-2">&amp;</span>[OrchardPayment::new(NonNegativeAmount::const_from_u64(
-                    <span class="number">30000</span>,
-                ))][..],
+                <span class="kw-2">&amp;</span>[OrchardPayment::new(Zatoshis::const_from_u64(<span class="number">30000</span>))][..],
             ),
             <span class="prelude-val">None</span>,
             <span class="kw-2">&amp;</span>(),
@@ -1282,8 +1258,8 @@
         <span class="macro">assert_matches!</span>(
             result,
             <span class="prelude-val">Ok</span>(balance) <span class="kw">if
-                </span>balance.proposed_change() == [ChangeValue::orchard(NonNegativeAmount::const_from_u64(<span class="number">5000</span>), <span class="prelude-val">None</span>)] &amp;&amp;
-                balance.fee_required() == NonNegativeAmount::const_from_u64(<span class="number">20000</span>)
+                </span>balance.proposed_change() == [ChangeValue::orchard(Zatoshis::const_from_u64(<span class="number">5000</span>), <span class="prelude-val">None</span>)] &amp;&amp;
+                balance.fee_required() == Zatoshis::const_from_u64(<span class="number">20000</span>)
         );
     }
 
@@ -1296,7 +1272,7 @@
     </span><span class="kw">fn </span>change_with_transparent_payments_explicitly_allowing_zero_change() {
         change_with_transparent_payments(DustOutputPolicy::new(
             DustAction::AllowDustChange,
-            <span class="prelude-val">Some</span>(NonNegativeAmount::ZERO),
+            <span class="prelude-val">Some</span>(Zatoshis::ZERO),
         ))
     }
 
@@ -1316,14 +1292,14 @@
                 .unwrap(),
             <span class="kw-2">&amp;</span>[] <span class="kw">as </span><span class="kw-2">&amp;</span>[TestTransparentInput],
             <span class="kw-2">&amp;</span>[TxOut {
-                value: NonNegativeAmount::const_from_u64(<span class="number">40000</span>),
+                value: Zatoshis::const_from_u64(<span class="number">40000</span>),
                 script_pubkey: Script(<span class="macro">vec!</span>[]),
             }],
             <span class="kw-2">&amp;</span>(
                 sapling::builder::BundleType::DEFAULT,
                 <span class="kw-2">&amp;</span>[TestSaplingInput {
                     note_id: <span class="number">0</span>,
-                    value: NonNegativeAmount::const_from_u64(<span class="number">55000</span>),
+                    value: Zatoshis::const_from_u64(<span class="number">55000</span>),
                 }][..],
                 <span class="kw-2">&amp;</span>[] <span class="kw">as </span><span class="kw-2">&amp;</span>[Infallible],
             ),
@@ -1336,8 +1312,8 @@
         <span class="macro">assert_matches!</span>(
             result,
             <span class="prelude-val">Ok</span>(balance) <span class="kw">if
-                </span>balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::ZERO, <span class="prelude-val">None</span>)]
-                &amp;&amp; balance.fee_required() == NonNegativeAmount::const_from_u64(<span class="number">15000</span>)
+                </span>balance.proposed_change() == [ChangeValue::sapling(Zatoshis::ZERO, <span class="prelude-val">None</span>)]
+                &amp;&amp; balance.fee_required() == Zatoshis::const_from_u64(<span class="number">15000</span>)
         );
     }
 
@@ -1345,7 +1321,7 @@
     #[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     </span><span class="kw">fn </span>change_fully_transparent_no_change() {
         <span class="kw">use </span><span class="kw">crate</span>::fees::sapling <span class="kw">as </span>sapling_fees;
-        <span class="kw">use </span>zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint};
+        <span class="kw">use </span>::transparent::{address::TransparentAddress, bundle::OutPoint};
 
         <span class="kw">let </span>change_strategy = SingleOutputChangeStrategy::&lt;<span class="kw">_</span>, MockWalletDb&gt;::new(
             Zip317FeeRule::standard(),
@@ -1363,12 +1339,12 @@
             <span class="kw-2">&amp;</span>[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut {
-                    value: NonNegativeAmount::const_from_u64(<span class="number">50000</span>),
+                    value: Zatoshis::const_from_u64(<span class="number">50000</span>),
                     script_pubkey: TransparentAddress::PublicKeyHash([<span class="number">0u8</span>; <span class="number">20</span>]).script(),
                 },
             }],
             <span class="kw-2">&amp;</span>[TxOut {
-                value: NonNegativeAmount::const_from_u64(<span class="number">40000</span>),
+                value: Zatoshis::const_from_u64(<span class="number">40000</span>),
                 script_pubkey: Script(<span class="macro">vec!</span>[]),
             }],
             <span class="kw-2">&amp;</span>sapling_fees::EmptyBundleView,
@@ -1382,7 +1358,7 @@
             result,
             <span class="prelude-val">Ok</span>(balance) <span class="kw">if
                 </span>balance.proposed_change().is_empty() &amp;&amp;
-                balance.fee_required() == NonNegativeAmount::const_from_u64(<span class="number">10000</span>)
+                balance.fee_required() == Zatoshis::const_from_u64(<span class="number">10000</span>)
         );
     }
 
@@ -1390,7 +1366,7 @@
     #[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     </span><span class="kw">fn </span>change_transparent_flows_with_shielded_change() {
         <span class="kw">use </span><span class="kw">crate</span>::fees::sapling <span class="kw">as </span>sapling_fees;
-        <span class="kw">use </span>zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint};
+        <span class="kw">use </span>::transparent::{address::TransparentAddress, bundle::OutPoint};
 
         <span class="kw">let </span>change_strategy = SingleOutputChangeStrategy::&lt;<span class="kw">_</span>, MockWalletDb&gt;::new(
             Zip317FeeRule::standard(),
@@ -1408,12 +1384,12 @@
             <span class="kw-2">&amp;</span>[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut {
-                    value: NonNegativeAmount::const_from_u64(<span class="number">63000</span>),
+                    value: Zatoshis::const_from_u64(<span class="number">63000</span>),
                     script_pubkey: TransparentAddress::PublicKeyHash([<span class="number">0u8</span>; <span class="number">20</span>]).script(),
                 },
             }],
             <span class="kw-2">&amp;</span>[TxOut {
-                value: NonNegativeAmount::const_from_u64(<span class="number">40000</span>),
+                value: Zatoshis::const_from_u64(<span class="number">40000</span>),
                 script_pubkey: Script(<span class="macro">vec!</span>[]),
             }],
             <span class="kw-2">&amp;</span>sapling_fees::EmptyBundleView,
@@ -1426,8 +1402,8 @@
         <span class="macro">assert_matches!</span>(
             result,
             <span class="prelude-val">Ok</span>(balance) <span class="kw">if
-                </span>balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">8000</span>), <span class="prelude-val">None</span>)] &amp;&amp;
-                balance.fee_required() == NonNegativeAmount::const_from_u64(<span class="number">15000</span>)
+                </span>balance.proposed_change() == [ChangeValue::sapling(Zatoshis::const_from_u64(<span class="number">8000</span>), <span class="prelude-val">None</span>)] &amp;&amp;
+                balance.fee_required() == Zatoshis::const_from_u64(<span class="number">15000</span>)
         );
     }
 
@@ -1435,7 +1411,7 @@
     #[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     </span><span class="kw">fn </span>change_transparent_flows_with_shielded_dust_change() {
         <span class="kw">use </span><span class="kw">crate</span>::fees::sapling <span class="kw">as </span>sapling_fees;
-        <span class="kw">use </span>zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint};
+        <span class="kw">use </span>::transparent::{address::TransparentAddress, bundle::OutPoint};
 
         <span class="kw">let </span>change_strategy = SingleOutputChangeStrategy::&lt;<span class="kw">_</span>, MockWalletDb&gt;::new(
             Zip317FeeRule::standard(),
@@ -1443,7 +1419,7 @@
             ShieldedProtocol::Sapling,
             DustOutputPolicy::new(
                 DustAction::AllowDustChange,
-                <span class="prelude-val">Some</span>(NonNegativeAmount::const_from_u64(<span class="number">1000</span>)),
+                <span class="prelude-val">Some</span>(Zatoshis::const_from_u64(<span class="number">1000</span>)),
             ),
         );
 
@@ -1459,12 +1435,12 @@
             <span class="kw-2">&amp;</span>[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut {
-                    value: NonNegativeAmount::const_from_u64(<span class="number">56000</span>),
+                    value: Zatoshis::const_from_u64(<span class="number">56000</span>),
                     script_pubkey: TransparentAddress::PublicKeyHash([<span class="number">0u8</span>; <span class="number">20</span>]).script(),
                 },
             }],
             <span class="kw-2">&amp;</span>[TxOut {
-                value: NonNegativeAmount::const_from_u64(<span class="number">40000</span>),
+                value: Zatoshis::const_from_u64(<span class="number">40000</span>),
                 script_pubkey: Script(<span class="macro">vec!</span>[]),
             }],
             <span class="kw-2">&amp;</span>sapling_fees::EmptyBundleView,
@@ -1477,8 +1453,8 @@
         <span class="macro">assert_matches!</span>(
             result,
             <span class="prelude-val">Ok</span>(balance) <span class="kw">if
-                </span>balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(<span class="number">1000</span>), <span class="prelude-val">None</span>)] &amp;&amp;
-                balance.fee_required() == NonNegativeAmount::const_from_u64(<span class="number">15000</span>)
+                </span>balance.proposed_change() == [ChangeValue::sapling(Zatoshis::const_from_u64(<span class="number">1000</span>), <span class="prelude-val">None</span>)] &amp;&amp;
+                balance.fee_required() == Zatoshis::const_from_u64(<span class="number">15000</span>)
         );
     }
 
@@ -1491,7 +1467,7 @@
     </span><span class="kw">fn </span>change_with_allowable_dust_explicitly_allowing_zero_change() {
         change_with_allowable_dust(DustOutputPolicy::new(
             DustAction::AllowDustChange,
-            <span class="prelude-val">Some</span>(NonNegativeAmount::ZERO),
+            <span class="prelude-val">Some</span>(Zatoshis::ZERO),
         ))
     }
 
@@ -1519,16 +1495,14 @@
                 <span class="kw-2">&amp;</span>[
                     TestSaplingInput {
                         note_id: <span class="number">0</span>,
-                        value: NonNegativeAmount::const_from_u64(<span class="number">49000</span>),
+                        value: Zatoshis::const_from_u64(<span class="number">49000</span>),
                     },
                     TestSaplingInput {
                         note_id: <span class="number">1</span>,
-                        value: NonNegativeAmount::const_from_u64(<span class="number">1000</span>),
+                        value: Zatoshis::const_from_u64(<span class="number">1000</span>),
                     },
                 ][..],
-                <span class="kw-2">&amp;</span>[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                    <span class="number">40000</span>,
-                ))][..],
+                <span class="kw-2">&amp;</span>[SaplingPayment::new(Zatoshis::const_from_u64(<span class="number">40000</span>))][..],
             ),
             <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
             </span><span class="kw-2">&amp;</span>orchard_fees::EmptyBundleView,
@@ -1539,8 +1513,8 @@
         <span class="macro">assert_matches!</span>(
             result,
             <span class="prelude-val">Ok</span>(balance) <span class="kw">if
-                </span>balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::ZERO, <span class="prelude-val">None</span>)] &amp;&amp;
-                balance.fee_required() == NonNegativeAmount::const_from_u64(<span class="number">10000</span>)
+                </span>balance.proposed_change() == [ChangeValue::sapling(Zatoshis::ZERO, <span class="prelude-val">None</span>)] &amp;&amp;
+                balance.fee_required() == Zatoshis::const_from_u64(<span class="number">10000</span>)
         );
     }
 
@@ -1567,20 +1541,18 @@
                 <span class="kw-2">&amp;</span>[
                     TestSaplingInput {
                         note_id: <span class="number">0</span>,
-                        value: NonNegativeAmount::const_from_u64(<span class="number">29000</span>),
+                        value: Zatoshis::const_from_u64(<span class="number">29000</span>),
                     },
                     TestSaplingInput {
                         note_id: <span class="number">1</span>,
-                        value: NonNegativeAmount::const_from_u64(<span class="number">20000</span>),
+                        value: Zatoshis::const_from_u64(<span class="number">20000</span>),
                     },
                     TestSaplingInput {
                         note_id: <span class="number">2</span>,
-                        value: NonNegativeAmount::const_from_u64(<span class="number">1000</span>),
+                        value: Zatoshis::const_from_u64(<span class="number">1000</span>),
                     },
                 ][..],
-                <span class="kw-2">&amp;</span>[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                    <span class="number">30000</span>,
-                ))][..],
+                <span class="kw-2">&amp;</span>[SaplingPayment::new(Zatoshis::const_from_u64(<span class="number">30000</span>))][..],
             ),
             <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
             </span><span class="kw-2">&amp;</span>orchard_fees::EmptyBundleView,

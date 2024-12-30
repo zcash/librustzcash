@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/scanning.rs`."><title>scanning.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>scanning.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/scanning.rs`."><title>scanning.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>scanning.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -1535,7 +1535,9 @@
 <a href="#1534" id="1534">1534</a>
 <a href="#1535" id="1535">1535</a>
 <a href="#1536" id="1536">1536</a>
-<a href="#1537" id="1537">1537</a></pre></div><pre class="rust"><code><span class="doccomment">//! Tools for scanning a compact representation of the Zcash block chain.
+<a href="#1537" id="1537">1537</a>
+<a href="#1538" id="1538">1538</a>
+<a href="#1539" id="1539">1539</a></pre></div><pre class="rust"><code><span class="doccomment">//! Tools for scanning a compact representation of the Zcash block chain.
 
 </span><span class="kw">use </span>std::collections::{HashMap, HashSet};
 <span class="kw">use </span>std::convert::TryFrom;
@@ -1552,9 +1554,10 @@
 <span class="kw">use </span>tracing::{debug, trace};
 <span class="kw">use </span>zcash_keys::keys::UnifiedFullViewingKey;
 <span class="kw">use </span>zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput, COMPACT_NOTE_SIZE};
-<span class="kw">use </span>zcash_primitives::{
+<span class="kw">use </span>zcash_primitives::transaction::{components::sapling::zip212_enforcement, TxId};
+<span class="kw">use </span>zcash_protocol::{
     consensus::{<span class="self">self</span>, BlockHeight, NetworkUpgrade},
-    transaction::{components::sapling::zip212_enforcement, TxId},
+    ShieldedProtocol,
 };
 <span class="kw">use </span>zip32::Scope;
 
@@ -1563,7 +1566,6 @@
     proto::compact_formats::CompactBlock,
     scan::{Batch, BatchRunner, CompactDecryptor, DecryptedOutput, Tasks},
     wallet::{WalletOutput, WalletSpend, WalletTx},
-    ShieldedProtocol,
 };
 
 <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
@@ -2704,10 +2706,12 @@
     };
     <span class="kw">use </span>zcash_note_encryption::{Domain, COMPACT_NOTE_SIZE};
     <span class="kw">use </span>zcash_primitives::{
-        block::BlockHash,
+        block::BlockHash, transaction::components::sapling::zip212_enforcement,
+    };
+    <span class="kw">use </span>zcash_protocol::{
         consensus::{BlockHeight, Network},
         memo::MemoBytes,
-        transaction::components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
+        value::Zatoshis,
     };
 
     <span class="kw">use </span><span class="kw">crate</span>::proto::compact_formats::{
@@ -2757,7 +2761,7 @@
         prev_hash: BlockHash,
         nf: Nullifier,
         dfvk: <span class="kw-2">&amp;</span>DiversifiableFullViewingKey,
-        value: NonNegativeAmount,
+        value: Zatoshis,
         tx_after: bool,
         initial_tree_sizes: <span class="prelude-ty">Option</span>&lt;(u32, u32)&gt;,
     ) -&gt; CompactBlock {
@@ -2841,12 +2845,12 @@
     <span class="kw">use </span>incrementalmerkletree::{Marking, Position, Retention};
     <span class="kw">use </span>sapling::Nullifier;
     <span class="kw">use </span>zcash_keys::keys::UnifiedSpendingKey;
-    <span class="kw">use </span>zcash_primitives::{
-        block::BlockHash,
+    <span class="kw">use </span>zcash_primitives::block::BlockHash;
+    <span class="kw">use </span>zcash_protocol::{
         consensus::{BlockHeight, Network},
-        transaction::components::amount::NonNegativeAmount,
-        zip32::AccountId,
+        value::Zatoshis,
     };
+    <span class="kw">use </span>zip32::AccountId;
 
     <span class="kw">use crate</span>::{
         data_api::BlockMetadata,
@@ -2871,7 +2875,7 @@
                 BlockHash([<span class="number">0</span>; <span class="number">32</span>]),
                 Nullifier([<span class="number">0</span>; <span class="number">32</span>]),
                 <span class="kw-2">&amp;</span>sapling_dfvk,
-                NonNegativeAmount::const_from_u64(<span class="number">5</span>),
+                Zatoshis::const_from_u64(<span class="number">5</span>),
                 <span class="bool-val">false</span>,
                 <span class="prelude-val">None</span>,
             );
@@ -2957,7 +2961,7 @@
                 BlockHash([<span class="number">0</span>; <span class="number">32</span>]),
                 Nullifier([<span class="number">0</span>; <span class="number">32</span>]),
                 <span class="kw-2">&amp;</span>sapling_dfvk,
-                NonNegativeAmount::const_from_u64(<span class="number">5</span>),
+                Zatoshis::const_from_u64(<span class="number">5</span>),
                 <span class="bool-val">true</span>,
                 <span class="prelude-val">Some</span>((<span class="number">0</span>, <span class="number">0</span>)),
             );
@@ -3037,7 +3041,7 @@
             BlockHash([<span class="number">0</span>; <span class="number">32</span>]),
             nf,
             ufvk.sapling().unwrap(),
-            NonNegativeAmount::const_from_u64(<span class="number">5</span>),
+            Zatoshis::const_from_u64(<span class="number">5</span>),
             <span class="bool-val">false</span>,
             <span class="prelude-val">Some</span>((<span class="number">0</span>, <span class="number">0</span>)),
         );

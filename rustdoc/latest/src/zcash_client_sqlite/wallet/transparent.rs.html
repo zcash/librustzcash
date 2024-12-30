@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/transparent.rs`."><title>transparent.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>transparent.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/transparent.rs`."><title>transparent.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>transparent.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -930,24 +930,24 @@
 
 <span class="kw">use </span>rusqlite::OptionalExtension;
 <span class="kw">use </span>rusqlite::{named_params, Connection, Row};
-<span class="kw">use </span>zcash_client_backend::data_api::TransactionDataRequest;
-<span class="kw">use </span>zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
-<span class="kw">use </span>zip32::{DiversifierIndex, Scope};
 
+<span class="kw">use </span>::transparent::{
+    address::{Script, TransparentAddress},
+    bundle::{OutPoint, TxOut},
+    keys::{IncomingViewingKey, NonHardenedChildIndex},
+};
 <span class="kw">use </span>zcash_address::unified::{Ivk, Uivk};
 <span class="kw">use </span>zcash_client_backend::{
-    data_api::AccountBalance,
+    data_api::{AccountBalance, TransactionDataRequest},
     wallet::{TransparentAddressMetadata, WalletTransparentOutput},
 };
 <span class="kw">use </span>zcash_keys::{address::Address, encoding::AddressCodec};
-<span class="kw">use </span>zcash_primitives::{
-    legacy::{
-        keys::{IncomingViewingKey, NonHardenedChildIndex},
-        Script, TransparentAddress,
-    },
-    transaction::components::{amount::NonNegativeAmount, Amount, OutPoint, TxOut},
+<span class="kw">use </span>zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
+<span class="kw">use </span>zcash_protocol::{
+    consensus::{<span class="self">self</span>, BlockHeight},
+    value::{ZatBalance, Zatoshis},
 };
-<span class="kw">use </span>zcash_protocol::consensus::{<span class="self">self</span>, BlockHeight};
+<span class="kw">use </span>zip32::{DiversifierIndex, Scope};
 
 <span class="kw">use super</span>::{chain_tip_height, get_account_ids};
 <span class="kw">use </span><span class="kw">crate</span>::AccountUuid;
@@ -1059,8 +1059,8 @@
     params: <span class="kw-2">&amp;</span>P,
     uivk_str: <span class="kw-2">&amp;</span>str,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(TransparentAddress, NonHardenedChildIndex)&gt;, SqliteClientError&gt; {
+    <span class="kw">use </span>::transparent::keys::ExternalIvk;
     <span class="kw">use </span>zcash_address::unified::{Container <span class="kw">as _</span>, Encoding <span class="kw">as _</span>};
-    <span class="kw">use </span>zcash_primitives::legacy::keys::ExternalIvk;
 
     <span class="kw">let </span>(network, uivk) = Uivk::decode(uivk_str)
         .map_err(|e| SqliteClientError::CorruptedData(<span class="macro">format!</span>(<span class="string">"Unable to parse UIVK: {e}"</span>)))<span class="question-mark">?</span>;
@@ -1118,7 +1118,7 @@
     <span class="kw">let </span>index: u32 = row.get(<span class="string">"output_index"</span>)<span class="question-mark">?</span>;
     <span class="kw">let </span>script_pubkey = Script(row.get(<span class="string">"script"</span>)<span class="question-mark">?</span>);
     <span class="kw">let </span>raw_value: i64 = row.get(<span class="string">"value_zat"</span>)<span class="question-mark">?</span>;
-    <span class="kw">let </span>value = NonNegativeAmount::from_nonnegative_i64(raw_value).map_err(|<span class="kw">_</span>| {
+    <span class="kw">let </span>value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|<span class="kw">_</span>| {
         SqliteClientError::CorruptedData(<span class="macro">format!</span>(<span class="string">"Invalid UTXO value: {}"</span>, raw_value))
     })<span class="question-mark">?</span>;
     <span class="kw">let </span>height: <span class="prelude-ty">Option</span>&lt;u32&gt; = row.get(<span class="string">"received_height"</span>)<span class="question-mark">?</span>;
@@ -1280,7 +1280,7 @@
     params: <span class="kw-2">&amp;</span>P,
     account_uuid: AccountUuid,
     summary_height: BlockHeight,
-) -&gt; <span class="prelude-ty">Result</span>&lt;HashMap&lt;TransparentAddress, NonNegativeAmount&gt;, SqliteClientError&gt; {
+) -&gt; <span class="prelude-ty">Result</span>&lt;HashMap&lt;TransparentAddress, Zatoshis&gt;, SqliteClientError&gt; {
     <span class="kw">let </span>chain_tip_height = chain_tip_height(conn)<span class="question-mark">?</span>.ok_or(SqliteClientError::ChainHeightUnknown)<span class="question-mark">?</span>;
 
     <span class="kw">let </span><span class="kw-2">mut </span>stmt_address_balances = conn.prepare(
@@ -1322,7 +1322,7 @@
     <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
         <span class="kw">let </span>taddr_str: String = row.get(<span class="number">0</span>)<span class="question-mark">?</span>;
         <span class="kw">let </span>taddr = TransparentAddress::decode(params, <span class="kw-2">&amp;</span>taddr_str)<span class="question-mark">?</span>;
-        <span class="kw">let </span>value = NonNegativeAmount::from_nonnegative_i64(row.get(<span class="number">1</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+        <span class="kw">let </span>value = Zatoshis::from_nonnegative_i64(row.get(<span class="number">1</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
 
         res.insert(taddr, value);
     }
@@ -1368,7 +1368,7 @@
     <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
         <span class="kw">let </span>account = AccountUuid(row.get(<span class="number">0</span>)<span class="question-mark">?</span>);
         <span class="kw">let </span>raw_value = row.get(<span class="number">1</span>)<span class="question-mark">?</span>;
-        <span class="kw">let </span>value = NonNegativeAmount::from_nonnegative_i64(raw_value).map_err(|<span class="kw">_</span>| {
+        <span class="kw">let </span>value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|<span class="kw">_</span>| {
             SqliteClientError::CorruptedData(<span class="macro">format!</span>(<span class="string">"Negative UTXO value {:?}"</span>, raw_value))
         })<span class="question-mark">?</span>;
 
@@ -1411,7 +1411,7 @@
     <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
         <span class="kw">let </span>account = AccountUuid(row.get(<span class="number">0</span>)<span class="question-mark">?</span>);
         <span class="kw">let </span>raw_value = row.get(<span class="number">1</span>)<span class="question-mark">?</span>;
-        <span class="kw">let </span>value = NonNegativeAmount::from_nonnegative_i64(raw_value).map_err(|<span class="kw">_</span>| {
+        <span class="kw">let </span>value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|<span class="kw">_</span>| {
             SqliteClientError::CorruptedData(<span class="macro">format!</span>(<span class="string">"Negative UTXO value {:?}"</span>, raw_value))
         })<span class="question-mark">?</span>;
 
@@ -1760,7 +1760,7 @@
         <span class="string">":account_id"</span>: receiving_account_id.<span class="number">0</span>,
         <span class="string">":address"</span>: <span class="kw-2">&amp;</span>address.encode(params),
         <span class="string">":script"</span>: <span class="kw-2">&amp;</span>txout.script_pubkey.<span class="number">0</span>,
-        <span class="string">":value_zat"</span>: <span class="kw-2">&amp;</span>i64::from(Amount::from(txout.value)),
+        <span class="string">":value_zat"</span>: <span class="kw-2">&amp;</span>i64::from(ZatBalance::from(txout.value)),
         <span class="string">":max_observed_unspent_height"</span>: max_observed_unspent.map(u32::from),
     ];
 

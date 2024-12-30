@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/common.rs`."><title>common.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (4ba4ac612 2024-12-18)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>common.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/common.rs`."><title>common.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0-nightly (14ee63a3c 2024-12-29)" data-channel="nightly" data-search-js="search-036cda7a.js" data-settings-js="settings-0f613d39.js" ><script src="../../../static.files/storage-59e33391.js"></script><script defer src="../../../static.files/src-script-56102188.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>common.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -421,10 +421,7 @@
 <a href="#420" id="420">420</a>
 <a href="#421" id="421">421</a>
 <a href="#422" id="422">422</a>
-<a href="#423" id="423">423</a>
-<a href="#424" id="424">424</a>
-<a href="#425" id="425">425</a>
-<a href="#426" id="426">426</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions common to Sapling and Orchard support in the wallet.
+<a href="#423" id="423">423</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions common to Sapling and Orchard support in the wallet.
 
 </span><span class="kw">use </span>rusqlite::{named_params, types::Value, Connection, Row};
 <span class="kw">use </span>std::{num::NonZeroU64, rc::Rc};
@@ -432,13 +429,12 @@
 <span class="kw">use </span>zcash_client_backend::{
     data_api::{NoteFilter, PoolMeta},
     wallet::ReceivedNote,
-    ShieldedProtocol,
 };
-<span class="kw">use </span>zcash_primitives::transaction::{components::amount::NonNegativeAmount, TxId};
+<span class="kw">use </span>zcash_primitives::transaction::TxId;
 <span class="kw">use </span>zcash_protocol::{
     consensus::{<span class="self">self</span>, BlockHeight},
-    value::BalanceError,
-    PoolType,
+    value::{BalanceError, Zatoshis},
+    PoolType, ShieldedProtocol,
 };
 
 <span class="kw">use </span><span class="kw">super</span>::wallet_birthday;
@@ -545,7 +541,7 @@
     conn: <span class="kw-2">&amp;</span>Connection,
     params: <span class="kw-2">&amp;</span>P,
     account: AccountUuid,
-    target_value: NonNegativeAmount,
+    target_value: Zatoshis,
     anchor_height: BlockHeight,
     exclude: <span class="kw-2">&amp;</span>[ReceivedNoteId],
     protocol: ShieldedProtocol,
@@ -685,8 +681,8 @@
         .collect();
     <span class="kw">let </span>excluded_ptr = Rc::new(excluded);
 
-    <span class="kw">fn </span>zatoshis(value: i64) -&gt; <span class="prelude-ty">Result</span>&lt;NonNegativeAmount, SqliteClientError&gt; {
-        NonNegativeAmount::from_nonnegative_i64(value).map_err(|<span class="kw">_</span>| {
+    <span class="kw">fn </span>zatoshis(value: i64) -&gt; <span class="prelude-ty">Result</span>&lt;Zatoshis, SqliteClientError&gt; {
+        Zatoshis::from_nonnegative_i64(value).map_err(|<span class="kw">_</span>| {
             SqliteClientError::CorruptedData(<span class="macro">format!</span>(<span class="string">"Negative received note value: {}"</span>, value))
         })
     }
@@ -734,7 +730,7 @@
         account: AccountUuid,
         filter: <span class="kw-2">&amp;</span>NoteFilter,
         chain_tip_height: BlockHeight,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;NonNegativeAmount&gt;, SqliteClientError&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;Zatoshis&gt;, SqliteClientError&gt; {
         <span class="kw">match </span>filter {
             NoteFilter::ExceedsMinValue(v) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="kw-2">*</span>v)),
             NoteFilter::ExceedsPriorSendPercentile(n) =&gt; {
@@ -760,14 +756,12 @@
                     .query_and_then::&lt;<span class="kw">_</span>, SqliteClientError, <span class="kw">_</span>, <span class="kw">_</span>&gt;(
                         <span class="macro">named_params!</span>[<span class="string">":account_uuid"</span>: account.<span class="number">0</span>],
                         |row| {
-                            NonNegativeAmount::from_nonnegative_i64(row.get::&lt;<span class="kw">_</span>, i64&gt;(<span class="number">0</span>)<span class="question-mark">?</span>).map_err(
-                                |<span class="kw">_</span>| {
-                                    SqliteClientError::CorruptedData(<span class="macro">format!</span>(
-                                        <span class="string">"Negative received note value: {}"</span>,
-                                        n.value()
-                                    ))
-                                },
-                            )
+                            Zatoshis::from_nonnegative_i64(row.get::&lt;<span class="kw">_</span>, i64&gt;(<span class="number">0</span>)<span class="question-mark">?</span>).map_err(|<span class="kw">_</span>| {
+                                SqliteClientError::CorruptedData(<span class="macro">format!</span>(
+                                    <span class="string">"Negative received note value: {}"</span>,
+                                    n.value()
+                                ))
+                            })
                         },
                     )<span class="question-mark">?
                     </span>.collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
@@ -844,7 +838,7 @@
 
         <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(PoolMeta::new(
             note_count,
-            total_value.unwrap_or(NonNegativeAmount::ZERO),
+            total_value.unwrap_or(Zatoshis::ZERO),
         )))
     } <span class="kw">else </span>{
         <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)
