@@ -346,10 +346,29 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "0.12.1 -> 0.12.3"
 
+[[audits.prost]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.13.1 -> 0.13.4"
+notes = """
+- The new `unsafe` block in `encoded_len_varint` has correct safety documentation.
+- The other changes to `unsafe` code are a move of existing `unsafe` code.
+"""
+
 [[audits.prost-build]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "0.12.1 -> 0.12.3"
+
+[[audits.prost-build]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.13.1 -> 0.13.4"
+notes = """
+- Changes to generated code make sense.
+- Changes to `protoc` path handling don't alter existing usages (just allow the
+  path to be explicitly set).
+"""
 
 [[audits.prost-derive]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
@@ -362,10 +381,20 @@ criteria = "safe-to-deploy"
 delta = "0.12.3 -> 0.12.6"
 notes = "Changes to proc macro code are to fix lints after bumping MSRV."
 
+[[audits.prost-derive]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.13.1 -> 0.13.4"
+
 [[audits.prost-types]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "0.12.1 -> 0.12.3"
+
+[[audits.prost-types]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.13.1 -> 0.13.4"
 
 [[audits.redox_syscall]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
