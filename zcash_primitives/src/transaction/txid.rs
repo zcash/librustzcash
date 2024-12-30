@@ -13,10 +13,7 @@ use zcash_protocol::{
     value::ZatBalance,
 };
 
-use ::sapling::{
-    self,
-    bundle::{OutputDescription, SpendDescription},
-};
+use ::sapling::bundle::{OutputDescription, SpendDescription};
 
 use super::{
     Authorization, Authorized, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,

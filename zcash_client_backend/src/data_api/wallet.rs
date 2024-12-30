@@ -46,7 +46,7 @@ use zcash_keys::{
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
 };
 use zcash_protocol::{PoolType, ShieldedProtocol};
-use zip321::{self, Payment};
+use zip321::Payment;
 
 use super::InputSource;
 use crate::{

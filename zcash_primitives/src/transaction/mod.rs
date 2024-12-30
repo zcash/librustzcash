@@ -18,7 +18,7 @@ use std::fmt::Debug;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 
-use ::sapling::{self, builder as sapling_builder};
+use ::sapling::builder as sapling_builder;
 use ::transparent::bundle::{self as transparent, OutPoint, TxIn, TxOut};
 use zcash_encoding::{CompactSize, Vector};
 use zcash_protocol::{

@@ -4,7 +4,7 @@ use super::{
     sighash_v4::v4_signature_hash, sighash_v5::v5_signature_hash, Authorization, TransactionData,
     TxDigests, TxVersion,
 };
-use ::sapling::{self, bundle::GrothProofBytes};
+use ::sapling::bundle::GrothProofBytes;
 
 #[cfg(zcash_unstable = "zfuture")]
 use {crate::extensions::transparent::Precondition, zcash_protocol::value::Zatoshis};

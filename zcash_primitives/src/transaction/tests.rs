@@ -8,7 +8,6 @@ use ::transparent::{address::Script, sighash::TransparentAuthorizingContext};
 use zcash_protocol::{consensus::BranchId, value::Zatoshis};
 
 use super::{
-    sapling,
     sighash::SignableInput,
     sighash_v4::v4_signature_hash,
     sighash_v5::v5_signature_hash,

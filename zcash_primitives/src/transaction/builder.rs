@@ -7,7 +7,6 @@ use std::fmt;
 use std::sync::mpsc::Sender;
 
 use ::sapling::{
-    self,
     builder::SaplingMetadata,
     prover::{OutputProver, SpendProver},
     Note, PaymentAddress,
@@ -994,10 +993,7 @@ mod testing {
     use rand::RngCore;
     use rand_core::CryptoRng;
 
-    use ::sapling::{
-        self,
-        prover::mock::{MockOutputProver, MockSpendProver},
-    };
+    use ::sapling::prover::mock::{MockOutputProver, MockSpendProver};
     use ::transparent::builder::TransparentSigningSet;
     use zcash_protocol::consensus;
 
@@ -1060,7 +1056,7 @@ mod tests {
     use super::{Builder, Error};
     use crate::transaction::builder::BuildConfig;
 
-    use ::sapling::{self, zip32::ExtendedSpendingKey, Node, Rseed};
+    use ::sapling::{zip32::ExtendedSpendingKey, Node, Rseed};
     use ::transparent::{address::TransparentAddress, builder::TransparentSigningSet};
     use zcash_protocol::{
         consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},

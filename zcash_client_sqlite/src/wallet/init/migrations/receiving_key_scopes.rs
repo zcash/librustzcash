@@ -317,7 +317,7 @@ mod tests {
         memo::MemoBytes,
         value::Zatoshis,
     };
-    use zip32::{self, Scope};
+    use zip32::Scope;
 
     use crate::{
         error::SqliteClientError,

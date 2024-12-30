@@ -8,7 +8,6 @@ use zcash_address::ParseError;
 use zcash_client_backend::data_api::NoteFilter;
 use zcash_keys::keys::AddressGenerationError;
 use zcash_protocol::{consensus::BlockHeight, value::BalanceError, PoolType};
-use zip32;
 
 use crate::{wallet::commitment_tree, AccountUuid};
 

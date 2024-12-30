@@ -75,7 +75,7 @@ use zcash_protocol::{
     value::Zatoshis,
     ShieldedProtocol,
 };
-use zip32::{self, fingerprint::SeedFingerprint, DiversifierIndex};
+use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
@@ -2257,7 +2257,6 @@ mod tests {
     pub(crate) fn fsblockdb_api() {
         use zcash_client_backend::data_api::testing::AddressType;
         use zcash_protocol::{consensus::NetworkConstants, value::Zatoshis};
-        use zip32;
 
         use crate::testing::FsBlockCache;
 

@@ -1,10 +1,7 @@
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use ff::PrimeField;
 
-use ::sapling::{
-    self,
-    bundle::{GrothProofBytes, OutputDescription, SpendDescription},
-};
+use ::sapling::bundle::{GrothProofBytes, OutputDescription, SpendDescription};
 use ::transparent::{
     bundle::{self as transparent, TxIn, TxOut},
     sighash::{SIGHASH_ANYONECANPAY, SIGHASH_MASK, SIGHASH_NONE, SIGHASH_SINGLE},
