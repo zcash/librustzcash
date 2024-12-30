@@ -192,14 +192,20 @@
 <a href="#191" id="191">191</a>
 <a href="#192" id="192">192</a>
 <a href="#193" id="193">193</a>
-<a href="#194" id="194">194</a></pre></div><pre class="rust"><code><span class="doccomment">//! This migration ensures that an Orchard receiver exists in the wallet's default Unified address.
+<a href="#194" id="194">194</a>
+<a href="#195" id="195">195</a>
+<a href="#196" id="196">196</a>
+<a href="#197" id="197">197</a>
+<a href="#198" id="198">198</a></pre></div><pre class="rust"><code><span class="doccomment">//! This migration ensures that an Orchard receiver exists in the wallet's default Unified address.
 </span><span class="kw">use </span>std::collections::HashSet;
 
 <span class="kw">use </span>rusqlite::named_params;
 <span class="kw">use </span>schemerz_rusqlite::RusqliteMigration;
 <span class="kw">use </span>uuid::Uuid;
 
-<span class="kw">use </span>zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey};
+<span class="kw">use </span>zcash_keys::keys::{
+    ReceiverRequirement::<span class="kw-2">*</span>, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey,
+};
 <span class="kw">use </span>zcash_protocol::consensus;
 
 <span class="kw">use </span><span class="kw">super</span>::orchard_received_notes;
@@ -258,7 +264,7 @@
             </span>};
 
             <span class="kw">let </span>(default_addr, diversifier_index) = uivk.default_address(<span class="prelude-val">Some</span>(
-                UnifiedAddressRequest::unsafe_new(UA_ORCHARD, <span class="bool-val">true</span>, UA_TRANSPARENT),
+                UnifiedAddressRequest::unsafe_new(UA_ORCHARD, Require, UA_TRANSPARENT),
             ))<span class="question-mark">?</span>;
 
             <span class="kw">let </span><span class="kw-2">mut </span>di_be = <span class="kw-2">*</span>diversifier_index.as_bytes();
@@ -284,8 +290,10 @@
     <span class="kw">use </span>secrecy::SecretVec;
     <span class="kw">use </span>tempfile::NamedTempFile;
 
-    <span class="kw">use </span>zcash_keys::address::Address;
-    <span class="kw">use </span>zcash_keys::keys::{UnifiedAddressRequest, UnifiedSpendingKey};
+    <span class="kw">use </span>zcash_keys::{
+        address::Address,
+        keys::{ReceiverRequirement::<span class="kw-2">*</span>, UnifiedAddressRequest, UnifiedSpendingKey},
+    };
     <span class="kw">use </span>zcash_protocol::consensus::Network;
 
     <span class="kw">use crate</span>::{
@@ -333,8 +341,8 @@
 
         <span class="kw">let </span>(addr, diversifier_index) = ufvk
             .default_address(<span class="prelude-val">Some</span>(UnifiedAddressRequest::unsafe_new(
-                <span class="bool-val">false</span>,
-                <span class="bool-val">true</span>,
+                Omit,
+                Require,
                 UA_TRANSPARENT,
             )))
             .unwrap();
@@ -362,7 +370,7 @@
             <span class="prelude-val">Ok</span>(Address::Unified(ua)) =&gt; {
                 <span class="macro">assert!</span>(!ua.has_orchard());
                 <span class="macro">assert!</span>(ua.has_sapling());
-                <span class="macro">assert_eq!</span>(ua.has_transparent(), UA_TRANSPARENT);
+                <span class="macro">assert_eq!</span>(ua.has_transparent(), UA_TRANSPARENT == Require);
             }
             other =&gt; <span class="macro">panic!</span>(<span class="string">"Unexpected result from address decoding: {:?}"</span>, other),
         }
@@ -378,9 +386,9 @@
                 <span class="prelude-val">Ok</span>(Address::decode(<span class="kw-2">&amp;</span>db_data.params, <span class="kw-2">&amp;</span>row.get::&lt;<span class="kw">_</span>, String&gt;(<span class="number">0</span>)<span class="question-mark">?</span>).unwrap())
             }) {
             <span class="prelude-val">Ok</span>(Address::Unified(ua)) =&gt; {
-                <span class="macro">assert_eq!</span>(ua.has_orchard(), UA_ORCHARD);
+                <span class="macro">assert_eq!</span>(ua.has_orchard(), UA_ORCHARD == Require);
                 <span class="macro">assert!</span>(ua.has_sapling());
-                <span class="macro">assert_eq!</span>(ua.has_transparent(), UA_TRANSPARENT);
+                <span class="macro">assert_eq!</span>(ua.has_transparent(), UA_TRANSPARENT == Require);
             }
             other =&gt; <span class="macro">panic!</span>(<span class="string">"Unexpected result from address decoding: {:?}"</span>, other),
         }

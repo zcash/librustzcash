@@ -2824,7 +2824,8 @@
 <a href="#2823" id="2823">2823</a>
 <a href="#2824" id="2824">2824</a>
 <a href="#2825" id="2825">2825</a>
-<a href="#2826" id="2826">2826</a></pre></div><pre class="rust"><code><span class="doccomment">//! Utilities for testing wallets based upon the [`crate::data_api`] traits.
+<a href="#2826" id="2826">2826</a>
+<a href="#2827" id="2827">2827</a></pre></div><pre class="rust"><code><span class="doccomment">//! Utilities for testing wallets based upon the [`crate::data_api`] traits.
 
 </span><span class="kw">use </span>std::{
     collections::{BTreeMap, HashMap},
@@ -2834,11 +2835,6 @@
     num::NonZeroU32,
 };
 
-<span class="kw">use </span>::sapling::{
-    note_encryption::{sapling_note_encryption, SaplingDomain},
-    util::generate_random_rseed,
-    zip32::DiversifiableFullViewingKey,
-};
 <span class="kw">use </span>assert_matches::assert_matches;
 <span class="kw">use </span>group::ff::Field;
 <span class="kw">use </span>incrementalmerkletree::{Marking, Retention};
@@ -2849,6 +2845,11 @@
 <span class="kw">use </span>shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 <span class="kw">use </span>subtle::ConditionallySelectable;
 
+<span class="kw">use </span>::sapling::{
+    note_encryption::{sapling_note_encryption, SaplingDomain},
+    util::generate_random_rseed,
+    zip32::DiversifiableFullViewingKey,
+};
 <span class="kw">use </span>zcash_address::ZcashAddress;
 <span class="kw">use </span>zcash_keys::{
     address::{Address, UnifiedAddress},
@@ -2870,6 +2871,21 @@
 <span class="kw">use </span>zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 <span class="kw">use </span>zip321::Payment;
 
+<span class="kw">use super</span>::{
+    chain::{scan_cached_blocks, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
+    error::Error,
+    scanning::ScanRange,
+    wallet::{
+        create_proposed_transactions,
+        input_selection::{GreedyInputSelector, InputSelector},
+        propose_standard_transfer_to_address, propose_transfer,
+    },
+    Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
+    BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery, ScannedBlock,
+    SeedRelevance, SentTransaction, SpendableNotes, TransactionDataRequest, TransactionStatus,
+    WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
+    SAPLING_SHARD_HEIGHT,
+};
 <span class="kw">use crate</span>::{
     fees::{
         standard::{<span class="self">self</span>, SingleOutputChangeStrategy},
@@ -2882,26 +2898,12 @@
     wallet::{Note, NoteId, OvkPolicy, ReceivedNote, WalletTransparentOutput},
 };
 
-<span class="kw">use super</span>::{
-    chain::{scan_cached_blocks, BlockSource, ChainState, CommitmentTreeRoot, ScanSummary},
-    scanning::ScanRange,
-    wallet::{
-        create_proposed_transactions,
-        input_selection::{GreedyInputSelector, InputSelector},
-        propose_standard_transfer_to_address, propose_transfer,
-    },
-    Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
-    BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
-    SentTransaction, SpendableNotes, TransactionDataRequest, TransactionStatus,
-    WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
-    SAPLING_SHARD_HEIGHT,
-};
-<span class="kw">use super</span>::{error::Error, NoteFilter};
-
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">use </span>{
-    <span class="kw">super</span>::wallet::input_selection::ShieldingSelector, <span class="kw">crate</span>::wallet::TransparentAddressMetadata,
-    ::transparent::address::TransparentAddress, std::ops::Range,
+    <span class="kw">super</span>::wallet::input_selection::ShieldingSelector,
+    <span class="kw">crate</span>::wallet::TransparentAddressMetadata,
+    ::transparent::{address::TransparentAddress, keys::NonHardenedChildIndex},
+    std::ops::Range,
 };
 
 <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
@@ -5450,7 +5452,7 @@
     </span><span class="kw">fn </span>get_known_ephemeral_addresses(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         _account: <span class="self">Self</span>::AccountId,
-        _index_range: <span class="prelude-ty">Option</span>&lt;Range&lt;u32&gt;&gt;,
+        _index_range: <span class="prelude-ty">Option</span>&lt;Range&lt;NonHardenedChildIndex&gt;&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(TransparentAddress, TransparentAddressMetadata)&gt;, <span class="self">Self</span>::Error&gt; {
         <span class="prelude-val">Ok</span>(<span class="macro">vec!</span>[])
     }

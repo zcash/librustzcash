@@ -925,7 +925,62 @@
 <a href="#924" id="924">924</a>
 <a href="#925" id="925">925</a>
 <a href="#926" id="926">926</a>
-<a href="#927" id="927">927</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for transparent input support in the wallet.
+<a href="#927" id="927">927</a>
+<a href="#928" id="928">928</a>
+<a href="#929" id="929">929</a>
+<a href="#930" id="930">930</a>
+<a href="#931" id="931">931</a>
+<a href="#932" id="932">932</a>
+<a href="#933" id="933">933</a>
+<a href="#934" id="934">934</a>
+<a href="#935" id="935">935</a>
+<a href="#936" id="936">936</a>
+<a href="#937" id="937">937</a>
+<a href="#938" id="938">938</a>
+<a href="#939" id="939">939</a>
+<a href="#940" id="940">940</a>
+<a href="#941" id="941">941</a>
+<a href="#942" id="942">942</a>
+<a href="#943" id="943">943</a>
+<a href="#944" id="944">944</a>
+<a href="#945" id="945">945</a>
+<a href="#946" id="946">946</a>
+<a href="#947" id="947">947</a>
+<a href="#948" id="948">948</a>
+<a href="#949" id="949">949</a>
+<a href="#950" id="950">950</a>
+<a href="#951" id="951">951</a>
+<a href="#952" id="952">952</a>
+<a href="#953" id="953">953</a>
+<a href="#954" id="954">954</a>
+<a href="#955" id="955">955</a>
+<a href="#956" id="956">956</a>
+<a href="#957" id="957">957</a>
+<a href="#958" id="958">958</a>
+<a href="#959" id="959">959</a>
+<a href="#960" id="960">960</a>
+<a href="#961" id="961">961</a>
+<a href="#962" id="962">962</a>
+<a href="#963" id="963">963</a>
+<a href="#964" id="964">964</a>
+<a href="#965" id="965">965</a>
+<a href="#966" id="966">966</a>
+<a href="#967" id="967">967</a>
+<a href="#968" id="968">968</a>
+<a href="#969" id="969">969</a>
+<a href="#970" id="970">970</a>
+<a href="#971" id="971">971</a>
+<a href="#972" id="972">972</a>
+<a href="#973" id="973">973</a>
+<a href="#974" id="974">974</a>
+<a href="#975" id="975">975</a>
+<a href="#976" id="976">976</a>
+<a href="#977" id="977">977</a>
+<a href="#978" id="978">978</a>
+<a href="#979" id="979">979</a>
+<a href="#980" id="980">980</a>
+<a href="#981" id="981">981</a>
+<a href="#982" id="982">982</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for transparent input support in the wallet.
 </span><span class="kw">use </span>std::collections::{HashMap, HashSet};
 
 <span class="kw">use </span>rusqlite::OptionalExtension;
@@ -1827,7 +1882,19 @@
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
-    <span class="kw">use </span><span class="kw">crate</span>::testing::{db::TestDbFactory, BlockCache};
+    <span class="kw">use </span>secrecy::Secret;
+    <span class="kw">use </span>transparent::keys::NonHardenedChildIndex;
+    <span class="kw">use </span>zcash_client_backend::{
+        data_api::{testing::TestBuilder, Account <span class="kw">as _</span>, WalletWrite, GAP_LIMIT},
+        wallet::TransparentAddressMetadata,
+    };
+    <span class="kw">use </span>zcash_primitives::block::BlockHash;
+
+    <span class="kw">use crate</span>::{
+        testing::{db::TestDbFactory, BlockCache},
+        wallet::{get_account_ref, transparent::ephemeral},
+        WalletDb,
+    };
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>put_received_transparent_utxo() {
@@ -1850,6 +1917,49 @@
             TestDbFactory::default(),
             BlockCache::new(),
         );
+    }
+
+    <span class="attr">#[test]
+    </span><span class="kw">fn </span>ephemeral_address_management() {
+        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
+            .build();
+
+        <span class="kw">let </span>birthday = st.test_account().unwrap().birthday().clone();
+        <span class="kw">let </span>account0_uuid = st.test_account().unwrap().account().id();
+        <span class="kw">let </span>account0_id = get_account_ref(<span class="kw-2">&amp;</span>st.wallet().db().conn, account0_uuid).unwrap();
+
+        <span class="kw">let </span>check = |db: <span class="kw-2">&amp;</span>WalletDb&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt;, account_id| {
+            <span class="macro">eprintln!</span>(<span class="string">"checking {account_id:?}"</span>);
+            <span class="macro">assert_matches!</span>(ephemeral::first_unstored_index(<span class="kw-2">&amp;</span>db.conn, account_id), <span class="prelude-val">Ok</span>(addr_index) <span class="kw">if </span>addr_index == GAP_LIMIT);
+            <span class="macro">assert_matches!</span>(ephemeral::first_unreserved_index(<span class="kw-2">&amp;</span>db.conn, account_id), <span class="prelude-val">Ok</span>(addr_index) <span class="kw">if </span>addr_index == <span class="number">0</span>);
+
+            <span class="kw">let </span>known_addrs =
+                ephemeral::get_known_ephemeral_addresses(<span class="kw-2">&amp;</span>db.conn, <span class="kw-2">&amp;</span>db.params, account_id, <span class="prelude-val">None</span>)
+                    .unwrap();
+
+            <span class="kw">let </span>expected_metadata: Vec&lt;TransparentAddressMetadata&gt; = (<span class="number">0</span>..GAP_LIMIT)
+                .map(|i| ephemeral::metadata(NonHardenedChildIndex::from_index(i).unwrap()))
+                .collect();
+            <span class="kw">let </span>actual_metadata: Vec&lt;TransparentAddressMetadata&gt; =
+                known_addrs.into_iter().map(|(<span class="kw">_</span>, meta)| meta).collect();
+            <span class="macro">assert_eq!</span>(actual_metadata, expected_metadata);
+        };
+
+        check(st.wallet().db(), account0_id);
+
+        <span class="comment">// Creating a new account should initialize `ephemeral_addresses` for that account.
+        </span><span class="kw">let </span>seed1 = <span class="macro">vec!</span>[<span class="number">0x01</span>; <span class="number">32</span>];
+        <span class="kw">let </span>(account1_uuid, _usk) = st
+            .wallet_mut()
+            .db_mut()
+            .create_account(<span class="string">"test1"</span>, <span class="kw-2">&amp;</span>Secret::new(seed1), <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>)
+            .unwrap();
+        <span class="kw">let </span>account1_id = get_account_ref(<span class="kw-2">&amp;</span>st.wallet().db().conn, account1_uuid).unwrap();
+        <span class="macro">assert_ne!</span>(account0_id, account1_id);
+        check(st.wallet().db(), account1_id);
     }
 }
 </code></pre></div></section></main></body></html>

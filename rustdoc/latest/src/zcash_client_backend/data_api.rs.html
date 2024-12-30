@@ -2548,10 +2548,7 @@
 <a href="#2547" id="2547">2547</a>
 <a href="#2548" id="2548">2548</a>
 <a href="#2549" id="2549">2549</a>
-<a href="#2550" id="2550">2550</a>
-<a href="#2551" id="2551">2551</a>
-<a href="#2552" id="2552">2552</a>
-<a href="#2553" id="2553">2553</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Utilities for Zcash wallet construction
+<a href="#2550" id="2550">2550</a></pre></div><pre class="rust"><code><span class="doccomment">//! # Utilities for Zcash wallet construction
 //!
 //! This module defines a set of APIs for wallet data persistence, and provides a suite of methods
 //! based upon these APIs that can be used to implement a fully functional Zcash wallet. At
@@ -2621,22 +2618,18 @@
 <span class="kw">use </span>incrementalmerkletree::{frontier::Frontier, Retention};
 <span class="kw">use </span>shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 
-<span class="kw">use </span>::transparent::bundle::OutPoint;
 <span class="kw">use </span>zcash_keys::{
     address::UnifiedAddress,
     keys::{
         UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey, UnifiedSpendingKey,
     },
 };
-<span class="kw">use </span>zcash_primitives::{
-    block::BlockHash,
-    transaction::{Transaction, TxId},
-};
+<span class="kw">use </span>zcash_primitives::{block::BlockHash, transaction::Transaction};
 <span class="kw">use </span>zcash_protocol::{
     consensus::BlockHeight,
     memo::{Memo, MemoBytes},
     value::{BalanceError, Zatoshis},
-    ShieldedProtocol,
+    ShieldedProtocol, TxId,
 };
 <span class="kw">use </span>zip32::fingerprint::SeedFingerprint;
 
@@ -2652,8 +2645,9 @@
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">use </span>{
-    <span class="kw">crate</span>::wallet::TransparentAddressMetadata, ::transparent::address::TransparentAddress,
+    <span class="kw">crate</span>::wallet::TransparentAddressMetadata,
     std::ops::Range,
+    transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
 };
 
 <span class="attr">#[cfg(feature = <span class="string">"test-dependencies"</span>)]
@@ -4018,7 +4012,7 @@
     </span><span class="kw">fn </span>get_known_ephemeral_addresses(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         _account: <span class="self">Self</span>::AccountId,
-        _index_range: <span class="prelude-ty">Option</span>&lt;Range&lt;u32&gt;&gt;,
+        _index_range: <span class="prelude-ty">Option</span>&lt;Range&lt;NonHardenedChildIndex&gt;&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(TransparentAddress, TransparentAddressMetadata)&gt;, <span class="self">Self</span>::Error&gt; {
         <span class="prelude-val">Ok</span>(<span class="macro">vec!</span>[])
     }
@@ -4519,7 +4513,7 @@
 /// This type is capable of representing both shielded and transparent outputs.
 </span><span class="kw">pub struct </span>SentTransactionOutput&lt;AccountId&gt; {
     output_index: usize,
-    recipient: Recipient&lt;AccountId, Note, OutPoint&gt;,
+    recipient: Recipient&lt;AccountId&gt;,
     value: Zatoshis,
     memo: <span class="prelude-ty">Option</span>&lt;MemoBytes&gt;,
 }
@@ -4536,7 +4530,7 @@
     /// * `memo` - the memo that was sent with this output
     </span><span class="kw">pub fn </span>from_parts(
         output_index: usize,
-        recipient: Recipient&lt;AccountId, Note, OutPoint&gt;,
+        recipient: Recipient&lt;AccountId&gt;,
         value: Zatoshis,
         memo: <span class="prelude-ty">Option</span>&lt;MemoBytes&gt;,
     ) -&gt; <span class="self">Self </span>{
@@ -4559,7 +4553,7 @@
     }
     <span class="doccomment">/// Returns the recipient address of the transaction, or the account id and
     /// resulting note/outpoint for wallet-internal outputs.
-    </span><span class="kw">pub fn </span>recipient(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Recipient&lt;AccountId, Note, OutPoint&gt; {
+    </span><span class="kw">pub fn </span>recipient(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Recipient&lt;AccountId&gt; {
         <span class="kw-2">&amp;</span><span class="self">self</span>.recipient
     }
     <span class="doccomment">/// Returns the value of the newly created output.

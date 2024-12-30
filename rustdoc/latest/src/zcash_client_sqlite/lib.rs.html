@@ -2304,7 +2304,8 @@
 <a href="#2303" id="2303">2303</a>
 <a href="#2304" id="2304">2304</a>
 <a href="#2305" id="2305">2305</a>
-<a href="#2306" id="2306">2306</a></pre></div><pre class="rust"><code><span class="doccomment">//! *An SQLite-based Zcash light client.*
+<a href="#2306" id="2306">2306</a>
+<a href="#2307" id="2307">2307</a></pre></div><pre class="rust"><code><span class="doccomment">//! *An SQLite-based Zcash light client.*
 //!
 //! `zcash_client_sqlite` contains complete SQLite-based implementations of the [`WalletRead`],
 //! [`WalletWrite`], and [`BlockSource`] traits from the [`zcash_client_backend`] crate. In
@@ -2368,7 +2369,8 @@
 <span class="kw">use </span>zcash_keys::{
     address::UnifiedAddress,
     keys::{
-        AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
+        AddressGenerationError, ReceiverRequirement, UnifiedAddressRequest, UnifiedFullViewingKey,
+        UnifiedSpendingKey,
     },
 };
 <span class="kw">use </span>zcash_primitives::{
@@ -2398,9 +2400,9 @@
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">use </span>{
-    ::transparent::{address::TransparentAddress, bundle::OutPoint},
+    ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     zcash_client_backend::wallet::TransparentAddressMetadata,
-    zcash_keys::encoding::AddressCodec <span class="kw">as _</span>,
+    zcash_keys::encoding::AddressCodec,
 };
 
 <span class="attr">#[cfg(feature = <span class="string">"multicore"</span>)]
@@ -2460,14 +2462,14 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>ORCHARD_TABLES_PREFIX: <span class="kw-2">&amp;</span>str = <span class="string">"orchard"</span>;
 
 <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>UA_ORCHARD: bool = <span class="bool-val">false</span>;
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>UA_ORCHARD: ReceiverRequirement = ReceiverRequirement::Omit;
 <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>UA_ORCHARD: bool = <span class="bool-val">true</span>;
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>UA_ORCHARD: ReceiverRequirement = ReceiverRequirement::Require;
 
 <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>UA_TRANSPARENT: bool = <span class="bool-val">false</span>;
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>UA_TRANSPARENT: ReceiverRequirement = ReceiverRequirement::Omit;
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>UA_TRANSPARENT: bool = <span class="bool-val">true</span>;
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>UA_TRANSPARENT: ReceiverRequirement = ReceiverRequirement::Require;
 
 <span class="doccomment">/// Unique identifier for a specific account tracked by a [`WalletDb`].
 ///
@@ -2965,14 +2967,14 @@
     </span><span class="kw">fn </span>get_known_ephemeral_addresses(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         account: <span class="self">Self</span>::AccountId,
-        index_range: <span class="prelude-ty">Option</span>&lt;Range&lt;u32&gt;&gt;,
+        index_range: <span class="prelude-ty">Option</span>&lt;Range&lt;NonHardenedChildIndex&gt;&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(TransparentAddress, TransparentAddressMetadata)&gt;, <span class="self">Self</span>::Error&gt; {
         <span class="kw">let </span>account_id = wallet::get_account_ref(<span class="self">self</span>.conn.borrow(), account)<span class="question-mark">?</span>;
         wallet::transparent::ephemeral::get_known_ephemeral_addresses(
             <span class="self">self</span>.conn.borrow(),
             <span class="kw-2">&amp;</span><span class="self">self</span>.params,
             account_id,
-            index_range,
+            index_range.map(|i| i.start.index()..i.end.index()),
         )
     }
 

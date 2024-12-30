@@ -557,7 +557,19 @@
 <a href="#556" id="556">556</a>
 <a href="#557" id="557">557</a>
 <a href="#558" id="558">558</a>
-<a href="#559" id="559">559</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs for handling supported address types.
+<a href="#559" id="559">559</a>
+<a href="#560" id="560">560</a>
+<a href="#561" id="561">561</a>
+<a href="#562" id="562">562</a>
+<a href="#563" id="563">563</a>
+<a href="#564" id="564">564</a>
+<a href="#565" id="565">565</a>
+<a href="#566" id="566">566</a>
+<a href="#567" id="567">567</a>
+<a href="#568" id="568">568</a>
+<a href="#569" id="569">569</a>
+<a href="#570" id="570">570</a>
+<a href="#571" id="571">571</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs for handling supported address types.
 
 </span><span class="kw">use </span>alloc::string::{String, ToString};
 <span class="kw">use </span>alloc::vec::Vec;
@@ -981,6 +993,18 @@
                 PoolType::Shielded(ShieldedProtocol::Sapling) =&gt; ua.has_sapling(),
                 PoolType::Shielded(ShieldedProtocol::Orchard) =&gt; ua.has_orchard(),
             },
+        }
+    }
+
+    <span class="doccomment">/// Returns the transparent address corresponding to this address, if it is a transparent
+    /// address, a Unified address with a transparent receiver, or ZIP 320 (TEX) address.
+    </span><span class="kw">pub fn </span>to_transparent_address(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;TransparentAddress&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)]
+            </span>Address::Sapling(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+            Address::Transparent(addr) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>addr),
+            Address::Unified(ua) =&gt; ua.transparent().copied(),
+            Address::Tex(addr_bytes) =&gt; <span class="prelude-val">Some</span>(TransparentAddress::PublicKeyHash(<span class="kw-2">*</span>addr_bytes)),
         }
     }
 }

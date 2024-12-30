@@ -435,7 +435,7 @@
 <a href="#434" id="434">434</a>
 <a href="#435" id="435">435</a>
 <a href="#436" id="436">436</a>
-<a href="#437" id="437">437</a></pre></div><pre class="rust"><code><span class="kw">use </span>zcash_protocol::PoolType;
+<a href="#437" id="437">437</a></pre></div><pre class="rust"><code><span class="kw">use </span>zcash_protocol::{constants, PoolType};
 
 <span class="kw">use super</span>::{private::SealedItem, ParseError, Typecode};
 
@@ -573,17 +573,17 @@
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    </span><span class="kw">const </span>MAINNET: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str = <span class="string">"u"</span>;
+    </span><span class="kw">const </span>MAINNET: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str = constants::mainnet::HRP_UNIFIED_ADDRESS;
 
     <span class="doccomment">/// The HRP for a Bech32m-encoded testnet Unified Address.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    </span><span class="kw">const </span>TESTNET: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str = <span class="string">"utest"</span>;
+    </span><span class="kw">const </span>TESTNET: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str = constants::testnet::HRP_UNIFIED_ADDRESS;
 
     <span class="doccomment">/// The HRP for a Bech32m-encoded regtest Unified Address.
-    </span><span class="kw">const </span>REGTEST: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str = <span class="string">"uregtest"</span>;
+    </span><span class="kw">const </span>REGTEST: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str = constants::regtest::HRP_UNIFIED_ADDRESS;
 
     <span class="kw">fn </span>from_inner(receivers: Vec&lt;<span class="self">Self</span>::Item&gt;) -&gt; <span class="self">Self </span>{
         <span class="self">Self</span>(receivers)

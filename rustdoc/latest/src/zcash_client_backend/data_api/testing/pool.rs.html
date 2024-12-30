@@ -3202,7 +3202,13 @@
 <a href="#3201" id="3201">3201</a>
 <a href="#3202" id="3202">3202</a>
 <a href="#3203" id="3203">3203</a>
-<a href="#3204" id="3204">3204</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::{
+<a href="#3204" id="3204">3204</a>
+<a href="#3205" id="3205">3205</a>
+<a href="#3206" id="3206">3206</a>
+<a href="#3207" id="3207">3207</a>
+<a href="#3208" id="3208">3208</a>
+<a href="#3209" id="3209">3209</a>
+<a href="#3210" id="3210">3210</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::{
     cmp::Eq,
     convert::Infallible,
     hash::Hash,
@@ -4031,7 +4037,13 @@
     // the start of the gap to index 12. This also tests the `index_range` parameter.
     </span><span class="kw">let </span>newer_known_addrs = st
         .wallet()
-        .get_known_ephemeral_addresses(account_id, <span class="prelude-val">Some</span>(<span class="number">5</span>..<span class="number">100</span>))
+        .get_known_ephemeral_addresses(
+            account_id,
+            <span class="prelude-val">Some</span>(
+                NonHardenedChildIndex::from_index(<span class="number">5</span>).unwrap()
+                    ..NonHardenedChildIndex::from_index(<span class="number">100</span>).unwrap(),
+            ),
+        )
         .unwrap();
     <span class="macro">assert_eq!</span>(newer_known_addrs.len(), (GAP_LIMIT <span class="kw">as </span>usize) + <span class="number">12 </span>- <span class="number">5</span>);
     <span class="macro">assert!</span>(newer_known_addrs.starts_with(<span class="kw-2">&amp;</span>new_known_addrs[<span class="number">5</span>..]));

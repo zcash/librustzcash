@@ -1775,7 +1775,75 @@
 <a href="#1774" id="1774">1774</a>
 <a href="#1775" id="1775">1775</a>
 <a href="#1776" id="1776">1776</a>
-<a href="#1777" id="1777">1777</a></pre></div><pre class="rust"><code><span class="doccomment">//! Helper functions for managing light client key material.
+<a href="#1777" id="1777">1777</a>
+<a href="#1778" id="1778">1778</a>
+<a href="#1779" id="1779">1779</a>
+<a href="#1780" id="1780">1780</a>
+<a href="#1781" id="1781">1781</a>
+<a href="#1782" id="1782">1782</a>
+<a href="#1783" id="1783">1783</a>
+<a href="#1784" id="1784">1784</a>
+<a href="#1785" id="1785">1785</a>
+<a href="#1786" id="1786">1786</a>
+<a href="#1787" id="1787">1787</a>
+<a href="#1788" id="1788">1788</a>
+<a href="#1789" id="1789">1789</a>
+<a href="#1790" id="1790">1790</a>
+<a href="#1791" id="1791">1791</a>
+<a href="#1792" id="1792">1792</a>
+<a href="#1793" id="1793">1793</a>
+<a href="#1794" id="1794">1794</a>
+<a href="#1795" id="1795">1795</a>
+<a href="#1796" id="1796">1796</a>
+<a href="#1797" id="1797">1797</a>
+<a href="#1798" id="1798">1798</a>
+<a href="#1799" id="1799">1799</a>
+<a href="#1800" id="1800">1800</a>
+<a href="#1801" id="1801">1801</a>
+<a href="#1802" id="1802">1802</a>
+<a href="#1803" id="1803">1803</a>
+<a href="#1804" id="1804">1804</a>
+<a href="#1805" id="1805">1805</a>
+<a href="#1806" id="1806">1806</a>
+<a href="#1807" id="1807">1807</a>
+<a href="#1808" id="1808">1808</a>
+<a href="#1809" id="1809">1809</a>
+<a href="#1810" id="1810">1810</a>
+<a href="#1811" id="1811">1811</a>
+<a href="#1812" id="1812">1812</a>
+<a href="#1813" id="1813">1813</a>
+<a href="#1814" id="1814">1814</a>
+<a href="#1815" id="1815">1815</a>
+<a href="#1816" id="1816">1816</a>
+<a href="#1817" id="1817">1817</a>
+<a href="#1818" id="1818">1818</a>
+<a href="#1819" id="1819">1819</a>
+<a href="#1820" id="1820">1820</a>
+<a href="#1821" id="1821">1821</a>
+<a href="#1822" id="1822">1822</a>
+<a href="#1823" id="1823">1823</a>
+<a href="#1824" id="1824">1824</a>
+<a href="#1825" id="1825">1825</a>
+<a href="#1826" id="1826">1826</a>
+<a href="#1827" id="1827">1827</a>
+<a href="#1828" id="1828">1828</a>
+<a href="#1829" id="1829">1829</a>
+<a href="#1830" id="1830">1830</a>
+<a href="#1831" id="1831">1831</a>
+<a href="#1832" id="1832">1832</a>
+<a href="#1833" id="1833">1833</a>
+<a href="#1834" id="1834">1834</a>
+<a href="#1835" id="1835">1835</a>
+<a href="#1836" id="1836">1836</a>
+<a href="#1837" id="1837">1837</a>
+<a href="#1838" id="1838">1838</a>
+<a href="#1839" id="1839">1839</a>
+<a href="#1840" id="1840">1840</a>
+<a href="#1841" id="1841">1841</a>
+<a href="#1842" id="1842">1842</a>
+<a href="#1843" id="1843">1843</a>
+<a href="#1844" id="1844">1844</a>
+<a href="#1845" id="1845">1845</a></pre></div><pre class="rust"><code><span class="doccomment">//! Helper functions for managing light client key material.
 </span><span class="kw">use </span>alloc::string::{String, ToString};
 <span class="kw">use </span>alloc::vec::Vec;
 <span class="kw">use </span>core::fmt::{<span class="self">self</span>, Display};
@@ -2329,72 +2397,107 @@
 <span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
 </span><span class="kw">impl </span>std::error::Error <span class="kw">for </span>AddressGenerationError {}
 
+<span class="doccomment">/// An enumeration of the ways in which a receiver may be requested to be present in a generated
+/// [`UnifiedAddress`].
+</span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+</span><span class="kw">pub enum </span>ReceiverRequirement {
+    <span class="doccomment">/// A receiver of the associated type is required to be present in the generated
+    /// `[UnifiedAddress`], and if it is not possible to generate a receiver of this type, the
+    /// address generation method should return an error. When calling [`Self::intersect`], this
+    /// variant will be preferred over [`ReceiverRequirement::Allow`].
+    </span>Require,
+    <span class="doccomment">/// The associated receiver should be included, if a corresponding item exists in the IVK from
+    /// which the address is being derived and derivation of the receiver succeeds at the given
+    /// diversifier index.
+    </span>Allow,
+    <span class="doccomment">/// No receiver of the associated type may be included in the generated [`UnifiedAddress`]
+    /// under any circumstances. When calling [`Self::intersect`], this variant will be preferred
+    /// over [`ReceiverRequirement::Allow`].
+    </span>Omit,
+}
+
+<span class="kw">impl </span>ReceiverRequirement {
+    <span class="doccomment">/// Return the intersection of two requirements that chooses the stronger requirement, if one
+    /// exists. [`ReceiverRequirement::Require`] and [`ReceiverRequirement::Omit`] are
+    /// incompatible; attempting an intersection between these will return an error.
+    </span><span class="kw">pub fn </span>intersect(<span class="self">self</span>, other: <span class="self">Self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, ()&gt; {
+        <span class="kw">use </span>ReceiverRequirement::<span class="kw-2">*</span>;
+        <span class="kw">match </span>(<span class="self">self</span>, other) {
+            (Require, Omit) =&gt; <span class="prelude-val">Err</span>(()),
+            (Require, Require) =&gt; <span class="prelude-val">Ok</span>(Require),
+            (Require, Allow) =&gt; <span class="prelude-val">Ok</span>(Require),
+            (Allow, Require) =&gt; <span class="prelude-val">Ok</span>(Require),
+            (Allow, Allow) =&gt; <span class="prelude-val">Ok</span>(Allow),
+            (Allow, Omit) =&gt; <span class="prelude-val">Ok</span>(Omit),
+            (Omit, Require) =&gt; <span class="prelude-val">Err</span>(()),
+            (Omit, Allow) =&gt; <span class="prelude-val">Ok</span>(Omit),
+            (Omit, Omit) =&gt; <span class="prelude-val">Ok</span>(Omit),
+        }
+    }
+}
+
 <span class="doccomment">/// Specification for how a unified address should be generated from a unified viewing key.
 </span><span class="attr">#[derive(Clone, Copy, Debug)]
 </span><span class="kw">pub struct </span>UnifiedAddressRequest {
-    has_orchard: bool,
-    has_sapling: bool,
-    has_p2pkh: bool,
+    orchard: ReceiverRequirement,
+    sapling: ReceiverRequirement,
+    p2pkh: ReceiverRequirement,
 }
 
 <span class="kw">impl </span>UnifiedAddressRequest {
     <span class="doccomment">/// Construct a new unified address request from its constituent parts.
     ///
-    /// Returns `None` if the resulting unified address would not include at least one shielded receiver.
-    </span><span class="kw">pub fn </span>new(has_orchard: bool, has_sapling: bool, has_p2pkh: bool) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
-        <span class="kw">let </span>has_shielded_receiver = has_orchard || has_sapling;
-
-        <span class="kw">if </span>!has_shielded_receiver {
-            <span class="prelude-val">None
-        </span>} <span class="kw">else </span>{
-            <span class="prelude-val">Some</span>(<span class="self">Self </span>{
-                has_orchard,
-                has_sapling,
-                has_p2pkh,
+    /// Returns `Err(())` if the resulting unified address would not include at least one shielded receiver.
+    </span><span class="kw">pub fn </span>new(
+        orchard: ReceiverRequirement,
+        sapling: ReceiverRequirement,
+        p2pkh: ReceiverRequirement,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, ()&gt; {
+        <span class="kw">use </span>ReceiverRequirement::<span class="kw-2">*</span>;
+        <span class="kw">if </span>orchard == Omit &amp;&amp; sapling == Omit {
+            <span class="prelude-val">Err</span>(())
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
+                orchard,
+                sapling,
+                p2pkh,
             })
         }
     }
 
-    <span class="doccomment">/// Constructs a new unified address request that includes a request for a receiver of each
-    /// type that is supported given the active feature flags.
-    </span><span class="kw">pub fn </span>all() -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
-        <span class="kw">let </span>_has_orchard = <span class="bool-val">false</span>;
-        <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-        </span><span class="kw">let </span>_has_orchard = <span class="bool-val">true</span>;
+    <span class="doccomment">/// Constructs a new unified address request that allows a receiver of each type.
+    </span><span class="kw">pub const </span>ALLOW_ALL: UnifiedAddressRequest = {
+        <span class="kw">use </span>ReceiverRequirement::<span class="kw-2">*</span>;
+        <span class="self">Self</span>::unsafe_new(Allow, Allow, Allow)
+    };
 
-        <span class="kw">let </span>_has_sapling = <span class="bool-val">false</span>;
-        <span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)]
-        </span><span class="kw">let </span>_has_sapling = <span class="bool-val">true</span>;
-
-        <span class="kw">let </span>_has_p2pkh = <span class="bool-val">false</span>;
-        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-        </span><span class="kw">let </span>_has_p2pkh = <span class="bool-val">true</span>;
-
-        <span class="self">Self</span>::new(_has_orchard, _has_sapling, _has_p2pkh)
-    }
-
-    <span class="doccomment">/// Constructs a new unified address request that includes only the receivers
-    /// that appear both in itself and a given other request.
-    </span><span class="kw">pub fn </span>intersect(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span>UnifiedAddressRequest) -&gt; <span class="prelude-ty">Option</span>&lt;UnifiedAddressRequest&gt; {
-        <span class="self">Self</span>::new(
-            <span class="self">self</span>.has_orchard &amp;&amp; other.has_orchard,
-            <span class="self">self</span>.has_sapling &amp;&amp; other.has_sapling,
-            <span class="self">self</span>.has_p2pkh &amp;&amp; other.has_p2pkh,
-        )
+    <span class="doccomment">/// Constructs a new unified address request that includes only the receivers that are allowed
+    /// both in itself and a given other request. Returns [`None`] if requirements are incompatible
+    /// or if no shielded receiver type is allowed.
+    </span><span class="kw">pub fn </span>intersect(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span>UnifiedAddressRequest) -&gt; <span class="prelude-ty">Result</span>&lt;UnifiedAddressRequest, ()&gt; {
+        <span class="kw">let </span>orchard = <span class="self">self</span>.orchard.intersect(other.orchard)<span class="question-mark">?</span>;
+        <span class="kw">let </span>sapling = <span class="self">self</span>.sapling.intersect(other.sapling)<span class="question-mark">?</span>;
+        <span class="kw">let </span>p2pkh = <span class="self">self</span>.p2pkh.intersect(other.p2pkh)<span class="question-mark">?</span>;
+        <span class="self">Self</span>::new(orchard, sapling, p2pkh)
     }
 
     <span class="doccomment">/// Construct a new unified address request from its constituent parts.
     ///
-    /// Panics: at least one of `has_orchard` or `has_sapling` must be `true`.
-    </span><span class="kw">pub const fn </span>unsafe_new(has_orchard: bool, has_sapling: bool, has_p2pkh: bool) -&gt; <span class="self">Self </span>{
-        <span class="kw">if </span>!(has_orchard || has_sapling) {
-            <span class="macro">panic!</span>(<span class="string">"At least one shielded receiver must be requested."</span>)
+    /// Panics: at least one of `orchard` or `sapling` must be allowed.
+    </span><span class="kw">pub const fn </span>unsafe_new(
+        orchard: ReceiverRequirement,
+        sapling: ReceiverRequirement,
+        p2pkh: ReceiverRequirement,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">use </span>ReceiverRequirement::<span class="kw-2">*</span>;
+        <span class="kw">if </span><span class="macro">matches!</span>(orchard, Omit) &amp;&amp; <span class="macro">matches!</span>(sapling, Omit) {
+            <span class="macro">panic!</span>(<span class="string">"At least one shielded receiver must be allowed."</span>)
         }
 
         <span class="self">Self </span>{
-            has_orchard,
-            has_sapling,
-            has_p2pkh,
+            orchard,
+            sapling,
+            p2pkh,
         }
     }
 }
@@ -2897,78 +3000,93 @@
     }
 
     <span class="doccomment">/// Attempts to derive the Unified Address for the given diversifier index and receiver types.
-    /// If `request` is None, the address should be derived to contain a receiver for each item in
+    /// If `request` is None, the address will be derived to contain a receiver for each item in
     /// this UFVK.
     ///
-    /// Returns `None` if the specified index does not produce a valid diversifier.
+    /// Returns an error if the this key does not produce a valid receiver for a required receiver
+    /// type at the given diversifier index.
     </span><span class="kw">pub fn </span>address(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         _j: DiversifierIndex,
         request: <span class="prelude-ty">Option</span>&lt;UnifiedAddressRequest&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;UnifiedAddress, AddressGenerationError&gt; {
+        <span class="kw">use </span>ReceiverRequirement::<span class="kw-2">*</span>;
+
         <span class="kw">let </span>request = request
-            .or(<span class="self">self</span>.to_address_request())
+            .or(<span class="self">self</span>.to_address_request().ok())
             .ok_or(AddressGenerationError::ShieldedReceiverRequired)<span class="question-mark">?</span>;
+
         <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
         </span><span class="kw">let </span><span class="kw-2">mut </span>orchard = <span class="prelude-val">None</span>;
-        <span class="kw">if </span>request.has_orchard {
+        <span class="kw">if </span>request.orchard != Omit {
             <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
-            </span><span class="kw">return </span><span class="prelude-val">Err</span>(AddressGenerationError::ReceiverTypeNotSupported(
-                Typecode::Orchard,
-            ));
+            </span><span class="kw">if </span>request.orchard == Require {
+                <span class="kw">return </span><span class="prelude-val">Err</span>(AddressGenerationError::ReceiverTypeNotSupported(
+                    Typecode::Orchard,
+                ));
+            }
 
             <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
             </span><span class="kw">if let </span><span class="prelude-val">Some</span>(oivk) = <span class="kw-2">&amp;</span><span class="self">self</span>.orchard {
                 <span class="kw">let </span>orchard_j = orchard::keys::DiversifierIndex::from(<span class="kw-2">*</span>_j.as_bytes());
                 orchard = <span class="prelude-val">Some</span>(oivk.address_at(orchard_j))
-            } <span class="kw">else </span>{
+            } <span class="kw">else if </span>request.orchard == Require {
                 <span class="kw">return </span><span class="prelude-val">Err</span>(AddressGenerationError::KeyNotAvailable(Typecode::Orchard));
             }
         }
 
         <span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)]
         </span><span class="kw">let </span><span class="kw-2">mut </span>sapling = <span class="prelude-val">None</span>;
-        <span class="kw">if </span>request.has_sapling {
+        <span class="kw">if </span>request.sapling != Omit {
             <span class="attr">#[cfg(not(feature = <span class="string">"sapling"</span>))]
-            </span><span class="kw">return </span><span class="prelude-val">Err</span>(AddressGenerationError::ReceiverTypeNotSupported(
-                Typecode::Sapling,
-            ));
+            </span><span class="kw">if </span>request.sapling == Require {
+                <span class="kw">return </span><span class="prelude-val">Err</span>(AddressGenerationError::ReceiverTypeNotSupported(
+                    Typecode::Sapling,
+                ));
+            }
 
             <span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)]
             </span><span class="kw">if let </span><span class="prelude-val">Some</span>(divk) = <span class="kw-2">&amp;</span><span class="self">self</span>.sapling {
                 <span class="comment">// If a Sapling receiver type is requested, we must be able to construct an
                 // address; if we're unable to do so, then no Unified Address exists at this
                 // diversifier and we use `?` to early-return from this method.
-                </span>sapling = <span class="prelude-val">Some</span>(
-                    divk.address_at(_j)
-                        .ok_or(AddressGenerationError::InvalidSaplingDiversifierIndex(_j))<span class="question-mark">?</span>,
-                );
-            } <span class="kw">else </span>{
+                </span>sapling = <span class="kw">match </span>(request.sapling, divk.address_at(_j)) {
+                    (Require | Allow, <span class="prelude-val">Some</span>(addr)) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(addr)),
+                    (Require, <span class="prelude-val">None</span>) =&gt; {
+                        <span class="prelude-val">Err</span>(AddressGenerationError::InvalidSaplingDiversifierIndex(_j))
+                    }
+                    <span class="kw">_ </span>=&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
+                }<span class="question-mark">?</span>;
+            } <span class="kw">else if </span>request.sapling == Require {
                 <span class="kw">return </span><span class="prelude-val">Err</span>(AddressGenerationError::KeyNotAvailable(Typecode::Sapling));
             }
         }
 
         <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
         </span><span class="kw">let </span><span class="kw-2">mut </span>transparent = <span class="prelude-val">None</span>;
-        <span class="kw">if </span>request.has_p2pkh {
+        <span class="kw">if </span>request.p2pkh != Omit {
             <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
-            </span><span class="kw">return </span><span class="prelude-val">Err</span>(AddressGenerationError::ReceiverTypeNotSupported(
-                Typecode::P2pkh,
-            ));
+            </span><span class="kw">if </span>request.p2pkh == Require {
+                <span class="kw">return </span><span class="prelude-val">Err</span>(AddressGenerationError::ReceiverTypeNotSupported(
+                    Typecode::P2pkh,
+                ));
+            }
 
             <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
             </span><span class="kw">if let </span><span class="prelude-val">Some</span>(tivk) = <span class="self">self</span>.transparent.as_ref() {
                 <span class="comment">// If a transparent receiver type is requested, we must be able to construct an
                 // address; if we're unable to do so, then no Unified Address exists at this
                 // diversifier.
-                </span><span class="kw">let </span>transparent_j = to_transparent_child_index(_j)
-                    .ok_or(AddressGenerationError::InvalidTransparentChildIndex(_j))<span class="question-mark">?</span>;
+                </span><span class="kw">let </span>j = to_transparent_child_index(_j);
 
-                transparent = <span class="prelude-val">Some</span>(
-                    tivk.derive_address(transparent_j)
-                        .map_err(|<span class="kw">_</span>| AddressGenerationError::InvalidTransparentChildIndex(_j))<span class="question-mark">?</span>,
-                );
-            } <span class="kw">else </span>{
+                transparent = <span class="kw">match </span>(request.p2pkh, j.and_then(|j| tivk.derive_address(j).ok())) {
+                    (Require | Allow, <span class="prelude-val">Some</span>(addr)) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(addr)),
+                    (Require, <span class="prelude-val">None</span>) =&gt; {
+                        <span class="prelude-val">Err</span>(AddressGenerationError::InvalidTransparentChildIndex(_j))
+                    }
+                    <span class="kw">_ </span>=&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
+                }<span class="question-mark">?</span>;
+            } <span class="kw">else if </span>request.p2pkh == Require {
                 <span class="kw">return </span><span class="prelude-val">Err</span>(AddressGenerationError::KeyNotAvailable(Typecode::P2pkh));
             }
         }
@@ -2985,23 +3103,33 @@
         .ok_or(AddressGenerationError::ShieldedReceiverRequired)
     }
 
-    <span class="doccomment">/// Searches the diversifier space starting at diversifier index `j` for one which will
-    /// produce a valid diversifier, and return the Unified Address constructed using that
-    /// diversifier along with the index at which the valid diversifier was found.
+    <span class="doccomment">/// Searches the diversifier space starting at diversifier index `j` for one which will produce
+    /// a valid address that conforms to the provided request, and returns that Unified Address
+    /// along with the index at which the valid diversifier was found.
+    ///
+    /// If [`None`] is specified for the `request` parameter, a default request that [`Require`]s a
+    /// receiver be present for each key item enabled by the feature flags in use will be used to
+    /// search the diversifier space.
     ///
     /// Returns an `Err(AddressGenerationError)` if no valid diversifier exists or if the features
-    /// required to satisfy the unified address request are not properly enabled.
+    /// required to satisfy the unified address request are not enabled.
+    ///
+    /// [`Require`]: ReceiverRequirement::Require
     </span><span class="attr">#[allow(unused_mut)]
     </span><span class="kw">pub fn </span>find_address(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="kw-2">mut </span>j: DiversifierIndex,
         request: <span class="prelude-ty">Option</span>&lt;UnifiedAddressRequest&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(UnifiedAddress, DiversifierIndex), AddressGenerationError&gt; {
+        <span class="kw">let </span>request = request
+            .or_else(|| <span class="self">self</span>.to_address_request().ok())
+            .ok_or(AddressGenerationError::ShieldedReceiverRequired)<span class="question-mark">?</span>;
+
         <span class="comment">// If we need to generate a transparent receiver, check that the user has not
         // specified an invalid transparent child index, from which we can never search to
         // find a valid index.
         </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-        </span><span class="kw">if </span>request.iter().any(|r| r.has_p2pkh)
+        </span><span class="kw">if </span>request.p2pkh == ReceiverRequirement::Require
             &amp;&amp; <span class="self">self</span>.transparent.is_some()
             &amp;&amp; to_transparent_child_index(j).is_none()
         {
@@ -3010,7 +3138,7 @@
 
         <span class="comment">// Find a working diversifier and construct the associated address.
         </span><span class="kw">loop </span>{
-            <span class="kw">let </span>res = <span class="self">self</span>.address(j, request);
+            <span class="kw">let </span>res = <span class="self">self</span>.address(j, <span class="prelude-val">Some</span>(request));
             <span class="kw">match </span>res {
                 <span class="prelude-val">Ok</span>(ua) =&gt; {
                     <span class="kw">return </span><span class="prelude-val">Ok</span>((ua, j));
@@ -3029,11 +3157,11 @@
     }
 
     <span class="doccomment">/// Find the Unified Address corresponding to the smallest valid diversifier index, along with
-    /// that index. If `request` is None, the address should be derived to contain a receiver for
-    /// each item in this UFVK.
+    /// that index. If `request` is None, the address will be derived to contain a receiver for
+    /// each data item in this UFVK.
     ///
-    /// Returns an `Err(AddressGenerationError)` if no valid diversifier exists or if the features
-    /// required to satisfy the unified address request are not properly enabled.
+    /// Returns an error if the this key does not produce a valid receiver for a required receiver
+    /// type at any diversifier index.
     </span><span class="kw">pub fn </span>default_address(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         request: <span class="prelude-ty">Option</span>&lt;UnifiedAddressRequest&gt;,
@@ -3041,24 +3169,32 @@
         <span class="self">self</span>.find_address(DiversifierIndex::new(), request)
     }
 
-    <span class="doccomment">/// Constructs a [`UnifiedAddressRequest`] that includes the components of this UIVK.
-    </span><span class="kw">pub fn </span>to_address_request(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;UnifiedAddressRequest&gt; {
+    <span class="doccomment">/// Constructs a [`UnifiedAddressRequest`] that requires a receiver for each data item of this UIVK.
+    ///
+    /// Returns [`Err`] if the resulting request would not include a shielded receiver.
+    </span><span class="attr">#[allow(unused_mut)]
+    </span><span class="kw">pub fn </span>to_address_request(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;UnifiedAddressRequest, ()&gt; {
+        <span class="kw">use </span>ReceiverRequirement::<span class="kw-2">*</span>;
+
+        <span class="kw">let </span><span class="kw-2">mut </span>orchard = Omit;
         <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-        </span><span class="kw">let </span>has_orchard = <span class="self">self</span>.orchard.is_some();
-        <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
-        </span><span class="kw">let </span>has_orchard = <span class="bool-val">false</span>;
+        </span><span class="kw">if </span><span class="self">self</span>.orchard.is_some() {
+            orchard = Require;
+        }
 
+        <span class="kw">let </span><span class="kw-2">mut </span>sapling = Omit;
         <span class="attr">#[cfg(feature = <span class="string">"sapling"</span>)]
-        </span><span class="kw">let </span>has_sapling = <span class="self">self</span>.sapling.is_some();
-        <span class="attr">#[cfg(not(feature = <span class="string">"sapling"</span>))]
-        </span><span class="kw">let </span>has_sapling = <span class="bool-val">false</span>;
+        </span><span class="kw">if </span><span class="self">self</span>.sapling.is_some() {
+            sapling = Require;
+        }
 
+        <span class="kw">let </span><span class="kw-2">mut </span>p2pkh = Omit;
         <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-        </span><span class="kw">let </span>has_p2pkh = <span class="self">self</span>.transparent.is_some();
-        <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
-        </span><span class="kw">let </span>has_p2pkh = <span class="bool-val">false</span>;
+        </span><span class="kw">if </span><span class="self">self</span>.transparent.is_some() {
+            p2pkh = Require;
+        }
 
-        UnifiedAddressRequest::new(has_orchard, has_sapling, has_p2pkh)
+        UnifiedAddressRequest::new(orchard, sapling, p2pkh)
     }
 }
 
@@ -3276,7 +3412,7 @@
     </span><span class="kw">fn </span>ufvk_derivation() {
         <span class="kw">use </span><span class="kw">crate</span>::keys::UnifiedAddressRequest;
 
-        <span class="kw">use </span><span class="kw">super</span>::UnifiedSpendingKey;
+        <span class="kw">use super</span>::{ReceiverRequirement::<span class="kw-2">*</span>, UnifiedSpendingKey};
 
         <span class="kw">for </span>tv <span class="kw">in </span>test_vectors::UNIFIED {
             <span class="kw">let </span>usk = UnifiedSpendingKey::from_seed(
@@ -3299,7 +3435,7 @@
             <span class="kw">let </span>ua = ufvk
                 .address(
                     d_idx,
-                    <span class="prelude-val">Some</span>(UnifiedAddressRequest::unsafe_new(<span class="bool-val">false</span>, <span class="bool-val">true</span>, <span class="bool-val">true</span>)),
+                    <span class="prelude-val">Some</span>(UnifiedAddressRequest::unsafe_new(Omit, Require, Require)),
                 )
                 .unwrap_or_else(|err| {
                     <span class="macro">panic!</span>(
@@ -3458,7 +3594,7 @@
     </span><span class="kw">fn </span>uivk_derivation() {
         <span class="kw">use </span><span class="kw">crate</span>::keys::UnifiedAddressRequest;
 
-        <span class="kw">use </span><span class="kw">super</span>::UnifiedSpendingKey;
+        <span class="kw">use super</span>::{ReceiverRequirement::<span class="kw-2">*</span>, UnifiedSpendingKey};
 
         <span class="kw">for </span>tv <span class="kw">in </span>test_vectors::UNIFIED {
             <span class="kw">let </span>usk = UnifiedSpendingKey::from_seed(
@@ -3483,7 +3619,7 @@
             <span class="kw">let </span>ua = uivk
                 .address(
                     d_idx,
-                    <span class="prelude-val">Some</span>(UnifiedAddressRequest::unsafe_new(<span class="bool-val">false</span>, <span class="bool-val">true</span>, <span class="bool-val">true</span>)),
+                    <span class="prelude-val">Some</span>(UnifiedAddressRequest::unsafe_new(Omit, Require, Require)),
                 )
                 .unwrap_or_else(|err| {
                     <span class="macro">panic!</span>(

@@ -377,8 +377,14 @@
 <a href="#376" id="376">376</a>
 <a href="#377" id="377">377</a>
 <a href="#378" id="378">378</a>
-<a href="#379" id="379">379</a></pre></div><pre class="rust"><code><span class="kw">use </span>alloc::vec::Vec;
+<a href="#379" id="379">379</a>
+<a href="#380" id="380">380</a>
+<a href="#381" id="381">381</a>
+<a href="#382" id="382">382</a>
+<a href="#383" id="383">383</a>
+<a href="#384" id="384">384</a></pre></div><pre class="rust"><code><span class="kw">use </span>alloc::vec::Vec;
 <span class="kw">use </span>core::convert::{TryFrom, TryInto};
+<span class="kw">use </span>zcash_protocol::constants;
 
 <span class="kw">use super</span>::{
     private::{SealedContainer, SealedItem},
@@ -507,17 +513,21 @@
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    </span><span class="kw">const </span>MAINNET: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str = <span class="string">"uview"</span>;
+    </span><span class="kw">const </span>MAINNET: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str = constants::mainnet::HRP_UNIFIED_FVK;
 
     <span class="doccomment">/// The HRP for a Bech32m-encoded testnet Unified FVK.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    </span><span class="kw">const </span>TESTNET: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str = <span class="string">"uviewtest"</span>;
+    </span><span class="kw">const </span>TESTNET: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str = constants::testnet::HRP_UNIFIED_FVK;
 
     <span class="doccomment">/// The HRP for a Bech32m-encoded regtest Unified FVK.
-    </span><span class="kw">const </span>REGTEST: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str = <span class="string">"uviewregtest"</span>;
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    </span><span class="kw">const </span>REGTEST: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str = constants::regtest::HRP_UNIFIED_FVK;
 
     <span class="kw">fn </span>from_inner(fvks: Vec&lt;<span class="self">Self</span>::Item&gt;) -&gt; <span class="self">Self </span>{
         <span class="self">Self</span>(fvks)

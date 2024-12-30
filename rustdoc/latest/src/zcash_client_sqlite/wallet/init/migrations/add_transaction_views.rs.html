@@ -490,7 +490,8 @@
 <a href="#489" id="489">489</a>
 <a href="#490" id="490">490</a>
 <a href="#491" id="491">491</a>
-<a href="#492" id="492">492</a></pre></div><pre class="rust"><code><span class="doccomment">//! Migration that adds transaction summary views &amp; add fee information to transactions.
+<a href="#492" id="492">492</a>
+<a href="#493" id="493">493</a></pre></div><pre class="rust"><code><span class="doccomment">//! Migration that adds transaction summary views &amp; add fee information to transactions.
 </span><span class="kw">use </span>std::collections::HashSet;
 
 <span class="kw">use </span>rusqlite::{<span class="self">self</span>, types::ToSql, OptionalExtension};
@@ -885,7 +886,8 @@
     #[cfg(feature = <span class="string">"transparent-inputs"</span>)]
     </span><span class="kw">fn </span>migrate_from_wm2() {
         <span class="kw">use </span>::transparent::keys::NonHardenedChildIndex;
-        <span class="kw">use </span>zcash_keys::keys::UnifiedAddressRequest;
+        <span class="kw">use </span>zcash_client_backend::keys::UnifiedAddressRequest;
+        <span class="kw">use </span>zcash_keys::keys::ReceiverRequirement::<span class="kw-2">*</span>;
         <span class="kw">use </span>zcash_protocol::value::Zatoshis;
 
         <span class="kw">use </span><span class="kw">crate</span>::UA_TRANSPARENT;
@@ -933,8 +935,8 @@
         <span class="kw">let </span>ufvk = usk.to_unified_full_viewing_key();
         <span class="kw">let </span>(ua, <span class="kw">_</span>) = ufvk
             .default_address(<span class="prelude-val">Some</span>(UnifiedAddressRequest::unsafe_new(
-                <span class="bool-val">false</span>,
-                <span class="bool-val">true</span>,
+                Omit,
+                Require,
                 UA_TRANSPARENT,
             )))
             .expect(<span class="string">"A valid default address exists for the UFVK"</span>);

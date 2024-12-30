@@ -1125,7 +1125,10 @@
 <a href="#1124" id="1124">1124</a>
 <a href="#1125" id="1125">1125</a>
 <a href="#1126" id="1126">1126</a>
-<a href="#1127" id="1127">1127</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for initializing the various databases.
+<a href="#1127" id="1127">1127</a>
+<a href="#1128" id="1128">1128</a>
+<a href="#1129" id="1129">1129</a>
+<a href="#1130" id="1130">1130</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for initializing the various databases.
 
 </span><span class="kw">use </span>std::fmt;
 <span class="kw">use </span>std::rc::Rc;
@@ -1570,7 +1573,10 @@
     <span class="kw">use </span>zcash_keys::{
         address::Address,
         encoding::{encode_extended_full_viewing_key, encode_payment_address},
-        keys::{sapling, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+        keys::{
+            sapling, ReceiverRequirement::<span class="kw-2">*</span>, UnifiedAddressRequest, UnifiedFullViewingKey,
+            UnifiedSpendingKey,
+        },
     };
     <span class="kw">use </span>zcash_primitives::transaction::{TransactionData, TxVersion};
     <span class="kw">use </span>zcash_protocol::consensus::{<span class="self">self</span>, BlockHeight, BranchId, Network, NetworkConstants};
@@ -2111,7 +2117,7 @@
 
             <span class="comment">// Unified addresses at the time of the addition of migrations did not contain an
             // Orchard component.
-            </span><span class="kw">let </span>ua_request = UnifiedAddressRequest::unsafe_new(<span class="bool-val">false</span>, <span class="bool-val">true</span>, UA_TRANSPARENT);
+            </span><span class="kw">let </span>ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, UA_TRANSPARENT);
             <span class="kw">let </span>address_str = Address::Unified(
                 ufvk.default_address(<span class="prelude-val">Some</span>(ua_request))
                     .expect(<span class="string">"A valid default address exists for the UFVK"</span>)
@@ -2238,7 +2244,7 @@
                 </span><span class="macro">assert_eq!</span>(tv.unified_addr, ua.encode(<span class="kw-2">&amp;</span>Network::MainNetwork));
 
                 <span class="comment">// hardcoded with knowledge of what's coming next
-                </span><span class="kw">let </span>ua_request = UnifiedAddressRequest::unsafe_new(<span class="bool-val">false</span>, <span class="bool-val">true</span>, <span class="bool-val">true</span>);
+                </span><span class="kw">let </span>ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, Require);
                 db_data
                     .get_next_available_address(account_id, <span class="prelude-val">Some</span>(ua_request))
                     .unwrap()
