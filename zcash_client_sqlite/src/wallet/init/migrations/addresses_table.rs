@@ -3,15 +3,15 @@ use std::collections::HashSet;
 use rusqlite::{named_params, Transaction};
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::{address::Address, keys::UnifiedFullViewingKey};
+use zcash_keys::{address::Address, keys::UnifiedFullViewingKey};
 use zcash_keys::{address::UnifiedAddress, encoding::AddressCodec, keys::UnifiedAddressRequest};
-use zcash_primitives::consensus;
+use zcash_protocol::consensus;
 use zip32::{AccountId, DiversifierIndex};
 
 use crate::{wallet::init::WalletMigrationError, UA_TRANSPARENT};
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::keys::IncomingViewingKey;
+use ::transparent::keys::IncomingViewingKey;
 
 use super::ufvk_support;
 

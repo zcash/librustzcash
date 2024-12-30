@@ -2,16 +2,15 @@
 
 use std::marker::PhantomData;
 
-use zcash_primitives::{
+use zcash_primitives::transaction::fees::{fixed::FeeRule as FixedFeeRule, transparent};
+use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    transaction::{
-        components::amount::{BalanceError, NonNegativeAmount},
-        fees::{fixed::FeeRule as FixedFeeRule, transparent},
-    },
+    value::{BalanceError, Zatoshis},
+    ShieldedProtocol,
 };
 
-use crate::{data_api::InputSource, ShieldedProtocol};
+use crate::data_api::InputSource;
 
 use super::{
     common::{single_pool_output_balance, SinglePoolBalanceConfig},
@@ -94,7 +93,7 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
             self.fee_rule.fixed_fee(),
             &split_policy,
             self.fallback_change_pool,
-            NonNegativeAmount::ZERO,
+            Zatoshis::ZERO,
             0,
         );
 
@@ -115,12 +114,14 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
 
 #[cfg(test)]
 mod tests {
-    use zcash_primitives::{
+    use ::transparent::bundle::TxOut;
+    use zcash_primitives::transaction::fees::{
+        fixed::FeeRule as FixedFeeRule, zip317::MINIMUM_FEE,
+    };
+    use zcash_protocol::{
         consensus::{Network, NetworkUpgrade, Parameters},
-        transaction::{
-            components::{amount::NonNegativeAmount, transparent::TxOut},
-            fees::{fixed::FeeRule as FixedFeeRule, zip317::MINIMUM_FEE},
-        },
+        value::Zatoshis,
+        ShieldedProtocol,
     };
 
     use super::SingleOutputChangeStrategy;
@@ -130,7 +131,6 @@ mod tests {
             tests::{TestSaplingInput, TestTransparentInput},
             ChangeError, ChangeStrategy, ChangeValue, DustOutputPolicy,
         },
-        ShieldedProtocol,
     };
 
     #[cfg(feature = "orchard")]
@@ -158,11 +158,9 @@ mod tests {
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
                     note_id: 0,
-                    value: NonNegativeAmount::const_from_u64(60000),
+                    value: Zatoshis::const_from_u64(60000),
                 }][..],
-                &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                    40000,
-                ))][..],
+                &[SaplingPayment::new(Zatoshis::const_from_u64(40000))][..],
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
@@ -173,7 +171,7 @@ mod tests {
         assert_matches!(
             result,
             Ok(balance) if
-                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(10000), None)] &&
+                balance.proposed_change() == [ChangeValue::sapling(Zatoshis::const_from_u64(10000), None)] &&
                 balance.fee_required() == MINIMUM_FEE
         );
     }
@@ -201,17 +199,15 @@ mod tests {
                 &[
                     TestSaplingInput {
                         note_id: 0,
-                        value: NonNegativeAmount::const_from_u64(40000),
+                        value: Zatoshis::const_from_u64(40000),
                     },
                     // enough to pay a fee, plus dust
                     TestSaplingInput {
                         note_id: 0,
-                        value: NonNegativeAmount::const_from_u64(10100),
+                        value: Zatoshis::const_from_u64(10100),
                     },
                 ][..],
-                &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                    40000,
-                ))][..],
+                &[SaplingPayment::new(Zatoshis::const_from_u64(40000))][..],
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
@@ -222,7 +218,7 @@ mod tests {
         assert_matches!(
             result,
             Err(ChangeError::InsufficientFunds { available, required })
-            if available == NonNegativeAmount::const_from_u64(50100) && required == NonNegativeAmount::const_from_u64(60000)
+            if available == Zatoshis::const_from_u64(50100) && required == Zatoshis::const_from_u64(60000)
         );
     }
 }

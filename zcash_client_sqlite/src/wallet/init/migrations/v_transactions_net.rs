@@ -5,7 +5,8 @@ use std::collections::HashSet;
 use rusqlite::named_params;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::PoolType;
+
+use zcash_protocol::PoolType;
 
 use super::add_transaction_views;
 use crate::wallet::{init::WalletMigrationError, pool_code};
@@ -206,8 +207,9 @@ mod tests {
     use rusqlite::{self, params};
     use tempfile::NamedTempFile;
 
-    use zcash_client_backend::keys::UnifiedSpendingKey;
-    use zcash_primitives::{consensus::Network, zip32::AccountId};
+    use zcash_keys::keys::UnifiedSpendingKey;
+    use zcash_protocol::consensus::Network;
+    use zip32::AccountId;
 
     use crate::{
         wallet::init::{init_wallet_db_internal, migrations::add_transaction_views},

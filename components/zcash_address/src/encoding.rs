@@ -186,7 +186,8 @@ mod tests {
     use assert_matches::assert_matches;
 
     use super::*;
-    use crate::{kind::unified, Network};
+    use crate::kind::unified;
+    use zcash_protocol::consensus::NetworkType;
 
     fn encoding(encoded: &str, decoded: ZcashAddress) {
         assert_eq!(decoded.to_string(), encoded);
@@ -197,11 +198,11 @@ mod tests {
     fn sprout() {
         encoding(
             "zc8E5gYid86n4bo2Usdq1cpr7PpfoJGzttwBHEEgGhGkLUg7SPPVFNB2AkRFXZ7usfphup5426dt1buMmY3fkYeRrQGLa8y",
-            ZcashAddress { net: Network::Main, kind: AddressKind::Sprout([0; 64]) },
+            ZcashAddress { net: NetworkType::Main, kind: AddressKind::Sprout([0; 64]) },
         );
         encoding(
             "ztJ1EWLKcGwF2S4NA17pAJVdco8Sdkz4AQPxt1cLTEfNuyNswJJc2BbBqYrsRZsp31xbVZwhF7c7a2L9jsF3p3ZwRWpqqyS",
-            ZcashAddress { net: Network::Test, kind: AddressKind::Sprout([0; 64]) },
+            ZcashAddress { net: NetworkType::Test, kind: AddressKind::Sprout([0; 64]) },
         );
     }
 
@@ -210,21 +211,21 @@ mod tests {
         encoding(
             "zs1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpq6d8g",
             ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::Sapling([0; 43]),
             },
         );
         encoding(
             "ztestsapling1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqfhgwqu",
             ZcashAddress {
-                net: Network::Test,
+                net: NetworkType::Test,
                 kind: AddressKind::Sapling([0; 43]),
             },
         );
         encoding(
             "zregtestsapling1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqknpr3m",
             ZcashAddress {
-                net: Network::Regtest,
+                net: NetworkType::Regtest,
                 kind: AddressKind::Sapling([0; 43]),
             },
         );
@@ -235,21 +236,21 @@ mod tests {
         encoding(
             "u1qpatys4zruk99pg59gcscrt7y6akvl9vrhcfyhm9yxvxz7h87q6n8cgrzzpe9zru68uq39uhmlpp5uefxu0su5uqyqfe5zp3tycn0ecl",
             ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::Unified(unified::Address(vec![unified::address::Receiver::Sapling([0; 43])])),
             },
         );
         encoding(
             "utest10c5kutapazdnf8ztl3pu43nkfsjx89fy3uuff8tsmxm6s86j37pe7uz94z5jhkl49pqe8yz75rlsaygexk6jpaxwx0esjr8wm5ut7d5s",
             ZcashAddress {
-                net: Network::Test,
+                net: NetworkType::Test,
                 kind: AddressKind::Unified(unified::Address(vec![unified::address::Receiver::Sapling([0; 43])])),
             },
         );
         encoding(
             "uregtest15xk7vj4grjkay6mnfl93dhsflc2yeunhxwdh38rul0rq3dfhzzxgm5szjuvtqdha4t4p2q02ks0jgzrhjkrav70z9xlvq0plpcjkd5z3",
             ZcashAddress {
-                net: Network::Regtest,
+                net: NetworkType::Regtest,
                 kind: AddressKind::Unified(unified::Address(vec![unified::address::Receiver::Sapling([0; 43])])),
             },
         );
@@ -266,28 +267,28 @@ mod tests {
         encoding(
             "t1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs",
             ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::P2pkh([0; 20]),
             },
         );
         encoding(
             "tm9iMLAuYMzJ6jtFLcA7rzUmfreGuKvr7Ma",
             ZcashAddress {
-                net: Network::Test,
+                net: NetworkType::Test,
                 kind: AddressKind::P2pkh([0; 20]),
             },
         );
         encoding(
             "t3JZcvsuaXE6ygokL4XUiZSTrQBUoPYFnXJ",
             ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::P2sh([0; 20]),
             },
         );
         encoding(
             "t26YoyZ1iPgiMEWL4zGUm74eVWfhyDMXzY2",
             ZcashAddress {
-                net: Network::Test,
+                net: NetworkType::Test,
                 kind: AddressKind::P2sh([0; 20]),
             },
         );
@@ -300,7 +301,7 @@ mod tests {
 
         // Transcode P2PKH to TEX
         let p2pkh_zaddr: ZcashAddress = p2pkh_str.parse().unwrap();
-        assert_matches!(p2pkh_zaddr.net, Network::Main);
+        assert_matches!(p2pkh_zaddr.net, NetworkType::Main);
         if let AddressKind::P2pkh(zaddr_data) = p2pkh_zaddr.kind {
             let tex_zaddr = ZcashAddress {
                 net: p2pkh_zaddr.net,
@@ -314,7 +315,7 @@ mod tests {
 
         // Transcode TEX to P2PKH
         let tex_zaddr: ZcashAddress = tex_str.parse().unwrap();
-        assert_matches!(tex_zaddr.net, Network::Main);
+        assert_matches!(tex_zaddr.net, NetworkType::Main);
         if let AddressKind::Tex(zaddr_data) = tex_zaddr.kind {
             let p2pkh_zaddr = ZcashAddress {
                 net: tex_zaddr.net,
@@ -334,7 +335,7 @@ mod tests {
 
         // Transcode P2PKH to TEX
         let p2pkh_zaddr: ZcashAddress = p2pkh_str.parse().unwrap();
-        assert_matches!(p2pkh_zaddr.net, Network::Test);
+        assert_matches!(p2pkh_zaddr.net, NetworkType::Test);
         if let AddressKind::P2pkh(zaddr_data) = p2pkh_zaddr.kind {
             let tex_zaddr = ZcashAddress {
                 net: p2pkh_zaddr.net,
@@ -348,7 +349,7 @@ mod tests {
 
         // Transcode TEX to P2PKH
         let tex_zaddr: ZcashAddress = tex_str.parse().unwrap();
-        assert_matches!(tex_zaddr.net, Network::Test);
+        assert_matches!(tex_zaddr.net, NetworkType::Test);
         if let AddressKind::Tex(zaddr_data) = tex_zaddr.kind {
             let p2pkh_zaddr = ZcashAddress {
                 net: tex_zaddr.net,
@@ -366,14 +367,14 @@ mod tests {
         assert_eq!(
             " t1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs".parse(),
             Ok(ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::P2pkh([0; 20])
             }),
         );
         assert_eq!(
             "t1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs ".parse(),
             Ok(ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::P2pkh([0; 20])
             }),
         );

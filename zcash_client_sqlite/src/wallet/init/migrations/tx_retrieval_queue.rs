@@ -222,10 +222,12 @@ mod tests {
     use rusqlite::named_params;
     use secrecy::Secret;
     use tempfile::NamedTempFile;
-    use zcash_primitives::{
-        legacy::{Script, TransparentAddress},
-        transaction::{components::transparent, Authorized, TransactionData, TxVersion},
+
+    use ::transparent::{
+        address::{Script, TransparentAddress},
+        bundle::{OutPoint, TxIn, TxOut},
     };
+    use zcash_primitives::transaction::{Authorized, TransactionData, TxVersion};
     use zcash_protocol::{
         consensus::{BranchId, Network},
         value::Zatoshis,
@@ -278,17 +280,17 @@ mod tests {
             BranchId::Nu5,
             0,
             12345678.into(),
-            Some(transparent::Bundle {
-                vin: vec![transparent::TxIn {
-                    prevout: transparent::OutPoint::fake(),
+            Some(transparent::bundle::Bundle {
+                vin: vec![TxIn {
+                    prevout: OutPoint::fake(),
                     script_sig: Script(vec![]),
                     sequence: 0,
                 }],
-                vout: vec![transparent::TxOut {
+                vout: vec![TxOut {
                     value: Zatoshis::const_from_u64(10_000),
                     script_pubkey: TransparentAddress::PublicKeyHash([7; 20]).script(),
                 }],
-                authorization: transparent::Authorized,
+                authorization: transparent::bundle::Authorized,
             }),
             None,
             None,

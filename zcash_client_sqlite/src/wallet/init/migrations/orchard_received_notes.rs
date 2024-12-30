@@ -5,7 +5,8 @@ use std::collections::HashSet;
 
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::PoolType;
+
+use zcash_protocol::PoolType;
 
 use super::full_account_ids;
 use crate::wallet::{init::WalletMigrationError, pool_code};

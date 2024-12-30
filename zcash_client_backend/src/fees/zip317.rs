@@ -6,17 +6,17 @@
 
 use std::marker::PhantomData;
 
-use zcash_primitives::{
+use zcash_primitives::transaction::fees::{transparent, zip317 as prim_zip317, FeeRule};
+use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    transaction::fees::{transparent, zip317 as prim_zip317, FeeRule},
+    value::{BalanceError, Zatoshis},
+    ShieldedProtocol,
 };
-use zcash_protocol::value::{BalanceError, Zatoshis};
 
 use crate::{
     data_api::{AccountMeta, InputSource, NoteFilter},
     fees::StandardFeeRule,
-    ShieldedProtocol,
 };
 
 use super::{
@@ -266,13 +266,12 @@ where
 mod tests {
     use std::{convert::Infallible, num::NonZeroUsize};
 
-    use zcash_primitives::{
+    use ::transparent::{address::Script, bundle::TxOut};
+    use zcash_primitives::transaction::fees::zip317::FeeRule as Zip317FeeRule;
+    use zcash_protocol::{
         consensus::{Network, NetworkUpgrade, Parameters},
-        legacy::Script,
-        transaction::{
-            components::{amount::NonNegativeAmount, transparent::TxOut},
-            fees::zip317::FeeRule as Zip317FeeRule,
-        },
+        value::Zatoshis,
+        ShieldedProtocol,
     };
 
     use super::SingleOutputChangeStrategy;
@@ -285,7 +284,6 @@ mod tests {
             zip317::MultiOutputChangeStrategy,
             ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy, SplitPolicy,
         },
-        ShieldedProtocol,
     };
 
     #[cfg(feature = "orchard")]
@@ -315,11 +313,9 @@ mod tests {
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
                     note_id: 0,
-                    value: NonNegativeAmount::const_from_u64(55000),
+                    value: Zatoshis::const_from_u64(55000),
                 }][..],
-                &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                    40000,
-                ))][..],
+                &[SaplingPayment::new(Zatoshis::const_from_u64(40000))][..],
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
@@ -330,8 +326,8 @@ mod tests {
         assert_matches!(
             result,
             Ok(balance) if
-                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(5000), None)] &&
-                balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
+                balance.proposed_change() == [ChangeValue::sapling(Zatoshis::const_from_u64(5000), None)] &&
+                balance.fee_required() == Zatoshis::const_from_u64(10000)
         );
     }
 
@@ -344,7 +340,7 @@ mod tests {
             DustOutputPolicy::default(),
             SplitPolicy::with_min_output_value(
                 NonZeroUsize::new(5).unwrap(),
-                NonNegativeAmount::const_from_u64(100_0000),
+                Zatoshis::const_from_u64(100_0000),
             ),
         );
 
@@ -362,11 +358,9 @@ mod tests {
                         sapling::builder::BundleType::DEFAULT,
                         &[TestSaplingInput {
                             note_id: 0,
-                            value: NonNegativeAmount::const_from_u64(750_0000),
+                            value: Zatoshis::const_from_u64(750_0000),
                         }][..],
-                        &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                            100_0000,
-                        ))][..],
+                        &[SaplingPayment::new(Zatoshis::const_from_u64(100_0000))][..],
                     ),
                     #[cfg(feature = "orchard")]
                     &orchard_fees::EmptyBundleView,
@@ -376,27 +370,27 @@ mod tests {
             };
 
             assert_matches!(
-                balance(0, NonNegativeAmount::ZERO),
+                balance(0, Zatoshis::ZERO),
                 Ok(balance) if
                     balance.proposed_change() == [
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(129_4000), None),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(129_4000), None),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(129_4000), None),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(129_4000), None),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(129_4000), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(129_4000), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(129_4000), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(129_4000), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(129_4000), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(129_4000), None),
                     ] &&
-                    balance.fee_required() == NonNegativeAmount::const_from_u64(30000)
+                    balance.fee_required() == Zatoshis::const_from_u64(30000)
             );
 
             assert_matches!(
-                balance(2, NonNegativeAmount::const_from_u64(100_0000)),
+                balance(2, Zatoshis::const_from_u64(100_0000)),
                 Ok(balance) if
                     balance.proposed_change() == [
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(216_0000), None),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(216_0000), None),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(216_0000), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(216_0000), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(216_0000), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(216_0000), None),
                     ] &&
-                    balance.fee_required() == NonNegativeAmount::const_from_u64(20000)
+                    balance.fee_required() == Zatoshis::const_from_u64(20000)
             );
         }
 
@@ -414,18 +408,16 @@ mod tests {
                     sapling::builder::BundleType::DEFAULT,
                     &[TestSaplingInput {
                         note_id: 0,
-                        value: NonNegativeAmount::const_from_u64(600_0000),
+                        value: Zatoshis::const_from_u64(600_0000),
                     }][..],
-                    &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                        100_0000,
-                    ))][..],
+                    &[SaplingPayment::new(Zatoshis::const_from_u64(100_0000))][..],
                 ),
                 #[cfg(feature = "orchard")]
                 &orchard_fees::EmptyBundleView,
                 None,
                 &AccountMeta::new(
-                    Some(PoolMeta::new(0, NonNegativeAmount::ZERO)),
-                    Some(PoolMeta::new(0, NonNegativeAmount::ZERO)),
+                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
+                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
                 ),
             );
 
@@ -433,12 +425,12 @@ mod tests {
                 result,
                 Ok(balance) if
                     balance.proposed_change() == [
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(124_7500), None),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(124_2500), None),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(124_2500), None),
-                        ChangeValue::sapling(NonNegativeAmount::const_from_u64(124_2500), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(124_7500), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(124_2500), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(124_2500), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(124_2500), None),
                     ] &&
-                    balance.fee_required() == NonNegativeAmount::const_from_u64(25000)
+                    balance.fee_required() == Zatoshis::const_from_u64(25000)
             );
         }
     }
@@ -465,16 +457,14 @@ mod tests {
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
                     note_id: 0,
-                    value: NonNegativeAmount::const_from_u64(55000),
+                    value: Zatoshis::const_from_u64(55000),
                 }][..],
                 &[] as &[Infallible],
             ),
             &(
                 orchard::builder::BundleType::DEFAULT,
                 &[] as &[Infallible],
-                &[OrchardPayment::new(NonNegativeAmount::const_from_u64(
-                    30000,
-                ))][..],
+                &[OrchardPayment::new(Zatoshis::const_from_u64(30000))][..],
             ),
             None,
             &(),
@@ -483,8 +473,8 @@ mod tests {
         assert_matches!(
             result,
             Ok(balance) if
-                balance.proposed_change() == [ChangeValue::orchard(NonNegativeAmount::const_from_u64(5000), None)] &&
-                balance.fee_required() == NonNegativeAmount::const_from_u64(20000)
+                balance.proposed_change() == [ChangeValue::orchard(Zatoshis::const_from_u64(5000), None)] &&
+                balance.fee_required() == Zatoshis::const_from_u64(20000)
         );
     }
 
@@ -497,7 +487,7 @@ mod tests {
     fn change_with_transparent_payments_explicitly_allowing_zero_change() {
         change_with_transparent_payments(DustOutputPolicy::new(
             DustAction::AllowDustChange,
-            Some(NonNegativeAmount::ZERO),
+            Some(Zatoshis::ZERO),
         ))
     }
 
@@ -517,14 +507,14 @@ mod tests {
                 .unwrap(),
             &[] as &[TestTransparentInput],
             &[TxOut {
-                value: NonNegativeAmount::const_from_u64(40000),
+                value: Zatoshis::const_from_u64(40000),
                 script_pubkey: Script(vec![]),
             }],
             &(
                 sapling::builder::BundleType::DEFAULT,
                 &[TestSaplingInput {
                     note_id: 0,
-                    value: NonNegativeAmount::const_from_u64(55000),
+                    value: Zatoshis::const_from_u64(55000),
                 }][..],
                 &[] as &[Infallible],
             ),
@@ -537,8 +527,8 @@ mod tests {
         assert_matches!(
             result,
             Ok(balance) if
-                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::ZERO, None)]
-                && balance.fee_required() == NonNegativeAmount::const_from_u64(15000)
+                balance.proposed_change() == [ChangeValue::sapling(Zatoshis::ZERO, None)]
+                && balance.fee_required() == Zatoshis::const_from_u64(15000)
         );
     }
 
@@ -546,7 +536,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn change_fully_transparent_no_change() {
         use crate::fees::sapling as sapling_fees;
-        use zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint};
+        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
 
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
@@ -564,12 +554,12 @@ mod tests {
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut {
-                    value: NonNegativeAmount::const_from_u64(50000),
+                    value: Zatoshis::const_from_u64(50000),
                     script_pubkey: TransparentAddress::PublicKeyHash([0u8; 20]).script(),
                 },
             }],
             &[TxOut {
-                value: NonNegativeAmount::const_from_u64(40000),
+                value: Zatoshis::const_from_u64(40000),
                 script_pubkey: Script(vec![]),
             }],
             &sapling_fees::EmptyBundleView,
@@ -583,7 +573,7 @@ mod tests {
             result,
             Ok(balance) if
                 balance.proposed_change().is_empty() &&
-                balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
+                balance.fee_required() == Zatoshis::const_from_u64(10000)
         );
     }
 
@@ -591,7 +581,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn change_transparent_flows_with_shielded_change() {
         use crate::fees::sapling as sapling_fees;
-        use zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint};
+        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
 
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
@@ -609,12 +599,12 @@ mod tests {
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut {
-                    value: NonNegativeAmount::const_from_u64(63000),
+                    value: Zatoshis::const_from_u64(63000),
                     script_pubkey: TransparentAddress::PublicKeyHash([0u8; 20]).script(),
                 },
             }],
             &[TxOut {
-                value: NonNegativeAmount::const_from_u64(40000),
+                value: Zatoshis::const_from_u64(40000),
                 script_pubkey: Script(vec![]),
             }],
             &sapling_fees::EmptyBundleView,
@@ -627,8 +617,8 @@ mod tests {
         assert_matches!(
             result,
             Ok(balance) if
-                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(8000), None)] &&
-                balance.fee_required() == NonNegativeAmount::const_from_u64(15000)
+                balance.proposed_change() == [ChangeValue::sapling(Zatoshis::const_from_u64(8000), None)] &&
+                balance.fee_required() == Zatoshis::const_from_u64(15000)
         );
     }
 
@@ -636,7 +626,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn change_transparent_flows_with_shielded_dust_change() {
         use crate::fees::sapling as sapling_fees;
-        use zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint};
+        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
 
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
@@ -644,7 +634,7 @@ mod tests {
             ShieldedProtocol::Sapling,
             DustOutputPolicy::new(
                 DustAction::AllowDustChange,
-                Some(NonNegativeAmount::const_from_u64(1000)),
+                Some(Zatoshis::const_from_u64(1000)),
             ),
         );
 
@@ -660,12 +650,12 @@ mod tests {
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut {
-                    value: NonNegativeAmount::const_from_u64(56000),
+                    value: Zatoshis::const_from_u64(56000),
                     script_pubkey: TransparentAddress::PublicKeyHash([0u8; 20]).script(),
                 },
             }],
             &[TxOut {
-                value: NonNegativeAmount::const_from_u64(40000),
+                value: Zatoshis::const_from_u64(40000),
                 script_pubkey: Script(vec![]),
             }],
             &sapling_fees::EmptyBundleView,
@@ -678,8 +668,8 @@ mod tests {
         assert_matches!(
             result,
             Ok(balance) if
-                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(1000), None)] &&
-                balance.fee_required() == NonNegativeAmount::const_from_u64(15000)
+                balance.proposed_change() == [ChangeValue::sapling(Zatoshis::const_from_u64(1000), None)] &&
+                balance.fee_required() == Zatoshis::const_from_u64(15000)
         );
     }
 
@@ -692,7 +682,7 @@ mod tests {
     fn change_with_allowable_dust_explicitly_allowing_zero_change() {
         change_with_allowable_dust(DustOutputPolicy::new(
             DustAction::AllowDustChange,
-            Some(NonNegativeAmount::ZERO),
+            Some(Zatoshis::ZERO),
         ))
     }
 
@@ -720,16 +710,14 @@ mod tests {
                 &[
                     TestSaplingInput {
                         note_id: 0,
-                        value: NonNegativeAmount::const_from_u64(49000),
+                        value: Zatoshis::const_from_u64(49000),
                     },
                     TestSaplingInput {
                         note_id: 1,
-                        value: NonNegativeAmount::const_from_u64(1000),
+                        value: Zatoshis::const_from_u64(1000),
                     },
                 ][..],
-                &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                    40000,
-                ))][..],
+                &[SaplingPayment::new(Zatoshis::const_from_u64(40000))][..],
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
@@ -740,8 +728,8 @@ mod tests {
         assert_matches!(
             result,
             Ok(balance) if
-                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::ZERO, None)] &&
-                balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
+                balance.proposed_change() == [ChangeValue::sapling(Zatoshis::ZERO, None)] &&
+                balance.fee_required() == Zatoshis::const_from_u64(10000)
         );
     }
 
@@ -768,20 +756,18 @@ mod tests {
                 &[
                     TestSaplingInput {
                         note_id: 0,
-                        value: NonNegativeAmount::const_from_u64(29000),
+                        value: Zatoshis::const_from_u64(29000),
                     },
                     TestSaplingInput {
                         note_id: 1,
-                        value: NonNegativeAmount::const_from_u64(20000),
+                        value: Zatoshis::const_from_u64(20000),
                     },
                     TestSaplingInput {
                         note_id: 2,
-                        value: NonNegativeAmount::const_from_u64(1000),
+                        value: Zatoshis::const_from_u64(1000),
                     },
                 ][..],
-                &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                    30000,
-                ))][..],
+                &[SaplingPayment::new(Zatoshis::const_from_u64(30000))][..],
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,

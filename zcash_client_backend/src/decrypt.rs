@@ -1,16 +1,19 @@
 use std::collections::HashMap;
 
 use sapling::note_encryption::{PreparedIncomingViewingKey, SaplingDomain};
+use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_note_encryption::{try_note_decryption, try_output_recovery_with_ovk};
 use zcash_primitives::{
+    transaction::components::sapling::zip212_enforcement, transaction::Transaction,
+};
+use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    transaction::components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
-    transaction::Transaction,
-    zip32::Scope,
+    value::Zatoshis,
 };
+use zip32::Scope;
 
-use crate::{data_api::DecryptedTransaction, keys::UnifiedFullViewingKey};
+use crate::data_api::DecryptedTransaction;
 
 #[cfg(feature = "orchard")]
 use orchard::note_encryption::OrchardDomain;
@@ -84,16 +87,16 @@ impl<Note, AccountId> DecryptedOutput<Note, AccountId> {
 }
 
 impl<A> DecryptedOutput<sapling::Note, A> {
-    pub fn note_value(&self) -> NonNegativeAmount {
-        NonNegativeAmount::from_u64(self.note.value().inner())
+    pub fn note_value(&self) -> Zatoshis {
+        Zatoshis::from_u64(self.note.value().inner())
             .expect("Sapling note value is expected to have been validated by consensus.")
     }
 }
 
 #[cfg(feature = "orchard")]
 impl<A> DecryptedOutput<orchard::note::Note, A> {
-    pub fn note_value(&self) -> NonNegativeAmount {
-        NonNegativeAmount::from_u64(self.note.value().inner())
+    pub fn note_value(&self) -> Zatoshis {
+        Zatoshis::from_u64(self.note.value().inner())
             .expect("Orchard note value is expected to have been validated by consensus.")
     }
 }

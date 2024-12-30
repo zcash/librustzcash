@@ -1,15 +1,15 @@
 use core::cmp::{max, min};
 use std::num::{NonZeroU64, NonZeroUsize};
 
-use zcash_primitives::{
+use zcash_primitives::transaction::fees::{
+    transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE, FeeRule,
+};
+use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    transaction::{
-        components::amount::{BalanceError, NonNegativeAmount},
-        fees::{transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE, FeeRule},
-    },
+    value::{BalanceError, Zatoshis},
+    ShieldedProtocol,
 };
-use zcash_protocol::ShieldedProtocol;
 
 use crate::data_api::AccountMeta;
 
@@ -22,19 +22,19 @@ use super::{
 use super::orchard as orchard_fees;
 
 pub(crate) struct NetFlows {
-    t_in: NonNegativeAmount,
-    t_out: NonNegativeAmount,
-    sapling_in: NonNegativeAmount,
-    sapling_out: NonNegativeAmount,
-    orchard_in: NonNegativeAmount,
-    orchard_out: NonNegativeAmount,
+    t_in: Zatoshis,
+    t_out: Zatoshis,
+    sapling_in: Zatoshis,
+    sapling_out: Zatoshis,
+    orchard_in: Zatoshis,
+    orchard_out: Zatoshis,
 }
 
 impl NetFlows {
-    fn total_in(&self) -> Result<NonNegativeAmount, BalanceError> {
+    fn total_in(&self) -> Result<Zatoshis, BalanceError> {
         (self.t_in + self.sapling_in + self.orchard_in).ok_or(BalanceError::Overflow)
     }
-    fn total_out(&self) -> Result<NonNegativeAmount, BalanceError> {
+    fn total_out(&self) -> Result<Zatoshis, BalanceError> {
         (self.t_out + self.sapling_out + self.orchard_out).ok_or(BalanceError::Overflow)
     }
     /// Returns true iff the flows excluding change are fully transparent.
@@ -92,7 +92,7 @@ where
         .sum::<Option<_>>()
         .ok_or_else(overflow)?;
     #[cfg(not(feature = "orchard"))]
-    let orchard_in = NonNegativeAmount::ZERO;
+    let orchard_in = Zatoshis::ZERO;
 
     #[cfg(feature = "orchard")]
     let orchard_out = orchard
@@ -102,7 +102,7 @@ where
         .sum::<Option<_>>()
         .ok_or_else(overflow)?;
     #[cfg(not(feature = "orchard"))]
-    let orchard_out = NonNegativeAmount::ZERO;
+    let orchard_out = Zatoshis::ZERO;
 
     Ok(NetFlows {
         t_in,
@@ -168,10 +168,10 @@ pub(crate) struct SinglePoolBalanceConfig<'a, P, F> {
     params: &'a P,
     fee_rule: &'a F,
     dust_output_policy: &'a DustOutputPolicy,
-    default_dust_threshold: NonNegativeAmount,
+    default_dust_threshold: Zatoshis,
     split_policy: &'a SplitPolicy,
     fallback_change_pool: ShieldedProtocol,
-    marginal_fee: NonNegativeAmount,
+    marginal_fee: Zatoshis,
     grace_actions: usize,
 }
 
@@ -181,10 +181,10 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
         params: &'a P,
         fee_rule: &'a F,
         dust_output_policy: &'a DustOutputPolicy,
-        default_dust_threshold: NonNegativeAmount,
+        default_dust_threshold: Zatoshis,
         split_policy: &'a SplitPolicy,
         fallback_change_pool: ShieldedProtocol,
-        marginal_fee: NonNegativeAmount,
+        marginal_fee: Zatoshis,
         grace_actions: usize,
     ) -> Self {
         Self {
@@ -468,10 +468,10 @@ where
                         .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?;
                     (
                         new_fee_with_change,
-                        (fee_with_change - new_fee_with_change).unwrap_or(NonNegativeAmount::ZERO),
+                        (fee_with_change - new_fee_with_change).unwrap_or(Zatoshis::ZERO),
                     )
                 } else {
-                    (fee_with_change, NonNegativeAmount::ZERO)
+                    (fee_with_change, Zatoshis::ZERO)
                 };
 
             let simple_case = || {
@@ -546,7 +546,7 @@ where
                             (
                                 vec![ChangeValue::shielded(
                                     change_pool,
-                                    NonNegativeAmount::ZERO,
+                                    Zatoshis::ZERO,
                                     change_memo.cloned(),
                                 )],
                                 fee_with_dust,
@@ -590,7 +590,7 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
     transparent_outputs: &[impl transparent::OutputView],
     sapling: &impl sapling_fees::BundleView<NoteRefT>,
     #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
-    marginal_fee: NonNegativeAmount,
+    marginal_fee: Zatoshis,
     grace_actions: usize,
     possible_change: &[OutputManifest],
     ephemeral_balance: Option<&EphemeralBalance>,

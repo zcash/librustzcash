@@ -63,7 +63,8 @@
 //! use std::ffi::{CStr, c_char, c_void};
 //! use std::ptr;
 //!
-//! use zcash_address::{ConversionError, Network, TryFromRawAddress, ZcashAddress};
+//! use zcash_address::{ConversionError, TryFromRawAddress, ZcashAddress};
+//! use zcash_protocol::consensus::NetworkType;
 //!
 //! // Functions that return a pointer to a heap-allocated address of the given kind in
 //! // the target language. These should be augmented to return any relevant errors.
@@ -112,7 +113,7 @@
 //!         }
 //!     };
 //!
-//!     match addr.convert_if_network::<ParsedAddress>(Network::Main) {
+//!     match addr.convert_if_network::<ParsedAddress>(NetworkType::Main) {
 //!         Ok(parsed) => parsed.0,
 //!         Err(e) => {
 //!             // We didn't implement all of the methods of `TryFromRawAddress`, so if an
@@ -151,13 +152,16 @@ pub use convert::{
 pub use encoding::ParseError;
 pub use kind::unified;
 use kind::unified::Receiver;
-pub use zcash_protocol::consensus::NetworkType as Network;
-use zcash_protocol::PoolType;
+
+#[deprecated(note = "use ::zcash_protocol::consensus::NetworkType instead")]
+pub type Network = zcash_protocol::consensus::NetworkType;
+
+use zcash_protocol::{consensus::NetworkType, PoolType};
 
 /// A Zcash address.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ZcashAddress {
-    net: Network,
+    net: NetworkType,
     kind: AddressKind,
 }
 
@@ -254,13 +258,13 @@ impl ZcashAddress {
     /// [`address.to_string()`]: std::string::ToString
     pub fn convert_if_network<T: TryFromRawAddress>(
         self,
-        net: Network,
+        net: NetworkType,
     ) -> Result<T, ConversionError<T::Error>> {
         let network_matches = self.net == net;
         // The Sprout and transparent address encodings use the same prefix for testnet
         // and regtest, so we need to allow parsing testnet addresses as regtest.
         let regtest_exception =
-            network_matches || (self.net == Network::Test && net == Network::Regtest);
+            network_matches || (self.net == NetworkType::Test && net == NetworkType::Regtest);
 
         match self.kind {
             AddressKind::Sprout(data) if regtest_exception => T::try_from_raw_sprout(data),

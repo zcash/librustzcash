@@ -15,10 +15,8 @@ use zcash_client_backend::data_api::{
     scanning::{ScanPriority, ScanRange},
     SAPLING_SHARD_HEIGHT,
 };
-use zcash_primitives::{
-    consensus::{self, BlockHeight, NetworkUpgrade},
-    merkle_tree::{read_commitment_tree, read_incremental_witness},
-};
+use zcash_primitives::merkle_tree::{read_commitment_tree, read_incremental_witness};
+use zcash_protocol::consensus::{self, BlockHeight, NetworkUpgrade};
 
 use crate::{
     wallet::{

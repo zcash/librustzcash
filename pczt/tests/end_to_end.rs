@@ -1,5 +1,10 @@
+use rand_core::OsRng;
 use std::sync::OnceLock;
 
+use ::transparent::{
+    bundle as transparent,
+    keys::{AccountPrivKey, IncomingViewingKey},
+};
 use orchard::tree::MerkleHashOrchard;
 use pczt::{
     roles::{
@@ -9,16 +14,11 @@ use pczt::{
     },
     Pczt,
 };
-use rand_core::OsRng;
 use shardtree::{store::memory::MemoryShardStore, ShardTree};
 use zcash_note_encryption::try_note_decryption;
-use zcash_primitives::{
-    legacy::keys::{AccountPrivKey, IncomingViewingKey},
-    transaction::{
-        builder::{BuildConfig, Builder, PcztResult},
-        components::transparent,
-        fees::zip317,
-    },
+use zcash_primitives::transaction::{
+    builder::{BuildConfig, Builder, PcztResult},
+    fees::zip317,
 };
 use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::{consensus::MainNetwork, memo::MemoBytes, value::Zatoshis};

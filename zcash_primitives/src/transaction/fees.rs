@@ -1,8 +1,9 @@
 //! Abstractions and types related to fee calculations.
 
-use crate::{
+use crate::transaction::fees::transparent::InputSize;
+use zcash_protocol::{
     consensus::{self, BlockHeight},
-    transaction::{components::amount::NonNegativeAmount, fees::transparent::InputSize},
+    value::Zatoshis,
 };
 
 #[cfg(feature = "non-standard-fees")]
@@ -33,7 +34,7 @@ pub trait FeeRule {
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
-    ) -> Result<NonNegativeAmount, Self::Error>;
+    ) -> Result<Zatoshis, Self::Error>;
 }
 
 /// A trait that represents the ability to compute the fees that must be paid by a transaction
@@ -57,5 +58,5 @@ pub trait FutureFeeRule: FeeRule {
         orchard_action_count: usize,
         tze_inputs: &[impl tze::InputView],
         tze_outputs: &[impl tze::OutputView],
-    ) -> Result<NonNegativeAmount, Self::Error>;
+    ) -> Result<Zatoshis, Self::Error>;
 }

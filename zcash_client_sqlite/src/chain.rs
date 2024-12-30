@@ -3,7 +3,7 @@
 use prost::Message;
 use rusqlite::params;
 
-use zcash_primitives::consensus::BlockHeight;
+use zcash_protocol::consensus::BlockHeight;
 
 use zcash_client_backend::{data_api::chain::error::Error, proto::compact_formats::CompactBlock};
 

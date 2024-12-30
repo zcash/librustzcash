@@ -6,15 +6,18 @@ use schemerz_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
 
-use zcash_client_backend::{address::Address, keys::UnifiedSpendingKey, PoolType};
-use zcash_keys::keys::UnifiedAddressRequest;
-use zcash_primitives::{consensus, zip32::AccountId};
+use zcash_keys::{
+    address::Address,
+    keys::{UnifiedAddressRequest, UnifiedSpendingKey},
+};
+use zcash_protocol::{consensus, PoolType};
+use zip32::AccountId;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::keys::IncomingViewingKey;
+use ::transparent::keys::IncomingViewingKey;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_client_backend::encoding::AddressCodec;
+use zcash_keys::encoding::AddressCodec;
 
 use crate::{
     wallet::{

@@ -33,6 +33,7 @@ zcash_keys = { workspace = true, features = ["sapling"] }
 zcash_primitives.workspace = true
 zcash_protocol.workspace = true
 zip32.workspace = true
+transparent.workspace = true
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)

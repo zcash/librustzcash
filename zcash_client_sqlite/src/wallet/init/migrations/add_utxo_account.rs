@@ -3,7 +3,7 @@
 use schemerz_rusqlite::RusqliteMigration;
 use std::collections::HashSet;
 use uuid::Uuid;
-use zcash_primitives::consensus;
+use zcash_protocol::consensus;
 
 use super::{addresses_table, utxos_table};
 use crate::wallet::init::WalletMigrationError;
@@ -11,16 +11,14 @@ use crate::wallet::init::WalletMigrationError;
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::error::SqliteClientError,
+    ::transparent::{
+        address::TransparentAddress,
+        keys::{IncomingViewingKey, NonHardenedChildIndex},
+    },
     rusqlite::{named_params, OptionalExtension},
     std::collections::HashMap,
-    zcash_client_backend::{
-        encoding::AddressCodec, keys::UnifiedFullViewingKey, wallet::TransparentAddressMetadata,
-    },
-    zcash_keys::address::Address,
-    zcash_primitives::legacy::{
-        keys::{IncomingViewingKey, NonHardenedChildIndex},
-        TransparentAddress,
-    },
+    zcash_client_backend::wallet::TransparentAddressMetadata,
+    zcash_keys::{address::Address, encoding::AddressCodec, keys::UnifiedFullViewingKey},
     zip32::{AccountId, DiversifierIndex, Scope},
 };
 

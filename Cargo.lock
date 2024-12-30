@@ -1250,6 +1250,7 @@ dependencies = [
  "zcash_proofs",
  "zcash_protocol",
  "zcash_transparent",
+ "zip32",
 ]
 
 [[package]]
@@ -6248,6 +6249,7 @@ dependencies = [
  "zcash_primitives",
  "zcash_proofs",
  "zcash_protocol",
+ "zcash_transparent",
  "zip32",
  "zip321",
 ]
@@ -6297,6 +6299,7 @@ dependencies = [
  "zcash_primitives",
  "zcash_proofs",
  "zcash_protocol",
+ "zcash_transparent",
  "zip32",
  "zip321",
 ]

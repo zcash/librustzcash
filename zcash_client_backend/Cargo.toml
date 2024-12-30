@@ -33,6 +33,7 @@ zcash_primitives.workspace = true
 zcash_protocol.workspace = true
 zip32.workspace = true
 zip321.workspace = true
+transparent.workspace = true
 pczt = { workspace = true, optional = true }
 
 # Dependencies exposed in a public API:

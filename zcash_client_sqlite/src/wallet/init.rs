@@ -10,11 +10,9 @@ use secrecy::SecretVec;
 use shardtree::error::ShardTreeError;
 use uuid::Uuid;
 
-use zcash_client_backend::{
-    data_api::{SeedRelevance, WalletRead},
-    keys::AddressGenerationError,
-};
-use zcash_primitives::{consensus, transaction::components::amount::BalanceError};
+use zcash_client_backend::data_api::{SeedRelevance, WalletRead};
+use zcash_keys::keys::AddressGenerationError;
+use zcash_protocol::{consensus, value::BalanceError};
 
 use self::migrations::verify_network_compatibility;
 
@@ -279,7 +277,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// # use std::error::Error;
 /// # use secrecy::SecretVec;
 /// # use tempfile::NamedTempFile;
-/// use zcash_primitives::consensus::Network;
+/// use zcash_protocol::consensus::Network;
 /// use zcash_client_sqlite::{
 ///     WalletDb,
 ///     wallet::init::{WalletMigrationError, init_wallet_db},
@@ -440,19 +438,16 @@ mod tests {
 
     use tempfile::NamedTempFile;
 
-    use zcash_client_backend::{
+    use ::sapling::zip32::ExtendedFullViewingKey;
+    use zcash_client_backend::data_api::testing::TestBuilder;
+    use zcash_keys::{
         address::Address,
-        data_api::testing::TestBuilder,
         encoding::{encode_extended_full_viewing_key, encode_payment_address},
         keys::{sapling, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     };
-
-    use ::sapling::zip32::ExtendedFullViewingKey;
-    use zcash_primitives::{
-        consensus::{self, BlockHeight, BranchId, Network, NetworkConstants},
-        transaction::{TransactionData, TxVersion},
-        zip32::AccountId,
-    };
+    use zcash_primitives::transaction::{TransactionData, TxVersion};
+    use zcash_protocol::consensus::{self, BlockHeight, BranchId, Network, NetworkConstants};
+    use zip32::AccountId;
 
     use crate::{testing::db::TestDbFactory, wallet::db, WalletDb, UA_TRANSPARENT};
 
@@ -464,7 +459,7 @@ mod tests {
         crate::wallet::{self, pool_code, PoolType},
         zcash_address::test_vectors,
         zcash_client_backend::data_api::WalletWrite,
-        zcash_primitives::zip32::DiversifierIndex,
+        zip32::DiversifierIndex,
     };
 
     pub(crate) fn describe_tables(conn: &Connection) -> Result<Vec<String>, rusqlite::Error> {

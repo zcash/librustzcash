@@ -3,28 +3,34 @@ use std::{
     convert::{TryFrom, TryInto},
 };
 
-use ::transparent::sighash::SighashType;
 use bellman::groth16;
 use group::GroupEncoding;
 use orchard::note_encryption::OrchardDomain;
 use sapling::{note_encryption::SaplingDomain, SaplingVerificationContext};
 use secp256k1::{Secp256k1, VerifyOnly};
+
+#[allow(deprecated)]
+use ::transparent::{
+    address::{Script, TransparentAddress},
+    bundle as transparent,
+    keys::pubkey_to_address,
+    sighash::{SighashType, TransparentAuthorizingContext},
+};
 use zcash_address::{
     unified::{self, Encoding},
     ToAddress, ZcashAddress,
 };
 use zcash_note_encryption::try_output_recovery_with_ovk;
-#[allow(deprecated)]
-use zcash_primitives::{
+use zcash_primitives::transaction::{
+    components::sapling as sapling_serialization,
+    sighash::{signature_hash, SignableInput},
+    txid::TxIdDigester,
+    Authorization, Transaction, TransactionData, TxId, TxVersion,
+};
+use zcash_protocol::{
     consensus::BlockHeight,
-    legacy::{keys::pubkey_to_address, Script, TransparentAddress},
     memo::{Memo, MemoBytes},
-    transaction::{
-        components::{amount::NonNegativeAmount, sapling as sapling_serialization, transparent},
-        sighash::{signature_hash, SignableInput, TransparentAuthorizingContext},
-        txid::TxIdDigester,
-        Authorization, Transaction, TransactionData, TxId, TxVersion,
-    },
+    value::Zatoshis,
 };
 
 use crate::{
@@ -109,7 +115,7 @@ impl transparent::Authorization for TransparentAuth {
 }
 
 impl TransparentAuthorizingContext for TransparentAuth {
-    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
+    fn input_amounts(&self) -> Vec<Zatoshis> {
         self.all_prev_outputs
             .iter()
             .map(|prevout| prevout.value)

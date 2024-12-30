@@ -10,6 +10,14 @@ and this library adheres to Rust's notion of
 ### Changed
 - Migrated to `nonempty 0.11`
 
+### Deprecated
+- `zcash_client_backend::address` (use `zcash_keys::address` instead)
+- `zcash_client_backend::encoding` (use `zcash_keys::encoding` instead)
+- `zcash_client_backend::keys` (use `zcash_keys::keys` instead)
+- `zcash_client_backend::zip321` (use the `zip321` crate instead)
+- `zcash_client_backend::PoolType` (use `zcash_protocol::PoolType` instead)
+- `zcash_client_backend::ShieldedProtocol` (use `zcash_protocol::ShieldedProtocol` instead)
+
 ## [0.16.0] - 2024-12-16
 
 ### Added

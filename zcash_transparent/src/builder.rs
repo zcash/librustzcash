@@ -4,7 +4,7 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::fmt;
 
-use zcash_protocol::value::{BalanceError, ZatBalance as Amount, Zatoshis as NonNegativeAmount};
+use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
 
 use crate::{
     address::{Script, TransparentAddress},
@@ -167,11 +167,7 @@ impl TransparentBuilder {
         Ok(())
     }
 
-    pub fn add_output(
-        &mut self,
-        to: &TransparentAddress,
-        value: NonNegativeAmount,
-    ) -> Result<(), Error> {
+    pub fn add_output(&mut self, to: &TransparentAddress, value: Zatoshis) -> Result<(), Error> {
         self.vout.push(TxOut {
             value,
             script_pubkey: to.script(),
@@ -180,26 +176,26 @@ impl TransparentBuilder {
         Ok(())
     }
 
-    pub fn value_balance(&self) -> Result<Amount, BalanceError> {
+    pub fn value_balance(&self) -> Result<ZatBalance, BalanceError> {
         #[cfg(feature = "transparent-inputs")]
         let input_sum = self
             .inputs
             .iter()
             .map(|input| input.coin.value)
-            .sum::<Option<NonNegativeAmount>>()
+            .sum::<Option<Zatoshis>>()
             .ok_or(BalanceError::Overflow)?;
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let input_sum = NonNegativeAmount::ZERO;
+        let input_sum = Zatoshis::ZERO;
 
         let output_sum = self
             .vout
             .iter()
             .map(|vo| vo.value)
-            .sum::<Option<NonNegativeAmount>>()
+            .sum::<Option<Zatoshis>>()
             .ok_or(BalanceError::Overflow)?;
 
-        (Amount::from(input_sum) - Amount::from(output_sum)).ok_or(BalanceError::Underflow)
+        (ZatBalance::from(input_sum) - ZatBalance::from(output_sum)).ok_or(BalanceError::Underflow)
     }
 
     pub fn build(self) -> Option<Bundle<Unauthorized>> {
@@ -295,7 +291,7 @@ impl TxIn<Unauthorized> {
 
 #[cfg(not(feature = "transparent-inputs"))]
 impl TransparentAuthorizingContext for Unauthorized {
-    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
+    fn input_amounts(&self) -> Vec<Zatoshis> {
         vec![]
     }
 
@@ -306,7 +302,7 @@ impl TransparentAuthorizingContext for Unauthorized {
 
 #[cfg(feature = "transparent-inputs")]
 impl TransparentAuthorizingContext for Unauthorized {
-    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
+    fn input_amounts(&self) -> Vec<Zatoshis> {
         return self.inputs.iter().map(|txin| txin.coin.value).collect();
     }
 

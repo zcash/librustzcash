@@ -7,8 +7,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use rusqlite::named_params;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::{decrypt_transaction, keys::UnifiedFullViewingKey};
-use zcash_primitives::{consensus, transaction::TxId, zip32::AccountId};
+
+use zcash_client_backend::decrypt_transaction;
+use zcash_keys::keys::UnifiedFullViewingKey;
+use zcash_protocol::{consensus, TxId};
+use zip32::AccountId;
 
 use crate::{
     error::SqliteClientError,

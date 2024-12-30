@@ -5,10 +5,8 @@ use rusqlite::named_params;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
-use zcash_client_backend::keys::{
-    UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey,
-};
-use zcash_primitives::consensus;
+use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey};
+use zcash_protocol::consensus;
 
 use super::orchard_received_notes;
 use crate::{wallet::init::WalletMigrationError, UA_ORCHARD, UA_TRANSPARENT};
@@ -92,9 +90,9 @@ mod tests {
     use secrecy::SecretVec;
     use tempfile::NamedTempFile;
 
-    use zcash_client_backend::keys::{UnifiedAddressRequest, UnifiedSpendingKey};
     use zcash_keys::address::Address;
-    use zcash_primitives::consensus::Network;
+    use zcash_keys::keys::{UnifiedAddressRequest, UnifiedSpendingKey};
+    use zcash_protocol::consensus::Network;
 
     use crate::{
         wallet::init::{init_wallet_db, init_wallet_db_internal, migrations::addresses_table},

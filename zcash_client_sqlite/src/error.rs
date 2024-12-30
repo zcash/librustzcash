@@ -6,17 +6,15 @@ use std::fmt;
 use shardtree::error::ShardTreeError;
 use zcash_address::ParseError;
 use zcash_client_backend::data_api::NoteFilter;
-use zcash_client_backend::PoolType;
 use zcash_keys::keys::AddressGenerationError;
-use zcash_primitives::zip32;
-use zcash_primitives::{consensus::BlockHeight, transaction::components::amount::BalanceError};
+use zcash_protocol::{consensus::BlockHeight, value::BalanceError, PoolType};
 
 use crate::{wallet::commitment_tree, AccountUuid};
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    zcash_client_backend::encoding::TransparentCodecError,
-    zcash_primitives::{legacy::TransparentAddress, transaction::TxId},
+    ::transparent::address::TransparentAddress, zcash_keys::encoding::TransparentCodecError,
+    zcash_primitives::transaction::TxId,
 };
 
 /// The primary error type for the SQLite wallet backend.
@@ -53,7 +51,7 @@ pub enum SqliteClientError {
     Io(std::io::Error),
 
     /// A received memo cannot be interpreted as a UTF-8 string.
-    InvalidMemo(zcash_primitives::memo::Error),
+    InvalidMemo(zcash_protocol::memo::Error),
 
     /// An attempt to update block data would overwrite the current hash for a block with a
     /// different hash. This indicates that a required rewind was not performed.
@@ -234,8 +232,8 @@ impl From<TransparentCodecError> for SqliteClientError {
     }
 }
 
-impl From<zcash_primitives::memo::Error> for SqliteClientError {
-    fn from(e: zcash_primitives::memo::Error) -> Self {
+impl From<zcash_protocol::memo::Error> for SqliteClientError {
+    fn from(e: zcash_protocol::memo::Error) -> Self {
         SqliteClientError::InvalidMemo(e)
     }
 }

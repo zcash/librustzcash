@@ -1,31 +1,28 @@
 //! Structs representing transaction data scanned from the block chain by a wallet or
 //! light client.
 
+use ::transparent::{
+    address::TransparentAddress,
+    bundle::{OutPoint, TxOut},
+};
 use incrementalmerkletree::Position;
 use zcash_address::ZcashAddress;
 use zcash_note_encryption::EphemeralKeyBytes;
-use zcash_primitives::{
+use zcash_primitives::transaction::{fees::transparent as transparent_fees, TxId};
+use zcash_protocol::{
     consensus::BlockHeight,
-    legacy::TransparentAddress,
-    transaction::{
-        components::{
-            amount::NonNegativeAmount,
-            transparent::{OutPoint, TxOut},
-        },
-        fees::transparent as transparent_fees,
-        TxId,
-    },
-    zip32::Scope,
+    value::{BalanceError, Zatoshis},
+    PoolType, ShieldedProtocol,
 };
-use zcash_protocol::value::BalanceError;
+use zip32::Scope;
 
-use crate::{fees::sapling as sapling_fees, PoolType, ShieldedProtocol};
+use crate::fees::sapling as sapling_fees;
 
 #[cfg(feature = "orchard")]
 use crate::fees::orchard as orchard_fees;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::keys::{NonHardenedChildIndex, TransparentKeyScope};
+use ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
 
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -285,7 +282,7 @@ impl WalletTransparentOutput {
         &self.recipient_address
     }
 
-    pub fn value(&self) -> NonNegativeAmount {
+    pub fn value(&self) -> Zatoshis {
         self.txout.value
     }
 }
@@ -433,13 +430,13 @@ pub enum Note {
 }
 
 impl Note {
-    pub fn value(&self) -> NonNegativeAmount {
+    pub fn value(&self) -> Zatoshis {
         match self {
             Note::Sapling(n) => n.value().inner().try_into().expect(
                 "Sapling notes must have values in the range of valid non-negative ZEC values.",
             ),
             #[cfg(feature = "orchard")]
-            Note::Orchard(n) => NonNegativeAmount::from_u64(n.value().inner()).expect(
+            Note::Orchard(n) => Zatoshis::from_u64(n.value().inner()).expect(
                 "Orchard notes must have values in the range of valid non-negative ZEC values.",
             ),
         }
@@ -522,14 +519,14 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
 }
 
 impl<NoteRef> ReceivedNote<NoteRef, sapling::Note> {
-    pub fn note_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+    pub fn note_value(&self) -> Result<Zatoshis, BalanceError> {
         self.note.value().inner().try_into()
     }
 }
 
 #[cfg(feature = "orchard")]
 impl<NoteRef> ReceivedNote<NoteRef, orchard::note::Note> {
-    pub fn note_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+    pub fn note_value(&self) -> Result<Zatoshis, BalanceError> {
         self.note.value().inner().try_into()
     }
 }
@@ -539,7 +536,7 @@ impl<NoteRef> sapling_fees::InputView<NoteRef> for (NoteRef, sapling::value::Not
         &self.0
     }
 
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         self.1
             .inner()
             .try_into()
@@ -552,7 +549,7 @@ impl<NoteRef> sapling_fees::InputView<NoteRef> for ReceivedNote<NoteRef, sapling
         &self.note_id
     }
 
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         self.note
             .value()
             .inner()
@@ -567,7 +564,7 @@ impl<NoteRef> orchard_fees::InputView<NoteRef> for (NoteRef, orchard::value::Not
         &self.0
     }
 
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         self.1
             .inner()
             .try_into()
@@ -581,7 +578,7 @@ impl<NoteRef> orchard_fees::InputView<NoteRef> for ReceivedNote<NoteRef, orchard
         &self.note_id
     }
 
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         self.note
             .value()
             .inner()

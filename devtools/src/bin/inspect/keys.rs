@@ -3,18 +3,16 @@ use std::iter;
 
 use bech32::{Bech32, Hrp};
 use secrecy::Zeroize;
+
+use ::transparent::{
+    address::TransparentAddress,
+    keys::{AccountPrivKey, IncomingViewingKey},
+};
 use zcash_address::{
     unified::{self, Encoding},
     ToAddress, ZcashAddress,
 };
 use zcash_keys::keys::UnifiedFullViewingKey;
-use zcash_primitives::{
-    legacy::{
-        keys::{AccountPrivKey, IncomingViewingKey},
-        TransparentAddress,
-    },
-    zip32,
-};
 use zcash_protocol::{
     consensus::{Network, NetworkConstants, NetworkType},
     local_consensus::LocalNetwork,

@@ -7,12 +7,10 @@ use std::convert::{TryFrom, TryInto};
 use std::io::{self, Read};
 
 use sha2::{Digest, Sha256};
+
 use zcash_encoding::Vector;
-use zcash_primitives::{
-    block::BlockHeader,
-    consensus::{BlockHeight, BranchId, Network, NetworkUpgrade, Parameters},
-    transaction::Transaction,
-};
+use zcash_primitives::{block::BlockHeader, transaction::Transaction};
+use zcash_protocol::consensus::{BlockHeight, BranchId, Network, NetworkUpgrade, Parameters};
 
 use crate::{
     transaction::{extract_height_from_coinbase, is_coinbase},

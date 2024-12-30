@@ -78,6 +78,7 @@ mod tests {
             testing::{db::TestDbFactory, BlockCache},
             wallet::init::init_wallet_db,
         },
+        ::transparent::bundle::{OutPoint, TxOut},
         zcash_client_backend::{
             data_api::{
                 testing::{
@@ -89,10 +90,7 @@ mod tests {
             fees::{standard, DustOutputPolicy, StandardFeeRule},
             wallet::WalletTransparentOutput,
         },
-        zcash_primitives::{
-            block::BlockHash,
-            transaction::components::{OutPoint, TxOut},
-        },
+        zcash_primitives::block::BlockHash,
         zcash_protocol::value::Zatoshis,
     };
 

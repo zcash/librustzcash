@@ -4,16 +4,14 @@ use std::ops::Range;
 
 use rusqlite::{named_params, OptionalExtension};
 
+use ::transparent::{
+    address::TransparentAddress,
+    keys::{EphemeralIvk, NonHardenedChildIndex, TransparentKeyScope},
+};
 use zcash_client_backend::{data_api::GAP_LIMIT, wallet::TransparentAddressMetadata};
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_keys::{encoding::AddressCodec, keys::AddressGenerationError};
-use zcash_primitives::{
-    legacy::{
-        keys::{EphemeralIvk, NonHardenedChildIndex, TransparentKeyScope},
-        TransparentAddress,
-    },
-    transaction::TxId,
-};
+use zcash_primitives::transaction::TxId;
 use zcash_protocol::consensus;
 
 use crate::wallet::{self, get_account_ref};

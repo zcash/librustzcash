@@ -18,19 +18,20 @@ use zcash_client_backend::{
         testing::{DataStoreFactory, Reset, TestState},
         *,
     },
-    keys::UnifiedFullViewingKey,
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
-    ShieldedProtocol,
 };
 use zcash_keys::{
     address::UnifiedAddress,
-    keys::{UnifiedAddressRequest, UnifiedSpendingKey},
+    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
 };
 use zcash_primitives::{
     block::BlockHash,
-    transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
+    transaction::{Transaction, TxId},
 };
-use zcash_protocol::{consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo};
+use zcash_protocol::{
+    consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo, value::Zatoshis,
+    ShieldedProtocol,
+};
 
 use crate::{
     error::SqliteClientError,
@@ -41,8 +42,8 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::TransparentAddressMetadata,
+    ::transparent::{address::TransparentAddress, bundle::OutPoint},
     core::ops::Range,
-    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
 };
 
 #[derive(Delegate)]
