@@ -125,7 +125,7 @@ rayon = "1.5"
 # Protobuf and gRPC
 prost = "0.13"
 tonic = { version = "0.12", default-features = false }
-tonic-build = { version = "0.12", default-features = false }
+tonic-build = { version = "0.12.3", default-features = false }
 
 # Secret management
 secrecy = "0.8"

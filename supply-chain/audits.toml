@@ -570,6 +570,12 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.12.0 -> 0.12.1"
 
+[[audits.tonic-build]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.12.1 -> 0.12.3"
+notes = "Changes to generated code make sense and don't result in anything unexpected."
+
 [[audits.utf8parse]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-run"
