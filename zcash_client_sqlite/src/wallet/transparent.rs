@@ -1248,13 +1248,21 @@ pub(crate) fn queue_transparent_spend_detection<P: consensus::Parameters>(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use secrecy::Secret;
     use transparent::keys::NonHardenedChildIndex;
     use zcash_client_backend::{
-        data_api::{testing::TestBuilder, Account as _, WalletWrite},
+        data_api::{
+            testing::{AddressType, TestBuilder},
+            wallet::decrypt_and_store_transaction,
+            Account as _, WalletRead, WalletWrite,
+        },
         wallet::TransparentAddressMetadata,
     };
+    use zcash_keys::address::Address;
     use zcash_primitives::block::BlockHash;
+    use zcash_protocol::value::Zatoshis;
 
     use crate::{
         error::SqliteClientError,
@@ -1288,6 +1296,71 @@ mod tests {
             TestDbFactory::default(),
             BlockCache::new(),
         );
+    }
+
+    #[test]
+    fn gap_limits() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let test_account = st.test_account().cloned().unwrap();
+        let account_uuid = test_account.account().id();
+        let ufvk = test_account.account().ufvk().unwrap().clone();
+
+        let external_taddrs = st
+            .wallet()
+            .get_transparent_receivers(account_uuid, false, false)
+            .unwrap();
+        assert_eq!(external_taddrs.len(), 20); //20 external
+        let external_taddrs_sorted = external_taddrs
+            .into_iter()
+            .filter_map(|(addr, meta)| meta.map(|m| (m.address_index(), addr)))
+            .collect::<BTreeMap<_, _>>();
+
+        let all_taddrs = st
+            .wallet()
+            .get_transparent_receivers(account_uuid, true, true)
+            .unwrap();
+        assert_eq!(all_taddrs.len(), 30); //20 external, 5 internal, 5 ephemeral
+
+        // Add some funds to the wallet
+        let (h0, _, _) = st.generate_next_block(
+            &ufvk.sapling().unwrap(),
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1000000),
+        );
+        st.scan_cached_blocks(h0, 1);
+
+        let to = Address::from(
+            *external_taddrs_sorted
+                .get(&NonHardenedChildIndex::from_index(9).unwrap())
+                .expect("An address exists at index 9."),
+        )
+        .to_zcash_address(st.network());
+
+        // Create a transaction & scan the block. Since the txid corresponds to one our wallet
+        // generated, this should cause the gap limit to be bumped (generating addresses with index
+        // 20..30
+        let txids = st
+            .create_standard_transaction(&test_account, to, Zatoshis::const_from_u64(20000))
+            .unwrap();
+        let (h1, _) = st.generate_next_block_including(txids.head);
+        st.scan_cached_blocks(h1, 1);
+
+        // use `decrypt_and_store_transaction` to ensure that the wallet sees the transaction as
+        // mined (since transparent handling doesn't get this from `scan_cached_blocks`)
+        let tx = st.wallet().get_transaction(txids.head).unwrap().unwrap();
+        decrypt_and_store_transaction(&st.network().clone(), st.wallet_mut(), &tx, Some(h1))
+            .unwrap();
+
+        let external_taddrs = st
+            .wallet()
+            .get_transparent_receivers(account_uuid, false, false)
+            .unwrap();
+        assert_eq!(external_taddrs.len(), 30);
     }
 
     #[test]
