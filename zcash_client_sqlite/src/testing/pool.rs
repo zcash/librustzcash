@@ -269,3 +269,10 @@ pub(crate) fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester>()
         BlockCache::new(),
     )
 }
+
+pub(crate) fn incorrect_pruning_is_fixable<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::incorrect_pruning_is_fixable::<T, _, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}

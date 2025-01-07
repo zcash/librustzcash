@@ -557,4 +557,9 @@ pub(crate) mod tests {
     fn pczt_single_step_sapling_to_orchard() {
         testing::pool::pczt_single_step::<SaplingPoolTester, OrchardPoolTester>()
     }
+
+    #[test]
+    fn incorrect_pruning_is_fixable() {
+        testing::pool::incorrect_pruning_is_fixable::<SaplingPoolTester>()
+    }
 }
