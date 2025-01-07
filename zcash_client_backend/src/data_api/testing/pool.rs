@@ -6,10 +6,10 @@ use std::{
 };
 
 use assert_matches::assert_matches;
-use incrementalmerkletree::{frontier::Frontier, Level, Position};
+use incrementalmerkletree::{frontier::Frontier, Hashable, Level, Position};
 use rand::{Rng, RngCore};
 use secrecy::Secret;
-use shardtree::error::ShardTreeError;
+use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 
 use ::transparent::address::TransparentAddress;
 use zcash_keys::{address::Address, keys::UnifiedSpendingKey};
@@ -106,8 +106,13 @@ pub trait ShieldedPoolTester {
 
     type Sk;
     type Fvk: TestFvk;
-    type MerkleTreeHash;
+    type MerkleTreeHash: Clone + Hashable + PartialEq;
     type Note;
+    type ShardStore<'a, DbT: WalletCommitmentTrees>: ShardStore<
+        H = Self::MerkleTreeHash,
+        CheckpointId = BlockHeight,
+        Error = <DbT as WalletCommitmentTrees>::Error,
+    >;
 
     fn test_account_fvk<Cache, DbT: WalletTest, P: consensus::Parameters>(
         st: &TestState<Cache, DbT, P>,
@@ -134,6 +139,14 @@ pub trait ShieldedPoolTester {
 
     fn empty_tree_leaf() -> Self::MerkleTreeHash;
     fn empty_tree_root(level: Level) -> Self::MerkleTreeHash;
+
+    fn with_tree_mut<Cache, DbT: WalletTest + WalletCommitmentTrees, P, F, A, E>(
+        st: &mut TestState<Cache, DbT, P>,
+        callback: F,
+    ) -> Result<A, E>
+    where
+        for<'a> F: FnMut(&'a mut ShardTree<Self::ShardStore<'a, DbT>, 32, 16>) -> Result<A, E>,
+        E: From<ShardTreeError<<DbT as WalletCommitmentTrees>::Error>>;
 
     fn put_subtree_roots<Cache, DbT: WalletTest + WalletCommitmentTrees, P>(
         st: &mut TestState<Cache, DbT, P>,

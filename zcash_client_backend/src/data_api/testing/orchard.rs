@@ -6,7 +6,7 @@ use ::orchard::{
     tree::MerkleHashOrchard,
 };
 use incrementalmerkletree::{Hashable, Level};
-use shardtree::error::ShardTreeError;
+use shardtree::{error::ShardTreeError, ShardTree};
 
 use zcash_keys::{
     address::{Address, UnifiedAddress},
@@ -26,6 +26,7 @@ use crate::{
         chain::{CommitmentTreeRoot, ScanSummary},
         testing::{pool::ShieldedPoolTester, TestState},
         DecryptedTransaction, InputSource, WalletCommitmentTrees, WalletSummary, WalletTest,
+        ORCHARD_SHARD_HEIGHT,
     },
     wallet::{Note, ReceivedNote},
 };
@@ -40,6 +41,8 @@ impl ShieldedPoolTester for OrchardPoolTester {
     type Fvk = FullViewingKey;
     type MerkleTreeHash = MerkleHashOrchard;
     type Note = orchard::note::Note;
+    type ShardStore<'a, DbT: WalletCommitmentTrees> =
+        <DbT as WalletCommitmentTrees>::OrchardShardStore<'a>;
 
     fn test_account_fvk<Cache, DbT: WalletTest, P: consensus::Parameters>(
         st: &TestState<Cache, DbT, P>,
@@ -89,6 +92,23 @@ impl ShieldedPoolTester for OrchardPoolTester {
 
     fn empty_tree_root(level: Level) -> Self::MerkleTreeHash {
         MerkleHashOrchard::empty_root(level)
+    }
+
+    fn with_tree_mut<Cache, DbT: WalletTest + WalletCommitmentTrees, P, F, A, E>(
+        st: &mut TestState<Cache, DbT, P>,
+        callback: F,
+    ) -> Result<A, E>
+    where
+        for<'a> F: FnMut(
+            &'a mut ShardTree<
+                Self::ShardStore<'a, DbT>,
+                { ORCHARD_SHARD_HEIGHT * 2 },
+                ORCHARD_SHARD_HEIGHT,
+            >,
+        ) -> Result<A, E>,
+        E: From<ShardTreeError<<DbT as WalletCommitmentTrees>::Error>>,
+    {
+        st.wallet_mut().with_orchard_tree_mut(callback)
     }
 
     fn put_subtree_roots<Cache, DbT: WalletTest + WalletCommitmentTrees, P>(

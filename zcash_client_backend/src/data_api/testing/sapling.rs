@@ -5,7 +5,7 @@ use sapling::{
     note_encryption::try_sapling_output_recovery,
     zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
 };
-use shardtree::error::ShardTreeError;
+use shardtree::{error::ShardTreeError, ShardTree};
 use zcash_keys::{address::Address, keys::UnifiedSpendingKey};
 use zcash_primitives::transaction::{components::sapling::zip212_enforcement, Transaction};
 use zcash_protocol::{
@@ -20,6 +20,7 @@ use crate::{
     data_api::{
         chain::{CommitmentTreeRoot, ScanSummary},
         DecryptedTransaction, InputSource, WalletCommitmentTrees, WalletSummary, WalletTest,
+        SAPLING_SHARD_HEIGHT,
     },
     wallet::{Note, ReceivedNote},
 };
@@ -36,6 +37,8 @@ impl ShieldedPoolTester for SaplingPoolTester {
     type Fvk = DiversifiableFullViewingKey;
     type MerkleTreeHash = sapling::Node;
     type Note = sapling::Note;
+    type ShardStore<'a, DbT: WalletCommitmentTrees> =
+        <DbT as WalletCommitmentTrees>::SaplingShardStore<'a>;
 
     fn test_account_fvk<Cache, DbT: WalletTest, P: consensus::Parameters>(
         st: &TestState<Cache, DbT, P>,
@@ -73,6 +76,23 @@ impl ShieldedPoolTester for SaplingPoolTester {
 
     fn empty_tree_root(level: Level) -> Self::MerkleTreeHash {
         ::sapling::Node::empty_root(level)
+    }
+
+    fn with_tree_mut<Cache, DbT: WalletTest + WalletCommitmentTrees, P, F, A, E>(
+        st: &mut TestState<Cache, DbT, P>,
+        callback: F,
+    ) -> Result<A, E>
+    where
+        for<'a> F: FnMut(
+            &'a mut ShardTree<
+                Self::ShardStore<'a, DbT>,
+                { sapling::NOTE_COMMITMENT_TREE_DEPTH },
+                SAPLING_SHARD_HEIGHT,
+            >,
+        ) -> Result<A, E>,
+        E: From<ShardTreeError<<DbT as WalletCommitmentTrees>::Error>>,
+    {
+        st.wallet_mut().with_sapling_tree_mut(callback)
     }
 
     fn put_subtree_roots<Cache, DbT: WalletTest + WalletCommitmentTrees, P>(
