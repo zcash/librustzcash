@@ -20,7 +20,10 @@ runs:
       shell: bash
       run: echo "feature=test-dependencies" >> $GITHUB_OUTPUT
       if: inputs.test-dependencies == 'true'
-    - name: Prepare feature flags
+
+    # `steps.test.outputs.feature` cannot expand into attacker-controllable code
+    # because the previous step only enables it to have one of two fixed values.
+    - name: Prepare feature flags # zizmor: ignore[template-injection]
       id: prepare
       shell: bash
       run: >
@@ -34,6 +37,8 @@ runs:
         unstable
         unstable-serialization
         unstable-spanning-tree
-        ${{ inputs.extra-features }}
+        ${EXTRA_FEATURES}
         ${{ steps.test.outputs.feature }}
         '" >> $GITHUB_OUTPUT
+      env:
+        EXTRA_FEATURES: ${{ inputs.extra-features }}

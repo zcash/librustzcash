@@ -248,7 +248,10 @@ jobs:
           key: ${{ runner.os }}-cargo-latest
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
-      - run: rustup override set ${{steps.toolchain.outputs.name}}
+      - run: rustup override set "${TOOLCHAIN}"
+        shell: sh
+        env:
+          TOOLCHAIN: ${{steps.toolchain.outputs.name}}
       - name: Remove lockfile to build with latest dependencies
         run: rm Cargo.lock
       - name: Build crates
@@ -383,7 +386,9 @@ jobs:
         uses: ./.github/actions/prepare
       - uses: dtolnay/rust-toolchain@beta
         id: toolchain
-      - run: rustup override set ${{steps.toolchain.outputs.name}}
+      - run: rustup override set "${TOOLCHAIN}"
+        env:
+          TOOLCHAIN: ${{steps.toolchain.outputs.name}}
       - name: Run Clippy (beta)
         uses: actions-rs/clippy-check@v1
         continue-on-error: true
@@ -535,4 +540,6 @@ jobs:
     steps:
       - name: Determine whether all required-pass steps succeeded
         run: |
-          echo '${{ toJSON(needs) }}' | jq -e '[ .[] | .result == "success" ] | all'
+          echo "${NEEDS}" | jq -e '[ .[] | .result == "success" ] | all'
+        env:
+          NEEDS: ${{ toJSON(needs) }}
