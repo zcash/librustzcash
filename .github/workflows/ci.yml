@@ -35,6 +35,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
         with:
@@ -92,6 +94,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
         with:
@@ -141,6 +145,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
         with:
@@ -194,6 +200,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
         with:
@@ -225,6 +233,8 @@ jobs:
         os: [ubuntu-latest, windows-latest, macOS-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
       - uses: actions/cache@v4
@@ -262,6 +272,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           path: crates
       # We use a synthetic crate to ensure no dev-dependencies are enabled, which can
       # be incompatible with some of these targets.
@@ -298,6 +309,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           path: crates
       # We use a synthetic crate to ensure no dev-dependencies are enabled, which can
       # be incompatible with some of these targets.
@@ -333,6 +345,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       # Build benchmarks to prevent bitrot
       - name: Build benchmarks
         run: cargo build --all --benches
@@ -342,6 +356,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
       - name: Run clippy
@@ -361,6 +377,8 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
       - uses: dtolnay/rust-toolchain@beta
@@ -387,6 +405,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
       - uses: actions/cache@v4
@@ -416,6 +436,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
       - run: cargo fetch
@@ -432,6 +454,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -440,6 +464,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
       - name: Install protoc
@@ -462,6 +488,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Extract UUIDs
         id: extract
         run: |
