@@ -28,7 +28,19 @@ use zip32::DiversifierIndex;
 use crate::error::Error;
 
 /// Internal representation of ID type for accounts. Will be unique for each account.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct AccountId(u32);
 
 impl From<u32> for AccountId {

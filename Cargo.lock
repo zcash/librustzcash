@@ -6310,6 +6310,7 @@ dependencies = [
  "rayon",
  "sapling-crypto",
  "secrecy",
+ "serde",
  "serde_json",
  "shardtree",
  "static_assertions",
