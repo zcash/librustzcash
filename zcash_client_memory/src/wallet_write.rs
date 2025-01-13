@@ -9,6 +9,7 @@ use rayon::prelude::*;
 use secrecy::ExposeSecret;
 use secrecy::SecretVec;
 use shardtree::store::ShardStore;
+use zcash_client_backend::data_api::Zip32Derivation;
 use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{
@@ -89,8 +90,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
             let (id, _account) = self.add_account(
                 account_name,
                 AccountSource::Derived {
-                    seed_fingerprint,
-                    account_index,
+                    derivation: Zip32Derivation::new(seed_fingerprint, account_index),
                     key_source: key_source.map(|s| s.to_string()),
                 },
                 ufvk,
@@ -104,7 +104,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
     fn get_next_available_address(
         &mut self,
         account: Self::AccountId,
-        request: UnifiedAddressRequest,
+        request: Option<UnifiedAddressRequest>,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         tracing::debug!("get_next_available_address");
         self.accounts
@@ -660,7 +660,10 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                                 receiver.to_zcash_address(self.params.network_type())
                             });
 
-                        Recipient::External(wallet_address, PoolType::SAPLING)
+                        Recipient::External {
+                            recipient_address: wallet_address,
+                            output_pool: PoolType::SAPLING,
+                        }
                     };
 
                     let sent_tx_output = SentTransactionOutput::from_parts(
@@ -679,7 +682,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                     let recipient = Recipient::InternalAccount {
                         receiving_account: *output.account(),
                         external_address: None,
-                        note: Note::Sapling(output.note().clone()),
+                        note: Box::new(Note::Sapling(output.note().clone())),
                     };
                     let sent_tx_output = SentTransactionOutput::from_parts(
                         output.index(),
@@ -728,7 +731,10 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                                 receiver.to_zcash_address(self.params.network_type())
                             });
 
-                        Recipient::External(wallet_address, PoolType::ORCHARD)
+                        Recipient::External {
+                            recipient_address: wallet_address,
+                            output_pool: PoolType::ORCHARD,
+                        }
                     };
 
                     let sent_tx_output = SentTransactionOutput::from_parts(
@@ -747,7 +753,7 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                     let recipient = Recipient::InternalAccount {
                         receiving_account: *output.account(),
                         external_address: None,
-                        note: Note::Orchard(*output.note()),
+                        note: Box::new(Note::Orchard(*output.note())),
                     };
                     let sent_tx_output = SentTransactionOutput::from_parts(
                         output.index(),
@@ -870,7 +876,10 @@ impl<P: consensus::Parameters> WalletWrite for MemoryWalletDb<P> {
                         #[cfg(not(feature = "transparent-inputs"))]
                         let recipient_addr = receiver.to_zcash_address(self.params.network_type());
 
-                        let recipient = Recipient::External(recipient_addr, PoolType::TRANSPARENT);
+                        let recipient = Recipient::External {
+                            recipient_address: recipient_addr,
+                            output_pool: PoolType::TRANSPARENT,
+                        };
 
                         let sent_tx_output = SentTransactionOutput::from_parts(
                             output_index,
@@ -1137,10 +1146,10 @@ Instead derive the ufvk in the calling code and import it using `import_account_
                     Recipient::EphemeralTransparent {
                         receiving_account,
                         ephemeral_address,
-                        outpoint_metadata,
+                        outpoint,
                     } => {
                         let txo = WalletTransparentOutput::from_parts(
-                            outpoint_metadata.clone(),
+                            outpoint.clone(),
                             TxOut {
                                 value: output.value(),
                                 script_pubkey: ephemeral_address.script(),
@@ -1188,6 +1197,8 @@ Instead derive the ufvk in the calling code and import it using `import_account_
         n: usize,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         // TODO: We need to implement first_unsafe_index to make sure we dont violate gap invarient
+
+        use zcash_primitives::legacy::keys::NonHardenedChildIndex;
         let first_unsafe = self.first_unsafe_index(account_id)?;
         if let Some(account) = self.accounts.get_mut(account_id) {
             let first_unreserved = account.first_unreserved_index()?;
@@ -1204,7 +1215,13 @@ Instead derive the ufvk in the calling code and import it using `import_account_
                 ));
             }
             let _reserved = account.reserve_until(allocation.end)?;
-            self.get_known_ephemeral_addresses(account_id, Some(allocation))
+            self.get_known_ephemeral_addresses(
+                account_id,
+                Some(
+                    NonHardenedChildIndex::from_index(allocation.start).expect("Bad Index")
+                        ..NonHardenedChildIndex::from_index(allocation.end).expect("Bad Index"),
+                ),
+            )
         } else {
             Err(Self::Error::AccountUnknown(account_id))
         }

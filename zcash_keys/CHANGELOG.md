@@ -6,6 +6,44 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `no-std` compatibility (`alloc` is required). A default-enabled `std` feature
+  flag has been added gating the `std::error::Error` usage.
+- `zcash_keys::keys::ReceiverRequirement`
+- `zcash_keys::Address::to_transparent_address`
+
+### Changed
+- Migrated to `nonempty 0.11`
+- `zcash_keys::keys::UnifiedAddressRequest` has been substantially modified;
+  instead of a collection of boolean flags, it is now a collection of
+  `ReceiverRequirement` values that describe how addresses may be constructed
+  in the case that keys for a particular protocol are absent or it is not
+  possible to generate a specific receiver at a given diversifier index.
+  Behavior of methods that accept a `UnifiedAddressRequest` have been modified
+  accordingly. In addition, request construction methods that previously
+  returned `None` to indicate an attempt to generate an invalid request now
+  return `Err(())`
+
+### Removed
+- `zcash_keys::keys::UnifiedAddressRequest::all` (use 
+  `UnifiedAddressRequest::ALLOW_ALL` or
+  `UnifiedFullViewingKey::to_address_request` instead)
+
+## [0.6.0] - 2024-12-16
+
+### Changed
+- Migrated to `bech32 0.11`, `sapling-crypto 0.4`. 
+- Added dependency on `zcash_transparent 0.1` to replace dependency
+  on `zcash_primitives`.
+- The `UnifiedAddressRequest` argument to the following methods is now optional:
+  - `zcash_keys::keys::UnifiedSpendingKey::address`
+  - `zcash_keys::keys::UnifiedSpendingKey::default_address`
+  - `zcash_keys::keys::UnifiedFullViewingKey::find_address`
+  - `zcash_keys::keys::UnifiedFullViewingKey::default_address`
+  - `zcash_keys::keys::UnifiedIncomingViewingKey::address`
+  - `zcash_keys::keys::UnifiedIncomingViewingKey::find_address`
+  - `zcash_keys::keys::UnifiedIncomingViewingKey::default_address`
+
 ## [0.5.0] - 2024-11-14
 
 ### Changed

@@ -98,10 +98,10 @@ where
             .iter()
             .filter(|(note_id, _)| note_id.txid() == txid)
             .map(|(_, note)| match note.to.clone() {
-                Recipient::External(zcash_address, _) => Ok((
+                Recipient::External{recipient_address, ..} => Ok((
                     note.value.into_u64(),
                     Some(
-                        Address::try_from_zcash_address(&self.params, zcash_address)
+                        Address::try_from_zcash_address(&self.params, recipient_address)
                             .map_err(Error::from)?,
                     ),
                     None,

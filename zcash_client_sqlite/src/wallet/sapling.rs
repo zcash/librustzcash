@@ -10,13 +10,15 @@ use sapling::{self, Diversifier, Nullifier, Rseed};
 use zcash_client_backend::{
     data_api::NullifierQuery,
     wallet::{ReceivedNote, WalletSaplingOutput},
-    DecryptedOutput, ShieldedProtocol, TransferType,
+    DecryptedOutput, TransferType,
 };
 use zcash_keys::keys::UnifiedFullViewingKey;
-use zcash_primitives::transaction::{components::amount::NonNegativeAmount, TxId};
+use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
+    value::Zatoshis,
+    ShieldedProtocol,
 };
 use zip32::Scope;
 
@@ -219,7 +221,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
     account: AccountUuid,
-    target_value: NonNegativeAmount,
+    target_value: Zatoshis,
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
@@ -542,5 +544,17 @@ pub(crate) mod tests {
     #[cfg(feature = "orchard")]
     fn multi_pool_checkpoints_with_pruning() {
         testing::pool::multi_pool_checkpoints_with_pruning::<SaplingPoolTester, OrchardPoolTester>()
+    }
+
+    #[cfg(feature = "pczt-tests")]
+    #[test]
+    fn pczt_single_step_sapling_only() {
+        testing::pool::pczt_single_step::<SaplingPoolTester, SaplingPoolTester>()
+    }
+
+    #[cfg(feature = "pczt-tests")]
+    #[test]
+    fn pczt_single_step_sapling_to_orchard() {
+        testing::pool::pczt_single_step::<SaplingPoolTester, OrchardPoolTester>()
     }
 }

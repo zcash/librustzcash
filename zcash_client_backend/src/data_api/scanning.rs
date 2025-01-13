@@ -3,7 +3,7 @@
 use std::fmt;
 use std::ops::Range;
 
-use zcash_primitives::consensus::BlockHeight;
+use zcash_protocol::consensus::BlockHeight;
 
 #[cfg(feature = "unstable-spanning-tree")]
 pub mod spanning_tree;

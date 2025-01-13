@@ -6,15 +6,18 @@ use schemerz_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
 
-use zcash_client_backend::{address::Address, keys::UnifiedSpendingKey, PoolType};
-use zcash_keys::keys::UnifiedAddressRequest;
-use zcash_primitives::{consensus, zip32::AccountId};
+use zcash_keys::{
+    address::Address,
+    keys::{ReceiverRequirement::*, UnifiedAddressRequest, UnifiedSpendingKey},
+};
+use zcash_protocol::{consensus, PoolType};
+use zip32::AccountId;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::keys::IncomingViewingKey;
+use ::transparent::keys::IncomingViewingKey;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_client_backend::encoding::AddressCodec;
+use zcash_keys::encoding::AddressCodec;
 
 use crate::{
     wallet::{
@@ -82,7 +85,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         //   our second assumption above, and we report this as corrupted data.
         let mut seed_is_relevant = false;
 
-        let ua_request = UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT);
+        let ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, UA_TRANSPARENT);
         let mut rows = stmt_fetch_accounts.query([])?;
         while let Some(row) = rows.next()? {
             // We only need to check for the presence of the seed if we have keys that
@@ -135,7 +138,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             "Address field value decoded to a transparent address; should have been Sapling or unified.".to_string()));
                     }
                     Address::Unified(decoded_address) => {
-                        let (expected_address, idx) = ufvk.default_address(ua_request)?;
+                        let (expected_address, idx) = ufvk.default_address(Some(ua_request))?;
                         if decoded_address != expected_address {
                             return Err(if seed_is_relevant {
                                 WalletMigrationError::CorruptedData(
@@ -154,7 +157,10 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 seed_is_relevant = true;
 
                 let ufvk_str: String = ufvk.encode(&self.params);
-                let address_str: String = ufvk.default_address(ua_request)?.0.encode(&self.params);
+                let address_str: String = ufvk
+                    .default_address(Some(ua_request))?
+                    .0
+                    .encode(&self.params);
 
                 // This migration, and the wallet behaviour before it, stored the default
                 // transparent address in the `accounts` table. This does not necessarily

@@ -11,12 +11,11 @@ use rand::{Rng, RngCore};
 use secrecy::Secret;
 use shardtree::error::ShardTreeError;
 
+use ::transparent::address::TransparentAddress;
 use zcash_keys::{address::Address, keys::UnifiedSpendingKey};
 use zcash_primitives::{
     block::BlockHash,
-    legacy::TransparentAddress,
     transaction::{
-        components::amount::NonNegativeAmount,
         fees::zip317::{FeeRule as Zip317FeeRule, MARGINAL_FEE, MINIMUM_FEE},
         Transaction,
     },
@@ -66,23 +65,26 @@ use {
         proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex},
         wallet::{TransparentAddressMetadata, WalletTransparentOutput},
     },
+    ::transparent::{
+        bundle::{OutPoint, TxOut},
+        keys::{NonHardenedChildIndex, TransparentKeyScope},
+    },
     nonempty::NonEmpty,
     rand_core::OsRng,
     std::{collections::HashSet, str::FromStr},
-    zcash_primitives::{
-        legacy::keys::{NonHardenedChildIndex, TransparentKeyScope},
-        transaction::{
-            builder::{BuildConfig, Builder},
-            components::{OutPoint, TxOut},
-            fees::zip317,
-        },
+    zcash_primitives::transaction::{
+        builder::{BuildConfig, Builder},
+        fees::zip317,
     },
     zcash_proofs::prover::LocalTxProver,
     zcash_protocol::value::ZatBalance,
 };
 
 #[cfg(feature = "orchard")]
-use crate::PoolType;
+use zcash_protocol::PoolType;
+
+#[cfg(feature = "pczt")]
+use pczt::roles::{prover::Prover, signer::Signer};
 
 /// Trait that exposes the pool-specific types and operations necessary to run the
 /// single-shielded-pool tests on a given pool.
@@ -162,6 +164,18 @@ pub trait ShieldedPoolTester {
     ) -> Option<(Note, Address, MemoBytes)>;
 
     fn received_note_count(summary: &ScanSummary) -> usize;
+
+    #[cfg(feature = "pczt")]
+    fn add_proof_generation_keys(
+        pczt: pczt::Pczt,
+        usk: &UnifiedSpendingKey,
+    ) -> Result<pczt::Pczt, pczt::roles::updater::SaplingError>;
+
+    #[cfg(feature = "pczt")]
+    fn apply_signatures_to_pczt(
+        signer: &mut Signer,
+        usk: &UnifiedSpendingKey,
+    ) -> Result<(), pczt::roles::signer::Error>;
 }
 
 /// Tests sending funds within the given shielded pool in a single transaction.
@@ -364,7 +378,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
         DustOutputPolicy::default(),
         SplitPolicy::with_min_output_value(
             NonZeroUsize::new(2).unwrap(),
-            NonNegativeAmount::const_from_u64(100_0000),
+            Zatoshis::const_from_u64(100_0000),
         ),
     );
 
@@ -467,7 +481,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
         DustOutputPolicy::default(),
         SplitPolicy::with_min_output_value(
             NonZeroUsize::new(8).unwrap(),
-            NonNegativeAmount::const_from_u64(10_0000),
+            Zatoshis::const_from_u64(10_0000),
         ),
     );
 
@@ -494,6 +508,8 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     DSF: DataStoreFactory,
     <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
+    use ::transparent::builder::TransparentSigningSet;
+
     use crate::data_api::{OutputOfSentTx, GAP_LIMIT};
 
     let mut st = TestBuilder::new()
@@ -523,8 +539,8 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         h
     };
 
-    let value = NonNegativeAmount::const_from_u64(100000);
-    let transfer_amount = NonNegativeAmount::const_from_u64(50000);
+    let value = Zatoshis::const_from_u64(100000);
+    let transfer_amount = Zatoshis::const_from_u64(50000);
 
     let run_test = |st: &mut TestState<_, DSF::DataStore, _>, expected_index| {
         // Add funds to the wallet.
@@ -715,6 +731,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
             orchard_anchor: None,
         },
     );
+    let mut transparent_signing_set = TransparentSigningSet::new();
     let (colliding_addr, _) = &known_addrs[10];
     let utxo_value = (value - zip317::MINIMUM_FEE).unwrap();
     assert_matches!(
@@ -726,6 +743,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         .transparent()
         .derive_secret_key(Scope::External.into(), default_index)
         .unwrap();
+    let pubkey = transparent_signing_set.add_key(sk);
     let outpoint = OutPoint::fake();
     let txout = TxOut {
         script_pubkey: default_addr.script(),
@@ -738,10 +756,16 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         )
         .unwrap();
 
-    assert_matches!(builder.add_transparent_input(sk, outpoint, txout), Ok(_));
+    assert_matches!(
+        builder.add_transparent_input(pubkey, outpoint, txout),
+        Ok(_)
+    );
     let test_prover = LocalTxProver::bundled();
     let build_result = builder
         .build(
+            &transparent_signing_set,
+            &[],
+            &[],
             OsRng,
             &test_prover,
             &test_prover,
@@ -803,7 +827,13 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     // the start of the gap to index 12. This also tests the `index_range` parameter.
     let newer_known_addrs = st
         .wallet()
-        .get_known_ephemeral_addresses(account_id, Some(5..100))
+        .get_known_ephemeral_addresses(
+            account_id,
+            Some(
+                NonHardenedChildIndex::from_index(5).unwrap()
+                    ..NonHardenedChildIndex::from_index(100).unwrap(),
+            ),
+        )
         .unwrap();
     assert_eq!(newer_known_addrs.len(), (GAP_LIMIT as usize) + 12 - 5);
     assert!(newer_known_addrs.starts_with(&new_known_addrs[5..]));
@@ -904,8 +934,8 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
         assert_eq!(st.get_spendable_balance(account_id, 1), value);
     };
 
-    let value = NonNegativeAmount::const_from_u64(100000);
-    let transfer_amount = NonNegativeAmount::const_from_u64(50000);
+    let value = Zatoshis::const_from_u64(100000);
+    let transfer_amount = Zatoshis::const_from_u64(50000);
 
     // Add funds to the wallet.
     add_funds(&mut st, value);
@@ -981,7 +1011,7 @@ pub fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester, DSF: Data
 
     let req = TransactionRequest::new(vec![Payment::without_memo(
         to.to_zcash_address(st.network()),
-        NonNegativeAmount::const_from_u64(1),
+        Zatoshis::const_from_u64(1),
     )])
     .unwrap();
 
@@ -1023,7 +1053,7 @@ where
             StandardFeeRule::Zip317,
             NonZeroU32::new(1).unwrap(),
             &to,
-            NonNegativeAmount::const_from_u64(1),
+            Zatoshis::const_from_u64(1),
             None,
             None,
             T::SHIELDED_PROTOCOL,
@@ -1047,7 +1077,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note
-    let value = NonNegativeAmount::const_from_u64(50000);
+    let value = Zatoshis::const_from_u64(50000);
     let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h1, 1);
 
@@ -1057,10 +1087,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
 
     // Value is considered pending at 10 confirmations.
     assert_eq!(st.get_pending_shielded_balance(account_id, 10), value);
-    assert_eq!(
-        st.get_spendable_balance(account_id, 10),
-        NonNegativeAmount::ZERO
-    );
+    assert_eq!(st.get_spendable_balance(account_id, 10), Zatoshis::ZERO);
 
     // If none of the wallet's accounts have a recover-until height, then there
     // is no recovery phase for the wallet, and therefore the denominator in the
@@ -1102,7 +1129,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
             StandardFeeRule::Zip317,
             NonZeroU32::new(2).unwrap(),
             &to,
-            NonNegativeAmount::const_from_u64(70000),
+            Zatoshis::const_from_u64(70000),
             None,
             None,
             T::SHIELDED_PROTOCOL,
@@ -1111,8 +1138,8 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
             available,
             required
         })
-        if available == NonNegativeAmount::const_from_u64(50000)
-            && required == NonNegativeAmount::const_from_u64(80000)
+        if available == Zatoshis::const_from_u64(50000)
+            && required == Zatoshis::const_from_u64(80000)
     );
 
     // Mine blocks SAPLING_ACTIVATION_HEIGHT + 2 to 9 until just before the second
@@ -1132,7 +1159,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
             StandardFeeRule::Zip317,
             NonZeroU32::new(10).unwrap(),
             &to,
-            NonNegativeAmount::const_from_u64(70000),
+            Zatoshis::const_from_u64(70000),
             None,
             None,
             T::SHIELDED_PROTOCOL,
@@ -1141,8 +1168,8 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
             available,
             required
         })
-        if available == NonNegativeAmount::const_from_u64(50000)
-            && required == NonNegativeAmount::const_from_u64(80000)
+        if available == Zatoshis::const_from_u64(50000)
+            && required == Zatoshis::const_from_u64(80000)
     );
 
     // Mine block 11 so that the second note becomes verified
@@ -1162,7 +1189,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     );
 
     // Should now be able to generate a proposal
-    let amount_sent = NonNegativeAmount::from_u64(70000).unwrap();
+    let amount_sent = Zatoshis::from_u64(70000).unwrap();
     let min_confirmations = NonZeroU32::new(10).unwrap();
     let proposal = st
         .propose_standard_transfer::<Infallible>(
@@ -1192,9 +1219,8 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     // TODO: send to an account so that we can check its balance.
     assert_eq!(
         st.get_total_balance(account_id),
-        ((value * 11u64).unwrap()
-            - (amount_sent + NonNegativeAmount::from_u64(10000).unwrap()).unwrap())
-        .unwrap()
+        ((value * 11u64).unwrap() - (amount_sent + Zatoshis::from_u64(10000).unwrap()).unwrap())
+            .unwrap()
     );
 }
 
@@ -1215,7 +1241,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     let fee_rule = StandardFeeRule::Zip317;
 
     // Add funds to the wallet in a single note
-    let value = NonNegativeAmount::const_from_u64(50000);
+    let value = Zatoshis::const_from_u64(50000);
     let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h1, 1);
 
@@ -1233,7 +1259,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
             fee_rule,
             min_confirmations,
             &to,
-            NonNegativeAmount::const_from_u64(15000),
+            Zatoshis::const_from_u64(15000),
             None,
             None,
             T::SHIELDED_PROTOCOL,
@@ -1253,7 +1279,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
             fee_rule,
             NonZeroU32::new(1).unwrap(),
             &to,
-            NonNegativeAmount::const_from_u64(2000),
+            Zatoshis::const_from_u64(2000),
             None,
             None,
             T::SHIELDED_PROTOCOL,
@@ -1262,7 +1288,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
             available,
             required
         })
-        if available == NonNegativeAmount::ZERO && required == NonNegativeAmount::const_from_u64(12000)
+        if available == Zatoshis::ZERO && required == Zatoshis::const_from_u64(12000)
     );
 
     // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 41 (that don't send us funds)
@@ -1283,7 +1309,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
             fee_rule,
             NonZeroU32::new(1).unwrap(),
             &to,
-            NonNegativeAmount::const_from_u64(2000),
+            Zatoshis::const_from_u64(2000),
             None,
             None,
             T::SHIELDED_PROTOCOL,
@@ -1292,7 +1318,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
             available,
             required
         })
-        if available == NonNegativeAmount::ZERO && required == NonNegativeAmount::const_from_u64(12000)
+        if available == Zatoshis::ZERO && required == Zatoshis::const_from_u64(12000)
     );
 
     // Mine block SAPLING_ACTIVATION_HEIGHT + 42 so that the first transaction expires
@@ -1308,7 +1334,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     assert_eq!(st.get_spendable_balance(account_id, 1), value);
 
     // Second spend should now succeed
-    let amount_sent2 = NonNegativeAmount::const_from_u64(2000);
+    let amount_sent2 = Zatoshis::const_from_u64(2000);
     let min_confirmations = NonZeroU32::new(1).unwrap();
     let proposal = st
         .propose_standard_transfer::<Infallible>(
@@ -1337,7 +1363,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     // TODO: send to an account so that we can check its balance.
     assert_eq!(
         st.get_total_balance(account_id),
-        (value - (amount_sent2 + NonNegativeAmount::from_u64(10000).unwrap()).unwrap()).unwrap()
+        (value - (amount_sent2 + Zatoshis::from_u64(10000).unwrap()).unwrap()).unwrap()
     );
 }
 
@@ -1358,7 +1384,7 @@ pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, DSF>(
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note
-    let value = NonNegativeAmount::const_from_u64(50000);
+    let value = Zatoshis::const_from_u64(50000);
     let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h1, 1);
 
@@ -1388,7 +1414,7 @@ pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, DSF>(
             fee_rule,
             min_confirmations,
             &addr2,
-            NonNegativeAmount::const_from_u64(15000),
+            Zatoshis::const_from_u64(15000),
             None,
             None,
             T::SHIELDED_PROTOCOL,
@@ -1448,7 +1474,7 @@ pub fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>(
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note
-    let value = NonNegativeAmount::const_from_u64(70000);
+    let value = Zatoshis::const_from_u64(70000);
     let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h, 1);
 
@@ -1467,7 +1493,7 @@ pub fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>(
             fee_rule,
             min_confirmations,
             &to,
-            NonNegativeAmount::const_from_u64(50000),
+            Zatoshis::const_from_u64(50000),
             None,
             None,
             T::SHIELDED_PROTOCOL,
@@ -1496,7 +1522,7 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note owned by the internal spending key
-    let value = NonNegativeAmount::const_from_u64(70000);
+    let value = Zatoshis::const_from_u64(70000);
     let (h, _, _) = st.generate_next_block(&dfvk, AddressType::Internal, value);
     st.scan_cached_blocks(h, 1);
 
@@ -1506,10 +1532,7 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
 
     // Value is considered pending at 10 confirmations.
     assert_eq!(st.get_pending_shielded_balance(account_id, 10), value);
-    assert_eq!(
-        st.get_spendable_balance(account_id, 10),
-        NonNegativeAmount::ZERO
-    );
+    assert_eq!(st.get_spendable_balance(account_id, 10), Zatoshis::ZERO);
 
     let change_note_scope = st
         .wallet()
@@ -1530,7 +1553,7 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
             fee_rule,
             min_confirmations,
             &to,
-            NonNegativeAmount::const_from_u64(50000),
+            Zatoshis::const_from_u64(50000),
             None,
             None,
             T::SHIELDED_PROTOCOL,
@@ -1572,17 +1595,17 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
     let dfvk2 = T::sk_to_fvk(T::usk_to_sk(&usk2));
 
     // Add funds to the wallet in a single note
-    let value = NonNegativeAmount::from_u64(100000).unwrap();
+    let value = Zatoshis::from_u64(100000).unwrap();
     let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h, 1);
 
     // Spendable balance matches total balance
     assert_eq!(st.get_total_balance(account1), value);
     assert_eq!(st.get_spendable_balance(account1, 1), value);
-    assert_eq!(st.get_total_balance(account2), NonNegativeAmount::ZERO);
+    assert_eq!(st.get_total_balance(account2), Zatoshis::ZERO);
 
-    let amount_sent = NonNegativeAmount::from_u64(20000).unwrap();
-    let amount_legacy_change = NonNegativeAmount::from_u64(30000).unwrap();
+    let amount_sent = Zatoshis::from_u64(20000).unwrap();
+    let amount_legacy_change = Zatoshis::from_u64(30000).unwrap();
     let addr = T::fvk_default_address(&dfvk);
     let addr2 = T::fvk_default_address(&dfvk2);
     let req = TransactionRequest::new(vec![
@@ -1672,7 +1695,7 @@ pub fn zip317_spend<T: ShieldedPoolTester, DSF: DataStoreFactory>(
     let (h1, _, _) = st.generate_next_block(
         &dfvk,
         AddressType::Internal,
-        NonNegativeAmount::const_from_u64(50000),
+        Zatoshis::const_from_u64(50000),
     );
 
     // Add 10 dust notes to the wallet
@@ -1680,14 +1703,14 @@ pub fn zip317_spend<T: ShieldedPoolTester, DSF: DataStoreFactory>(
         st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(1000),
+            Zatoshis::const_from_u64(1000),
         );
     }
 
     st.scan_cached_blocks(h1, 11);
 
     // Spendable balance matches total balance
-    let total = NonNegativeAmount::const_from_u64(60000);
+    let total = Zatoshis::const_from_u64(60000);
     assert_eq!(st.get_total_balance(account_id), total);
     assert_eq!(st.get_spendable_balance(account_id, 1), total);
 
@@ -1698,7 +1721,7 @@ pub fn zip317_spend<T: ShieldedPoolTester, DSF: DataStoreFactory>(
     // This first request will fail due to insufficient non-dust funds
     let req = TransactionRequest::new(vec![Payment::without_memo(
         T::fvk_default_address(&dfvk).to_zcash_address(st.network()),
-        NonNegativeAmount::const_from_u64(50000),
+        Zatoshis::const_from_u64(50000),
     )])
     .unwrap();
 
@@ -1712,15 +1735,15 @@ pub fn zip317_spend<T: ShieldedPoolTester, DSF: DataStoreFactory>(
             NonZeroU32::new(1).unwrap(),
         ),
         Err(Error::InsufficientFunds { available, required })
-            if available == NonNegativeAmount::const_from_u64(51000)
-            && required == NonNegativeAmount::const_from_u64(60000)
+            if available == Zatoshis::const_from_u64(51000)
+            && required == Zatoshis::const_from_u64(60000)
     );
 
     // This request will succeed, spending a single dust input to pay the 10000
     // ZAT fee in addition to the 41000 ZAT output to the recipient
     let req = TransactionRequest::new(vec![Payment::without_memo(
         T::fvk_default_address(&dfvk).to_zcash_address(st.network()),
-        NonNegativeAmount::const_from_u64(41000),
+        Zatoshis::const_from_u64(41000),
     )])
     .unwrap();
 
@@ -1743,7 +1766,7 @@ pub fn zip317_spend<T: ShieldedPoolTester, DSF: DataStoreFactory>(
     // in the total balance.
     assert_eq!(
         st.get_total_balance(account_id),
-        (total - NonNegativeAmount::const_from_u64(10000)).unwrap()
+        (total - Zatoshis::const_from_u64(10000)).unwrap()
     );
 }
 
@@ -1773,14 +1796,14 @@ where
     let (h, _, _) = st.generate_next_block(
         &dfvk,
         AddressType::Internal,
-        NonNegativeAmount::const_from_u64(50000),
+        Zatoshis::const_from_u64(50000),
     );
     st.scan_cached_blocks(h, 1);
 
     let utxo = WalletTransparentOutput::from_parts(
         OutPoint::fake(),
         TxOut {
-            value: NonNegativeAmount::const_from_u64(100000),
+            value: Zatoshis::const_from_u64(100000),
             script_pubkey: taddr.script(),
         },
         Some(h),
@@ -1798,7 +1821,7 @@ where
         .shield_transparent_funds(
             &input_selector,
             &change_strategy,
-            NonNegativeAmount::from_u64(10000).unwrap(),
+            Zatoshis::from_u64(10000).unwrap(),
             account.usk(),
             &[*taddr],
             account.id(),
@@ -1892,7 +1915,7 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
         .build();
 
     // Generate 9 blocks that have no value for us, starting at the birthday height.
-    let not_our_value = NonNegativeAmount::const_from_u64(10000);
+    let not_our_value = Zatoshis::const_from_u64(10000);
     let not_our_key = T::random_fvk(st.rng_mut());
     let (initial_height, _, _) =
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -1904,7 +1927,7 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
     let (received_tx_height, _, _) = st.generate_next_block(
         &T::test_account_fvk(&st),
         AddressType::DefaultExternal,
-        NonNegativeAmount::const_from_u64(500000),
+        Zatoshis::const_from_u64(500000),
     );
 
     // Generate some more blocks to get above our anchor height
@@ -1922,7 +1945,7 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
     let spendable = T::select_spendable_notes(
         &st,
         account_id,
-        NonNegativeAmount::const_from_u64(300000),
+        Zatoshis::const_from_u64(300000),
         received_tx_height + 10,
         &[],
     )
@@ -1937,7 +1960,7 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
     let spendable = T::select_spendable_notes(
         &st,
         account_id,
-        NonNegativeAmount::const_from_u64(300000),
+        Zatoshis::const_from_u64(300000),
         received_tx_height + 10,
         &[],
     )
@@ -1963,14 +1986,14 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
     st.generate_next_block(
         &dfvk,
         AddressType::DefaultExternal,
-        NonNegativeAmount::const_from_u64(500000),
+        Zatoshis::const_from_u64(500000),
     );
     st.scan_cached_blocks(account.birthday().height(), 1);
 
     // Create a gap of 10 blocks having no shielded outputs, then add a block that doesn't
     // belong to us so that we can get a checkpoint in the tree.
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
-    let not_our_value = NonNegativeAmount::const_from_u64(10000);
+    let not_our_value = Zatoshis::const_from_u64(10000);
     st.generate_block_at(
         account.birthday().height() + 10,
         BlockHash([0; 32]),
@@ -1991,7 +2014,7 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
     let spendable = T::select_spendable_notes(
         &st,
         account.id(),
-        NonNegativeAmount::const_from_u64(300000),
+        Zatoshis::const_from_u64(300000),
         account.birthday().height() + 5,
         &[],
     )
@@ -2005,7 +2028,7 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
     let to = T::fvk_default_address(&not_our_key);
     let req = TransactionRequest::new(vec![Payment::without_memo(
         to.to_zcash_address(st.network()),
-        NonNegativeAmount::const_from_u64(10000),
+        Zatoshis::const_from_u64(10000),
     )])
     .unwrap();
 
@@ -2042,7 +2065,7 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     let p1_fvk = P1::test_account_fvk(&st);
     let p1_to = P1::fvk_default_address(&p1_fvk);
 
-    let note_value = NonNegativeAmount::const_from_u64(350000);
+    let note_value = Zatoshis::const_from_u64(350000);
     st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
     st.scan_cached_blocks(account.birthday().height(), 2);
 
@@ -2050,7 +2073,7 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     assert_eq!(st.get_total_balance(account.id()), initial_balance);
     assert_eq!(st.get_spendable_balance(account.id(), 1), initial_balance);
 
-    let transfer_amount = NonNegativeAmount::const_from_u64(200000);
+    let transfer_amount = Zatoshis::const_from_u64(200000);
     let p0_to_p1 = TransactionRequest::new(vec![Payment::without_memo(
         p1_to.to_zcash_address(st.network()),
         transfer_amount,
@@ -2075,7 +2098,7 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     let step0 = &proposal0.steps().head;
 
     // We expect 4 logical actions, two per pool (due to padding).
-    let expected_fee = NonNegativeAmount::const_from_u64(20000);
+    let expected_fee = Zatoshis::const_from_u64(20000);
     assert_eq!(step0.balance().fee_required(), expected_fee);
 
     let expected_change = (note_value - transfer_amount - expected_fee).unwrap();
@@ -2131,7 +2154,7 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
     let p1_fvk = P1::test_account_fvk(&st);
     let p1_to = P1::fvk_default_address(&p1_fvk);
 
-    let note_value = NonNegativeAmount::const_from_u64(350000);
+    let note_value = Zatoshis::const_from_u64(350000);
     st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
     st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
     st.scan_cached_blocks(account.birthday().height(), 2);
@@ -2140,7 +2163,7 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
     assert_eq!(st.get_total_balance(account.id()), initial_balance);
     assert_eq!(st.get_spendable_balance(account.id(), 1), initial_balance);
 
-    let transfer_amount = NonNegativeAmount::const_from_u64(200000);
+    let transfer_amount = Zatoshis::const_from_u64(200000);
     let p0_to_p1 = TransactionRequest::new(vec![Payment::without_memo(
         p1_to.to_zcash_address(st.network()),
         transfer_amount,
@@ -2168,7 +2191,7 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
 
     // We expect 2 logical actions, since either pool can pay the full balance required
     // and note selection should choose the fully-private path.
-    let expected_fee = NonNegativeAmount::const_from_u64(10000);
+    let expected_fee = Zatoshis::const_from_u64(10000);
     assert_eq!(step0.balance().fee_required(), expected_fee);
 
     let expected_change = (note_value - transfer_amount - expected_fee).unwrap();
@@ -2221,7 +2244,7 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     let p1_fvk = P1::test_account_fvk(&st);
     let (p1_to, _) = account.usk().default_transparent_address();
 
-    let note_value = NonNegativeAmount::const_from_u64(350000);
+    let note_value = Zatoshis::const_from_u64(350000);
     st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
     st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
     st.scan_cached_blocks(account.birthday().height(), 2);
@@ -2230,7 +2253,7 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     assert_eq!(st.get_total_balance(account.id()), initial_balance);
     assert_eq!(st.get_spendable_balance(account.id(), 1), initial_balance);
 
-    let transfer_amount = NonNegativeAmount::const_from_u64(200000);
+    let transfer_amount = Zatoshis::const_from_u64(200000);
     let p0_to_p1 = TransactionRequest::new(vec![Payment::without_memo(
         Address::Transparent(p1_to).to_zcash_address(st.network()),
         transfer_amount,
@@ -2257,7 +2280,7 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     let step0 = &proposal0.steps().head;
 
     // We expect 3 logical actions, one for the transparent output and two for the source pool.
-    let expected_fee = NonNegativeAmount::const_from_u64(15000);
+    let expected_fee = Zatoshis::const_from_u64(15000);
     assert_eq!(step0.balance().fee_required(), expected_fee);
 
     let expected_change = (note_value - transfer_amount - expected_fee).unwrap();
@@ -2310,7 +2333,7 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
 
     // Add some funds to the wallet; we add two notes to allow successive spends. Also,
     // we will generate a note in the P1 pool to ensure that we have some tree state.
-    let note_value = NonNegativeAmount::const_from_u64(500000);
+    let note_value = Zatoshis::const_from_u64(500000);
     let (start_height, _, _) =
         st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
     st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
@@ -2342,7 +2365,7 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
         single_output_change_strategy(StandardFeeRule::Zip317, None, P1::SHIELDED_PROTOCOL);
 
     // First, send funds just to P0
-    let transfer_amount = NonNegativeAmount::const_from_u64(200000);
+    let transfer_amount = Zatoshis::const_from_u64(200000);
     let p0_transfer = TransactionRequest::new(vec![Payment::without_memo(
         P0::random_address(st.rng_mut()).to_zcash_address(st.network()),
         transfer_amount,
@@ -2360,7 +2383,7 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
         .unwrap();
     st.generate_next_block_including(*res.first());
 
-    let expected_fee = NonNegativeAmount::const_from_u64(10000);
+    let expected_fee = Zatoshis::const_from_u64(10000);
     let expected_change = (note_value - transfer_amount - expected_fee).unwrap();
     assert_eq!(
         st.get_total_balance(acct_id),
@@ -2471,7 +2494,7 @@ pub fn multi_pool_checkpoints_with_pruning<P0: ShieldedPoolTester, P1: ShieldedP
     let p0_fvk = P0::random_fvk(st.rng_mut());
     let p1_fvk = P1::random_fvk(st.rng_mut());
 
-    let note_value = NonNegativeAmount::const_from_u64(10000);
+    let note_value = Zatoshis::const_from_u64(10000);
     // Generate 100 P0 blocks, then 100 P1 blocks, then another 100 P0 blocks.
     for _ in 0..10 {
         for _ in 0..10 {
@@ -2508,7 +2531,7 @@ pub fn valid_chain_states<T: ShieldedPoolTester>(
     let (h1, _, _) = st.generate_next_block(
         &dfvk,
         AddressType::DefaultExternal,
-        NonNegativeAmount::const_from_u64(5),
+        Zatoshis::const_from_u64(5),
     );
 
     // Scan the cache
@@ -2518,7 +2541,7 @@ pub fn valid_chain_states<T: ShieldedPoolTester>(
     let (h2, _, _) = st.generate_next_block(
         &dfvk,
         AddressType::DefaultExternal,
-        NonNegativeAmount::const_from_u64(7),
+        Zatoshis::const_from_u64(7),
     );
 
     // Scanning should detect no inconsistencies
@@ -2543,12 +2566,12 @@ pub fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>(
     let (h, _, _) = st.generate_next_block(
         &dfvk,
         AddressType::DefaultExternal,
-        NonNegativeAmount::const_from_u64(5),
+        Zatoshis::const_from_u64(5),
     );
     let (last_contiguous_height, _, _) = st.generate_next_block(
         &dfvk,
         AddressType::DefaultExternal,
-        NonNegativeAmount::const_from_u64(7),
+        Zatoshis::const_from_u64(7),
     );
 
     // Scanning the cache should find no inconsistencies
@@ -2562,7 +2585,7 @@ pub fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>(
         &[FakeCompactOutput::new(
             &dfvk,
             AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(8),
+            Zatoshis::const_from_u64(8),
         )],
         2,
         2,
@@ -2571,7 +2594,7 @@ pub fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>(
     st.generate_next_block(
         &dfvk,
         AddressType::DefaultExternal,
-        NonNegativeAmount::const_from_u64(3),
+        Zatoshis::const_from_u64(3),
     );
 
     // Data+cache chain should be invalid at the data/cache boundary
@@ -2603,8 +2626,8 @@ where
     assert_eq!(st.get_wallet_summary(0), None);
 
     // Create fake CompactBlocks sending value to the address
-    let value = NonNegativeAmount::const_from_u64(5);
-    let value2 = NonNegativeAmount::const_from_u64(7);
+    let value = Zatoshis::const_from_u64(5);
+    let value2 = Zatoshis::const_from_u64(7);
     let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
 
@@ -2797,7 +2820,7 @@ pub fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>(
     let account = st.test_account().cloned().unwrap();
     let dfvk = T::test_account_fvk(&st);
 
-    let value = NonNegativeAmount::const_from_u64(50000);
+    let value = Zatoshis::const_from_u64(50000);
     let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h1, 1);
     assert_eq!(st.get_total_balance(account.id()), value);
@@ -2813,13 +2836,13 @@ pub fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>(
     st.scan_cached_blocks(h2, 1);
     assert_eq!(
         st.get_total_balance(account.id()),
-        NonNegativeAmount::const_from_u64(150_000)
+        Zatoshis::const_from_u64(150_000)
     );
 
     // We can spend the received notes
     let req = TransactionRequest::new(vec![Payment::without_memo(
         T::fvk_default_address(&dfvk).to_zcash_address(st.network()),
-        NonNegativeAmount::const_from_u64(110_000),
+        Zatoshis::const_from_u64(110_000),
     )])
     .unwrap();
 
@@ -2860,7 +2883,7 @@ pub fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester, DSF>(
     assert_eq!(st.get_wallet_summary(0), None);
 
     // Create a fake CompactBlock sending value to the address
-    let value = NonNegativeAmount::const_from_u64(5);
+    let value = Zatoshis::const_from_u64(5);
     let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
     // Scan the cache
@@ -2873,7 +2896,7 @@ pub fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester, DSF>(
     assert_eq!(st.get_total_balance(account.id()), value);
 
     // Create a second fake CompactBlock sending more value to the address
-    let value2 = NonNegativeAmount::const_from_u64(7);
+    let value2 = Zatoshis::const_from_u64(7);
     let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
 
     // Scan the cache again
@@ -2910,7 +2933,7 @@ pub fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester, DSF>(
     assert_eq!(st.get_wallet_summary(0), None);
 
     // Create a fake CompactBlock sending value to the address
-    let value = NonNegativeAmount::const_from_u64(5);
+    let value = Zatoshis::const_from_u64(5);
     let (received_height, _, nf) =
         st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
@@ -2923,7 +2946,7 @@ pub fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester, DSF>(
     // Create a second fake CompactBlock spending value from the address
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let to2 = T::fvk_default_address(&not_our_key);
-    let value2 = NonNegativeAmount::const_from_u64(2);
+    let value2 = Zatoshis::const_from_u64(2);
     let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
 
     // Scan the cache again
@@ -2956,14 +2979,14 @@ pub fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester, DSF
     assert_eq!(st.get_wallet_summary(0), None);
 
     // Create a fake CompactBlock sending value to the address
-    let value = NonNegativeAmount::const_from_u64(5);
+    let value = Zatoshis::const_from_u64(5);
     let (received_height, _, nf) =
         st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
     // Create a second fake CompactBlock spending value from the address
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let to2 = T::fvk_default_address(&not_our_key);
-    let value2 = NonNegativeAmount::const_from_u64(2);
+    let value2 = Zatoshis::const_from_u64(2);
     let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
 
     // Scan the spending block first.
@@ -3003,11 +3026,11 @@ pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, DSF, TC>(
     let dfvk = T::test_account_fvk(&st);
 
     // Create 10 blocks with successively increasing value
-    let value = NonNegativeAmount::const_from_u64(100_0000);
+    let value = Zatoshis::const_from_u64(100_0000);
     let (h0, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     let mut note_values = vec![value];
     for i in 2..=10 {
-        let value = NonNegativeAmount::const_from_u64(i * 100_0000);
+        let value = Zatoshis::const_from_u64(i * 100_0000);
         st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         note_values.push(value);
     }
@@ -3024,12 +3047,12 @@ pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, DSF, TC>(
 
     test_meta(
         &st,
-        NoteFilter::ExceedsMinValue(NonNegativeAmount::const_from_u64(1000_0000)),
+        NoteFilter::ExceedsMinValue(Zatoshis::const_from_u64(1000_0000)),
         Some(1),
     );
     test_meta(
         &st,
-        NoteFilter::ExceedsMinValue(NonNegativeAmount::const_from_u64(500_0000)),
+        NoteFilter::ExceedsMinValue(Zatoshis::const_from_u64(500_0000)),
         Some(6),
     );
     test_meta(
@@ -3069,4 +3092,119 @@ pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, DSF, TC>(
         NoteFilter::ExceedsPriorSendPercentile(BoundedU8::new_const(50)),
         Some(5),
     );
+}
+
+#[cfg(feature = "pczt")]
+pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, DSF>(
+    ds_factory: DSF,
+    cache: impl TestCache,
+) where
+    DSF: DataStoreFactory,
+    <DSF as DataStoreFactory>::AccountId: serde::Serialize + serde::de::DeserializeOwned,
+{
+    use zcash_protocol::consensus::ZIP212_GRACE_PERIOD;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .with_initial_chain_state(|_, network| {
+            // Initialize the chain state to after ZIP 212 became enforced.
+            let birthday_height = std::cmp::max(
+                network.activation_height(NetworkUpgrade::Nu5).unwrap(),
+                network.activation_height(NetworkUpgrade::Canopy).unwrap() + ZIP212_GRACE_PERIOD,
+            );
+
+            InitialChainState {
+                chain_state: ChainState::new(
+                    birthday_height - 1,
+                    BlockHash([5; 32]),
+                    Frontier::empty(),
+                    #[cfg(feature = "orchard")]
+                    Frontier::empty(),
+                ),
+                prior_sapling_roots: vec![],
+                #[cfg(feature = "orchard")]
+                prior_orchard_roots: vec![],
+            }
+        })
+        .with_account_having_current_birthday()
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+
+    let p0_fvk = P0::test_account_fvk(&st);
+
+    let p1_fvk = P1::test_account_fvk(&st);
+    let p1_to = P1::fvk_default_address(&p1_fvk);
+
+    // Only mine a block in P0 to ensure the transactions source is there.
+    let note_value = Zatoshis::const_from_u64(350000);
+    st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+    st.scan_cached_blocks(account.birthday().height(), 1);
+
+    assert_eq!(st.get_total_balance(account.id()), note_value);
+    assert_eq!(st.get_spendable_balance(account.id(), 1), note_value);
+
+    let transfer_amount = Zatoshis::const_from_u64(200000);
+    let p0_to_p1 = TransactionRequest::new(vec![Payment::without_memo(
+        p1_to.to_zcash_address(st.network()),
+        transfer_amount,
+    )])
+    .unwrap();
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, P0::SHIELDED_PROTOCOL);
+    let proposal0 = st
+        .propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            p0_to_p1,
+            NonZeroU32::new(1).unwrap(),
+        )
+        .unwrap();
+
+    let _min_target_height = proposal0.min_target_height();
+    assert_eq!(proposal0.steps().len(), 1);
+
+    let create_proposed_result = st.create_pczt_from_proposal::<Infallible, _, Infallible>(
+        account.id(),
+        OvkPolicy::Sender,
+        &proposal0,
+    );
+    assert_matches!(&create_proposed_result, Ok(_));
+    let pczt_created = create_proposed_result.unwrap();
+
+    // If we don't create proofs or signatures, we will fail to extract a transaction.
+    assert_matches!(
+        st.extract_and_store_transaction_from_pczt(pczt_created.clone()),
+        Err(Error::Pczt(data_api::error::PcztError::Extraction(_)))
+    );
+
+    // Add proof generation keys to Sapling spends.
+    let pczt_updated = P0::add_proof_generation_keys(pczt_created, account.usk()).unwrap();
+
+    // Create proofs.
+    let sapling_prover = LocalTxProver::bundled();
+    let orchard_pk = ::orchard::circuit::ProvingKey::build();
+    let pczt_proven = Prover::new(pczt_updated)
+        .create_orchard_proof(&orchard_pk)
+        .unwrap()
+        .create_sapling_proofs(&sapling_prover, &sapling_prover)
+        .unwrap()
+        .finish();
+
+    // Apply signatures.
+    let mut signer = Signer::new(pczt_proven).unwrap();
+    P0::apply_signatures_to_pczt(&mut signer, account.usk()).unwrap();
+    let pczt_authorized = signer.finish();
+
+    // Now we can extract the transaction.
+    let extract_and_store_result = st.extract_and_store_transaction_from_pczt(pczt_authorized);
+    assert_matches!(&extract_and_store_result, Ok(_));
+    let txid = extract_and_store_result.unwrap();
+
+    let (h, _) = st.generate_next_block_including(txid);
+    st.scan_cached_blocks(h, 1);
 }

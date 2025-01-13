@@ -41,18 +41,17 @@ CREATE TABLE "accounts" (
     recover_until_height INTEGER,
     has_spend_key INTEGER NOT NULL DEFAULT 1,
     CHECK (
-        (
+      (
         account_kind = 0
         AND hd_seed_fingerprint IS NOT NULL
         AND hd_account_index IS NOT NULL
         AND ufvk IS NOT NULL
-        )
-        OR
-        (
+      )
+      OR
+      (
         account_kind = 1
-        AND hd_seed_fingerprint IS NULL
-        AND hd_account_index IS NULL
-        )
+        AND (hd_seed_fingerprint IS NULL) = (hd_account_index IS NULL)
+      )
     )
 )"#;
 pub(super) const INDEX_ACCOUNTS_UUID: &str =
@@ -384,8 +383,8 @@ CREATE TABLE transparent_spend_map (
     prevout_txid BLOB NOT NULL,
     prevout_output_index INTEGER NOT NULL,
     FOREIGN KEY (spending_transaction_id) REFERENCES transactions(id_tx)
-    -- NOTE: We can't create a unique constraint on just (prevout_txid, prevout_output_index) 
-    -- because the same output may be attempted to be spent in multiple transactions, even 
+    -- NOTE: We can't create a unique constraint on just (prevout_txid, prevout_output_index)
+    -- because the same output may be attempted to be spent in multiple transactions, even
     -- though only one will ever be mined.
     CONSTRAINT transparent_spend_map_unique UNIQUE (
         spending_transaction_id, prevout_txid, prevout_output_index
@@ -860,7 +859,7 @@ SELECT accounts.uuid                AS account_uuid,
             AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
        ) AS is_shielding
 FROM notes
-JOIN accounts ON accounts.id = notes.account_id
+LEFT JOIN accounts ON accounts.id = notes.account_id
 LEFT JOIN transactions
      ON notes.txid = transactions.txid
 JOIN blocks_max_height
@@ -885,43 +884,56 @@ GROUP BY notes.account_id, notes.txid";
 /// that controls the output.
 pub(super) const VIEW_TX_OUTPUTS: &str = "
 CREATE VIEW v_tx_outputs AS
--- select all outputs received by the wallet
-SELECT transactions.txid            AS txid,
-       ro.pool                      AS output_pool,
-       ro.output_index              AS output_index,
-       from_account.uuid            AS from_account_uuid,
-       to_account.uuid              AS to_account_uuid,
-       NULL                         AS to_address,
-       ro.value                     AS value,
-       ro.is_change                 AS is_change,
-       ro.memo                      AS memo
-FROM v_received_outputs ro
-JOIN transactions
-    ON transactions.id_tx = ro.transaction_id
--- join to the sent_notes table to obtain `from_account_id`
-LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
--- join on the accounts table to obtain account UUIDs
-JOIN accounts from_account ON accounts.id = sent_notes.from_account_id
-JOIN accounts to_account ON accounts.id = ro.account_id
-UNION
--- select all outputs sent from the wallet to external recipients
-SELECT transactions.txid            AS txid,
-       sent_notes.output_pool       AS output_pool,
-       sent_notes.output_index      AS output_index,
-       from_account.uuid            AS from_account_uuid,
-       NULL                         AS to_account_uuid,
-       sent_notes.to_address        AS to_address,
-       sent_notes.value             AS value,
-       0                            AS is_change,
-       sent_notes.memo              AS memo
-FROM sent_notes
-JOIN transactions
-    ON transactions.id_tx = sent_notes.tx
-LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
--- join on the accounts table to obtain account UUIDs
-JOIN accounts from_account ON accounts.id = sent_notes.from_account_id
--- exclude any sent notes for which a row exists in the v_received_outputs view
-WHERE ro.account_id IS NULL";
+WITH unioned AS (
+    -- select all outputs received by the wallet
+    SELECT transactions.txid            AS txid,
+           ro.pool                      AS output_pool,
+           ro.output_index              AS output_index,
+           from_account.uuid            AS from_account_uuid,
+           to_account.uuid              AS to_account_uuid,
+           NULL                         AS to_address,
+           ro.value                     AS value,
+           ro.is_change                 AS is_change,
+           ro.memo                      AS memo
+    FROM v_received_outputs ro
+    JOIN transactions
+        ON transactions.id_tx = ro.transaction_id
+    -- join to the sent_notes table to obtain `from_account_id`
+    LEFT JOIN sent_notes ON sent_notes.id = ro.sent_note_id
+    -- join on the accounts table to obtain account UUIDs
+    LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
+    LEFT JOIN accounts to_account ON to_account.id = ro.account_id
+    UNION ALL
+    -- select all outputs sent from the wallet to external recipients
+    SELECT transactions.txid            AS txid,
+           sent_notes.output_pool       AS output_pool,
+           sent_notes.output_index      AS output_index,
+           from_account.uuid            AS from_account_uuid,
+           NULL                         AS to_account_uuid,
+           sent_notes.to_address        AS to_address,
+           sent_notes.value             AS value,
+           0                            AS is_change,
+           sent_notes.memo              AS memo
+    FROM sent_notes
+    JOIN transactions
+        ON transactions.id_tx = sent_notes.tx
+    LEFT JOIN v_received_outputs ro ON ro.sent_note_id = sent_notes.id
+    -- join on the accounts table to obtain account UUIDs
+    LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
+)
+-- merge duplicate rows while retaining maximum information
+SELECT
+    txid,
+    output_pool,
+    output_index,
+    max(from_account_uuid) AS from_account_uuid,
+    max(to_account_uuid) AS to_account_uuid,
+    max(to_address) AS to_address,
+    max(value) AS value,
+    max(is_change) AS is_change,
+    max(memo) AS memo
+FROM unioned
+GROUP BY txid, output_pool, output_index";
 
 pub(super) fn view_sapling_shard_scan_ranges<P: Parameters>(params: &P) -> String {
     format!(

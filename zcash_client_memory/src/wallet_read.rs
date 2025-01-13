@@ -38,7 +38,7 @@ use zip32::Scope;
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::wallet::TransparentAddressMetadata,
-    zcash_primitives::legacy::TransparentAddress,
+    zcash_primitives::legacy::{keys::NonHardenedChildIndex, TransparentAddress},
 };
 
 use crate::{error::Error, Account, AccountId, MemoryWalletBlock, MemoryWalletDb, Nullifier};
@@ -71,12 +71,10 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             .accounts
             .iter()
             .find_map(|(_id, acct)| match acct.kind() {
-                AccountSource::Derived {
-                    seed_fingerprint,
-                    account_index,
-                    ..
-                } => {
-                    if seed_fingerprint == seed && account_index == &account_id {
+                AccountSource::Derived { derivation, .. } => {
+                    if derivation.seed_fingerprint() == seed
+                        && derivation.account_index() == account_id
+                    {
                         Some(acct.clone())
                     } else {
                         None
@@ -93,17 +91,12 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     ) -> Result<bool, Self::Error> {
         tracing::debug!("validate_seed: {:?}", account_id);
         if let Some(account) = self.get_account(account_id)? {
-            if let AccountSource::Derived {
-                seed_fingerprint,
-                account_index,
-                ..
-            } = account.source()
-            {
+            if let AccountSource::Derived { derivation, .. } = account.source() {
                 seed_matches_derived_account(
                     &self.params,
                     seed,
-                    &seed_fingerprint,
-                    *account_index,
+                    derivation.seed_fingerprint(),
+                    derivation.account_index(),
                     &account.uivk(),
                 )
             } else {
@@ -132,19 +125,14 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             // way we could determine that is by brute-forcing the ZIP 32 account
             // index space, which we're not going to do. The method name indicates to
             // the caller that we only check derived accounts.
-            if let AccountSource::Derived {
-                seed_fingerprint,
-                account_index,
-                ..
-            } = account.source()
-            {
+            if let AccountSource::Derived { derivation, .. } = account.source() {
                 has_derived = true;
 
                 if seed_matches_derived_account(
                     &self.params,
                     seed,
-                    &seed_fingerprint,
-                    *account_index,
+                    derivation.seed_fingerprint(),
+                    derivation.account_index(),
                     &account.uivk(),
                 )? {
                     // The seed is relevant to this account.
@@ -171,11 +159,13 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<Self::Account>, Self::Error> {
         tracing::debug!("get_account_for_ufvk");
-        let ufvk_req =
-            UnifiedAddressRequest::all().expect("At least one protocol should be enabled");
+        let ufvk_req = ufvk
+            .to_unified_incoming_viewing_key()
+            .to_address_request()
+            .expect("At least one protocol should be enabled");
         Ok(self.accounts.iter().find_map(|(_id, acct)| {
-            if acct.ufvk()?.default_address(ufvk_req).unwrap()
-                == ufvk.default_address(ufvk_req).unwrap()
+            if acct.ufvk()?.default_address(Some(ufvk_req)).unwrap()
+                == ufvk.default_address(Some(ufvk_req)).unwrap()
             {
                 Some(acct.clone())
             } else {
@@ -298,7 +288,10 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             let transparent_balances =
                 self.get_transparent_balances(*account, fully_scanned_height)?;
             for (_, value) in transparent_balances {
-                balance.add_unshielded_value(value)?;
+                balance.with_unshielded_balance_mut(|b: &mut Balance| -> Result<(), Error> {
+                    b.add_spendable_value(value)?;
+                    Ok(())
+                })?;
             }
         }
 
@@ -657,7 +650,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
     fn get_known_ephemeral_addresses(
         &self,
         account_id: Self::AccountId,
-        index_range: Option<Range<u32>>,
+        index_range: Option<Range<NonHardenedChildIndex>>,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         Ok(self
             .accounts
@@ -668,7 +661,7 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             .filter(|(_addr, meta)| {
                 index_range
                     .as_ref()
-                    .map(|range| range.contains(&meta.address_index().index()))
+                    .map(|range| range.contains(&meta.address_index()))
                     .unwrap_or(true)
             })
             .collect::<Vec<_>>())
@@ -773,12 +766,9 @@ fn seed_matches_derived_account<P: consensus::Parameters>(
             // accounts are required to have a known UIVK.
             Err(_) => false,
             Ok(usk) => {
-                UnifiedAddressRequest::all().map_or(Ok::<_, Error>(false), |ua_request| {
-                    Ok(usk
-                        .to_unified_full_viewing_key()
-                        .default_address(ua_request)?
-                        == uivk.default_address(ua_request)?)
-                })?
+                usk.to_unified_full_viewing_key()
+                    .default_address(Some(UnifiedAddressRequest::ALLOW_ALL))?
+                    == uivk.default_address(Some(UnifiedAddressRequest::ALLOW_ALL))?
             }
         };
 

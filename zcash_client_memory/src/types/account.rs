@@ -262,10 +262,8 @@ impl Account {
             .viewing_key
             .to_unified_incoming_viewing_key()
             .to_address_request()
-            .and_then(|ua_request| ua_request.intersect(&UnifiedAddressRequest::all().unwrap()))
-            .ok_or_else(|| {
-                Error::AddressGeneration(AddressGenerationError::ShieldedReceiverRequired)
-            })?;
+            .and_then(|ua_request| ua_request.intersect(&UnifiedAddressRequest::ALLOW_ALL))
+            .unwrap();
         let (ua, diversifier_index) = acc.default_address(ua_request)?;
         acc.addresses.insert(diversifier_index, ua);
         #[cfg(feature = "transparent-inputs")]
@@ -298,7 +296,7 @@ impl Account {
         &self,
         request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
-        self.uivk().default_address(request)
+        self.uivk().default_address(Some(request))
     }
 
     pub(crate) fn birthday(&self) -> &AccountBirthday {
@@ -320,7 +318,7 @@ impl Account {
 
     pub(crate) fn next_available_address(
         &mut self,
-        request: UnifiedAddressRequest,
+        request: Option<UnifiedAddressRequest>,
     ) -> Result<Option<UnifiedAddress>, Error> {
         match self.ufvk() {
             Some(ufvk) => {
@@ -523,6 +521,7 @@ impl zcash_client_backend::data_api::Account for Account {
 
 mod serialization {
     use zcash_client_backend::data_api::chain::ChainState;
+    use zcash_client_backend::data_api::Zip32Derivation;
     use zcash_keys::encoding::AddressCodec;
     use zcash_primitives::block::BlockHash;
     use zcash_primitives::consensus::Network::MainNetwork as EncodingParams;
@@ -569,19 +568,21 @@ mod serialization {
                     AccountSource::Imported { .. } => 1,
                 },
                 seed_fingerprint: match acc.kind {
-                    AccountSource::Derived {
-                        seed_fingerprint, ..
-                    } => Some(seed_fingerprint.to_bytes().to_vec()),
+                    AccountSource::Derived { ref derivation, .. } => {
+                        Some(derivation.seed_fingerprint().to_bytes().to_vec())
+                    }
                     AccountSource::Imported { .. } => None,
                 },
                 account_index: match acc.kind {
-                    AccountSource::Derived { account_index, .. } => Some(account_index.into()),
+                    AccountSource::Derived { ref derivation, .. } => {
+                        Some(derivation.account_index().into())
+                    }
                     AccountSource::Imported { .. } => None,
                 },
                 purpose: match acc.kind {
                     AccountSource::Derived { .. } => None,
-                    AccountSource::Imported { purpose, .. } => match purpose {
-                        AccountPurpose::Spending => Some(0),
+                    AccountSource::Imported { ref purpose, .. } => match purpose {
+                        AccountPurpose::Spending { .. } => Some(0),
                         AccountPurpose::ViewOnly => Some(1),
                     },
                 },
@@ -628,15 +629,15 @@ mod serialization {
                 account_id: acc.account_id.into(),
                 kind: match acc.kind {
                     0 => AccountSource::Derived {
-                        seed_fingerprint: SeedFingerprint::from_bytes(
-                            acc.seed_fingerprint().try_into()?,
+                        derivation: Zip32Derivation::new(
+                            SeedFingerprint::from_bytes(acc.seed_fingerprint().try_into()?),
+                            read_optional!(acc, account_index)?.try_into()?,
                         ),
-                        account_index: read_optional!(acc, account_index)?.try_into()?,
                         key_source: acc.key_source,
                     },
                     1 => AccountSource::Imported {
                         purpose: match read_optional!(acc, purpose)? {
-                            0 => AccountPurpose::Spending,
+                            0 => AccountPurpose::Spending { derivation: None },
                             1 => AccountPurpose::ViewOnly,
                             _ => unreachable!(),
                         },
@@ -759,7 +760,7 @@ mod serialization {
                 "test_account_name".to_string(),
                 AccountId(0),
                 AccountSource::Imported {
-                    purpose: AccountPurpose::Spending,
+                    purpose: AccountPurpose::Spending { derivation: None },
                     key_source: Some("test_key_source".to_string()),
                 },
                 UnifiedFullViewingKey::decode(&EncodingParams, TEST_VK).unwrap(),

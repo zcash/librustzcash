@@ -15,9 +15,10 @@ use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use tracing::{debug, trace};
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput, COMPACT_NOTE_SIZE};
-use zcash_primitives::{
+use zcash_primitives::transaction::{components::sapling::zip212_enforcement, TxId};
+use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade},
-    transaction::{components::sapling::zip212_enforcement, TxId},
+    ShieldedProtocol,
 };
 use zip32::Scope;
 
@@ -26,7 +27,6 @@ use crate::{
     proto::compact_formats::CompactBlock,
     scan::{Batch, BatchRunner, CompactDecryptor, DecryptedOutput, Tasks},
     wallet::{WalletOutput, WalletSpend, WalletTx},
-    ShieldedProtocol,
 };
 
 #[cfg(feature = "orchard")]
@@ -1167,10 +1167,12 @@ pub mod testing {
     };
     use zcash_note_encryption::{Domain, COMPACT_NOTE_SIZE};
     use zcash_primitives::{
-        block::BlockHash,
+        block::BlockHash, transaction::components::sapling::zip212_enforcement,
+    };
+    use zcash_protocol::{
         consensus::{BlockHeight, Network},
         memo::MemoBytes,
-        transaction::components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
+        value::Zatoshis,
     };
 
     use crate::proto::compact_formats::{
@@ -1220,7 +1222,7 @@ pub mod testing {
         prev_hash: BlockHash,
         nf: Nullifier,
         dfvk: &DiversifiableFullViewingKey,
-        value: NonNegativeAmount,
+        value: Zatoshis,
         tx_after: bool,
         initial_tree_sizes: Option<(u32, u32)>,
     ) -> CompactBlock {
@@ -1304,12 +1306,12 @@ mod tests {
     use incrementalmerkletree::{Marking, Position, Retention};
     use sapling::Nullifier;
     use zcash_keys::keys::UnifiedSpendingKey;
-    use zcash_primitives::{
-        block::BlockHash,
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::{
         consensus::{BlockHeight, Network},
-        transaction::components::amount::NonNegativeAmount,
-        zip32::AccountId,
+        value::Zatoshis,
     };
+    use zip32::AccountId;
 
     use crate::{
         data_api::BlockMetadata,
@@ -1334,7 +1336,7 @@ mod tests {
                 BlockHash([0; 32]),
                 Nullifier([0; 32]),
                 &sapling_dfvk,
-                NonNegativeAmount::const_from_u64(5),
+                Zatoshis::const_from_u64(5),
                 false,
                 None,
             );
@@ -1420,7 +1422,7 @@ mod tests {
                 BlockHash([0; 32]),
                 Nullifier([0; 32]),
                 &sapling_dfvk,
-                NonNegativeAmount::const_from_u64(5),
+                Zatoshis::const_from_u64(5),
                 true,
                 Some((0, 0)),
             );
@@ -1500,7 +1502,7 @@ mod tests {
             BlockHash([0; 32]),
             nf,
             ufvk.sapling().unwrap(),
-            NonNegativeAmount::const_from_u64(5),
+            Zatoshis::const_from_u64(5),
             false,
             Some((0, 0)),
         );

@@ -1,7 +1,7 @@
 [package]
 name = "zcash_primitives"
 description = "Rust implementations of the Zcash primitives"
-version = "0.20.0"
+version = "0.21.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -21,7 +21,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 equihash.workspace = true
 zcash_address.workspace = true
-zcash_encoding.workspace = true
+zcash_encoding = { workspace = true, features = ["std"] }
 zcash_protocol.workspace = true
 zip32.workspace = true
 
@@ -47,7 +47,7 @@ ff.workspace = true
 group = { workspace = true, features = ["wnaf-memuse"] }
 jubjub.workspace = true
 nonempty.workspace = true
-orchard.workspace = true
+orchard = { workspace = true, features = ["circuit"] }
 sapling.workspace = true
 zcash_spec.workspace = true
 
@@ -57,14 +57,20 @@ incrementalmerkletree = { workspace = true, features = ["legacy-api"] }
 # - Test dependencies
 proptest = { workspace = true, optional = true }
 
+# - Transparent protocol
+transparent.workspace = true
+
 # - Transparent inputs
 #   - `Error` type exposed
-bip32 = { workspace = true, optional = true }
+bip32.workspace = true
 #   - `SecretKey` and `PublicKey` types exposed
 secp256k1 = { workspace = true, optional = true }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Boilerplate
+getset.workspace = true
+
 # - Documentation
 document-features.workspace = true
 
@@ -76,8 +82,8 @@ hex.workspace = true
 # - Shielded protocols
 redjubjub = "0.7"
 
-# - Transparent inputs
-ripemd = { workspace = true, optional = true }
+# - Transparent protocol
+ripemd.workspace = true
 
 # - ZIP 32
 aes.workspace = true
@@ -108,7 +114,11 @@ default = ["multicore"]
 multicore = ["orchard/multicore", "sapling/multicore"]
 
 ## Enables spending transparent notes with the transaction builder.
-transparent-inputs = ["dep:bip32", "dep:ripemd", "dep:secp256k1"]
+transparent-inputs = [
+    "transparent/transparent-inputs",
+    "bip32/secp256k1-ffi",
+    "dep:secp256k1",
+]
 
 ### A temporary feature flag that exposes granular APIs needed by `zcashd`. These APIs
 ### should not be relied upon and will be removed in a future release.
@@ -119,6 +129,7 @@ test-dependencies = [
     "dep:proptest",
     "orchard/test-dependencies",
     "sapling/test-dependencies",
+    "transparent/test-dependencies",
     "zcash_protocol/test-dependencies",
 ]
 

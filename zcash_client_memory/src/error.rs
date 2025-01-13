@@ -106,12 +106,18 @@ pub enum Error {
     #[error("Viewing key not found for account: {0:?}")]
     ViewingKeyNotFound(AccountId),
     #[error("Error parsing zcash address: {0}")]
-    ParseZcashAddress(#[from] zcash_address::ParseError),
+    ParseZcashAddress(zcash_address::ParseError),
     #[error("Unknown zip32 derivation error")]
     UnknownZip32Derivation,
 
     #[error("Error converting int to zip32: {0}")]
     Zip32FromInt(#[from] zip32::TryFromIntError),
+}
+
+impl From<zcash_address::ParseError> for Error {
+    fn from(e: zcash_address::ParseError) -> Self {
+        Error::ParseZcashAddress(e)
+    }
 }
 
 #[cfg(feature = "transparent-inputs")]

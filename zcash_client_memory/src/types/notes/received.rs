@@ -96,45 +96,43 @@ impl ReceivedNote {
         match output.recipient() {
             Recipient::InternalAccount {
                 receiving_account,
-                note: Note::Sapling(note),
+                note,
                 ..
-            } => Ok(ReceivedNote {
-                note_id: NoteId::new(txid, Sapling, output.output_index() as u16),
-                txid,
-                output_index: output.output_index() as u32,
-                account_id: *receiving_account,
-                note: Note::Sapling(note.clone()),
-                nf: None,
-                is_change: true,
-                memo: output
-                    .memo()
-                    .map(Memo::try_from)
-                    .transpose()?
-                    .expect("expected a memo for a non-transparent output"),
-                commitment_tree_position: None,
-                recipient_key_scope: Some(Scope::Internal),
-            }),
-            #[cfg(feature = "orchard")]
-            Recipient::InternalAccount {
-                receiving_account,
-                note: Note::Orchard(note),
-                ..
-            } => Ok(ReceivedNote {
-                note_id: NoteId::new(txid, Orchard, output.output_index() as u16),
-                txid,
-                output_index: output.output_index() as u32,
-                account_id: *receiving_account,
-                note: Note::Orchard(*note),
-                nf: None,
-                is_change: true,
-                memo: output
-                    .memo()
-                    .map(Memo::try_from)
-                    .transpose()?
-                    .expect("expected a memo for a non-transparent output"),
-                commitment_tree_position: None,
-                recipient_key_scope: Some(Scope::Internal),
-            }),
+            } => match note.as_ref() {
+                Note::Sapling(note) => Ok(ReceivedNote {
+                    note_id: NoteId::new(txid, Sapling, output.output_index() as u16),
+                    txid,
+                    output_index: output.output_index() as u32,
+                    account_id: *receiving_account,
+                    note: Note::Sapling(note.clone()),
+                    nf: None,
+                    is_change: true,
+                    memo: output
+                        .memo()
+                        .map(Memo::try_from)
+                        .transpose()?
+                        .expect("expected a memo for a non-transparent output"),
+                    commitment_tree_position: None,
+                    recipient_key_scope: Some(Scope::Internal),
+                }),
+                #[cfg(feature = "orchard")]
+                Note::Orchard(note) => Ok(ReceivedNote {
+                    note_id: NoteId::new(txid, Orchard, output.output_index() as u16),
+                    txid,
+                    output_index: output.output_index() as u32,
+                    account_id: *receiving_account,
+                    note: Note::Orchard(*note),
+                    nf: None,
+                    is_change: true,
+                    memo: output
+                        .memo()
+                        .map(Memo::try_from)
+                        .transpose()?
+                        .expect("expected a memo for a non-transparent output"),
+                    commitment_tree_position: None,
+                    recipient_key_scope: Some(Scope::Internal),
+                }),
+            },
             _ => Err(Error::Other(
                 "Recipient is not an internal shielded account".to_owned(),
             )),

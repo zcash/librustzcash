@@ -195,7 +195,7 @@ pub struct Recipient {
     pub account_id: ::core::option::Option<u32>,
     /// the outpoint metadata if InternalAccount
     #[prost(message, optional, tag = "5")]
-    pub outpoint_metadata: ::core::option::Option<OutPoint>,
+    pub outpoint: ::core::option::Option<OutPoint>,
     /// the note if InternalAccount
     #[prost(message, optional, tag = "6")]
     pub note: ::core::option::Option<Note>,
@@ -432,11 +432,14 @@ pub struct MemoryWallet {
     pub orchard_tree_shard_end_heights: ::prost::alloc::vec::Vec<TreeEndHeightsRecord>,
     /// UTXOs known to this wallet
     #[prost(message, repeated, tag = "15")]
-    pub transparent_received_outputs: ::prost::alloc::vec::Vec<TransparentReceivedOutputRecord>,
+    pub transparent_received_outputs: ::prost::alloc::vec::Vec<
+        TransparentReceivedOutputRecord,
+    >,
     /// UTXOs spent by this wallet
     #[prost(message, repeated, tag = "16")]
-    pub transparent_received_output_spends:
-        ::prost::alloc::vec::Vec<TransparentReceivedOutputSpendRecord>,
+    pub transparent_received_output_spends: ::prost::alloc::vec::Vec<
+        TransparentReceivedOutputSpendRecord,
+    >,
     /// Map from spends to their location in the blockchain
     #[prost(message, repeated, tag = "17")]
     pub transparent_spend_map: ::prost::alloc::vec::Vec<TransparentSpendCacheRecord>,

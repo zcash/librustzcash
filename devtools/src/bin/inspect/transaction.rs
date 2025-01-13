@@ -8,22 +8,29 @@ use group::GroupEncoding;
 use orchard::note_encryption::OrchardDomain;
 use sapling::{note_encryption::SaplingDomain, SaplingVerificationContext};
 use secp256k1::{Secp256k1, VerifyOnly};
+
+#[allow(deprecated)]
+use ::transparent::{
+    address::{Script, TransparentAddress},
+    bundle as transparent,
+    keys::pubkey_to_address,
+    sighash::{SighashType, TransparentAuthorizingContext},
+};
 use zcash_address::{
     unified::{self, Encoding},
     ToAddress, ZcashAddress,
 };
 use zcash_note_encryption::try_output_recovery_with_ovk;
-#[allow(deprecated)]
-use zcash_primitives::{
+use zcash_primitives::transaction::{
+    components::sapling as sapling_serialization,
+    sighash::{signature_hash, SignableInput},
+    txid::TxIdDigester,
+    Authorization, Transaction, TransactionData, TxId, TxVersion,
+};
+use zcash_protocol::{
     consensus::BlockHeight,
-    legacy::{keys::pubkey_to_address, Script, TransparentAddress},
     memo::{Memo, MemoBytes},
-    transaction::{
-        components::{amount::NonNegativeAmount, sapling as sapling_serialization, transparent},
-        sighash::{signature_hash, SignableInput, TransparentAuthorizingContext},
-        txid::TxIdDigester,
-        Authorization, Transaction, TransactionData, TxId, TxVersion,
-    },
+    value::Zatoshis,
 };
 
 use crate::{
@@ -108,7 +115,7 @@ impl transparent::Authorization for TransparentAuth {
 }
 
 impl TransparentAuthorizingContext for TransparentAuth {
-    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
+    fn input_amounts(&self) -> Vec<Zatoshis> {
         self.all_prev_outputs
             .iter()
             .map(|prevout| prevout.value)
@@ -283,7 +290,7 @@ pub(crate) fn inspect(
                                 let sig = secp256k1::ecdsa::Signature::from_der(
                                     &txin.script_sig.0[1..1 + sig_len],
                                 );
-                                let hash_type = txin.script_sig.0[1 + sig_len];
+                                let hash_type = SighashType::parse(txin.script_sig.0[1 + sig_len]);
                                 let pubkey_bytes = &txin.script_sig.0[1 + sig_len + 2..];
                                 let pubkey = secp256k1::PublicKey::from_slice(pubkey_bytes);
 
@@ -293,13 +300,18 @@ pub(crate) fn inspect(
                                         i, e
                                     );
                                 }
+                                if hash_type.is_none() {
+                                    eprintln!("    ⚠️  Txin {} has invalid sighash type", i);
+                                }
                                 if let Err(e) = pubkey {
                                     eprintln!(
                                         "    ⚠️  Txin {} has invalid pubkey encoding: {}",
                                         i, e
                                     );
                                 }
-                                if let (Ok(sig), Ok(pubkey)) = (sig, pubkey) {
+                                if let (Ok(sig), Some(hash_type), Ok(pubkey)) =
+                                    (sig, hash_type, pubkey)
+                                {
                                     #[allow(deprecated)]
                                     if pubkey_to_address(&pubkey) != addr {
                                         eprintln!("    ⚠️  Txin {} pubkey does not match coin's script_pubkey", i);
@@ -307,14 +319,16 @@ pub(crate) fn inspect(
 
                                     let sighash = signature_hash(
                                         tx,
-                                        &SignableInput::Transparent {
-                                            hash_type,
-                                            index: i,
-                                            // For P2PKH these are the same.
-                                            script_code: &coin.script_pubkey,
-                                            script_pubkey: &coin.script_pubkey,
-                                            value: coin.value,
-                                        },
+                                        &SignableInput::Transparent(
+                                            ::transparent::sighash::SignableInput::from_parts(
+                                                hash_type,
+                                                i,
+                                                // For P2PKH these are the same.
+                                                &coin.script_pubkey,
+                                                &coin.script_pubkey,
+                                                coin.value,
+                                            ),
+                                        ),
                                         txid_parts,
                                     );
                                     let msg = secp256k1::Message::from_slice(sighash.as_ref())

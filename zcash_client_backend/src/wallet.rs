@@ -2,30 +2,28 @@
 //! light client.
 
 use incrementalmerkletree::Position;
+
+use ::transparent::{
+    address::TransparentAddress,
+    bundle::{OutPoint, TxOut},
+};
 use zcash_address::ZcashAddress;
 use zcash_note_encryption::EphemeralKeyBytes;
-use zcash_primitives::{
+use zcash_primitives::transaction::{fees::transparent as transparent_fees, TxId};
+use zcash_protocol::{
     consensus::BlockHeight,
-    legacy::TransparentAddress,
-    transaction::{
-        components::{
-            amount::NonNegativeAmount,
-            transparent::{OutPoint, TxOut},
-        },
-        fees::transparent as transparent_fees,
-        TxId,
-    },
-    zip32::Scope,
+    value::{BalanceError, Zatoshis},
+    PoolType, ShieldedProtocol,
 };
-use zcash_protocol::value::BalanceError;
+use zip32::Scope;
 
-use crate::{fees::sapling as sapling_fees, PoolType, ShieldedProtocol};
+use crate::fees::sapling as sapling_fees;
 
 #[cfg(feature = "orchard")]
 use crate::fees::orchard as orchard_fees;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::keys::{NonHardenedChildIndex, TransparentKeyScope};
+use ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
 
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -63,109 +61,29 @@ impl NoteId {
 }
 
 /// A type that represents the recipient of a transaction output:
+///
 /// * a recipient address;
 /// * for external unified addresses, the pool to which the payment is sent;
-/// * for ephemeral transparent addresses, the internal account ID and metadata about the outpoint;
 /// * for wallet-internal outputs, the internal account ID and metadata about the note.
+/// * if the `transparent-inputs` feature is enabled, for ephemeral transparent outputs, the
+///   internal account ID and metadata about the outpoint;
 #[derive(Debug, Clone, PartialEq)]
-pub enum Recipient<AccountId, N, O> {
-    External(ZcashAddress, PoolType),
+pub enum Recipient<AccountId> {
+    External {
+        recipient_address: ZcashAddress,
+        output_pool: PoolType,
+    },
+    #[cfg(feature = "transparent-inputs")]
     EphemeralTransparent {
         receiving_account: AccountId,
         ephemeral_address: TransparentAddress,
-        outpoint_metadata: O,
+        outpoint: OutPoint,
     },
     InternalAccount {
         receiving_account: AccountId,
         external_address: Option<ZcashAddress>,
-        note: N,
+        note: Box<Note>,
     },
-}
-
-impl<AccountId, N, O> Recipient<AccountId, N, O> {
-    /// Return a copy of this `Recipient` with `f` applied to the note metadata, if any.
-    pub fn map_internal_account_note<B, F: FnOnce(N) -> B>(
-        self,
-        f: F,
-    ) -> Recipient<AccountId, B, O> {
-        match self {
-            Recipient::External(addr, pool) => Recipient::External(addr, pool),
-            Recipient::EphemeralTransparent {
-                receiving_account,
-                ephemeral_address,
-                outpoint_metadata,
-            } => Recipient::EphemeralTransparent {
-                receiving_account,
-                ephemeral_address,
-                outpoint_metadata,
-            },
-            Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note,
-            } => Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note: f(note),
-            },
-        }
-    }
-
-    /// Return a copy of this `Recipient` with `f` applied to the output metadata, if any.
-    pub fn map_ephemeral_transparent_outpoint<B, F: FnOnce(O) -> B>(
-        self,
-        f: F,
-    ) -> Recipient<AccountId, N, B> {
-        match self {
-            Recipient::External(addr, pool) => Recipient::External(addr, pool),
-            Recipient::EphemeralTransparent {
-                receiving_account,
-                ephemeral_address,
-                outpoint_metadata,
-            } => Recipient::EphemeralTransparent {
-                receiving_account,
-                ephemeral_address,
-                outpoint_metadata: f(outpoint_metadata),
-            },
-            Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note,
-            } => Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note,
-            },
-        }
-    }
-}
-
-impl<AccountId, N, O> Recipient<AccountId, Option<N>, O> {
-    /// Return a copy of this `Recipient` with optional note metadata transposed to
-    /// an optional result.
-    pub fn internal_account_note_transpose_option(self) -> Option<Recipient<AccountId, N, O>> {
-        match self {
-            Recipient::External(addr, pool) => Some(Recipient::External(addr, pool)),
-            Recipient::EphemeralTransparent {
-                receiving_account,
-                ephemeral_address,
-                outpoint_metadata,
-            } => Some(Recipient::EphemeralTransparent {
-                receiving_account,
-                ephemeral_address,
-                outpoint_metadata,
-            }),
-            Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note,
-            } => note.map(|n0| Recipient::InternalAccount {
-                receiving_account,
-                external_address,
-                note: n0,
-            }),
-        }
-    }
 }
 
 /// The shielded subset of a [`Transaction`]'s data that is relevant to a particular wallet.
@@ -286,7 +204,7 @@ impl WalletTransparentOutput {
         &self.recipient_address
     }
 
-    pub fn value(&self) -> NonNegativeAmount {
+    pub fn value(&self) -> Zatoshis {
         self.txout.value
     }
 }
@@ -436,13 +354,13 @@ pub enum Note {
 }
 
 impl Note {
-    pub fn value(&self) -> NonNegativeAmount {
+    pub fn value(&self) -> Zatoshis {
         match self {
             Note::Sapling(n) => n.value().inner().try_into().expect(
                 "Sapling notes must have values in the range of valid non-negative ZEC values.",
             ),
             #[cfg(feature = "orchard")]
-            Note::Orchard(n) => NonNegativeAmount::from_u64(n.value().inner()).expect(
+            Note::Orchard(n) => Zatoshis::from_u64(n.value().inner()).expect(
                 "Orchard notes must have values in the range of valid non-negative ZEC values.",
             ),
         }
@@ -525,14 +443,14 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
 }
 
 impl<NoteRef> ReceivedNote<NoteRef, sapling::Note> {
-    pub fn note_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+    pub fn note_value(&self) -> Result<Zatoshis, BalanceError> {
         self.note.value().inner().try_into()
     }
 }
 
 #[cfg(feature = "orchard")]
 impl<NoteRef> ReceivedNote<NoteRef, orchard::note::Note> {
-    pub fn note_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+    pub fn note_value(&self) -> Result<Zatoshis, BalanceError> {
         self.note.value().inner().try_into()
     }
 }
@@ -542,7 +460,7 @@ impl<NoteRef> sapling_fees::InputView<NoteRef> for (NoteRef, sapling::value::Not
         &self.0
     }
 
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         self.1
             .inner()
             .try_into()
@@ -555,7 +473,7 @@ impl<NoteRef> sapling_fees::InputView<NoteRef> for ReceivedNote<NoteRef, sapling
         &self.note_id
     }
 
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         self.note
             .value()
             .inner()
@@ -570,7 +488,7 @@ impl<NoteRef> orchard_fees::InputView<NoteRef> for (NoteRef, orchard::value::Not
         &self.0
     }
 
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         self.1
             .inner()
             .try_into()
@@ -584,7 +502,7 @@ impl<NoteRef> orchard_fees::InputView<NoteRef> for ReceivedNote<NoteRef, orchard
         &self.note_id
     }
 
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         self.note
             .value()
             .inner()

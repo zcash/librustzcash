@@ -1,4 +1,6 @@
-use std::convert::{TryFrom, TryInto};
+use alloc::vec::Vec;
+use core::convert::{TryFrom, TryInto};
+use zcash_protocol::constants;
 
 use super::{
     private::{SealedContainer, SealedItem},
@@ -87,10 +89,12 @@ impl SealedItem for Ivk {
 /// # Examples
 ///
 /// ```
-/// # use std::error::Error;
 /// use zcash_address::unified::{self, Container, Encoding};
 ///
-/// # fn main() -> Result<(), Box<dyn Error>> {
+/// # #[cfg(not(feature = "std"))]
+/// # fn main() {}
+/// # #[cfg(feature = "std")]
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// # let uivk_from_user = || "uivk1djetqg3fws7y7qu5tekynvcdhz69gsyq07ewvppmzxdqhpfzdgmx8urnkqzv7ylz78ez43ux266pqjhecd59fzhn7wpe6zarnzh804hjtkyad25ryqla5pnc8p5wdl3phj9fczhz64zprun3ux7y9jc08567xryumuz59rjmg4uuflpjqwnq0j0tzce0x74t4tv3gfjq7nczkawxy6y7hse733ae3vw7qfjd0ss0pytvezxp42p6rrpzeh6t2zrz7zpjk0xhngcm6gwdppxs58jkx56gsfflugehf5vjlmu7vj3393gj6u37wenavtqyhdvcdeaj86s6jczl4zq";
 /// let example_uivk: &str = uivk_from_user();
 ///
@@ -130,17 +134,17 @@ impl SealedContainer for Uivk {
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const MAINNET: &'static str = "uivk";
+    const MAINNET: &'static str = constants::mainnet::HRP_UNIFIED_IVK;
 
     /// The HRP for a Bech32m-encoded testnet Unified IVK.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const TESTNET: &'static str = "uivktest";
+    const TESTNET: &'static str = constants::testnet::HRP_UNIFIED_IVK;
 
     /// The HRP for a Bech32m-encoded regtest Unified IVK.
-    const REGTEST: &'static str = "uivkregtest";
+    const REGTEST: &'static str = constants::regtest::HRP_UNIFIED_IVK;
 
     fn from_inner(ivks: Vec<Self::Item>) -> Self {
         Self(ivks)
@@ -149,6 +153,9 @@ impl SealedContainer for Uivk {
 
 #[cfg(test)]
 mod tests {
+    use alloc::borrow::ToOwned;
+    use alloc::vec::Vec;
+
     use assert_matches::assert_matches;
 
     use proptest::{
@@ -158,13 +165,11 @@ mod tests {
     };
 
     use super::{Ivk, ParseError, Typecode, Uivk};
-    use crate::{
-        kind::unified::{
-            private::{SealedContainer, SealedItem},
-            Container, Encoding,
-        },
-        Network,
+    use crate::kind::unified::{
+        private::{SealedContainer, SealedItem},
+        Container, Encoding,
     };
+    use zcash_protocol::consensus::NetworkType;
 
     prop_compose! {
         fn uniform64()(a in uniform32(0u8..), b in uniform32(0u8..)) -> [u8; 64] {
@@ -213,7 +218,7 @@ mod tests {
     proptest! {
         #[test]
         fn uivk_roundtrip(
-            network in select(vec![Network::Main, Network::Test, Network::Regtest]),
+            network in select(vec![NetworkType::Main, NetworkType::Test, NetworkType::Regtest]),
             uivk in arb_unified_ivk(),
         ) {
             let encoded = uivk.encode(&network);
@@ -302,7 +307,7 @@ mod tests {
     fn duplicate_typecode() {
         // Construct and serialize an invalid UIVK.
         let uivk = Uivk(vec![Ivk::Sapling([1; 64]), Ivk::Sapling([2; 64])]);
-        let encoded = uivk.encode(&Network::Main);
+        let encoded = uivk.encode(&NetworkType::Main);
         assert_eq!(
             Uivk::decode(&encoded),
             Err(ParseError::DuplicateTypecode(Typecode::Sapling))

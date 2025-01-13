@@ -7,6 +7,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `nonempty 0.11`
+
+## [0.2.2] - 2024-12-13
+### Added
+- `no-std` support, via a default-enabled `std` feature flag.
+
 ## [0.2.1] - 2024-08-19
 ### Added
 - `zcash_encoding::CompactSize::serialized_size`

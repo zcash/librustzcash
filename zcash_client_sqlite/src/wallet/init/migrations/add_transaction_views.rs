@@ -5,12 +5,10 @@ use rusqlite::{self, types::ToSql, OptionalExtension};
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
-use zcash_primitives::{
+use zcash_primitives::transaction::Transaction;
+use zcash_protocol::{
     consensus::BranchId,
-    transaction::{
-        components::amount::{Amount, BalanceError},
-        Transaction,
-    },
+    value::{BalanceError, ZatBalance},
 };
 
 use super::{add_utxo_account, sent_notes_to_internal};
@@ -105,7 +103,7 @@ impl RusqliteMigration for Migration {
                     op_amount.map_or_else(
                         || Err(FeeError::UtxoNotFound),
                         |i| {
-                            Amount::from_i64(i).map_err(|_| {
+                            ZatBalance::from_i64(i).map_err(|_| {
                                 FeeError::CorruptedData(format!(
                                     "UTXO amount out of range in outpoint {:?}",
                                     op
@@ -275,8 +273,9 @@ mod tests {
     use rusqlite::{self, params};
     use tempfile::NamedTempFile;
 
-    use zcash_client_backend::keys::UnifiedSpendingKey;
-    use zcash_primitives::{consensus::Network, zip32::AccountId};
+    use zcash_keys::keys::UnifiedSpendingKey;
+    use zcash_protocol::consensus::Network;
+    use zip32::AccountId;
 
     use crate::{
         wallet::init::{init_wallet_db_internal, migrations::addresses_table},
@@ -286,17 +285,16 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     use {
         crate::wallet::init::migrations::{ufvk_support, utxos_table},
-        zcash_client_backend::encoding::AddressCodec,
-        zcash_primitives::{
+        ::transparent::{
+            address::Script,
+            bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut},
+            keys::IncomingViewingKey,
+        },
+        zcash_keys::encoding::AddressCodec,
+        zcash_primitives::transaction::{TransactionData, TxVersion},
+        zcash_protocol::{
             consensus::{BlockHeight, BranchId},
-            legacy::{keys::IncomingViewingKey, Script},
-            transaction::{
-                components::{
-                    transparent::{self, Authorized, OutPoint},
-                    Amount, TxIn, TxOut,
-                },
-                TransactionData, TxVersion,
-            },
+            value::ZatBalance,
         },
     };
 
@@ -394,10 +392,10 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn migrate_from_wm2() {
+        use ::transparent::keys::NonHardenedChildIndex;
         use zcash_client_backend::keys::UnifiedAddressRequest;
-        use zcash_primitives::{
-            legacy::keys::NonHardenedChildIndex, transaction::components::amount::NonNegativeAmount,
-        };
+        use zcash_keys::keys::ReceiverRequirement::*;
+        use zcash_protocol::value::Zatoshis;
 
         use crate::UA_TRANSPARENT;
 
@@ -425,7 +423,7 @@ mod tests {
                     sequence: 0,
                 }],
                 vout: vec![TxOut {
-                    value: NonNegativeAmount::const_from_u64(1100000000),
+                    value: Zatoshis::const_from_u64(1100000000),
                     script_pubkey: Script(vec![]),
                 }],
                 authorization: Authorized,
@@ -443,11 +441,11 @@ mod tests {
         let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32][..], AccountId::ZERO).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
         let (ua, _) = ufvk
-            .default_address(UnifiedAddressRequest::unsafe_new(
-                false,
-                true,
+            .default_address(Some(UnifiedAddressRequest::unsafe_new(
+                Omit,
+                Require,
                 UA_TRANSPARENT,
-            ))
+            )))
             .expect("A valid default address exists for the UFVK");
         let taddr = ufvk
             .transparent()
@@ -486,10 +484,10 @@ mod tests {
         let fee = db_data
             .conn
             .query_row("SELECT fee FROM transactions WHERE id_tx = 0", [], |row| {
-                Ok(Amount::from_i64(row.get(0)?).unwrap())
+                Ok(ZatBalance::from_i64(row.get(0)?).unwrap())
             })
             .unwrap();
 
-        assert_eq!(fee, Amount::from_i64(300000000).unwrap());
+        assert_eq!(fee, ZatBalance::from_i64(300000000).unwrap());
     }
 }

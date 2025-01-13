@@ -7,10 +7,17 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `nonempty 0.11`
+
+## [0.14.0] - 2024-12-16
+
 ### Added
 - `zcash_client_sqlite::AccountUuid`
 
 ### Changed
+- Migrated to `sapling-crypto 0.4`, `zcash_keys 0.6`, `zcash_primitives 0.21`,
+  `zcash_proofs 0.21`, `zcash_client_backend 0.16`
 - The `v_transactions` view has been modified:
   - The `account_id` column has been replaced with `account_uuid`.
 - The `v_tx_outputs` view has been modified:
@@ -42,6 +49,18 @@ and this library adheres to Rust's notion of
 - Migrated from `schemer` to our fork `schemerz`.
 - Migrated to `rusqlite 0.32`.
 - `error::SqliteClientError` has additional variant `NoteFilterInvalid`
+
+### Fixed
+- `zcash_client_sqlite::WalletDb`'s implementation of
+  `zcash_client_backend::data_api::WalletRead::get_wallet_summary` has been
+  fixed to take account of `min_confirmations` for transparent balances.
+  (Previously, it would treat transparent balances as though
+  `min_confirmations` were `1` even if it was set to a higher value.)
+  Note that this implementation treats `min_confirmations == 0` the same
+  as `min_confirmations == 1` for both shielded and transparent TXOs.
+  It also does not currently distinguish between pending change and
+  non-change; the pending value is all counted as non-change (issue
+  [#1592](https://github.com/zcash/librustzcash/issues/1592)).
 
 ## [0.12.2] - 2024-10-21
 

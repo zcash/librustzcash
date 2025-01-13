@@ -5,8 +5,9 @@ use std::collections::HashSet;
 
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
+
 use zcash_client_backend::data_api::{scanning::ScanPriority, SAPLING_SHARD_HEIGHT};
-use zcash_primitives::consensus::{self, NetworkUpgrade};
+use zcash_protocol::consensus::{self, NetworkUpgrade};
 
 use crate::wallet::{init::WalletMigrationError, scanning::priority_code};
 

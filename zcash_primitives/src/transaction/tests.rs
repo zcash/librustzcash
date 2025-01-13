@@ -1,18 +1,14 @@
+use ::transparent::sighash::SighashType;
 use blake2b_simd::Hash as Blake2bHash;
 use std::ops::Deref;
 
 use proptest::prelude::*;
 
-use crate::{
-    consensus::BranchId, legacy::Script, transaction::components::amount::NonNegativeAmount,
-};
+use ::transparent::{address::Script, sighash::TransparentAuthorizingContext};
+use zcash_protocol::{consensus::BranchId, value::Zatoshis};
 
 use super::{
-    sapling,
-    sighash::{
-        SignableInput, TransparentAuthorizingContext, SIGHASH_ALL, SIGHASH_ANYONECANPAY,
-        SIGHASH_NONE, SIGHASH_SINGLE,
-    },
+    sighash::SignableInput,
     sighash_v4::v4_signature_hash,
     sighash_v5::v5_signature_hash,
     testing::arb_tx,
@@ -136,13 +132,15 @@ fn zip_0143() {
     for tv in self::data::zip_0143::make_test_vectors() {
         let tx = Transaction::read(&tv.tx[..], tv.consensus_branch_id).unwrap();
         let signable_input = match tv.transparent_input {
-            Some(n) => SignableInput::Transparent {
-                hash_type: tv.hash_type as u8,
-                index: n as usize,
-                script_code: &tv.script_code,
-                script_pubkey: &tv.script_code,
-                value: NonNegativeAmount::from_nonnegative_i64(tv.amount).unwrap(),
-            },
+            Some(n) => {
+                SignableInput::Transparent(::transparent::sighash::SignableInput::from_parts(
+                    SighashType::parse(tv.hash_type as u8).unwrap(),
+                    n as usize,
+                    &tv.script_code,
+                    &tv.script_code,
+                    Zatoshis::from_nonnegative_i64(tv.amount).unwrap(),
+                ))
+            }
             _ => SignableInput::Shielded,
         };
 
@@ -158,13 +156,15 @@ fn zip_0243() {
     for tv in self::data::zip_0243::make_test_vectors() {
         let tx = Transaction::read(&tv.tx[..], tv.consensus_branch_id).unwrap();
         let signable_input = match tv.transparent_input {
-            Some(n) => SignableInput::Transparent {
-                hash_type: tv.hash_type as u8,
-                index: n as usize,
-                script_code: &tv.script_code,
-                script_pubkey: &tv.script_code,
-                value: NonNegativeAmount::from_nonnegative_i64(tv.amount).unwrap(),
-            },
+            Some(n) => {
+                SignableInput::Transparent(::transparent::sighash::SignableInput::from_parts(
+                    SighashType::parse(tv.hash_type as u8).unwrap(),
+                    n as usize,
+                    &tv.script_code,
+                    &tv.script_code,
+                    Zatoshis::from_nonnegative_i64(tv.amount).unwrap(),
+                ))
+            }
             _ => SignableInput::Shielded,
         };
 
@@ -177,7 +177,7 @@ fn zip_0243() {
 
 #[derive(Debug)]
 struct TestTransparentAuth {
-    input_amounts: Vec<NonNegativeAmount>,
+    input_amounts: Vec<Zatoshis>,
     input_scriptpubkeys: Vec<Script>,
 }
 
@@ -186,7 +186,7 @@ impl transparent::Authorization for TestTransparentAuth {
 }
 
 impl TransparentAuthorizingContext for TestTransparentAuth {
-    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
+    fn input_amounts(&self) -> Vec<Zatoshis> {
         self.input_amounts.clone()
     }
 
@@ -221,7 +221,7 @@ fn zip_0244() {
         let input_amounts = tv
             .amounts
             .iter()
-            .map(|amount| NonNegativeAmount::from_nonnegative_i64(*amount).unwrap())
+            .map(|amount| Zatoshis::from_nonnegative_i64(*amount).unwrap())
             .collect();
         let input_scriptpubkeys = tv
             .script_pubkeys
@@ -287,27 +287,30 @@ fn zip_0244() {
             let bundle = txdata.transparent_bundle().unwrap();
             let value = bundle.authorization.input_amounts[index];
             let script_pubkey = &bundle.authorization.input_scriptpubkeys[index];
-            let signable_input = |hash_type| SignableInput::Transparent {
-                hash_type,
-                index,
-                script_code: script_pubkey,
-                script_pubkey,
-                value,
+            let signable_input = |hash_type| {
+                SignableInput::Transparent(::transparent::sighash::SignableInput::from_parts(
+                    hash_type,
+                    index,
+                    script_pubkey,
+                    script_pubkey,
+                    value,
+                ))
             };
 
             assert_eq!(
-                v5_signature_hash(&txdata, &signable_input(SIGHASH_ALL), &txid_parts).as_ref(),
+                v5_signature_hash(&txdata, &signable_input(SighashType::ALL), &txid_parts).as_ref(),
                 &tv.sighash_all.unwrap()
             );
 
             assert_eq!(
-                v5_signature_hash(&txdata, &signable_input(SIGHASH_NONE), &txid_parts).as_ref(),
+                v5_signature_hash(&txdata, &signable_input(SighashType::NONE), &txid_parts)
+                    .as_ref(),
                 &tv.sighash_none.unwrap()
             );
 
             if index < bundle.vout.len() {
                 assert_eq!(
-                    v5_signature_hash(&txdata, &signable_input(SIGHASH_SINGLE), &txid_parts)
+                    v5_signature_hash(&txdata, &signable_input(SighashType::SINGLE), &txid_parts)
                         .as_ref(),
                     &tv.sighash_single.unwrap()
                 );
@@ -318,7 +321,7 @@ fn zip_0244() {
             assert_eq!(
                 v5_signature_hash(
                     &txdata,
-                    &signable_input(SIGHASH_ALL | SIGHASH_ANYONECANPAY),
+                    &signable_input(SighashType::ALL_ANYONECANPAY),
                     &txid_parts,
                 )
                 .as_ref(),
@@ -328,7 +331,7 @@ fn zip_0244() {
             assert_eq!(
                 v5_signature_hash(
                     &txdata,
-                    &signable_input(SIGHASH_NONE | SIGHASH_ANYONECANPAY),
+                    &signable_input(SighashType::NONE_ANYONECANPAY),
                     &txid_parts,
                 )
                 .as_ref(),
@@ -339,7 +342,7 @@ fn zip_0244() {
                 assert_eq!(
                     v5_signature_hash(
                         &txdata,
-                        &signable_input(SIGHASH_SINGLE | SIGHASH_ANYONECANPAY),
+                        &signable_input(SighashType::SINGLE_ANYONECANPAY),
                         &txid_parts,
                     )
                     .as_ref(),

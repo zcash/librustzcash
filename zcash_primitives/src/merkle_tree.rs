@@ -10,8 +10,6 @@ use orchard::tree::MerkleHashOrchard;
 use std::io::{self, Read, Write};
 use zcash_encoding::{Optional, Vector};
 
-use crate::sapling;
-
 /// A hashable node within a Merkle tree.
 pub trait HashSer {
     /// Parses a node from the given byte source.
@@ -350,7 +348,7 @@ mod tests {
         read_incremental_witness, write_commitment_tree, write_frontier_v1,
         write_incremental_witness, CommitmentTree, HashSer,
     };
-    use crate::sapling::{self, Node};
+    use ::sapling::{self, Node};
 
     proptest! {
         #[test]

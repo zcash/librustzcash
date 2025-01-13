@@ -7,27 +7,70 @@ on:
   merge_group:
 
 jobs:
-  test:
-    name: >
-      Test${{
-      matrix.state != 'NOT_A_PUZZLE' && format(' {0}', matrix.state) || ''
-      }} on ${{ matrix.target }}
+  required-test:
+    name: Test ${{ matrix.state }} on ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.state != 'NOT_A_PUZZLE' }}
     strategy:
       matrix:
         target:
           - Linux
-          - macOS
-          - Windows
         state:
-          - NOT_A_PUZZLE
+          - no-Orchard
           - Orchard
           - NU7
 
         include:
           - target: Linux
             os: ubuntu-latest-8cores
+
+          - state: Orchard
+            extra_flags: orchard
+          - state: NU7
+            extra_flags: orchard
+            rustflags: '--cfg zcash_unstable="nu7"'
+
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      RUSTDOCFLAGS: ${{ matrix.rustflags }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - id: prepare
+        uses: ./.github/actions/prepare
+        with:
+          extra-features: ${{ matrix.extra_flags || '' }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run tests
+        run: >
+          cargo test
+          --workspace
+          ${{ steps.prepare.outputs.feature-flags }}
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+
+  test:
+    name: Test ${{ matrix.state }} on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      matrix:
+        target:
+          - macOS
+          - Windows
+        state:
+          - no-Orchard
+          - Orchard
+          - NU7
+
+        include:
           - target: macOS
             os: macOS-latest
           - target: Windows
@@ -36,6 +79,7 @@ jobs:
           - state: Orchard
             extra_flags: orchard
           - state: NU7
+            extra_flags: orchard
             rustflags: '--cfg zcash_unstable="nu7"'
 
         exclude:
@@ -51,7 +95,7 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          extra-features: ${{ matrix.state != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
+          extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
         with:
           path: |
@@ -66,6 +110,50 @@ jobs:
           cargo test
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+
+  test-slow:
+    name: Slow Test ${{ matrix.state }} on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      matrix:
+        target:
+          - Linux
+        state:
+          - Orchard
+          - NU7
+
+        include:
+          - target: Linux
+            os: ubuntu-latest-8cores
+
+          - state: Orchard
+            extra_flags: orchard
+          - state: NU7
+            extra_flags: orchard
+            rustflags: '--cfg zcash_unstable="nu7"'
+
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      RUSTDOCFLAGS: ${{ matrix.rustflags }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - id: prepare
+        uses: ./.github/actions/prepare
+        with:
+          extra-features: ${{ matrix.extra_flags || '' }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
       - name: Run slow tests
         run: >
           cargo test
@@ -78,12 +166,8 @@ jobs:
 
   # States that we want to ensure can be built, but that we don't actively run tests for.
   check-msrv:
-    name: >
-      Check${{
-      matrix.state != 'NOT_A_PUZZLE' && format(' {0}', matrix.state) || ''
-      }} build on ${{ matrix.target }}
+    name: Check ${{ matrix.state }} build on ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.state != 'NOT_A_PUZZLE' }}
     strategy:
       matrix:
         target:
@@ -113,7 +197,7 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          extra-features: ${{ matrix.state != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
+          extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
         with:
           path: |
@@ -204,6 +288,46 @@ jobs:
         working-directory: ./ci-build
         run: cargo build --verbose --target ${{ matrix.target }}
 
+  build-nostd:
+    name: Build target ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - thumbv7em-none-eabihf
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: crates
+      # We use a synthetic crate to ensure no dev-dependencies are enabled, which can
+      # be incompatible with some of these targets.
+      - name: Create synthetic crate for testing
+        run: cargo init --lib ci-build
+      - name: Copy Rust version into synthetic crate
+        run: cp crates/rust-toolchain.toml ci-build/
+      - name: Copy patch directives into synthetic crate
+        run: |
+          echo "[patch.crates-io]" >> ./ci-build/Cargo.toml
+          cat ./crates/Cargo.toml | sed "0,/.\+\(patch.crates.\+\)/d" >> ./ci-build/Cargo.toml
+      - name: Add no_std pragma to lib.rs
+        run: |
+          echo "#![no_std]" > ./ci-build/src/lib.rs
+      - name: Add zcash_keys as a dependency of the synthetic crate
+        working-directory: ./ci-build
+        run: cargo add --no-default-features --path ../crates/zcash_keys
+      - name: Add pczt as a dependency of the synthetic crate
+        working-directory: ./ci-build
+        run: cargo add --no-default-features --path ../crates/pczt
+      - name: Add lazy_static with the spin_no_std feature
+        working-directory: ./ci-build
+        run: cargo add lazy_static --features "spin_no_std"
+      - name: Add target
+        working-directory: ./ci-build
+        run: rustup target add ${{ matrix.target }}
+      - name: Build for target
+        working-directory: ./ci-build
+        run: cargo build --verbose --target ${{ matrix.target }}
+
   bitrot:
     name: Bitrot check
     runs-on: ubuntu-latest
@@ -283,7 +407,7 @@ jobs:
           --timeout 600
           --out xml
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4.6.0
+        uses: codecov/codecov-action@v5.1.2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -368,7 +492,7 @@ jobs:
   required-checks:
     name: Required status checks have passed
     needs:
-      - test
+      - required-test
       - check-msrv
       - build-latest
       - build-nodefault

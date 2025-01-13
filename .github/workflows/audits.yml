@@ -29,8 +29,8 @@ jobs:
         with:
           command: check licenses
 
-  required-checks:
-    name: Required status checks have passed
+  required-audits:
+    name: Required audits have passed
     needs:
       - cargo-vet
       - cargo-deny

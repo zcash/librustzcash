@@ -15,15 +15,14 @@ use sapling::{
     zip32::DiversifiableFullViewingKey,
     Diversifier, Node, Rseed,
 };
-use zcash_client_backend::{data_api::SAPLING_SHARD_HEIGHT, keys::UnifiedFullViewingKey};
-use zcash_primitives::{
+use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
+use zcash_keys::keys::UnifiedFullViewingKey;
+use zcash_primitives::transaction::{components::sapling::zip212_enforcement, Transaction};
+use zcash_protocol::{
     consensus::{self, BlockHeight, BranchId},
-    transaction::{
-        components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
-        Transaction,
-    },
-    zip32::Scope,
+    value::Zatoshis,
 };
+use zip32::Scope;
 
 use crate::{
     wallet::{
@@ -218,12 +217,11 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     })?)
                 };
 
-                let note_value =
-                    NonNegativeAmount::from_nonnegative_i64(row.get(7)?).map_err(|_e| {
-                        WalletMigrationError::CorruptedData(
-                            "Note values must be nonnegative".to_string(),
-                        )
-                    })?;
+                let note_value = Zatoshis::from_nonnegative_i64(row.get(7)?).map_err(|_e| {
+                    WalletMigrationError::CorruptedData(
+                        "Note values must be nonnegative".to_string(),
+                    )
+                })?;
 
                 let rseed = {
                     let rcm_bytes: [u8; 32] =
@@ -290,6 +288,12 @@ mod tests {
     use rand_core::OsRng;
     use rusqlite::{named_params, params, Connection, OptionalExtension};
     use tempfile::NamedTempFile;
+
+    use ::transparent::{
+        builder::TransparentSigningSet,
+        bundle as transparent,
+        keys::{IncomingViewingKey, NonHardenedChildIndex},
+    };
     use zcash_client_backend::{
         data_api::{BlockMetadata, WalletCommitmentTrees, SAPLING_SHARD_HEIGHT},
         decrypt_transaction,
@@ -301,18 +305,19 @@ mod tests {
     use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
-        legacy::keys::{IncomingViewingKey, NonHardenedChildIndex},
-        memo::MemoBytes,
         transaction::{
             builder::{BuildConfig, BuildResult, Builder},
-            components::{amount::NonNegativeAmount, transparent},
             fees::fixed,
             Transaction,
         },
-        zip32::{self, Scope},
     };
     use zcash_proofs::prover::LocalTxProver;
+    use zcash_protocol::{
+        consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
+        memo::MemoBytes,
+        value::Zatoshis,
+    };
+    use zip32::Scope;
 
     use crate::{
         error::SqliteClientError,
@@ -364,14 +369,17 @@ mod tests {
                 orchard_anchor: None,
             },
         );
+        let mut transparent_signing_set = TransparentSigningSet::new();
         builder
             .add_transparent_input(
-                usk0.transparent()
-                    .derive_external_secret_key(NonHardenedChildIndex::ZERO)
-                    .unwrap(),
+                transparent_signing_set.add_key(
+                    usk0.transparent()
+                        .derive_external_secret_key(NonHardenedChildIndex::ZERO)
+                        .unwrap(),
+                ),
                 transparent::OutPoint::fake(),
                 transparent::TxOut {
-                    value: NonNegativeAmount::const_from_u64(EXTERNAL_VALUE + INTERNAL_VALUE),
+                    value: Zatoshis::const_from_u64(EXTERNAL_VALUE + INTERNAL_VALUE),
                     script_pubkey: usk0
                         .transparent()
                         .to_account_pubkey()
@@ -387,7 +395,7 @@ mod tests {
             .add_sapling_output::<Infallible>(
                 Some(ovk),
                 external_addr,
-                NonNegativeAmount::const_from_u64(EXTERNAL_VALUE),
+                Zatoshis::const_from_u64(EXTERNAL_VALUE),
                 MemoBytes::empty(),
             )
             .unwrap();
@@ -395,18 +403,21 @@ mod tests {
             .add_sapling_output::<Infallible>(
                 Some(ovk),
                 internal_addr,
-                NonNegativeAmount::const_from_u64(INTERNAL_VALUE),
+                Zatoshis::const_from_u64(INTERNAL_VALUE),
                 MemoBytes::empty(),
             )
             .unwrap();
         let prover = LocalTxProver::bundled();
         let res = builder
             .build(
+                &transparent_signing_set,
+                &[],
+                &[],
                 OsRng,
                 &prover,
                 &prover,
                 #[allow(deprecated)]
-                &fixed::FeeRule::non_standard(NonNegativeAmount::ZERO),
+                &fixed::FeeRule::non_standard(Zatoshis::ZERO),
             )
             .unwrap();
 
@@ -479,7 +490,7 @@ mod tests {
     fn put_tx_data(
         conn: &rusqlite::Connection,
         tx: &Transaction,
-        fee: Option<NonNegativeAmount>,
+        fee: Option<Zatoshis>,
         created_at: Option<time::OffsetDateTime>,
     ) -> Result<TxRef, SqliteClientError> {
         let mut stmt_upsert_tx_data = conn.prepare_cached(

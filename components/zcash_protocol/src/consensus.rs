@@ -1,10 +1,12 @@
 //! Consensus logic and parameters.
 
+use core::cmp::{Ord, Ordering};
+use core::convert::TryFrom;
+use core::fmt;
+use core::ops::{Add, Bound, RangeBounds, Sub};
+
+#[cfg(feature = "std")]
 use memuse::DynamicUsage;
-use std::cmp::{Ord, Ordering};
-use std::convert::TryFrom;
-use std::fmt;
-use std::ops::{Add, Bound, RangeBounds, Sub};
 
 use crate::constants::{mainnet, regtest, testnet};
 
@@ -16,6 +18,7 @@ use crate::constants::{mainnet, regtest, testnet};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHeight(u32);
 
+#[cfg(feature = "std")]
 memuse::impl_no_dynamic_usage!(BlockHeight);
 
 /// The height of the genesis block on a network.
@@ -64,7 +67,7 @@ impl From<BlockHeight> for u32 {
 }
 
 impl TryFrom<u64> for BlockHeight {
-    type Error = std::num::TryFromIntError;
+    type Error = core::num::TryFromIntError;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
         u32::try_from(value).map(BlockHeight)
@@ -78,7 +81,7 @@ impl From<BlockHeight> for u64 {
 }
 
 impl TryFrom<i32> for BlockHeight {
-    type Error = std::num::TryFromIntError;
+    type Error = core::num::TryFromIntError;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         u32::try_from(value).map(BlockHeight)
@@ -86,7 +89,7 @@ impl TryFrom<i32> for BlockHeight {
 }
 
 impl TryFrom<i64> for BlockHeight {
-    type Error = std::num::TryFromIntError;
+    type Error = core::num::TryFromIntError;
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         u32::try_from(value).map(BlockHeight)
@@ -186,6 +189,27 @@ pub trait NetworkConstants: Clone {
     ///
     /// [ZIP 320]: https://zips.z.cash/zip-0320
     fn hrp_tex_address(&self) -> &'static str;
+
+    /// The HRP for a Bech32m-encoded mainnet Unified Address.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    fn hrp_unified_address(&self) -> &'static str;
+
+    /// The HRP for a Bech32m-encoded mainnet Unified FVK.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    fn hrp_unified_fvk(&self) -> &'static str;
+
+    /// The HRP for a Bech32m-encoded mainnet Unified IVK.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    fn hrp_unified_ivk(&self) -> &'static str;
 }
 
 /// The enumeration of known Zcash network types.
@@ -202,6 +226,7 @@ pub enum NetworkType {
     Regtest,
 }
 
+#[cfg(feature = "std")]
 memuse::impl_no_dynamic_usage!(NetworkType);
 
 impl NetworkConstants for NetworkType {
@@ -268,6 +293,30 @@ impl NetworkConstants for NetworkType {
             NetworkType::Regtest => regtest::HRP_TEX_ADDRESS,
         }
     }
+
+    fn hrp_unified_address(&self) -> &'static str {
+        match self {
+            NetworkType::Main => mainnet::HRP_UNIFIED_ADDRESS,
+            NetworkType::Test => testnet::HRP_UNIFIED_ADDRESS,
+            NetworkType::Regtest => regtest::HRP_UNIFIED_ADDRESS,
+        }
+    }
+
+    fn hrp_unified_fvk(&self) -> &'static str {
+        match self {
+            NetworkType::Main => mainnet::HRP_UNIFIED_FVK,
+            NetworkType::Test => testnet::HRP_UNIFIED_FVK,
+            NetworkType::Regtest => regtest::HRP_UNIFIED_FVK,
+        }
+    }
+
+    fn hrp_unified_ivk(&self) -> &'static str {
+        match self {
+            NetworkType::Main => mainnet::HRP_UNIFIED_IVK,
+            NetworkType::Test => testnet::HRP_UNIFIED_IVK,
+            NetworkType::Regtest => regtest::HRP_UNIFIED_IVK,
+        }
+    }
 }
 
 /// Zcash consensus parameters.
@@ -318,12 +367,25 @@ impl<P: Parameters> NetworkConstants for P {
     fn hrp_tex_address(&self) -> &'static str {
         self.network_type().hrp_tex_address()
     }
+
+    fn hrp_unified_address(&self) -> &'static str {
+        self.network_type().hrp_unified_address()
+    }
+
+    fn hrp_unified_fvk(&self) -> &'static str {
+        self.network_type().hrp_unified_fvk()
+    }
+
+    fn hrp_unified_ivk(&self) -> &'static str {
+        self.network_type().hrp_unified_ivk()
+    }
 }
 
 /// Marker struct for the production network.
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct MainNetwork;
 
+#[cfg(feature = "std")]
 memuse::impl_no_dynamic_usage!(MainNetwork);
 
 /// The production network.
@@ -353,6 +415,7 @@ impl Parameters for MainNetwork {
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct TestNetwork;
 
+#[cfg(feature = "std")]
 memuse::impl_no_dynamic_usage!(TestNetwork);
 
 /// The test network.
@@ -387,6 +450,7 @@ pub enum Network {
     TestNetwork,
 }
 
+#[cfg(feature = "std")]
 memuse::impl_no_dynamic_usage!(Network);
 
 impl Parameters for Network {
@@ -448,6 +512,7 @@ pub enum NetworkUpgrade {
     ZFuture,
 }
 
+#[cfg(feature = "std")]
 memuse::impl_no_dynamic_usage!(NetworkUpgrade);
 
 impl fmt::Display for NetworkUpgrade {
@@ -538,6 +603,7 @@ pub enum BranchId {
     ZFuture,
 }
 
+#[cfg(feature = "std")]
 memuse::impl_no_dynamic_usage!(BranchId);
 
 impl TryFrom<u32> for BranchId {
@@ -688,7 +754,7 @@ pub mod testing {
             .height_bounds(params)
             .map_or(Strategy::boxed(Just(None)), |(lower, upper)| {
                 Strategy::boxed(
-                    (lower.0..upper.map_or(std::u32::MAX, |u| u.0))
+                    (lower.0..upper.map_or(core::u32::MAX, |u| u.0))
                         .prop_map(|h| Some(BlockHeight(h))),
                 )
             })
@@ -707,7 +773,6 @@ mod tests {
     use super::{
         BlockHeight, BranchId, NetworkUpgrade, Parameters, MAIN_NETWORK, UPGRADES_IN_ORDER,
     };
-    use std::convert::TryFrom;
 
     #[test]
     fn nu_ordering() {

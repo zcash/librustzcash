@@ -8,17 +8,76 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Changed
+- Migrated to `nonempty 0.11`
+- `zcash_client_backend::wallet::Recipient` has changed:
+  - The `Recipient::External` variant is now a structured variant.
+  - The `Recipient::EphemeralTransparent` variant is now only available if
+    `zcash_client_backend` is built using the `transparent-inputs` feature flag.
+  - The `N` and `O` type pararameters to this type have been replaced by
+    concrete uses of `Box<Note>` and `Outpoint` instead. The
+    `map_internal_account_note` and `map_ephemeral_transparent_outpoint` and
+    `internal_account_note_transpose_option` methods have consequently been
+    removed.
+- `zcash_client_backend::data_api::WalletRead::get_known_ephemeral_addresses`
+  now takes a `Range<zcash_transparent::keys::NonHardenedChildIndex>` as its
+  argument instead of a `Range<u32>`
+
+### Deprecated
+- `zcash_client_backend::address` (use `zcash_keys::address` instead)
+- `zcash_client_backend::encoding` (use `zcash_keys::encoding` instead)
+- `zcash_client_backend::keys` (use `zcash_keys::keys` instead)
+- `zcash_client_backend::zip321` (use the `zip321` crate instead)
+- `zcash_client_backend::PoolType` (use `zcash_protocol::PoolType` instead)
+- `zcash_client_backend::ShieldedProtocol` (use `zcash_protocol::ShieldedProtocol` instead)
+
+## [0.16.0] - 2024-12-16
+
+### Added
+- `zcash_client_backend::data_api`
+  - `AccountSource::key_derivation`
+  - `error::PcztError`
+  - `wallet::ExtractErrT`
+  - `wallet::create_pczt_from_proposal`
+  - `wallet::extract_and_store_transaction_from_pczt`
+
+### Changed
+- Migrated to `sapling-crypto 0.4`, `zcash_keys 0.6`, `zcash_primitives 0.21`,
+  `zcash_proofs 0.21`.
+- `zcash_client_backend::data_api::AccountBalance`: Refactored to use `Balance`
+  for transparent funds (issue #1411). It now has an `unshielded_balance()`
+  method that returns `Balance`, allowing the unshielded spendable, unshielded
+  pending change, and unshielded pending non-change values to be tracked
+  separately.
 - `zcash_client_backend::data_api::WalletRead`:
   - The `create_account`, `import_account_hd`, and `import_account_ufvk`
     methods now each take additional `account_name` and `key_source` arguments.
     These allow the wallet backend to store additional metadata that is useful
     to applications managing these accounts.
 - `zcash_client_backend::data_api::AccountSource`:
-  - Both the `Derived` and `Importants` now have an additional `key_source`
-    property that is used to convey application-specific key source metadata.
+  - Both `Derived` and `Imported` alternatives of `AccountSource` now have an
+    additional `key_source` field that is used to convey application-specific
+    key source metadata.
   - The `Copy` impl for this type has been removed.
+  - The `request` argument to `WalletRead::get_next_available_address` is now optional.
 - `zcash_client_backend::data_api::Account` has an additional `name` method
   that returns the human-readable name of the account, if any.
+- `zcash_client_backend::data_api::error::Error` has new variants:
+    - `AccountIdNotRecognized`
+    - `AccountCannotSpend`
+    - `Pczt`
+
+### Deprecated
+- `AccountBalance::unshielded`. Instead use `unshielded_balance` which
+  provides a `Balance` value. Its `total()` method can be used to obtain the
+  total of transparent funds.
+
+### Removed
+- `zcash_client_backend::AccountBalance::add_unshielded_value`. Instead use
+  `AccountBalance::with_unshielded_balance_mut` with a closure that calls
+  the appropriate `add_*_value` method(s) of `Balance` on its argument.
+  Note that the appropriate method(s) depend on whether the funds are
+  spendable, pending change, or pending non-change (previously, only the
+  total unshielded value was tracked).
 
 ## [0.15.0] - 2024-11-14
 

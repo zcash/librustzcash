@@ -1,10 +1,13 @@
 //! Structs for handling supported address types.
 
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+
+use transparent::address::TransparentAddress;
 use zcash_address::{
     unified::{self, Container, Encoding, Typecode},
     ConversionError, ToAddress, TryFromRawAddress, ZcashAddress,
 };
-use zcash_primitives::legacy::TransparentAddress;
 use zcash_protocol::consensus::{self, NetworkType};
 
 #[cfg(feature = "sapling")]
@@ -215,7 +218,7 @@ impl UnifiedAddress {
 
     /// Returns the set of receiver typecodes.
     pub fn receiver_types(&self) -> Vec<Typecode> {
-        let result = std::iter::empty();
+        let result = core::iter::empty();
         #[cfg(feature = "orchard")]
         let result = result.chain(self.orchard.map(|_| Typecode::Orchard));
         #[cfg(feature = "sapling")]
@@ -421,6 +424,18 @@ impl Address {
             },
         }
     }
+
+    /// Returns the transparent address corresponding to this address, if it is a transparent
+    /// address, a Unified address with a transparent receiver, or ZIP 320 (TEX) address.
+    pub fn to_transparent_address(&self) -> Option<TransparentAddress> {
+        match self {
+            #[cfg(feature = "sapling")]
+            Address::Sapling(_) => None,
+            Address::Transparent(addr) => Some(*addr),
+            Address::Unified(ua) => ua.transparent().copied(),
+            Address::Tex(addr_bytes) => Some(TransparentAddress::PublicKeyHash(*addr_bytes)),
+        }
+    }
 }
 
 #[cfg(all(
@@ -433,7 +448,7 @@ impl Address {
 ))]
 pub mod testing {
     use proptest::prelude::*;
-    use zcash_primitives::consensus::Network;
+    use zcash_protocol::consensus::Network;
 
     use crate::keys::{testing::arb_unified_spending_key, UnifiedAddressRequest};
 
@@ -441,13 +456,13 @@ pub mod testing {
 
     #[cfg(feature = "sapling")]
     use sapling::testing::arb_payment_address;
-    use zcash_primitives::legacy::testing::arb_transparent_addr;
+    use transparent::address::testing::arb_transparent_addr;
 
     pub fn arb_unified_addr(
         params: Network,
         request: UnifiedAddressRequest,
     ) -> impl Strategy<Value = UnifiedAddress> {
-        arb_unified_spending_key(params).prop_map(move |k| k.default_address(request).0)
+        arb_unified_spending_key(params).prop_map(move |k| k.default_address(Some(request)).0)
     }
 
     #[cfg(feature = "sapling")]
@@ -473,7 +488,7 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use zcash_address::test_vectors;
-    use zcash_primitives::consensus::MAIN_NETWORK;
+    use zcash_protocol::consensus::MAIN_NETWORK;
 
     use super::{Address, UnifiedAddress};
 
@@ -481,7 +496,7 @@ mod tests {
     use crate::keys::sapling;
 
     #[cfg(any(feature = "orchard", feature = "sapling"))]
-    use zcash_primitives::zip32::AccountId;
+    use zip32::AccountId;
 
     #[test]
     #[cfg(any(feature = "orchard", feature = "sapling"))]

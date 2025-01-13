@@ -20,6 +20,10 @@ pub trait Authorization: Debug {
     type Witness: Debug + Clone + PartialEq;
 }
 
+impl Authorization for std::convert::Infallible {
+    type Witness = std::convert::Infallible;
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Authorized;
 

@@ -53,7 +53,7 @@ message Recipient {
   optional string address = 2; // either the zcash address if external or transparent address if EphemeralTransparent
   optional PoolType pool_type = 3; // the shielded protocol if External
   optional uint32 account_id = 4; // the account id if EphemeralTransparent or InternalAccount
-  optional OutPoint outpoint_metadata = 5; // the outpoint metadata if InternalAccount
+  optional OutPoint outpoint = 5; // the outpoint metadata if InternalAccount
   optional Note note = 6; // the note if InternalAccount
 }
 

@@ -6,13 +6,12 @@ use std::{num::NonZeroU64, rc::Rc};
 use zcash_client_backend::{
     data_api::{NoteFilter, PoolMeta},
     wallet::ReceivedNote,
-    ShieldedProtocol,
 };
-use zcash_primitives::transaction::{components::amount::NonNegativeAmount, TxId};
+use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
     consensus::{self, BlockHeight},
-    value::BalanceError,
-    PoolType,
+    value::{BalanceError, Zatoshis},
+    PoolType, ShieldedProtocol,
 };
 
 use super::wallet_birthday;
@@ -119,7 +118,7 @@ pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     conn: &Connection,
     params: &P,
     account: AccountUuid,
-    target_value: NonNegativeAmount,
+    target_value: Zatoshis,
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
@@ -259,8 +258,8 @@ pub(crate) fn spendable_notes_meta(
         .collect();
     let excluded_ptr = Rc::new(excluded);
 
-    fn zatoshis(value: i64) -> Result<NonNegativeAmount, SqliteClientError> {
-        NonNegativeAmount::from_nonnegative_i64(value).map_err(|_| {
+    fn zatoshis(value: i64) -> Result<Zatoshis, SqliteClientError> {
+        Zatoshis::from_nonnegative_i64(value).map_err(|_| {
             SqliteClientError::CorruptedData(format!("Negative received note value: {}", value))
         })
     }
@@ -308,7 +307,7 @@ pub(crate) fn spendable_notes_meta(
         account: AccountUuid,
         filter: &NoteFilter,
         chain_tip_height: BlockHeight,
-    ) -> Result<Option<NonNegativeAmount>, SqliteClientError> {
+    ) -> Result<Option<Zatoshis>, SqliteClientError> {
         match filter {
             NoteFilter::ExceedsMinValue(v) => Ok(Some(*v)),
             NoteFilter::ExceedsPriorSendPercentile(n) => {
@@ -334,14 +333,12 @@ pub(crate) fn spendable_notes_meta(
                     .query_and_then::<_, SqliteClientError, _, _>(
                         named_params![":account_uuid": account.0],
                         |row| {
-                            NonNegativeAmount::from_nonnegative_i64(row.get::<_, i64>(0)?).map_err(
-                                |_| {
-                                    SqliteClientError::CorruptedData(format!(
-                                        "Negative received note value: {}",
-                                        n.value()
-                                    ))
-                                },
-                            )
+                            Zatoshis::from_nonnegative_i64(row.get::<_, i64>(0)?).map_err(|_| {
+                                SqliteClientError::CorruptedData(format!(
+                                    "Negative received note value: {}",
+                                    n.value()
+                                ))
+                            })
                         },
                     )?
                     .collect::<Result<Vec<_>, _>>()?;
@@ -418,7 +415,7 @@ pub(crate) fn spendable_notes_meta(
 
         Ok(Some(PoolMeta::new(
             note_count,
-            total_value.unwrap_or(NonNegativeAmount::ZERO),
+            total_value.unwrap_or(Zatoshis::ZERO),
         )))
     } else {
         Ok(None)

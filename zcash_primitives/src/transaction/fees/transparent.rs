@@ -3,16 +3,15 @@
 
 use std::convert::Infallible;
 
-use crate::{
-    legacy::{Script, TransparentAddress},
-    transaction::{
-        components::{amount::NonNegativeAmount, transparent::TxOut, OutPoint},
-        fees::zip317::P2PKH_STANDARD_INPUT_SIZE,
-    },
+use crate::transaction::fees::zip317::P2PKH_STANDARD_INPUT_SIZE;
+use transparent::{
+    address::{Script, TransparentAddress},
+    bundle::{OutPoint, TxOut},
 };
+use zcash_protocol::value::Zatoshis;
 
 #[cfg(feature = "transparent-inputs")]
-use crate::transaction::components::transparent::builder::TransparentInputInfo;
+use transparent::builder::TransparentInputInfo;
 
 /// The size of a transparent input, or the outpoint corresponding to the input
 /// if the size of the script required to spend that input is unknown.
@@ -72,7 +71,7 @@ impl InputView for Infallible {
 /// fee and change computation.
 pub trait OutputView: std::fmt::Debug {
     /// Returns the value of the output being created.
-    fn value(&self) -> NonNegativeAmount;
+    fn value(&self) -> Zatoshis;
 
     /// Returns the script corresponding to the newly created output.
     fn script_pubkey(&self) -> &Script;
@@ -86,7 +85,7 @@ pub trait OutputView: std::fmt::Debug {
 }
 
 impl OutputView for TxOut {
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         self.value
     }
 

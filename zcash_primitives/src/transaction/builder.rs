@@ -1,39 +1,35 @@
 //! Structs for building transactions.
 
+use rand::{CryptoRng, RngCore};
 use std::cmp::Ordering;
 use std::error;
 use std::fmt;
 use std::sync::mpsc::Sender;
 
-use rand::{CryptoRng, RngCore};
-
-use crate::{
-    consensus::{self, BlockHeight, BranchId, NetworkUpgrade},
-    legacy::TransparentAddress,
+use ::sapling::{
+    builder::SaplingMetadata,
+    prover::{OutputProver, SpendProver},
+    Note, PaymentAddress,
+};
+use ::transparent::{address::TransparentAddress, builder::TransparentBuilder, bundle::TxOut};
+use zcash_protocol::{
+    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::MemoBytes,
-    sapling::{
-        self,
-        builder::SaplingMetadata,
-        prover::{OutputProver, SpendProver},
-        Note, PaymentAddress,
+    value::{BalanceError, ZatBalance, Zatoshis},
+};
+
+use crate::transaction::{
+    fees::{
+        transparent::{InputView, OutputView},
+        FeeRule,
     },
-    transaction::{
-        components::{
-            amount::{Amount, BalanceError},
-            transparent::{self, builder::TransparentBuilder, TxOut},
-        },
-        fees::{
-            transparent::{InputView, OutputView},
-            FeeRule,
-        },
-        sighash::{signature_hash, SignableInput},
-        txid::TxIdDigester,
-        Transaction, TransactionData, TxVersion, Unauthorized,
-    },
+    sighash::{signature_hash, SignableInput},
+    txid::TxIdDigester,
+    Transaction, TransactionData, TxVersion, Unauthorized,
 };
 
 #[cfg(feature = "transparent-inputs")]
-use crate::transaction::components::transparent::builder::TransparentInputInfo;
+use ::transparent::builder::TransparentInputInfo;
 
 #[cfg(not(feature = "transparent-inputs"))]
 use std::convert::Infallible;
@@ -50,8 +46,8 @@ use crate::{
     },
 };
 
-use super::components::amount::NonNegativeAmount;
 use super::components::sapling::zip212_enforcement;
+use ::transparent::builder::TransparentSigningSet;
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
@@ -78,10 +74,10 @@ impl<FE: fmt::Display> fmt::Display for FeeError<FE> {
 pub enum Error<FE> {
     /// Insufficient funds were provided to the transaction builder; the given
     /// additional amount is required in order to construct the transaction.
-    InsufficientFunds(Amount),
+    InsufficientFunds(ZatBalance),
     /// The transaction has inputs in excess of outputs and fees; the user must
     /// add a change output.
-    ChangeRequired(Amount),
+    ChangeRequired(ZatBalance),
     /// An error occurred in computing the fees for a transaction.
     Fee(FeeError<FE>),
     /// An overflow or underflow occurred when computing value balances
@@ -272,6 +268,30 @@ impl BuildResult {
     }
 }
 
+/// The result of [`Builder::build_for_pczt`].
+///
+/// It includes the PCZT components along with metadata describing how spends and outputs
+/// were shuffled in creating the transaction's shielded bundles.
+#[derive(Debug)]
+pub struct PcztResult<P: Parameters> {
+    pub pczt_parts: PcztParts<P>,
+    pub sapling_meta: SaplingMetadata,
+    pub orchard_meta: orchard::builder::BundleMetadata,
+}
+
+/// The components of a PCZT.
+#[derive(Debug)]
+pub struct PcztParts<P: Parameters> {
+    pub params: P,
+    pub version: TxVersion,
+    pub consensus_branch_id: BranchId,
+    pub lock_time: u32,
+    pub expiry_height: BlockHeight,
+    pub transparent: Option<transparent::pczt::Bundle>,
+    pub sapling: Option<sapling::pczt::Bundle>,
+    pub orchard: Option<orchard::pczt::Bundle>,
+}
+
 /// Generates a [`Transaction`] from its inputs and outputs.
 pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     params: P,
@@ -281,12 +301,6 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     transparent_builder: TransparentBuilder,
     sapling_builder: Option<sapling::builder::Builder>,
     orchard_builder: Option<orchard::builder::Builder>,
-    // TODO: In the future, instead of taking the spending keys as arguments when calling
-    // `add_sapling_spend` or `add_orchard_spend`, we will build an unauthorized, unproven
-    // transaction, and then the caller will be responsible for using the spending keys or their
-    // derivatives for proving and signing to complete transaction creation.
-    sapling_asks: Vec<sapling::keys::SpendAuthorizingKey>,
-    orchard_saks: Vec<orchard::keys::SpendAuthorizingKey>,
     #[cfg(zcash_unstable = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(zcash_unstable = "zfuture"))]
@@ -370,8 +384,6 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder,
             orchard_builder,
-            sapling_asks: vec![],
-            orchard_saks: Vec::new(),
             #[cfg(zcash_unstable = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
@@ -398,8 +410,6 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             transparent_builder: self.transparent_builder,
             sapling_builder: self.sapling_builder,
             orchard_builder: self.orchard_builder,
-            sapling_asks: self.sapling_asks,
-            orchard_saks: self.orchard_saks,
             tze_builder: self.tze_builder,
             progress_notifier,
         }
@@ -413,16 +423,12 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     /// the given note.
     pub fn add_orchard_spend<FE>(
         &mut self,
-        sk: &orchard::keys::SpendingKey,
+        fvk: orchard::keys::FullViewingKey,
         note: orchard::Note,
         merkle_path: orchard::tree::MerklePath,
     ) -> Result<(), Error<FE>> {
         if let Some(builder) = self.orchard_builder.as_mut() {
-            builder.add_spend(orchard::keys::FullViewingKey::from(sk), note, merkle_path)?;
-
-            self.orchard_saks
-                .push(orchard::keys::SpendAuthorizingKey::from(sk));
-
+            builder.add_spend(fvk, note, merkle_path)?;
             Ok(())
         } else {
             Err(Error::OrchardBuilderNotAvailable)
@@ -455,14 +461,12 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     /// paths for previous Sapling notes.
     pub fn add_sapling_spend<FE>(
         &mut self,
-        extsk: &sapling::zip32::ExtendedSpendingKey,
+        fvk: sapling::keys::FullViewingKey,
         note: Note,
         merkle_path: sapling::MerklePath,
     ) -> Result<(), Error<FE>> {
         if let Some(builder) = self.sapling_builder.as_mut() {
-            builder.add_spend(extsk, note, merkle_path)?;
-
-            self.sapling_asks.push(extsk.expsk.ask.clone());
+            builder.add_spend(fvk, note, merkle_path)?;
             Ok(())
         } else {
             Err(Error::SaplingBuilderNotAvailable)
@@ -474,7 +478,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         &mut self,
         ovk: Option<sapling::keys::OutgoingViewingKey>,
         to: PaymentAddress,
-        value: NonNegativeAmount,
+        value: Zatoshis,
         memo: MemoBytes,
     ) -> Result<(), Error<FE>> {
         self.sapling_builder
@@ -493,34 +497,36 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     #[cfg(feature = "transparent-inputs")]
     pub fn add_transparent_input(
         &mut self,
-        sk: secp256k1::SecretKey,
-        utxo: transparent::OutPoint,
+        pubkey: secp256k1::PublicKey,
+        utxo: transparent::bundle::OutPoint,
         coin: TxOut,
     ) -> Result<(), transparent::builder::Error> {
-        self.transparent_builder.add_input(sk, utxo, coin)
+        self.transparent_builder.add_input(pubkey, utxo, coin)
     }
 
     /// Adds a transparent address to send funds to.
     pub fn add_transparent_output(
         &mut self,
         to: &TransparentAddress,
-        value: NonNegativeAmount,
+        value: Zatoshis,
     ) -> Result<(), transparent::builder::Error> {
         self.transparent_builder.add_output(to, value)
     }
 
     /// Returns the sum of the transparent, Sapling, Orchard, and TZE value balances.
-    fn value_balance(&self) -> Result<Amount, BalanceError> {
+    fn value_balance(&self) -> Result<ZatBalance, BalanceError> {
         let value_balances = [
             self.transparent_builder.value_balance()?,
             self.sapling_builder
                 .as_ref()
-                .map_or_else(Amount::zero, |builder| builder.value_balance::<Amount>()),
+                .map_or_else(ZatBalance::zero, |builder| {
+                    builder.value_balance::<ZatBalance>()
+                }),
             self.orchard_builder.as_ref().map_or_else(
-                || Ok(Amount::zero()),
+                || Ok(ZatBalance::zero()),
                 |builder| {
                     builder
-                        .value_balance::<Amount>()
+                        .value_balance::<ZatBalance>()
                         .map_err(|_| BalanceError::Overflow)
                 },
             )?,
@@ -538,10 +544,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     ///
     /// This fee is a function of the spends and outputs that have been added to the builder,
     /// pursuant to the specified [`FeeRule`].
-    pub fn get_fee<FR: FeeRule>(
-        &self,
-        fee_rule: &FR,
-    ) -> Result<NonNegativeAmount, FeeError<FR::Error>> {
+    pub fn get_fee<FR: FeeRule>(&self, fee_rule: &FR) -> Result<Zatoshis, FeeError<FR::Error>> {
         #[cfg(feature = "transparent-inputs")]
         let transparent_inputs = self.transparent_builder.inputs();
 
@@ -587,7 +590,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     pub fn get_fee_zfuture<FR: FeeRule + FutureFeeRule>(
         &self,
         fee_rule: &FR,
-    ) -> Result<NonNegativeAmount, FeeError<FR::Error>> {
+    ) -> Result<Zatoshis, FeeError<FR::Error>> {
         #[cfg(feature = "transparent-inputs")]
         let transparent_inputs = self.transparent_builder.inputs();
 
@@ -635,15 +638,27 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     ///
     /// Upon success, returns a tuple containing the final transaction, and the
     /// [`SaplingMetadata`] generated during the build process.
+    #[allow(clippy::too_many_arguments)]
     pub fn build<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FR: FeeRule>(
         self,
+        transparent_signing_set: &TransparentSigningSet,
+        sapling_extsks: &[sapling::zip32::ExtendedSpendingKey],
+        orchard_saks: &[orchard::keys::SpendAuthorizingKey],
         rng: R,
         spend_prover: &SP,
         output_prover: &OP,
         fee_rule: &FR,
     ) -> Result<BuildResult, Error<FR::Error>> {
         let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
-        self.build_internal(rng, spend_prover, output_prover, fee)
+        self.build_internal(
+            transparent_signing_set,
+            sapling_extsks,
+            orchard_saks,
+            rng,
+            spend_prover,
+            output_prover,
+            fee,
+        )
     }
 
     /// Builds a transaction from the configured spends and outputs.
@@ -658,21 +673,36 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         FR: FutureFeeRule,
     >(
         self,
+        transparent_signing_set: &TransparentSigningSet,
+        sapling_extsks: &[sapling::zip32::ExtendedSpendingKey],
+        orchard_saks: &[orchard::keys::SpendAuthorizingKey],
         rng: R,
         spend_prover: &SP,
         output_prover: &OP,
         fee_rule: &FR,
     ) -> Result<BuildResult, Error<FR::Error>> {
         let fee = self.get_fee_zfuture(fee_rule).map_err(Error::Fee)?;
-        self.build_internal(rng, spend_prover, output_prover, fee)
+        self.build_internal(
+            transparent_signing_set,
+            sapling_extsks,
+            orchard_saks,
+            rng,
+            spend_prover,
+            output_prover,
+            fee,
+        )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_internal<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FE>(
         self,
+        transparent_signing_set: &TransparentSigningSet,
+        sapling_extsks: &[sapling::zip32::ExtendedSpendingKey],
+        orchard_saks: &[orchard::keys::SpendAuthorizingKey],
         mut rng: R,
         spend_prover: &SP,
         output_prover: &OP,
-        fee: NonNegativeAmount,
+        fee: Zatoshis,
     ) -> Result<BuildResult, Error<FE>> {
         let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
 
@@ -687,7 +717,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         let balance_after_fees =
             (self.value_balance()? - fee.into()).ok_or(BalanceError::Underflow)?;
 
-        match balance_after_fees.cmp(&Amount::zero()) {
+        match balance_after_fees.cmp(&ZatBalance::zero()) {
             Ordering::Less => {
                 return Err(Error::InsufficientFunds(-balance_after_fees));
             }
@@ -703,7 +733,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             .sapling_builder
             .and_then(|builder| {
                 builder
-                    .build::<SP, OP, _, _>(&mut rng)
+                    .build::<SP, OP, _, _>(sapling_extsks, &mut rng)
                     .map_err(Error::SaplingBuild)
                     .transpose()
                     .map(|res| {
@@ -764,14 +794,24 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         //
         let txid_parts = unauthed_tx.digest(TxIdDigester);
 
-        let transparent_bundle = unauthed_tx.transparent_bundle.clone().map(|b| {
-            b.apply_signatures(
-                #[cfg(feature = "transparent-inputs")]
-                &unauthed_tx,
-                #[cfg(feature = "transparent-inputs")]
-                &txid_parts,
-            )
-        });
+        let transparent_bundle = unauthed_tx
+            .transparent_bundle
+            .clone()
+            .map(|b| {
+                b.apply_signatures(
+                    |input| {
+                        *signature_hash(
+                            &unauthed_tx,
+                            &SignableInput::Transparent(input),
+                            &txid_parts,
+                        )
+                        .as_ref()
+                    },
+                    transparent_signing_set,
+                )
+            })
+            .transpose()
+            .map_err(Error::TransparentBuild)?;
 
         #[cfg(zcash_unstable = "zfuture")]
         let tze_bundle = unauthed_tx
@@ -787,15 +827,13 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         let shielded_sig_commitment =
             signature_hash(&unauthed_tx, &SignableInput::Shielded, &txid_parts);
 
+        let sapling_asks = sapling_extsks
+            .iter()
+            .map(|extsk| extsk.expsk.ask.clone())
+            .collect::<Vec<_>>();
         let sapling_bundle = unauthed_tx
             .sapling_bundle
-            .map(|b| {
-                b.apply_signatures(
-                    &mut rng,
-                    *shielded_sig_commitment.as_ref(),
-                    &self.sapling_asks,
-                )
-            })
+            .map(|b| b.apply_signatures(&mut rng, *shielded_sig_commitment.as_ref(), &sapling_asks))
             .transpose()
             .map_err(Error::SaplingBuild)?;
 
@@ -807,7 +845,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
                         b.apply_signatures(
                             &mut rng,
                             *shielded_sig_commitment.as_ref(),
-                            &self.orchard_saks,
+                            orchard_saks,
                         )
                     })
             })
@@ -831,6 +869,86 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         // of freeze() should be infalliable.
         Ok(BuildResult {
             transaction: authorized_tx.freeze().unwrap(),
+            sapling_meta,
+            orchard_meta,
+        })
+    }
+
+    /// Builds a PCZT from the configured spends and outputs.
+    ///
+    /// Upon success, returns a struct containing the PCZT components, and the
+    /// [`SaplingMetadata`] and [`orchard::builder::BundleMetadata`] generated during the
+    /// build process.
+    pub fn build_for_pczt<R: RngCore + CryptoRng, FR: FeeRule>(
+        self,
+        mut rng: R,
+        fee_rule: &FR,
+    ) -> Result<PcztResult<P>, Error<FR::Error>> {
+        let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
+        let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
+
+        // determine transaction version
+        let version = TxVersion::suggested_for_branch(consensus_branch_id);
+
+        let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
+
+        //
+        // Consistency checks
+        //
+
+        // After fees are accounted for, the value balance of the transaction must be zero.
+        let balance_after_fees =
+            (self.value_balance()? - fee.into()).ok_or(BalanceError::Underflow)?;
+
+        match balance_after_fees.cmp(&ZatBalance::zero()) {
+            Ordering::Less => {
+                return Err(Error::InsufficientFunds(-balance_after_fees));
+            }
+            Ordering::Greater => {
+                return Err(Error::ChangeRequired(balance_after_fees));
+            }
+            Ordering::Equal => (),
+        };
+
+        let transparent_bundle = self.transparent_builder.build_for_pczt();
+
+        let (sapling_bundle, sapling_meta) = match self
+            .sapling_builder
+            .map(|builder| {
+                builder
+                    .build_for_pczt(&mut rng)
+                    .map_err(Error::SaplingBuild)
+            })
+            .transpose()?
+        {
+            Some((bundle, meta)) => (Some(bundle), meta),
+            None => (None, SaplingMetadata::empty()),
+        };
+
+        let (orchard_bundle, orchard_meta) = match self
+            .orchard_builder
+            .map(|builder| {
+                builder
+                    .build_for_pczt(&mut rng)
+                    .map_err(Error::OrchardBuild)
+            })
+            .transpose()?
+        {
+            Some((bundle, meta)) => (Some(bundle), meta),
+            None => (None, orchard::builder::BundleMetadata::empty()),
+        };
+
+        Ok(PcztResult {
+            pczt_parts: PcztParts {
+                params: self.params,
+                version,
+                consensus_branch_id,
+                lock_time: 0,
+                expiry_height: self.expiry_height,
+                transparent: transparent_bundle,
+                sapling: sapling_bundle,
+                orchard: orchard_bundle,
+            },
             sapling_meta,
             orchard_meta,
         })
@@ -863,7 +981,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Extensio
     fn add_tze_output<G: ToPayload>(
         &mut self,
         extension_id: u32,
-        value: Amount,
+        value: ZatBalance,
         guarded_by: &G,
     ) -> Result<(), Self::BuildError> {
         self.tze_builder.add_output(extension_id, value, guarded_by)
@@ -875,21 +993,21 @@ mod testing {
     use rand::RngCore;
     use rand_core::CryptoRng;
 
+    use ::sapling::prover::mock::{MockOutputProver, MockSpendProver};
+    use ::transparent::builder::TransparentSigningSet;
+    use zcash_protocol::consensus;
+
     use super::{BuildResult, Builder, Error};
-    use crate::{
-        consensus,
-        sapling::{
-            self,
-            prover::mock::{MockOutputProver, MockSpendProver},
-        },
-        transaction::fees::zip317,
-    };
+    use crate::transaction::fees::zip317;
 
     impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
         /// Build the transaction using mocked randomness and proving capabilities.
         /// DO NOT USE EXCEPT FOR UNIT TESTING.
         pub fn mock_build<R: RngCore>(
             self,
+            transparent_signing_set: &TransparentSigningSet,
+            sapling_extsks: &[sapling::zip32::ExtendedSpendingKey],
+            orchard_saks: &[orchard::keys::SpendAuthorizingKey],
             rng: R,
         ) -> Result<BuildResult, Error<zip317::FeeError>> {
             struct FakeCryptoRng<R: RngCore>(R);
@@ -913,6 +1031,9 @@ mod testing {
             }
 
             self.build(
+                transparent_signing_set,
+                sapling_extsks,
+                orchard_saks,
                 FakeCryptoRng(rng),
                 &MockSpendProver,
                 &MockOutputProver,
@@ -932,27 +1053,25 @@ mod tests {
     use incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness};
     use rand_core::OsRng;
 
-    use crate::{
-        consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
-        legacy::TransparentAddress,
-        memo::MemoBytes,
-        sapling::{self, zip32::ExtendedSpendingKey, Node, Rseed},
-        transaction::{
-            builder::BuildConfig,
-            components::amount::{Amount, BalanceError, NonNegativeAmount},
-        },
-    };
-
     use super::{Builder, Error};
+    use crate::transaction::builder::BuildConfig;
+
+    use ::sapling::{zip32::ExtendedSpendingKey, Node, Rseed};
+    use ::transparent::{address::TransparentAddress, builder::TransparentSigningSet};
+    use zcash_protocol::{
+        consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
+        memo::MemoBytes,
+        value::{BalanceError, ZatBalance, Zatoshis},
+    };
 
     #[cfg(zcash_unstable = "zfuture")]
     #[cfg(feature = "transparent-inputs")]
     use super::TzeBuilder;
 
     #[cfg(feature = "transparent-inputs")]
-    use crate::{
-        legacy::keys::{AccountPrivKey, IncomingViewingKey},
-        transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, OutPoint, TxOut},
+    use {
+        crate::transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, OutPoint, TxOut},
+        ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
         zip32::AccountId,
     };
 
@@ -961,9 +1080,9 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn binding_sig_absent_if_no_shielded_spend_or_output() {
-        use crate::consensus::NetworkUpgrade;
-        use crate::legacy::keys::NonHardenedChildIndex;
         use crate::transaction::builder::{self, TransparentBuilder};
+        use ::transparent::{builder::TransparentSigningSet, keys::NonHardenedChildIndex};
+        use zcash_protocol::consensus::NetworkUpgrade;
 
         let sapling_activation_height = TEST_NETWORK
             .activation_height(NetworkUpgrade::Sapling)
@@ -986,13 +1105,16 @@ mod tests {
             tze_builder: std::marker::PhantomData,
             progress_notifier: (),
             orchard_builder: None,
-            sapling_asks: vec![],
-            orchard_saks: Vec::new(),
         };
 
+        let mut transparent_signing_set = TransparentSigningSet::new();
         let tsk = AccountPrivKey::from_seed(&TEST_NETWORK, &[0u8; 32], AccountId::ZERO).unwrap();
+        let sk = tsk
+            .derive_external_secret_key(NonHardenedChildIndex::ZERO)
+            .unwrap();
+        let pubkey = transparent_signing_set.add_key(sk);
         let prev_coin = TxOut {
-            value: NonNegativeAmount::const_from_u64(50000),
+            value: Zatoshis::const_from_u64(50000),
             script_pubkey: tsk
                 .to_account_pubkey()
                 .derive_external_ivk()
@@ -1002,23 +1124,20 @@ mod tests {
                 .script(),
         };
         builder
-            .add_transparent_input(
-                tsk.derive_external_secret_key(NonHardenedChildIndex::ZERO)
-                    .unwrap(),
-                OutPoint::fake(),
-                prev_coin,
-            )
+            .add_transparent_input(pubkey, OutPoint::fake(), prev_coin)
             .unwrap();
 
         // Create a tx with only t output. No binding_sig should be present
         builder
             .add_transparent_output(
                 &TransparentAddress::PublicKeyHash([0; 20]),
-                NonNegativeAmount::const_from_u64(40000),
+                Zatoshis::const_from_u64(40000),
             )
             .unwrap();
 
-        let res = builder.mock_build(OsRng).unwrap();
+        let res = builder
+            .mock_build(&transparent_signing_set, &[], &[], OsRng)
+            .unwrap();
         // No binding signature, because only t input and outputs
         assert!(res.transaction().sapling_bundle.is_none());
     }
@@ -1052,18 +1171,20 @@ mod tests {
 
         // Create a tx with a sapling spend. binding_sig should be present
         builder
-            .add_sapling_spend::<Infallible>(&extsk, note1, witness1.path().unwrap())
+            .add_sapling_spend::<Infallible>(dfvk.fvk().clone(), note1, witness1.path().unwrap())
             .unwrap();
 
         builder
             .add_transparent_output(
                 &TransparentAddress::PublicKeyHash([0; 20]),
-                NonNegativeAmount::const_from_u64(35000),
+                Zatoshis::const_from_u64(35000),
             )
             .unwrap();
 
         // A binding signature (and bundle) is present because there is a Sapling spend.
-        let res = builder.mock_build(OsRng).unwrap();
+        let res = builder
+            .mock_build(&TransparentSigningSet::new(), &[extsk], &[], OsRng)
+            .unwrap();
         assert!(res.transaction().sapling_bundle().is_some());
     }
 
@@ -1088,7 +1209,7 @@ mod tests {
             };
             let builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             assert_matches!(
-                builder.mock_build(OsRng),
+                builder.mock_build(&TransparentSigningSet::new(), &[], &[], OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected == MINIMUM_FEE.into()
             );
         }
@@ -1096,6 +1217,8 @@ mod tests {
         let dfvk = extsk.to_diversifiable_full_viewing_key();
         let ovk = Some(dfvk.fvk().ovk);
         let to = dfvk.default_address().1;
+
+        let extsks = &[extsk];
 
         // Fail if there is only a Sapling output
         // 0.0005 z-ZEC out, 0.0001 t-ZEC fee
@@ -1109,14 +1232,14 @@ mod tests {
                 .add_sapling_output::<Infallible>(
                     ovk,
                     to,
-                    NonNegativeAmount::const_from_u64(50000),
+                    Zatoshis::const_from_u64(50000),
                     MemoBytes::empty(),
                 )
                 .unwrap();
             assert_matches!(
-                builder.mock_build(OsRng),
+                builder.mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng),
                 Err(Error::InsufficientFunds(expected)) if
-                    expected == (NonNegativeAmount::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
+                    expected == (Zatoshis::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
             );
         }
 
@@ -1131,13 +1254,13 @@ mod tests {
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKeyHash([0; 20]),
-                    NonNegativeAmount::const_from_u64(50000),
+                    Zatoshis::const_from_u64(50000),
                 )
                 .unwrap();
             assert_matches!(
-                builder.mock_build(OsRng),
+                builder.mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected ==
-                    (NonNegativeAmount::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
+                    (Zatoshis::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
             );
         }
 
@@ -1159,25 +1282,29 @@ mod tests {
             };
             let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             builder
-                .add_sapling_spend::<Infallible>(&extsk, note1.clone(), witness1.path().unwrap())
+                .add_sapling_spend::<Infallible>(
+                    dfvk.fvk().clone(),
+                    note1.clone(),
+                    witness1.path().unwrap(),
+                )
                 .unwrap();
             builder
                 .add_sapling_output::<Infallible>(
                     ovk,
                     to,
-                    NonNegativeAmount::const_from_u64(30000),
+                    Zatoshis::const_from_u64(30000),
                     MemoBytes::empty(),
                 )
                 .unwrap();
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKeyHash([0; 20]),
-                    NonNegativeAmount::const_from_u64(15000),
+                    Zatoshis::const_from_u64(15000),
                 )
                 .unwrap();
             assert_matches!(
-                builder.mock_build(OsRng),
-                Err(Error::InsufficientFunds(expected)) if expected == Amount::const_from_i64(1)
+                builder.mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng),
+                Err(Error::InsufficientFunds(expected)) if expected == ZatBalance::const_from_i64(1)
             );
         }
 
@@ -1199,31 +1326,41 @@ mod tests {
             };
             let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             builder
-                .add_sapling_spend::<Infallible>(&extsk, note1, witness1.path().unwrap())
+                .add_sapling_spend::<Infallible>(
+                    dfvk.fvk().clone(),
+                    note1,
+                    witness1.path().unwrap(),
+                )
                 .unwrap();
             builder
-                .add_sapling_spend::<Infallible>(&extsk, note2, witness2.path().unwrap())
+                .add_sapling_spend::<Infallible>(
+                    dfvk.fvk().clone(),
+                    note2,
+                    witness2.path().unwrap(),
+                )
                 .unwrap();
             builder
                 .add_sapling_output::<Infallible>(
                     ovk,
                     to,
-                    NonNegativeAmount::const_from_u64(30000),
+                    Zatoshis::const_from_u64(30000),
                     MemoBytes::empty(),
                 )
                 .unwrap();
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKeyHash([0; 20]),
-                    NonNegativeAmount::const_from_u64(15000),
+                    Zatoshis::const_from_u64(15000),
                 )
                 .unwrap();
-            let res = builder.mock_build(OsRng).unwrap();
+            let res = builder
+                .mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng)
+                .unwrap();
             assert_eq!(
                 res.transaction()
                     .fee_paid(|_| Err(BalanceError::Overflow))
                     .unwrap(),
-                Amount::const_from_i64(15_000)
+                ZatBalance::const_from_i64(15_000)
             );
         }
     }

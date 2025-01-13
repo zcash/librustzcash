@@ -1,21 +1,19 @@
 use std::{collections::HashSet, rc::Rc};
 
-use crate::wallet::{account_kind_code, init::WalletMigrationError};
 use rusqlite::{named_params, OptionalExtension, Transaction};
 use schemerz_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
-use zcash_client_backend::{
-    data_api::{AccountPurpose, AccountSource},
-    keys::UnifiedSpendingKey,
-};
-use zcash_keys::keys::UnifiedFullViewingKey;
-use zcash_primitives::consensus;
+
+use zcash_client_backend::data_api::{AccountPurpose, AccountSource, Zip32Derivation};
+use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
+use zcash_protocol::consensus;
 use zip32::fingerprint::SeedFingerprint;
 
 use super::{
     add_account_birthdays, receiving_key_scopes, v_transactions_note_uniqueness, wallet_summaries,
 };
+use crate::wallet::{account_kind_code, init::WalletMigrationError};
 
 /// The migration that switched from presumed seed-derived account IDs to supporting
 /// HD accounts and all sorts of imported keys.
@@ -53,8 +51,10 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
     fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
         let account_kind_derived = account_kind_code(&AccountSource::Derived {
-            seed_fingerprint: SeedFingerprint::from_bytes([0; 32]),
-            account_index: zip32::AccountId::ZERO,
+            derivation: Zip32Derivation::new(
+                SeedFingerprint::from_bytes([0; 32]),
+                zip32::AccountId::ZERO,
+            ),
             key_source: None,
         });
         let account_kind_imported = account_kind_code(&AccountSource::Imported {

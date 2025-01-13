@@ -5,22 +5,20 @@ use std::fmt::{self, Debug, Display};
 
 use shardtree::error::ShardTreeError;
 use zcash_address::ConversionError;
-use zcash_primitives::transaction::components::amount::NonNegativeAmount;
-use zcash_primitives::transaction::{
-    builder,
-    components::{amount::BalanceError, transparent},
+use zcash_keys::address::UnifiedAddress;
+use zcash_primitives::transaction::builder;
+use zcash_protocol::{
+    value::{BalanceError, Zatoshis},
+    PoolType,
 };
 
-use crate::address::UnifiedAddress;
-use crate::data_api::wallet::input_selection::InputSelectorError;
-use crate::fees::ChangeError;
-use crate::proposal::ProposalError;
-use crate::PoolType;
+use crate::{
+    data_api::wallet::input_selection::InputSelectorError, fees::ChangeError,
+    proposal::ProposalError, wallet::NoteId,
+};
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::TransparentAddress;
-
-use crate::wallet::NoteId;
+use ::transparent::address::TransparentAddress;
 
 /// Errors that can occur as a consequence of wallet operations.
 #[derive(Debug)]
@@ -47,16 +45,23 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     /// * pay to a TEX address if the "transparent-inputs" feature is not enabled.
     ProposalNotSupported,
 
+    /// No account could be found corresponding to a provided ID.
+    AccountIdNotRecognized,
+
     /// No account could be found corresponding to a provided spending key.
     KeyNotRecognized,
+
+    /// The given account cannot be used for spending, because it is unable to maintain an
+    /// accurate balance.
+    AccountCannotSpend,
 
     /// Zcash amount computation encountered an overflow or underflow.
     BalanceError(BalanceError),
 
     /// Unable to create a new spend because the wallet balance is not sufficient.
     InsufficientFunds {
-        available: NonNegativeAmount,
-        required: NonNegativeAmount,
+        available: Zatoshis,
+        required: Zatoshis,
     },
 
     /// The wallet must first perform a scan of the blockchain before other
@@ -79,11 +84,9 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     /// Attempted to create a spend to an unsupported Unified Address receiver
     NoSupportedReceivers(Box<UnifiedAddress>),
 
-    /// A proposed transaction cannot be built because it requires spending an input
-    /// for which no spending key is available.
-    ///
-    /// The argument is the address of the note or UTXO being spent.
-    NoSpendingKey(String),
+    /// A proposed transaction cannot be built because it requires spending an input of
+    /// a type for which a key required to construct the transaction is not available.
+    KeyNotAvailable(PoolType),
 
     /// A note being spent does not correspond to either the internal or external
     /// full viewing key for an account.
@@ -101,6 +104,39 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     /// output.
     #[cfg(feature = "transparent-inputs")]
     PaysEphemeralTransparentAddress(String),
+
+    /// An error occurred while working with PCZTs.
+    #[cfg(feature = "pczt")]
+    Pczt(PcztError),
+}
+
+/// Errors that can occur while working with PCZTs.
+#[cfg(feature = "pczt")]
+#[derive(Debug)]
+pub enum PcztError {
+    /// An error occurred while building a PCZT.
+    Build,
+
+    /// An error occurred while finalizing the IO of a PCZT.
+    IoFinalization(pczt::roles::io_finalizer::Error),
+
+    /// An error occurred while updating the Orchard bundle of a PCZT.
+    UpdateOrchard(pczt::roles::updater::OrchardError),
+
+    /// An error occurred while updating the Sapling bundle of a PCZT.
+    UpdateSapling(pczt::roles::updater::SaplingError),
+
+    /// An error occurred while updating the transparent bundle of a PCZT.
+    UpdateTransparent(pczt::roles::updater::TransparentError),
+
+    /// An error occurred while finalizing the spends of a PCZT.
+    SpendFinalization(pczt::roles::spend_finalizer::Error),
+
+    /// An error occurred while extracting a transaction from a PCZT.
+    Extraction(pczt::roles::tx_extractor::Error),
+
+    /// PCZT parsing resulted in an invalid condition.
+    Invalid(String),
 }
 
 impl<DE, TE, SE, FE, CE, N> fmt::Display for Error<DE, TE, SE, FE, CE, N>
@@ -147,6 +183,18 @@ where
                     "Wallet does not contain an account corresponding to the provided spending key"
                 )
             }
+            Error::AccountCannotSpend => {
+                write!(
+                    f,
+                    "The given account cannot be used for spending, because it is unable to maintain an accurate balance.",
+                )
+            }
+            Error::AccountIdNotRecognized => {
+                write!(
+                    f,
+                    "Wallet does not contain an account corresponding to the provided ID"
+                )
+            }
             Error::BalanceError(e) => write!(
                 f,
                 "The value lies outside the valid range of Zcash amounts: {:?}.",
@@ -170,7 +218,7 @@ where
                     acc
                 })
             ),
-            Error::NoSpendingKey(addr) => write!(f, "No spending key available for address: {}", addr),
+            Error::KeyNotAvailable(pool) => write!(f, "A key required for transaction construction was not available for pool type {}", pool),
             Error::NoteMismatch(n) => write!(f, "A note being spent ({:?}) does not correspond to either the internal or external full viewing key for the provided spending key.", n),
 
             Error::Address(e) => {
@@ -183,6 +231,43 @@ where
             #[cfg(feature = "transparent-inputs")]
             Error::PaysEphemeralTransparentAddress(addr) => {
                 write!(f, "The wallet tried to pay to an ephemeral transparent address as a normal output: {}", addr)
+            }
+            #[cfg(feature = "pczt")]
+            Error::Pczt(e) => write!(f, "PCZT error: {e}"),
+        }
+    }
+}
+
+#[cfg(feature = "pczt")]
+impl fmt::Display for PcztError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            PcztError::Build => {
+                write!(
+                    f,
+                    "Failed to generate the PCZT prior to proving or signing."
+                )
+            }
+            PcztError::IoFinalization(e) => {
+                write!(f, "Failed to finalize IO: {:?}.", e)
+            }
+            PcztError::UpdateOrchard(e) => {
+                write!(f, "Failed to updating Orchard PCZT data: {:?}.", e)
+            }
+            PcztError::UpdateSapling(e) => {
+                write!(f, "Failed to updating Sapling PCZT data: {:?}.", e)
+            }
+            PcztError::UpdateTransparent(e) => {
+                write!(f, "Failed to updating transparent PCZT data: {:?}.", e)
+            }
+            PcztError::SpendFinalization(e) => {
+                write!(f, "Failed to finalize the PCZT spends: {:?}.", e)
+            }
+            PcztError::Extraction(e) => {
+                write!(f, "Failed to extract the final transaction: {:?}.", e)
+            }
+            PcztError::Invalid(e) => {
+                write!(f, "PCZT parsing resulted in an invalid condition: {}.", e)
             }
         }
     }
@@ -204,10 +289,15 @@ where
             Error::NoteSelection(e) => Some(e),
             Error::Proposal(e) => Some(e),
             Error::Builder(e) => Some(e),
+            #[cfg(feature = "pczt")]
+            Error::Pczt(e) => Some(e),
             _ => None,
         }
     }
 }
+
+#[cfg(feature = "pczt")]
+impl error::Error for PcztError {}
 
 impl<DE, TE, SE, FE, CE, N> From<builder::Error<FE>> for Error<DE, TE, SE, FE, CE, N> {
     fn from(e: builder::Error<FE>) -> Self {
@@ -262,7 +352,7 @@ impl<DE, TE, SE, FE, CE, N> From<sapling::builder::Error> for Error<DE, TE, SE, 
 }
 
 impl<DE, TE, SE, FE, CE, N> From<transparent::builder::Error> for Error<DE, TE, SE, FE, CE, N> {
-    fn from(e: transparent::builder::Error) -> Self {
+    fn from(e: ::transparent::builder::Error) -> Self {
         Error::Builder(builder::Error::TransparentBuild(e))
     }
 }
@@ -270,5 +360,66 @@ impl<DE, TE, SE, FE, CE, N> From<transparent::builder::Error> for Error<DE, TE, 
 impl<DE, TE, SE, FE, CE, N> From<ShardTreeError<TE>> for Error<DE, TE, SE, FE, CE, N> {
     fn from(e: ShardTreeError<TE>) -> Self {
         Error::CommitmentTree(e)
+    }
+}
+
+#[cfg(feature = "pczt")]
+impl<DE, TE, SE, FE, CE, N> From<PcztError> for Error<DE, TE, SE, FE, CE, N> {
+    fn from(e: PcztError) -> Self {
+        Error::Pczt(e)
+    }
+}
+
+#[cfg(feature = "pczt")]
+impl<DE, TE, SE, FE, CE, N> From<pczt::roles::io_finalizer::Error>
+    for Error<DE, TE, SE, FE, CE, N>
+{
+    fn from(e: pczt::roles::io_finalizer::Error) -> Self {
+        Error::Pczt(PcztError::IoFinalization(e))
+    }
+}
+
+#[cfg(feature = "pczt")]
+impl<DE, TE, SE, FE, CE, N> From<pczt::roles::updater::OrchardError>
+    for Error<DE, TE, SE, FE, CE, N>
+{
+    fn from(e: pczt::roles::updater::OrchardError) -> Self {
+        Error::Pczt(PcztError::UpdateOrchard(e))
+    }
+}
+
+#[cfg(feature = "pczt")]
+impl<DE, TE, SE, FE, CE, N> From<pczt::roles::updater::SaplingError>
+    for Error<DE, TE, SE, FE, CE, N>
+{
+    fn from(e: pczt::roles::updater::SaplingError) -> Self {
+        Error::Pczt(PcztError::UpdateSapling(e))
+    }
+}
+
+#[cfg(feature = "pczt")]
+impl<DE, TE, SE, FE, CE, N> From<pczt::roles::updater::TransparentError>
+    for Error<DE, TE, SE, FE, CE, N>
+{
+    fn from(e: pczt::roles::updater::TransparentError) -> Self {
+        Error::Pczt(PcztError::UpdateTransparent(e))
+    }
+}
+
+#[cfg(feature = "pczt")]
+impl<DE, TE, SE, FE, CE, N> From<pczt::roles::spend_finalizer::Error>
+    for Error<DE, TE, SE, FE, CE, N>
+{
+    fn from(e: pczt::roles::spend_finalizer::Error) -> Self {
+        Error::Pczt(PcztError::SpendFinalization(e))
+    }
+}
+
+#[cfg(feature = "pczt")]
+impl<DE, TE, SE, FE, CE, N> From<pczt::roles::tx_extractor::Error>
+    for Error<DE, TE, SE, FE, CE, N>
+{
+    fn from(e: pczt::roles::tx_extractor::Error) -> Self {
+        Error::Pczt(PcztError::Extraction(e))
     }
 }

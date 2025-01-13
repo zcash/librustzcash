@@ -1,21 +1,45 @@
 //! Structs representing the components within Zcash transactions.
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use alloc::vec::Vec;
+use core::fmt::Debug;
+use core2::io::{self, Read, Write};
 
-use std::fmt::Debug;
-use std::io::{self, Read, Write};
-
-use crate::{
-    legacy::{Script, TransparentAddress},
-    transaction::TxId,
+use zcash_protocol::{
+    value::{BalanceError, ZatBalance as Amount, Zatoshis as NonNegativeAmount},
+    TxId,
 };
 
-use super::amount::{Amount, BalanceError, NonNegativeAmount};
-
-pub mod builder;
+use crate::{
+    address::{Script, TransparentAddress},
+    sighash::TransparentAuthorizingContext,
+};
 
 pub trait Authorization: Debug {
     type ScriptSig: Debug + Clone + PartialEq;
+}
+
+/// Marker type for a bundle that contains no authorizing data, and the necessary input
+/// information for creating sighashes.
+#[derive(Debug)]
+pub struct EffectsOnly {
+    pub(crate) inputs: Vec<TxOut>,
+}
+
+impl Authorization for EffectsOnly {
+    type ScriptSig = ();
+}
+
+impl TransparentAuthorizingContext for EffectsOnly {
+    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
+        self.inputs.iter().map(|input| input.value).collect()
+    }
+
+    fn input_scriptpubkeys(&self) -> Vec<Script> {
+        self.inputs
+            .iter()
+            .map(|input| input.script_pubkey.clone())
+            .collect()
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -28,6 +52,20 @@ impl Authorization for Authorized {
 pub trait MapAuth<A: Authorization, B: Authorization> {
     fn map_script_sig(&self, s: A::ScriptSig) -> B::ScriptSig;
     fn map_authorization(&self, s: A) -> B;
+}
+
+/// The identity map.
+impl MapAuth<Authorized, Authorized> for () {
+    fn map_script_sig(
+        &self,
+        s: <Authorized as Authorization>::ScriptSig,
+    ) -> <Authorized as Authorization>::ScriptSig {
+        s
+    }
+
+    fn map_authorization(&self, s: Authorized) -> Authorized {
+        s
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -94,8 +132,8 @@ impl<A: Authorization> Bundle<A> {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OutPoint {
-    hash: TxId,
-    n: u32,
+    pub(crate) hash: TxId,
+    pub(crate) n: u32,
 }
 
 impl OutPoint {
@@ -112,7 +150,7 @@ impl OutPoint {
     #[cfg(any(test, feature = "test-dependencies"))]
     pub const fn fake() -> Self {
         OutPoint {
-            hash: TxId([1u8; 32]),
+            hash: TxId::from_bytes([1u8; 32]),
             n: 1,
         }
     }
@@ -120,13 +158,14 @@ impl OutPoint {
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut hash = [0u8; 32];
         reader.read_exact(&mut hash)?;
-        let n = reader.read_u32::<LittleEndian>()?;
-        Ok(OutPoint::new(hash, n))
+        let mut n = [0; 4];
+        reader.read_exact(&mut n)?;
+        Ok(OutPoint::new(hash, u32::from_le_bytes(n)))
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(self.hash.as_ref())?;
-        writer.write_u32::<LittleEndian>(self.n)
+        writer.write_all(&self.n.to_le_bytes())
     }
 
     /// Returns `true` if this `OutPoint` is "null" in the Bitcoin sense: it has txid set to
@@ -164,7 +203,11 @@ impl TxIn<Authorized> {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let prevout = OutPoint::read(&mut reader)?;
         let script_sig = Script::read(&mut reader)?;
-        let sequence = reader.read_u32::<LittleEndian>()?;
+        let sequence = {
+            let mut sequence = [0; 4];
+            reader.read_exact(&mut sequence)?;
+            u32::from_le_bytes(sequence)
+        };
 
         Ok(TxIn {
             prevout,
@@ -176,7 +219,7 @@ impl TxIn<Authorized> {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.prevout.write(&mut writer)?;
         self.script_sig.write(&mut writer)?;
-        writer.write_u32::<LittleEndian>(self.sequence)
+        writer.write_all(&self.sequence.to_le_bytes())
     }
 }
 
@@ -218,8 +261,9 @@ pub mod testing {
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::sample::select;
+    use zcash_protocol::value::testing::arb_zatoshis;
 
-    use crate::{legacy::Script, transaction::components::amount::testing::arb_nonnegative_amount};
+    use crate::address::Script;
 
     use super::{Authorized, Bundle, OutPoint, TxIn, TxOut};
 
@@ -257,7 +301,7 @@ pub mod testing {
     }
 
     prop_compose! {
-        pub fn arb_txout()(value in arb_nonnegative_amount(), script_pubkey in arb_script()) -> TxOut {
+        pub fn arb_txout()(value in arb_zatoshis(), script_pubkey in arb_script()) -> TxOut {
             TxOut { value, script_pubkey }
         }
     }

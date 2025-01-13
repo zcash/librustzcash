@@ -10,7 +10,7 @@ use rusqlite::{named_params, types::Value, Connection, Row, Transaction};
 use zcash_client_backend::{
     data_api::NullifierQuery,
     wallet::{ReceivedNote, WalletOrchardOutput},
-    DecryptedOutput, ShieldedProtocol, TransferType,
+    DecryptedOutput, TransferType,
 };
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::transaction::TxId;
@@ -18,6 +18,7 @@ use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::Zatoshis,
+    ShieldedProtocol,
 };
 use zip32::Scope;
 
@@ -525,5 +526,17 @@ pub(crate) mod tests {
     #[test]
     fn multi_pool_checkpoints_with_pruning() {
         testing::pool::multi_pool_checkpoints_with_pruning::<OrchardPoolTester, SaplingPoolTester>()
+    }
+
+    #[cfg(feature = "pczt-tests")]
+    #[test]
+    fn pczt_single_step_orchard_only() {
+        testing::pool::pczt_single_step::<OrchardPoolTester, OrchardPoolTester>()
+    }
+
+    #[cfg(feature = "pczt-tests")]
+    #[test]
+    fn pczt_single_step_orchard_to_sapling() {
+        testing::pool::pczt_single_step::<OrchardPoolTester, SaplingPoolTester>()
     }
 }

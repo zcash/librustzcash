@@ -3,24 +3,24 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::OptionalExtension;
 use rusqlite::{named_params, Connection, Row};
-use zcash_client_backend::data_api::TransactionDataRequest;
-use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
-use zip32::{DiversifierIndex, Scope};
 
+use ::transparent::{
+    address::{Script, TransparentAddress},
+    bundle::{OutPoint, TxOut},
+    keys::{IncomingViewingKey, NonHardenedChildIndex},
+};
 use zcash_address::unified::{Ivk, Uivk};
 use zcash_client_backend::{
-    data_api::AccountBalance,
+    data_api::{AccountBalance, TransactionDataRequest},
     wallet::{TransparentAddressMetadata, WalletTransparentOutput},
 };
 use zcash_keys::{address::Address, encoding::AddressCodec};
-use zcash_primitives::{
-    legacy::{
-        keys::{IncomingViewingKey, NonHardenedChildIndex},
-        Script, TransparentAddress,
-    },
-    transaction::components::{amount::NonNegativeAmount, Amount, OutPoint, TxOut},
+use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
+use zcash_protocol::{
+    consensus::{self, BlockHeight},
+    value::{ZatBalance, Zatoshis},
 };
-use zcash_protocol::consensus::{self, BlockHeight};
+use zip32::{DiversifierIndex, Scope};
 
 use super::{chain_tip_height, get_account_ids};
 use crate::AccountUuid;
@@ -132,8 +132,8 @@ pub(crate) fn uivk_legacy_transparent_address<P: consensus::Parameters>(
     params: &P,
     uivk_str: &str,
 ) -> Result<Option<(TransparentAddress, NonHardenedChildIndex)>, SqliteClientError> {
+    use ::transparent::keys::ExternalIvk;
     use zcash_address::unified::{Container as _, Encoding as _};
-    use zcash_primitives::legacy::keys::ExternalIvk;
 
     let (network, uivk) = Uivk::decode(uivk_str)
         .map_err(|e| SqliteClientError::CorruptedData(format!("Unable to parse UIVK: {e}")))?;
@@ -191,7 +191,7 @@ fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, S
     let index: u32 = row.get("output_index")?;
     let script_pubkey = Script(row.get("script")?);
     let raw_value: i64 = row.get("value_zat")?;
-    let value = NonNegativeAmount::from_nonnegative_i64(raw_value).map_err(|_| {
+    let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
         SqliteClientError::CorruptedData(format!("Invalid UTXO value: {}", raw_value))
     })?;
     let height: Option<u32> = row.get("received_height")?;
@@ -353,7 +353,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     params: &P,
     account_uuid: AccountUuid,
     summary_height: BlockHeight,
-) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, SqliteClientError> {
+) -> Result<HashMap<TransparentAddress, Zatoshis>, SqliteClientError> {
     let chain_tip_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
 
     let mut stmt_address_balances = conn.prepare(
@@ -395,7 +395,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     while let Some(row) = rows.next()? {
         let taddr_str: String = row.get(0)?;
         let taddr = TransparentAddress::decode(params, &taddr_str)?;
-        let value = NonNegativeAmount::from_nonnegative_i64(row.get(1)?)?;
+        let value = Zatoshis::from_nonnegative_i64(row.get(1)?)?;
 
         res.insert(taddr, value);
     }
@@ -407,16 +407,59 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
 pub(crate) fn add_transparent_account_balances(
     conn: &rusqlite::Connection,
     mempool_height: BlockHeight,
+    min_confirmations: u32,
     account_balances: &mut HashMap<AccountUuid, AccountBalance>,
 ) -> Result<(), SqliteClientError> {
-    let mut stmt_account_balances = conn.prepare(
+    // TODO (#1592): Ability to distinguish between Transparent pending change and pending non-change
+    let mut stmt_account_spendable_balances = conn.prepare(
         "SELECT a.uuid, SUM(u.value_zat)
          FROM transparent_received_outputs u
          JOIN accounts a ON a.id = u.account_id
          JOIN transactions t ON t.id_tx = u.transaction_id
-         -- the transaction that created the output is mined or is definitely unexpired
+         -- the transaction that created the output is mined and with enough confirmations
          WHERE (
             t.mined_height < :mempool_height -- tx is mined
+            AND :mempool_height - t.mined_height >= :min_confirmations -- has at least min_confirmations
+         )
+         -- and the received txo is unspent
+         AND u.id NOT IN (
+           SELECT transparent_received_output_id
+           FROM transparent_received_output_spends txo_spends
+           JOIN transactions tx
+             ON tx.id_tx = txo_spends.transaction_id
+           WHERE tx.mined_height IS NOT NULL -- the spending tx is mined
+           OR tx.expiry_height = 0 -- the spending tx will not expire
+           OR tx.expiry_height >= :mempool_height -- the spending tx is unexpired
+         )
+         GROUP BY a.uuid",
+    )?;
+    let mut rows = stmt_account_spendable_balances.query(named_params![
+        ":mempool_height": u32::from(mempool_height),
+        ":min_confirmations": min_confirmations,
+    ])?;
+
+    while let Some(row) = rows.next()? {
+        let account = AccountUuid(row.get(0)?);
+        let raw_value = row.get(1)?;
+        let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
+            SqliteClientError::CorruptedData(format!("Negative UTXO value {:?}", raw_value))
+        })?;
+
+        account_balances
+            .entry(account)
+            .or_insert(AccountBalance::ZERO)
+            .with_unshielded_balance_mut(|bal| bal.add_spendable_value(value))?;
+    }
+
+    let mut stmt_account_unconfirmed_balances = conn.prepare(
+        "SELECT a.uuid, SUM(u.value_zat)
+         FROM transparent_received_outputs u
+         JOIN accounts a ON a.id = u.account_id
+         JOIN transactions t ON t.id_tx = u.transaction_id
+         -- the transaction that created the output is mined with not enough confirmations or is definitely unexpired
+         WHERE (
+            t.mined_height < :mempool_height
+            AND :mempool_height - t.mined_height < :min_confirmations -- tx is mined but not confirmed
             OR t.expiry_height = 0 -- tx will not expire
             OR t.expiry_height >= :mempool_height
          )
@@ -432,20 +475,23 @@ pub(crate) fn add_transparent_account_balances(
          )
          GROUP BY a.uuid",
     )?;
-    let mut rows = stmt_account_balances
-        .query(named_params![":mempool_height": u32::from(mempool_height),])?;
+
+    let mut rows = stmt_account_unconfirmed_balances.query(named_params![
+        ":mempool_height": u32::from(mempool_height),
+        ":min_confirmations": min_confirmations,
+    ])?;
 
     while let Some(row) = rows.next()? {
         let account = AccountUuid(row.get(0)?);
         let raw_value = row.get(1)?;
-        let value = NonNegativeAmount::from_nonnegative_i64(raw_value).map_err(|_| {
+        let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
             SqliteClientError::CorruptedData(format!("Negative UTXO value {:?}", raw_value))
         })?;
 
         account_balances
             .entry(account)
             .or_insert(AccountBalance::ZERO)
-            .add_unshielded_value(value)?;
+            .with_unshielded_balance_mut(|bal| bal.add_pending_spendable_value(value))?;
     }
     Ok(())
 }
@@ -787,7 +833,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
         ":account_id": receiving_account_id.0,
         ":address": &address.encode(params),
         ":script": &txout.script_pubkey.0,
-        ":value_zat": &i64::from(Amount::from(txout.value)),
+        ":value_zat": &i64::from(ZatBalance::from(txout.value)),
         ":max_observed_unspent_height": max_observed_unspent.map(u32::from),
     ];
 
@@ -854,7 +900,19 @@ pub(crate) fn queue_transparent_spend_detection<P: consensus::Parameters>(
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::{db::TestDbFactory, BlockCache};
+    use secrecy::Secret;
+    use transparent::keys::NonHardenedChildIndex;
+    use zcash_client_backend::{
+        data_api::{testing::TestBuilder, Account as _, WalletWrite, GAP_LIMIT},
+        wallet::TransparentAddressMetadata,
+    };
+    use zcash_primitives::block::BlockHash;
+
+    use crate::{
+        testing::{db::TestDbFactory, BlockCache},
+        wallet::{get_account_ref, transparent::ephemeral},
+        WalletDb,
+    };
 
     #[test]
     fn put_received_transparent_utxo() {
@@ -869,5 +927,56 @@ mod tests {
             TestDbFactory::default(),
             BlockCache::new(),
         );
+    }
+
+    #[test]
+    fn transparent_balance_spendability() {
+        zcash_client_backend::data_api::testing::transparent::transparent_balance_spendability(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn ephemeral_address_management() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let birthday = st.test_account().unwrap().birthday().clone();
+        let account0_uuid = st.test_account().unwrap().account().id();
+        let account0_id = get_account_ref(&st.wallet().db().conn, account0_uuid).unwrap();
+
+        let check = |db: &WalletDb<_, _>, account_id| {
+            eprintln!("checking {account_id:?}");
+            assert_matches!(ephemeral::first_unstored_index(&db.conn, account_id), Ok(addr_index) if addr_index == GAP_LIMIT);
+            assert_matches!(ephemeral::first_unreserved_index(&db.conn, account_id), Ok(addr_index) if addr_index == 0);
+
+            let known_addrs =
+                ephemeral::get_known_ephemeral_addresses(&db.conn, &db.params, account_id, None)
+                    .unwrap();
+
+            let expected_metadata: Vec<TransparentAddressMetadata> = (0..GAP_LIMIT)
+                .map(|i| ephemeral::metadata(NonHardenedChildIndex::from_index(i).unwrap()))
+                .collect();
+            let actual_metadata: Vec<TransparentAddressMetadata> =
+                known_addrs.into_iter().map(|(_, meta)| meta).collect();
+            assert_eq!(actual_metadata, expected_metadata);
+        };
+
+        check(st.wallet().db(), account0_id);
+
+        // Creating a new account should initialize `ephemeral_addresses` for that account.
+        let seed1 = vec![0x01; 32];
+        let (account1_uuid, _usk) = st
+            .wallet_mut()
+            .db_mut()
+            .create_account("test1", &Secret::new(seed1), &birthday, None)
+            .unwrap();
+        let account1_id = get_account_ref(&st.wallet().db().conn, account1_uuid).unwrap();
+        assert_ne!(account0_id, account1_id);
+        check(st.wallet().db(), account1_id);
     }
 }

@@ -7,6 +7,69 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `nonempty 0.11`
+
+### Deprecated
+- `zcash_primitives::consensus` (use `zcash_protocol::consensus` instead)
+- `zcash_primitives::constants` (use `zcash_protocol::constants` instead)
+- `zcash_primitives::memo` (use `zcash_protocol::memo` instead)
+- `zcash_primitives::zip32` (use the `zip32` crate instead)
+- `zcash_primitives::legacy` (use the `zcash_transparent` crate instead)
+- `zcash_primitives::transaction::components::Amount` (use `zcash_protocol::value::ZatBalance` instead)
+- `zcash_primitives::transaction::components::amount`:
+  - `BalanceError` (use `zcash_protocol::value::BalanceError` instead)
+  - `Amount` (use `zcash_protocol::value::ZatBalance` instead)
+  - `NonNegativeAmount` (use `zcash_protocol::value::Zatoshis` instead)
+  - `COIN` (use `zcash_protocol::value::COIN` instead)
+  - module `testing` (use `zcash_protocol::value::testing` instead)
+    - `arb_positive_amount` (use `zcash_protocol::value::testing::arb_positive_zat_balance` instead.)
+    - `arb_amount` (use `zcash_protocol::value::testing::arb_zat_balance` instead.)
+    - `arb_nonnegative_amount` (use `::zcash_protocol::value::testing::arb_zatoshis` instead.)
+
+### Removed
+- `zcash_primitives::transaction::sighash::TransparentAuthorizingContext` was
+  removed as there is no way to deprecate a previously-reexported trait name.
+  Use `zcash_transparent::sighash::TransparentAuthorizingContext` instead.
+
+## [0.21.0] - 2024-12-16
+
+### Added
+- `zcash_primitives::legacy::Script::address`
+- `zcash_primitives::transaction`
+  - `TransactionData::try_map_bundles`
+  - `builder::{PcztResult, PcztParts}`
+  - `builder::Builder::build_for_pczt`
+  - `components::transparent`:
+    - `pczt` module.
+    - `EffectsOnly`
+    - `impl MapAuth<Authorized, Authorized> for ()`
+    - `builder::TransparentSigningSet`
+  - `sighash::SighashType`
+
+### Changed
+- Migrated to `sapling-crypto` version `0.4`.
+- `zcash_primitives::transaction::components::transparent`:
+  - `builder::TransparentBuilder::add_input` now takes `secp256k1::PublicKey`
+    instead of `secp256k1::SecretKey`.
+  - `Bundle<Unauthorized>::apply_signatures` has had its arguments replaced with
+    a function providing the sighash calculation, and `&TransparentSigningSet`.
+  - `builder::Error` has a new variant `MissingSigningKey`.
+- `zcash_primitives::transaction::builder`:
+  - `Builder::add_orchard_spend` now takes `orchard::keys::FullViewingKey`
+    instead of `&orchard::keys::SpendingKey`.
+  - `Builder::add_sapling_spend` now takes `sapling::keys::FullViewingKey`
+    instead of `&sapling::zip32::ExtendedSpendingKey`.
+  - `Builder::add_transparent_input` now takes `secp256k1::PublicKey` instead of
+    `secp256k1::SecretKey`.
+  - `Builder::build` now takes several additional arguments:
+    - `&TransparentSigningSet`
+    - `&[sapling::zip32::ExtendedSpendingKey]`
+    - `&[orchard::keys::SpendAuthorizingKey]`
+- `zcash_primitives::transaction::sighash`:
+  - `SignableInput::Transparent` is now a wrapper around
+    `zcash_transparent::sighash::SignableInput`.
+
 ## [0.20.0] - 2024-11-14
 
 ### Added

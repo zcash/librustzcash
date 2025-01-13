@@ -10,11 +10,9 @@ use secrecy::SecretVec;
 use shardtree::error::ShardTreeError;
 use uuid::Uuid;
 
-use zcash_client_backend::{
-    data_api::{SeedRelevance, WalletRead},
-    keys::AddressGenerationError,
-};
-use zcash_primitives::{consensus, transaction::components::amount::BalanceError};
+use zcash_client_backend::data_api::{SeedRelevance, WalletRead};
+use zcash_keys::keys::AddressGenerationError;
+use zcash_protocol::{consensus, value::BalanceError};
 
 use self::migrations::verify_network_compatibility;
 
@@ -279,7 +277,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// # use std::error::Error;
 /// # use secrecy::SecretVec;
 /// # use tempfile::NamedTempFile;
-/// use zcash_primitives::consensus::Network;
+/// use zcash_protocol::consensus::Network;
 /// use zcash_client_sqlite::{
 ///     WalletDb,
 ///     wallet::init::{WalletMigrationError, init_wallet_db},
@@ -440,19 +438,19 @@ mod tests {
 
     use tempfile::NamedTempFile;
 
-    use zcash_client_backend::{
-        address::Address,
-        data_api::testing::TestBuilder,
-        encoding::{encode_extended_full_viewing_key, encode_payment_address},
-        keys::{sapling, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    };
-
     use ::sapling::zip32::ExtendedFullViewingKey;
-    use zcash_primitives::{
-        consensus::{self, BlockHeight, BranchId, Network, NetworkConstants},
-        transaction::{TransactionData, TxVersion},
-        zip32::AccountId,
+    use zcash_client_backend::data_api::testing::TestBuilder;
+    use zcash_keys::{
+        address::Address,
+        encoding::{encode_extended_full_viewing_key, encode_payment_address},
+        keys::{
+            sapling, ReceiverRequirement::*, UnifiedAddressRequest, UnifiedFullViewingKey,
+            UnifiedSpendingKey,
+        },
     };
+    use zcash_primitives::transaction::{TransactionData, TxVersion};
+    use zcash_protocol::consensus::{self, BlockHeight, BranchId, Network, NetworkConstants};
+    use zip32::AccountId;
 
     use crate::{testing::db::TestDbFactory, wallet::db, WalletDb, UA_TRANSPARENT};
 
@@ -464,7 +462,7 @@ mod tests {
         crate::wallet::{self, pool_code, PoolType},
         zcash_address::test_vectors,
         zcash_client_backend::data_api::WalletWrite,
-        zcash_primitives::zip32::DiversifierIndex,
+        zip32::DiversifierIndex,
     };
 
     pub(crate) fn describe_tables(conn: &Connection) -> Result<Vec<String>, rusqlite::Error> {
@@ -989,9 +987,9 @@ mod tests {
 
             // Unified addresses at the time of the addition of migrations did not contain an
             // Orchard component.
-            let ua_request = UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT);
+            let ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, UA_TRANSPARENT);
             let address_str = Address::Unified(
-                ufvk.default_address(ua_request)
+                ufvk.default_address(Some(ua_request))
                     .expect("A valid default address exists for the UFVK")
                     .0,
             )
@@ -1011,7 +1009,7 @@ mod tests {
             {
                 let taddr = Address::Transparent(
                     *ufvk
-                        .default_address(ua_request)
+                        .default_address(Some(ua_request))
                         .expect("A valid default address exists for the UFVK")
                         .0
                         .transparent()
@@ -1084,8 +1082,8 @@ mod tests {
         assert_matches!(
             db_data.get_account(account_id),
             Ok(Some(account)) if matches!(
-                account.kind,
-                AccountSource::Derived{account_index, ..} if account_index == zip32::AccountId::ZERO,
+                &account.kind,
+                AccountSource::Derived{derivation, ..} if derivation.account_index() == zip32::AccountId::ZERO,
             )
         );
 
@@ -1116,9 +1114,9 @@ mod tests {
                 assert_eq!(tv.unified_addr, ua.encode(&Network::MainNetwork));
 
                 // hardcoded with knowledge of what's coming next
-                let ua_request = UnifiedAddressRequest::unsafe_new(false, true, true);
+                let ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, Require);
                 db_data
-                    .get_next_available_address(account_id, ua_request)
+                    .get_next_available_address(account_id, Some(ua_request))
                     .unwrap()
                     .expect("get_next_available_address generated an address");
             } else {

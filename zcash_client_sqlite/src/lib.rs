@@ -46,7 +46,6 @@ use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
 use zcash_client_backend::{
-    address::UnifiedAddress,
     data_api::{
         self,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
@@ -54,24 +53,30 @@ use zcash_client_backend::{
         Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, BlockMetadata,
         DecryptedTransaction, InputSource, NoteFilter, NullifierQuery, ScannedBlock, SeedRelevance,
         SentTransaction, SpendableNotes, TransactionDataRequest, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
-    },
-    keys::{
-        AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
+        WalletSummary, WalletWrite, Zip32Derivation, SAPLING_SHARD_HEIGHT,
     },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
-    ShieldedProtocol, TransferType,
+    TransferType,
 };
-
+use zcash_keys::{
+    address::UnifiedAddress,
+    keys::{
+        AddressGenerationError, ReceiverRequirement, UnifiedAddressRequest, UnifiedFullViewingKey,
+        UnifiedSpendingKey,
+    },
+};
 use zcash_primitives::{
     block::BlockHash,
+    transaction::{Transaction, TxId},
+};
+use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::Memo,
-    transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
-    zip32::{self, DiversifierIndex},
+    value::Zatoshis,
+    ShieldedProtocol,
 };
-use zip32::fingerprint::SeedFingerprint;
+use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
@@ -88,9 +93,9 @@ use {
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     zcash_client_backend::wallet::TransparentAddressMetadata,
     zcash_keys::encoding::AddressCodec,
-    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
 };
 
 #[cfg(feature = "multicore")]
@@ -150,17 +155,14 @@ pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
 pub(crate) const ORCHARD_TABLES_PREFIX: &str = "orchard";
 
 #[cfg(not(feature = "orchard"))]
-pub(crate) const UA_ORCHARD: bool = false;
+pub(crate) const UA_ORCHARD: ReceiverRequirement = ReceiverRequirement::Omit;
 #[cfg(feature = "orchard")]
-pub(crate) const UA_ORCHARD: bool = true;
+pub(crate) const UA_ORCHARD: ReceiverRequirement = ReceiverRequirement::Require;
 
 #[cfg(not(feature = "transparent-inputs"))]
-pub(crate) const UA_TRANSPARENT: bool = false;
+pub(crate) const UA_TRANSPARENT: ReceiverRequirement = ReceiverRequirement::Omit;
 #[cfg(feature = "transparent-inputs")]
-pub(crate) const UA_TRANSPARENT: bool = true;
-
-pub(crate) const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
-    UnifiedAddressRequest::unsafe_new(UA_ORCHARD, true, UA_TRANSPARENT);
+pub(crate) const UA_TRANSPARENT: ReceiverRequirement = ReceiverRequirement::Require;
 
 /// Unique identifier for a specific account tracked by a [`WalletDb`].
 ///
@@ -180,7 +182,8 @@ pub(crate) const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
 /// - Restoring a wallet from a backed-up seed.
 /// - Importing the same viewing key into two different wallet instances.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
-pub struct AccountUuid(Uuid);
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AccountUuid(#[cfg_attr(feature = "serde", serde(with = "uuid::serde::compact"))] Uuid);
 
 impl ConditionallySelectable for AccountUuid {
     fn conditional_select(a: &Self, b: &Self, choice: subtle::Choice) -> Self {
@@ -319,7 +322,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
     fn select_spendable_notes(
         &self,
         account: Self::AccountId,
-        target_value: NonNegativeAmount,
+        target_value: Zatoshis,
         sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
@@ -442,17 +445,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error> {
         if let Some(account) = self.get_account(account_id)? {
-            if let AccountSource::Derived {
-                seed_fingerprint,
-                account_index,
-                ..
-            } = account.source()
-            {
+            if let AccountSource::Derived { derivation, .. } = account.source() {
                 wallet::seed_matches_derived_account(
                     &self.params,
                     seed,
-                    seed_fingerprint,
-                    *account_index,
+                    derivation.seed_fingerprint(),
+                    derivation.account_index(),
                     &account.uivk(),
                 )
             } else {
@@ -480,19 +478,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
             // way we could determine that is by brute-forcing the ZIP 32 account
             // index space, which we're not going to do. The method name indicates to
             // the caller that we only check derived accounts.
-            if let AccountSource::Derived {
-                seed_fingerprint,
-                account_index,
-                ..
-            } = account.source()
-            {
+            if let AccountSource::Derived { derivation, .. } = account.source() {
                 has_derived = true;
 
                 if wallet::seed_matches_derived_account(
                     &self.params,
                     seed,
-                    seed_fingerprint,
-                    *account_index,
+                    derivation.seed_fingerprint(),
+                    derivation.account_index(),
                     &account.uivk(),
                 )? {
                     // The seed is relevant to this account.
@@ -640,7 +633,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         &self,
         account: Self::AccountId,
         max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
         wallet::transparent::get_transparent_balances(
             self.conn.borrow(),
             &self.params,
@@ -667,14 +660,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     fn get_known_ephemeral_addresses(
         &self,
         account: Self::AccountId,
-        index_range: Option<Range<u32>>,
+        index_range: Option<Range<NonHardenedChildIndex>>,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         let account_id = wallet::get_account_ref(self.conn.borrow(), account)?;
         wallet::transparent::ephemeral::get_known_ephemeral_addresses(
             self.conn.borrow(),
             &self.params,
             account_id,
-            index_range,
+            index_range.map(|i| i.start.index()..i.end.index()),
         )
     }
 
@@ -770,7 +763,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletTest for W
             .map(|res| {
                 let (amount, external_recipient, ephemeral_address) = res?;
                 Ok::<_, <Self as WalletRead>::Error>(OutputOfSentTx::from_parts(
-                    NonNegativeAmount::from_u64(amount)?,
+                    Zatoshis::from_u64(amount)?,
                     external_recipient,
                     ephemeral_address,
                 ))
@@ -873,8 +866,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 &wdb.params,
                 account_name,
                 &AccountSource::Derived {
-                    seed_fingerprint,
-                    account_index: zip32_account_index,
+                    derivation: Zip32Derivation::new(seed_fingerprint, zip32_account_index),
                     key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
@@ -911,8 +903,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 &wdb.params,
                 account_name,
                 &AccountSource::Derived {
-                    seed_fingerprint,
-                    account_index,
+                    derivation: Zip32Derivation::new(seed_fingerprint, account_index),
                     key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
@@ -949,7 +940,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     fn get_next_available_address(
         &mut self,
         account_uuid: Self::AccountId,
-        request: UnifiedAddressRequest,
+        request: Option<UnifiedAddressRequest>,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         self.transactionally(
             |wdb| match wdb.get_unified_full_viewing_keys()?.get(&account_uuid) {
@@ -1952,15 +1943,10 @@ mod tests {
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::consensus;
 
-    use crate::{
-        error::SqliteClientError, testing::db::TestDbFactory, AccountUuid, DEFAULT_UA_REQUEST,
-    };
+    use crate::{error::SqliteClientError, testing::db::TestDbFactory, AccountUuid};
 
     #[cfg(feature = "unstable")]
-    use {
-        zcash_client_backend::keys::sapling,
-        zcash_primitives::transaction::components::amount::NonNegativeAmount,
-    };
+    use zcash_keys::keys::sapling;
 
     #[test]
     fn validate_seed() {
@@ -2005,7 +1991,7 @@ mod tests {
 
         let addr2 = st
             .wallet_mut()
-            .get_next_available_address(account.id(), DEFAULT_UA_REQUEST)
+            .get_next_available_address(account.id(), None)
             .unwrap();
         assert!(addr2.is_some());
         assert_ne!(current_addr, addr2);
@@ -2023,7 +2009,7 @@ mod tests {
             .build();
         assert_matches!(
             st.test_account().unwrap().account().source(),
-            AccountSource::Derived { account_index, .. } if *account_index == zip32::AccountId::ZERO);
+            AccountSource::Derived { derivation, .. } if derivation.account_index() == zip32::AccountId::ZERO);
     }
 
     #[test]
@@ -2046,7 +2032,7 @@ mod tests {
             .unwrap();
         assert_matches!(
             first.0.source(),
-            AccountSource::Derived { account_index, .. } if *account_index == zip32_index_1);
+            AccountSource::Derived { derivation, .. } if derivation.account_index() == zip32_index_1);
 
         let zip32_index_2 = zip32_index_1.next().unwrap();
         let second = st
@@ -2055,7 +2041,7 @@ mod tests {
             .unwrap();
         assert_matches!(
             second.0.source(),
-            AccountSource::Derived { account_index, .. } if *account_index == zip32_index_2);
+            AccountSource::Derived { derivation, .. } if derivation.account_index() == zip32_index_2);
     }
 
     fn check_collisions<C, DbT: WalletTest + WalletWrite, P: consensus::Parameters>(
@@ -2068,7 +2054,7 @@ mod tests {
     {
         assert_matches!(
             st.wallet_mut()
-                .import_account_ufvk("", ufvk, birthday, AccountPurpose::Spending, None),
+                .import_account_ufvk("", ufvk, birthday, AccountPurpose::Spending { derivation: None }, None),
             Err(e) if is_account_collision(&e)
         );
 
@@ -2089,7 +2075,7 @@ mod tests {
                     "",
                     &subset_ufvk,
                     birthday,
-                    AccountPurpose::Spending,
+                    AccountPurpose::Spending { derivation: None },
                     None,
                 ),
                 Err(e) if is_account_collision(&e)
@@ -2113,7 +2099,7 @@ mod tests {
                     "",
                     &subset_ufvk,
                     birthday,
-                    AccountPurpose::Spending,
+                    AccountPurpose::Spending { derivation: None },
                     None,
                 ),
                 Err(e) if is_account_collision(&e)
@@ -2172,7 +2158,13 @@ mod tests {
 
         let account = st
             .wallet_mut()
-            .import_account_ufvk("", &ufvk, &birthday, AccountPurpose::Spending, None)
+            .import_account_ufvk(
+                "",
+                &ufvk,
+                &birthday,
+                AccountPurpose::Spending { derivation: None },
+                None,
+            )
             .unwrap();
         assert_eq!(
             ufvk.encode(st.network()),
@@ -2182,7 +2174,7 @@ mod tests {
         assert_matches!(
             account.source(),
             AccountSource::Imported {
-                purpose: AccountPurpose::Spending,
+                purpose: AccountPurpose::Spending { .. },
                 ..
             }
         );
@@ -2250,7 +2242,7 @@ mod tests {
 
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(
-            ufvk.default_address(DEFAULT_UA_REQUEST)
+            ufvk.default_address(None)
                 .expect("A valid default address exists for the UFVK")
                 .0
                 .transparent()
@@ -2265,8 +2257,7 @@ mod tests {
     #[test]
     pub(crate) fn fsblockdb_api() {
         use zcash_client_backend::data_api::testing::AddressType;
-        use zcash_primitives::zip32;
-        use zcash_protocol::consensus::NetworkConstants;
+        use zcash_protocol::{consensus::NetworkConstants, value::Zatoshis};
 
         use crate::testing::FsBlockCache;
 
@@ -2286,12 +2277,12 @@ mod tests {
         let (h1, meta1, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(5),
+            Zatoshis::const_from_u64(5),
         );
         let (h2, meta2, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(10),
+            Zatoshis::const_from_u64(10),
         );
 
         // The BlockMeta DB is not updated until we do so explicitly.

@@ -1,16 +1,13 @@
 //! Support for legacy transparent addresses and scripts.
 
-use byteorder::{ReadBytesExt, WriteBytesExt};
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::fmt;
+use core::ops::Shl;
+use core2::io::{self, Read, Write};
+
 use zcash_address::TryFromRawAddress;
-
-use std::fmt;
-use std::io::{self, Read, Write};
-use std::ops::Shl;
-
 use zcash_encoding::Vector;
-
-#[cfg(feature = "transparent-inputs")]
-pub mod keys;
 
 /// Defined script opcodes.
 ///
@@ -315,12 +312,15 @@ impl fmt::Debug for Script {
 
 impl Script {
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let script = Vector::read(&mut reader, |r| r.read_u8())?;
+        let script = Vector::read(&mut reader, |r| {
+            let mut bytes = [0; 1];
+            r.read_exact(&mut bytes).map(|_| bytes[0])
+        })?;
         Ok(Script(script))
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        Vector::write(&mut writer, &self.0, |w, e| w.write_u8(*e))
+        Vector::write(&mut writer, &self.0, |w, e| w.write_all(&[*e]))
     }
 
     /// Returns the length of this script as encoded (including the initial CompactSize).
@@ -329,7 +329,7 @@ impl Script {
     }
 
     /// Returns the address that this Script contains, if any.
-    pub(crate) fn address(&self) -> Option<TransparentAddress> {
+    pub fn address(&self) -> Option<TransparentAddress> {
         if self.0.len() == 25
             && self.0[0..3] == [OpCode::Dup as u8, OpCode::Hash160 as u8, 0x14]
             && self.0[23..25] == [OpCode::EqualVerify as u8, OpCode::CheckSig as u8]

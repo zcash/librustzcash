@@ -1,7 +1,8 @@
 use zcash_address::{
     unified::{self, Container, Encoding},
-    ConversionError, Network, ToAddress, ZcashAddress,
+    ConversionError, ToAddress, ZcashAddress,
 };
+use zcash_protocol::consensus::NetworkType;
 
 #[allow(dead_code)]
 enum AddressKind {
@@ -14,14 +15,17 @@ enum AddressKind {
 }
 
 struct Address {
-    net: Network,
+    net: NetworkType,
     kind: AddressKind,
 }
 
 impl zcash_address::TryFromAddress for Address {
     type Error = ();
 
-    fn try_from_sprout(net: Network, data: [u8; 64]) -> Result<Self, ConversionError<Self::Error>> {
+    fn try_from_sprout(
+        net: NetworkType,
+        data: [u8; 64],
+    ) -> Result<Self, ConversionError<Self::Error>> {
         Ok(Address {
             net,
             kind: AddressKind::Sprout(data),
@@ -29,7 +33,7 @@ impl zcash_address::TryFromAddress for Address {
     }
 
     fn try_from_sapling(
-        net: Network,
+        net: NetworkType,
         data: [u8; 43],
     ) -> Result<Self, ConversionError<Self::Error>> {
         Ok(Address {
@@ -39,7 +43,7 @@ impl zcash_address::TryFromAddress for Address {
     }
 
     fn try_from_unified(
-        net: Network,
+        net: NetworkType,
         data: unified::Address,
     ) -> Result<Self, ConversionError<Self::Error>> {
         Ok(Address {
@@ -49,7 +53,7 @@ impl zcash_address::TryFromAddress for Address {
     }
 
     fn try_from_transparent_p2pkh(
-        net: Network,
+        net: NetworkType,
         data: [u8; 20],
     ) -> Result<Self, ConversionError<Self::Error>> {
         Ok(Address {
@@ -59,7 +63,7 @@ impl zcash_address::TryFromAddress for Address {
     }
 
     fn try_from_transparent_p2sh(
-        net: Network,
+        net: NetworkType,
         data: [u8; 20],
     ) -> Result<Self, ConversionError<Self::Error>> {
         Ok(Address {
@@ -68,7 +72,10 @@ impl zcash_address::TryFromAddress for Address {
         })
     }
 
-    fn try_from_tex(net: Network, data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
+    fn try_from_tex(
+        net: NetworkType,
+        data: [u8; 20],
+    ) -> Result<Self, ConversionError<Self::Error>> {
         Ok(Address {
             net,
             kind: AddressKind::Tex(data),
@@ -87,9 +94,9 @@ pub(crate) fn inspect(addr: ZcashAddress) {
             eprintln!(
                 " - Network: {}",
                 match addr.net {
-                    Network::Main => "main",
-                    Network::Test => "testnet",
-                    Network::Regtest => "regtest",
+                    NetworkType::Main => "main",
+                    NetworkType::Test => "testnet",
+                    NetworkType::Regtest => "regtest",
                 }
             );
             eprintln!(

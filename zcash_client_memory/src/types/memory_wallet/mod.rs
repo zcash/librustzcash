@@ -482,21 +482,16 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
             .accounts
             .iter()
             .filter_map(|(_, a)| match a.source() {
-                AccountSource::Derived {
-                    seed_fingerprint: sf,
-                    account_index,
-                    ..
-                } => {
-                    if sf == seed_fingerprint {
-                        Some(account_index)
+                AccountSource::Derived { derivation, .. } => {
+                    if derivation.seed_fingerprint() == seed_fingerprint {
+                        Some(derivation.account_index())
                     } else {
                         None
                     }
                 }
                 _ => None,
             })
-            .max()
-            .copied())
+            .max())
     }
     pub(crate) fn insert_received_sapling_note(
         &mut self,
