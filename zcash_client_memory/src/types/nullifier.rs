@@ -86,12 +86,16 @@ mod serialization {
                 proto::ShieldedProtocol::Sapling => {
                     Nullifier::Sapling(sapling::Nullifier::from_slice(&nullifier.nullifier)?)
                 }
-                #[cfg(feature = "orchard")]
-                proto::ShieldedProtocol::Orchard => Nullifier::Orchard(
-                    orchard::note::Nullifier::from_bytes(&nullifier.nullifier.try_into()?)
-                        .into_option()
-                        .ok_or(Error::CorruptedData("Invalid Orchard nullifier".into()))?,
-                ),
+                proto::ShieldedProtocol::Orchard => {
+                    #[cfg(not(feature = "orchard"))]
+                    return Err(Error::Other("Orchard support is not enabled".into()));
+                    #[cfg(feature = "orchard")]
+                    Nullifier::Orchard(
+                        orchard::note::Nullifier::from_bytes(&nullifier.nullifier.try_into()?)
+                            .into_option()
+                            .ok_or(Error::CorruptedData("Invalid Orchard nullifier".into()))?,
+                    )
+                }
             })
         }
     }

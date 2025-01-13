@@ -55,6 +55,7 @@ impl SentNoteTable {
     ) {
         let pool_type = match output.recipient() {
             Recipient::External { output_pool, .. } => *output_pool,
+            #[cfg(feature = "transparent-inputs")]
             Recipient::EphemeralTransparent { .. } => PoolType::Transparent,
             Recipient::InternalAccount { note, .. } => PoolType::Shielded(note.protocol()),
         };
@@ -103,6 +104,7 @@ impl SentNoteTable {
     ) {
         let pool_type = match output.recipient() {
             Recipient::External { output_pool, .. } => *output_pool,
+            #[cfg(feature = "transparent-inputs")]
             Recipient::EphemeralTransparent { .. } => PoolType::Transparent,
             Recipient::InternalAccount { note, .. } => PoolType::Shielded(note.protocol()),
         };
@@ -335,15 +337,19 @@ mod serialization {
                         },
                     }
                 }
-                #[cfg(feature = "transparent-inputs")]
-                proto::RecipientType::EphemeralTransparent => Recipient::EphemeralTransparent {
-                    receiving_account: read_optional!(recipient, account_id)?.into(),
-                    ephemeral_address: TransparentAddress::decode(
-                        &EncodingParams,
-                        &read_optional!(recipient, address)?,
-                    )?,
-                    outpoint: read_optional!(recipient, outpoint)?.try_into()?,
-                },
+                proto::RecipientType::EphemeralTransparent => {
+                    #[cfg(not(feature = "transparent-inputs"))]
+                    return Err(Error::Other("transparent inputs not enabled".to_string()));
+                    #[cfg(feature = "transparent-inputs")]
+                    Recipient::EphemeralTransparent {
+                        receiving_account: read_optional!(recipient, account_id)?.into(),
+                        ephemeral_address: TransparentAddress::decode(
+                            &EncodingParams,
+                            &read_optional!(recipient, address)?,
+                        )?,
+                        outpoint: read_optional!(recipient, outpoint)?.try_into()?,
+                    }
+                }
                 proto::RecipientType::InternalAccount => Recipient::InternalAccount {
                     receiving_account: read_optional!(recipient, account_id)?.into(),
                     external_address: recipient.address.map(|a| a.parse()).transpose()?,
