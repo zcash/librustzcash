@@ -5,10 +5,9 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
 
-use zcash_encoding::{CompactSize, Vector};
-
-use super::amount::Amount;
 use crate::{extensions::transparent as tze, transaction::TxId};
+use zcash_encoding::{CompactSize, Vector};
+use zcash_protocol::value::Zatoshis;
 
 pub mod builder;
 
@@ -190,7 +189,7 @@ impl TzeIn<<Authorized as Authorization>::Witness> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TzeOut {
-    pub value: Amount,
+    pub value: Zatoshis,
     pub precondition: tze::Precondition,
 }
 
@@ -199,7 +198,7 @@ impl TzeOut {
         let value = {
             let mut tmp = [0; 8];
             reader.read_exact(&mut tmp)?;
-            Amount::from_nonnegative_i64_le_bytes(tmp)
+            Zatoshis::from_nonnegative_i64_le_bytes(tmp)
         }
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
 

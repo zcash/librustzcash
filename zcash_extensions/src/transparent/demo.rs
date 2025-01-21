@@ -25,11 +25,9 @@ use blake2b_simd::Params;
 
 use zcash_primitives::{
     extensions::transparent::{Extension, ExtensionTxBuilder, FromPayload, ToPayload},
-    transaction::components::{
-        amount::Amount,
-        tze::{OutPoint, TzeOut},
-    },
+    transaction::components::tze::{OutPoint, TzeOut},
 };
+use zcash_protocol::value::Zatoshis;
 
 /// Types and constants used for Mode 0 (open a channel)
 mod open {
@@ -377,7 +375,7 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<B> {
     /// construction.
     pub fn demo_open(
         &mut self,
-        value: Amount,
+        value: Zatoshis,
         hash_1: [u8; 32],
     ) -> Result<(), DemoBuildError<B::BuildError>> {
         // Call through to the generic builder.
@@ -391,7 +389,7 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<B> {
     pub fn demo_transfer_to_close(
         &mut self,
         prevout: (OutPoint, TzeOut),
-        transfer_amount: Amount,
+        transfer_amount: Zatoshis,
         preimage_1: [u8; 32],
         hash_2: [u8; 32],
     ) -> Result<(), DemoBuildError<B::BuildError>> {
@@ -483,21 +481,21 @@ mod tests {
     use rand_core::OsRng;
 
     use sapling::{zip32::ExtendedSpendingKey, Node, Rseed};
+    use transparent::{address::TransparentAddress, builder::TransparentSigningSet};
     use zcash_primitives::{
-        consensus::{BlockHeight, BranchId, NetworkType, NetworkUpgrade, Parameters},
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
-        legacy::TransparentAddress,
         transaction::{
             builder::{BuildConfig, Builder},
-            components::{
-                amount::{Amount, NonNegativeAmount},
-                transparent::builder::TransparentSigningSet,
-                tze::{Authorized, Bundle, OutPoint, TzeIn, TzeOut},
-            },
+            components::tze::{Authorized, Bundle, OutPoint, TzeIn, TzeOut},
             fees::{fixed, zip317::MINIMUM_FEE},
             Transaction, TransactionData, TxVersion,
         },
     };
+    use zcash_protocol::{
+        consensus::{BlockHeight, BranchId, NetworkType, NetworkUpgrade, Parameters},
+        value::Zatoshis,
+    };
+
     use zcash_proofs::prover::LocalTxProver;
 
     use super::{close, hash_1, open, Context, DemoBuilder, Precondition, Program, Witness};
@@ -669,7 +667,7 @@ mod tests {
         //
 
         let out_a = TzeOut {
-            value: Amount::from_u64(1).unwrap(),
+            value: Zatoshis::from_u64(1).unwrap(),
             precondition: tze::Precondition::from(0, &Precondition::open(hash_1)),
         };
 
@@ -700,7 +698,7 @@ mod tests {
             witness: tze::Witness::from(0, &Witness::open(preimage_1)),
         };
         let out_b = TzeOut {
-            value: Amount::from_u64(1).unwrap(),
+            value: Zatoshis::const_from_u64(1),
             precondition: tze::Precondition::from(0, &Precondition::close(hash_2)),
         };
 
@@ -818,7 +816,7 @@ mod tests {
             .add_sapling_spend::<Infallible>(dfvk.fvk().clone(), note1, witness1.path().unwrap())
             .unwrap();
 
-        let value = NonNegativeAmount::const_from_u64(100000);
+        let value = Zatoshis::const_from_u64(100000);
         let (h1, h2) = demo_hashes(&preimage_1, &preimage_2);
         builder_a
             .demo_open(value.into(), h1)

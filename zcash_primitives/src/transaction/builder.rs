@@ -981,10 +981,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Extensio
     fn add_tze_output<G: ToPayload>(
         &mut self,
         extension_id: u32,
-        value: ZatBalance,
+        value: Zatoshis,
         guarded_by: &G,
     ) -> Result<(), Self::BuildError> {
-        self.tze_builder.add_output(extension_id, value, guarded_by)
+        self.tze_builder.add_output(extension_id, value, guarded_by);
+        Ok(())
     }
 }
 
