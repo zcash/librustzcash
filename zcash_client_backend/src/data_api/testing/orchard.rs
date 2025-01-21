@@ -75,7 +75,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
             None,
             None,
         )
-        .unwrap()
+        .expect("Address construction is valid")
         .into()
     }
 
@@ -156,7 +156,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
                     (
                         Note::Orchard(note),
                         UnifiedAddress::from_receivers(Some(addr), None, None)
-                            .unwrap()
+                            .expect("Address construction is valid")
                             .into(),
                         MemoBytes::from_bytes(&memo).expect("correct length"),
                     )

@@ -14,6 +14,7 @@ use zcash_address::{
 };
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_protocol::{
+    address::Revision,
     consensus::{Network, NetworkConstants, NetworkType},
     local_consensus::LocalNetwork,
 };
@@ -150,7 +151,11 @@ pub(crate) fn inspect_mnemonic(mnemonic: bip0039::Mnemonic, context: Option<Cont
                 .collect();
 
             eprintln!("   - Unified ({}):", item_names.join(", "));
-            let ufvk = unified::Ufvk::try_from_items(items).unwrap();
+            let ufvk = unified::Ufvk::try_from_items(
+                Revision::R0,
+                items.into_iter().map(unified::Item::Data).collect(),
+            )
+            .unwrap();
             eprintln!("     - UFVK: {}", ufvk.encode(&addr_net));
         }
         seed.zeroize();

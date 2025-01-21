@@ -58,15 +58,28 @@ pub const B58_SCRIPT_ADDRESS_PREFIX: [u8; 2] = [0x1c, 0xba];
 /// [ZIP 320]: https://zips.z.cash/zip-0320
 pub const HRP_TEX_ADDRESS: &str = "texregtest";
 
-/// The HRP for a Bech32m-encoded regtest Unified Address.
+/// The HRP for a Bech32m-encoded regtest Revision 0 Unified Address.
 ///
 /// Defined in [ZIP 316][zip-0316].
 ///
 /// [zip-0316]: https://zips.z.cash/zip-0316
-pub const HRP_UNIFIED_ADDRESS: &str = "uregtest";
+pub const HRP_UNIFIED_ADDRESS_R0: &str = "uregtest";
 
-/// The HRP for a Bech32m-encoded regtest Unified FVK.
-pub const HRP_UNIFIED_FVK: &str = "uviewregtest";
+/// The HRP for a Bech32m-encoded regtest Revision 0 Unified FVK.
+pub const HRP_UNIFIED_FVK_R0: &str = "uviewregtest";
 
-/// The HRP for a Bech32m-encoded regtest Unified IVK.
-pub const HRP_UNIFIED_IVK: &str = "uivkregtest";
+/// The HRP for a Bech32m-encoded regtest Revision 0 Unified IVK.
+pub const HRP_UNIFIED_IVK_R0: &str = "uivkregtest";
+
+/// The HRP for a Bech32m-encoded regtest Revision 1 Unified Address.
+///
+/// Defined in [ZIP 316][zip-0316].
+///
+/// [zip-0316]: https://zips.z.cash/zip-0316
+pub const HRP_UNIFIED_ADDRESS_R1: &str = "urregtest";
+
+/// The HRP for a Bech32m-encoded regtest Revision 1 Unified FVK.
+pub const HRP_UNIFIED_FVK_R1: &str = "urviewregtest";
+
+/// The HRP for a Bech32m-encoded regtest Revision 1 Unified IVK.
+pub const HRP_UNIFIED_IVK_R1: &str = "urivkregtest";

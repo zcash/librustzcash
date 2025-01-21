@@ -91,13 +91,13 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 ));
             };
             let (expected_address, idx) = ufvk.default_address(Some(
-                UnifiedAddressRequest::unsafe_new(Omit, Require, UA_TRANSPARENT),
+                UnifiedAddressRequest::unsafe_new_without_expiry(Omit, Require, UA_TRANSPARENT),
             ))?;
-            if decoded_address != expected_address {
+            if *decoded_address != expected_address {
                 return Err(WalletMigrationError::CorruptedData(format!(
                     "Decoded UA {} does not match the UFVK's default address {} at {:?}.",
                     address,
-                    Address::Unified(expected_address).encode(&self.params),
+                    Address::from(expected_address).encode(&self.params),
                     idx,
                 )));
             }
@@ -163,7 +163,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             )?;
 
             let (address, d_idx) = ufvk.default_address(Some(
-                UnifiedAddressRequest::unsafe_new(Omit, Require, UA_TRANSPARENT),
+                UnifiedAddressRequest::unsafe_new_without_expiry(Omit, Require, UA_TRANSPARENT),
             ))?;
             insert_address(transaction, &self.params, account, d_idx, &address)?;
         }

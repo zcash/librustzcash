@@ -656,7 +656,7 @@ pub(crate) fn get_current_address<P: consensus::Parameters>(
                     addr_str,
                 ))),
             })
-            .map(|addr| (addr, DiversifierIndex::from(di_be)))
+            .map(|addr| (*addr, DiversifierIndex::from(di_be)))
     })
     .transpose()
 }

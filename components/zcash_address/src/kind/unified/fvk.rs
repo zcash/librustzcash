@@ -1,10 +1,10 @@
 use alloc::vec::Vec;
-use core::convert::{TryFrom, TryInto};
-use zcash_protocol::constants;
+use core::convert::TryInto;
+use zcash_protocol::{address::Revision, constants};
 
 use super::{
-    private::{SealedContainer, SealedItem},
-    Container, Encoding, ParseError, Typecode,
+    private::{SealedContainer, SealedDataItem},
+    Container, DataTypecode, Encoding, Item, ParseError,
 };
 
 /// The set of known FVKs for Unified FVKs.
@@ -41,31 +41,27 @@ pub enum Fvk {
     },
 }
 
-impl TryFrom<(u32, &[u8])> for Fvk {
-    type Error = ParseError;
-
-    fn try_from((typecode, data): (u32, &[u8])) -> Result<Self, Self::Error> {
+impl SealedDataItem for Fvk {
+    fn parse(typecode: DataTypecode, data: &[u8]) -> Result<Self, ParseError> {
         let data = data.to_vec();
-        match typecode.try_into()? {
-            Typecode::P2pkh => data.try_into().map(Fvk::P2pkh),
-            Typecode::P2sh => Err(data),
-            Typecode::Sapling => data.try_into().map(Fvk::Sapling),
-            Typecode::Orchard => data.try_into().map(Fvk::Orchard),
-            Typecode::Unknown(_) => Ok(Fvk::Unknown { typecode, data }),
+        match typecode {
+            DataTypecode::P2pkh => data.try_into().map(Fvk::P2pkh),
+            DataTypecode::P2sh => Err(data),
+            DataTypecode::Sapling => data.try_into().map(Fvk::Sapling),
+            DataTypecode::Orchard => data.try_into().map(Fvk::Orchard),
+            DataTypecode::Unknown(typecode) => Ok(Fvk::Unknown { typecode, data }),
         }
         .map_err(|e| {
-            ParseError::InvalidEncoding(format!("Invalid fvk for typecode {}: {:?}", typecode, e))
+            ParseError::InvalidEncoding(format!("Invalid fvk for typecode {:?}: {:?}", typecode, e))
         })
     }
-}
 
-impl SealedItem for Fvk {
-    fn typecode(&self) -> Typecode {
+    fn typecode(&self) -> DataTypecode {
         match self {
-            Fvk::P2pkh(_) => Typecode::P2pkh,
-            Fvk::Sapling(_) => Typecode::Sapling,
-            Fvk::Orchard(_) => Typecode::Orchard,
-            Fvk::Unknown { typecode, .. } => Typecode::Unknown(*typecode),
+            Fvk::P2pkh(_) => DataTypecode::P2pkh,
+            Fvk::Sapling(_) => DataTypecode::Sapling,
+            Fvk::Orchard(_) => DataTypecode::Orchard,
+            Fvk::Unknown { typecode, .. } => DataTypecode::Unknown(*typecode),
         }
     }
 
@@ -84,7 +80,8 @@ impl SealedItem for Fvk {
 /// # Examples
 ///
 /// ```
-/// use zcash_address::unified::{self, Container, Encoding};
+/// use zcash_address::unified::{self, Container, Encoding, Item};
+/// use zcash_protocol::address::Revision;
 ///
 /// # #[cfg(not(feature = "std"))]
 /// # fn main() {}
@@ -95,58 +92,75 @@ impl SealedItem for Fvk {
 ///
 /// let (network, ufvk) = unified::Ufvk::decode(example_ufvk)?;
 ///
-/// // We can obtain the pool-specific Full Viewing Keys for the UFVK in preference
-/// // order (the order in which wallets should prefer to use their corresponding
-/// // address receivers):
-/// let fvks: Vec<unified::Fvk> = ufvk.items();
+/// // We can obtain the pool-specific Full Viewing Keys for the UFVK.
+/// let fvks: &[Item<unified::Fvk>] = ufvk.items_as_parsed();
 ///
 /// // And we can create the UFVK from a list of FVKs:
-/// let new_ufvk = unified::Ufvk::try_from_items(fvks)?;
+/// let new_ufvk = unified::Ufvk::try_from_items(Revision::R0, fvks.to_vec())?;
 /// assert_eq!(new_ufvk, ufvk);
 /// # Ok(())
 /// # }
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Ufvk(pub(crate) Vec<Fvk>);
+pub struct Ufvk {
+    pub(crate) revision: Revision,
+    pub(crate) fvks: Vec<Item<Fvk>>,
+}
 
 impl Container for Ufvk {
-    type Item = Fvk;
+    type DataItem = Fvk;
 
-    /// Returns the FVKs contained within this UFVK, in the order they were
-    /// parsed from the string encoding.
-    ///
-    /// This API is for advanced usage; in most cases you should use `Ufvk::receivers`.
-    fn items_as_parsed(&self) -> &[Fvk] {
-        &self.0
+    fn items_as_parsed(&self) -> &[Item<Fvk>] {
+        &self.fvks
+    }
+
+    fn revision(&self) -> Revision {
+        self.revision
     }
 }
 
 impl Encoding for Ufvk {}
 
 impl SealedContainer for Ufvk {
-    /// The HRP for a Bech32m-encoded mainnet Unified FVK.
+    /// The HRP for a Bech32m-encoded mainnet Revision 0 Unified FVK.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const MAINNET: &'static str = constants::mainnet::HRP_UNIFIED_FVK;
+    const MAINNET_R0: &'static str = constants::mainnet::HRP_UNIFIED_FVK_R0;
 
-    /// The HRP for a Bech32m-encoded testnet Unified FVK.
+    /// The HRP for a Bech32m-encoded testnet Revision 0 Unified FVK.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const TESTNET: &'static str = constants::testnet::HRP_UNIFIED_FVK;
+    const TESTNET_R0: &'static str = constants::testnet::HRP_UNIFIED_FVK_R0;
 
     /// The HRP for a Bech32m-encoded regtest Unified FVK.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const REGTEST: &'static str = constants::regtest::HRP_UNIFIED_FVK;
+    const REGTEST_R0: &'static str = constants::regtest::HRP_UNIFIED_FVK_R0;
 
-    fn from_inner(fvks: Vec<Self::Item>) -> Self {
-        Self(fvks)
+    /// The HRP for a Bech32m-encoded mainnet Revision 1 Unified FVK.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    const MAINNET_R1: &'static str = constants::mainnet::HRP_UNIFIED_FVK_R1;
+    /// The HRP for a Bech32m-encoded testnet Revision 1 Unified FVK.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    const TESTNET_R1: &'static str = constants::testnet::HRP_UNIFIED_FVK_R1;
+
+    /// The HRP for a Bech32m-encoded regtest Revision 1 Unified FVK.
+    const REGTEST_R1: &'static str = constants::regtest::HRP_UNIFIED_FVK_R1;
+
+    fn from_inner(revision: Revision, fvks: Vec<Item<Self::DataItem>>) -> Self {
+        Self { revision, fvks }
     }
 }
 
@@ -159,12 +173,12 @@ mod tests {
 
     use proptest::{array::uniform1, array::uniform32, prelude::*, sample::select};
 
-    use super::{Fvk, ParseError, Typecode, Ufvk};
-    use crate::kind::unified::{
-        private::{SealedContainer, SealedItem},
-        Container, Encoding,
+    use super::{Fvk, ParseError, Ufvk};
+    use crate::{
+        kind::unified::{private::SealedContainer, Encoding as _},
+        unified::{address::testing::arb_revision, Item, Typecode},
     };
-    use zcash_protocol::consensus::NetworkType;
+    use zcash_protocol::{address::Revision, consensus::NetworkType};
 
     prop_compose! {
         fn uniform128()(a in uniform96(), b in uniform32(0u8..)) -> [u8; 128] {
@@ -217,12 +231,13 @@ mod tests {
 
     prop_compose! {
         fn arb_unified_fvk()(
+            revision in arb_revision(),
             shielded in arb_shielded_fvk(),
             transparent in prop::option::of(arb_transparent_fvk()),
         ) -> Ufvk {
-            let mut items: Vec<_> = transparent.into_iter().chain(shielded).collect();
-            items.sort_unstable_by(Fvk::encoding_order);
-            Ufvk(items)
+            let mut fvks: Vec<_> = transparent.into_iter().chain(shielded).map(Item::Data).collect();
+            fvks.sort_unstable_by(Item::encoding_order);
+            Ufvk { revision, fvks }
         }
     }
 
@@ -254,7 +269,7 @@ mod tests {
             0xdf, 0x63, 0xe7, 0xef, 0x65, 0x6b, 0x18, 0x23, 0xf7, 0x3e, 0x35, 0x7c, 0xf3, 0xc4,
         ];
         assert_eq!(
-            Ufvk::parse_internal(Ufvk::MAINNET, &invalid_padding[..]),
+            Ufvk::parse_internal(Ufvk::MAINNET_R0, &invalid_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -272,7 +287,7 @@ mod tests {
             0x43, 0x8e, 0xc0, 0x3e, 0x9f, 0xf4, 0xf1, 0x80, 0x32, 0xcf, 0x2f, 0x7e, 0x7f, 0x91,
         ];
         assert_eq!(
-            Ufvk::parse_internal(Ufvk::MAINNET, &truncated_padding[..]),
+            Ufvk::parse_internal(Ufvk::MAINNET_R0, &truncated_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -304,7 +319,7 @@ mod tests {
             0x8c, 0x7a, 0xbf, 0x7b, 0x9a, 0xdd, 0xee, 0x18, 0x2c, 0x2d, 0xc2, 0xfc,
         ];
         assert_matches!(
-            Ufvk::parse_internal(Ufvk::MAINNET, &truncated_sapling_data[..]),
+            Ufvk::parse_internal(Ufvk::MAINNET_R0, &truncated_sapling_data[..]),
             Err(ParseError::InvalidEncoding(_))
         );
 
@@ -319,7 +334,7 @@ mod tests {
             0x54, 0xd1, 0x9e, 0xec, 0x8b, 0xef, 0x35, 0xb8, 0x44, 0xdd, 0xab, 0x9a, 0x8d,
         ];
         assert_matches!(
-            Ufvk::parse_internal(Ufvk::MAINNET, &truncated_after_sapling_typecode[..]),
+            Ufvk::parse_internal(Ufvk::MAINNET_R0, &truncated_after_sapling_typecode[..]),
             Err(ParseError::InvalidEncoding(_))
         );
     }
@@ -328,11 +343,17 @@ mod tests {
     fn duplicate_typecode() {
         // Construct and serialize an invalid Ufvk. This must be done using private
         // methods, as the public API does not permit construction of such invalid values.
-        let ufvk = Ufvk(vec![Fvk::Sapling([1; 128]), Fvk::Sapling([2; 128])]);
-        let encoded = ufvk.to_jumbled_bytes(Ufvk::MAINNET);
+        let ufvk = Ufvk {
+            revision: Revision::R0,
+            fvks: vec![
+                Item::Data(Fvk::Sapling([1; 128])),
+                Item::Data(Fvk::Sapling([2; 128])),
+            ],
+        };
+        let encoded = ufvk.to_jumbled_bytes(Ufvk::MAINNET_R0);
         assert_eq!(
-            Ufvk::parse_internal(Ufvk::MAINNET, &encoded[..]),
-            Err(ParseError::DuplicateTypecode(Typecode::Sapling))
+            Ufvk::parse_internal(Ufvk::MAINNET_R0, &encoded[..]),
+            Err(ParseError::DuplicateTypecode(Typecode::SAPLING))
         );
     }
 
@@ -348,37 +369,6 @@ mod tests {
             0xf4, 0xf5, 0x16, 0xef, 0x5c, 0xe0, 0x26, 0xbc, 0x23, 0x73, 0x76, 0x3f, 0x4b,
         ];
 
-        assert_eq!(
-            Ufvk::parse_internal(Ufvk::MAINNET, &encoded[..]),
-            Err(ParseError::OnlyTransparent)
-        );
-    }
-
-    #[test]
-    fn fvks_are_sorted() {
-        // Construct a UFVK with fvks in an unsorted order.
-        let ufvk = Ufvk(vec![
-            Fvk::P2pkh([0; 65]),
-            Fvk::Orchard([0; 96]),
-            Fvk::Unknown {
-                typecode: 0xff,
-                data: vec![],
-            },
-            Fvk::Sapling([0; 128]),
-        ]);
-
-        // `Ufvk::items` sorts the fvks in priority order.
-        assert_eq!(
-            ufvk.items(),
-            vec![
-                Fvk::Orchard([0; 96]),
-                Fvk::Sapling([0; 128]),
-                Fvk::P2pkh([0; 65]),
-                Fvk::Unknown {
-                    typecode: 0xff,
-                    data: vec![],
-                },
-            ]
-        )
+        assert_matches!(Ufvk::parse_internal(Ufvk::MAINNET_R0, &encoded[..]), Ok(_));
     }
 }

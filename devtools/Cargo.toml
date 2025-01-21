@@ -43,6 +43,7 @@ orchard.workspace = true
 
 # zcash-inspect tool
 anyhow = "1"
+chrono = "0.4"
 hex.workspace = true
 lazy_static.workspace = true
 secrecy.workspace = true

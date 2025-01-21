@@ -2068,6 +2068,10 @@ mod tests {
                 ufvk.sapling().cloned(),
                 #[cfg(feature = "orchard")]
                 ufvk.orchard().cloned(),
+                vec![],
+                None,
+                None,
+                vec![],
             )
             .unwrap();
             assert_matches!(
@@ -2092,6 +2096,10 @@ mod tests {
                 ufvk.transparent().cloned(),
                 ufvk.sapling().cloned(),
                 None,
+                vec![],
+                None,
+                None,
+                vec![],
             )
             .unwrap();
             assert_matches!(

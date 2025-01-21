@@ -8,6 +8,7 @@ use core::ops::{Add, Bound, RangeBounds, Sub};
 #[cfg(feature = "std")]
 use memuse::DynamicUsage;
 
+use crate::address::Revision;
 use crate::constants::{mainnet, regtest, testnet};
 
 /// A wrapper type representing blockchain heights.
@@ -195,21 +196,21 @@ pub trait NetworkConstants: Clone {
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    fn hrp_unified_address(&self) -> &'static str;
+    fn hrp_unified_address(&self, revision: Revision) -> &'static str;
 
     /// The HRP for a Bech32m-encoded mainnet Unified FVK.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    fn hrp_unified_fvk(&self) -> &'static str;
+    fn hrp_unified_fvk(&self, revision: Revision) -> &'static str;
 
     /// The HRP for a Bech32m-encoded mainnet Unified IVK.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    fn hrp_unified_ivk(&self) -> &'static str;
+    fn hrp_unified_ivk(&self, revision: Revision) -> &'static str;
 }
 
 /// The enumeration of known Zcash network types.
@@ -294,27 +295,36 @@ impl NetworkConstants for NetworkType {
         }
     }
 
-    fn hrp_unified_address(&self) -> &'static str {
-        match self {
-            NetworkType::Main => mainnet::HRP_UNIFIED_ADDRESS,
-            NetworkType::Test => testnet::HRP_UNIFIED_ADDRESS,
-            NetworkType::Regtest => regtest::HRP_UNIFIED_ADDRESS,
+    fn hrp_unified_address(&self, revision: Revision) -> &'static str {
+        match (revision, self) {
+            (Revision::R0, NetworkType::Main) => mainnet::HRP_UNIFIED_ADDRESS_R0,
+            (Revision::R0, NetworkType::Test) => testnet::HRP_UNIFIED_ADDRESS_R0,
+            (Revision::R0, NetworkType::Regtest) => regtest::HRP_UNIFIED_ADDRESS_R0,
+            (Revision::R1, NetworkType::Main) => mainnet::HRP_UNIFIED_ADDRESS_R1,
+            (Revision::R1, NetworkType::Test) => testnet::HRP_UNIFIED_ADDRESS_R1,
+            (Revision::R1, NetworkType::Regtest) => regtest::HRP_UNIFIED_ADDRESS_R1,
         }
     }
 
-    fn hrp_unified_fvk(&self) -> &'static str {
-        match self {
-            NetworkType::Main => mainnet::HRP_UNIFIED_FVK,
-            NetworkType::Test => testnet::HRP_UNIFIED_FVK,
-            NetworkType::Regtest => regtest::HRP_UNIFIED_FVK,
+    fn hrp_unified_fvk(&self, revision: Revision) -> &'static str {
+        match (revision, self) {
+            (Revision::R0, NetworkType::Main) => mainnet::HRP_UNIFIED_FVK_R0,
+            (Revision::R0, NetworkType::Test) => testnet::HRP_UNIFIED_FVK_R0,
+            (Revision::R0, NetworkType::Regtest) => regtest::HRP_UNIFIED_FVK_R0,
+            (Revision::R1, NetworkType::Main) => mainnet::HRP_UNIFIED_FVK_R1,
+            (Revision::R1, NetworkType::Test) => testnet::HRP_UNIFIED_FVK_R1,
+            (Revision::R1, NetworkType::Regtest) => regtest::HRP_UNIFIED_FVK_R1,
         }
     }
 
-    fn hrp_unified_ivk(&self) -> &'static str {
-        match self {
-            NetworkType::Main => mainnet::HRP_UNIFIED_IVK,
-            NetworkType::Test => testnet::HRP_UNIFIED_IVK,
-            NetworkType::Regtest => regtest::HRP_UNIFIED_IVK,
+    fn hrp_unified_ivk(&self, revision: Revision) -> &'static str {
+        match (revision, self) {
+            (Revision::R0, NetworkType::Main) => mainnet::HRP_UNIFIED_IVK_R0,
+            (Revision::R0, NetworkType::Test) => testnet::HRP_UNIFIED_IVK_R0,
+            (Revision::R0, NetworkType::Regtest) => regtest::HRP_UNIFIED_IVK_R0,
+            (Revision::R1, NetworkType::Main) => mainnet::HRP_UNIFIED_IVK_R1,
+            (Revision::R1, NetworkType::Test) => testnet::HRP_UNIFIED_IVK_R1,
+            (Revision::R1, NetworkType::Regtest) => regtest::HRP_UNIFIED_IVK_R1,
         }
     }
 }
@@ -368,16 +378,16 @@ impl<P: Parameters> NetworkConstants for P {
         self.network_type().hrp_tex_address()
     }
 
-    fn hrp_unified_address(&self) -> &'static str {
-        self.network_type().hrp_unified_address()
+    fn hrp_unified_address(&self, revision: Revision) -> &'static str {
+        self.network_type().hrp_unified_address(revision)
     }
 
-    fn hrp_unified_fvk(&self) -> &'static str {
-        self.network_type().hrp_unified_fvk()
+    fn hrp_unified_fvk(&self, revision: Revision) -> &'static str {
+        self.network_type().hrp_unified_fvk(revision)
     }
 
-    fn hrp_unified_ivk(&self) -> &'static str {
-        self.network_type().hrp_unified_ivk()
+    fn hrp_unified_ivk(&self, revision: Revision) -> &'static str {
+        self.network_type().hrp_unified_ivk(revision)
     }
 }
 

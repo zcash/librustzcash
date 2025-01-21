@@ -1,10 +1,10 @@
 use alloc::vec::Vec;
-use core::convert::{TryFrom, TryInto};
-use zcash_protocol::constants;
+use core::convert::TryInto;
+use zcash_protocol::{address::Revision, constants};
 
 use super::{
-    private::{SealedContainer, SealedItem},
-    Container, Encoding, ParseError, Typecode,
+    private::{SealedContainer, SealedDataItem},
+    Container, DataTypecode, Encoding, Item, ParseError,
 };
 
 /// The set of known IVKs for Unified IVKs.
@@ -46,31 +46,27 @@ pub enum Ivk {
     },
 }
 
-impl TryFrom<(u32, &[u8])> for Ivk {
-    type Error = ParseError;
-
-    fn try_from((typecode, data): (u32, &[u8])) -> Result<Self, Self::Error> {
+impl SealedDataItem for Ivk {
+    fn parse(typecode: DataTypecode, data: &[u8]) -> Result<Self, ParseError> {
         let data = data.to_vec();
-        match typecode.try_into()? {
-            Typecode::P2pkh => data.try_into().map(Ivk::P2pkh),
-            Typecode::P2sh => Err(data),
-            Typecode::Sapling => data.try_into().map(Ivk::Sapling),
-            Typecode::Orchard => data.try_into().map(Ivk::Orchard),
-            Typecode::Unknown(_) => Ok(Ivk::Unknown { typecode, data }),
+        match typecode {
+            DataTypecode::P2pkh => data.try_into().map(Ivk::P2pkh),
+            DataTypecode::P2sh => Err(data),
+            DataTypecode::Sapling => data.try_into().map(Ivk::Sapling),
+            DataTypecode::Orchard => data.try_into().map(Ivk::Orchard),
+            DataTypecode::Unknown(typecode) => Ok(Ivk::Unknown { typecode, data }),
         }
         .map_err(|e| {
-            ParseError::InvalidEncoding(format!("Invalid ivk for typecode {}: {:?}", typecode, e))
+            ParseError::InvalidEncoding(format!("Invalid ivk for typecode {:?}: {:?}", typecode, e))
         })
     }
-}
 
-impl SealedItem for Ivk {
-    fn typecode(&self) -> Typecode {
+    fn typecode(&self) -> DataTypecode {
         match self {
-            Ivk::P2pkh(_) => Typecode::P2pkh,
-            Ivk::Sapling(_) => Typecode::Sapling,
-            Ivk::Orchard(_) => Typecode::Orchard,
-            Ivk::Unknown { typecode, .. } => Typecode::Unknown(*typecode),
+            Ivk::P2pkh(_) => DataTypecode::P2pkh,
+            Ivk::Sapling(_) => DataTypecode::Sapling,
+            Ivk::Orchard(_) => DataTypecode::Orchard,
+            Ivk::Unknown { typecode, .. } => DataTypecode::Unknown(*typecode),
         }
     }
 
@@ -89,7 +85,8 @@ impl SealedItem for Ivk {
 /// # Examples
 ///
 /// ```
-/// use zcash_address::unified::{self, Container, Encoding};
+/// use zcash_address::unified::{self, Container, Encoding, Item};
+/// use zcash_protocol::address::Revision;
 ///
 /// # #[cfg(not(feature = "std"))]
 /// # fn main() {}
@@ -100,54 +97,72 @@ impl SealedItem for Ivk {
 ///
 /// let (network, uivk) = unified::Uivk::decode(example_uivk)?;
 ///
-/// // We can obtain the pool-specific Incoming Viewing Keys for the UIVK in
-/// // preference order (the order in which wallets should prefer to use their
-/// // corresponding address receivers):
-/// let ivks: Vec<unified::Ivk> = uivk.items();
+/// // We can obtain the pool-specific Incoming Viewing Keys for the UIVK.
+/// let ivks: &[Item<unified::Ivk>] = uivk.items_as_parsed();
 ///
-/// // And we can create the UIVK from a list of IVKs:
-/// let new_uivk = unified::Uivk::try_from_items(ivks)?;
+/// // And we can create the UIVK from a vector of IVKs:
+/// let new_uivk = unified::Uivk::try_from_items(Revision::R0, ivks.to_vec())?;
 /// assert_eq!(new_uivk, uivk);
 /// # Ok(())
 /// # }
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Uivk(pub(crate) Vec<Ivk>);
+pub struct Uivk {
+    pub(crate) revision: Revision,
+    pub(crate) ivks: Vec<Item<Ivk>>,
+}
 
 impl Container for Uivk {
-    type Item = Ivk;
+    type DataItem = Ivk;
 
-    /// Returns the IVKs contained within this UIVK, in the order they were
-    /// parsed from the string encoding.
-    ///
-    /// This API is for advanced usage; in most cases you should use `Uivk::items`.
-    fn items_as_parsed(&self) -> &[Ivk] {
-        &self.0
+    fn items_as_parsed(&self) -> &[Item<Ivk>] {
+        &self.ivks
+    }
+
+    fn revision(&self) -> Revision {
+        self.revision
     }
 }
 
 impl Encoding for Uivk {}
 
 impl SealedContainer for Uivk {
-    /// The HRP for a Bech32m-encoded mainnet Unified IVK.
+    /// The HRP for a Bech32m-encoded mainnet Revision 0 Unified IVK.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const MAINNET: &'static str = constants::mainnet::HRP_UNIFIED_IVK;
+    const MAINNET_R0: &'static str = constants::mainnet::HRP_UNIFIED_IVK_R0;
 
-    /// The HRP for a Bech32m-encoded testnet Unified IVK.
+    /// The HRP for a Bech32m-encoded testnet Revision 0 Unified IVK.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const TESTNET: &'static str = constants::testnet::HRP_UNIFIED_IVK;
+    const TESTNET_R0: &'static str = constants::testnet::HRP_UNIFIED_IVK_R0;
 
     /// The HRP for a Bech32m-encoded regtest Unified IVK.
-    const REGTEST: &'static str = constants::regtest::HRP_UNIFIED_IVK;
+    const REGTEST_R0: &'static str = constants::regtest::HRP_UNIFIED_IVK_R0;
 
-    fn from_inner(ivks: Vec<Self::Item>) -> Self {
-        Self(ivks)
+    /// The HRP for a Bech32m-encoded mainnet Revision 1 Unified IVK.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    const MAINNET_R1: &'static str = constants::mainnet::HRP_UNIFIED_IVK_R1;
+
+    /// The HRP for a Bech32m-encoded testnet Revision 1 Unified IVK.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    const TESTNET_R1: &'static str = constants::testnet::HRP_UNIFIED_IVK_R1;
+
+    /// The HRP for a Bech32m-encoded regtest Revision 1 Unified IVK.
+    const REGTEST_R1: &'static str = constants::regtest::HRP_UNIFIED_IVK_R1;
+
+    fn from_inner(revision: Revision, ivks: Vec<Item<Self::DataItem>>) -> Self {
+        Self { revision, ivks }
     }
 }
 
@@ -164,12 +179,12 @@ mod tests {
         sample::select,
     };
 
-    use super::{Ivk, ParseError, Typecode, Uivk};
-    use crate::kind::unified::{
-        private::{SealedContainer, SealedItem},
-        Container, Encoding,
+    use super::{Ivk, ParseError, Uivk};
+    use crate::{
+        kind::unified::{private::SealedContainer, Encoding as _},
+        unified::{address::testing::arb_revision, Item, Typecode},
     };
-    use zcash_protocol::consensus::NetworkType;
+    use zcash_protocol::{address::Revision, consensus::NetworkType};
 
     prop_compose! {
         fn uniform64()(a in uniform32(0u8..), b in uniform32(0u8..)) -> [u8; 64] {
@@ -206,12 +221,13 @@ mod tests {
 
     prop_compose! {
         fn arb_unified_ivk()(
+            revision in arb_revision(),
             shielded in arb_shielded_ivk(),
             transparent in prop::option::of(arb_transparent_ivk()),
         ) -> Uivk {
-            let mut items: Vec<_> = transparent.into_iter().chain(shielded).collect();
-            items.sort_unstable_by(Ivk::encoding_order);
-            Uivk(items)
+            let mut ivks: Vec<_> = transparent.into_iter().chain(shielded).map(Item::Data).collect();
+            ivks.sort_unstable_by(Item::encoding_order);
+            Uivk { revision, ivks }
         }
     }
 
@@ -241,7 +257,7 @@ mod tests {
             0x83, 0xe8, 0x92, 0x18, 0x28, 0x70, 0x1e, 0x81, 0x76, 0x56, 0xb6, 0x15,
         ];
         assert_eq!(
-            Uivk::parse_internal(Uivk::MAINNET, &invalid_padding[..]),
+            Uivk::parse_internal(Uivk::MAINNET_R0, &invalid_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -257,7 +273,7 @@ mod tests {
             0xf9, 0x65, 0x49, 0x14, 0xab, 0x7c, 0x55, 0x7b, 0x39, 0x47,
         ];
         assert_eq!(
-            Uivk::parse_internal(Uivk::MAINNET, &truncated_padding[..]),
+            Uivk::parse_internal(Uivk::MAINNET_R0, &truncated_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -285,7 +301,7 @@ mod tests {
             0xf5, 0xd5, 0x8a, 0xb5, 0x1a,
         ];
         assert_matches!(
-            Uivk::parse_internal(Uivk::MAINNET, &truncated_sapling_data[..]),
+            Uivk::parse_internal(Uivk::MAINNET_R0, &truncated_sapling_data[..]),
             Err(ParseError::InvalidEncoding(_))
         );
 
@@ -298,7 +314,7 @@ mod tests {
             0xd8, 0x21, 0x5e, 0x8, 0xa, 0x82, 0x95, 0x21, 0x74,
         ];
         assert_matches!(
-            Uivk::parse_internal(Uivk::MAINNET, &truncated_after_sapling_typecode[..]),
+            Uivk::parse_internal(Uivk::MAINNET_R0, &truncated_after_sapling_typecode[..]),
             Err(ParseError::InvalidEncoding(_))
         );
     }
@@ -306,11 +322,17 @@ mod tests {
     #[test]
     fn duplicate_typecode() {
         // Construct and serialize an invalid UIVK.
-        let uivk = Uivk(vec![Ivk::Sapling([1; 64]), Ivk::Sapling([2; 64])]);
+        let uivk = Uivk {
+            revision: Revision::R0,
+            ivks: vec![
+                Item::Data(Ivk::Sapling([1; 64])),
+                Item::Data(Ivk::Sapling([2; 64])),
+            ],
+        };
         let encoded = uivk.encode(&NetworkType::Main);
         assert_eq!(
             Uivk::decode(&encoded),
-            Err(ParseError::DuplicateTypecode(Typecode::Sapling))
+            Err(ParseError::DuplicateTypecode(Typecode::SAPLING))
         );
     }
 
@@ -326,37 +348,6 @@ mod tests {
             0xbd, 0xfe, 0xa4, 0xb7, 0x47, 0x20, 0x92, 0x6, 0xf0, 0x0, 0xf9, 0x64,
         ];
 
-        assert_eq!(
-            Uivk::parse_internal(Uivk::MAINNET, &encoded[..]),
-            Err(ParseError::OnlyTransparent)
-        );
-    }
-
-    #[test]
-    fn ivks_are_sorted() {
-        // Construct a UIVK with ivks in an unsorted order.
-        let uivk = Uivk(vec![
-            Ivk::P2pkh([0; 65]),
-            Ivk::Orchard([0; 64]),
-            Ivk::Unknown {
-                typecode: 0xff,
-                data: vec![],
-            },
-            Ivk::Sapling([0; 64]),
-        ]);
-
-        // `Uivk::items` sorts the ivks in priority order.
-        assert_eq!(
-            uivk.items(),
-            vec![
-                Ivk::Orchard([0; 64]),
-                Ivk::Sapling([0; 64]),
-                Ivk::P2pkh([0; 65]),
-                Ivk::Unknown {
-                    typecode: 0xff,
-                    data: vec![],
-                },
-            ]
-        )
+        assert_matches!(Uivk::parse_internal(Uivk::MAINNET_R0, &encoded[..]), Ok(_));
     }
 }

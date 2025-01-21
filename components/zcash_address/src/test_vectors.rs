@@ -8,12 +8,13 @@ use {
         unified::{
             self,
             address::{test_vectors::TEST_VECTORS, Receiver},
+            Item,
         },
         ToAddress, ZcashAddress,
     },
     alloc::string::ToString,
     core::iter,
-    zcash_protocol::consensus::NetworkType,
+    zcash_protocol::{address::Revision, consensus::NetworkType},
 };
 
 #[test]
@@ -38,10 +39,16 @@ fn unified() {
                     data: data.to_vec(),
                 })
             }))
+            .map(Item::Data)
             .collect();
 
-        let expected_addr =
-            ZcashAddress::from_unified(NetworkType::Main, unified::Address(receivers));
+        let expected_addr = ZcashAddress::from_unified(
+            NetworkType::Main,
+            unified::Address {
+                revision: Revision::R0,
+                receivers,
+            },
+        );
 
         // Test parsing
         let addr: ZcashAddress = tv.unified_addr.parse().unwrap();

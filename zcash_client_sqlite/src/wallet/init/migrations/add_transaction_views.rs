@@ -441,7 +441,7 @@ mod tests {
         let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32][..], AccountId::ZERO).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
         let (ua, _) = ufvk
-            .default_address(Some(UnifiedAddressRequest::unsafe_new(
+            .default_address(Some(UnifiedAddressRequest::unsafe_new_without_expiry(
                 Omit,
                 Require,
                 UA_TRANSPARENT,
