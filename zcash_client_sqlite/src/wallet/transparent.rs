@@ -13,6 +13,7 @@ use ::transparent::{
     keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
 use zcash_address::unified::{Ivk, Typecode, Uivk};
+use zcash_client_backend::data_api::{OutputStatusFilter, TransactionStatusFilter};
 use zcash_client_backend::{
     data_api::{Account, AccountBalance, TransactionDataRequest},
     wallet::{TransparentAddressMetadata, WalletTransparentOutput},
@@ -1043,13 +1044,16 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
             let max_end_height = block_range_start + DEFAULT_TX_EXPIRY_DELTA + 1;
 
             Ok::<TransactionDataRequest, SqliteClientError>(
-                TransactionDataRequest::SpendsFromAddress {
+                TransactionDataRequest::TransactionsInvolvingAddress {
                     address,
                     block_range_start,
                     block_range_end: Some(
                         chain_tip_height
                             .map_or(max_end_height, |h| std::cmp::min(h + 1, max_end_height)),
                     ),
+                    request_at: None,
+                    tx_status_filter: TransactionStatusFilter::Mined,
+                    output_status_filter: OutputStatusFilter::All,
                 },
             )
         })?
