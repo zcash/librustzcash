@@ -19,6 +19,13 @@
 
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
+#![no_std]
+
+#[cfg(feature = "std")]
+extern crate std;
+
+#[macro_use]
+extern crate alloc;
 
 mod minimal;
 mod params;
