@@ -17,11 +17,11 @@ keywords = ["zcash"]
 
 [dependencies]
 core2.workspace = true
-nonempty = { workspace = true, optional = true }
+nonempty.workspace = true
 
 [features]
 default = ["std"]
-std = ["core2/std", "dep:nonempty"]
+std = ["core2/std"]
 
 [lib]
 bench = false

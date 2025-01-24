@@ -17,7 +17,6 @@ use alloc::vec::Vec;
 use core::iter::FromIterator;
 use core2::io::{self, Read, Write};
 
-#[cfg(feature = "std")]
 use nonempty::NonEmpty;
 
 /// The maximum allowed value representable as a `[CompactSize]`
@@ -171,7 +170,6 @@ impl Vector {
 
     /// Writes a NonEmpty container of values to the stream using the same encoding as
     /// `[Vector::write]`
-    #[cfg(feature = "std")]
     pub fn write_nonempty<W: Write, E, F>(
         mut writer: W,
         vec: &NonEmpty<E>,
