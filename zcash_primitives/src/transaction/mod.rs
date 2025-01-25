@@ -58,7 +58,7 @@ const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
 #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
 const V6_TX_VERSION: u32 = 6;
 #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-const V6_VERSION_GROUP_ID: u32 = 0x124A69F8; // TODO ???
+const V6_VERSION_GROUP_ID: u32 = 0x77777777; // TODO ???
 
 /// These versions are used exclusively for in-development transaction
 /// serialization, and will never be active under the consensus rules.
@@ -338,12 +338,10 @@ impl Authorization for Unauthorized {
     type TransparentAuth = transparent::builder::Unauthorized;
     type SaplingAuth =
         sapling_builder::InProgress<sapling_builder::Proven, sapling_builder::Unsigned>;
-    type OrchardAuth =
-        orchard::builder::InProgress<Unproven<OrchardVanilla>, orchard::builder::Unauthorized>;
+    type OrchardAuth = orchard::builder::InProgress<Unproven, orchard::builder::Unauthorized>;
 
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    type OrchardZsaAuth =
-        orchard::builder::InProgress<Unproven<OrchardZSA>, orchard::builder::Unauthorized>;
+    type OrchardZsaAuth = orchard::builder::InProgress<Unproven, orchard::builder::Unauthorized>;
 
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     type IssueAuth = orchard::issuance::Unauthorized;
@@ -926,7 +924,7 @@ impl Transaction {
             Self::read_v5_header_fragment(&mut reader)?;
         let transparent_bundle = Self::read_transparent(&mut reader)?;
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
-        let orchard_zsa_bundle = orchard_serialization::read_orchard_bundle(&mut reader)?;
+        let orchard_zsa_bundle = orchard_serialization::read_orchard_zsa_bundle(&mut reader)?;
         let issue_bundle = issuance::read_v6_bundle(&mut reader)?;
 
         #[cfg(zcash_unstable = "zfuture")]
@@ -1045,7 +1043,7 @@ impl Transaction {
         self.write_header(&mut writer)?;
         self.write_transparent(&mut writer)?;
         self.write_sapling(&mut writer)?;
-        orchard_serialization::write_orchard_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
+        orchard_serialization::write_orchard_bundle(&mut writer, self.orchard_bundle.as_ref())?;
         #[cfg(zcash_unstable = "zfuture")]
         self.write_tze(&mut writer)?;
         Ok(())
@@ -1082,7 +1080,10 @@ impl Transaction {
         self.write_header(&mut writer)?;
         self.write_transparent(&mut writer)?;
         self.write_sapling(&mut writer)?;
-        orchard_serialization::write_orchard_bundle(self.orchard_zsa_bundle.as_ref(), &mut writer)?;
+        orchard_serialization::write_orchard_zsa_bundle(
+            &mut writer,
+            self.orchard_zsa_bundle.as_ref(),
+        )?;
         issuance::write_v6_bundle(self.issue_bundle.as_ref(), &mut writer)?;
         #[cfg(zcash_unstable = "zfuture")]
         self.write_tze(&mut writer)?;

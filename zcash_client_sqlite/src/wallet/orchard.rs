@@ -390,7 +390,7 @@ pub(crate) mod tests {
     use incrementalmerkletree::{Hashable, Level};
     use orchard::{
         keys::{FullViewingKey, SpendingKey},
-        note_encryption::OrchardDomain,
+        domain::OrchardDomain,
         tree::MerkleHashOrchard,
     };
     use shardtree::error::ShardTreeError;

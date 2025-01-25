@@ -626,7 +626,7 @@ impl TryFrom<u32> for BranchId {
             #[cfg(zcash_unstable = "nu6")]
             0xc8e7_1055 => Ok(BranchId::Nu6),
             #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-            0x7777_7777 => Ok(BranchId::Nu7),
+            0x7719_0ad8 => Ok(BranchId::Nu7),
             #[cfg(zcash_unstable = "zfuture")]
             0xffff_ffff => Ok(BranchId::ZFuture),
             _ => Err("Unknown consensus branch ID"),
@@ -647,7 +647,7 @@ impl From<BranchId> for u32 {
             #[cfg(zcash_unstable = "nu6")]
             BranchId::Nu6 => 0xc8e7_1055,
             #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-            BranchId::Nu7 => 0x7777_7777,
+            BranchId::Nu7 => 0x7719_0ad8,
             #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => 0xffff_ffff,
         }

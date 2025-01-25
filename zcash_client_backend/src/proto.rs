@@ -187,12 +187,12 @@ impl compact_formats::CompactSaplingSpend {
 
 #[cfg(feature = "orchard")]
 impl TryFrom<&compact_formats::CompactOrchardAction>
-    for orchard::note_encryption::CompactAction<orchard::orchard_flavor::OrchardVanilla>
+    for orchard::domain::CompactAction<orchard::orchard_flavor::OrchardVanilla>
 {
     type Error = ();
 
     fn try_from(value: &compact_formats::CompactOrchardAction) -> Result<Self, Self::Error> {
-        Ok(orchard::note_encryption::CompactAction::from_parts(
+        Ok(orchard::domain::CompactAction::from_parts(
             value.nf()?,
             value.cmx()?,
             value.ephemeral_key()?,
