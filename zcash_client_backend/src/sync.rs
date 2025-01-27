@@ -252,8 +252,6 @@ where
 {
     let mut request = service::GetSubtreeRootsArg::default();
     request.set_shielded_protocol(service::ShieldedProtocol::Sapling);
-    // Hack to work around a bug in the initial lightwalletd implementation.
-    request.max_entries = 65536;
 
     let sapling_roots: Vec<CommitmentTreeRoot<sapling::Node>> = client
         .get_subtree_roots(request)
@@ -278,8 +276,7 @@ where
     {
         let mut request = service::GetSubtreeRootsArg::default();
         request.set_shielded_protocol(service::ShieldedProtocol::Orchard);
-        // Hack to work around a bug in the initial lightwalletd implementation.
-        request.max_entries = 65536;
+
         let orchard_roots: Vec<CommitmentTreeRoot<MerkleHashOrchard>> = client
             .get_subtree_roots(request)
             .await?
