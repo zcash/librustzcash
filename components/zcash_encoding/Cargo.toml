@@ -25,3 +25,6 @@ std = ["core2/std", "dep:nonempty"]
 
 [lib]
 bench = false
+
+[lints]
+workspace = true

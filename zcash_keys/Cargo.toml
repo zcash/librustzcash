@@ -109,3 +109,6 @@ unstable = ["dep:byteorder"]
 
 [badges]
 maintenance = { status = "actively-developed" }
+
+[lints]
+workspace = true

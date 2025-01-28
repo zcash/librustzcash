@@ -1438,7 +1438,7 @@ impl<Cache, DsFactory> TestBuilder<Cache, DsFactory> {
     ///
     /// - Must not be called twice.
     /// - Must be called before [`Self::with_account_from_sapling_activation`] or
-    /// [`Self::with_account_having_current_birthday`].
+    ///   [`Self::with_account_having_current_birthday`].
     ///
     /// # Examples
     ///

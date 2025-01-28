@@ -145,3 +145,6 @@ pczt-tests = ["serde", "zcash_client_backend/pczt"]
 
 [lib]
 bench = false
+
+[lints]
+workspace = true

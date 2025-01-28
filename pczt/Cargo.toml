@@ -95,3 +95,6 @@ tx-extractor = [
 [[test]]
 name = "end_to_end"
 required-features = ["io-finalizer", "prover", "signer", "tx-extractor"]
+
+[lints]
+workspace = true

@@ -54,3 +54,6 @@ test-dependencies = [
 
 ## Exposes support for working with a local consensus (e.g. regtest).
 local-consensus = []
+
+[lints]
+workspace = true

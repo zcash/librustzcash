@@ -37,3 +37,6 @@ std = [
     "alloc",
     "blake2b_simd/std",
 ]
+
+[lints]
+workspace = true

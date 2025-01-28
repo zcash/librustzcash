@@ -85,7 +85,7 @@ impl<'a> TransactionExtractor<'a> {
             .map_err(|_| Error::Global(GlobalError::UnknownConsensusBranchId))?;
 
         let lock_time = determine_lock_time(&pczt.global, &pczt.transparent.inputs)
-            .map_err(|_| Error::IncompatibleLockTimes)?;
+            .ok_or(Error::IncompatibleLockTimes)?;
 
         let transparent_bundle =
             transparent::extract_bundle(pczt.transparent).map_err(Error::Transparent)?;

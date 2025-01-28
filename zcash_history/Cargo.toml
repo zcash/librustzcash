@@ -24,3 +24,6 @@ test-dependencies = ["dep:proptest"]
 
 [lib]
 bench = false
+
+[lints]
+workspace = true

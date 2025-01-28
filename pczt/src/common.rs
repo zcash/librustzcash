@@ -214,7 +214,7 @@ pub(crate) struct Zip32Derivation {
 pub fn determine_lock_time<L: LockTimeInput>(
     global: &crate::common::Global,
     inputs: &[L],
-) -> Result<u32, ()> {
+) -> Option<u32> {
     // The nLockTime field of a transaction is determined by inspecting the
     // `Global.fallback_lock_time` and each input's `required_time_lock_time` and
     // `required_height_lock_time` fields.
@@ -241,25 +241,29 @@ pub fn determine_lock_time<L: LockTimeInput>(
         time_lock_time_unsupported,
         height_lock_time_unsupported,
     ) {
-        (true, true, true) => Err(()),
-        (true, false, true) => Ok(inputs
-            .iter()
-            .filter_map(|input| input.required_time_lock_time())
-            .max()
-            .expect("iterator is non-empty because have_required_lock_time is true")),
+        (true, true, true) => None,
+        (true, false, true) => Some(
+            inputs
+                .iter()
+                .filter_map(|input| input.required_time_lock_time())
+                .max()
+                .expect("iterator is non-empty because have_required_lock_time is true"),
+        ),
         // If a PSBT has both types of locktimes possible because one or more inputs
         // specify both `required_time_lock_time` and `required_height_lock_time`, then a
         // locktime determined by looking at the `required_height_lock_time` fields of the
         // inputs must be chosen.
-        (true, _, false) => Ok(inputs
-            .iter()
-            .filter_map(|input| input.required_height_lock_time())
-            .max()
-            .expect("iterator is non-empty because have_required_lock_time is true")),
+        (true, _, false) => Some(
+            inputs
+                .iter()
+                .filter_map(|input| input.required_height_lock_time())
+                .max()
+                .expect("iterator is non-empty because have_required_lock_time is true"),
+        ),
         // If none of the inputs have a `required_time_lock_time` and
         // `required_height_lock_time`, then `Global.fallback_lock_time` must be used. If
         // `Global.fallback_lock_time` is not provided, then it is assumed to be 0.
-        (false, _, _) => Ok(global.fallback_lock_time.unwrap_or(0)),
+        (false, _, _) => Some(global.fallback_lock_time.unwrap_or(0)),
     }
 }
 

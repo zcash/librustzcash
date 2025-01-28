@@ -55,3 +55,6 @@ uint = "0.9"
 [[bin]]
 name = "zcash-inspect"
 path = "src/bin/inspect/main.rs"
+
+[lints]
+workspace = true
