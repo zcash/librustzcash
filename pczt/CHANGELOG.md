@@ -10,7 +10,6 @@ and this library adheres to Rust's notion of
 ### Added
 - `pczt::common`:
   - `Global::{tx_version, version_group_id, consensus_branch_id, expiry_height}`
-  - `Zip32Derivation::{seed_fingerprint, derivation_path}`
   - `determine_lock_time`
   - `LockTimeInput` trait
 - `pczt::orchard`:
@@ -26,8 +25,8 @@ and this library adheres to Rust's notion of
   - `Spend::{cv, nullifier, rk}`
   - `Output::{cv, cmu, ephemeral_key, enc_ciphertext, out_ciphertext}`
 - `pczt::transparent`:
-  - `Input::{sequence, script_pubkey, sighash_type, bip32_derivation}`
-  - `Output::{value, script_pubkey, bip32_derivation}`
+  - `Input::{sequence, script_pubkey}`
+  - `Output::{value, script_pubkey}`
 
 ### Changed
 - MSRV is now 1.81.0.

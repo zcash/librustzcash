@@ -185,10 +185,9 @@ impl Global {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Zip32Derivation {
     /// The [ZIP 32 seed fingerprint](https://zips.z.cash/zip-0032#seed-fingerprints).
-    #[getset(get = "pub")]
     pub(crate) seed_fingerprint: [u8; 32],
 
     /// The sequence of indices corresponding to the shielded HD path.
@@ -201,7 +200,6 @@ pub(crate) struct Zip32Derivation {
     ///
     /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
     /// [ZIP 320]: https://zips.z.cash/zip-0320
-    #[getset(get = "pub")]
     pub(crate) derivation_path: Vec<u32>,
 }
 
