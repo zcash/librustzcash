@@ -8,7 +8,26 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
-- `pczt::roles::redactor`
+- `pczt::common`:
+  - `Global::{tx_version, version_group_id, consensus_branch_id, expiry_height}`
+  - `Zip32Derivation::{seed_fingerprint, derivation_path}`
+  - `determine_lock_time`
+  - `LockTimeInput` trait
+- `pczt::orchard`:
+  - `Bundle::{flags, value_sum, anchor}`
+  - `Action::cv_net`
+  - `Spend::rk`
+  - `Output::{cmx, ephemeral_key, enc_ciphertext, out_ciphertext}`
+- `pczt::roles`:
+  - `low_level_signer` module
+  - `redactor` module
+- `pczt::sapling`:
+  - `Bundle::{value_sum, anchor}`
+  - `Spend::{cv, nullifier, rk}`
+  - `Output::{cv, cmu, ephemeral_key, enc_ciphertext, out_ciphertext}`
+- `pczt::transparent`:
+  - `Input::{sequence, script_pubkey, sighash_type, bip32_derivation}`
+  - `Output::{value, script_pubkey, bip32_derivation}`
 
 ### Changed
 - MSRV is now 1.81.0.
