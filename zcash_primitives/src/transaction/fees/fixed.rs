@@ -1,7 +1,8 @@
-use crate::{
+use crate::transaction::fees::transparent;
+
+use zcash_protocol::{
     consensus::{self, BlockHeight},
-    transaction::components::amount::NonNegativeAmount,
-    transaction::fees::transparent,
+    value::Zatoshis,
 };
 
 #[cfg(zcash_unstable = "zfuture")]
@@ -11,17 +12,17 @@ use crate::transaction::fees::tze;
 /// the transaction being constructed.
 #[derive(Clone, Copy, Debug)]
 pub struct FeeRule {
-    fixed_fee: NonNegativeAmount,
+    fixed_fee: Zatoshis,
 }
 
 impl FeeRule {
     /// Creates a new nonstandard fixed fee rule with the specified fixed fee.
-    pub fn non_standard(fixed_fee: NonNegativeAmount) -> Self {
+    pub fn non_standard(fixed_fee: Zatoshis) -> Self {
         Self { fixed_fee }
     }
 
     /// Returns the fixed fee amount which this rule was configured.
-    pub fn fixed_fee(&self) -> NonNegativeAmount {
+    pub fn fixed_fee(&self) -> Zatoshis {
         self.fixed_fee
     }
 }
@@ -38,7 +39,7 @@ impl super::FeeRule for FeeRule {
         _sapling_input_count: usize,
         _sapling_output_count: usize,
         _orchard_action_count: usize,
-    ) -> Result<NonNegativeAmount, Self::Error> {
+    ) -> Result<Zatoshis, Self::Error> {
         Ok(self.fixed_fee)
     }
 }
@@ -56,7 +57,7 @@ impl super::FutureFeeRule for FeeRule {
         _orchard_action_count: usize,
         _tze_inputs: &[impl tze::InputView],
         _tze_outputs: &[impl tze::OutputView],
-    ) -> Result<NonNegativeAmount, Self::Error> {
+    ) -> Result<Zatoshis, Self::Error> {
         Ok(self.fixed_fee)
     }
 }

@@ -6,16 +6,13 @@ use std::{
 };
 
 use nonempty::NonEmpty;
-use zcash_primitives::{
-    consensus::BlockHeight,
-    transaction::{components::amount::NonNegativeAmount, TxId},
-};
+use zcash_primitives::transaction::TxId;
+use zcash_protocol::{consensus::BlockHeight, value::Zatoshis, PoolType, ShieldedProtocol};
+use zip321::TransactionRequest;
 
 use crate::{
     fees::TransactionBalance,
     wallet::{Note, ReceivedNote, WalletTransparentOutput},
-    zip321::TransactionRequest,
-    PoolType, ShieldedProtocol,
 };
 
 /// Errors that can occur in construction of a [`Step`].
@@ -29,8 +26,8 @@ pub enum ProposalError {
     /// sum of transaction outputs, change, and fees is required to be exactly equal to the value
     /// of provided inputs.
     BalanceError {
-        input_total: NonNegativeAmount,
-        output_total: NonNegativeAmount,
+        input_total: Zatoshis,
+        output_total: Zatoshis,
     },
     /// The `is_shielding` flag may only be set to `true` under the following conditions:
     /// * The total of transparent inputs is nonzero
@@ -424,7 +421,7 @@ impl<NoteRef> Step<NoteRef> {
         let transparent_input_total = transparent_inputs
             .iter()
             .map(|out| out.txout().value)
-            .try_fold(NonNegativeAmount::ZERO, |acc, a| {
+            .try_fold(Zatoshis::ZERO, |acc, a| {
                 (acc + a).ok_or(ProposalError::Overflow)
             })?;
 
@@ -432,7 +429,7 @@ impl<NoteRef> Step<NoteRef> {
             .iter()
             .flat_map(|s_in| s_in.notes().iter())
             .map(|out| out.note().value())
-            .try_fold(NonNegativeAmount::ZERO, |acc, a| (acc + a))
+            .try_fold(Zatoshis::ZERO, |acc, a| (acc + a))
             .ok_or(ProposalError::Overflow)?;
 
         let prior_step_input_total = prior_step_inputs
@@ -458,7 +455,7 @@ impl<NoteRef> Step<NoteRef> {
             })
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .try_fold(NonNegativeAmount::ZERO, |acc, a| (acc + a))
+            .try_fold(Zatoshis::ZERO, |acc, a| (acc + a))
             .ok_or(ProposalError::Overflow)?;
 
         let input_total = (transparent_input_total + shielded_input_total + prior_step_input_total)
@@ -470,9 +467,9 @@ impl<NoteRef> Step<NoteRef> {
         let output_total = (request_total + balance.total()).ok_or(ProposalError::Overflow)?;
 
         if is_shielding
-            && (transparent_input_total == NonNegativeAmount::ZERO
-                || shielded_input_total > NonNegativeAmount::ZERO
-                || request_total > NonNegativeAmount::ZERO)
+            && (transparent_input_total == Zatoshis::ZERO
+                || shielded_input_total > Zatoshis::ZERO
+                || request_total > Zatoshis::ZERO)
         {
             return Err(ProposalError::ShieldingInvalid);
         }

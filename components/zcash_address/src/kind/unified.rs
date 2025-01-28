@@ -12,7 +12,7 @@ use std::error::Error;
 
 use bech32::{primitives::decode::CheckedHrpstring, Bech32m, Checksum, Hrp};
 
-use crate::Network;
+use zcash_protocol::consensus::NetworkType;
 
 pub(crate) mod address;
 pub(crate) mod fvk;
@@ -171,8 +171,8 @@ pub(crate) mod private {
     use core2::io::Write;
 
     use super::{ParseError, Typecode, PADDING_LEN};
-    use crate::Network;
     use zcash_encoding::CompactSize;
+    use zcash_protocol::consensus::NetworkType;
 
     /// A raw address or viewing key.
     pub trait SealedItem: for<'a> TryFrom<(u32, &'a [u8]), Error = ParseError> + Clone {
@@ -205,21 +205,21 @@ pub(crate) mod private {
         /// general invariants that apply to all unified containers.
         fn from_inner(items: Vec<Self::Item>) -> Self;
 
-        fn network_hrp(network: &Network) -> &'static str {
+        fn network_hrp(network: &NetworkType) -> &'static str {
             match network {
-                Network::Main => Self::MAINNET,
-                Network::Test => Self::TESTNET,
-                Network::Regtest => Self::REGTEST,
+                NetworkType::Main => Self::MAINNET,
+                NetworkType::Test => Self::TESTNET,
+                NetworkType::Regtest => Self::REGTEST,
             }
         }
 
-        fn hrp_network(hrp: &str) -> Option<Network> {
+        fn hrp_network(hrp: &str) -> Option<NetworkType> {
             if hrp == Self::MAINNET {
-                Some(Network::Main)
+                Some(NetworkType::Main)
             } else if hrp == Self::TESTNET {
-                Some(Network::Test)
+                Some(NetworkType::Test)
             } else if hrp == Self::REGTEST {
-                Some(Network::Regtest)
+                Some(NetworkType::Regtest)
             } else {
                 None
             }
@@ -400,7 +400,7 @@ pub trait Encoding: private::SealedContainer {
     /// Decodes a unified container from its string representation, preserving
     /// the order of its components so that it correctly obeys round-trip
     /// serialization invariants.
-    fn decode(s: &str) -> Result<(Network, Self), ParseError> {
+    fn decode(s: &str) -> Result<(NetworkType, Self), ParseError> {
         if let Ok(parsed) = CheckedHrpstring::new::<Bech32mZip316>(s) {
             let hrp = parsed.hrp();
             let hrp = hrp.as_str();
@@ -420,7 +420,7 @@ pub trait Encoding: private::SealedContainer {
     /// using the correct constants for the specified network, preserving the
     /// ordering of the contained items such that it correctly obeys round-trip
     /// serialization invariants.
-    fn encode(&self, network: &Network) -> String {
+    fn encode(&self, network: &NetworkType) -> String {
         let hrp = Self::network_hrp(network);
         bech32::encode::<Bech32mZip316>(Hrp::parse_unchecked(hrp), &self.to_jumbled_bytes(hrp))
             .expect("F4Jumble ensures length is short enough by construction")

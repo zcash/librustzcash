@@ -4,12 +4,24 @@ use super::{
     sighash_v4::v4_signature_hash, sighash_v5::v5_signature_hash, Authorization, TransactionData,
     TxDigests, TxVersion,
 };
-use crate::sapling::{self, bundle::GrothProofBytes};
+use ::sapling::bundle::GrothProofBytes;
 
 #[cfg(zcash_unstable = "zfuture")]
-use {super::components::Amount, crate::extensions::transparent::Precondition};
+use {crate::extensions::transparent::Precondition, zcash_protocol::value::Zatoshis};
 
-pub use transparent::sighash::*;
+#[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_ALL` instead.")]
+pub const SIGHASH_ALL: u8 = ::transparent::sighash::SIGHASH_ALL;
+#[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_NONE` instead.")]
+pub const SIGHASH_NONE: u8 = ::transparent::sighash::SIGHASH_NONE;
+#[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_SINGLE` instead.")]
+pub const SIGHASH_SINGLE: u8 = ::transparent::sighash::SIGHASH_SINGLE;
+#[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_MASK` instead.")]
+pub const SIGHASH_MASK: u8 = ::transparent::sighash::SIGHASH_MASK;
+#[deprecated(note = "use `::zcash_transparent::sighash::SIGHASH_ANYONECANPAY` instead.")]
+pub const SIGHASH_ANYONECANPAY: u8 = ::transparent::sighash::SIGHASH_ANYONECANPAY;
+
+#[deprecated(note = "use `::zcash_transparent::sighash::SighashType` instead.")]
+pub type SighashType = ::transparent::sighash::SighashType;
 
 pub enum SignableInput<'a> {
     Shielded,
@@ -18,17 +30,17 @@ pub enum SignableInput<'a> {
     Tze {
         index: usize,
         precondition: &'a Precondition,
-        value: Amount,
+        value: Zatoshis,
     },
 }
 
 impl<'a> SignableInput<'a> {
     pub fn hash_type(&self) -> u8 {
         match self {
-            SignableInput::Shielded => SIGHASH_ALL,
+            SignableInput::Shielded => ::transparent::sighash::SIGHASH_ALL,
             SignableInput::Transparent(input) => input.hash_type().encode(),
             #[cfg(zcash_unstable = "zfuture")]
-            SignableInput::Tze { .. } => SIGHASH_ALL,
+            SignableInput::Tze { .. } => ::transparent::sighash::SIGHASH_ALL,
         }
     }
 }
@@ -46,7 +58,7 @@ impl AsRef<[u8; 32]> for SignatureHash {
 /// set of precomputed hashes produced in the construction of the
 /// transaction ID.
 pub fn signature_hash<
-    TA: TransparentAuthorizingContext,
+    TA: ::transparent::sighash::TransparentAuthorizingContext,
     SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
     A: Authorization<SaplingAuth = SA, TransparentAuth = TA>,
 >(

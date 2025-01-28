@@ -14,9 +14,10 @@ use sapling::{
     Diversifier, SaplingIvk,
 };
 use zcash_note_encryption::batch;
-use zcash_primitives::{
+use zcash_primitives::transaction::components::sapling::zip212_enforcement;
+use zcash_protocol::{
     consensus::{NetworkUpgrade::Canopy, Parameters, TEST_NETWORK},
-    transaction::components::{sapling::zip212_enforcement, Amount},
+    value::ZatBalance,
 };
 
 #[cfg(unix)]
@@ -46,7 +47,7 @@ fn bench_note_decryption(c: &mut Criterion) {
             .add_output(None, pa, NoteValue::from_raw(100), None)
             .unwrap();
         let (bundle, _) = builder
-            .build::<MockSpendProver, MockOutputProver, _, Amount>(&[], &mut rng)
+            .build::<MockSpendProver, MockOutputProver, _, ZatBalance>(&[], &mut rng)
             .unwrap()
             .unwrap();
         bundle.shielded_outputs()[0].clone()

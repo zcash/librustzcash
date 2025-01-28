@@ -35,17 +35,12 @@ to a wallet-internal shielded address, as described in [ZIP 316](https://zips.z.
 
 use nonempty::NonEmpty;
 use rand_core::OsRng;
-use sapling::{
-    note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
-    prover::{OutputProver, SpendProver},
-};
-use shardtree::error::{QueryError, ShardTreeError};
 use std::num::NonZeroU32;
-use zcash_keys::keys::UnifiedFullViewingKey;
+
+use shardtree::error::{QueryError, ShardTreeError};
 
 use super::InputSource;
 use crate::{
-    address::Address,
     data_api::{
         error::Error, Account, SentTransaction, SentTransactionOutput, WalletCommitmentTrees,
         WalletRead, WalletWrite,
@@ -54,43 +49,50 @@ use crate::{
     fees::{
         standard::SingleOutputChangeStrategy, ChangeStrategy, DustOutputPolicy, StandardFeeRule,
     },
-    keys::UnifiedSpendingKey,
     proposal::{Proposal, ProposalError, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
-    zip321::{self, Payment},
-    PoolType, ShieldedProtocol,
 };
-use zcash_primitives::{
-    legacy::TransparentAddress,
-    transaction::{
-        builder::{BuildConfig, BuildResult, Builder},
-        components::{
-            amount::NonNegativeAmount, sapling::zip212_enforcement,
-            transparent::builder::TransparentSigningSet, OutPoint,
-        },
-        fees::FeeRule,
-        Transaction, TxId,
-    },
+use ::sapling::{
+    note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
+    prover::{OutputProver, SpendProver},
+};
+use ::transparent::{
+    address::TransparentAddress, builder::TransparentSigningSet, bundle::OutPoint,
+};
+use zcash_address::ZcashAddress;
+use zcash_keys::{
+    address::Address,
+    keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
+};
+use zcash_primitives::transaction::{
+    builder::{BuildConfig, BuildResult, Builder},
+    components::sapling::zip212_enforcement,
+    fees::FeeRule,
+    Transaction, TxId,
 };
 use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     memo::MemoBytes,
+    value::Zatoshis,
+    PoolType, ShieldedProtocol,
 };
 use zip32::Scope;
+use zip321::Payment;
 
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{fees::ChangeValue, proposal::StepOutput, wallet::TransparentAddressMetadata},
+    ::transparent::bundle::TxOut,
     core::convert::Infallible,
     input_selection::ShieldingSelector,
     std::collections::HashMap,
     zcash_keys::encoding::AddressCodec,
-    zcash_primitives::transaction::components::TxOut,
 };
 
 #[cfg(feature = "pczt")]
 use {
     crate::data_api::error::PcztError,
+    ::transparent::pczt::Bip32Derivation,
     bip32::ChildNumber,
     orchard::note_encryption::OrchardDomain,
     pczt::roles::{
@@ -99,9 +101,7 @@ use {
     },
     sapling::note_encryption::SaplingDomain,
     serde::{Deserialize, Serialize},
-    zcash_address::ZcashAddress,
     zcash_note_encryption::try_output_recovery_with_pkd_esk,
-    zcash_primitives::transaction::components::transparent::pczt::Bip32Derivation,
     zcash_protocol::{
         consensus::NetworkConstants,
         value::{BalanceError, ZatBalance},
@@ -133,25 +133,32 @@ struct ProposalInfo<AccountId> {
 #[derive(Serialize, Deserialize)]
 enum PcztRecipient<AccountId> {
     External,
-    EphemeralTransparent { receiving_account: AccountId },
-    InternalAccount { receiving_account: AccountId },
+    #[cfg(feature = "transparent-inputs")]
+    EphemeralTransparent {
+        receiving_account: AccountId,
+    },
+    InternalAccount {
+        receiving_account: AccountId,
+    },
 }
 
 #[cfg(feature = "pczt")]
 impl<AccountId: Copy> PcztRecipient<AccountId> {
-    fn from_recipient<N, O>(recipient: Recipient<AccountId, N, O>) -> (Self, Option<ZcashAddress>) {
+    fn from_recipient(recipient: BuildRecipient<AccountId>) -> (Self, Option<ZcashAddress>) {
         match recipient {
-            Recipient::External(addr, _) => (PcztRecipient::External, Some(addr)),
-            Recipient::EphemeralTransparent {
+            BuildRecipient::External {
+                recipient_address, ..
+            } => (PcztRecipient::External, Some(recipient_address)),
+            #[cfg(feature = "transparent-inputs")]
+            BuildRecipient::EphemeralTransparent {
                 receiving_account, ..
             } => (
                 PcztRecipient::EphemeralTransparent { receiving_account },
                 None,
             ),
-            Recipient::InternalAccount {
+            BuildRecipient::InternalAccount {
                 receiving_account,
                 external_address,
-                ..
             } => (
                 PcztRecipient::InternalAccount { receiving_account },
                 external_address,
@@ -331,7 +338,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     spend_from_account: <DbT as InputSource>::AccountId,
     min_confirmations: NonZeroU32,
     to: &Address,
-    amount: NonNegativeAmount,
+    amount: Zatoshis,
     memo: Option<MemoBytes>,
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedProtocol,
@@ -395,7 +402,7 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     params: &ParamsT,
     input_selector: &InputsT,
     change_strategy: &ChangeT,
-    shielding_threshold: NonNegativeAmount,
+    shielding_threshold: Zatoshis,
     from_addrs: &[TransparentAddress],
     to_account: <DbT as InputSource>::AccountId,
     min_confirmations: u32,
@@ -431,7 +438,7 @@ where
 struct StepResult<AccountId> {
     build_result: BuildResult,
     outputs: Vec<SentTransactionOutput<AccountId>>,
-    fee_amount: NonNegativeAmount,
+    fee_amount: Zatoshis,
     #[cfg(feature = "transparent-inputs")]
     utxos_spent: Vec<OutPoint>,
 }
@@ -536,6 +543,72 @@ where
     Ok(NonEmpty::from_vec(txids).expect("proposal.steps is NonEmpty"))
 }
 
+#[derive(Debug, Clone)]
+enum BuildRecipient<AccountId> {
+    External {
+        recipient_address: ZcashAddress,
+        output_pool: PoolType,
+    },
+    #[cfg(feature = "transparent-inputs")]
+    EphemeralTransparent {
+        receiving_account: AccountId,
+        ephemeral_address: TransparentAddress,
+    },
+    InternalAccount {
+        receiving_account: AccountId,
+        external_address: Option<ZcashAddress>,
+    },
+}
+
+impl<AccountId> BuildRecipient<AccountId> {
+    fn into_recipient_with_note(self, note: impl FnOnce() -> Note) -> Recipient<AccountId> {
+        match self {
+            BuildRecipient::External {
+                recipient_address,
+                output_pool,
+            } => Recipient::External {
+                recipient_address,
+                output_pool,
+            },
+            #[cfg(feature = "transparent-inputs")]
+            BuildRecipient::EphemeralTransparent { .. } => unreachable!(),
+            BuildRecipient::InternalAccount {
+                receiving_account,
+                external_address,
+            } => Recipient::InternalAccount {
+                receiving_account,
+                external_address,
+                note: Box::new(note()),
+            },
+        }
+    }
+
+    fn into_recipient_with_outpoint(
+        self,
+        #[cfg(feature = "transparent-inputs")] outpoint: OutPoint,
+    ) -> Recipient<AccountId> {
+        match self {
+            BuildRecipient::External {
+                recipient_address,
+                output_pool,
+            } => Recipient::External {
+                recipient_address,
+                output_pool,
+            },
+            #[cfg(feature = "transparent-inputs")]
+            BuildRecipient::EphemeralTransparent {
+                receiving_account,
+                ephemeral_address,
+            } => Recipient::EphemeralTransparent {
+                receiving_account,
+                ephemeral_address,
+                outpoint,
+            },
+            BuildRecipient::InternalAccount { .. } => unreachable!(),
+        }
+    }
+}
+
 #[allow(clippy::type_complexity)]
 struct BuildState<'a, P, AccountId> {
     #[cfg(feature = "transparent-inputs")]
@@ -544,20 +617,12 @@ struct BuildState<'a, P, AccountId> {
     #[cfg(feature = "transparent-inputs")]
     transparent_input_addresses: HashMap<TransparentAddress, TransparentAddressMetadata>,
     #[cfg(feature = "orchard")]
-    orchard_output_meta: Vec<(
-        Recipient<AccountId, PoolType, OutPoint>,
-        NonNegativeAmount,
-        Option<MemoBytes>,
-    )>,
-    sapling_output_meta: Vec<(
-        Recipient<AccountId, PoolType, OutPoint>,
-        NonNegativeAmount,
-        Option<MemoBytes>,
-    )>,
+    orchard_output_meta: Vec<(BuildRecipient<AccountId>, Zatoshis, Option<MemoBytes>)>,
+    sapling_output_meta: Vec<(BuildRecipient<AccountId>, Zatoshis, Option<MemoBytes>)>,
     transparent_output_meta: Vec<(
-        Recipient<AccountId, Note, ()>,
+        BuildRecipient<AccountId>,
         TransparentAddress,
-        NonNegativeAmount,
+        Zatoshis,
         StepOutputIndex,
     )>,
     #[cfg(feature = "transparent-inputs")]
@@ -884,20 +949,12 @@ where
     };
 
     #[cfg(feature = "orchard")]
-    let mut orchard_output_meta: Vec<(
-        Recipient<_, PoolType, _>,
-        NonNegativeAmount,
-        Option<MemoBytes>,
-    )> = vec![];
-    let mut sapling_output_meta: Vec<(
-        Recipient<_, PoolType, _>,
-        NonNegativeAmount,
-        Option<MemoBytes>,
-    )> = vec![];
+    let mut orchard_output_meta: Vec<(BuildRecipient<_>, Zatoshis, Option<MemoBytes>)> = vec![];
+    let mut sapling_output_meta: Vec<(BuildRecipient<_>, Zatoshis, Option<MemoBytes>)> = vec![];
     let mut transparent_output_meta: Vec<(
-        Recipient<_, _, ()>,
+        BuildRecipient<_>,
         TransparentAddress,
-        NonNegativeAmount,
+        Zatoshis,
         StepOutputIndex,
     )> = vec![];
 
@@ -921,7 +978,10 @@ where
             let memo = payment.memo().map_or_else(MemoBytes::empty, |m| m.clone());
             builder.add_sapling_output(sapling_external_ovk, to, payment.amount(), memo.clone())?;
             sapling_output_meta.push((
-                Recipient::External(recipient_address.clone(), PoolType::SAPLING),
+                BuildRecipient::External {
+                    recipient_address: recipient_address.clone(),
+                    output_pool: PoolType::SAPLING,
+                },
                 payment.amount(),
                 Some(memo),
             ));
@@ -942,7 +1002,10 @@ where
                     memo.clone(),
                 )?;
                 orchard_output_meta.push((
-                    Recipient::External(recipient_address.clone(), PoolType::ORCHARD),
+                    BuildRecipient::External {
+                        recipient_address: recipient_address.clone(),
+                        output_pool: PoolType::ORCHARD,
+                    },
                     payment.amount(),
                     Some(memo),
                 ));
@@ -968,7 +1031,10 @@ where
                 }
                 builder.add_transparent_output(&to, payment.amount())?;
                 transparent_output_meta.push((
-                    Recipient::External(recipient_address.clone(), PoolType::TRANSPARENT),
+                    BuildRecipient::External {
+                        recipient_address: recipient_address.clone(),
+                        output_pool: PoolType::TRANSPARENT,
+                    },
                     to,
                     payment.amount(),
                     StepOutputIndex::Payment(payment_index),
@@ -1037,10 +1103,9 @@ where
                     memo.clone(),
                 )?;
                 sapling_output_meta.push((
-                    Recipient::InternalAccount {
+                    BuildRecipient::InternalAccount {
                         receiving_account: account_id,
                         external_address: None,
-                        note: output_pool,
                     },
                     change_value.value(),
                     Some(memo),
@@ -1061,10 +1126,9 @@ where
                         memo.clone(),
                     )?;
                     orchard_output_meta.push((
-                        Recipient::InternalAccount {
+                        BuildRecipient::InternalAccount {
                             receiving_account: account_id,
                             external_address: None,
-                            note: output_pool,
                         },
                         change_value.value(),
                         Some(memo),
@@ -1106,10 +1170,9 @@ where
             // if a later step does not consume it.
             builder.add_transparent_output(&ephemeral_address, change_value.value())?;
             transparent_output_meta.push((
-                Recipient::EphemeralTransparent {
+                BuildRecipient::EphemeralTransparent {
                     receiving_account: account_id,
                     ephemeral_address,
-                    outpoint_metadata: (),
                 },
                 ephemeral_address,
                 change_value.value(),
@@ -1214,20 +1277,17 @@ where
                 .output_action_index(i)
                 .expect("An action should exist in the transaction for each Orchard output.");
 
-            let recipient = recipient
-                .map_internal_account_note(|pool| {
-                    assert!(pool == PoolType::ORCHARD);
-                    build_result
-                        .transaction()
-                        .orchard_bundle()
-                        .and_then(|bundle| {
-                            bundle
-                                .decrypt_output_with_key(output_index, &orchard_internal_ivk)
-                                .map(|(note, _, _)| Note::Orchard(note))
-                        })
-                })
-                .internal_account_note_transpose_option()
-                .expect("Wallet-internal outputs must be decryptable with the wallet's IVK");
+            let recipient = recipient.into_recipient_with_note(|| {
+                build_result
+                    .transaction()
+                    .orchard_bundle()
+                    .and_then(|bundle| {
+                        bundle
+                            .decrypt_output_with_key(output_index, &orchard_internal_ivk)
+                            .map(|(note, _, _)| Note::Orchard(note))
+                    })
+                    .expect("Wallet-internal outputs must be decryptable with the wallet's IVK")
+            });
 
             SentTransactionOutput::from_parts(output_index, recipient, value, memo)
         },
@@ -1243,23 +1303,20 @@ where
                 .output_index(i)
                 .expect("An output should exist in the transaction for each Sapling payment.");
 
-            let recipient = recipient
-                .map_internal_account_note(|pool| {
-                    assert!(pool == PoolType::SAPLING);
-                    build_result
-                        .transaction()
-                        .sapling_bundle()
-                        .and_then(|bundle| {
-                            try_sapling_note_decryption(
-                                &sapling_internal_ivk,
-                                &bundle.shielded_outputs()[output_index],
-                                zip212_enforcement(params, min_target_height),
-                            )
-                            .map(|(note, _, _)| Note::Sapling(note))
-                        })
-                })
-                .internal_account_note_transpose_option()
-                .expect("Wallet-internal outputs must be decryptable with the wallet's IVK");
+            let recipient = recipient.into_recipient_with_note(|| {
+                build_result
+                    .transaction()
+                    .sapling_bundle()
+                    .and_then(|bundle| {
+                        try_sapling_note_decryption(
+                            &sapling_internal_ivk,
+                            &bundle.shielded_outputs()[output_index],
+                            zip212_enforcement(params, min_target_height),
+                        )
+                        .map(|(note, _, _)| Note::Sapling(note))
+                    })
+                    .expect("Wallet-internal outputs must be decryptable with the wallet's IVK")
+            });
 
             SentTransactionOutput::from_parts(output_index, recipient, value, memo)
         },
@@ -1286,7 +1343,11 @@ where
             // would not usefully improve privacy.
             let outpoint = OutPoint::new(txid, n as u32);
 
-            let recipient = recipient.map_ephemeral_transparent_outpoint(|()| outpoint.clone());
+            let recipient = recipient.into_recipient_with_outpoint(
+                #[cfg(feature = "transparent-inputs")]
+                outpoint.clone(),
+            );
+
             #[cfg(feature = "transparent-inputs")]
             unused_transparent_outputs.insert(
                 StepOutput::new(build_state.step_index, step_output_index),
@@ -1823,14 +1884,16 @@ where
             MemoBytes::from_bytes(memo_bytes(&m)).expect("Memo is the correct length.")
         });
 
-        let note_value = NonNegativeAmount::try_from(note_value(&note))?;
+        let note_value = Zatoshis::try_from(note_value(&note))?;
         let recipient = match (pczt_recipient, external_address) {
-            (PcztRecipient::External, Some(addr)) => {
-                Ok(Recipient::External(addr, PoolType::Shielded(output_pool)))
-            }
+            (PcztRecipient::External, Some(addr)) => Ok(Recipient::External {
+                recipient_address: addr,
+                output_pool: PoolType::Shielded(output_pool),
+            }),
             (PcztRecipient::External, None) => Err(PcztError::Invalid(
                 "external recipient needs to have its user_address field set".into(),
             )),
+            #[cfg(feature = "transparent-inputs")]
             (PcztRecipient::EphemeralTransparent { .. }, _) => Err(PcztError::Invalid(
                 "shielded output cannot be EphemeralTransparent".into(),
             )),
@@ -1838,7 +1901,7 @@ where
                 Ok(Recipient::InternalAccount {
                     receiving_account,
                     external_address,
-                    note: wallet_note(note),
+                    note: Box::new(wallet_note(note)),
                 })
             }
         }?;
@@ -1933,11 +1996,15 @@ where
 
                         let recipient = match (pczt_recipient, external_address) {
                             (PcztRecipient::External, Some(addr)) => {
-                                Ok(Recipient::External(addr, PoolType::Transparent))
+                                Ok(Recipient::External {
+                                    recipient_address: addr,
+                                    output_pool: PoolType::Transparent,
+                                })
                             }
                             (PcztRecipient::External, None) => Err(PcztError::Invalid(
                                 "external recipient needs to have its user_address field set".into(),
                             )),
+                            #[cfg(feature = "transparent-inputs")]
                             (PcztRecipient::EphemeralTransparent { receiving_account }, _) => output
                                 .recipient_address()
                                 .ok_or(PcztError::Invalid(
@@ -1947,7 +2014,7 @@ where
                                 .map(|ephemeral_address| Recipient::EphemeralTransparent {
                                     receiving_account,
                                     ephemeral_address,
-                                    outpoint_metadata: outpoint,
+                                    outpoint,
                                 }),
                             (
                                 PcztRecipient::InternalAccount {
@@ -1977,7 +2044,7 @@ where
     outputs.extend(sapling_outputs.into_iter().flatten());
     outputs.extend(transparent_outputs.into_iter().flatten());
 
-    let fee_amount = NonNegativeAmount::try_from(transaction.fee_paid(|outpoint| {
+    let fee_amount = Zatoshis::try_from(transaction.fee_paid(|outpoint| {
         utxos_map
             .get(outpoint)
             .copied()
@@ -2052,7 +2119,7 @@ pub fn shield_transparent_funds<DbT, ParamsT, InputsT, ChangeT>(
     output_prover: &impl OutputProver,
     input_selector: &InputsT,
     change_strategy: &ChangeT,
-    shielding_threshold: NonNegativeAmount,
+    shielding_threshold: Zatoshis,
     usk: &UnifiedSpendingKey,
     from_addrs: &[TransparentAddress],
     to_account: <DbT as InputSource>::AccountId,

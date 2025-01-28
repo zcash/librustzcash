@@ -5,21 +5,17 @@ use std::io::Write;
 use blake2b_simd::{Hash as Blake2bHash, Params, State};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
-use orchard::bundle::{self as orchard};
 
-use crate::{
+use ::orchard::bundle::{self as orchard};
+use ::transparent::bundle::{self as transparent, TxIn, TxOut};
+use zcash_protocol::{
     consensus::{BlockHeight, BranchId},
-    sapling::{
-        self,
-        bundle::{OutputDescription, SpendDescription},
-    },
+    value::ZatBalance,
 };
 
+use ::sapling::bundle::{OutputDescription, SpendDescription};
+
 use super::{
-    components::{
-        amount::Amount,
-        transparent::{self, TxIn, TxOut},
-    },
     Authorization, Authorized, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
 };
 
@@ -256,7 +252,7 @@ pub(crate) fn hash_transparent_txid_data(
 
 /// Implements [ZIP 244 section T.3](https://zips.z.cash/zip-0244#t-3-sapling-digest)
 fn hash_sapling_txid_data<A: sapling::bundle::Authorization>(
-    bundle: &sapling::Bundle<A, Amount>,
+    bundle: &sapling::Bundle<A, ZatBalance>,
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_SAPLING_HASH_PERSONALIZATION);
     if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
@@ -328,14 +324,14 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
 
     fn digest_sapling(
         &self,
-        sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth, Amount>>,
+        sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth, ZatBalance>>,
     ) -> Self::SaplingDigest {
         sapling_bundle.map(hash_sapling_txid_data)
     }
 
     fn digest_orchard(
         &self,
-        orchard_bundle: Option<&orchard::Bundle<A::OrchardAuth, Amount>>,
+        orchard_bundle: Option<&orchard::Bundle<A::OrchardAuth, ZatBalance>>,
     ) -> Self::OrchardDigest {
         orchard_bundle.map(|b| b.commitment().0)
     }
@@ -467,7 +463,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
 
     fn digest_sapling(
         &self,
-        sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, Amount>>,
+        sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, ZatBalance>>,
     ) -> Blake2bHash {
         let mut h = hasher(ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION);
         if let Some(bundle) = sapling_bundle {
@@ -492,7 +488,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
 
     fn digest_orchard(
         &self,
-        orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, Amount>>,
+        orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, ZatBalance>>,
     ) -> Self::OrchardDigest {
         orchard_bundle.map_or_else(orchard::commitments::hash_bundle_auth_empty, |b| {
             b.authorizing_commitment().0

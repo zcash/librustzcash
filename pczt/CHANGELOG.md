@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `pczt::roles::redactor`
+
 ### Changed
 - Migrated to `nonempty 0.11`
 

@@ -8,7 +8,6 @@ use std::{
     ops::Range,
     sync::Arc,
 };
-use zcash_client_backend::data_api::chain::CommitmentTreeRoot;
 
 use incrementalmerkletree::{Address, Hashable, Level, Position, Retention};
 use shardtree::{
@@ -17,9 +16,12 @@ use shardtree::{
     LocatedPrunableTree, LocatedTree, PrunableTree, RetentionFlags,
 };
 
-use zcash_primitives::{consensus::BlockHeight, merkle_tree::HashSer};
-
-use zcash_client_backend::serialization::shardtree::{read_shard, write_shard};
+use zcash_client_backend::{
+    data_api::chain::CommitmentTreeRoot,
+    serialization::shardtree::{read_shard, write_shard},
+};
+use zcash_primitives::merkle_tree::HashSer;
+use zcash_protocol::consensus::BlockHeight;
 
 /// Errors that can appear in SQLite-back [`ShardStore`] implementation operations.
 #[derive(Debug)]
@@ -1107,7 +1109,7 @@ mod tests {
         chain::CommitmentTreeRoot,
         testing::{pool::ShieldedPoolTester, sapling::SaplingPoolTester},
     };
-    use zcash_primitives::consensus::{BlockHeight, Network};
+    use zcash_protocol::consensus::{BlockHeight, Network};
 
     use super::SqliteShardStore;
     use crate::{testing::pool::ShieldedPoolPersistence, wallet::init::init_wallet_db, WalletDb};

@@ -155,10 +155,8 @@ use std::ops::Range;
 
 use incrementalmerkletree::frontier::Frontier;
 use subtle::ConditionallySelectable;
-use zcash_primitives::{
-    block::BlockHash,
-    consensus::{self, BlockHeight},
-};
+use zcash_primitives::block::BlockHash;
+use zcash_protocol::consensus::{self, BlockHeight};
 
 use crate::{
     data_api::{NullifierQuery, WalletWrite},
@@ -701,7 +699,7 @@ where
 #[cfg(feature = "test-dependencies")]
 pub mod testing {
     use std::convert::Infallible;
-    use zcash_primitives::consensus::BlockHeight;
+    use zcash_protocol::consensus::BlockHeight;
 
     use crate::proto::compact_formats::CompactBlock;
 

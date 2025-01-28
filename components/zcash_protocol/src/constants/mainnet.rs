@@ -50,3 +50,24 @@ pub const B58_SCRIPT_ADDRESS_PREFIX: [u8; 2] = [0x1c, 0xbd];
 ///
 /// [ZIP 320]: https://zips.z.cash/zip-0320
 pub const HRP_TEX_ADDRESS: &str = "tex";
+
+/// The HRP for a Bech32m-encoded mainnet Unified Address.
+///
+/// Defined in [ZIP 316][zip-0316].
+///
+/// [zip-0316]: https://zips.z.cash/zip-0316
+pub const HRP_UNIFIED_ADDRESS: &str = "u";
+
+/// The HRP for a Bech32m-encoded mainnet Unified FVK.
+///
+/// Defined in [ZIP 316][zip-0316].
+///
+/// [zip-0316]: https://zips.z.cash/zip-0316
+pub const HRP_UNIFIED_FVK: &str = "uview";
+
+/// The HRP for a Bech32m-encoded mainnet Unified IVK.
+///
+/// Defined in [ZIP 316][zip-0316].
+///
+/// [zip-0316]: https://zips.z.cash/zip-0316
+pub const HRP_UNIFIED_IVK: &str = "uivk";

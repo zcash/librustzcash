@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 use core::convert::{TryFrom, TryInto};
+use zcash_protocol::constants;
 
 use super::{
     private::{SealedContainer, SealedItem},
@@ -128,17 +129,21 @@ impl SealedContainer for Ufvk {
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const MAINNET: &'static str = "uview";
+    const MAINNET: &'static str = constants::mainnet::HRP_UNIFIED_FVK;
 
     /// The HRP for a Bech32m-encoded testnet Unified FVK.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const TESTNET: &'static str = "uviewtest";
+    const TESTNET: &'static str = constants::testnet::HRP_UNIFIED_FVK;
 
     /// The HRP for a Bech32m-encoded regtest Unified FVK.
-    const REGTEST: &'static str = "uviewregtest";
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    const REGTEST: &'static str = constants::regtest::HRP_UNIFIED_FVK;
 
     fn from_inner(fvks: Vec<Self::Item>) -> Self {
         Self(fvks)
@@ -155,13 +160,11 @@ mod tests {
     use proptest::{array::uniform1, array::uniform32, prelude::*, sample::select};
 
     use super::{Fvk, ParseError, Typecode, Ufvk};
-    use crate::{
-        kind::unified::{
-            private::{SealedContainer, SealedItem},
-            Container, Encoding,
-        },
-        Network,
+    use crate::kind::unified::{
+        private::{SealedContainer, SealedItem},
+        Container, Encoding,
     };
+    use zcash_protocol::consensus::NetworkType;
 
     prop_compose! {
         fn uniform128()(a in uniform96(), b in uniform32(0u8..)) -> [u8; 128] {
@@ -226,7 +229,7 @@ mod tests {
     proptest! {
         #[test]
         fn ufvk_roundtrip(
-            network in select(vec![Network::Main, Network::Test, Network::Regtest]),
+            network in select(vec![NetworkType::Main, NetworkType::Test, NetworkType::Regtest]),
             ufvk in arb_unified_fvk(),
         ) {
             let encoded = ufvk.encode(&network);

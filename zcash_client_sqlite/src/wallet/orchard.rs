@@ -10,7 +10,7 @@ use rusqlite::{named_params, types::Value, Connection, Row, Transaction};
 use zcash_client_backend::{
     data_api::NullifierQuery,
     wallet::{ReceivedNote, WalletOrchardOutput},
-    DecryptedOutput, ShieldedProtocol, TransferType,
+    DecryptedOutput, TransferType,
 };
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::transaction::TxId;
@@ -18,6 +18,7 @@ use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::Zatoshis,
+    ShieldedProtocol,
 };
 use zip32::Scope;
 

@@ -1,10 +1,10 @@
 use blake2b_simd::Hash as Blake2bHash;
 use rand_core::OsRng;
+
+use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE};
 use zcash_primitives::transaction::{
-    sighash::{SignableInput, SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE},
-    sighash_v5::v5_signature_hash,
-    txid::TxIdDigester,
-    Authorization, TransactionData, TxDigests, TxVersion,
+    sighash::SignableInput, sighash_v5::v5_signature_hash, txid::TxIdDigester, Authorization,
+    TransactionData, TxDigests, TxVersion,
 };
 use zcash_protocol::consensus::BranchId;
 
@@ -139,6 +139,9 @@ impl Signer {
 
     /// Signs the Sapling spend at the given index with the given spend authorizing key.
     ///
+    /// Requires the spend's `proof_generation_key` field to be set (because the API does
+    /// not take an FVK).
+    ///
     /// It is the caller's responsibility to perform any semantic validity checks on the
     /// PCZT (for example, comfirming that the change amounts are correct) before calling
     /// this method.
@@ -178,6 +181,8 @@ impl Signer {
     }
 
     /// Signs the Orchard spend at the given index with the given spend authorizing key.
+    ///
+    /// Requires the spend's `fvk` field to be set (because the API does not take an FVK).
     ///
     /// It is the caller's responsibility to perform any semantic validity checks on the
     /// PCZT (for example, comfirming that the change amounts are correct) before calling

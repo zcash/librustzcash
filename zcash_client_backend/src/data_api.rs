@@ -55,6 +55,8 @@
 //! [`TransactionRequest`]: crate::zip321::TransactionRequest
 //! [`propose_shielding`]: crate::data_api::wallet::propose_shielding
 
+use nonempty::NonEmpty;
+use secrecy::SecretVec;
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -64,9 +66,21 @@ use std::{
 };
 
 use incrementalmerkletree::{frontier::Frontier, Retention};
-use nonempty::NonEmpty;
-use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
+
+use zcash_keys::{
+    address::UnifiedAddress,
+    keys::{
+        UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey, UnifiedSpendingKey,
+    },
+};
+use zcash_primitives::{block::BlockHash, transaction::Transaction};
+use zcash_protocol::{
+    consensus::BlockHeight,
+    memo::{Memo, MemoBytes},
+    value::{BalanceError, Zatoshis},
+    ShieldedProtocol, TxId,
+};
 use zip32::fingerprint::SeedFingerprint;
 
 use self::{
@@ -74,39 +88,23 @@ use self::{
     scanning::ScanRange,
 };
 use crate::{
-    address::UnifiedAddress,
     decrypt::DecryptedOutput,
-    keys::{
-        UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey, UnifiedSpendingKey,
-    },
     proto::service::TreeState,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
-    ShieldedProtocol,
-};
-use zcash_primitives::{
-    block::BlockHash,
-    consensus::BlockHeight,
-    memo::{Memo, MemoBytes},
-    transaction::{
-        components::{
-            amount::{BalanceError, NonNegativeAmount},
-            OutPoint,
-        },
-        Transaction, TxId,
-    },
 };
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::wallet::TransparentAddressMetadata, std::ops::Range,
-    zcash_primitives::legacy::TransparentAddress,
+    crate::wallet::TransparentAddressMetadata,
+    std::ops::Range,
+    transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
 };
 
 #[cfg(feature = "test-dependencies")]
 use ambassador::delegatable_trait;
 
 #[cfg(any(test, feature = "test-dependencies"))]
-use {zcash_keys::address::Address, zcash_primitives::consensus::NetworkUpgrade};
+use {zcash_keys::address::Address, zcash_protocol::consensus::NetworkUpgrade};
 
 pub mod chain;
 pub mod error;
@@ -143,23 +141,20 @@ pub enum NullifierQuery {
 /// Balance information for a value within a single pool in an account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Balance {
-    spendable_value: NonNegativeAmount,
-    change_pending_confirmation: NonNegativeAmount,
-    value_pending_spendability: NonNegativeAmount,
+    spendable_value: Zatoshis,
+    change_pending_confirmation: Zatoshis,
+    value_pending_spendability: Zatoshis,
 }
 
 impl Balance {
     /// The [`Balance`] value having zero values for all its fields.
     pub const ZERO: Self = Self {
-        spendable_value: NonNegativeAmount::ZERO,
-        change_pending_confirmation: NonNegativeAmount::ZERO,
-        value_pending_spendability: NonNegativeAmount::ZERO,
+        spendable_value: Zatoshis::ZERO,
+        change_pending_confirmation: Zatoshis::ZERO,
+        value_pending_spendability: Zatoshis::ZERO,
     };
 
-    fn check_total_adding(
-        &self,
-        value: NonNegativeAmount,
-    ) -> Result<NonNegativeAmount, BalanceError> {
+    fn check_total_adding(&self, value: Zatoshis) -> Result<Zatoshis, BalanceError> {
         (self.spendable_value
             + self.change_pending_confirmation
             + self.value_pending_spendability
@@ -170,12 +165,12 @@ impl Balance {
     /// Returns the value in the account that may currently be spent; it is possible to compute
     /// witnesses for all the notes that comprise this value, and all of this value is confirmed to
     /// the required confirmation depth.
-    pub fn spendable_value(&self) -> NonNegativeAmount {
+    pub fn spendable_value(&self) -> Zatoshis {
         self.spendable_value
     }
 
     /// Adds the specified value to the spendable total, checking for overflow.
-    pub fn add_spendable_value(&mut self, value: NonNegativeAmount) -> Result<(), BalanceError> {
+    pub fn add_spendable_value(&mut self, value: Zatoshis) -> Result<(), BalanceError> {
         self.check_total_adding(value)?;
         self.spendable_value = (self.spendable_value + value).unwrap();
         Ok(())
@@ -183,15 +178,12 @@ impl Balance {
 
     /// Returns the value in the account of shielded change notes that do not yet have sufficient
     /// confirmations to be spendable.
-    pub fn change_pending_confirmation(&self) -> NonNegativeAmount {
+    pub fn change_pending_confirmation(&self) -> Zatoshis {
         self.change_pending_confirmation
     }
 
     /// Adds the specified value to the pending change total, checking for overflow.
-    pub fn add_pending_change_value(
-        &mut self,
-        value: NonNegativeAmount,
-    ) -> Result<(), BalanceError> {
+    pub fn add_pending_change_value(&mut self, value: Zatoshis) -> Result<(), BalanceError> {
         self.check_total_adding(value)?;
         self.change_pending_confirmation = (self.change_pending_confirmation + value).unwrap();
         Ok(())
@@ -200,22 +192,19 @@ impl Balance {
     /// Returns the value in the account of all remaining received notes that either do not have
     /// sufficient confirmations to be spendable, or for which witnesses cannot yet be constructed
     /// without additional scanning.
-    pub fn value_pending_spendability(&self) -> NonNegativeAmount {
+    pub fn value_pending_spendability(&self) -> Zatoshis {
         self.value_pending_spendability
     }
 
     /// Adds the specified value to the pending spendable total, checking for overflow.
-    pub fn add_pending_spendable_value(
-        &mut self,
-        value: NonNegativeAmount,
-    ) -> Result<(), BalanceError> {
+    pub fn add_pending_spendable_value(&mut self, value: Zatoshis) -> Result<(), BalanceError> {
         self.check_total_adding(value)?;
         self.value_pending_spendability = (self.value_pending_spendability + value).unwrap();
         Ok(())
     }
 
     /// Returns the total value of funds represented by this [`Balance`].
-    pub fn total(&self) -> NonNegativeAmount {
+    pub fn total(&self) -> Zatoshis {
         (self.spendable_value + self.change_pending_confirmation + self.value_pending_spendability)
             .expect("Balance cannot overflow MAX_MONEY")
     }
@@ -243,7 +232,7 @@ impl AccountBalance {
         unshielded_balance: Balance::ZERO,
     };
 
-    fn check_total(&self) -> Result<NonNegativeAmount, BalanceError> {
+    fn check_total(&self) -> Result<Zatoshis, BalanceError> {
         (self.sapling_balance.total()
             + self.orchard_balance.total()
             + self.unshielded_balance.total())
@@ -288,7 +277,7 @@ impl AccountBalance {
     #[deprecated(
         note = "this function is deprecated. Please use [`AccountBalance::unshielded_balance`] instead."
     )]
-    pub fn unshielded(&self) -> NonNegativeAmount {
+    pub fn unshielded(&self) -> Zatoshis {
         self.unshielded_balance.total()
     }
 
@@ -310,7 +299,7 @@ impl AccountBalance {
     }
 
     /// Returns the total value of funds belonging to the account.
-    pub fn total(&self) -> NonNegativeAmount {
+    pub fn total(&self) -> Zatoshis {
         (self.sapling_balance.total()
             + self.orchard_balance.total()
             + self.unshielded_balance.total())
@@ -319,14 +308,14 @@ impl AccountBalance {
 
     /// Returns the total value of shielded (Sapling and Orchard) funds that may immediately be
     /// spent.
-    pub fn spendable_value(&self) -> NonNegativeAmount {
+    pub fn spendable_value(&self) -> Zatoshis {
         (self.sapling_balance.spendable_value + self.orchard_balance.spendable_value)
             .expect("Account balance cannot overflow MAX_MONEY")
     }
 
     /// Returns the total value of change and/or shielding transaction outputs that are awaiting
     /// sufficient confirmations for spendability.
-    pub fn change_pending_confirmation(&self) -> NonNegativeAmount {
+    pub fn change_pending_confirmation(&self) -> Zatoshis {
         (self.sapling_balance.change_pending_confirmation
             + self.orchard_balance.change_pending_confirmation)
             .expect("Account balance cannot overflow MAX_MONEY")
@@ -334,7 +323,7 @@ impl AccountBalance {
 
     /// Returns the value of shielded funds that are not yet spendable because additional scanning
     /// is required before it will be possible to derive witnesses for the associated notes.
-    pub fn value_pending_spendability(&self) -> NonNegativeAmount {
+    pub fn value_pending_spendability(&self) -> Zatoshis {
         (self.sapling_balance.value_pending_spendability
             + self.orchard_balance.value_pending_spendability)
             .expect("Account balance cannot overflow MAX_MONEY")
@@ -821,26 +810,22 @@ impl<NoteRef> SpendableNotes<NoteRef> {
     }
 
     /// Computes the total value of Sapling notes.
-    pub fn sapling_value(&self) -> Result<NonNegativeAmount, BalanceError> {
-        self.sapling
-            .iter()
-            .try_fold(NonNegativeAmount::ZERO, |acc, n| {
-                (acc + n.note_value()?).ok_or(BalanceError::Overflow)
-            })
+    pub fn sapling_value(&self) -> Result<Zatoshis, BalanceError> {
+        self.sapling.iter().try_fold(Zatoshis::ZERO, |acc, n| {
+            (acc + n.note_value()?).ok_or(BalanceError::Overflow)
+        })
     }
 
     /// Computes the total value of Sapling notes.
     #[cfg(feature = "orchard")]
-    pub fn orchard_value(&self) -> Result<NonNegativeAmount, BalanceError> {
-        self.orchard
-            .iter()
-            .try_fold(NonNegativeAmount::ZERO, |acc, n| {
-                (acc + n.note_value()?).ok_or(BalanceError::Overflow)
-            })
+    pub fn orchard_value(&self) -> Result<Zatoshis, BalanceError> {
+        self.orchard.iter().try_fold(Zatoshis::ZERO, |acc, n| {
+            (acc + n.note_value()?).ok_or(BalanceError::Overflow)
+        })
     }
 
     /// Computes the total value of spendable inputs
-    pub fn total_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+    pub fn total_value(&self) -> Result<Zatoshis, BalanceError> {
         #[cfg(not(feature = "orchard"))]
         return self.sapling_value();
 
@@ -878,12 +863,12 @@ impl<NoteRef> SpendableNotes<NoteRef> {
 #[derive(Debug, Clone)]
 pub struct PoolMeta {
     note_count: usize,
-    value: NonNegativeAmount,
+    value: Zatoshis,
 }
 
 impl PoolMeta {
     /// Constructs a new [`PoolMeta`] value from its constituent parts.
-    pub fn new(note_count: usize, value: NonNegativeAmount) -> Self {
+    pub fn new(note_count: usize, value: Zatoshis) -> Self {
         Self { note_count, value }
     }
 
@@ -895,7 +880,7 @@ impl PoolMeta {
 
     /// Returns the total value of unspent outputs in the account that are accounted for in
     /// [`Self::note_count`].
-    pub fn value(&self) -> NonNegativeAmount {
+    pub fn value(&self) -> Zatoshis {
         self.value
     }
 }
@@ -967,11 +952,11 @@ impl AccountMeta {
         s.zip(o).map(|(s, o)| s + o).or(s).or(o)
     }
 
-    fn sapling_value(&self) -> Option<NonNegativeAmount> {
+    fn sapling_value(&self) -> Option<Zatoshis> {
         self.sapling.as_ref().map(|m| m.value)
     }
 
-    fn orchard_value(&self) -> Option<NonNegativeAmount> {
+    fn orchard_value(&self) -> Option<Zatoshis> {
         self.orchard.as_ref().map(|m| m.value)
     }
 
@@ -980,7 +965,7 @@ impl AccountMeta {
     /// Returns [`None`] if no metadata is available or it was not possible to evaluate the query
     /// described by a [`NoteFilter`] given the available wallet data. If metadata is available
     /// only for a single pool, the metadata for that pool will be returned.
-    pub fn total_value(&self) -> Option<NonNegativeAmount> {
+    pub fn total_value(&self) -> Option<Zatoshis> {
         let s = self.sapling_value();
         let o = self.orchard_value();
         s.zip(o)
@@ -1041,7 +1026,7 @@ impl<const MAX: u8> From<BoundedU8<MAX>> for usize {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NoteFilter {
     /// Selects notes having value greater than or equal to the provided value.
-    ExceedsMinValue(NonNegativeAmount),
+    ExceedsMinValue(Zatoshis),
     /// Selects notes having value greater than or equal to approximately the n'th percentile of
     /// previously sent notes in the account, irrespective of pool. The wrapped value must be in
     /// the range `1..=99`. The value `n` is respected in a best-effort fashion; results are likely
@@ -1123,7 +1108,7 @@ pub trait InputSource {
     fn select_spendable_notes(
         &self,
         account: Self::AccountId,
-        target_value: NonNegativeAmount,
+        target_value: Zatoshis,
         sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
@@ -1398,7 +1383,7 @@ pub trait WalletRead {
         &self,
         _account: Self::AccountId,
         _max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, Zatoshis>, Self::Error> {
         Ok(HashMap::new())
     }
 
@@ -1477,7 +1462,7 @@ pub trait WalletRead {
     fn get_known_ephemeral_addresses(
         &self,
         _account: Self::AccountId,
-        _index_range: Option<Range<u32>>,
+        _index_range: Option<Range<NonHardenedChildIndex>>,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         Ok(vec![])
     }
@@ -1600,7 +1585,7 @@ pub trait WalletTest: InputSource + WalletRead {
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct OutputOfSentTx {
-    value: NonNegativeAmount,
+    value: Zatoshis,
     external_recipient: Option<Address>,
     ephemeral_address: Option<(Address, u32)>,
 }
@@ -1613,7 +1598,7 @@ impl OutputOfSentTx {
     /// address along with the `address_index` it was derived from under the BIP 32 path
     /// `m/44'/<coin_type>'/<account>'/2/<address_index>`.
     pub fn from_parts(
-        value: NonNegativeAmount,
+        value: Zatoshis,
         external_recipient: Option<Address>,
         ephemeral_address: Option<(Address, u32)>,
     ) -> Self {
@@ -1903,7 +1888,7 @@ pub struct SentTransaction<'a, AccountId> {
     target_height: BlockHeight,
     account: AccountId,
     outputs: &'a [SentTransactionOutput<AccountId>],
-    fee_amount: NonNegativeAmount,
+    fee_amount: Zatoshis,
     #[cfg(feature = "transparent-inputs")]
     utxos_spent: &'a [OutPoint],
 }
@@ -1926,7 +1911,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
         target_height: BlockHeight,
         account: AccountId,
         outputs: &'a [SentTransactionOutput<AccountId>],
-        fee_amount: NonNegativeAmount,
+        fee_amount: Zatoshis,
         #[cfg(feature = "transparent-inputs")] utxos_spent: &'a [OutPoint],
     ) -> Self {
         Self {
@@ -1958,7 +1943,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
         self.outputs
     }
     /// Returns the fee paid by the transaction.
-    pub fn fee_amount(&self) -> NonNegativeAmount {
+    pub fn fee_amount(&self) -> Zatoshis {
         self.fee_amount
     }
     /// Returns the list of UTXOs spent in the created transaction.
@@ -1978,8 +1963,8 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
 /// This type is capable of representing both shielded and transparent outputs.
 pub struct SentTransactionOutput<AccountId> {
     output_index: usize,
-    recipient: Recipient<AccountId, Note, OutPoint>,
-    value: NonNegativeAmount,
+    recipient: Recipient<AccountId>,
+    value: Zatoshis,
     memo: Option<MemoBytes>,
 }
 
@@ -1995,8 +1980,8 @@ impl<AccountId> SentTransactionOutput<AccountId> {
     /// * `memo` - the memo that was sent with this output
     pub fn from_parts(
         output_index: usize,
-        recipient: Recipient<AccountId, Note, OutPoint>,
-        value: NonNegativeAmount,
+        recipient: Recipient<AccountId>,
+        value: Zatoshis,
         memo: Option<MemoBytes>,
     ) -> Self {
         Self {
@@ -2018,11 +2003,11 @@ impl<AccountId> SentTransactionOutput<AccountId> {
     }
     /// Returns the recipient address of the transaction, or the account id and
     /// resulting note/outpoint for wallet-internal outputs.
-    pub fn recipient(&self) -> &Recipient<AccountId, Note, OutPoint> {
+    pub fn recipient(&self) -> &Recipient<AccountId> {
         &self.recipient
     }
     /// Returns the value of the newly created output.
-    pub fn value(&self) -> NonNegativeAmount {
+    pub fn value(&self) -> Zatoshis {
         self.value
     }
     /// Returns the memo that was attached to the output, if any. This will only be `None`
@@ -2136,7 +2121,7 @@ impl AccountBirthday {
     /// # Panics
     ///
     /// Panics if the activation height for the given network upgrade is not set.
-    pub fn from_activation<P: zcash_primitives::consensus::Parameters>(
+    pub fn from_activation<P: zcash_protocol::consensus::Parameters>(
         params: &P,
         network_upgrade: NetworkUpgrade,
         prior_block_hash: BlockHash,
@@ -2157,7 +2142,7 @@ impl AccountBirthday {
     /// # Panics
     ///
     /// Panics if the Sapling activation height is not set.
-    pub fn from_sapling_activation<P: zcash_primitives::consensus::Parameters>(
+    pub fn from_sapling_activation<P: zcash_protocol::consensus::Parameters>(
         params: &P,
         prior_block_hash: BlockHash,
     ) -> AccountBirthday {

@@ -103,7 +103,7 @@ impl Creator {
     pub fn build_from_parts<P: zcash_protocol::consensus::Parameters>(
         parts: zcash_primitives::transaction::builder::PcztParts<P>,
     ) -> Option<Pczt> {
-        use zcash_primitives::transaction::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_SINGLE};
+        use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_SINGLE};
         use zcash_protocol::consensus::NetworkConstants;
 
         use crate::{common::FLAG_HAS_SIGHASH_SINGLE, SAPLING_TX_VERSION};

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_primitives::consensus::{self, NetworkUpgrade};
+use zcash_protocol::consensus::{self, NetworkUpgrade};
 
 use crate::wallet::init::WalletMigrationError;
 

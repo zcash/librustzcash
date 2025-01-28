@@ -7,6 +7,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- `zcash_protocol::consensus::NetworkConstants` has added methods:
+  - `hrp_unified_address`
+  - `hrp_unified_fvk`
+  - `hrp_unified_ivk`
+
 ## [0.4.3] - 2024-12-16
 ### Added
 - `zcash_protocol::TxId` (moved from `zcash_primitives::transaction`).

@@ -1,14 +1,12 @@
 use core::marker::PhantomData;
-
 use rand_core::OsRng;
-use zcash_primitives::{
-    consensus::BranchId,
-    transaction::{
-        sighash::{signature_hash, SignableInput},
-        txid::TxIdDigester,
-        Authorization, Transaction, TransactionData, TxVersion,
-    },
+
+use zcash_primitives::transaction::{
+    sighash::{signature_hash, SignableInput},
+    txid::TxIdDigester,
+    Authorization, Transaction, TransactionData, TxVersion,
 };
+use zcash_protocol::consensus::BranchId;
 
 use crate::{common::determine_lock_time, Pczt, V5_TX_VERSION, V5_VERSION_GROUP_ID};
 

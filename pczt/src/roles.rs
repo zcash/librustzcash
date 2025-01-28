@@ -7,6 +7,8 @@ pub mod verifier;
 
 pub mod updater;
 
+pub mod redactor;
+
 #[cfg(feature = "prover")]
 pub mod prover;
 

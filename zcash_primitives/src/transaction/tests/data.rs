@@ -140,7 +140,8 @@ pub mod tx_read_write {
 }
 
 pub mod zip_0143 {
-    use crate::{consensus, legacy::Script};
+    use transparent::address::Script;
+    use zcash_protocol::consensus;
 
     pub struct Test0143Vector {
         pub tx: Vec<u8>,
@@ -1953,7 +1954,8 @@ pub mod zip_0143 {
 }
 
 pub mod zip_0243 {
-    use crate::{consensus, legacy::Script};
+    use transparent::address::Script;
+    use zcash_protocol::consensus;
 
     pub struct Test0243Vector {
         pub tx: Vec<u8>,

@@ -9,9 +9,25 @@ and this library adheres to Rust's notion of
 ### Added
 - `no-std` compatibility (`alloc` is required). A default-enabled `std` feature
   flag has been added gating the `std::error::Error` usage.
+- `zcash_keys::keys::ReceiverRequirement`
+- `zcash_keys::Address::to_transparent_address`
 
 ### Changed
 - Migrated to `nonempty 0.11`
+- `zcash_keys::keys::UnifiedAddressRequest` has been substantially modified;
+  instead of a collection of boolean flags, it is now a collection of
+  `ReceiverRequirement` values that describe how addresses may be constructed
+  in the case that keys for a particular protocol are absent or it is not
+  possible to generate a specific receiver at a given diversifier index.
+  Behavior of methods that accept a `UnifiedAddressRequest` have been modified
+  accordingly. In addition, request construction methods that previously
+  returned `None` to indicate an attempt to generate an invalid request now
+  return `Err(())`
+
+### Removed
+- `zcash_keys::keys::UnifiedAddressRequest::all` (use 
+  `UnifiedAddressRequest::ALLOW_ALL` or
+  `UnifiedFullViewingKey::to_address_request` instead)
 
 ## [0.6.0] - 2024-12-16
 

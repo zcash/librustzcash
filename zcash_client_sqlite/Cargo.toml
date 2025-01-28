@@ -33,6 +33,7 @@ zcash_keys = { workspace = true, features = ["sapling"] }
 zcash_primitives.workspace = true
 zcash_protocol.workspace = true
 zip32.workspace = true
+transparent.workspace = true
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
@@ -122,6 +123,7 @@ test-dependencies = [
 ## Enables receiving transparent funds and sending to transparent recipients
 transparent-inputs = [
   "dep:bip32",
+  "transparent/transparent-inputs",
   "zcash_keys/transparent-inputs",
   "zcash_client_backend/transparent-inputs"
 ]

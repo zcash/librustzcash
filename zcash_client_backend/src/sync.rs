@@ -20,10 +20,10 @@ use tonic::{
     codegen::{Body, Bytes, StdError},
 };
 use tracing::{debug, info};
-use zcash_primitives::{
-    consensus::{BlockHeight, Parameters},
-    merkle_tree::HashSer,
-};
+
+use zcash_keys::encoding::AddressCodec as _;
+use zcash_primitives::merkle_tree::HashSer;
+use zcash_protocol::consensus::{BlockHeight, Parameters};
 
 use crate::{
     data_api::{
@@ -43,10 +43,10 @@ use orchard::tree::MerkleHashOrchard;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::{encoding::AddressCodec, wallet::WalletTransparentOutput},
-    zcash_primitives::{
-        legacy::Script,
-        transaction::components::transparent::{OutPoint, TxOut},
+    crate::wallet::WalletTransparentOutput,
+    ::transparent::{
+        address::Script,
+        bundle::{OutPoint, TxOut},
     },
     zcash_protocol::{consensus::NetworkUpgrade, value::Zatoshis},
 };
@@ -252,8 +252,6 @@ where
 {
     let mut request = service::GetSubtreeRootsArg::default();
     request.set_shielded_protocol(service::ShieldedProtocol::Sapling);
-    // Hack to work around a bug in the initial lightwalletd implementation.
-    request.max_entries = 65536;
 
     let sapling_roots: Vec<CommitmentTreeRoot<sapling::Node>> = client
         .get_subtree_roots(request)
@@ -278,8 +276,7 @@ where
     {
         let mut request = service::GetSubtreeRootsArg::default();
         request.set_shielded_protocol(service::ShieldedProtocol::Orchard);
-        // Hack to work around a bug in the initial lightwalletd implementation.
-        request.max_entries = 65536;
+
         let orchard_roots: Vec<CommitmentTreeRoot<MerkleHashOrchard>> = client
             .get_subtree_roots(request)
             .await?

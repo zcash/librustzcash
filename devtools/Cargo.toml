@@ -24,6 +24,7 @@ zcash_note_encryption.workspace = true
 zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 zcash_proofs = { workspace = true, features = ["directories"] }
 zcash_protocol = {workspace = true, features = ["local-consensus"] }
+zip32.workspace = true
 
 # Transparent
 secp256k1.workspace = true

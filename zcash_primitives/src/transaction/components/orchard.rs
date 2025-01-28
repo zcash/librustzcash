@@ -4,6 +4,7 @@ use std::io::{self, Read, Write};
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use nonempty::NonEmpty;
+
 use orchard::{
     bundle::{Authorization, Authorized, Flags},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
@@ -12,8 +13,8 @@ use orchard::{
     Action, Anchor,
 };
 use zcash_encoding::{Array, CompactSize, Vector};
+use zcash_protocol::value::ZatBalance;
 
-use super::Amount;
 use crate::transaction::Transaction;
 
 pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
@@ -47,7 +48,7 @@ impl MapAuth<Authorized, Authorized> for () {
 /// Reads an [`orchard::Bundle`] from a v5 transaction format.
 pub fn read_v5_bundle<R: Read>(
     mut reader: R,
-) -> io::Result<Option<orchard::Bundle<Authorized, Amount>>> {
+) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
     #[allow(clippy::redundant_closure)]
     let actions_without_auth = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
     if actions_without_auth.is_empty() {
@@ -194,7 +195,7 @@ pub fn read_signature<R: Read, T: SigType>(mut reader: R) -> io::Result<Signatur
 
 /// Writes an [`orchard::Bundle`] in the v5 transaction format.
 pub fn write_v5_bundle<W: Write>(
-    bundle: Option<&orchard::Bundle<Authorized, Amount>>,
+    bundle: Option<&orchard::Bundle<Authorized, ZatBalance>>,
     mut writer: W,
 ) -> io::Result<()> {
     if let Some(bundle) = &bundle {
@@ -273,17 +274,15 @@ pub mod testing {
         testing::{self as t_orch},
         Authorized, Bundle,
     };
+    use zcash_protocol::value::{testing::arb_zat_balance, ZatBalance};
 
-    use crate::transaction::{
-        components::amount::{testing::arb_amount, Amount},
-        TxVersion,
-    };
+    use crate::transaction::TxVersion;
 
     prop_compose! {
         pub fn arb_bundle(n_actions: usize)(
-            orchard_value_balance in arb_amount(),
+            orchard_value_balance in arb_zat_balance(),
             bundle in t_orch::arb_bundle(n_actions)
-        ) -> Bundle<Authorized, Amount> {
+        ) -> Bundle<Authorized, ZatBalance> {
             // overwrite the value balance, as we can't guarantee that the
             // value doesn't exceed the MAX_MONEY bounds.
             bundle.try_map_value_balance::<_, (), _>(|_| Ok(orchard_value_balance)).unwrap()
@@ -292,7 +291,7 @@ pub mod testing {
 
     pub fn arb_bundle_for_version(
         v: TxVersion,
-    ) -> impl Strategy<Value = Option<Bundle<Authorized, Amount>>> {
+    ) -> impl Strategy<Value = Option<Bundle<Authorized, ZatBalance>>> {
         if v.has_orchard() {
             Strategy::boxed((1usize..100).prop_flat_map(|n| prop::option::of(arb_bundle(n))))
         } else {

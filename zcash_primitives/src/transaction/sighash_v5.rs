@@ -1,14 +1,17 @@
+use blake2b_simd::{Hash as Blake2bHash, Params, State};
 use std::io::Write;
 
-use blake2b_simd::{Hash as Blake2bHash, Params, State};
+use ::transparent::{
+    bundle::{self as transparent, TxOut},
+    sighash::{
+        TransparentAuthorizingContext, SIGHASH_ANYONECANPAY, SIGHASH_MASK, SIGHASH_NONE,
+        SIGHASH_SINGLE,
+    },
+};
 use zcash_encoding::Array;
 
 use crate::transaction::{
-    components::transparent::{self, TxOut},
-    sighash::{
-        SignableInput, TransparentAuthorizingContext, SIGHASH_ANYONECANPAY, SIGHASH_MASK,
-        SIGHASH_NONE, SIGHASH_SINGLE,
-    },
+    sighash::SignableInput,
     txid::{
         hash_transparent_txid_data, to_hash, transparent_outputs_hash, transparent_prevout_hash,
         transparent_sequence_hash, ZCASH_TRANSPARENT_HASH_PERSONALIZATION,

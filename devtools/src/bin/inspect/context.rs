@@ -2,16 +2,19 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::str::FromStr;
 
+use ::transparent::{
+    address::Script,
+    bundle::{self as transparent, TxOut},
+};
 use serde::{
     de::{Unexpected, Visitor},
     Deserialize, Serialize, Serializer,
 };
-use zcash_primitives::{
-    consensus::Network,
-    legacy::Script,
-    transaction::components::{amount::NonNegativeAmount, transparent, TxOut},
-    zip32::AccountId,
+use zcash_protocol::{
+    consensus::{Network, NetworkType},
+    value::Zatoshis,
 };
+use zip32::AccountId;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct JsonNetwork(Network);
@@ -170,7 +173,7 @@ impl fmt::Display for ZUint256 {
 }
 
 #[derive(Clone, Debug)]
-struct ZOutputValue(NonNegativeAmount);
+struct ZOutputValue(Zatoshis);
 
 struct ZOutputValueVisitor;
 
@@ -185,7 +188,7 @@ impl<'de> Visitor<'de> for ZOutputValueVisitor {
     where
         E: serde::de::Error,
     {
-        NonNegativeAmount::from_u64(v)
+        Zatoshis::from_u64(v)
             .map(ZOutputValue)
             .map_err(|e| match e {
                 zcash_protocol::value::BalanceError::Overflow => serde::de::Error::invalid_type(
@@ -297,10 +300,10 @@ impl Context {
         self.network.map(|n| n.0)
     }
 
-    pub(crate) fn addr_network(&self) -> Option<zcash_address::Network> {
+    pub(crate) fn addr_network(&self) -> Option<NetworkType> {
         self.network().map(|params| match params {
-            Network::MainNetwork => zcash_address::Network::Main,
-            Network::TestNetwork => zcash_address::Network::Test,
+            Network::MainNetwork => NetworkType::Main,
+            Network::TestNetwork => NetworkType::Test,
         })
     }
 

@@ -4,21 +4,18 @@
 //! [ZIP 317]: https//zips.z.cash/zip-0317
 use core::cmp::max;
 
-use crate::{
+use ::transparent::bundle::OutPoint;
+use zcash_protocol::{
     consensus::{self, BlockHeight},
-    transaction::{
-        components::{
-            amount::{BalanceError, NonNegativeAmount},
-            transparent::OutPoint,
-        },
-        fees::transparent,
-    },
+    value::{BalanceError, Zatoshis},
 };
+
+use crate::transaction::fees::transparent;
 
 /// The standard [ZIP 317] marginal fee.
 ///
 /// [ZIP 317]: https//zips.z.cash/zip-0317
-pub const MARGINAL_FEE: NonNegativeAmount = NonNegativeAmount::const_from_u64(5_000);
+pub const MARGINAL_FEE: Zatoshis = Zatoshis::const_from_u64(5_000);
 
 /// The minimum number of logical actions that must be paid according to [ZIP 317].
 ///
@@ -39,7 +36,7 @@ pub const P2PKH_STANDARD_OUTPUT_SIZE: usize = 34;
 /// `MARGINAL_FEE * GRACE_ACTIONS`.
 ///
 /// [ZIP 317]: https//zips.z.cash/zip-0317
-pub const MINIMUM_FEE: NonNegativeAmount = NonNegativeAmount::const_from_u64(10_000);
+pub const MINIMUM_FEE: Zatoshis = Zatoshis::const_from_u64(10_000);
 
 /// A [`FeeRule`] implementation that implements the [ZIP 317] fee rule.
 ///
@@ -55,7 +52,7 @@ pub const MINIMUM_FEE: NonNegativeAmount = NonNegativeAmount::const_from_u64(10_
 /// [ZIP 317]: https//zips.z.cash/zip-0317
 #[derive(Clone, Debug)]
 pub struct FeeRule {
-    marginal_fee: NonNegativeAmount,
+    marginal_fee: Zatoshis,
     grace_actions: usize,
     p2pkh_standard_input_size: usize,
     p2pkh_standard_output_size: usize,
@@ -88,7 +85,7 @@ impl FeeRule {
     /// zero.
     #[cfg(feature = "non-standard-fees")]
     pub fn non_standard(
-        marginal_fee: NonNegativeAmount,
+        marginal_fee: Zatoshis,
         grace_actions: usize,
         p2pkh_standard_input_size: usize,
         p2pkh_standard_output_size: usize,
@@ -106,7 +103,7 @@ impl FeeRule {
     }
 
     /// Returns the ZIP 317 marginal fee.
-    pub fn marginal_fee(&self) -> NonNegativeAmount {
+    pub fn marginal_fee(&self) -> Zatoshis {
         self.marginal_fee
     }
     /// Returns the ZIP 317 number of grace actions
@@ -164,7 +161,7 @@ impl super::FeeRule for FeeRule {
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
-    ) -> Result<NonNegativeAmount, Self::Error> {
+    ) -> Result<Zatoshis, Self::Error> {
         let mut t_in_total_size: usize = 0;
         let mut non_p2pkh_outpoints = vec![];
         for sz in transparent_input_sizes.into_iter() {
