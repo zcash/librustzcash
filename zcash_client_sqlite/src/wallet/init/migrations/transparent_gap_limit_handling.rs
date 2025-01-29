@@ -111,12 +111,10 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             cached_transparent_receiver_address = :t_addr
                         WHERE account_id = :account_id
                         AND diversifier_index_be = :diversifier_index_be
-                        AND key_scope = :external_scope_code
                         "#,
                         named_params! {
                             ":account_id": account_id,
                             ":diversifier_index_be": &di_be[..],
-                            ":external_scope_code": external_scope_code,
                             ":transparent_child_index": idx.index(),
                             ":t_addr": t_addr.encode(&self.params),
                         },
@@ -184,11 +182,13 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 let account_id: i64 = row.get("account_id")?;
                 let transparent_child_index = row.get::<_, i64>("address_index")?;
                 let diversifier_index = DiversifierIndex::from(
-                    u32::try_from(transparent_child_index).map_err(|_| {
-                        WalletMigrationError::CorruptedData(
-                            "ephermeral address indices must be in the range of `u32`".to_owned(),
-                        )
-                    })?,
+                    u32::try_from(transparent_child_index)
+                        .ok()
+                        .and_then(NonHardenedChildIndex::from_index)
+                        .ok_or(WalletMigrationError::CorruptedData(
+                            "ephermeral address indices must be in the range of `u31`".to_owned(),
+                        ))?
+                        .index(),
                 );
                 let address: String = row.get("address")?;
 
@@ -385,14 +385,36 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         // join to the addresses table using the address itself in order to obtain the address index.
         #[cfg(feature = "transparent-inputs")]
         {
-            conn.execute(
+            conn.execute_batch(
                 r#"
+                PRAGMA legacy_alter_table = ON;
+
                 UPDATE transparent_received_outputs
                 SET address_id = addresses.id
                 FROM addresses
-                WHERE addresses.cached_transparent_receiver_address = transparent_received_outputs.address
+                WHERE addresses.cached_transparent_receiver_address = transparent_received_outputs.address;
+
+                CREATE TABLE transparent_received_outputs_new (
+                    id INTEGER PRIMARY KEY,
+                    transaction_id INTEGER NOT NULL,
+                    output_index INTEGER NOT NULL,
+                    account_id INTEGER NOT NULL,
+                    address TEXT NOT NULL,
+                    script BLOB NOT NULL,
+                    value_zat INTEGER NOT NULL,
+                    max_observed_unspent_height INTEGER,
+                    address_id INTEGER NOT NULL REFERENCES addresses(id),
+                    FOREIGN KEY (transaction_id) REFERENCES transactions(id_tx),
+                    FOREIGN KEY (account_id) REFERENCES accounts(id),
+                    CONSTRAINT transparent_output_unique UNIQUE (transaction_id, output_index)
+                );
+                INSERT INTO transparent_received_outputs_new SELECT * FROM transparent_received_outputs;
+
+                DROP TABLE transparent_received_outputs;
+                ALTER TABLE transparent_received_outputs_new RENAME TO transparent_received_outputs;
+
+                PRAGMA legacy_alter_table = OFF;
                 "#,
-                []
             )?;
         }
 
