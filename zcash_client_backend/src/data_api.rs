@@ -752,7 +752,7 @@ pub enum TransactionDataRequest {
 }
 
 /// Metadata about the status of a transaction obtained by inspecting the chain state.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TransactionStatus {
     /// The requested transaction ID was not recognized by the node.
     TxidNotRecognized,
@@ -1576,6 +1576,10 @@ pub trait WalletTest: InputSource + WalletRead {
         &self,
         protocol: ShieldedProtocol,
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error>;
+
+    /// Optionally perform final checks at the conclusion of each test
+    /// Allows wallet backend developers to perform any necessary consistency checks or cleanup
+    fn finally(&self) {}
 }
 
 /// The output of a transaction sent by the wallet.
@@ -2019,7 +2023,7 @@ impl<AccountId> SentTransactionOutput<AccountId> {
 
 /// A data structure used to set the birthday height for an account, and ensure that the initial
 /// note commitment tree state is recorded at that height.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AccountBirthday {
     prior_chain_state: ChainState,
     recover_until: Option<BlockHeight>,
@@ -2056,9 +2060,8 @@ impl AccountBirthday {
     ///    exist no unscanned ranges between the wallet's birthday height and the provided
     ///    `recover_until` height, exclusive.
     ///
-    /// This API is intended primarily to be used in testing contexts; under normal circumstances,
+    /// This API is intended primarily to be used in testing contexts and deserialization; under normal circumstances,
     /// [`AccountBirthday::from_treestate`] should be used instead.
-    #[cfg(any(test, feature = "test-dependencies"))]
     pub fn from_parts(prior_chain_state: ChainState, recover_until: Option<BlockHeight>) -> Self {
         Self {
             prior_chain_state,
@@ -2112,6 +2115,11 @@ impl AccountBirthday {
     /// Returns the height at which the wallet should exit "recovery mode".
     pub fn recover_until(&self) -> Option<BlockHeight> {
         self.recover_until
+    }
+
+    /// Returns the [`ChainState`] corresponding to the last block prior to the wallet's birthday
+    pub fn prior_chain_state(&self) -> &ChainState {
+        &self.prior_chain_state
     }
 
     #[cfg(any(test, feature = "test-dependencies"))]

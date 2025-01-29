@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package memwallet;
+
+// A shard tree defined by a cap subtree and shard subtrees
+message ShardTree {
+  bytes cap = 1;
+  repeated TreeShard shards = 2;
+  repeated TreeCheckpoint checkpoints = 3;
+}
+
+// A shard in a shard tree
+message TreeShard {
+  uint64 shard_index = 1;
+  bytes shard_data = 3;
+}
+
+// A checkpoint in a shard tree
+message TreeCheckpoint {
+  uint32 checkpoint_id = 1;
+  uint64 position = 2;
+}
+
+// Stores the block height corresponding to the last note commitment in a shard
+// as defined by its level and index in the tree
+message TreeEndHeightsRecord {
+  uint32 level = 1;
+  uint64 index = 2;
+  uint32 block_height = 3;
+}
