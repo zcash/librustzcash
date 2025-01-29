@@ -289,21 +289,13 @@
 <a href="#288" id="288">288</a>
 <a href="#289" id="289">289</a>
 <a href="#290" id="290">290</a>
-<a href="#291" id="291">291</a>
-<a href="#292" id="292">292</a>
-<a href="#293" id="293">293</a>
-<a href="#294" id="294">294</a>
-<a href="#295" id="295">295</a>
-<a href="#296" id="296">296</a>
-<a href="#297" id="297">297</a>
-<a href="#298" id="298">298</a>
-<a href="#299" id="299">299</a>
-<a href="#300" id="300">300</a>
-<a href="#301" id="301">301</a></pre></div><pre class="rust"><code><span class="doccomment">/// Functions for parsing &amp; serialization of Orchard transaction components.
-</span><span class="kw">use </span>std::convert::TryFrom;
-<span class="kw">use </span>std::io::{<span class="self">self</span>, Read, Write};
+<a href="#291" id="291">291</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for parsing &amp; serialization of Orchard transaction components.
+</span><span class="kw">use </span><span class="kw">crate</span>::encoding::ReadBytesExt;
 
-<span class="kw">use </span>byteorder::{ReadBytesExt, WriteBytesExt};
+<span class="kw">use </span>alloc::vec::Vec;
+<span class="kw">use </span>core::convert::TryFrom;
+<span class="kw">use </span>core2::io::{<span class="self">self</span>, Read, Write};
+
 <span class="kw">use </span>nonempty::NonEmpty;
 
 <span class="kw">use </span>orchard::{
@@ -391,7 +383,7 @@
     <span class="kw">if </span>cv.is_none().into() {
         <span class="prelude-val">Err</span>(io::Error::new(
             io::ErrorKind::InvalidInput,
-            <span class="string">"invalid Pallas point for value commitment"</span>.to_owned(),
+            <span class="string">"invalid Pallas point for value commitment"</span>,
         ))
     } <span class="kw">else </span>{
         <span class="prelude-val">Ok</span>(cv.unwrap())
@@ -405,7 +397,7 @@
     <span class="kw">if </span>nullifier_ctopt.is_none().into() {
         <span class="prelude-val">Err</span>(io::Error::new(
             io::ErrorKind::InvalidInput,
-            <span class="string">"invalid Pallas point for nullifier"</span>.to_owned(),
+            <span class="string">"invalid Pallas point for nullifier"</span>,
         ))
     } <span class="kw">else </span>{
         <span class="prelude-val">Ok</span>(nullifier_ctopt.unwrap())
@@ -415,12 +407,8 @@
 <span class="kw">pub fn </span>read_verification_key&lt;R: Read&gt;(<span class="kw-2">mut </span>reader: R) -&gt; io::Result&lt;VerificationKey&lt;SpendAuth&gt;&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>bytes = [<span class="number">0u8</span>; <span class="number">32</span>];
     reader.read_exact(<span class="kw-2">&amp;mut </span>bytes)<span class="question-mark">?</span>;
-    VerificationKey::try_from(bytes).map_err(|<span class="kw">_</span>| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            <span class="string">"invalid verification key"</span>.to_owned(),
-        )
-    })
+    VerificationKey::try_from(bytes)
+        .map_err(|<span class="kw">_</span>| io::Error::new(io::ErrorKind::InvalidInput, <span class="string">"invalid verification key"</span>))
 }
 
 <span class="kw">pub fn </span>read_cmx&lt;R: Read&gt;(<span class="kw-2">mut </span>reader: R) -&gt; io::Result&lt;ExtractedNoteCommitment&gt; {
@@ -430,7 +418,7 @@
     Option::from(cmx).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
-            <span class="string">"invalid Pallas base for field cmx"</span>.to_owned(),
+            <span class="string">"invalid Pallas base for field cmx"</span>,
         )
     })
 }
@@ -469,23 +457,15 @@
 <span class="kw">pub fn </span>read_flags&lt;R: Read&gt;(<span class="kw-2">mut </span>reader: R) -&gt; io::Result&lt;Flags&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>byte = [<span class="number">0u8</span>; <span class="number">1</span>];
     reader.read_exact(<span class="kw-2">&amp;mut </span>byte)<span class="question-mark">?</span>;
-    Flags::from_byte(byte[<span class="number">0</span>]).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            <span class="string">"invalid Orchard flags"</span>.to_owned(),
-        )
-    })
+    Flags::from_byte(byte[<span class="number">0</span>])
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, <span class="string">"invalid Orchard flags"</span>))
 }
 
 <span class="kw">pub fn </span>read_anchor&lt;R: Read&gt;(<span class="kw-2">mut </span>reader: R) -&gt; io::Result&lt;Anchor&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>bytes = [<span class="number">0u8</span>; <span class="number">32</span>];
     reader.read_exact(<span class="kw-2">&amp;mut </span>bytes)<span class="question-mark">?</span>;
-    Option::from(Anchor::from_bytes(bytes)).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            <span class="string">"invalid Orchard anchor"</span>.to_owned(),
-        )
-    })
+    Option::from(Anchor::from_bytes(bytes))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, <span class="string">"invalid Orchard anchor"</span>))
 }
 
 <span class="kw">pub fn </span>read_signature&lt;R: Read, T: SigType&gt;(<span class="kw-2">mut </span>reader: R) -&gt; io::Result&lt;Signature&lt;T&gt;&gt; {
@@ -510,7 +490,7 @@
         Vector::write(
             <span class="kw-2">&amp;mut </span>writer,
             bundle.authorization().proof().as_ref(),
-            |w, b| w.write_u8(<span class="kw-2">*</span>b),
+            |w, b| w.write_all(<span class="kw-2">&amp;</span>[<span class="kw-2">*</span>b]),
         )<span class="question-mark">?</span>;
         Array::write(
             <span class="kw-2">&amp;mut </span>writer,

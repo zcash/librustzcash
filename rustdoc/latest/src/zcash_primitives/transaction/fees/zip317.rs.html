@@ -193,11 +193,13 @@
 <a href="#192" id="192">192</a>
 <a href="#193" id="193">193</a>
 <a href="#194" id="194">194</a>
-<a href="#195" id="195">195</a></pre></div><pre class="rust"><code><span class="doccomment">//! Types related to implementing a [`FeeRule`] provides [ZIP 317] fee calculation.
+<a href="#195" id="195">195</a>
+<a href="#196" id="196">196</a></pre></div><pre class="rust"><code><span class="doccomment">//! Types related to implementing a [`FeeRule`] provides [ZIP 317] fee calculation.
 //!
 //! [`FeeRule`]: crate::transaction::fees::FeeRule
 //! [ZIP 317]: https//zips.z.cash/zip-0317
-</span><span class="kw">use </span>core::cmp::max;
+</span><span class="kw">use </span>alloc::vec::Vec;
+<span class="kw">use </span>core::cmp::max;
 
 <span class="kw">use </span>::transparent::bundle::OutPoint;
 <span class="kw">use </span>zcash_protocol::{
@@ -331,8 +333,8 @@
     }
 }
 
-<span class="kw">impl </span>std::fmt::Display <span class="kw">for </span>FeeError {
-    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter) -&gt; std::fmt::Result {
+<span class="kw">impl </span>core::fmt::Display <span class="kw">for </span>FeeError {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>core::fmt::Formatter) -&gt; core::fmt::Result {
         <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self </span>{
             FeeError::Balance(e) =&gt; <span class="macro">write!</span>(
                 f,

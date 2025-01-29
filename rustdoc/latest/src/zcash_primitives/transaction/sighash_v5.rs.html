@@ -200,8 +200,14 @@
 <a href="#199" id="199">199</a>
 <a href="#200" id="200">200</a>
 <a href="#201" id="201">201</a>
-<a href="#202" id="202">202</a></pre></div><pre class="rust"><code><span class="kw">use </span>blake2b_simd::{Hash <span class="kw">as </span>Blake2bHash, Params, State};
-<span class="kw">use </span>std::io::Write;
+<a href="#202" id="202">202</a>
+<a href="#203" id="203">203</a>
+<a href="#204" id="204">204</a>
+<a href="#205" id="205">205</a>
+<a href="#206" id="206">206</a>
+<a href="#207" id="207">207</a>
+<a href="#208" id="208">208</a></pre></div><pre class="rust"><code><span class="kw">use </span>blake2b_simd::{Hash <span class="kw">as </span>Blake2bHash, Params};
+<span class="kw">use </span>core2::io::Write;
 
 <span class="kw">use </span>::transparent::{
     bundle::{<span class="self">self </span><span class="kw">as </span>transparent, TxOut},
@@ -212,19 +218,25 @@
 };
 <span class="kw">use </span>zcash_encoding::Array;
 
-<span class="kw">use </span><span class="kw">crate</span>::transaction::{
-    sighash::SignableInput,
-    txid::{
-        hash_transparent_txid_data, to_hash, transparent_outputs_hash, transparent_prevout_hash,
-        transparent_sequence_hash, ZCASH_TRANSPARENT_HASH_PERSONALIZATION,
+<span class="kw">use crate</span>::{
+    encoding::StateWrite,
+    transaction::{
+        sighash::SignableInput,
+        txid::{
+            hash_transparent_txid_data, to_hash, transparent_outputs_hash,
+            transparent_prevout_hash, transparent_sequence_hash,
+            ZCASH_TRANSPARENT_HASH_PERSONALIZATION,
+        },
+        Authorization, TransactionData, TransparentDigests, TxDigests,
     },
-    Authorization, TransactionData, TransparentDigests, TxDigests,
 };
 
 <span class="attr">#[cfg(zcash_unstable = <span class="string">"zfuture"</span>)]
 </span><span class="kw">use </span>{
-    <span class="kw">crate</span>::transaction::{components::tze, TzeDigests},
-    byteorder::WriteBytesExt,
+    <span class="kw">crate</span>::{
+        encoding::WriteBytesExt,
+        transaction::{components::tze, TzeDigests},
+    },
     zcash_encoding::{CompactSize, Vector},
 };
 
@@ -235,8 +247,8 @@
 <span class="attr">#[cfg(zcash_unstable = <span class="string">"zfuture"</span>)]
 </span><span class="kw">const </span>ZCASH_TZE_INPUT_HASH_PERSONALIZATION: <span class="kw-2">&amp;</span>[u8; <span class="number">16</span>] = <span class="string">b"Zcash__TzeInHash"</span>;
 
-<span class="kw">fn </span>hasher(personal: <span class="kw-2">&amp;</span>[u8; <span class="number">16</span>]) -&gt; State {
-    Params::new().hash_length(<span class="number">32</span>).personal(personal).to_state()
+<span class="kw">fn </span>hasher(personal: <span class="kw-2">&amp;</span>[u8; <span class="number">16</span>]) -&gt; StateWrite {
+    StateWrite(Params::new().hash_length(<span class="number">32</span>).personal(personal).to_state())
 }
 
 <span class="doccomment">/// Implements [ZIP 244 section S.2](https://zips.z.cash/zip-0244#s-2-transparent-sig-digest).

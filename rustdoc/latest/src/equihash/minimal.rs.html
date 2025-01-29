@@ -188,10 +188,14 @@
 <a href="#187" id="187">187</a>
 <a href="#188" id="188">188</a>
 <a href="#189" id="189">189</a>
-<a href="#190" id="190">190</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::io::Cursor;
-<span class="kw">use </span>std::mem::size_of;
-
-<span class="kw">use </span>byteorder::{BigEndian, ReadBytesExt};
+<a href="#190" id="190">190</a>
+<a href="#191" id="191">191</a>
+<a href="#192" id="192">192</a>
+<a href="#193" id="193">193</a>
+<a href="#194" id="194">194</a>
+<a href="#195" id="195">195</a></pre></div><pre class="rust"><code><span class="kw">use </span>alloc::vec::Vec;
+<span class="kw">use </span>core::mem::size_of;
+<span class="kw">use </span>core2::io::{Cursor, Read};
 
 <span class="kw">use </span><span class="kw">crate</span>::params::Params;
 
@@ -240,6 +244,12 @@
     vout
 }
 
+<span class="kw">fn </span>read_u32_be(csr: <span class="kw-2">&amp;mut </span>Cursor&lt;Vec&lt;u8&gt;&gt;) -&gt; core2::io::Result&lt;u32&gt; {
+    <span class="kw">let </span><span class="kw-2">mut </span>n = [<span class="number">0</span>; <span class="number">4</span>];
+    csr.read_exact(<span class="kw-2">&amp;mut </span>n)<span class="question-mark">?</span>;
+    <span class="prelude-val">Ok</span>(u32::from_be_bytes(n))
+}
+
 <span class="doccomment">/// Returns `None` if the parameters are invalid for this minimal encoding.
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>indices_from_minimal(p: Params, minimal: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;u32&gt;&gt; {
     <span class="kw">let </span>c_bit_len = p.collision_bit_length();
@@ -257,7 +267,7 @@
 
     <span class="comment">// Big-endian so that lexicographic array comparison is equivalent to integer
     // comparison
-    </span><span class="kw">while let </span><span class="prelude-val">Ok</span>(i) = csr.read_u32::&lt;BigEndian&gt;() {
+    </span><span class="kw">while let </span><span class="prelude-val">Ok</span>(i) = read_u32_be(<span class="kw-2">&amp;mut </span>csr) {
         ret.push(i);
     }
 

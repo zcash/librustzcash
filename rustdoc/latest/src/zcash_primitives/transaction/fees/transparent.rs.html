@@ -96,7 +96,7 @@
 <a href="#95" id="95">95</a></pre></div><pre class="rust"><code><span class="doccomment">//! Types related to computation of fees and change related to the transparent components
 //! of a transaction.
 
-</span><span class="kw">use </span>std::convert::Infallible;
+</span><span class="kw">use </span>core::convert::Infallible;
 
 <span class="kw">use </span><span class="kw">crate</span>::transaction::fees::zip317::P2PKH_STANDARD_INPUT_SIZE;
 <span class="kw">use </span>transparent::{
@@ -126,7 +126,7 @@
 
 <span class="doccomment">/// This trait provides a minimized view of a transparent input suitable for use in
 /// fee and change computation.
-</span><span class="kw">pub trait </span>InputView: std::fmt::Debug {
+</span><span class="kw">pub trait </span>InputView: core::fmt::Debug {
     <span class="doccomment">/// The outpoint to which the input refers.
     </span><span class="kw">fn </span>outpoint(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>OutPoint;
 
@@ -164,7 +164,7 @@
 
 <span class="doccomment">/// This trait provides a minimized view of a transparent output suitable for use in
 /// fee and change computation.
-</span><span class="kw">pub trait </span>OutputView: std::fmt::Debug {
+</span><span class="kw">pub trait </span>OutputView: core::fmt::Debug {
     <span class="doccomment">/// Returns the value of the output being created.
     </span><span class="kw">fn </span>value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Zatoshis;
 

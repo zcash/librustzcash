@@ -69,8 +69,8 @@
 <a href="#68" id="68">68</a>
 <a href="#69" id="69">69</a>
 <a href="#70" id="70">70</a>
-<a href="#71" id="71">71</a></pre></div><pre class="rust"><code><span class="kw">use </span>sha2::{digest::Output, Digest, Sha256};
-<span class="kw">use </span>std::io::{<span class="self">self</span>, Read, Write};
+<a href="#71" id="71">71</a></pre></div><pre class="rust"><code><span class="kw">use </span>core2::io::{<span class="self">self</span>, Read, Write};
+<span class="kw">use </span>sha2::{digest::Output, Digest, Sha256};
 
 <span class="doccomment">/// Abstraction over a reader which SHA-256d-hashes the data being read.
 </span><span class="kw">pub struct </span>HashReader&lt;R: Read&gt; {

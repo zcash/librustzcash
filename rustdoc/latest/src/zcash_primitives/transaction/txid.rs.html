@@ -533,14 +533,12 @@
 <a href="#532" id="532">532</a>
 <a href="#533" id="533">533</a>
 <a href="#534" id="534">534</a>
-<a href="#535" id="535">535</a>
-<a href="#536" id="536">536</a>
-<a href="#537" id="537">537</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::borrow::Borrow;
-<span class="kw">use </span>std::convert::TryFrom;
-<span class="kw">use </span>std::io::Write;
+<a href="#535" id="535">535</a></pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::encoding::{StateWrite, WriteBytesExt};
+<span class="kw">use </span>core::borrow::Borrow;
+<span class="kw">use </span>core::convert::TryFrom;
+<span class="kw">use </span>core2::io::Write;
 
-<span class="kw">use </span>blake2b_simd::{Hash <span class="kw">as </span>Blake2bHash, Params, State};
-<span class="kw">use </span>byteorder::{LittleEndian, WriteBytesExt};
+<span class="kw">use </span>blake2b_simd::{Hash <span class="kw">as </span>Blake2bHash, Params};
 <span class="kw">use </span>ff::PrimeField;
 
 <span class="kw">use </span>::orchard::bundle::{<span class="self">self </span><span class="kw">as </span>orchard};
@@ -599,8 +597,8 @@
 <span class="attr">#[cfg(zcash_unstable = <span class="string">"zfuture"</span>)]
 </span><span class="kw">const </span>ZCASH_TZE_WITNESSES_HASH_PERSONALIZATION: <span class="kw-2">&amp;</span>[u8; <span class="number">16</span>] = <span class="string">b"ZTxAuthTZE__Hash"</span>;
 
-<span class="kw">fn </span>hasher(personal: <span class="kw-2">&amp;</span>[u8; <span class="number">16</span>]) -&gt; State {
-    Params::new().hash_length(<span class="number">32</span>).personal(personal).to_state()
+<span class="kw">fn </span>hasher(personal: <span class="kw-2">&amp;</span>[u8; <span class="number">16</span>]) -&gt; StateWrite {
+    StateWrite(Params::new().hash_length(<span class="number">32</span>).personal(personal).to_state())
 }
 
 <span class="doccomment">/// Sequentially append the serialized value of each transparent input
@@ -624,7 +622,7 @@
 ) -&gt; Blake2bHash {
     <span class="kw">let </span><span class="kw-2">mut </span>h = hasher(ZCASH_SEQUENCE_HASH_PERSONALIZATION);
     <span class="kw">for </span>t_in <span class="kw">in </span>vin {
-        h.write_u32::&lt;LittleEndian&gt;(t_in.sequence).unwrap();
+        h.write_u32_le(t_in.sequence).unwrap();
     }
     h.finalize()
 }
@@ -763,13 +761,11 @@
 ) -&gt; Blake2bHash {
     <span class="kw">let </span><span class="kw-2">mut </span>h = hasher(ZCASH_HEADERS_HASH_PERSONALIZATION);
 
-    h.write_u32::&lt;LittleEndian&gt;(version.header()).unwrap();
-    h.write_u32::&lt;LittleEndian&gt;(version.version_group_id())
-        .unwrap();
-    h.write_u32::&lt;LittleEndian&gt;(consensus_branch_id.into())
-        .unwrap();
-    h.write_u32::&lt;LittleEndian&gt;(lock_time).unwrap();
-    h.write_u32::&lt;LittleEndian&gt;(expiry_height.into()).unwrap();
+    h.write_u32_le(version.header()).unwrap();
+    h.write_u32_le(version.version_group_id()).unwrap();
+    h.write_u32_le(consensus_branch_id.into()).unwrap();
+    h.write_u32_le(lock_time).unwrap();
+    h.write_u32_le(expiry_height.into()).unwrap();
 
     h.finalize()
 }
@@ -909,7 +905,7 @@
     <span class="kw">let </span><span class="kw-2">mut </span>personal = [<span class="number">0</span>; <span class="number">16</span>];
     personal[..<span class="number">12</span>].copy_from_slice(ZCASH_TX_PERSONALIZATION_PREFIX);
     (<span class="kw-2">&amp;mut </span>personal[<span class="number">12</span>..])
-        .write_u32::&lt;LittleEndian&gt;(consensus_branch_id.into())
+        .write_u32_le(consensus_branch_id.into())
         .unwrap();
 
     <span class="kw">let </span><span class="kw-2">mut </span>h = hasher(<span class="kw-2">&amp;</span>personal);
@@ -1056,7 +1052,7 @@
         <span class="kw">let </span><span class="kw-2">mut </span>personal = [<span class="number">0</span>; <span class="number">16</span>];
         personal[..<span class="number">12</span>].copy_from_slice(ZCASH_AUTH_PERSONALIZATION_PREFIX);
         (<span class="kw-2">&amp;mut </span>personal[<span class="number">12</span>..])
-            .write_u32::&lt;LittleEndian&gt;(consensus_branch_id.into())
+            .write_u32_le(consensus_branch_id.into())
             .unwrap();
 
         <span class="kw">let </span><span class="kw-2">mut </span>h = hasher(<span class="kw-2">&amp;</span>personal);

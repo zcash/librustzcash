@@ -28,7 +28,14 @@
 <a href="#27" id="27">27</a>
 <a href="#28" id="28">28</a>
 <a href="#29" id="29">29</a>
-<a href="#30" id="30">30</a></pre></div><pre class="rust"><code><span class="doccomment">//! Equihash is a Proof-of-Work algorithm, based on a generalization of the Birthday
+<a href="#30" id="30">30</a>
+<a href="#31" id="31">31</a>
+<a href="#32" id="32">32</a>
+<a href="#33" id="33">33</a>
+<a href="#34" id="34">34</a>
+<a href="#35" id="35">35</a>
+<a href="#36" id="36">36</a>
+<a href="#37" id="37">37</a></pre></div><pre class="rust"><code><span class="doccomment">//! Equihash is a Proof-of-Work algorithm, based on a generalization of the Birthday
 //! problem which finds colliding hash values. It was designed to be memory-hard; more
 //! specifically, the bottle-neck for parallel implementations of Equihash solvers would
 //! be memory bandwidth.
@@ -49,8 +56,15 @@
 
 </span><span class="comment">// Catch documentation errors caused by code changes.
 </span><span class="attr">#![deny(rustdoc::broken_intra_doc_links)]
+#![no_std]
 
-</span><span class="kw">mod </span>minimal;
+#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">extern crate </span>std;
+
+<span class="attr">#[macro_use]
+</span><span class="kw">extern crate </span>alloc;
+
+<span class="kw">mod </span>minimal;
 <span class="kw">mod </span>params;
 <span class="kw">mod </span>verify;
 

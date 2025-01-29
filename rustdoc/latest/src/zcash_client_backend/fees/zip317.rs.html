@@ -789,7 +789,7 @@
 //! to ensure that inputs added to a transaction do not cause fees to rise by
 //! an amount greater than their value.
 
-</span><span class="kw">use </span>std::marker::PhantomData;
+</span><span class="kw">use </span>core::marker::PhantomData;
 
 <span class="kw">use </span>zcash_primitives::transaction::fees::{transparent, zip317 <span class="kw">as </span>prim_zip317, FeeRule};
 <span class="kw">use </span>zcash_protocol::{
@@ -1049,7 +1049,7 @@
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
-    <span class="kw">use </span>std::{convert::Infallible, num::NonZeroUsize};
+    <span class="kw">use </span>core::{convert::Infallible, num::NonZeroUsize};
 
     <span class="kw">use </span>::transparent::{address::Script, bundle::TxOut};
     <span class="kw">use </span>zcash_primitives::transaction::fees::zip317::FeeRule <span class="kw">as </span>Zip317FeeRule;

@@ -276,14 +276,23 @@
 <a href="#275" id="275">275</a>
 <a href="#276" id="276">276</a>
 <a href="#277" id="277">277</a>
-<a href="#278" id="278">278</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs and methods for handling Zcash block headers.
+<a href="#278" id="278">278</a>
+<a href="#279" id="279">279</a>
+<a href="#280" id="280">280</a>
+<a href="#281" id="281">281</a>
+<a href="#282" id="282">282</a>
+<a href="#283" id="283">283</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs and methods for handling Zcash block headers.
 
-</span><span class="kw">use </span>byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+</span><span class="kw">use </span>alloc::string::ToString;
+<span class="kw">use </span>alloc::vec::Vec;
+<span class="kw">use </span>core::fmt;
+<span class="kw">use </span>core::ops::Deref;
+<span class="kw">use </span>core2::io::{<span class="self">self</span>, Read, Write};
+
+<span class="kw">use </span><span class="kw">crate</span>::encoding::{ReadBytesExt, WriteBytesExt};
 <span class="kw">use </span>memuse::DynamicUsage;
 <span class="kw">use </span>sha2::{Digest, Sha256};
-<span class="kw">use </span>std::fmt;
-<span class="kw">use </span>std::io::{<span class="self">self</span>, Read, Write};
-<span class="kw">use </span>std::ops::Deref;
+
 <span class="kw">use </span>zcash_encoding::Vector;
 
 <span class="kw">pub use </span>equihash;
@@ -390,7 +399,7 @@
     }
 
     <span class="kw">pub fn </span>read&lt;R: Read&gt;(<span class="kw-2">mut </span>reader: R) -&gt; io::Result&lt;<span class="self">Self</span>&gt; {
-        <span class="kw">let </span>version = reader.read_i32::&lt;LittleEndian&gt;()<span class="question-mark">?</span>;
+        <span class="kw">let </span>version = reader.read_i32_le()<span class="question-mark">?</span>;
 
         <span class="kw">let </span><span class="kw-2">mut </span>prev_block = BlockHash([<span class="number">0</span>; <span class="number">32</span>]);
         reader.read_exact(<span class="kw-2">&amp;mut </span>prev_block.<span class="number">0</span>)<span class="question-mark">?</span>;
@@ -401,8 +410,8 @@
         <span class="kw">let </span><span class="kw-2">mut </span>final_sapling_root = [<span class="number">0</span>; <span class="number">32</span>];
         reader.read_exact(<span class="kw-2">&amp;mut </span>final_sapling_root)<span class="question-mark">?</span>;
 
-        <span class="kw">let </span>time = reader.read_u32::&lt;LittleEndian&gt;()<span class="question-mark">?</span>;
-        <span class="kw">let </span>bits = reader.read_u32::&lt;LittleEndian&gt;()<span class="question-mark">?</span>;
+        <span class="kw">let </span>time = reader.read_u32_le()<span class="question-mark">?</span>;
+        <span class="kw">let </span>bits = reader.read_u32_le()<span class="question-mark">?</span>;
 
         <span class="kw">let </span><span class="kw-2">mut </span>nonce = [<span class="number">0</span>; <span class="number">32</span>];
         reader.read_exact(<span class="kw-2">&amp;mut </span>nonce)<span class="question-mark">?</span>;
@@ -422,12 +431,12 @@
     }
 
     <span class="kw">pub fn </span>write&lt;W: Write&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut </span>writer: W) -&gt; io::Result&lt;()&gt; {
-        writer.write_i32::&lt;LittleEndian&gt;(<span class="self">self</span>.version)<span class="question-mark">?</span>;
+        writer.write_i32_le(<span class="self">self</span>.version)<span class="question-mark">?</span>;
         writer.write_all(<span class="kw-2">&amp;</span><span class="self">self</span>.prev_block.<span class="number">0</span>)<span class="question-mark">?</span>;
         writer.write_all(<span class="kw-2">&amp;</span><span class="self">self</span>.merkle_root)<span class="question-mark">?</span>;
         writer.write_all(<span class="kw-2">&amp;</span><span class="self">self</span>.final_sapling_root)<span class="question-mark">?</span>;
-        writer.write_u32::&lt;LittleEndian&gt;(<span class="self">self</span>.time)<span class="question-mark">?</span>;
-        writer.write_u32::&lt;LittleEndian&gt;(<span class="self">self</span>.bits)<span class="question-mark">?</span>;
+        writer.write_u32_le(<span class="self">self</span>.time)<span class="question-mark">?</span>;
+        writer.write_u32_le(<span class="self">self</span>.bits)<span class="question-mark">?</span>;
         writer.write_all(<span class="kw-2">&amp;</span><span class="self">self</span>.nonce)<span class="question-mark">?</span>;
         Vector::write(<span class="kw-2">&amp;mut </span>writer, <span class="kw-2">&amp;</span><span class="self">self</span>.solution, |w, b| w.write_u8(<span class="kw-2">*</span>b))<span class="question-mark">?</span>;
 
@@ -438,6 +447,7 @@
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
     <span class="kw">use </span><span class="kw">super</span>::BlockHeader;
+    <span class="kw">use </span>alloc::vec::Vec;
 
     <span class="kw">const </span>HEADER_MAINNET_415000: [u8; <span class="number">1487</span>] = [
         <span class="number">0x04</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x00</span>, <span class="number">0x52</span>, <span class="number">0x74</span>, <span class="number">0xb4</span>, <span class="number">0x3b</span>, <span class="number">0x9e</span>, <span class="number">0x4a</span>, <span class="number">0xd8</span>, <span class="number">0xf4</span>, <span class="number">0x3e</span>, <span class="number">0x93</span>, <span class="number">0xf7</span>,

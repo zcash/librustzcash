@@ -435,9 +435,7 @@
 <a href="#434" id="434">434</a>
 <a href="#435" id="435">435</a>
 <a href="#436" id="436">436</a>
-<a href="#437" id="437">437</a>
-<a href="#438" id="438">438</a>
-<a href="#439" id="439">439</a></pre></div><pre class="rust"><code><span class="doccomment">//! *Zcash binary encodings.*
+<a href="#437" id="437">437</a></pre></div><pre class="rust"><code><span class="doccomment">//! *Zcash binary encodings.*
 //!
 //! `zcash_encoding` is a library that provides common encoding and decoding operations
 //! for stable binary encodings used throughout the Zcash ecosystem.
@@ -456,8 +454,7 @@
 <span class="kw">use </span>core::iter::FromIterator;
 <span class="kw">use </span>core2::io::{<span class="self">self</span>, Read, Write};
 
-<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
-</span><span class="kw">use </span>nonempty::NonEmpty;
+<span class="kw">use </span>nonempty::NonEmpty;
 
 <span class="doccomment">/// The maximum allowed value representable as a `[CompactSize]`
 </span><span class="kw">pub const </span>MAX_COMPACT_SIZE: u32 = <span class="number">0x02000000</span>;
@@ -610,7 +607,6 @@
 
     <span class="doccomment">/// Writes a NonEmpty container of values to the stream using the same encoding as
     /// `[Vector::write]`
-    </span><span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
     </span><span class="kw">pub fn </span>write_nonempty&lt;W: Write, E, F&gt;(
         <span class="kw-2">mut </span>writer: W,
         vec: <span class="kw-2">&amp;</span>NonEmpty&lt;E&gt;,

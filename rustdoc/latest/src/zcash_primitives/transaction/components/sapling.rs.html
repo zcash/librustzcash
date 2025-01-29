@@ -524,8 +524,10 @@
 <a href="#523" id="523">523</a>
 <a href="#524" id="524">524</a>
 <a href="#525" id="525">525</a>
-<a href="#526" id="526">526</a></pre></div><pre class="rust"><code><span class="kw">use </span>ff::PrimeField;
-<span class="kw">use </span>std::io::{<span class="self">self</span>, Read, Write};
+<a href="#526" id="526">526</a>
+<a href="#527" id="527">527</a></pre></div><pre class="rust"><code><span class="kw">use </span>alloc::vec::Vec;
+<span class="kw">use </span>core2::io::{<span class="self">self</span>, Read, Write};
+<span class="kw">use </span>ff::PrimeField;
 
 <span class="kw">use </span>::sapling::{
     bundle::{
@@ -635,13 +637,13 @@
 
 <span class="doccomment">/// Consensus rules (§7.3) &amp; (§7.4):
 /// - Canonical encoding is enforced here
-</span><span class="kw">pub fn </span>read_base&lt;R: Read&gt;(<span class="kw-2">mut </span>reader: R, field: <span class="kw-2">&amp;</span>str) -&gt; io::Result&lt;jubjub::Base&gt; {
+</span><span class="kw">pub fn </span>read_base&lt;R: Read&gt;(<span class="kw-2">mut </span>reader: R, _field: <span class="kw-2">&amp;</span>str) -&gt; io::Result&lt;jubjub::Base&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>f = [<span class="number">0u8</span>; <span class="number">32</span>];
     reader.read_exact(<span class="kw-2">&amp;mut </span>f)<span class="question-mark">?</span>;
     Option::from(jubjub::Base::from_repr(f)).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
-            <span class="macro">format!</span>(<span class="string">"{} not in field"</span>, field),
+            <span class="string">"base value not a valid field element"</span>,
         )
     })
 }
@@ -671,7 +673,7 @@
     <span class="kw">let </span><span class="kw-2">mut </span>bytes = [<span class="number">0</span>; <span class="number">32</span>];
     reader.read_exact(<span class="kw-2">&amp;mut </span>bytes)<span class="question-mark">?</span>;
     redjubjub::VerificationKey::try_from(bytes)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        .map_err(|<span class="kw">_</span>| io::Error::new(io::ErrorKind::InvalidData, <span class="string">"verification key is invalid"</span>))
 }
 
 <span class="doccomment">/// Consensus rules (§4.4):

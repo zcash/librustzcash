@@ -194,9 +194,11 @@
 <a href="#193" id="193">193</a>
 <a href="#194" id="194">194</a>
 <a href="#195" id="195">195</a>
-<a href="#196" id="196">196</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs representing the components within Zcash transactions.
+<a href="#196" id="196">196</a>
+<a href="#197" id="197">197</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs representing the components within Zcash transactions.
 
-</span><span class="kw">use </span>std::io::{<span class="self">self</span>, Read, Write};
+</span><span class="kw">use </span>alloc::vec::Vec;
+<span class="kw">use </span>core2::io::{<span class="self">self</span>, Read, Write};
 
 <span class="kw">use </span><span class="kw">super</span>::GROTH_PROOF_SIZE;
 <span class="kw">use </span>zcash_protocol::value::ZatBalance;
@@ -233,8 +235,8 @@
     PHGR([u8; PHGR_PROOF_SIZE]),
 }
 
-<span class="kw">impl </span>std::fmt::Debug <span class="kw">for </span>SproutProof {
-    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;(), std::fmt::Error&gt; {
+<span class="kw">impl </span>core::fmt::Debug <span class="kw">for </span>SproutProof {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>core::fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;(), core::fmt::Error&gt; {
         <span class="kw">match </span><span class="self">self </span>{
             SproutProof::Groth(<span class="kw">_</span>) =&gt; <span class="macro">write!</span>(f, <span class="string">"SproutProof::Groth"</span>),
             SproutProof::PHGR(<span class="kw">_</span>) =&gt; <span class="macro">write!</span>(f, <span class="string">"SproutProof::PHGR"</span>),
@@ -256,8 +258,8 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) ciphertexts: [[u8; <span class="number">601</span>]; ZC_NUM_JS_OUTPUTS],
 }
 
-<span class="kw">impl </span>std::fmt::Debug <span class="kw">for </span>JsDescription {
-    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;(), std::fmt::Error&gt; {
+<span class="kw">impl </span>core::fmt::Debug <span class="kw">for </span>JsDescription {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>core::fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;(), core::fmt::Error&gt; {
         <span class="macro">write!</span>(
             f,
             <span class="string">"JSDescription(

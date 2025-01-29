@@ -1365,19 +1365,24 @@
 <a href="#1364" id="1364">1364</a>
 <a href="#1365" id="1365">1365</a>
 <a href="#1366" id="1366">1366</a>
-<a href="#1367" id="1367">1367</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs for building transactions.
+<a href="#1367" id="1367">1367</a>
+<a href="#1368" id="1368">1368</a>
+<a href="#1369" id="1369">1369</a>
+<a href="#1370" id="1370">1370</a>
+<a href="#1371" id="1371">1371</a>
+<a href="#1372" id="1372">1372</a>
+<a href="#1373" id="1373">1373</a>
+<a href="#1374" id="1374">1374</a>
+<a href="#1375" id="1375">1375</a>
+<a href="#1376" id="1376">1376</a>
+<a href="#1377" id="1377">1377</a>
+<a href="#1378" id="1378">1378</a></pre></div><pre class="rust"><code><span class="doccomment">//! Structs for building transactions.
 
-</span><span class="kw">use </span>rand::{CryptoRng, RngCore};
-<span class="kw">use </span>std::cmp::Ordering;
-<span class="kw">use </span>std::error;
-<span class="kw">use </span>std::fmt;
-<span class="kw">use </span>std::sync::mpsc::Sender;
+</span><span class="kw">use </span>core::cmp::Ordering;
+<span class="kw">use </span>core::fmt;
+<span class="kw">use </span>rand::{CryptoRng, RngCore};
 
-<span class="kw">use </span>::sapling::{
-    builder::SaplingMetadata,
-    prover::{OutputProver, SpendProver},
-    Note, PaymentAddress,
-};
+<span class="kw">use </span>::sapling::{builder::SaplingMetadata, Note, PaymentAddress};
 <span class="kw">use </span>::transparent::{address::TransparentAddress, builder::TransparentBuilder, bundle::TxOut};
 <span class="kw">use </span>zcash_protocol::{
     consensus::{<span class="self">self</span>, BlockHeight, BranchId, NetworkUpgrade, Parameters},
@@ -1390,16 +1395,29 @@
         transparent::{InputView, OutputView},
         FeeRule,
     },
-    sighash::{signature_hash, SignableInput},
-    txid::TxIdDigester,
-    Transaction, TransactionData, TxVersion, Unauthorized,
+    Transaction, TxVersion,
+};
+
+<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">use </span>std::sync::mpsc::Sender;
+
+<span class="attr">#[cfg(feature = <span class="string">"circuits"</span>)]
+</span><span class="kw">use </span>{
+    <span class="kw">crate</span>::transaction::{
+        sighash::{signature_hash, SignableInput},
+        txid::TxIdDigester,
+        TransactionData, Unauthorized,
+    },
+    ::sapling::prover::{OutputProver, SpendProver},
+    ::transparent::builder::TransparentSigningSet,
+    alloc::vec::Vec,
 };
 
 <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
 </span><span class="kw">use </span>::transparent::builder::TransparentInputInfo;
 
 <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
-</span><span class="kw">use </span>std::convert::Infallible;
+</span><span class="kw">use </span>core::convert::Infallible;
 
 <span class="attr">#[cfg(zcash_unstable = <span class="string">"zfuture"</span>)]
 </span><span class="kw">use crate</span>::{
@@ -1414,7 +1432,6 @@
 };
 
 <span class="kw">use </span><span class="kw">super</span>::components::sapling::zip212_enforcement;
-<span class="kw">use </span>::transparent::builder::TransparentSigningSet;
 
 <span class="doccomment">/// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// &lt;https://zips.z.cash/zip-0203#changes-for-blossom&gt;
@@ -1504,7 +1521,8 @@
     }
 }
 
-<span class="kw">impl</span>&lt;FE: fmt::Debug + fmt::Display&gt; error::Error <span class="kw">for </span>Error&lt;FE&gt; {}
+<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">impl</span>&lt;FE: fmt::Debug + fmt::Display&gt; std::error::Error <span class="kw">for </span>Error&lt;FE&gt; {}
 
 <span class="kw">impl</span>&lt;FE&gt; From&lt;BalanceError&gt; <span class="kw">for </span>Error&lt;FE&gt; {
     <span class="kw">fn </span>from(e: BalanceError) -&gt; <span class="self">Self </span>{
@@ -1671,8 +1689,8 @@
     <span class="attr">#[cfg(zcash_unstable = <span class="string">"zfuture"</span>)]
     </span>tze_builder: TzeBuilder&lt;<span class="lifetime">'a</span>, TransactionData&lt;Unauthorized&gt;&gt;,
     <span class="attr">#[cfg(not(zcash_unstable = <span class="string">"zfuture"</span>))]
-    </span>tze_builder: std::marker::PhantomData&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>()&gt;,
-    progress_notifier: U,
+    </span>tze_builder: core::marker::PhantomData&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>()&gt;,
+    _progress_notifier: U,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">'a</span>, P, U: sapling::builder::ProverProgress&gt; Builder&lt;<span class="lifetime">'a</span>, P, U&gt; {
@@ -1754,8 +1772,8 @@
             <span class="attr">#[cfg(zcash_unstable = <span class="string">"zfuture"</span>)]
             </span>tze_builder: TzeBuilder::empty(),
             <span class="attr">#[cfg(not(zcash_unstable = <span class="string">"zfuture"</span>))]
-            </span>tze_builder: std::marker::PhantomData,
-            progress_notifier: (),
+            </span>tze_builder: core::marker::PhantomData,
+            _progress_notifier: (),
         }
     }
 
@@ -1765,9 +1783,10 @@
     /// sent represents the total steps completed so far. It will eventually send number
     /// of spends + outputs. If there's an error building the transaction, the channel is
     /// closed.
+    </span><span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
     </span><span class="kw">pub fn </span>with_progress_notifier(
         <span class="self">self</span>,
-        progress_notifier: Sender&lt;Progress&gt;,
+        _progress_notifier: Sender&lt;Progress&gt;,
     ) -&gt; Builder&lt;<span class="lifetime">'a</span>, P, Sender&lt;Progress&gt;&gt; {
         Builder {
             params: <span class="self">self</span>.params,
@@ -1778,7 +1797,7 @@
             sapling_builder: <span class="self">self</span>.sapling_builder,
             orchard_builder: <span class="self">self</span>.orchard_builder,
             tze_builder: <span class="self">self</span>.tze_builder,
-            progress_notifier,
+            _progress_notifier,
         }
     }
 }
@@ -2006,6 +2025,7 @@
     /// Upon success, returns a tuple containing the final transaction, and the
     /// [`SaplingMetadata`] generated during the build process.
     </span><span class="attr">#[allow(clippy::too_many_arguments)]
+    #[cfg(feature = <span class="string">"circuits"</span>)]
     </span><span class="kw">pub fn </span>build&lt;R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FR: FeeRule&gt;(
         <span class="self">self</span>,
         transparent_signing_set: <span class="kw-2">&amp;</span>TransparentSigningSet,
@@ -2061,6 +2081,7 @@
     }
 
     <span class="attr">#[allow(clippy::too_many_arguments)]
+    #[cfg(feature = <span class="string">"circuits"</span>)]
     </span><span class="kw">fn </span>build_internal&lt;R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FE&gt;(
         <span class="self">self</span>,
         transparent_signing_set: <span class="kw-2">&amp;</span>TransparentSigningSet,
@@ -2113,7 +2134,7 @@
                                     spend_prover,
                                     output_prover,
                                     <span class="kw-2">&amp;mut </span>rng,
-                                    <span class="self">self</span>.progress_notifier,
+                                    <span class="self">self</span>._progress_notifier,
                                 ),
                                 sapling_meta,
                             )
@@ -2348,10 +2369,11 @@
     <span class="kw">fn </span>add_tze_output&lt;G: ToPayload&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         extension_id: u32,
-        value: ZatBalance,
+        value: Zatoshis,
         guarded_by: <span class="kw-2">&amp;</span>G,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::BuildError&gt; {
-        <span class="self">self</span>.tze_builder.add_output(extension_id, value, guarded_by)
+        <span class="self">self</span>.tze_builder.add_output(extension_id, value, guarded_by);
+        <span class="prelude-val">Ok</span>(())
     }
 }
 
@@ -2413,7 +2435,7 @@
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
-    <span class="kw">use </span>std::convert::Infallible;
+    <span class="kw">use </span>core::convert::Infallible;
 
     <span class="kw">use </span>assert_matches::assert_matches;
     <span class="kw">use </span>ff::Field;
@@ -2469,8 +2491,8 @@
             <span class="attr">#[cfg(zcash_unstable = <span class="string">"zfuture"</span>)]
             </span>tze_builder: TzeBuilder::empty(),
             <span class="attr">#[cfg(not(zcash_unstable = <span class="string">"zfuture"</span>))]
-            </span>tze_builder: std::marker::PhantomData,
-            progress_notifier: (),
+            </span>tze_builder: core::marker::PhantomData,
+            _progress_notifier: (),
             orchard_builder: <span class="prelude-val">None</span>,
         };
 

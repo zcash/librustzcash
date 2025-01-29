@@ -902,16 +902,19 @@
 <a href="#901" id="901">901</a>
 <a href="#902" id="902">902</a>
 <a href="#903" id="903">903</a>
-<a href="#904" id="904">904</a></pre></div><pre class="rust"><code><span class="doccomment">//! Parsers and serializers for Zcash Merkle trees.
+<a href="#904" id="904">904</a>
+<a href="#905" id="905">905</a></pre></div><pre class="rust"><code><span class="doccomment">//! Parsers and serializers for Zcash Merkle trees.
 
-</span><span class="kw">use </span>byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+</span><span class="kw">use </span>alloc::vec::Vec;
+<span class="kw">use </span>core2::io::{<span class="self">self</span>, Read, Write};
+
+<span class="kw">use </span><span class="kw">crate</span>::encoding::{ReadBytesExt, WriteBytesExt};
 <span class="kw">use </span>incrementalmerkletree::{
     frontier::{CommitmentTree, Frontier, NonEmptyFrontier},
     witness::IncrementalWitness,
     Address, Hashable, Level, MerklePath, Position,
 };
 <span class="kw">use </span>orchard::tree::MerkleHashOrchard;
-<span class="kw">use </span>std::io::{<span class="self">self</span>, Read, Write};
 <span class="kw">use </span>zcash_encoding::{Optional, Vector};
 
 <span class="doccomment">/// A hashable node within a Merkle tree.
@@ -966,41 +969,44 @@
 /// is platform-dependent, we consistently represent it as u64 in serialized
 /// formats.
 </span><span class="kw">pub fn </span>write_usize_leu64&lt;W: Write&gt;(<span class="kw-2">mut </span>writer: W, value: usize) -&gt; io::Result&lt;()&gt; {
-    <span class="comment">// Panic if we get a usize value that can't fit into a u64.
-    </span>writer.write_u64::&lt;LittleEndian&gt;(value.try_into().unwrap())
+    writer.write_u64_le(u64::try_from(value).map_err(|<span class="kw">_</span>| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            <span class="string">"usize value was outside the representable range of a u64"</span>,
+        )
+    })<span class="question-mark">?</span>)
 }
 
 <span class="doccomment">/// Reads a usize value encoded as a u64 in little-endian order. Since usize
 /// is platform-dependent, we consistently represent it as u64 in serialized
 /// formats.
 </span><span class="kw">pub fn </span>read_leu64_usize&lt;R: Read&gt;(<span class="kw-2">mut </span>reader: R) -&gt; io::Result&lt;usize&gt; {
-    reader.read_u64::&lt;LittleEndian&gt;()<span class="question-mark">?</span>.try_into().map_err(|e| {
+    <span class="kw">let </span><span class="kw-2">mut </span>repr = [<span class="number">0u8</span>; <span class="number">8</span>];
+    reader.read_exact(<span class="kw-2">&amp;mut </span>repr)<span class="question-mark">?</span>;
+    usize::try_from(u64::from_le_bytes(repr)).map_err(|<span class="kw">_</span>| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            <span class="macro">format!</span>(
-                <span class="string">"usize could not be decoded from a 64-bit value on this platform: {:?}"</span>,
-                e
-            ),
+            <span class="string">"usize could not be decoded from a 64-bit value"</span>,
         )
     })
 }
 
 <span class="kw">pub fn </span>write_position&lt;W: Write&gt;(<span class="kw-2">mut </span>writer: W, position: Position) -&gt; io::Result&lt;()&gt; {
-    writer.write_u64::&lt;LittleEndian&gt;(position.into())
+    writer.write_u64_le(u64::from(position))
 }
 
 <span class="kw">pub fn </span>read_position&lt;R: Read&gt;(<span class="kw-2">mut </span>reader: R) -&gt; io::Result&lt;Position&gt; {
-    reader.read_u64::&lt;LittleEndian&gt;().map(Position::from)
+    reader.read_u64_le().map(Position::from)
 }
 
 <span class="kw">pub fn </span>write_address&lt;W: Write&gt;(<span class="kw-2">mut </span>writer: W, addr: Address) -&gt; io::Result&lt;()&gt; {
     writer.write_u8(addr.level().into())<span class="question-mark">?</span>;
-    writer.write_u64::&lt;LittleEndian&gt;(addr.index())
+    writer.write_u64_le(addr.index())
 }
 
 <span class="kw">pub fn </span>read_address&lt;R: Read&gt;(<span class="kw-2">mut </span>reader: R) -&gt; io::Result&lt;Address&gt; {
     <span class="kw">let </span>level = reader.read_u8().map(Level::from)<span class="question-mark">?</span>;
-    <span class="kw">let </span>index = reader.read_u64::&lt;LittleEndian&gt;()<span class="question-mark">?</span>;
+    <span class="kw">let </span>index = reader.read_u64_le()<span class="question-mark">?</span>;
     <span class="prelude-val">Ok</span>(Address::from_parts(level, index))
 }
 
@@ -1053,10 +1059,10 @@
         left
     };
 
-    NonEmptyFrontier::from_parts(position, leaf, ommers).map_err(|err| {
+    NonEmptyFrontier::from_parts(position, leaf, ommers).map_err(|_err| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            <span class="macro">format!</span>(<span class="string">"Parsing resulted in an invalid Merkle frontier: {:?}"</span>, err),
+            <span class="string">"Parsing resulted in an invalid Merkle frontier"</span>,
         )
     })
 }
@@ -1072,10 +1078,10 @@
 </span><span class="kw">pub fn </span>read_frontier_v1&lt;H: HashSer + Clone, R: Read&gt;(reader: R) -&gt; io::Result&lt;Frontier&lt;H, <span class="number">32</span>&gt;&gt; {
     <span class="kw">match </span>Optional::read(reader, read_nonempty_frontier_v1)<span class="question-mark">? </span>{
         <span class="prelude-val">None </span>=&gt; <span class="prelude-val">Ok</span>(Frontier::empty()),
-        <span class="prelude-val">Some</span>(f) =&gt; Frontier::try_from(f).map_err(|err| {
+        <span class="prelude-val">Some</span>(f) =&gt; Frontier::try_from(f).map_err(|_err| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                <span class="macro">format!</span>(<span class="string">"Parsing resulted in an invalid Merkle frontier: {:?}"</span>, err),
+                <span class="string">"Parsing resulted in an invalid Merkle frontier"</span>,
             )
         }),
     }
@@ -1170,25 +1176,21 @@
     <span class="kw">if </span>auth_path.len() != usize::from(DEPTH) {
         <span class="kw">return </span><span class="prelude-val">Err</span>(io::Error::new(
             io::ErrorKind::InvalidData,
-            <span class="macro">format!</span>(<span class="string">"length of auth path is not the expected {} elements"</span>, DEPTH),
+            <span class="string">"auth path has unexpected length"</span>,
         ));
     }
 
     <span class="comment">// Read the position from the witness
-    </span><span class="kw">let </span>position = witness.read_u64::&lt;LittleEndian&gt;().map(Position::from)<span class="question-mark">?</span>;
+    </span><span class="kw">let </span>position = witness.read_u64_le().map(Position::from)<span class="question-mark">?</span>;
 
     <span class="comment">// The witness should be empty now; if it wasn't, the caller would
     // have provided more information than they should have, indicating
     // a bug downstream
     </span><span class="kw">if </span>witness.is_empty() {
-        <span class="kw">let </span>path_len = auth_path.len();
         MerklePath::from_parts(auth_path, position).map_err(|<span class="kw">_</span>| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                <span class="macro">format!</span>(
-                    <span class="string">"auth path expected to contain {} elements, got {}"</span>,
-                    DEPTH, path_len
-                ),
+                <span class="string">"auth path contained incorrect number of elements"</span>,
             )
         })
     } <span class="kw">else </span>{
@@ -1201,43 +1203,43 @@
 
 <span class="attr">#[cfg(any(test, feature = <span class="string">"test-dependencies"</span>))]
 </span><span class="kw">pub mod </span>testing {
-    <span class="kw">use </span>byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+    <span class="kw">use </span><span class="kw">crate</span>::encoding::{ReadBytesExt, WriteBytesExt};
+    <span class="kw">use </span>alloc::string::String;
+    <span class="kw">use </span>core2::io::{<span class="self">self</span>, Read, Write};
     <span class="kw">use </span>incrementalmerkletree::frontier::testing::TestNode;
-    <span class="kw">use </span>std::io::{<span class="self">self</span>, Read, Write};
     <span class="kw">use </span>zcash_encoding::Vector;
 
     <span class="kw">use </span><span class="kw">super</span>::HashSer;
 
     <span class="kw">impl </span>HashSer <span class="kw">for </span>TestNode {
         <span class="kw">fn </span>read&lt;R: Read&gt;(<span class="kw-2">mut </span>reader: R) -&gt; io::Result&lt;TestNode&gt; {
-            reader.read_u64::&lt;LittleEndian&gt;().map(TestNode)
+            reader.read_u64_le().map(TestNode)
         }
 
         <span class="kw">fn </span>write&lt;W: Write&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut </span>writer: W) -&gt; io::Result&lt;()&gt; {
-            writer.write_u64::&lt;LittleEndian&gt;(<span class="self">self</span>.<span class="number">0</span>)
+            writer.write_u64_le(<span class="self">self</span>.<span class="number">0</span>)
         }
     }
 
     <span class="kw">impl </span>HashSer <span class="kw">for </span>String {
         <span class="kw">fn </span>read&lt;R: Read&gt;(reader: R) -&gt; io::Result&lt;String&gt; {
             Vector::read(reader, |r| r.read_u8()).and_then(|xs| {
-                String::from_utf8(xs).map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        <span class="macro">format!</span>(<span class="string">"Not a valid utf8 string: {:?}"</span>, e),
-                    )
+                String::from_utf8(xs).map_err(|_e| {
+                    io::Error::new(io::ErrorKind::InvalidData, <span class="string">"not a valid utf8 string"</span>)
                 })
             })
         }
 
         <span class="kw">fn </span>write&lt;W: Write&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, writer: W) -&gt; io::Result&lt;()&gt; {
-            Vector::write(writer, <span class="self">self</span>.as_bytes(), |w, b| w.write_u8(<span class="kw-2">*</span>b))
+            Vector::write(writer, <span class="self">self</span>.as_bytes(), |w, b| w.write_all(<span class="kw-2">&amp;</span>[<span class="kw-2">*</span>b]))
         }
     }
 }
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
+    <span class="kw">use </span>alloc::string::{String, ToString};
+    <span class="kw">use </span>alloc::vec::Vec;
     <span class="kw">use </span>assert_matches::assert_matches;
     <span class="kw">use </span>incrementalmerkletree::{
         frontier::{testing::arb_commitment_tree, Frontier, PathFiller},

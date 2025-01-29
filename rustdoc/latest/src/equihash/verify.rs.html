@@ -314,13 +314,16 @@
 <a href="#313" id="313">313</a>
 <a href="#314" id="314">314</a>
 <a href="#315" id="315">315</a>
-<a href="#316" id="316">316</a></pre></div><pre class="rust"><code><span class="doccomment">//! Verification functions for the [Equihash] proof-of-work algorithm.
+<a href="#316" id="316">316</a>
+<a href="#317" id="317">317</a>
+<a href="#318" id="318">318</a></pre></div><pre class="rust"><code><span class="doccomment">//! Verification functions for the [Equihash] proof-of-work algorithm.
 //!
 //! [Equihash]: https://zips.z.cash/protocol/protocol.pdf#equihash
 
-</span><span class="kw">use </span>blake2b_simd::{Hash <span class="kw">as </span>Blake2bHash, Params <span class="kw">as </span>Blake2bParams, State <span class="kw">as </span>Blake2bState};
-<span class="kw">use </span>byteorder::{LittleEndian, WriteBytesExt};
-<span class="kw">use </span>std::fmt;
+</span><span class="kw">use </span>alloc::vec::Vec;
+<span class="kw">use </span>blake2b_simd::{Hash <span class="kw">as </span>Blake2bHash, Params <span class="kw">as </span>Blake2bParams, State <span class="kw">as </span>Blake2bState};
+<span class="kw">use </span>core::fmt;
+<span class="kw">use </span>core2::io::Write;
 
 <span class="kw">use crate</span>::{
     minimal::{expand_array, indices_from_minimal},
@@ -407,7 +410,8 @@
     }
 }
 
-<span class="kw">impl </span>std::error::Error <span class="kw">for </span>Error {}
+<span class="attr">#[cfg(feature = <span class="string">"std"</span>)]
+</span><span class="kw">impl </span>std::error::Error <span class="kw">for </span>Error {}
 
 <span class="attr">#[derive(Debug, PartialEq)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>Kind {
@@ -432,8 +436,8 @@
 
 <span class="kw">fn </span>initialise_state(n: u32, k: u32, digest_len: u8) -&gt; Blake2bState {
     <span class="kw">let </span><span class="kw-2">mut </span>personalization: Vec&lt;u8&gt; = Vec::from(<span class="string">"ZcashPoW"</span>);
-    personalization.write_u32::&lt;LittleEndian&gt;(n).unwrap();
-    personalization.write_u32::&lt;LittleEndian&gt;(k).unwrap();
+    personalization.write_all(<span class="kw-2">&amp;</span>n.to_le_bytes()).unwrap();
+    personalization.write_all(<span class="kw-2">&amp;</span>k.to_le_bytes()).unwrap();
 
     Blake2bParams::new()
         .hash_length(digest_len <span class="kw">as </span>usize)
@@ -443,7 +447,7 @@
 
 <span class="kw">fn </span>generate_hash(base_state: <span class="kw-2">&amp;</span>Blake2bState, i: u32) -&gt; Blake2bHash {
     <span class="kw">let </span><span class="kw-2">mut </span>lei = [<span class="number">0u8</span>; <span class="number">4</span>];
-    (<span class="kw-2">&amp;mut </span>lei[..]).write_u32::&lt;LittleEndian&gt;(i).unwrap();
+    (<span class="kw-2">&amp;mut </span>lei[..]).write_all(<span class="kw-2">&amp;</span>i.to_le_bytes()).unwrap();
 
     <span class="kw">let </span><span class="kw-2">mut </span>state = base_state.clone();
     state.update(<span class="kw-2">&amp;</span>lei);
