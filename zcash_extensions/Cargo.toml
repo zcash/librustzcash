@@ -16,7 +16,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 blake2b_simd.workspace = true
-zcash_primitives.workspace = true
+zcash_primitives = { workspace = true, features = ["non-standard-fees"] }
+zcash_protocol.workspace = true
 
 [dev-dependencies]
 ff.workspace = true
@@ -24,8 +25,9 @@ jubjub.workspace = true
 rand_core.workspace = true
 sapling.workspace = true
 orchard.workspace = true
+transparent.workspace = true
 zcash_address.workspace = true
-zcash_proofs.workspace = true
+zcash_proofs = { workspace = true, features = ["local-prover", "bundled-prover"] }
 
 [features]
 transparent-inputs = []

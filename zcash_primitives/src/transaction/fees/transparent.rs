@@ -1,7 +1,7 @@
 //! Types related to computation of fees and change related to the transparent components
 //! of a transaction.
 
-use std::convert::Infallible;
+use core::convert::Infallible;
 
 use crate::transaction::fees::zip317::P2PKH_STANDARD_INPUT_SIZE;
 use transparent::{
@@ -31,7 +31,7 @@ impl InputSize {
 
 /// This trait provides a minimized view of a transparent input suitable for use in
 /// fee and change computation.
-pub trait InputView: std::fmt::Debug {
+pub trait InputView: core::fmt::Debug {
     /// The outpoint to which the input refers.
     fn outpoint(&self) -> &OutPoint;
 
@@ -69,7 +69,7 @@ impl InputView for Infallible {
 
 /// This trait provides a minimized view of a transparent output suitable for use in
 /// fee and change computation.
-pub trait OutputView: std::fmt::Debug {
+pub trait OutputView: core::fmt::Debug {
     /// Returns the value of the output being created.
     fn value(&self) -> Zatoshis;
 

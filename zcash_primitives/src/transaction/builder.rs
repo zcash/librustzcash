@@ -1,16 +1,10 @@
 //! Structs for building transactions.
 
+use core::cmp::Ordering;
+use core::fmt;
 use rand::{CryptoRng, RngCore};
-use std::cmp::Ordering;
-use std::error;
-use std::fmt;
-use std::sync::mpsc::Sender;
 
-use ::sapling::{
-    builder::SaplingMetadata,
-    prover::{OutputProver, SpendProver},
-    Note, PaymentAddress,
-};
+use ::sapling::{builder::SaplingMetadata, Note, PaymentAddress};
 use ::transparent::{address::TransparentAddress, builder::TransparentBuilder, bundle::TxOut};
 use zcash_protocol::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
@@ -23,16 +17,29 @@ use crate::transaction::{
         transparent::{InputView, OutputView},
         FeeRule,
     },
-    sighash::{signature_hash, SignableInput},
-    txid::TxIdDigester,
-    Transaction, TransactionData, TxVersion, Unauthorized,
+    Transaction, TxVersion,
+};
+
+#[cfg(feature = "std")]
+use std::sync::mpsc::Sender;
+
+#[cfg(feature = "circuits")]
+use {
+    crate::transaction::{
+        sighash::{signature_hash, SignableInput},
+        txid::TxIdDigester,
+        TransactionData, Unauthorized,
+    },
+    ::sapling::prover::{OutputProver, SpendProver},
+    ::transparent::builder::TransparentSigningSet,
+    alloc::vec::Vec,
 };
 
 #[cfg(feature = "transparent-inputs")]
 use ::transparent::builder::TransparentInputInfo;
 
 #[cfg(not(feature = "transparent-inputs"))]
-use std::convert::Infallible;
+use core::convert::Infallible;
 
 #[cfg(zcash_unstable = "zfuture")]
 use crate::{
@@ -47,7 +54,6 @@ use crate::{
 };
 
 use super::components::sapling::zip212_enforcement;
-use ::transparent::builder::TransparentSigningSet;
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
@@ -137,7 +143,8 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
     }
 }
 
-impl<FE: fmt::Debug + fmt::Display> error::Error for Error<FE> {}
+#[cfg(feature = "std")]
+impl<FE: fmt::Debug + fmt::Display> std::error::Error for Error<FE> {}
 
 impl<FE> From<BalanceError> for Error<FE> {
     fn from(e: BalanceError) -> Self {
@@ -304,8 +311,8 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     #[cfg(zcash_unstable = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(zcash_unstable = "zfuture"))]
-    tze_builder: std::marker::PhantomData<&'a ()>,
-    progress_notifier: U,
+    tze_builder: core::marker::PhantomData<&'a ()>,
+    _progress_notifier: U,
 }
 
 impl<'a, P, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
@@ -387,8 +394,8 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             #[cfg(zcash_unstable = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
-            tze_builder: std::marker::PhantomData,
-            progress_notifier: (),
+            tze_builder: core::marker::PhantomData,
+            _progress_notifier: (),
         }
     }
 
@@ -398,9 +405,10 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     /// sent represents the total steps completed so far. It will eventually send number
     /// of spends + outputs. If there's an error building the transaction, the channel is
     /// closed.
+    #[cfg(feature = "std")]
     pub fn with_progress_notifier(
         self,
-        progress_notifier: Sender<Progress>,
+        _progress_notifier: Sender<Progress>,
     ) -> Builder<'a, P, Sender<Progress>> {
         Builder {
             params: self.params,
@@ -411,7 +419,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             sapling_builder: self.sapling_builder,
             orchard_builder: self.orchard_builder,
             tze_builder: self.tze_builder,
-            progress_notifier,
+            _progress_notifier,
         }
     }
 }
@@ -639,6 +647,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     /// Upon success, returns a tuple containing the final transaction, and the
     /// [`SaplingMetadata`] generated during the build process.
     #[allow(clippy::too_many_arguments)]
+    #[cfg(feature = "circuits")]
     pub fn build<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FR: FeeRule>(
         self,
         transparent_signing_set: &TransparentSigningSet,
@@ -694,6 +703,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[cfg(feature = "circuits")]
     fn build_internal<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FE>(
         self,
         transparent_signing_set: &TransparentSigningSet,
@@ -746,7 +756,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
                                     spend_prover,
                                     output_prover,
                                     &mut rng,
-                                    self.progress_notifier,
+                                    self._progress_notifier,
                                 ),
                                 sapling_meta,
                             )
@@ -981,10 +991,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Extensio
     fn add_tze_output<G: ToPayload>(
         &mut self,
         extension_id: u32,
-        value: ZatBalance,
+        value: Zatoshis,
         guarded_by: &G,
     ) -> Result<(), Self::BuildError> {
-        self.tze_builder.add_output(extension_id, value, guarded_by)
+        self.tze_builder.add_output(extension_id, value, guarded_by);
+        Ok(())
     }
 }
 
@@ -1046,7 +1057,7 @@ mod testing {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::Infallible;
+    use core::convert::Infallible;
 
     use assert_matches::assert_matches;
     use ff::Field;
@@ -1102,8 +1113,8 @@ mod tests {
             #[cfg(zcash_unstable = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
-            tze_builder: std::marker::PhantomData,
-            progress_notifier: (),
+            tze_builder: core::marker::PhantomData,
+            _progress_notifier: (),
             orchard_builder: None,
         };
 

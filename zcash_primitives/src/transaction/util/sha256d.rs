@@ -1,5 +1,5 @@
+use core2::io::{self, Read, Write};
 use sha2::{digest::Output, Digest, Sha256};
-use std::io::{self, Read, Write};
 
 /// Abstraction over a reader which SHA-256d-hashes the data being read.
 pub struct HashReader<R: Read> {

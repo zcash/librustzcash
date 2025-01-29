@@ -1,17 +1,17 @@
 //! Types and functions for building TZE transaction components
 
-use std::fmt;
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use core::fmt;
 
 use crate::{
     extensions::transparent::{self as tze, ToPayload},
     transaction::{
         self as tx,
-        components::{
-            amount::{Amount, BalanceError},
-            tze::{Authorization, Authorized, Bundle, OutPoint, TzeIn, TzeOut},
-        },
+        components::tze::{Authorization, Authorized, Bundle, OutPoint, TzeIn, TzeOut},
     },
 };
+use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
@@ -100,13 +100,9 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
     pub fn add_output<G: ToPayload>(
         &mut self,
         extension_id: u32,
-        value: Amount,
+        value: Zatoshis,
         guarded_by: &G,
-    ) -> Result<(), Error> {
-        if value.is_negative() {
-            return Err(Error::InvalidAmount);
-        }
-
+    ) -> () {
         let (mode, payload) = guarded_by.to_payload();
         self.vout.push(TzeOut {
             value,
@@ -116,26 +112,24 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
                 payload,
             },
         });
-
-        Ok(())
     }
 
-    pub fn value_balance(&self) -> Result<Amount, BalanceError> {
+    pub fn value_balance(&self) -> Result<ZatBalance, BalanceError> {
         let total_in = self
             .vin
             .iter()
             .map(|tzi| tzi.coin.value)
-            .sum::<Option<Amount>>()
+            .sum::<Option<Zatoshis>>()
             .ok_or(BalanceError::Overflow)?;
 
         let total_out = self
             .vout
             .iter()
             .map(|tzo| tzo.value)
-            .sum::<Option<Amount>>()
+            .sum::<Option<Zatoshis>>()
             .ok_or(BalanceError::Overflow)?;
 
-        (total_in - total_out).ok_or(BalanceError::Underflow)
+        (ZatBalance::from(total_in) - ZatBalance::from(total_out)).ok_or(BalanceError::Underflow)
     }
 
     pub fn build(self) -> (Option<Bundle<Unauthorized>>, Vec<TzeSigner<'a, BuildCtx>>) {

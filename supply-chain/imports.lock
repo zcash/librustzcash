@@ -84,13 +84,6 @@ user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
-[[publisher.sapling-crypto]]
-version = "0.4.0"
-when = "2024-12-17"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
-
 [[publisher.schemerz]]
 version = "0.2.0"
 when = "2024-10-16"
@@ -344,8 +337,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_spec]]
-version = "0.1.0"
-when = "2023-12-07"
+version = "0.1.2"
+when = "2024-10-22"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
@@ -358,8 +351,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zip32]]
-version = "0.1.1"
-when = "2024-03-14"
+version = "0.1.3"
+when = "2024-12-13"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
@@ -3102,24 +3095,6 @@ aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/suppl
 who = "Sean Bowe <ewillbefull@gmail.com>"
 criteria = "safe-to-deploy"
 version = "0.3.0"
-aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
-
-[[audits.zcash.audits.redjubjub]]
-who = "Daira Emma Hopwood <daira@jacaranda.org>"
-criteria = "safe-to-deploy"
-version = "0.7.0"
-notes = """
-This crate is a thin wrapper around the `reddsa` crate, which I did not review. I also
-did not review tests or verify test vectors.
-
-The comment on `batch::Verifier::verify` has an error in the batch verification equation,
-filed as https://github.com/ZcashFoundation/redjubjub/issues/163 . It does not affect the
-implementation which just delegates to `reddsa`. `reddsa` has the same comment bug filed as
-https://github.com/ZcashFoundation/reddsa/issues/52 , but its batch verification implementation
-is correct. (I checked the latter against https://zips.z.cash/protocol/protocol.pdf#reddsabatchvalidate
-which has had previous cryptographic review by NCC group; see finding NCC-Zcash2018-009 in
-https://research.nccgroup.com/wp-content/uploads/2020/07/NCC_Group_Zcash2018_Public_Report_2019-01-30_v1.3.pdf ).
-"""
 aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
 [[audits.zcash.audits.redox_users]]

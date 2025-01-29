@@ -28,7 +28,7 @@ impl FeeRule {
 }
 
 impl super::FeeRule for FeeRule {
-    type Error = std::convert::Infallible;
+    type Error = core::convert::Infallible;
 
     fn fee_required<P: consensus::Parameters>(
         &self,

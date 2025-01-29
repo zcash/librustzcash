@@ -4,7 +4,7 @@
 //! to ensure that inputs added to a transaction do not cause fees to rise by
 //! an amount greater than their value.
 
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use zcash_primitives::transaction::fees::{transparent, zip317 as prim_zip317, FeeRule};
 use zcash_protocol::{
@@ -264,7 +264,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::Infallible, num::NonZeroUsize};
+    use core::{convert::Infallible, num::NonZeroUsize};
 
     use ::transparent::{address::Script, bundle::TxOut};
     use zcash_primitives::transaction::fees::zip317::FeeRule as Zip317FeeRule;

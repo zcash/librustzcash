@@ -10,11 +10,15 @@ edition = "2021"
 rust-version = "1.56.1"
 
 [dependencies]
-blake2b_simd = "1"
-byteorder = "1"
+core2.workspace = true
+blake2b_simd.workspace = true
 
 [lib]
 bench = false
 
 [lints]
 workspace = true
+
+[features]
+default = ["std"]
+std = []

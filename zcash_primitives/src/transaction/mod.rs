@@ -11,14 +11,13 @@ pub mod util;
 #[cfg(test)]
 mod tests;
 
+use crate::encoding::{ReadBytesExt, WriteBytesExt};
 use blake2b_simd::Hash as Blake2bHash;
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::convert::TryFrom;
-use std::fmt::Debug;
-use std::io::{self, Read, Write};
-use std::ops::Deref;
+use core::convert::TryFrom;
+use core::fmt::Debug;
+use core::ops::Deref;
+use core2::io::{self, Read, Write};
 
-use ::sapling::builder as sapling_builder;
 use ::transparent::bundle::{self as transparent, OutPoint, TxIn, TxOut};
 use zcash_encoding::{CompactSize, Vector};
 use zcash_protocol::{
@@ -34,6 +33,9 @@ use self::{
     txid::{to_txid, BlockTxCommitmentDigester, TxIdDigester},
     util::sha256d::{HashReader, HashWriter},
 };
+
+#[cfg(feature = "circuits")]
+use ::sapling::builder as sapling_builder;
 
 #[cfg(zcash_unstable = "zfuture")]
 use self::components::tze::{self, TzeIn, TzeOut};
@@ -78,12 +80,12 @@ pub enum TxVersion {
 
 impl TxVersion {
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let header = reader.read_u32::<LittleEndian>()?;
+        let header = reader.read_u32_le()?;
         let overwintered = (header >> 31) == 1;
         let version = header & 0x7FFFFFFF;
 
         if overwintered {
-            match (version, reader.read_u32::<LittleEndian>()?) {
+            match (version, reader.read_u32_le()?) {
                 (OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID) => Ok(TxVersion::Overwinter),
                 (SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID) => Ok(TxVersion::Sapling),
                 (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::Zip225),
@@ -134,10 +136,10 @@ impl TxVersion {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_u32::<LittleEndian>(self.header())?;
+        writer.write_u32_le(self.header())?;
         match self {
             TxVersion::Sprout(_) => Ok(()),
-            _ => writer.write_u32::<LittleEndian>(self.version_group_id()),
+            _ => writer.write_u32_le(self.version_group_id()),
         }
     }
 
@@ -227,6 +229,7 @@ impl Authorization for Authorized {
 /// transactions, which commit to the Sapling proofs in the transaction digest.
 pub struct Unauthorized;
 
+#[cfg(feature = "circuits")]
 impl Authorization for Unauthorized {
     type TransparentAuth = ::transparent::builder::Unauthorized;
     type SaplingAuth =
@@ -602,9 +605,9 @@ impl Transaction {
     ) -> io::Result<Self> {
         let transparent_bundle = Self::read_transparent(&mut reader)?;
 
-        let lock_time = reader.read_u32::<LittleEndian>()?;
+        let lock_time = reader.read_u32_le()?;
         let expiry_height: BlockHeight = if version.has_overwinter() {
-            reader.read_u32::<LittleEndian>()?.into()
+            reader.read_u32_le()?.into()
         } else {
             0u32.into()
         };
@@ -725,16 +728,13 @@ impl Transaction {
     }
 
     fn read_v5_header_fragment<R: Read>(mut reader: R) -> io::Result<(BranchId, u32, BlockHeight)> {
-        let consensus_branch_id = reader.read_u32::<LittleEndian>().and_then(|value| {
-            BranchId::try_from(value).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "invalid consensus branch id: ".to_owned() + e,
-                )
+        let consensus_branch_id = reader.read_u32_le().and_then(|value| {
+            BranchId::try_from(value).map_err(|_e| {
+                io::Error::new(io::ErrorKind::InvalidInput, "invalid consensus branch id")
             })
         })?;
-        let lock_time = reader.read_u32::<LittleEndian>()?;
-        let expiry_height: BlockHeight = reader.read_u32::<LittleEndian>()?.into();
+        let lock_time = reader.read_u32_le()?;
+        let expiry_height: BlockHeight = reader.read_u32_le()?.into();
         Ok((consensus_branch_id, lock_time, expiry_height))
     }
 
@@ -775,9 +775,9 @@ impl Transaction {
         self.version.write(&mut writer)?;
 
         self.write_transparent(&mut writer)?;
-        writer.write_u32::<LittleEndian>(self.lock_time)?;
+        writer.write_u32_le(self.lock_time)?;
         if self.version.has_overwinter() {
-            writer.write_u32::<LittleEndian>(u32::from(self.expiry_height))?;
+            writer.write_u32_le(u32::from(self.expiry_height))?;
         }
 
         sapling_serialization::write_v4_components(
@@ -842,9 +842,9 @@ impl Transaction {
 
     pub fn write_v5_header<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.version.write(&mut writer)?;
-        writer.write_u32::<LittleEndian>(u32::from(self.consensus_branch_id))?;
-        writer.write_u32::<LittleEndian>(self.lock_time)?;
-        writer.write_u32::<LittleEndian>(u32::from(self.expiry_height))?;
+        writer.write_u32_le(u32::from(self.consensus_branch_id))?;
+        writer.write_u32_le(self.lock_time)?;
+        writer.write_u32_le(u32::from(self.expiry_height))?;
         Ok(())
     }
 

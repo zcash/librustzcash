@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use ff::PrimeField;
 

@@ -1,4 +1,4 @@
-use std::iter;
+use core::iter;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use ff::Field;

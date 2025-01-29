@@ -21,7 +21,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 equihash.workspace = true
 zcash_address.workspace = true
-zcash_encoding = { workspace = true, features = ["std"] }
+zcash_encoding.workspace = true
 zcash_protocol.workspace = true
 zip32.workspace = true
 
@@ -37,17 +37,17 @@ sha2.workspace = true
 
 # - Logging and metrics
 memuse.workspace = true
-tracing.workspace = true
+tracing = { workspace = true, default-features = false }
 
 # - Secret management
 subtle.workspace = true
 
 # - Shielded protocols
 ff.workspace = true
-group = { workspace = true, features = ["wnaf-memuse"] }
+group.workspace = true
 jubjub.workspace = true
 nonempty.workspace = true
-orchard = { workspace = true, features = ["circuit"] }
+orchard.workspace = true
 sapling.workspace = true
 zcash_spec.workspace = true
 
@@ -72,22 +72,23 @@ secp256k1 = { workspace = true, optional = true }
 getset.workspace = true
 
 # - Documentation
-document-features.workspace = true
+document-features = { workspace = true, optional = true }
 
 # - Encodings
 bs58.workspace = true
-byteorder.workspace = true
 hex.workspace = true
 
 # - Shielded protocols
-redjubjub = "0.7"
+redjubjub.workspace = true
 
 # - Transparent protocol
 ripemd.workspace = true
 
 # - ZIP 32
-aes.workspace = true
 fpe.workspace = true
+
+# No-std support
+core2.workspace = true
 
 [dependencies.zcash_note_encryption]
 workspace = true
@@ -100,6 +101,7 @@ incrementalmerkletree = { workspace = true, features = ["legacy-api", "test-depe
 proptest.workspace = true
 assert_matches.workspace = true
 rand_xorshift.workspace = true
+transparent = { workspace = true, features = ["test-dependencies"] }
 sapling = { workspace = true, features = ["test-dependencies"] }
 orchard = { workspace = true, features = ["test-dependencies"] }
 zcash_protocol = { workspace = true, features = ["test-dependencies"] }
@@ -108,7 +110,11 @@ zcash_protocol = { workspace = true, features = ["test-dependencies"] }
 pprof = { version = "0.13", features = ["criterion", "flamegraph"] }
 
 [features]
-default = ["multicore"]
+default = ["multicore", "std", "circuits"]
+std = ["document-features", "redjubjub/std"]
+
+## Enables creating proofs
+circuits = ["orchard/circuit", "sapling/circuit"]
 
 ## Enables multithreading support for creating proofs.
 multicore = ["orchard/multicore", "sapling/multicore"]
@@ -127,6 +133,7 @@ temporary-zcashd = []
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
     "dep:proptest",
+    "incrementalmerkletree/test-dependencies",
     "orchard/test-dependencies",
     "sapling/test-dependencies",
     "transparent/test-dependencies",

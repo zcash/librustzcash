@@ -1,8 +1,10 @@
-/// Functions for parsing & serialization of Orchard transaction components.
-use std::convert::TryFrom;
-use std::io::{self, Read, Write};
+//! Functions for parsing & serialization of Orchard transaction components.
+use crate::encoding::ReadBytesExt;
 
-use byteorder::{ReadBytesExt, WriteBytesExt};
+use alloc::vec::Vec;
+use core::convert::TryFrom;
+use core2::io::{self, Read, Write};
+
 use nonempty::NonEmpty;
 
 use orchard::{
@@ -90,7 +92,7 @@ pub fn read_value_commitment<R: Read>(mut reader: R) -> io::Result<ValueCommitme
     if cv.is_none().into() {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "invalid Pallas point for value commitment".to_owned(),
+            "invalid Pallas point for value commitment",
         ))
     } else {
         Ok(cv.unwrap())
@@ -104,7 +106,7 @@ pub fn read_nullifier<R: Read>(mut reader: R) -> io::Result<Nullifier> {
     if nullifier_ctopt.is_none().into() {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "invalid Pallas point for nullifier".to_owned(),
+            "invalid Pallas point for nullifier",
         ))
     } else {
         Ok(nullifier_ctopt.unwrap())
@@ -114,12 +116,8 @@ pub fn read_nullifier<R: Read>(mut reader: R) -> io::Result<Nullifier> {
 pub fn read_verification_key<R: Read>(mut reader: R) -> io::Result<VerificationKey<SpendAuth>> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
-    VerificationKey::try_from(bytes).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "invalid verification key".to_owned(),
-        )
-    })
+    VerificationKey::try_from(bytes)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid verification key"))
 }
 
 pub fn read_cmx<R: Read>(mut reader: R) -> io::Result<ExtractedNoteCommitment> {
@@ -129,7 +127,7 @@ pub fn read_cmx<R: Read>(mut reader: R) -> io::Result<ExtractedNoteCommitment> {
     Option::from(cmx).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
-            "invalid Pallas base for field cmx".to_owned(),
+            "invalid Pallas base for field cmx",
         )
     })
 }
@@ -168,23 +166,15 @@ pub fn read_action_without_auth<R: Read>(mut reader: R) -> io::Result<Action<()>
 pub fn read_flags<R: Read>(mut reader: R) -> io::Result<Flags> {
     let mut byte = [0u8; 1];
     reader.read_exact(&mut byte)?;
-    Flags::from_byte(byte[0]).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "invalid Orchard flags".to_owned(),
-        )
-    })
+    Flags::from_byte(byte[0])
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid Orchard flags"))
 }
 
 pub fn read_anchor<R: Read>(mut reader: R) -> io::Result<Anchor> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
-    Option::from(Anchor::from_bytes(bytes)).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "invalid Orchard anchor".to_owned(),
-        )
-    })
+    Option::from(Anchor::from_bytes(bytes))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid Orchard anchor"))
 }
 
 pub fn read_signature<R: Read, T: SigType>(mut reader: R) -> io::Result<Signature<T>> {
@@ -209,7 +199,7 @@ pub fn write_v5_bundle<W: Write>(
         Vector::write(
             &mut writer,
             bundle.authorization().proof().as_ref(),
-            |w, b| w.write_u8(*b),
+            |w, b| w.write_all(&[*b]),
         )?;
         Array::write(
             &mut writer,

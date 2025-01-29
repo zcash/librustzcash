@@ -78,6 +78,12 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-run"
 delta = "4.5.0 -> 4.4.18"
 
+[[audits.cpp_demangle]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-run"
+delta = "0.4.3 -> 0.4.4"
+notes = "No added unsafe code; adds support for additional c++23 types."
+
 [[audits.darling]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -218,6 +224,12 @@ delta = "0.1.5 -> 0.1.6"
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-run"
 delta = "0.11.17 -> 0.11.19"
+
+[[audits.inferno]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-run"
+delta = "0.11.19 -> 0.11.21"
+notes = "No added unsafe code."
 
 [[audits.is-terminal]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
@@ -412,6 +424,15 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.8.3 -> 0.8.4"
 
+[[audits.rgb]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-run"
+delta = "0.8.37 -> 0.8.50"
+notes = """
+Some clearly-marked unsafe code is moved; adds safer alternative to the
+`as-bytes` feature (which is still enabled by default)
+"""
+
 [[audits.rustc-demangle]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
@@ -517,6 +538,12 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "0.5.6 -> 0.5.7"
 notes = "The new uses of unsafe to access getsockopt/setsockopt look reasonable."
+
+[[audits.symbolic-common]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-run"
+delta = "12.9.2 -> 12.13.3"
+notes = "Just minor code & Cargo.toml cleanups."
 
 [[audits.syn]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"

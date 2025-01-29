@@ -1,6 +1,6 @@
 //! Change strategies designed for use with a fixed fee.
 
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use zcash_primitives::transaction::fees::{fixed::FeeRule as FixedFeeRule, transparent};
 use zcash_protocol::{

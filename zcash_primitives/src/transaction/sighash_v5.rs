@@ -1,5 +1,5 @@
-use blake2b_simd::{Hash as Blake2bHash, Params, State};
-use std::io::Write;
+use blake2b_simd::{Hash as Blake2bHash, Params};
+use core2::io::Write;
 
 use ::transparent::{
     bundle::{self as transparent, TxOut},
@@ -10,19 +10,25 @@ use ::transparent::{
 };
 use zcash_encoding::Array;
 
-use crate::transaction::{
-    sighash::SignableInput,
-    txid::{
-        hash_transparent_txid_data, to_hash, transparent_outputs_hash, transparent_prevout_hash,
-        transparent_sequence_hash, ZCASH_TRANSPARENT_HASH_PERSONALIZATION,
+use crate::{
+    encoding::StateWrite,
+    transaction::{
+        sighash::SignableInput,
+        txid::{
+            hash_transparent_txid_data, to_hash, transparent_outputs_hash,
+            transparent_prevout_hash, transparent_sequence_hash,
+            ZCASH_TRANSPARENT_HASH_PERSONALIZATION,
+        },
+        Authorization, TransactionData, TransparentDigests, TxDigests,
     },
-    Authorization, TransactionData, TransparentDigests, TxDigests,
 };
 
 #[cfg(zcash_unstable = "zfuture")]
 use {
-    crate::transaction::{components::tze, TzeDigests},
-    byteorder::WriteBytesExt,
+    crate::{
+        encoding::WriteBytesExt,
+        transaction::{components::tze, TzeDigests},
+    },
     zcash_encoding::{CompactSize, Vector},
 };
 
@@ -33,8 +39,8 @@ const ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxTrScripts
 #[cfg(zcash_unstable = "zfuture")]
 const ZCASH_TZE_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash__TzeInHash";
 
-fn hasher(personal: &[u8; 16]) -> State {
-    Params::new().hash_length(32).personal(personal).to_state()
+fn hasher(personal: &[u8; 16]) -> StateWrite {
+    StateWrite(Params::new().hash_length(32).personal(personal).to_state())
 }
 
 /// Implements [ZIP 244 section S.2](https://zips.z.cash/zip-0244#s-2-transparent-sig-digest).
