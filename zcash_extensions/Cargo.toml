@@ -32,3 +32,6 @@ transparent-inputs = []
 
 [lib]
 bench = false
+
+[lints]
+workspace = true

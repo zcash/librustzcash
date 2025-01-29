@@ -31,3 +31,6 @@ multicore = ["zcash_primitives/multicore"]
 
 ## Enables use of the transparent payment protocol for inputs.
 transparent-inputs = ["zcash_primitives/transparent-inputs"]
+
+[lints]
+workspace = true

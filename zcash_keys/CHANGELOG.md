@@ -13,6 +13,7 @@ and this library adheres to Rust's notion of
 - `zcash_keys::Address::to_transparent_address`
 
 ### Changed
+- MSRV is now 1.81.0.
 - Migrated to `nonempty 0.11`
 - `zcash_keys::keys::UnifiedAddressRequest` has been substantially modified;
   instead of a collection of boolean flags, it is now a collection of

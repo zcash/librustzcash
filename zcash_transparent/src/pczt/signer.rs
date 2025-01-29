@@ -32,7 +32,7 @@ impl super::Input {
             value: self.value,
         });
 
-        let msg = secp256k1::Message::from_slice(&sighash).expect("32 bytes");
+        let msg = secp256k1::Message::from_digest_slice(&sighash).expect("32 bytes");
         let sig = secp.sign_ecdsa(&msg, sk);
 
         // Signature has to have the SighashType appended to it.

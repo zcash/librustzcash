@@ -46,6 +46,7 @@ use {
     core::ops::Range,
 };
 
+#[allow(clippy::duplicated_attributes, reason = "False positive")]
 #[derive(Delegate)]
 #[delegate(InputSource, target = "wallet_db")]
 #[delegate(WalletRead, target = "wallet_db")]

@@ -1438,7 +1438,7 @@ impl<Cache, DsFactory> TestBuilder<Cache, DsFactory> {
     ///
     /// - Must not be called twice.
     /// - Must be called before [`Self::with_account_from_sapling_activation`] or
-    /// [`Self::with_account_having_current_birthday`].
+    ///   [`Self::with_account_having_current_birthday`].
     ///
     /// # Examples
     ///
@@ -2035,7 +2035,7 @@ fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
         CompactSaplingOutput {
             cmu,
             ephemeral_key,
-            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+            ciphertext: enc_ciphertext[..52].to_vec(),
         },
         note,
     )
@@ -2067,7 +2067,7 @@ fn compact_orchard_action<R: RngCore + CryptoRng>(
             nullifier: compact_action.nullifier().to_bytes().to_vec(),
             cmx: compact_action.cmx().to_bytes().to_vec(),
             ephemeral_key: compact_action.ephemeral_key().0.to_vec(),
-            ciphertext: compact_action.enc_ciphertext().as_ref()[..52].to_vec(),
+            ciphertext: compact_action.enc_ciphertext()[..52].to_vec(),
         },
         note,
     )

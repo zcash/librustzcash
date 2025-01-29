@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- MSRV is now 1.81.0.
+
 ## [0.21.0] - 2024-12-16
 ### Added
 - `zcash_proofs::prover::LocalTxProver::verifying_keys`

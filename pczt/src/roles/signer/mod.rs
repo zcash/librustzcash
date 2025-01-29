@@ -16,7 +16,7 @@ use crate::{
     Pczt,
 };
 
-use super::tx_extractor::determine_lock_time;
+use crate::common::determine_lock_time;
 
 const V5_TX_VERSION: u32 = 5;
 const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
@@ -266,8 +266,7 @@ pub(crate) fn pczt_to_tx_data(
     Ok(TransactionData::from_parts(
         version,
         consensus_branch_id,
-        determine_lock_time(global, transparent.inputs())
-            .map_err(|_| Error::IncompatibleLockTimes)?,
+        determine_lock_time(global, transparent.inputs()).ok_or(Error::IncompatibleLockTimes)?,
         global.expiry_height.into(),
         transparent_bundle,
         None,

@@ -127,7 +127,7 @@ impl compact_formats::CompactSaplingOutput {
     /// [`CompactOutput.cmu`]: #structfield.cmu
     pub fn cmu(&self) -> Result<ExtractedNoteCommitment, ()> {
         let mut repr = [0; 32];
-        repr.as_mut().copy_from_slice(&self.cmu[..]);
+        repr.copy_from_slice(&self.cmu[..]);
         Option::from(ExtractedNoteCommitment::from_bytes(&repr)).ok_or(())
     }
 

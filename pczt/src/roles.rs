@@ -15,6 +15,8 @@ pub mod prover;
 #[cfg(feature = "signer")]
 pub mod signer;
 
+pub mod low_level_signer;
+
 pub mod combiner;
 
 #[cfg(feature = "spend-finalizer")]

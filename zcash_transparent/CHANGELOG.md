@@ -14,6 +14,9 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_transparent::pczt::Bip32Derivation::extract_bip_44_fields`
 
+### Changed
+- MSRV is now 1.81.0.
+
 ## [0.1.0] - 2024-12-16
 
 The entries below are relative to the `zcash_primitives` crate as of the tag

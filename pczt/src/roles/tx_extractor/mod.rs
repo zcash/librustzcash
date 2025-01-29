@@ -8,7 +8,7 @@ use zcash_primitives::transaction::{
 };
 use zcash_protocol::consensus::BranchId;
 
-use crate::{Pczt, V5_TX_VERSION, V5_VERSION_GROUP_ID};
+use crate::{common::determine_lock_time, Pczt, V5_TX_VERSION, V5_VERSION_GROUP_ID};
 
 mod orchard;
 pub use self::orchard::OrchardError;
@@ -85,7 +85,7 @@ impl<'a> TransactionExtractor<'a> {
             .map_err(|_| Error::Global(GlobalError::UnknownConsensusBranchId))?;
 
         let lock_time = determine_lock_time(&pczt.global, &pczt.transparent.inputs)
-            .map_err(|_| Error::IncompatibleLockTimes)?;
+            .ok_or(Error::IncompatibleLockTimes)?;
 
         let transparent_bundle =
             transparent::extract_bundle(pczt.transparent).map_err(Error::Transparent)?;
@@ -172,88 +172,4 @@ pub enum Error {
 pub enum GlobalError {
     UnknownConsensusBranchId,
     UnsupportedTxVersion { version: u32, version_group_id: u32 },
-}
-
-/// Determines the lock time for the transaction.
-///
-/// Implemented following the specification in [BIP 370], with the rationale that this
-/// makes integration of PCZTs simpler for codebases that already support PSBTs.
-///
-/// [BIP 370]: https://github.com/bitcoin/bips/blob/master/bip-0370.mediawiki#determining-lock-time
-pub(crate) fn determine_lock_time<L: LockTimeInput>(
-    global: &crate::common::Global,
-    inputs: &[L],
-) -> Result<u32, ()> {
-    // The nLockTime field of a transaction is determined by inspecting the
-    // `Global.fallback_lock_time` and each input's `required_time_lock_time` and
-    // `required_height_lock_time` fields.
-
-    // If one or more inputs have a `required_time_lock_time` or `required_height_lock_time`,
-    let have_required_lock_time = inputs.iter().any(|input| {
-        input.required_time_lock_time().is_some() || input.required_height_lock_time().is_some()
-    });
-    // then the field chosen is the one which is supported by all of the inputs. This can
-    // be determined by looking at all of the inputs which specify a locktime in either of
-    // those fields, and choosing the field which is present in all of those inputs.
-    // Inputs not specifying a lock time field can take both types of lock times, as can
-    // those that specify both.
-    let time_lock_time_unsupported = inputs
-        .iter()
-        .any(|input| input.required_height_lock_time().is_some());
-    let height_lock_time_unsupported = inputs
-        .iter()
-        .any(|input| input.required_time_lock_time().is_some());
-
-    // The lock time chosen is then the maximum value of the chosen type of lock time.
-    match (
-        have_required_lock_time,
-        time_lock_time_unsupported,
-        height_lock_time_unsupported,
-    ) {
-        (true, true, true) => Err(()),
-        (true, false, true) => Ok(inputs
-            .iter()
-            .filter_map(|input| input.required_time_lock_time())
-            .max()
-            .expect("iterator is non-empty because have_required_lock_time is true")),
-        // If a PSBT has both types of locktimes possible because one or more inputs
-        // specify both `required_time_lock_time` and `required_height_lock_time`, then a
-        // locktime determined by looking at the `required_height_lock_time` fields of the
-        // inputs must be chosen.
-        (true, _, false) => Ok(inputs
-            .iter()
-            .filter_map(|input| input.required_height_lock_time())
-            .max()
-            .expect("iterator is non-empty because have_required_lock_time is true")),
-        // If none of the inputs have a `required_time_lock_time` and
-        // `required_height_lock_time`, then `Global.fallback_lock_time` must be used. If
-        // `Global.fallback_lock_time` is not provided, then it is assumed to be 0.
-        (false, _, _) => Ok(global.fallback_lock_time.unwrap_or(0)),
-    }
-}
-
-pub(crate) trait LockTimeInput {
-    fn required_time_lock_time(&self) -> Option<u32>;
-    fn required_height_lock_time(&self) -> Option<u32>;
-}
-
-impl LockTimeInput for crate::transparent::Input {
-    fn required_time_lock_time(&self) -> Option<u32> {
-        self.required_time_lock_time
-    }
-
-    fn required_height_lock_time(&self) -> Option<u32> {
-        self.required_height_lock_time
-    }
-}
-
-#[cfg(feature = "transparent")]
-impl LockTimeInput for ::transparent::pczt::Input {
-    fn required_time_lock_time(&self) -> Option<u32> {
-        *self.required_time_lock_time()
-    }
-
-    fn required_height_lock_time(&self) -> Option<u32> {
-        *self.required_height_lock_time()
-    }
 }

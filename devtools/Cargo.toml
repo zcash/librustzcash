@@ -28,7 +28,7 @@ zip32.workspace = true
 
 # Transparent
 secp256k1.workspace = true
-transparent.workspace = true
+transparent = { workspace = true, features = ["test-dependencies"] }
 
 # Sprout
 ed25519-zebra = "4"
@@ -55,3 +55,6 @@ uint = "0.9"
 [[bin]]
 name = "zcash-inspect"
 path = "src/bin/inspect/main.rs"
+
+[lints]
+workspace = true

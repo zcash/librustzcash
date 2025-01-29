@@ -876,9 +876,6 @@ mod tests {
         value::{testing::arb_zatoshis, Zatoshis},
     };
 
-    #[cfg(feature = "local-consensus")]
-    use zcash_protocol::{local_consensus::LocalNetwork, BlockHeight};
-
     use super::{
         memo_from_base64, memo_to_base64,
         parse::{parse_amount, zcashparam, Param},
@@ -1039,21 +1036,10 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "local-consensus")]
     #[test]
     fn test_zip321_spec_regtest_valid_examples() {
-        let params = LocalNetwork {
-            overwinter: Some(BlockHeight::from_u32(1)),
-            sapling: Some(BlockHeight::from_u32(1)),
-            blossom: Some(BlockHeight::from_u32(1)),
-            heartwood: Some(BlockHeight::from_u32(1)),
-            canopy: Some(BlockHeight::from_u32(1)),
-            nu5: Some(BlockHeight::from_u32(1)),
-            nu6: Some(BlockHeight::from_u32(1)),
-            z_future: Some(BlockHeight::from_u32(1)),
-        };
         let valid_1 = "zcash:zregtestsapling1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle7505hlz3?amount=1&memo=VGhpcyBpcyBhIHNpbXBsZSBtZW1vLg&message=Thank%20you%20for%20your%20purchase";
-        let v1r = TransactionRequest::from_uri(&params, valid_1).unwrap();
+        let v1r = TransactionRequest::from_uri(valid_1).unwrap();
         assert_eq!(
             v1r.payments.get(&0).map(|p| p.amount),
             Some(Zatoshis::const_from_u64(100000000))

@@ -506,7 +506,7 @@ pub(crate) fn mark_transparent_utxo_spent(
 ) -> Result<bool, SqliteClientError> {
     let spend_params = named_params![
         ":spent_in_tx": spent_in_tx.0,
-        ":prevout_txid": outpoint.hash().as_ref(),
+        ":prevout_txid": outpoint.hash(),
         ":prevout_idx": outpoint.n(),
     ];
     let mut stmt_mark_transparent_utxo_spent = conn.prepare_cached(
@@ -533,7 +533,7 @@ pub(crate) fn mark_transparent_utxo_spent(
          )",
     )?;
     stmt_remove_spend_detection.execute(named_params![
-        ":prevout_txid": outpoint.hash().as_ref(),
+        ":prevout_txid": outpoint.hash(),
         ":prevout_idx": outpoint.n(),
     ])?;
 
