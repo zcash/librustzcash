@@ -115,7 +115,7 @@ impl NonHardenedChildIndex {
     /// Adds the given delta to this index, returning a maximum possible value of
     /// [`NonHardenedChildIndex::MAX`].
     pub const fn saturating_add(&self, delta: u32) -> Self {
-        let idx = self.0 + delta;
+        let idx = self.0.saturating_add(delta);
         if idx > Self::MAX.0 {
             Self::MAX
         } else {
