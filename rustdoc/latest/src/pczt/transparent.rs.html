@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `pczt/src/transparent.rs`."><title>transparent.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-5d1d17d0.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="pczt" data-themes="" data-resource-suffix="" data-rustdoc-version="1.86.0-nightly (f3d1d47fd 2025-01-20)" data-channel="nightly" data-search-js="search-ccb196c1.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">pczt/</div>transparent.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `pczt/src/transparent.rs`."><title>transparent.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-e7950ecc.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="pczt" data-themes="" data-resource-suffix="" data-rustdoc-version="1.86.0-nightly (bf1b174e7 2025-01-28)" data-channel="nightly" data-search-js="search-ccb196c1.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">pczt/</div>transparent.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -449,7 +449,11 @@
 <a href="#448" id="448">448</a>
 <a href="#449" id="449">449</a>
 <a href="#450" id="450">450</a>
-<a href="#451" id="451">451</a></pre></div><pre class="rust"><code><span class="kw">use </span>alloc::collections::BTreeMap;
+<a href="#451" id="451">451</a>
+<a href="#452" id="452">452</a>
+<a href="#453" id="453">453</a>
+<a href="#454" id="454">454</a>
+<a href="#455" id="455">455</a></pre></div><pre class="rust"><code><span class="kw">use </span>alloc::collections::BTreeMap;
 <span class="kw">use </span>alloc::string::String;
 <span class="kw">use </span>alloc::vec::Vec;
 <span class="kw">use </span>core::cmp::Ordering;
@@ -492,6 +496,7 @@
     /// - This is set by the Constructor.
     /// - If omitted, the sequence number is assumed to be the final sequence number
     ///   (`0xffffffff`).
+    </span><span class="attr">#[getset(get = <span class="string">"pub"</span>)]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) sequence: <span class="prelude-ty">Option</span>&lt;u32&gt;,
 
     <span class="doccomment">/// The minimum Unix timstamp that this input requires to be set as the transaction's
@@ -517,7 +522,8 @@
     // needed for computing the binding signatures.
     </span><span class="attr">#[getset(get = <span class="string">"pub"</span>)]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) value: u64,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) script_pubkey: Vec&lt;u8&gt;,
+    <span class="attr">#[getset(get = <span class="string">"pub"</span>)]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) script_pubkey: Vec&lt;u8&gt;,
 
     <span class="doccomment">/// The script required to spend this output, if it is P2SH.
     ///
@@ -590,8 +596,10 @@
     // These are required fields that are part of the final transaction, and are filled in
     // by the Constructor when adding an output.
     //
+    </span><span class="attr">#[getset(get = <span class="string">"pub"</span>)]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) value: u64,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) script_pubkey: Vec&lt;u8&gt;,
+    <span class="attr">#[getset(get = <span class="string">"pub"</span>)]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) script_pubkey: Vec&lt;u8&gt;,
 
     <span class="doccomment">/// The script required to spend this output, if it is P2SH.
     ///

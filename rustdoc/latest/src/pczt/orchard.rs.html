@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `pczt/src/orchard.rs`."><title>orchard.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-5d1d17d0.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="pczt" data-themes="" data-resource-suffix="" data-rustdoc-version="1.86.0-nightly (f3d1d47fd 2025-01-20)" data-channel="nightly" data-search-js="search-ccb196c1.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">pczt/</div>orchard.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `pczt/src/orchard.rs`."><title>orchard.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-e7950ecc.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="pczt" data-themes="" data-resource-suffix="" data-rustdoc-version="1.86.0-nightly (bf1b174e7 2025-01-28)" data-channel="nightly" data-search-js="search-ccb196c1.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">pczt/</div>orchard.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -561,7 +561,16 @@
 <a href="#560" id="560">560</a>
 <a href="#561" id="561">561</a>
 <a href="#562" id="562">562</a>
-<a href="#563" id="563">563</a></pre></div><pre class="rust"><code><span class="kw">use </span>alloc::collections::BTreeMap;
+<a href="#563" id="563">563</a>
+<a href="#564" id="564">564</a>
+<a href="#565" id="565">565</a>
+<a href="#566" id="566">566</a>
+<a href="#567" id="567">567</a>
+<a href="#568" id="568">568</a>
+<a href="#569" id="569">569</a>
+<a href="#570" id="570">570</a>
+<a href="#571" id="571">571</a>
+<a href="#572" id="572">572</a></pre></div><pre class="rust"><code><span class="kw">use </span>alloc::collections::BTreeMap;
 <span class="kw">use </span>alloc::string::String;
 <span class="kw">use </span>alloc::vec::Vec;
 <span class="kw">use </span>core::cmp::Ordering;
@@ -596,6 +605,7 @@
     ///
     /// This is set by the Creator. The Constructor MUST only add spends and outputs that
     /// are consistent with these flags (i.e. are dummies as appropriate).
+    </span><span class="attr">#[getset(get = <span class="string">"pub"</span>)]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) flags: u8,
 
     <span class="doccomment">/// The net value of Orchard spends minus outputs.
@@ -603,11 +613,13 @@
     /// This is initialized by the Creator, and updated by the Constructor as spends or
     /// outputs are added to the PCZT. It enables per-spend and per-output values to be
     /// redacted from the PCZT after they are no longer necessary.
+    </span><span class="attr">#[getset(get = <span class="string">"pub"</span>)]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) value_sum: (u64, bool),
 
     <span class="doccomment">/// The Orchard anchor for this transaction.
     ///
     /// Set by the Creator.
+    </span><span class="attr">#[getset(get = <span class="string">"pub"</span>)]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) anchor: [u8; <span class="number">32</span>],
 
     <span class="doccomment">/// The Orchard bundle proof.
@@ -630,6 +642,7 @@
     // These are required fields that are part of the final transaction, and are filled in
     // by the Constructor when adding an output.
     //
+    </span><span class="attr">#[getset(get = <span class="string">"pub"</span>)]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) cv_net: [u8; <span class="number">32</span>],
     <span class="attr">#[getset(get = <span class="string">"pub"</span>)]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) spend: Spend,
@@ -660,7 +673,8 @@
     //
     </span><span class="attr">#[getset(get = <span class="string">"pub"</span>)]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) nullifier: [u8; <span class="number">32</span>],
-    <span class="kw">pub</span>(<span class="kw">crate</span>) rk: [u8; <span class="number">32</span>],
+    <span class="attr">#[getset(get = <span class="string">"pub"</span>)]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) rk: [u8; <span class="number">32</span>],
 
     <span class="doccomment">/// The spend authorization signature.
     ///
@@ -746,18 +760,22 @@
     // These are required fields that are part of the final transaction, and are filled in
     // by the Constructor when adding an output.
     //
+    </span><span class="attr">#[getset(get = <span class="string">"pub"</span>)]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) cmx: [u8; <span class="number">32</span>],
-    <span class="kw">pub</span>(<span class="kw">crate</span>) ephemeral_key: [u8; <span class="number">32</span>],
+    <span class="attr">#[getset(get = <span class="string">"pub"</span>)]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) ephemeral_key: [u8; <span class="number">32</span>],
     <span class="doccomment">/// The encrypted note plaintext for the output.
     ///
     /// Encoded as a `Vec&lt;u8&gt;` because its length depends on the transaction version.
     ///
     /// Once we have memo bundles, we will be able to set memos independently of Outputs.
     /// For now, the Constructor sets both at the same time.
+    </span><span class="attr">#[getset(get = <span class="string">"pub"</span>)]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) enc_ciphertext: Vec&lt;u8&gt;,
     <span class="doccomment">/// The encrypted note plaintext for the output.
     ///
     /// Encoded as a `Vec&lt;u8&gt;` because its length depends on the transaction version.
+    </span><span class="attr">#[getset(get = <span class="string">"pub"</span>)]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) out_ciphertext: Vec&lt;u8&gt;,
 
     <span class="doccomment">/// The [raw encoding] of the Orchard payment address that will receive the output.
