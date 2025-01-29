@@ -282,7 +282,6 @@ pub fn merkle_path_from_slice<Node: HashSer, const DEPTH: u8>(
     // have provided more information than they should have, indicating
     // a bug downstream
     if witness.is_empty() {
-        let _path_len = auth_path.len();
         MerklePath::from_parts(auth_path, position).map_err(|_| {
             io::Error::new(
                 io::ErrorKind::InvalidData,

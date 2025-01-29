@@ -5,7 +5,6 @@ use alloc::vec::Vec;
 use core::convert::TryFrom;
 use core2::io::{self, Read, Write};
 
-//use byteorder::{ReadBytesExt, WriteBytesExt};
 use nonempty::NonEmpty;
 
 use orchard::{

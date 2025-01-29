@@ -44,7 +44,7 @@ subtle.workspace = true
 
 # - Shielded protocols
 ff.workspace = true
-group.workspace = true # = { workspace = true, features = ["wnaf-memuse"] }
+group.workspace = true
 jubjub.workspace = true
 nonempty.workspace = true
 orchard.workspace = true
