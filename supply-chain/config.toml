@@ -1246,7 +1246,7 @@ version = "12.9.2"
 criteria = "safe-to-run"
 
 [[exemptions.symbolic-demangle]]
-version = "12.9.2"
+version = "12.13.3"
 criteria = "safe-to-run"
 
 [[exemptions.syn]]
