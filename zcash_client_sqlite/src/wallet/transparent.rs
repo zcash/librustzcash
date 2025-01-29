@@ -218,8 +218,13 @@ pub(crate) fn find_gap_start(
             )
             SELECT
                 transparent_child_index + 1,
+                -- both next_child_index and transparent_child_index are used indices,
+                -- so the gap between them is one less than their difference
                 next_child_index - transparent_child_index - 1 AS gap_len
             FROM offsets
+            -- if gap_len is equal to the gap limit, then we have found a gap.
+            -- if next_child_index is NULL, then we have reached the end of
+            -- the allocated indices (the remainder of the index space is a gap).
             WHERE gap_len >= :gap_limit OR next_child_index IS NULL
             ORDER BY transparent_child_index
             LIMIT 1

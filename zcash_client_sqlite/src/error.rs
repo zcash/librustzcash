@@ -117,9 +117,9 @@ pub enum SqliteClientError {
     /// A note selection query contained an invalid constant or was otherwise not supported.
     NoteFilterInvalid(NoteFilter),
 
-    /// The proposal cannot be constructed until transactions with previously reserved
-    /// ephemeral address outputs have been mined. The error contains the index that could not
-    /// safely be reserved.
+    /// An address cannot be reserved, or a proposal cannot be constructed until a transaction
+    /// containing outputs belonging to a previously reserved address has been mined. The error
+    /// contains the index that could not safely be reserved.
     #[cfg(feature = "transparent-inputs")]
     ReachedGapLimit(u32),
 
@@ -185,8 +185,8 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::NoteFilterInvalid(s) => write!(f, "Could not evaluate filter query: {:?}", s),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::ReachedGapLimit(bad_index) => write!(f,
-                "The proposal cannot be constructed until transactions with outputs to previously reserved ephemeral addresses have been mined. \
-                 The ephemeral address at index {bad_index} could not be safely reserved.",
+                "The proposal cannot be constructed until a transaction with outputs to a previously reserved addresse has been mined. \
+                 The address at index {bad_index} could not be safely reserved.",
             ),
             SqliteClientError::AddressReuse(address_str, txids) => {
                 write!(f, "The address {address_str} previously used in txid(s) {:?} would be reused.", txids)
