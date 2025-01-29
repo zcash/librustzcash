@@ -641,8 +641,8 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
     }
 
     let (t_inputs_len, t_outputs_len) = (
-        transparent_inputs.len() + usize::from(ephemeral_balance.map_or(false, |b| b.is_input())),
-        transparent_outputs.len() + usize::from(ephemeral_balance.map_or(false, |b| b.is_output())),
+        transparent_inputs.len() + usize::from(ephemeral_balance.is_some_and(|b| b.is_input())),
+        transparent_outputs.len() + usize::from(ephemeral_balance.is_some_and(|b| b.is_output())),
     );
     let (s_inputs_len, s_outputs_len) = (sapling.inputs().len(), sapling.outputs().len());
     #[cfg(feature = "orchard")]

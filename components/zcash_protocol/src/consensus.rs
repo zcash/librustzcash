@@ -331,7 +331,7 @@ pub trait Parameters: Clone {
     /// Determines whether the specified network upgrade is active as of the
     /// provided block height on the network to which this Parameters value applies.
     fn is_nu_active(&self, nu: NetworkUpgrade, height: BlockHeight) -> bool {
-        self.activation_height(nu).map_or(false, |h| h <= height)
+        self.activation_height(nu).is_some_and(|h| h <= height)
     }
 }
 

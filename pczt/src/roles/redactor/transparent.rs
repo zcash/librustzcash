@@ -14,7 +14,7 @@ impl super::Redactor {
 /// A Redactor for the transparent bundle.
 pub struct TransparentRedactor<'a>(&'a mut Bundle);
 
-impl<'a> TransparentRedactor<'a> {
+impl TransparentRedactor<'_> {
     /// Redacts all inputs in the same way.
     pub fn redact_inputs<F>(&mut self, f: F)
     where
@@ -64,7 +64,7 @@ enum Inputs<'a> {
     One(&'a mut Input),
 }
 
-impl<'a> InputRedactor<'a> {
+impl InputRedactor<'_> {
     fn redact<F>(&mut self, f: F)
     where
         F: Fn(&mut Input),
@@ -202,7 +202,7 @@ enum Outputs<'a> {
     One(&'a mut Output),
 }
 
-impl<'a> OutputRedactor<'a> {
+impl OutputRedactor<'_> {
     fn redact<F>(&mut self, f: F)
     where
         F: Fn(&mut Output),

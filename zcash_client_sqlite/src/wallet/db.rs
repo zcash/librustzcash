@@ -81,6 +81,7 @@ pub(super) const INDEX_HD_ACCOUNT: &str =
 ///     sequential transparent addresses.
 ///   - Transparent change addresses.
 ///   - ZIP 320 ephemeral addresses.
+///
 ///   This column exists because the diversifier index is stored as a byte array, meaning that we
 ///   cannot use SQL integer operations on it for gap limit calculations, and thus need it as an
 ///   integer as well.
