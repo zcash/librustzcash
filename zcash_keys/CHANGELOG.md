@@ -14,7 +14,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.81.0.
-- Migrated to `nonempty 0.11`
+- Migrated to `bip32 =0.6.0-pre.1`, `nonempty 0.11`.
 - `zcash_keys::keys::UnifiedAddressRequest` has been substantially modified;
   instead of a collection of boolean flags, it is now a collection of
   `ReceiverRequirement` values that describe how addresses may be constructed
