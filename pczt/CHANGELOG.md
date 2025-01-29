@@ -30,7 +30,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.81.0.
-- Migrated to `nonempty 0.11`
+- Migrated to `nonempty 0.11`, `secp256k1 0.29`.
 
 ## [0.1.0] - 2024-12-16
 Initial release supporting the PCZT v1 format.
