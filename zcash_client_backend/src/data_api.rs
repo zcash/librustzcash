@@ -820,7 +820,7 @@ pub enum TransactionDataRequest {
     TransactionsInvolvingAddress {
         /// The address to request transactions and/or UTXOs for.
         address: TransparentAddress,
-        /// Only transactions mined at heighs greater than or equal to this height should be
+        /// Only transactions mined at heights greater than or equal to this height should be
         /// returned.
         block_range_start: BlockHeight,
         /// Only transactions mined at heights less than this height should be returned.
@@ -835,8 +835,8 @@ pub enum TransactionDataRequest {
         /// that uses a private, trusted-for-privacy supplier of chain data can safely ignore this
         /// field.
         request_at: Option<SystemTime>,
-        /// The caller should respond to this request only with transactions that have conform to
-        /// the specified transaction status filter.
+        /// The caller should respond to this request only with transactions that conform to the
+        /// specified transaction status filter.
         tx_status_filter: TransactionStatusFilter,
         /// The caller should respond to this request only with transactions containing outputs
         /// that conform to the specified output status filter.

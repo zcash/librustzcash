@@ -212,14 +212,21 @@ mod tests {
     use zip32::AccountId;
 
     use crate::{
-        wallet::init::{init_wallet_db_internal, migrations::add_transaction_views},
+        testing::db::{test_clock, test_rng},
+        wallet::init::{migrations::add_transaction_views, testing::init_wallet_db_internal},
         WalletDb,
     };
 
     #[test]
     fn v_transactions_net() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork, ()).unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
         init_wallet_db_internal(
             &mut db_data,
             None,

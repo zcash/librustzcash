@@ -33,8 +33,12 @@ mod v_transactions_transparent_history;
 mod v_tx_outputs_use_legacy_false;
 mod wallet_summaries;
 
-use std::rc::Rc;
+use std::{
+    rc::Rc,
+    sync::{Arc, Mutex},
+};
 
+use rand_core::RngCore;
 use rusqlite::{named_params, OptionalExtension};
 use schemerz_rusqlite::RusqliteMigration;
 use secrecy::SecretVec;
@@ -42,10 +46,18 @@ use uuid::Uuid;
 use zcash_address::unified::{Encoding as _, Ufvk};
 use zcash_protocol::consensus;
 
+use crate::util::Clock;
+
 use super::WalletMigrationError;
 
-pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
+pub(super) fn all_migrations<
+    P: consensus::Parameters + 'static,
+    C: Clock + Clone + 'static,
+    R: RngCore + Clone + 'static,
+>(
     params: &P,
+    clock: C,
+    rng: R,
     seed: Option<Rc<SecretVec<u8>>>,
 ) -> Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>> {
     //                                   initial_setup
@@ -90,6 +102,7 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                          fix_bad_change_flagging     v_transactions_additional_totals
     //                                                                     |
     //                                                       transparent_gap_limit_handling
+    let rng = Arc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -156,6 +169,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(v_transactions_additional_totals::Migration),
         Box::new(transparent_gap_limit_handling::Migration {
             params: params.clone(),
+            _clock: clock.clone(),
+            _rng: rng.clone(),
         }),
     ]
 }
@@ -296,13 +311,23 @@ mod tests {
     use uuid::Uuid;
     use zcash_protocol::consensus::Network;
 
-    use crate::{wallet::init::init_wallet_db_internal, WalletDb};
+    use crate::{
+        testing::db::{test_clock, test_rng},
+        wallet::init::testing::init_wallet_db_internal,
+        WalletDb,
+    };
 
     /// Tests that we can migrate from a completely empty wallet database to the target
     /// migrations.
     pub(crate) fn test_migrate(migrations: &[Uuid]) {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork, ()).unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
 
         let seed = [0xab; 32];
         assert_matches!(
@@ -319,7 +344,13 @@ mod tests {
     #[test]
     fn migrate_between_releases_without_data() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork, ()).unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
 
         let seed = [0xab; 32].to_vec();
 

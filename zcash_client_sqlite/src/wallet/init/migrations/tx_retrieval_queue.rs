@@ -234,7 +234,8 @@ mod tests {
     };
 
     use crate::{
-        wallet::init::{init_wallet_db_internal, migrations::tests::test_migrate},
+        testing::db::{test_clock, test_rng},
+        wallet::init::{migrations::tests::test_migrate, testing::init_wallet_db_internal},
         WalletDb,
     };
 
@@ -248,7 +249,13 @@ mod tests {
     #[test]
     fn migrate_with_data() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork, ()).unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
 
         let seed_bytes = vec![0xab; 32];
 

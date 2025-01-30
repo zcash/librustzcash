@@ -114,6 +114,7 @@ CREATE TABLE "addresses" (
     cached_transparent_receiver_address TEXT,
     exposed_at_height INTEGER,
     receiver_flags INTEGER NOT NULL,
+    transparent_receiver_next_check_time INTEGER,
     FOREIGN KEY (account_id) REFERENCES accounts(id),
     CONSTRAINT diversification UNIQUE (account_id, key_scope, diversifier_index_be),
     CONSTRAINT transparent_index_consistency CHECK (
