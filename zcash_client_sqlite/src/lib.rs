@@ -275,6 +275,19 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
     }
 }
 
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters + Clone> WalletDb<C, P> {
+    /// Constructs a new wrapper around the given connection.
+    ///
+    /// This is provided for use cases such as connection pooling, where `conn` may be an
+    /// `&mut rusqlite::Connection`.
+    ///
+    /// The caller must ensure that [`rusqlite::vtab::array::load_module`] has been called
+    /// on the connection.
+    pub fn from_connection(conn: C, params: P) -> Self {
+        WalletDb { conn, params }
+    }
+}
+
 impl<C: BorrowMut<Connection>, P: consensus::Parameters + Clone> WalletDb<C, P> {
     pub fn transactionally<F, A, E: From<rusqlite::Error>>(&mut self, f: F) -> Result<A, E>
     where

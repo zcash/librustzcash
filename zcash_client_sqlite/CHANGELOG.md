@@ -15,6 +15,7 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `zcash_client_sqlite::AccountUuid`
+- `zcash_client_sqlite::WalletDb::from_connection`
 
 ### Changed
 - Migrated to `sapling-crypto 0.4`, `zcash_keys 0.6`, `zcash_primitives 0.21`,
