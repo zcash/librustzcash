@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-e7950ecc.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.86.0-nightly (bf1b174e7 2025-01-28)" data-channel="nightly" data-search-js="search-ccb196c1.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-e7950ecc.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.86.0-nightly (ae5de6c75 2025-01-29)" data-channel="nightly" data-search-js="search-2d513d54.js" data-settings-js="settings-5411db44.js" ><script src="../../static.files/storage-c4642c8f.js"></script><script defer src="../../static.files/src-script-8fee9dc5.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-9b5d7e41.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -2305,7 +2305,33 @@
 <a href="#2304" id="2304">2304</a>
 <a href="#2305" id="2305">2305</a>
 <a href="#2306" id="2306">2306</a>
-<a href="#2307" id="2307">2307</a></pre></div><pre class="rust"><code><span class="doccomment">//! *An SQLite-based Zcash light client.*
+<a href="#2307" id="2307">2307</a>
+<a href="#2308" id="2308">2308</a>
+<a href="#2309" id="2309">2309</a>
+<a href="#2310" id="2310">2310</a>
+<a href="#2311" id="2311">2311</a>
+<a href="#2312" id="2312">2312</a>
+<a href="#2313" id="2313">2313</a>
+<a href="#2314" id="2314">2314</a>
+<a href="#2315" id="2315">2315</a>
+<a href="#2316" id="2316">2316</a>
+<a href="#2317" id="2317">2317</a>
+<a href="#2318" id="2318">2318</a>
+<a href="#2319" id="2319">2319</a>
+<a href="#2320" id="2320">2320</a>
+<a href="#2321" id="2321">2321</a>
+<a href="#2322" id="2322">2322</a>
+<a href="#2323" id="2323">2323</a>
+<a href="#2324" id="2324">2324</a>
+<a href="#2325" id="2325">2325</a>
+<a href="#2326" id="2326">2326</a>
+<a href="#2327" id="2327">2327</a>
+<a href="#2328" id="2328">2328</a>
+<a href="#2329" id="2329">2329</a>
+<a href="#2330" id="2330">2330</a>
+<a href="#2331" id="2331">2331</a>
+<a href="#2332" id="2332">2332</a>
+<a href="#2333" id="2333">2333</a></pre></div><pre class="rust"><code><span class="doccomment">//! *An SQLite-based Zcash light client.*
 //!
 //! `zcash_client_sqlite` contains complete SQLite-based implementations of the [`WalletRead`],
 //! [`WalletWrite`], and [`BlockSource`] traits from the [`zcash_client_backend`] crate. In
@@ -2345,7 +2371,12 @@
 <span class="kw">use </span>secrecy::{ExposeSecret, SecretVec};
 <span class="kw">use </span>shardtree::{error::ShardTreeError, ShardTree};
 <span class="kw">use </span>std::{
-    borrow::Borrow, collections::HashMap, convert::AsRef, fmt, num::NonZeroU32, ops::Range,
+    borrow::{Borrow, BorrowMut},
+    collections::HashMap,
+    convert::AsRef,
+    fmt,
+    num::NonZeroU32,
+    ops::Range,
     path::Path,
 };
 <span class="kw">use </span>subtle::ConditionallySelectable;
@@ -2575,12 +2606,27 @@
             <span class="prelude-val">Ok</span>(WalletDb { conn, params })
         })
     }
+}
 
+<span class="kw">impl</span>&lt;C: Borrow&lt;rusqlite::Connection&gt;, P: consensus::Parameters + Clone&gt; WalletDb&lt;C, P&gt; {
+    <span class="doccomment">/// Constructs a new wrapper around the given connection.
+    ///
+    /// This is provided for use cases such as connection pooling, where `conn` may be an
+    /// `&amp;mut rusqlite::Connection`.
+    ///
+    /// The caller must ensure that [`rusqlite::vtab::array::load_module`] has been called
+    /// on the connection.
+    </span><span class="kw">pub fn </span>from_connection(conn: C, params: P) -&gt; <span class="self">Self </span>{
+        WalletDb { conn, params }
+    }
+}
+
+<span class="kw">impl</span>&lt;C: BorrowMut&lt;Connection&gt;, P: consensus::Parameters + Clone&gt; WalletDb&lt;C, P&gt; {
     <span class="kw">pub fn </span>transactionally&lt;F, A, E: From&lt;rusqlite::Error&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, f: F) -&gt; <span class="prelude-ty">Result</span>&lt;A, E&gt;
     <span class="kw">where
         </span>F: FnOnce(<span class="kw-2">&amp;mut </span>WalletDb&lt;SqlTransaction&lt;<span class="lifetime">'_</span>&gt;, P&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;A, E&gt;,
     {
-        <span class="kw">let </span>tx = <span class="self">self</span>.conn.transaction()<span class="question-mark">?</span>;
+        <span class="kw">let </span>tx = <span class="self">self</span>.conn.borrow_mut().transaction()<span class="question-mark">?</span>;
         <span class="kw">let </span><span class="kw-2">mut </span>wdb = WalletDb {
             conn: SqlTransaction(<span class="kw-2">&amp;</span>tx),
             params: <span class="self">self</span>.params.clone(),
@@ -3134,7 +3180,7 @@
     }
 }
 
-<span class="kw">impl</span>&lt;P: consensus::Parameters&gt; WalletWrite <span class="kw">for </span>WalletDb&lt;rusqlite::Connection, P&gt; {
+<span class="kw">impl</span>&lt;C: BorrowMut&lt;rusqlite::Connection&gt;, P: consensus::Parameters&gt; WalletWrite <span class="kw">for </span>WalletDb&lt;C, P&gt; {
     <span class="kw">type </span>UtxoRef = UtxoId;
 
     <span class="kw">fn </span>create_account(
@@ -3144,7 +3190,7 @@
         birthday: <span class="kw-2">&amp;</span>AccountBirthday,
         key_source: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(<span class="self">Self</span>::AccountId, UnifiedSpendingKey), <span class="self">Self</span>::Error&gt; {
-        <span class="self">self</span>.transactionally(|wdb| {
+        <span class="self">self</span>.borrow_mut().transactionally(|wdb| {
             <span class="kw">let </span>seed_fingerprint =
                 SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
                     SqliteClientError::BadAccountData(
@@ -3282,7 +3328,7 @@
     }
 
     <span class="kw">fn </span>update_chain_tip(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tip_height: BlockHeight) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::Error&gt; {
-        <span class="kw">let </span>tx = <span class="self">self</span>.conn.transaction()<span class="question-mark">?</span>;
+        <span class="kw">let </span>tx = <span class="self">self</span>.conn.borrow_mut().transaction()<span class="question-mark">?</span>;
         wallet::scanning::update_chain_tip(<span class="kw-2">&amp;</span>tx, <span class="kw-2">&amp;</span><span class="self">self</span>.params, tip_height)<span class="question-mark">?</span>;
         tx.commit()<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
@@ -3722,7 +3768,7 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::UtxoRef, <span class="self">Self</span>::Error&gt; {
         <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
         </span><span class="kw">return </span>wallet::transparent::put_received_transparent_utxo(
-            <span class="kw-2">&amp;</span><span class="self">self</span>.conn,
+            <span class="self">self</span>.conn.borrow(),
             <span class="kw-2">&amp;</span><span class="self">self</span>.params,
             _output,
         );
@@ -3782,7 +3828,9 @@
     }
 }
 
-<span class="kw">impl</span>&lt;P: consensus::Parameters&gt; WalletCommitmentTrees <span class="kw">for </span>WalletDb&lt;rusqlite::Connection, P&gt; {
+<span class="kw">impl</span>&lt;C: BorrowMut&lt;rusqlite::Connection&gt;, P: consensus::Parameters&gt; WalletCommitmentTrees
+    <span class="kw">for </span>WalletDb&lt;C, P&gt;
+{
     <span class="kw">type </span>Error = commitment_tree::Error;
     <span class="kw">type </span>SaplingShardStore&lt;<span class="lifetime">'a</span>&gt; =
         SqliteShardStore&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>rusqlite::Transaction&lt;<span class="lifetime">'a</span>&gt;, sapling::Node, SAPLING_SHARD_HEIGHT&gt;;
@@ -3800,6 +3848,7 @@
     {
         <span class="kw">let </span>tx = <span class="self">self
             </span>.conn
+            .borrow_mut()
             .transaction()
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))<span class="question-mark">?</span>;
         <span class="kw">let </span>shard_store = SqliteShardStore::from_connection(<span class="kw-2">&amp;</span>tx, SAPLING_TABLES_PREFIX)
@@ -3821,6 +3870,7 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), ShardTreeError&lt;<span class="self">Self</span>::Error&gt;&gt; {
         <span class="kw">let </span>tx = <span class="self">self
             </span>.conn
+            .borrow_mut()
             .transaction()
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))<span class="question-mark">?</span>;
         put_shard_roots::&lt;<span class="kw">_</span>, { sapling::NOTE_COMMITMENT_TREE_DEPTH }, SAPLING_SHARD_HEIGHT&gt;(
@@ -3855,6 +3905,7 @@
     {
         <span class="kw">let </span>tx = <span class="self">self
             </span>.conn
+            .borrow_mut()
             .transaction()
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))<span class="question-mark">?</span>;
         <span class="kw">let </span>shard_store = SqliteShardStore::from_connection(<span class="kw-2">&amp;</span>tx, ORCHARD_TABLES_PREFIX)
@@ -3877,6 +3928,7 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), ShardTreeError&lt;<span class="self">Self</span>::Error&gt;&gt; {
         <span class="kw">let </span>tx = <span class="self">self
             </span>.conn
+            .borrow_mut()
             .transaction()
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))<span class="question-mark">?</span>;
         put_shard_roots::&lt;<span class="kw">_</span>, { ORCHARD_SHARD_HEIGHT * <span class="number">2 </span>}, ORCHARD_SHARD_HEIGHT&gt;(
