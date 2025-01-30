@@ -38,7 +38,12 @@ use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, ShardTree};
 use std::{
-    borrow::Borrow, collections::HashMap, convert::AsRef, fmt, num::NonZeroU32, ops::Range,
+    borrow::{Borrow, BorrowMut},
+    collections::HashMap,
+    convert::AsRef,
+    fmt,
+    num::NonZeroU32,
+    ops::Range,
     path::Path,
 };
 use subtle::ConditionallySelectable;
@@ -268,12 +273,27 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
             Ok(WalletDb { conn, params })
         })
     }
+}
 
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters + Clone> WalletDb<C, P> {
+    /// Constructs a new wrapper around the given connection.
+    ///
+    /// This is provided for use cases such as connection pooling, where `conn` may be an
+    /// `&mut rusqlite::Connection`.
+    ///
+    /// The caller must ensure that [`rusqlite::vtab::array::load_module`] has been called
+    /// on the connection.
+    pub fn from_connection(conn: C, params: P) -> Self {
+        WalletDb { conn, params }
+    }
+}
+
+impl<C: BorrowMut<Connection>, P: consensus::Parameters + Clone> WalletDb<C, P> {
     pub fn transactionally<F, A, E: From<rusqlite::Error>>(&mut self, f: F) -> Result<A, E>
     where
         F: FnOnce(&mut WalletDb<SqlTransaction<'_>, P>) -> Result<A, E>,
     {
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.borrow_mut().transaction()?;
         let mut wdb = WalletDb {
             conn: SqlTransaction(&tx),
             params: self.params.clone(),
@@ -827,7 +847,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletTest for W
     }
 }
 
-impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P> {
+impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters> WalletWrite for WalletDb<C, P> {
     type UtxoRef = UtxoId;
 
     fn create_account(
@@ -837,7 +857,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         birthday: &AccountBirthday,
         key_source: Option<&str>,
     ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
-        self.transactionally(|wdb| {
+        self.borrow_mut().transactionally(|wdb| {
             let seed_fingerprint =
                 SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
                     SqliteClientError::BadAccountData(
@@ -975,7 +995,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     }
 
     fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error> {
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.borrow_mut().transaction()?;
         wallet::scanning::update_chain_tip(&tx, &self.params, tip_height)?;
         tx.commit()?;
         Ok(())
@@ -1415,7 +1435,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     ) -> Result<Self::UtxoRef, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
         return wallet::transparent::put_received_transparent_utxo(
-            &self.conn,
+            self.conn.borrow(),
             &self.params,
             _output,
         );
@@ -1475,7 +1495,9 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     }
 }
 
-impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Connection, P> {
+impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters> WalletCommitmentTrees
+    for WalletDb<C, P>
+{
     type Error = commitment_tree::Error;
     type SaplingShardStore<'a> =
         SqliteShardStore<&'a rusqlite::Transaction<'a>, sapling::Node, SAPLING_SHARD_HEIGHT>;
@@ -1493,6 +1515,7 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
     {
         let tx = self
             .conn
+            .borrow_mut()
             .transaction()
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
         let shard_store = SqliteShardStore::from_connection(&tx, SAPLING_TABLES_PREFIX)
@@ -1514,6 +1537,7 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
     ) -> Result<(), ShardTreeError<Self::Error>> {
         let tx = self
             .conn
+            .borrow_mut()
             .transaction()
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
         put_shard_roots::<_, { sapling::NOTE_COMMITMENT_TREE_DEPTH }, SAPLING_SHARD_HEIGHT>(
@@ -1548,6 +1572,7 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
     {
         let tx = self
             .conn
+            .borrow_mut()
             .transaction()
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
         let shard_store = SqliteShardStore::from_connection(&tx, ORCHARD_TABLES_PREFIX)
@@ -1570,6 +1595,7 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
     ) -> Result<(), ShardTreeError<Self::Error>> {
         let tx = self
             .conn
+            .borrow_mut()
             .transaction()
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
         put_shard_roots::<_, { ORCHARD_SHARD_HEIGHT * 2 }, ORCHARD_SHARD_HEIGHT>(
