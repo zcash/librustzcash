@@ -367,7 +367,13 @@ pub(crate) fn get_shard<H: HashSer>(
     .map_err(Error::Query)?
     .map(|(shard_data, root_hash)| {
         let shard_tree = read_shard(&mut Cursor::new(shard_data)).map_err(Error::Serialization)?;
-        let located_tree = LocatedPrunableTree::from_parts(shard_root_addr, shard_tree);
+        let located_tree =
+            LocatedPrunableTree::from_parts(shard_root_addr, shard_tree).map_err(|e| {
+                Error::Serialization(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Tree contained invalid data at address {:?}", e),
+                ))
+            })?;
         if let Some(root_hash_data) = root_hash {
             let root_hash = H::read(Cursor::new(root_hash_data)).map_err(Error::Serialization)?;
             Ok(located_tree.reannotate_root(Some(Arc::new(root_hash))))
@@ -403,7 +409,12 @@ pub(crate) fn last_shard<H: HashSer>(
     .map(|(shard_index, shard_data)| {
         let shard_root = Address::from_parts(shard_root_level, shard_index);
         let shard_tree = read_shard(&mut Cursor::new(shard_data)).map_err(Error::Serialization)?;
-        Ok(LocatedPrunableTree::from_parts(shard_root, shard_tree))
+        LocatedPrunableTree::from_parts(shard_root, shard_tree).map_err(|e| {
+            Error::Serialization(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Tree contained invalid data at address {:?}", e),
+            ))
+        })
     })
     .transpose()
 }
@@ -1032,7 +1043,13 @@ pub(crate) fn put_shard_roots<
         Address::from_parts((DEPTH - SHARD_HEIGHT).into(), 0),
         get_cap::<LevelShifter<H, SHARD_HEIGHT>>(conn, table_prefix)
             .map_err(ShardTreeError::Storage)?,
-    );
+    )
+    .map_err(|e| {
+        ShardTreeError::Storage(Error::Serialization(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Note commitment tree cap was invalid at address {:?}", e),
+        )))
+    })?;
 
     let insert_into_cap = tracing::info_span!("insert_into_cap").entered();
     let cap_result = cap
