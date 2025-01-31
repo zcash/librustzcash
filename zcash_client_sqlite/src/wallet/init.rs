@@ -1,5 +1,6 @@
 //! Functions for initializing the various databases.
 
+use std::borrow::BorrowMut;
 use std::fmt;
 use std::rc::Rc;
 
@@ -309,22 +310,25 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 // the library that does not support transparent use. It might be a good idea to add an explicit
 // check for unspent transparent outputs whenever running initialization with a version of the
 // library *not* compiled with the `transparent-inputs` feature flag, and fail if any are present.
-pub fn init_wallet_db<P: consensus::Parameters + 'static>(
-    wdb: &mut WalletDb<rusqlite::Connection, P>,
+pub fn init_wallet_db<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters + 'static>(
+    wdb: &mut WalletDb<C, P>,
     seed: Option<SecretVec<u8>>,
 ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
     init_wallet_db_internal(wdb, seed, &[], true)
 }
 
-pub(crate) fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
-    wdb: &mut WalletDb<rusqlite::Connection, P>,
+pub(crate) fn init_wallet_db_internal<
+    C: BorrowMut<rusqlite::Connection>,
+    P: consensus::Parameters + 'static,
+>(
+    wdb: &mut WalletDb<C, P>,
     seed: Option<SecretVec<u8>>,
     target_migrations: &[Uuid],
     verify_seed_relevance: bool,
 ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
     let seed = seed.map(Rc::new);
 
-    verify_sqlite_version_compatibility(&wdb.conn).map_err(MigratorError::Adapter)?;
+    verify_sqlite_version_compatibility(wdb.conn.borrow()).map_err(MigratorError::Adapter)?;
 
     // Turn off foreign key enforcement, to ensure that table replacement does not break foreign
     // key references in table definitions.
@@ -332,6 +336,7 @@ pub(crate) fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     // It is necessary to perform this operation globally using the outer connection because this
     // pragma has no effect when set or unset within a transaction.
     wdb.conn
+        .borrow()
         .execute_batch("PRAGMA foreign_keys = OFF;")
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
 
@@ -342,7 +347,7 @@ pub(crate) fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     // https://github.com/zcash/schemerz/issues/6)
     {
         let adapter = RusqliteAdapter::<'_, WalletMigrationError>::new(
-            &mut wdb.conn,
+            wdb.conn.borrow_mut(),
             Some(MIGRATIONS_TABLE.to_string()),
         );
         adapter.init().expect("Migrations table setup succeeds.");
@@ -351,11 +356,11 @@ pub(crate) fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     // Now that we are certain that the migrations table exists, verify that if the database
     // already contains account data, any stored UFVKs correspond to the same network that the
     // migrations are being run for.
-    verify_network_compatibility(&wdb.conn, &wdb.params).map_err(MigratorError::Adapter)?;
+    verify_network_compatibility(wdb.conn.borrow(), &wdb.params).map_err(MigratorError::Adapter)?;
 
     // Now create the adapter that we're actually going to use to perform the migrations, and
     // proceed.
-    let adapter = RusqliteAdapter::new(&mut wdb.conn, Some(MIGRATIONS_TABLE.to_string()));
+    let adapter = RusqliteAdapter::new(wdb.conn.borrow_mut(), Some(MIGRATIONS_TABLE.to_string()));
     let mut migrator = Migrator::new(adapter);
     migrator
         .register_multiple(migrations::all_migrations(&wdb.params, seed.clone()).into_iter())
@@ -368,6 +373,7 @@ pub(crate) fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
         }
     }
     wdb.conn
+        .borrow()
         .execute("PRAGMA foreign_keys = ON", [])
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
 
