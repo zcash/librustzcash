@@ -7,15 +7,20 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_sqlite::WalletDb::from_connection`
+
 ### Changed
 - MSRV is now 1.81.0.
 - Migrated to `bip32 =0.6.0-pre.1`, `nonempty 0.11`.
+- `zcash_client_sqlite::wallet::init::init_wallet_db` now has an additional
+  generic parameter, enabling it to be used with wallets constructed via
+  `WalletDb::from_connection`.
 
 ## [0.14.0] - 2024-12-16
 
 ### Added
 - `zcash_client_sqlite::AccountUuid`
-- `zcash_client_sqlite::WalletDb::from_connection`
 
 ### Changed
 - Migrated to `sapling-crypto 0.4`, `zcash_keys 0.6`, `zcash_primitives 0.21`,
