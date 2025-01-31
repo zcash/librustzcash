@@ -1128,9 +1128,16 @@
 <a href="#1127" id="1127">1127</a>
 <a href="#1128" id="1128">1128</a>
 <a href="#1129" id="1129">1129</a>
-<a href="#1130" id="1130">1130</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for initializing the various databases.
+<a href="#1130" id="1130">1130</a>
+<a href="#1131" id="1131">1131</a>
+<a href="#1132" id="1132">1132</a>
+<a href="#1133" id="1133">1133</a>
+<a href="#1134" id="1134">1134</a>
+<a href="#1135" id="1135">1135</a>
+<a href="#1136" id="1136">1136</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for initializing the various databases.
 
-</span><span class="kw">use </span>std::fmt;
+</span><span class="kw">use </span>std::borrow::BorrowMut;
+<span class="kw">use </span>std::fmt;
 <span class="kw">use </span>std::rc::Rc;
 
 <span class="kw">use </span>regex::Regex;
@@ -1439,22 +1446,25 @@
 // the library that does not support transparent use. It might be a good idea to add an explicit
 // check for unspent transparent outputs whenever running initialization with a version of the
 // library *not* compiled with the `transparent-inputs` feature flag, and fail if any are present.
-</span><span class="kw">pub fn </span>init_wallet_db&lt;P: consensus::Parameters + <span class="lifetime">'static</span>&gt;(
-    wdb: <span class="kw-2">&amp;mut </span>WalletDb&lt;rusqlite::Connection, P&gt;,
+</span><span class="kw">pub fn </span>init_wallet_db&lt;C: BorrowMut&lt;rusqlite::Connection&gt;, P: consensus::Parameters + <span class="lifetime">'static</span>&gt;(
+    wdb: <span class="kw-2">&amp;mut </span>WalletDb&lt;C, P&gt;,
     seed: <span class="prelude-ty">Option</span>&lt;SecretVec&lt;u8&gt;&gt;,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;(), MigratorError&lt;Uuid, WalletMigrationError&gt;&gt; {
     init_wallet_db_internal(wdb, seed, <span class="kw-2">&amp;</span>[], <span class="bool-val">true</span>)
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>init_wallet_db_internal&lt;P: consensus::Parameters + <span class="lifetime">'static</span>&gt;(
-    wdb: <span class="kw-2">&amp;mut </span>WalletDb&lt;rusqlite::Connection, P&gt;,
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>init_wallet_db_internal&lt;
+    C: BorrowMut&lt;rusqlite::Connection&gt;,
+    P: consensus::Parameters + <span class="lifetime">'static</span>,
+&gt;(
+    wdb: <span class="kw-2">&amp;mut </span>WalletDb&lt;C, P&gt;,
     seed: <span class="prelude-ty">Option</span>&lt;SecretVec&lt;u8&gt;&gt;,
     target_migrations: <span class="kw-2">&amp;</span>[Uuid],
     verify_seed_relevance: bool,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;(), MigratorError&lt;Uuid, WalletMigrationError&gt;&gt; {
     <span class="kw">let </span>seed = seed.map(Rc::new);
 
-    verify_sqlite_version_compatibility(<span class="kw-2">&amp;</span>wdb.conn).map_err(MigratorError::Adapter)<span class="question-mark">?</span>;
+    verify_sqlite_version_compatibility(wdb.conn.borrow()).map_err(MigratorError::Adapter)<span class="question-mark">?</span>;
 
     <span class="comment">// Turn off foreign key enforcement, to ensure that table replacement does not break foreign
     // key references in table definitions.
@@ -1462,6 +1472,7 @@
     // It is necessary to perform this operation globally using the outer connection because this
     // pragma has no effect when set or unset within a transaction.
     </span>wdb.conn
+        .borrow()
         .execute_batch(<span class="string">"PRAGMA foreign_keys = OFF;"</span>)
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))<span class="question-mark">?</span>;
 
@@ -1472,7 +1483,7 @@
     // https://github.com/zcash/schemerz/issues/6)
     </span>{
         <span class="kw">let </span>adapter = RusqliteAdapter::&lt;<span class="lifetime">'_</span>, WalletMigrationError&gt;::new(
-            <span class="kw-2">&amp;mut </span>wdb.conn,
+            wdb.conn.borrow_mut(),
             <span class="prelude-val">Some</span>(MIGRATIONS_TABLE.to_string()),
         );
         adapter.init().expect(<span class="string">"Migrations table setup succeeds."</span>);
@@ -1481,11 +1492,11 @@
     <span class="comment">// Now that we are certain that the migrations table exists, verify that if the database
     // already contains account data, any stored UFVKs correspond to the same network that the
     // migrations are being run for.
-    </span>verify_network_compatibility(<span class="kw-2">&amp;</span>wdb.conn, <span class="kw-2">&amp;</span>wdb.params).map_err(MigratorError::Adapter)<span class="question-mark">?</span>;
+    </span>verify_network_compatibility(wdb.conn.borrow(), <span class="kw-2">&amp;</span>wdb.params).map_err(MigratorError::Adapter)<span class="question-mark">?</span>;
 
     <span class="comment">// Now create the adapter that we're actually going to use to perform the migrations, and
     // proceed.
-    </span><span class="kw">let </span>adapter = RusqliteAdapter::new(<span class="kw-2">&amp;mut </span>wdb.conn, <span class="prelude-val">Some</span>(MIGRATIONS_TABLE.to_string()));
+    </span><span class="kw">let </span>adapter = RusqliteAdapter::new(wdb.conn.borrow_mut(), <span class="prelude-val">Some</span>(MIGRATIONS_TABLE.to_string()));
     <span class="kw">let </span><span class="kw-2">mut </span>migrator = Migrator::new(adapter);
     migrator
         .register_multiple(migrations::all_migrations(<span class="kw-2">&amp;</span>wdb.params, seed.clone()).into_iter())
@@ -1498,6 +1509,7 @@
         }
     }
     wdb.conn
+        .borrow()
         .execute(<span class="string">"PRAGMA foreign_keys = ON"</span>, [])
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))<span class="question-mark">?</span>;
 
