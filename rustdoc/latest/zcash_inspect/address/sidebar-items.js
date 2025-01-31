@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"enum":["AddressKind"],"fn":["inspect"],"struct":["Address"]};
