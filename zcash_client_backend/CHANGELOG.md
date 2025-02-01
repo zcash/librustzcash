@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::sync`:
+  - `SyncHandle`
+  - `ShutdownListener`
+
 ### Changed
 - MSRV is now 1.81.0.
 - Migrated to `bip32 =0.6.0-pre.1`, `nonempty 0.11`.
@@ -222,6 +227,7 @@ and this library adheres to Rust's notion of
     to a greater depth than the available note commitment tree checkpoints provide,
     but such rewinds are no longer supported.
 - `zcash_client_backend::sync::run`:
+  - It now takes a `ShutdownListener` argument.
   - Transparent outputs are now refreshed in addition to shielded notes.
 - `zcash_client_backend::proposal::ProposalError` has a new `AnchorNotFound`
   variant.
