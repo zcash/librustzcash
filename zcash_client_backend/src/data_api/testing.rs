@@ -2616,7 +2616,6 @@ impl WalletRead for MockWalletDb {
         &self,
         _account: Self::AccountId,
         _include_change: bool,
-        _include_ephemeral: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         Ok(HashMap::new())
     }
