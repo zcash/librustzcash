@@ -11,6 +11,8 @@ use zcash_keys::keys::UnifiedIncomingViewingKey;
 use zcash_protocol::consensus::{self, BlockHeight};
 
 use super::add_account_uuids;
+use crate::wallet::transparent::generate_gap_addresses;
+use crate::GapLimits;
 use crate::{
     wallet::{self, init::WalletMigrationError, KeyScope},
     AccountRef,
@@ -69,6 +71,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         ))?;
 
         #[cfg(feature = "transparent-inputs")]
+        let mut account_ids = HashSet::new();
+
+        #[cfg(feature = "transparent-inputs")]
         {
             // If the diversifier index is in the valid range of non-hardened child indices, set
             // `transparent_child_index` so that we can use it for gap limit handling.
@@ -84,6 +89,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             let mut rows = di_query.query([])?;
             while let Some(row) = rows.next()? {
                 let account_id: i64 = row.get("account_id")?;
+                account_ids.insert(account_id);
+
                 let uivk = decode_uivk(row.get("uivk")?)?;
                 let di_be: Vec<u8> = row.get("diversifier_index_be")?;
                 let diversifier_index = decode_diversifier_index_be(&di_be)?;
@@ -203,6 +210,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     ":transparent_child_index": transparent_child_index,
                     ":cached_transparent_receiver_address": address
                 })?;
+
+                account_ids.insert(account_id);
             }
         }
 
@@ -505,6 +514,23 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                    (u.transaction_id, 0, u.output_index);
             "#,
         )?;
+
+        // At this point, we have completed updating the infrastructure for gap limit handling,
+        // so we can regenerate the gap limit worth of addresses for each account that we
+        // recorded.
+        #[cfg(feature = "transparent-inputs")]
+        for account_id in account_ids {
+            for key_scope in [KeyScope::EXTERNAL, KeyScope::INTERNAL] {
+                generate_gap_addresses(
+                    conn,
+                    &self.params,
+                    AccountRef(account_id.try_into().unwrap()),
+                    key_scope,
+                    &GapLimits::default(),
+                    None,
+                )?;
+            }
+        }
 
         Ok(())
     }

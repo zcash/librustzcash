@@ -11,7 +11,7 @@ use super::utxos_to_txos;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::{error::SqliteClientError, AccountRef},
+    crate::{error::SqliteClientError, AccountRef, GapLimits},
     rusqlite::named_params,
     transparent::keys::NonHardenedChildIndex,
     zcash_keys::{
@@ -22,9 +22,6 @@ use {
 };
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x0e1d4274_1f8e_44e2_909d_689a4bc2967b);
-
-#[cfg(feature = "transparent-inputs")]
-const EPHEMERAL_GAP_LIMIT: u32 = 5;
 
 const DEPENDENCIES: &[Uuid] = &[utxos_to_txos::MIGRATION_ID];
 
@@ -52,6 +49,8 @@ fn init_accounts<P: consensus::Parameters>(
     transaction: &rusqlite::Transaction,
     params: &P,
 ) -> Result<(), SqliteClientError> {
+    let ephemeral_gap_limit = GapLimits::default().ephemeral();
+
     let mut stmt = transaction.prepare("SELECT id, ufvk FROM accounts")?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
@@ -74,10 +73,10 @@ fn init_accounts<P: consensus::Parameters>(
                 )?;
 
                 // NB: we have reduced the initial space of generated ephemeral addresses
-                // from 20 addresses to 5, as ephemeral addresses should always be used in
+                // from 20 addresses to 3, as ephemeral addresses should always be used in
                 // a transaction immediatly after being reserved, and as a consequence
                 // there is no significant benefit in having a larger gap limit.
-                for i in 0..EPHEMERAL_GAP_LIMIT {
+                for i in 0..ephemeral_gap_limit {
                     let address = ephemeral_ivk
                         .derive_ephemeral_address(
                             NonHardenedChildIndex::from_index(i).expect("index is valid"),
@@ -128,7 +127,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             ) WITHOUT ROWID;"
         )?;
 
-        // Make sure that at least `EPHEMERAL_GAP_LIMIT` ephemeral transparent addresses are
+        // Make sure that at least `GapLimits::default().ephemeral()` ephemeral transparent addresses are
         // stored in each account.
         #[cfg(feature = "transparent-inputs")]
         {

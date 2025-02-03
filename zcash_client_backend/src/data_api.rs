@@ -1366,7 +1366,6 @@ pub trait WalletRead {
         &self,
         _account: Self::AccountId,
         _include_change: bool,
-        _include_ephemeral: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         Ok(HashMap::new())
     }
@@ -1412,10 +1411,7 @@ pub trait WalletRead {
     ) -> Result<Option<TransparentAddressMetadata>, Self::Error> {
         // This should be overridden.
         Ok(
-            if let Some(result) = self
-                .get_transparent_receivers(account, true, true)?
-                .get(address)
-            {
+            if let Some(result) = self.get_transparent_receivers(account, true)?.get(address) {
                 result.clone()
             } else {
                 self.get_known_ephemeral_addresses(account, None)?
