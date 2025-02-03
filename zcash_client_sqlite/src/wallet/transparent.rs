@@ -437,7 +437,7 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
 
     let gap_limit = match key_scope {
         KeyScope::Zip32(zip32::Scope::External) => gap_limits.external(),
-        KeyScope::Zip32(zip32::Scope::Internal) => gap_limits.transparent_internal(),
+        KeyScope::Zip32(zip32::Scope::Internal) => gap_limits.internal(),
         KeyScope::Ephemeral => gap_limits.ephemeral(),
     };
 
@@ -1277,7 +1277,7 @@ mod tests {
             transparent::{ephemeral, find_gap_start, reserve_next_n_addresses},
             KeyScope,
         },
-        WalletDb,
+        GapLimits, WalletDb,
     };
 
     #[test]
@@ -1304,6 +1304,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "transparent-inputs")]
     fn gap_limits() {
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
@@ -1317,19 +1318,28 @@ mod tests {
 
         let external_taddrs = st
             .wallet()
-            .get_transparent_receivers(account_uuid, false, false)
+            .get_transparent_receivers(account_uuid, false)
             .unwrap();
-        assert_eq!(external_taddrs.len(), 20); //20 external
-        let external_taddrs_sorted = external_taddrs
-            .into_iter()
-            .filter_map(|(addr, meta)| meta.map(|m| (m.address_index(), addr)))
-            .collect::<BTreeMap<_, _>>();
-
-        let all_taddrs = st
+        assert_eq!(
+            u32::try_from(external_taddrs.len()).unwrap(),
+            GapLimits::default().external()
+        );
+        let internal_taddrs = st
             .wallet()
-            .get_transparent_receivers(account_uuid, true, true)
+            .get_transparent_receivers(account_uuid, true)
             .unwrap();
-        assert_eq!(all_taddrs.len(), 30); //20 external, 5 internal, 5 ephemeral
+        assert_eq!(
+            u32::try_from(internal_taddrs.len()).unwrap(),
+            GapLimits::default().external() + GapLimits::default().internal()
+        );
+        let ephemeral_taddrs = st
+            .wallet()
+            .get_known_ephemeral_addresses(account_uuid, None)
+            .unwrap();
+        assert_eq!(
+            u32::try_from(ephemeral_taddrs.len()).unwrap(),
+            GapLimits::default().ephemeral()
+        );
 
         // Add some funds to the wallet
         let (h0, _, _) = st.generate_next_block(
@@ -1339,33 +1349,70 @@ mod tests {
         );
         st.scan_cached_blocks(h0, 1);
 
+        // The previous operation was shielded-only, but unified address usage within the
+        // valid transparent child index range still count towards the gap limit, so this
+        // updates the gap limit by the index of the default Sapling receiver
+        let external_taddrs = st
+            .wallet()
+            .get_transparent_receivers(account_uuid, false)
+            .unwrap();
+        assert_eq!(
+            u32::try_from(external_taddrs.len()).unwrap(),
+            GapLimits::default().external()
+                + (u32::try_from(ufvk.sapling().unwrap().default_address().0).unwrap() + 1)
+        );
+
+        // Pick an address half way through the set of external taddrs
+        let external_taddrs_sorted = external_taddrs
+            .into_iter()
+            .filter_map(|(addr, meta)| meta.map(|m| (m.address_index(), addr)))
+            .collect::<BTreeMap<_, _>>();
         let to = Address::from(
             *external_taddrs_sorted
-                .get(&NonHardenedChildIndex::from_index(9).unwrap())
-                .expect("An address exists at index 9."),
+                .get(&NonHardenedChildIndex::from_index(4).unwrap())
+                .expect("An address exists at index 4."),
         )
         .to_zcash_address(st.network());
 
         // Create a transaction & scan the block. Since the txid corresponds to one our wallet
         // generated, this should cause the gap limit to be bumped (generating addresses with index
-        // 20..30
+        // 10..15
         let txids = st
             .create_standard_transaction(&test_account, to, Zatoshis::const_from_u64(20000))
             .unwrap();
         let (h1, _) = st.generate_next_block_including(txids.head);
-        st.scan_cached_blocks(h1, 1);
 
-        // use `decrypt_and_store_transaction` to ensure that the wallet sees the transaction as
-        // mined (since transparent handling doesn't get this from `scan_cached_blocks`)
+        // At this point, the transaction has been created, but since it has not been mined it does
+        // not cause an update to the gap limit; we have to wait for the transaction to actually be
+        // mined or we could bump the gap limit too soon and start generating addresses that will
+        // never be inspected on wallet recovery.
+        let external_taddrs = st
+            .wallet()
+            .get_transparent_receivers(account_uuid, false)
+            .unwrap();
+        assert_eq!(
+            u32::try_from(external_taddrs.len()).unwrap(),
+            GapLimits::default().external()
+                + (u32::try_from(ufvk.sapling().unwrap().default_address().0).unwrap() + 1)
+        );
+
+        // Mine the block, then use `decrypt_and_store_transaction` to ensure that the wallet sees
+        // the transaction as mined (since transparent handling doesn't get this from
+        // `scan_cached_blocks`)
+        st.scan_cached_blocks(h1, 1);
         let tx = st.wallet().get_transaction(txids.head).unwrap().unwrap();
         decrypt_and_store_transaction(&st.network().clone(), st.wallet_mut(), &tx, Some(h1))
             .unwrap();
 
+        // Now that the transaction has been mined, the gap limit should have increased.
         let external_taddrs = st
             .wallet()
-            .get_transparent_receivers(account_uuid, false, false)
+            .get_transparent_receivers(account_uuid, false)
             .unwrap();
-        assert_eq!(external_taddrs.len(), 30);
+        assert_eq!(
+            u32::try_from(external_taddrs.len()).unwrap(),
+            GapLimits::default().external() + 5
+        );
     }
 
     #[test]

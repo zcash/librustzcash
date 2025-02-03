@@ -265,16 +265,16 @@ struct AddressRef(pub(crate) i64);
 #[cfg(feature = "transparent-inputs")]
 pub struct GapLimits {
     external: u32,
-    transparent_internal: u32,
+    internal: u32,
     ephemeral: u32,
 }
 
 #[cfg(feature = "transparent-inputs")]
 impl GapLimits {
-    pub fn new(external: u32, transparent_internal: u32, ephemeral: u32) -> Self {
+    pub fn new(external: u32, internal: u32, ephemeral: u32) -> Self {
         Self {
             external,
-            transparent_internal,
+            internal,
             ephemeral,
         }
     }
@@ -283,8 +283,8 @@ impl GapLimits {
         self.external
     }
 
-    pub(crate) fn transparent_internal(&self) -> u32 {
-        self.transparent_internal
+    pub(crate) fn internal(&self) -> u32 {
+        self.internal
     }
 
     pub(crate) fn ephemeral(&self) -> u32 {
@@ -292,13 +292,18 @@ impl GapLimits {
     }
 }
 
+/// The default gap limits supported by this implementation are:
+///
+/// external addresses: 10
+/// transparent internal (change) addresses: 5
+/// ephemeral addresses: 3
 #[cfg(feature = "transparent-inputs")]
 impl Default for GapLimits {
     fn default() -> Self {
         Self {
-            external: 20,
-            transparent_internal: 5,
-            ephemeral: 5,
+            external: 10,
+            internal: 5,
+            ephemeral: 3,
         }
     }
 }
@@ -719,14 +724,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         &self,
         account: Self::AccountId,
         include_change: bool,
-        include_ephemeral: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
-        let key_scopes: &[KeyScope] = match (include_change, include_ephemeral) {
-            (true, true) => &[KeyScope::EXTERNAL, KeyScope::INTERNAL, KeyScope::Ephemeral],
-            (true, false) => &[KeyScope::EXTERNAL, KeyScope::INTERNAL],
-            (false, true) => &[KeyScope::EXTERNAL, KeyScope::Ephemeral],
-            (false, false) => &[KeyScope::EXTERNAL],
+        let key_scopes: &[KeyScope] = if include_change {
+            &[KeyScope::EXTERNAL, KeyScope::INTERNAL]
+        } else {
+            &[KeyScope::EXTERNAL]
         };
+
         wallet::transparent::get_transparent_receivers(
             self.conn.borrow(),
             &self.params,
@@ -2441,7 +2445,7 @@ mod tests {
 
         let receivers = st
             .wallet()
-            .get_transparent_receivers(account.id(), false, false)
+            .get_transparent_receivers(account.id(), false)
             .unwrap();
 
         // The receiver for the default UA should be in the set.

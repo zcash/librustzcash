@@ -89,7 +89,7 @@ use pczt::roles::{prover::Prover, signer::Signer};
 /// The number of ephemeral addresses that can be safely reserved without observing any
 /// of them to be mined.
 #[cfg(feature = "transparent-inputs")]
-pub const EPHEMERAL_ADDR_GAP_LIMIT: usize = 5;
+pub const EPHEMERAL_ADDR_GAP_LIMIT: usize = 3;
 
 /// Trait that exposes the pool-specific types and operations necessary to run the
 /// single-shielded-pool tests on a given pool.
