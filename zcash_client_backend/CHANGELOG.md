@@ -9,7 +9,8 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.81.0.
-- Migrated to `bip32 =0.6.0-pre.1`, `nonempty 0.11`.
+- Migrated to `bip32 =0.6.0-pre.1`, `nonempty 0.11`, `incrementalmerkletree 0.8`,
+  `shardtree 0.6`.
 - `zcash_client_backend::wallet::Recipient` has changed:
   - The `Recipient::External` variant is now a structured variant.
   - The `Recipient::EphemeralTransparent` variant is now only available if

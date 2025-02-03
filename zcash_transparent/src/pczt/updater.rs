@@ -20,7 +20,7 @@ impl Bundle {
 /// An updater for a transparent PCZT bundle.
 pub struct Updater<'a>(&'a mut Bundle);
 
-impl<'a> Updater<'a> {
+impl Updater<'_> {
     /// Provides read access to the bundle being updated.
     pub fn bundle(&self) -> &Bundle {
         self.0
@@ -58,7 +58,7 @@ impl<'a> Updater<'a> {
 /// An updater for a transparent PCZT input.
 pub struct InputUpdater<'a>(&'a mut Input);
 
-impl<'a> InputUpdater<'a> {
+impl InputUpdater<'_> {
     /// Sets the redeem script for this input.
     ///
     /// Returns an error if the input is not P2SH, or the given `redeem_script` does not
@@ -114,7 +114,7 @@ impl<'a> InputUpdater<'a> {
 /// An updater for a transparent PCZT output.
 pub struct OutputUpdater<'a>(&'a mut Output);
 
-impl<'a> OutputUpdater<'a> {
+impl OutputUpdater<'_> {
     /// Sets the redeem script for this output.
     ///
     /// Returns an error if the output is not P2SH, or the given `redeem_script` does not

@@ -12,6 +12,8 @@ and this library adheres to Rust's notion of
   - `hrp_unified_address`
   - `hrp_unified_fvk`
   - `hrp_unified_ivk`
+- Migrated to `incrementalmerkletree 0.8` for functionality provided
+  under the `test-dependencies` feature flag.
 
 ## [0.4.3] - 2024-12-16
 ### Added

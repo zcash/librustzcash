@@ -50,8 +50,8 @@ pczt = { version = "0.1", path = "pczt" }
 bellman = { version = "0.14", default-features = false, features = ["groth16"] }
 ff = { version = "0.13", default-features = false }
 group = "0.13"
-incrementalmerkletree = { version = "0.7.1", default-features = false }
-shardtree = "0.5"
+incrementalmerkletree = { version = "0.8.2", default-features = false }
+shardtree = "0.6.1"
 zcash_spec = "0.1"
 
 # Payment protocols
@@ -151,7 +151,7 @@ criterion = "0.5"
 proptest = "1"
 rand_chacha = "0.3"
 rand_xorshift = "0.3"
-incrementalmerkletree-testing = "0.2"
+incrementalmerkletree-testing = "0.3"
 
 # Tor
 # - `arti-client` depends on `rusqlite`, and a version mismatch there causes a compilation
@@ -194,6 +194,6 @@ debug = true
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
 
 [patch.crates-io]
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "c684e9185a0449efb00428f807d3bf286b5dae03" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "b1c22c07300db22239235d16dab096e23369948f" }
 redjubjub = { git = "https://github.com/ZcashFoundation/redjubjub", rev = "eae848c5c14d9c795d000dd9f4c4762d1aee7ee1" }
-sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "e607c52d13bb7ade66293f9ab8d07e311f4ad868" }
+sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "6ca338532912adcd82369220faeea31aab4720c5" }

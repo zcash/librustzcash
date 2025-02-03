@@ -809,7 +809,7 @@ mod tests {
         // fake that the note appears in some previous
         // shielded output
         tree.append(cm1).unwrap();
-        let witness1 = sapling::IncrementalWitness::from_tree(tree);
+        let witness1 = sapling::IncrementalWitness::from_tree(tree).unwrap();
 
         let mut builder_a = demo_builder(tx_height, witness1.root().into());
         builder_a

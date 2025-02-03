@@ -219,7 +219,10 @@ pub fn read_incremental_witness<Node: HashSer, R: Read, const DEPTH: u8>(
     let filled = Vector::read(&mut reader, |r| Node::read(r))?;
     let cursor = Optional::read(&mut reader, read_commitment_tree)?;
 
-    Ok(IncrementalWitness::from_parts(tree, filled, cursor))
+    IncrementalWitness::from_parts(tree, filled, cursor).ok_or(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "invalid witness: inconsistency detected between witness parts",
+    ))
 }
 
 /// Serializes an `IncrementalWitness` as an array of bytes.
@@ -827,7 +830,14 @@ mod tests {
             let cmu = Node::from_bytes(cmu[..].try_into().unwrap()).unwrap();
 
             // Witness here
-            witnesses.push((IncrementalWitness::from_tree(tree.clone()), last_cmu));
+            witnesses.push((
+                if tree.is_empty() {
+                    IncrementalWitness::invalid_empty_witness()
+                } else {
+                    IncrementalWitness::from_tree(tree.clone()).unwrap()
+                },
+                last_cmu,
+            ));
 
             // Now append a commitment to the tree
             assert!(tree.append(cmu).is_ok());

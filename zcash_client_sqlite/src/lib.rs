@@ -543,7 +543,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     }
 
     fn get_account_birthday(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
-        wallet::account_birthday(self.conn.borrow(), account).map_err(SqliteClientError::from)
+        wallet::account_birthday(self.conn.borrow(), account)
     }
 
     fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error> {
@@ -590,7 +590,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
 
     fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error> {
         wallet::scanning::suggest_scan_ranges(self.conn.borrow(), ScanPriority::Historic)
-            .map_err(SqliteClientError::from)
     }
 
     fn get_target_and_anchor_heights(
@@ -1610,7 +1609,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters> WalletCommitm
     }
 }
 
-impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTransaction<'conn>, P> {
+impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTransaction<'_>, P> {
     type Error = commitment_tree::Error;
     type SaplingShardStore<'a> =
         SqliteShardStore<&'a rusqlite::Transaction<'a>, sapling::Node, SAPLING_SHARD_HEIGHT>;

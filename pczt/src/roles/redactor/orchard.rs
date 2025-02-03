@@ -14,7 +14,7 @@ impl super::Redactor {
 /// A Redactor for the Orchard bundle.
 pub struct OrchardRedactor<'a>(&'a mut Bundle);
 
-impl<'a> OrchardRedactor<'a> {
+impl OrchardRedactor<'_> {
     /// Redacts all actions in the same way.
     pub fn redact_actions<F>(&mut self, f: F)
     where
@@ -54,7 +54,7 @@ enum Actions<'a> {
     One(&'a mut Action),
 }
 
-impl<'a> ActionRedactor<'a> {
+impl ActionRedactor<'_> {
     fn redact<F>(&mut self, f: F)
     where
         F: Fn(&mut Action),

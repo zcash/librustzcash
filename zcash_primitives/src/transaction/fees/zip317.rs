@@ -182,7 +182,7 @@ impl super::FeeRule for FeeRule {
 
         let t_out_total_size = transparent_output_sizes.into_iter().sum();
 
-        let ceildiv = |num: usize, den: usize| (num + den - 1) / den;
+        let ceildiv = |num: usize, den: usize| num.div_ceil(den);
 
         let logical_actions = max(
             ceildiv(t_in_total_size, self.p2pkh_standard_input_size),
