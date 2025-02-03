@@ -315,7 +315,7 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     _progress_notifier: U,
 }
 
-impl<'a, P, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
+impl<P, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
     /// Returns the network parameters that the builder has been configured for.
     pub fn params(&self) -> &P {
         &self.params
@@ -424,7 +424,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     }
 }
 
-impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
+impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
     /// Adds an Orchard note to be spent in this bundle.
     ///
     /// Returns an error if the given Merkle path does not have the required anchor for
@@ -1011,7 +1011,7 @@ mod testing {
     use super::{BuildResult, Builder, Error};
     use crate::transaction::fees::zip317;
 
-    impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
+    impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
         /// Build the transaction using mocked randomness and proving capabilities.
         /// DO NOT USE EXCEPT FOR UNIT TESTING.
         pub fn mock_build<R: RngCore>(

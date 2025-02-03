@@ -303,15 +303,14 @@ impl TransparentAuthorizingContext for Unauthorized {
 #[cfg(feature = "transparent-inputs")]
 impl TransparentAuthorizingContext for Unauthorized {
     fn input_amounts(&self) -> Vec<Zatoshis> {
-        return self.inputs.iter().map(|txin| txin.coin.value).collect();
+        self.inputs.iter().map(|txin| txin.coin.value).collect()
     }
 
     fn input_scriptpubkeys(&self) -> Vec<Script> {
-        return self
-            .inputs
+        self.inputs
             .iter()
             .map(|txin| txin.coin.script_pubkey.clone())
-            .collect();
+            .collect()
     }
 }
 

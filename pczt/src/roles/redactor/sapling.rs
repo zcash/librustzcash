@@ -14,7 +14,7 @@ impl super::Redactor {
 /// A Redactor for the Sapling bundle.
 pub struct SaplingRedactor<'a>(&'a mut Bundle);
 
-impl<'a> SaplingRedactor<'a> {
+impl SaplingRedactor<'_> {
     /// Redacts all spends in the same way.
     pub fn redact_spends<F>(&mut self, f: F)
     where
@@ -69,7 +69,7 @@ enum Spends<'a> {
     One(&'a mut Spend),
 }
 
-impl<'a> SpendRedactor<'a> {
+impl SpendRedactor<'_> {
     fn redact<F>(&mut self, f: F)
     where
         F: Fn(&mut Spend),
@@ -194,7 +194,7 @@ enum Outputs<'a> {
     One(&'a mut Output),
 }
 
-impl<'a> OutputRedactor<'a> {
+impl OutputRedactor<'_> {
     fn redact<F>(&mut self, f: F)
     where
         F: Fn(&mut Output),

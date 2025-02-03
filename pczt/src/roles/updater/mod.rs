@@ -61,7 +61,7 @@ impl Updater {
 /// An updater for a transparent PCZT output.
 pub struct GlobalUpdater<'a>(&'a mut Global);
 
-impl<'a> GlobalUpdater<'a> {
+impl GlobalUpdater<'_> {
     /// Stores the given proprietary value at the given key.
     pub fn set_proprietary(&mut self, key: String, value: Vec<u8>) {
         self.0.proprietary.insert(key, value);

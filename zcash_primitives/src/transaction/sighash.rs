@@ -34,7 +34,7 @@ pub enum SignableInput<'a> {
     },
 }
 
-impl<'a> SignableInput<'a> {
+impl SignableInput<'_> {
     pub fn hash_type(&self) -> u8 {
         match self {
             SignableInput::Shielded => ::transparent::sighash::SIGHASH_ALL,

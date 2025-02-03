@@ -294,7 +294,7 @@ where
         let mut tmp = vec![];
         for b in value
             .iter()
-            .flat_map(|&m| (0..8).rev().map(move |i| m >> i & 1 == 1))
+            .flat_map(|&m| (0..8).rev().map(move |i| (m >> i) & 1 == 1))
             .skip(skip_bits)
         {
             tmp.push(Some(b));
