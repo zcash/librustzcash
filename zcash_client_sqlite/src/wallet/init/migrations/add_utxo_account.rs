@@ -19,7 +19,7 @@ use {
     std::collections::HashMap,
     zcash_client_backend::wallet::TransparentAddressMetadata,
     zcash_keys::{address::Address, encoding::AddressCodec, keys::UnifiedFullViewingKey},
-    zip32::{AccountId, DiversifierIndex, Scope},
+    zip32::{AccountId, Scope},
 };
 
 /// This migration adds an account identifier column to the UTXOs table.
@@ -132,6 +132,8 @@ fn get_transparent_receivers<P: consensus::Parameters>(
     params: &P,
     account: AccountId,
 ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, SqliteClientError> {
+    use crate::wallet::decode_diversifier_index_be;
+
     let mut ret: HashMap<TransparentAddress, Option<TransparentAddressMetadata>> = HashMap::new();
 
     // Get all UAs derived
@@ -141,11 +143,7 @@ fn get_transparent_receivers<P: consensus::Parameters>(
 
     while let Some(row) = rows.next()? {
         let ua_str: String = row.get(0)?;
-        let di_vec: Vec<u8> = row.get(1)?;
-        let mut di: [u8; 11] = di_vec.try_into().map_err(|_| {
-            SqliteClientError::CorruptedData("Diversifier index is not an 11-byte value".to_owned())
-        })?;
-        di.reverse(); // BE -> LE conversion
+        let di = decode_diversifier_index_be(&row.get::<_, Vec<u8>>(1)?)?;
 
         let ua = Address::decode(params, &ua_str)
             .ok_or_else(|| {
@@ -160,13 +158,11 @@ fn get_transparent_receivers<P: consensus::Parameters>(
             })?;
 
         if let Some(taddr) = ua.transparent() {
-            let index = NonHardenedChildIndex::from_index(
-                DiversifierIndex::from(di).try_into().map_err(|_| {
-                    SqliteClientError::CorruptedData(
-                        "Unable to get diversifier for transparent address.".to_owned(),
-                    )
-                })?,
-            )
+            let index = NonHardenedChildIndex::from_index(u32::try_from(di).map_err(|_| {
+                SqliteClientError::CorruptedData(
+                    "Unable to get diversifier for transparent address.".to_owned(),
+                )
+            })?)
             .ok_or_else(|| {
                 SqliteClientError::CorruptedData(
                     "Unexpected hardened index for transparent address.".to_owned(),

@@ -507,7 +507,7 @@ where
 {
     let request = service::GetAddressUtxosArg {
         addresses: db_data
-            .get_transparent_receivers(account_id)
+            .get_transparent_receivers(account_id, true)
             .map_err(Error::Wallet)?
             .into_keys()
             .map(|addr| addr.encode(params))

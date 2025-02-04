@@ -32,7 +32,7 @@ impl Redactor {
 /// An Redactor for the global transaction details.
 pub struct GlobalRedactor<'a>(&'a mut Global);
 
-impl<'a> GlobalRedactor<'a> {
+impl GlobalRedactor<'_> {
     /// Redacts the proprietary value at the given key.
     pub fn redact_proprietary(&mut self, key: &str) {
         self.0.proprietary.remove(key);
