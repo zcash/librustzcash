@@ -2072,6 +2072,23 @@ pub(crate) fn account_birthday(
     .and_then(|opt| opt.ok_or(SqliteClientError::AccountUnknown))
 }
 
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn account_birthday_internal(
+    conn: &rusqlite::Connection,
+    account_ref: AccountRef,
+) -> Result<BlockHeight, SqliteClientError> {
+    conn.query_row(
+        "SELECT birthday_height
+         FROM accounts
+         WHERE id = :account_ref",
+        named_params![":account_ref": account_ref.0],
+        |row| row.get::<_, u32>(0).map(BlockHeight::from),
+    )
+    .optional()
+    .map_err(SqliteClientError::from)
+    .and_then(|opt| opt.ok_or(SqliteClientError::AccountUnknown))
+}
+
 /// Returns the maximum recover-until height for accounts in the wallet.
 pub(crate) fn recover_until_height(
     conn: &rusqlite::Connection,

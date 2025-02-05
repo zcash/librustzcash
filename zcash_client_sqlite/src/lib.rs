@@ -121,7 +121,7 @@ use {
 };
 
 #[cfg(any(test, feature = "test-dependencies", feature = "transparent-inputs"))]
-use wallet::KeyScope;
+use crate::wallet::KeyScope;
 
 #[cfg(any(test, feature = "test-dependencies", not(feature = "orchard")))]
 use zcash_protocol::PoolType;
@@ -765,6 +765,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
             account,
             address,
         )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn utxo_query_height(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
+        let account_ref = wallet::get_account_ref(self.conn.borrow(), account)?;
+        wallet::transparent::utxo_query_height(self.conn.borrow(), account_ref, &self.gap_limits)
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -1650,7 +1656,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters> WalletWrite f
                 wdb.conn.0,
                 &wdb.params,
                 account_id,
-                wallet::KeyScope::Ephemeral,
+                KeyScope::Ephemeral,
                 wdb.gap_limits.ephemeral(),
                 n,
             )?;
