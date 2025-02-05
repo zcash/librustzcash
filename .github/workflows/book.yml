@@ -10,11 +10,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
       - uses: dtolnay/rust-toolchain@nightly
         id: toolchain
-      - run: rustup override set ${{steps.toolchain.outputs.name}}
+      - run: rustup override set "${TOOLCHAIN}"
+        env:
+          TOOLCHAIN: ${{steps.toolchain.outputs.name}}
 
       - name: Build latest rustdocs
         run: >
