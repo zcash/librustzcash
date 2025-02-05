@@ -1422,6 +1422,18 @@ pub trait WalletRead {
         )
     }
 
+    /// Returns the maximum block height at which a transparent output belonging to the wallet has
+    /// been observed.
+    ///
+    /// We must start looking for UTXOs for addresses within the current gap limit as of the block
+    /// height at which they might have first been revealed. This would have occurred when the gap
+    /// advanced as a consequence of a transaction being mined. The address at the start of the current
+    /// gap was potentially first revealed after the address at index `gap_start - (gap_limit + 1)`
+    /// received an output in a mined transaction; therefore, we take that height to be where we
+    /// should start searching for UTXOs.
+    #[cfg(feature = "transparent-inputs")]
+    fn utxo_query_height(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error>;
+
     /// Returns a vector of ephemeral transparent addresses associated with the given
     /// account controlled by this wallet, along with their metadata. The result includes
     /// reserved addresses, and addresses for the backend's configured gap limit worth

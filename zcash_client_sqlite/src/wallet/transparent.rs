@@ -32,8 +32,8 @@ use zcash_protocol::{
 use zip32::Scope;
 
 use super::{
-    chain_tip_height, decode_diversifier_index_be, encode_diversifier_index_be, get_account_ids,
-    get_account_internal, KeyScope,
+    account_birthday_internal, chain_tip_height, decode_diversifier_index_be,
+    encode_diversifier_index_be, get_account_ids, get_account_internal, KeyScope,
 };
 use crate::{error::SqliteClientError, AccountUuid, TxRef, UtxoId};
 use crate::{AccountRef, AddressRef, GapLimits};
@@ -522,6 +522,60 @@ pub(crate) fn check_address_reuse<P: consensus::Parameters>(
     }
 
     Ok(())
+}
+
+/// Returns the block height at which we should start scanning for UTXOs.
+///
+/// We must start looking for UTXOs for addresses within the current gap limit as of the block
+/// height at which they might have first been revealed. This would have occurred when the gap
+/// advanced as a consequence of a transaction being mined. The address at the start of the current
+/// gap was potentially first revealed after the address at index `gap_start - (gap_limit + 1)`
+/// received an output in a mined transaction; therefore, we take that height to be where we should
+/// start searching for UTXOs.
+pub(crate) fn utxo_query_height(
+    conn: &rusqlite::Connection,
+    account_ref: AccountRef,
+    gap_limits: &GapLimits,
+) -> Result<BlockHeight, SqliteClientError> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT MIN(au.mined_height)
+         FROM v_address_uses au
+         JOIN addresses a ON a.id = au.address_id
+         WHERE a.account_id = :account_id
+         AND au.key_scope = :key_scope
+         AND au.transparent_child_index >= :transparent_child_index",
+    )?;
+
+    let mut get_height = |key_scope: KeyScope, gap_limit: u32| {
+        if let Some(gap_start) = find_gap_start(conn, account_ref, key_scope, gap_limit)? {
+            stmt.query_row(
+                named_params! {
+                    ":account_id": account_ref.0,
+                    ":key_scope": key_scope.encode(),
+                    ":transparent_child_index": gap_start.index().saturating_sub(gap_limit + 1)
+                },
+                |row| {
+                    row.get::<_, Option<u32>>(0)
+                        .map(|opt| opt.map(BlockHeight::from))
+                },
+            )
+            .optional()
+            .map(|opt| opt.flatten())
+            .map_err(SqliteClientError::from)
+        } else {
+            Ok(None)
+        }
+    };
+
+    let h_external = get_height(KeyScope::EXTERNAL, gap_limits.external())?;
+    let h_internal = get_height(KeyScope::INTERNAL, gap_limits.internal())?;
+
+    match (h_external, h_internal) {
+        (Some(ext), Some(int)) => Ok(std::cmp::min(ext, int)),
+        (Some(ext), None) => Ok(ext),
+        (None, Some(int)) => Ok(int),
+        (None, None) => account_birthday_internal(conn, account_ref),
+    }
 }
 
 fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, SqliteClientError> {
@@ -1413,6 +1467,11 @@ mod tests {
             u32::try_from(external_taddrs.len()).unwrap(),
             GapLimits::default().external() + 5
         );
+
+        // The utxo query height should be equal to the minimum mined height among transactions
+        // sent to any of the set of {addresses in the gap limit range | address prior to the gap}.
+        let query_height = st.wallet().utxo_query_height(account_uuid).unwrap();
+        assert_eq!(query_height, h0);
     }
 
     #[test]

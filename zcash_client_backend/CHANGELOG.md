@@ -14,6 +14,8 @@ and this library adheres to Rust's notion of
     - `get_known_ephemeral_addresses` now takes a
       `Range<zcash_transparent::keys::NonHardenedChildIndex>` as its argument
       instead of a `Range<u32>`
+    - Has added method `utxo_query_height` when the `transparent-inputs` feature
+      flag is active.
 - `zcash_client_backend::data_api::WalletWrite` has an added method
   `get_address_for_index`
 

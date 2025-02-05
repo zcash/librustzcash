@@ -2649,6 +2649,11 @@ impl WalletRead for MockWalletDb {
     }
 
     #[cfg(feature = "transparent-inputs")]
+    fn utxo_query_height(&self, _account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
+        Ok(BlockHeight::from(0u32))
+    }
+
+    #[cfg(feature = "transparent-inputs")]
     fn find_account_for_ephemeral_address(
         &self,
         _address: &TransparentAddress,
