@@ -219,6 +219,7 @@ pub struct Account {
     name: Option<String>,
     kind: AccountSource,
     viewing_key: ViewingKey,
+    birthday: BlockHeight,
 }
 
 impl Account {
@@ -236,6 +237,10 @@ impl Account {
 
     pub(crate) fn internal_id(&self) -> AccountRef {
         self.id
+    }
+
+    pub(crate) fn birthday(&self) -> BlockHeight {
+        self.birthday
     }
 }
 
@@ -592,6 +597,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         uuid: account_uuid,
         kind: kind.clone(),
         viewing_key,
+        birthday: birthday.height(),
     };
 
     // If a birthday frontier is available, insert it into the note commitment tree. If the
@@ -916,12 +922,15 @@ fn parse_account_row<P: consensus::Parameters>(
         ))
     };
 
+    let birthday = BlockHeight::from(row.get::<_, u32>("birthday_height")?);
+
     Ok(Account {
         id: account_id,
         name: account_name,
         uuid: account_uuid,
         kind,
         viewing_key,
+        birthday,
     })
 }
 
@@ -934,7 +943,7 @@ pub(crate) fn get_account<P: Parameters>(
         r#"
         SELECT id, name, uuid, account_kind,
                hd_seed_fingerprint, hd_account_index, key_source,
-               ufvk, uivk, has_spend_key
+               ufvk, uivk, has_spend_key, birthday_height
         FROM accounts
         WHERE uuid = :account_uuid
         "#,
@@ -958,7 +967,7 @@ pub(crate) fn get_account_internal<P: Parameters>(
         r#"
         SELECT id, name, uuid, account_kind,
                hd_seed_fingerprint, hd_account_index, key_source,
-               ufvk, uivk, has_spend_key
+               ufvk, uivk, has_spend_key, birthday_height
         FROM accounts
         WHERE id = :account_id
         "#,
@@ -994,7 +1003,7 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     let mut stmt = conn.prepare(
         "SELECT id, name, uuid, account_kind,
                 hd_seed_fingerprint, hd_account_index, key_source,
-                ufvk, uivk, has_spend_key
+                ufvk, uivk, has_spend_key, birthday_height
          FROM accounts
          WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
             OR sapling_fvk_item_cache = :sapling_fvk_item_cache
@@ -1030,7 +1039,7 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
     account_index: zip32::AccountId,
 ) -> Result<Option<Account>, SqliteClientError> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, key_source, uuid, ufvk
+        "SELECT id, name, key_source, uuid, ufvk, birthday_height
          FROM accounts
          WHERE hd_seed_fingerprint = :hd_seed_fingerprint
          AND hd_account_index = :hd_account_index",
@@ -1058,6 +1067,8 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
                     ))
                 }),
             }?;
+            let birthday = BlockHeight::from(row.get::<_, u32>("birthday_height")?);
+
             Ok(Account {
                 id: account_id,
                 name: account_name,
@@ -1067,6 +1078,7 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
                     key_source,
                 },
                 viewing_key: ViewingKey::Full(Box::new(ufvk)),
+                birthday,
             })
         },
     )?;
