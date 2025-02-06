@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::testing`:
+  - `struct transparent::GapLimits`
+  - `transparent::gap_limits` high-level test for gap limit handling
+
 ### Changed
 - `zcash_client_backend::data_api::WalletRead`:
     - `get_transparent_receivers` now takes additional `include_change` and

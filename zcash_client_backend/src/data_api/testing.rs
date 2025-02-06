@@ -85,10 +85,11 @@ use {
     ::orchard::tree::MerkleHashOrchard, group::ff::PrimeField, pasta_curves::pallas,
 };
 
-#[cfg(feature = "orchard")]
-pub mod orchard;
 pub mod pool;
 pub mod sapling;
+
+#[cfg(feature = "orchard")]
+pub mod orchard;
 #[cfg(feature = "transparent-inputs")]
 pub mod transparent;
 
