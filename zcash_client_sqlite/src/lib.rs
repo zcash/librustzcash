@@ -308,6 +308,17 @@ impl Default for GapLimits {
     }
 }
 
+#[cfg(all(test, feature = "transparent-inputs"))]
+impl From<GapLimits> for zcash_client_backend::data_api::testing::transparent::GapLimits {
+    fn from(value: GapLimits) -> Self {
+        zcash_client_backend::data_api::testing::transparent::GapLimits::new(
+            value.external,
+            value.internal,
+            value.ephemeral,
+        )
+    }
+}
+
 /// A wrapper for the SQLite connection to the wallet database.
 pub struct WalletDb<C, P> {
     conn: C,

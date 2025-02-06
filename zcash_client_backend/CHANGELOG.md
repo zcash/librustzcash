@@ -8,8 +8,10 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
-- `zcash_client_backend::data_api::testing::TransactionSummary` has added
-  accessor methods `total_spent` and `total_received`.
+- `zcash_client_backend::data_api::testing`:
+  - `TransactionSummary` has added accessor methods `total_spent` and `total_received`.
+  - `struct transparent::GapLimits`
+  - `transparent::gap_limits` high-level test for gap limit handling
 
 ### Changed
 - MSRV is now 1.81.0.
