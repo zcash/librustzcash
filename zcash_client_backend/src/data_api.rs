@@ -1390,7 +1390,7 @@ pub trait WalletRead {
     /// This is equivalent to (but may be implemented more efficiently than):
     /// ```compile_fail
     /// Ok(
-    ///     if let Some(result) = self.get_transparent_receivers(account, true, true)?.get(address) {
+    ///     if let Some(result) = self.get_transparent_receivers(account, true)?.get(address) {
     ///         result.clone()
     ///     } else {
     ///         self.get_known_ephemeral_addresses(account, None)?
@@ -2386,13 +2386,15 @@ pub trait WalletWrite: WalletRead {
     /// at the provided diversifier index. If the `request` parameter is `None`, an address should
     /// be generated using all of the available receivers for the account's UFVK.
     ///
-    /// In the case that the diversifier index is outside of the range of valid transparent address
-    /// indexes, no transparent receiver should be generated in the resulting unified address. If a
-    /// transparent receiver is specifically requested for such a diversifier index,
-    /// implementations of this method should return an error.
+    /// Returns `Ok(None)` in the case that it is not possible to generate an address conforming
+    /// to the provided request at the specified diversifier index. Such a result might arise from
+    /// either a key not being available or the diversifier index not being valid for a
+    /// [`ReceiverRequirement::Require`]'ed receiver.
     ///
     /// Address generation should fail if a transparent receiver would be generated that violates
     /// the backend's internally configured gap limit for HD-seed-based recovery.
+    ///
+    /// [`ReceiverRequirement::Require`]: zcash_keys::keys::ReceiverRequirement::Require
     fn get_address_for_index(
         &mut self,
         account: Self::AccountId,

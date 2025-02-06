@@ -18,9 +18,12 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::wallet::{
-        decode_diversifier_index_be, encode_diversifier_index_be,
-        transparent::generate_gap_addresses, GapLimits,
+    crate::{
+        wallet::{
+            decode_diversifier_index_be, encode_diversifier_index_be,
+            transparent::generate_gap_addresses,
+        },
+        GapLimits,
     },
     ::transparent::keys::{IncomingViewingKey as _, NonHardenedChildIndex},
     zcash_keys::encoding::AddressCodec as _,
