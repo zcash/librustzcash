@@ -359,7 +359,7 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
 /// This extends the [`zip32::Scope`] type to include the custom scope used to generate keys for
 /// ephemeral transparent addresses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum KeyScope {
+pub enum KeyScope {
     /// A key scope corresponding to a [`zip32::Scope`].
     Zip32(zip32::Scope),
     /// An ephemeral transparent address, which is derived from an account's transparent
@@ -2625,6 +2625,7 @@ pub(crate) fn set_transaction_status(
 pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
     max_height: BlockHeight,
 ) -> Result<BlockHeight, SqliteClientError> {
     // Determine a checkpoint to which we can rewind, if any.
@@ -2742,7 +2743,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
             conn: SqlTransaction(conn),
             params: params.clone(),
             #[cfg(feature = "transparent-inputs")]
-            gap_limits: GapLimits::default(),
+            gap_limits: *gap_limits,
         };
         wdb.with_sapling_tree_mut(|tree| {
             tree.truncate_to_checkpoint(&truncation_height)?;

@@ -300,6 +300,8 @@ pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
                 ":account_id": account_id.0,
                 ":key_scope": key_scope.encode(),
                 ":gap_start": gap_start.index(),
+                // NOTE: this approach means that the address at index 2^31 - 1 will never be
+                // allocated. I think that's fine.
                 ":gap_end": gap_start.saturating_add(gap_limit).index(),
                 ":n": n
             },
@@ -329,6 +331,7 @@ pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
     if addresses_to_reserve.len() < n {
         return Err(SqliteClientError::ReachedGapLimit(
             gap_start.index() + gap_limit,
+            key_scope,
         ));
     }
 
@@ -572,8 +575,7 @@ pub(crate) fn utxo_query_height(
 
     match (h_external, h_internal) {
         (Some(ext), Some(int)) => Ok(std::cmp::min(ext, int)),
-        (Some(ext), None) => Ok(ext),
-        (None, Some(int)) => Ok(int),
+        (Some(h), None) | (None, Some(h)) => Ok(h),
         (None, None) => account_birthday_internal(conn, account_ref),
     }
 }
@@ -1088,12 +1090,6 @@ pub(crate) fn find_account_uuid_for_transparent_address<P: consensus::Parameters
         return Ok(Some((account_id, KeyScope::decode(key_scope_code)?)));
     }
 
-    // Search known ephemeral addresses.
-    if let Some(account_id) = ephemeral::find_account_for_ephemeral_address_str(conn, &address_str)?
-    {
-        return Ok(Some((account_id, KeyScope::Ephemeral)));
-    }
-
     let account_ids = get_account_ids(conn)?;
 
     // If the UTXO is received at the legacy transparent address (at BIP 44 address
@@ -1131,19 +1127,22 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
 
     // Unlike the shielded pools, we only can receive transparent outputs on addresses for which we
     // have an `addresses` table entry, so we can just query for that here.
-    let (address_id, account_id, key_scope_code) = conn.query_row(
-        "SELECT id, account_id, key_scope
-         FROM addresses
-         WHERE cached_transparent_receiver_address = :transparent_address",
-        named_params! {":transparent_address": addr_str},
-        |row| {
-            Ok((
-                row.get("id").map(AddressRef)?,
-                row.get("account_id").map(AccountRef)?,
-                row.get("key_scope")?,
-            ))
-        },
-    )?;
+    let (address_id, account_id, key_scope_code) = conn
+        .query_row(
+            "SELECT id, account_id, key_scope
+             FROM addresses
+             WHERE cached_transparent_receiver_address = :transparent_address",
+            named_params! {":transparent_address": addr_str},
+            |row| {
+                Ok((
+                    row.get("id").map(AddressRef)?,
+                    row.get("account_id").map(AccountRef)?,
+                    row.get("key_scope")?,
+                ))
+            },
+        )
+        .optional()?
+        .ok_or(SqliteClientError::AddressNotRecognized(*address))?;
 
     let key_scope = KeyScope::decode(key_scope_code)?;
 
@@ -1421,7 +1420,7 @@ mod tests {
                     db.gap_limits.ephemeral(),
                     db.gap_limits.ephemeral() as usize
                 ),
-                Err(SqliteClientError::ReachedGapLimit(_))
+                Err(SqliteClientError::ReachedGapLimit(..))
             );
         };
 

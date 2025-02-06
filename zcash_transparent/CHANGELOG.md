@@ -13,6 +13,7 @@ and this library adheres to Rust's notion of
 - `zcash_transparent::keys::NonHardenedChildIndex::MAX`
 - `impl From<NonHardenedChildIndex> for zip32::DiversifierIndex`
 - `impl TryFrom<zip32::DiversifierIndex> for NonHardenedChildIndex`
+- `impl {PartialOrd, Ord} for NonHardenedChildIndex`
 
 ## [0.2.0] - 2025-02-21
 

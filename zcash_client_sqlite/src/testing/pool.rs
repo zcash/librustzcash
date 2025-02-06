@@ -51,7 +51,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         |e, _, expected_bad_index| {
             matches!(
                 e,
-                crate::error::SqliteClientError::ReachedGapLimit(bad_index)
+                crate::error::SqliteClientError::ReachedGapLimit(bad_index, _)
                 if bad_index == &expected_bad_index)
         },
     )

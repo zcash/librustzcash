@@ -819,7 +819,6 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 
     // Now, store the transaction, pretending it has been mined (we will actually mine the block
     // next). This will cause the the gap start to move & a new `EPHEMERAL_ADDR_GAP_LIMIT` of
-
     // addresses to be created.
     let target_height = st.latest_cached_block().unwrap().height() + 1;
     st.wallet_mut()
@@ -838,6 +837,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     // `store_decrypted_tx` into the database.
     let (h, _) = st.generate_next_block_including(txid);
     st.scan_cached_blocks(h, 1);
+    assert_eq!(h, target_height);
 
     // At this point the start of the gap should be at index `EPHEMERAL_ADDR_GAP_LIMIT` and the new
     // size of the known address set should be `EPHEMERAL_ADDR_GAP_LIMIT * 2`.

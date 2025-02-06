@@ -147,9 +147,10 @@ use {
 
 pub mod chain;
 pub mod error;
+pub mod wallet;
+
 #[cfg(test)]
 mod testing;
-pub mod wallet;
 
 /// The maximum number of blocks the wallet is allowed to rewind. This is
 /// consistent with the bound in zcashd, and allows block data deeper than
@@ -271,7 +272,18 @@ pub struct GapLimits {
 
 #[cfg(feature = "transparent-inputs")]
 impl GapLimits {
-    pub fn new(external: u32, internal: u32, ephemeral: u32) -> Self {
+    /// Constructs a new `GapLimits` value from its constituent parts.
+    ///
+    /// The following gap limits are recommended for use with this crate, and are supplied by the
+    /// [`Default`] implementation for this type.
+    /// - external addresses: 10
+    /// - transparent internal (change) addresses: 5
+    /// - ephemeral addresses: 3
+    ///
+    /// This constructor is only available under the `unstable` feature, as it is not recommended
+    /// for general use.
+    #[cfg(feature = "unstable")]
+    pub fn from_parts(external: u32, internal: u32, ephemeral: u32) -> Self {
         Self {
             external,
             internal,
@@ -294,9 +306,27 @@ impl GapLimits {
 
 /// The default gap limits supported by this implementation are:
 ///
-/// external addresses: 10
-/// transparent internal (change) addresses: 5
-/// ephemeral addresses: 3
+/// - external addresses: 10
+/// - transparent internal (change) addresses: 5
+/// - ephemeral addresses: 3
+///
+/// These limits are chosen with the following rationale:
+/// - At present, many wallets query light wallet servers with a set of addresses, because querying
+///   for each address independently and in a fashion that is not susceptible to clustering via
+///   timing correlation leads to undesirable delays in discovery of received funds. As such, it is
+///   desirable to minimize the number of addresses that can be "linked", i.e. understood by the
+///   light wallet server to all belong to the same wallet.
+/// - For transparent change addresses and ephemeral addresses, it is always expected that an
+///   address will receive funds immediately following its generation except in the case of wallet
+///   failure.
+/// - For externally-scoped transparent addresses, it is desirable to use a slightly larger gap
+///   limit to account for addresses that were shared with counterparties never having been used.
+///   However, we don't want to use the full 20-address gap limit space because it's possible that
+///   in the future, changes to the light wallet protocol will obviate the need to query for UTXOs
+///   in a fashion that links those addresses. In such a circumstance, the gap limit will be
+///   adjusted upward and address rotation should then choose an address that is outside the
+///   current gap limit; after that change, newly generated addresses will not be exposed as
+///   linked in the view of the light wallet server.
 #[cfg(feature = "transparent-inputs")]
 impl Default for GapLimits {
     fn default() -> Self {
@@ -353,6 +383,7 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
 
 #[cfg(feature = "transparent-inputs")]
 impl<C, P> WalletDb<C, P> {
+    /// Sets the gap limits to be used by the wallet in transparent address generation.
     pub fn with_gap_limits(mut self, gap_limits: GapLimits) -> Self {
         self.gap_limits = gap_limits;
         self
@@ -1670,7 +1701,15 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters> WalletWrite f
     }
 
     fn truncate_to_height(&mut self, max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
-        self.transactionally(|wdb| wallet::truncate_to_height(wdb.conn.0, &wdb.params, max_height))
+        self.transactionally(|wdb| {
+            wallet::truncate_to_height(
+                wdb.conn.0,
+                &wdb.params,
+                #[cfg(feature = "transparent-inputs")]
+                &wdb.gap_limits,
+                max_height,
+            )
+        })
     }
 
     #[cfg(feature = "transparent-inputs")]

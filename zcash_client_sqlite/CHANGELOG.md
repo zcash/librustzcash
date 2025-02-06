@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_sqlite::WalletDb::with_gap_limits`
+- `zcash_client_sqlite::GapLimits`
+
 ### Changed
 - `zcash_client_sqlite::error::SqliteClientError` variants have changed:
   - The `EphemeralAddressReuse` variant has been removed and replaced
