@@ -6158,6 +6158,7 @@ dependencies = [
  "crossbeam-channel",
  "document-features",
  "dynosaur",
+ "fs-mistrust",
  "futures-util",
  "group",
  "gumdrop",

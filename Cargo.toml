@@ -158,6 +158,7 @@ incrementalmerkletree-testing = "0.3"
 #   failure due to incompatible `libsqlite3-sys` versions.
 arti-client = { version = "0.23", default-features = false, features = ["compression", "rustls", "tokio"] }
 dynosaur = "0.1.1"
+fs-mistrust = "0.8"
 tokio = "1"
 tor-rtcompat = "0.23"
 tower = "0.4"
