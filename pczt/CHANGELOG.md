@@ -19,6 +19,7 @@ and this library adheres to Rust's notion of
   - `Output::{cmx, ephemeral_key, enc_ciphertext, out_ciphertext}`
 - `pczt::roles`:
   - `low_level_signer` module
+  - `prover::Prover::{requires_sapling_proofs, requires_orchard_proof}`
   - `redactor` module
 - `pczt::sapling`:
   - `Bundle::{value_sum, anchor}`
