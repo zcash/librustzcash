@@ -275,7 +275,7 @@ pub struct Script(pub Vec<u8>);
 impl fmt::Debug for Script {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         struct ScriptPrinter<'s>(&'s [u8]);
-        impl<'s> fmt::Debug for ScriptPrinter<'s> {
+        impl fmt::Debug for ScriptPrinter<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let mut l = f.debug_list();
                 let mut unknown: Option<String> = None;

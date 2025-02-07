@@ -1745,7 +1745,7 @@ pub trait TestFvk: Clone {
     ) -> Self::Nullifier;
 }
 
-impl<'a, A: TestFvk> TestFvk for &'a A {
+impl<A: TestFvk> TestFvk for &A {
     type Nullifier = A::Nullifier;
 
     fn sapling_ovk(&self) -> Option<::sapling::keys::OutgoingViewingKey> {

@@ -438,7 +438,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         .expect("cannot fail because memo is None"),
                     );
                     total_ephemeral = (total_ephemeral + payment.amount())
-                        .ok_or_else(|| GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
+                        .ok_or(GreedyInputSelectorError::Balance(BalanceError::Overflow))?;
                 }
                 #[cfg(not(feature = "transparent-inputs"))]
                 Address::Tex(_) => {

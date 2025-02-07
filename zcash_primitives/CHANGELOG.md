@@ -9,7 +9,8 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.81.0.
-- Migrated to `bip32 =0.6.0-pre.1`, `nonempty 0.11`, `secp256k1 0.29`.
+- Migrated to `bip32 =0.6.0-pre.1`, `nonempty 0.11`, `secp256k1 0.29`,
+  `incrementalmerkletree 0.8`.
 
 ### Deprecated
 - `zcash_primitives::consensus` (use `zcash_protocol::consensus` instead)

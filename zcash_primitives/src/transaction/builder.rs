@@ -315,7 +315,7 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     _progress_notifier: U,
 }
 
-impl<'a, P, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
+impl<P, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
     /// Returns the network parameters that the builder has been configured for.
     pub fn params(&self) -> &P {
         &self.params
@@ -424,7 +424,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     }
 }
 
-impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
+impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
     /// Adds an Orchard note to be spent in this bundle.
     ///
     /// Returns an error if the given Merkle path does not have the required anchor for
@@ -1011,7 +1011,7 @@ mod testing {
     use super::{BuildResult, Builder, Error};
     use crate::transaction::fees::zip317;
 
-    impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
+    impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
         /// Build the transaction using mocked randomness and proving capabilities.
         /// DO NOT USE EXCEPT FOR UNIT TESTING.
         pub fn mock_build<R: RngCore>(
@@ -1168,7 +1168,7 @@ mod tests {
         let cmu1 = Node::from_cmu(&note1.cmu());
         let mut tree = CommitmentTree::<Node, 32>::empty();
         tree.append(cmu1).unwrap();
-        let witness1 = IncrementalWitness::from_tree(tree);
+        let witness1 = IncrementalWitness::from_tree(tree).unwrap();
 
         let tx_height = TEST_NETWORK
             .activation_height(NetworkUpgrade::Sapling)
@@ -1282,7 +1282,7 @@ mod tests {
         let cmu1 = Node::from_cmu(&note1.cmu());
         let mut tree = CommitmentTree::<Node, 32>::empty();
         tree.append(cmu1).unwrap();
-        let mut witness1 = IncrementalWitness::from_tree(tree.clone());
+        let mut witness1 = IncrementalWitness::from_tree(tree.clone()).unwrap();
 
         // Fail if there is insufficient input
         // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
@@ -1326,7 +1326,7 @@ mod tests {
         let cmu2 = Node::from_cmu(&note2.cmu());
         tree.append(cmu2).unwrap();
         witness1.append(cmu2).unwrap();
-        let witness2 = IncrementalWitness::from_tree(tree);
+        let witness2 = IncrementalWitness::from_tree(tree).unwrap();
 
         // Succeeds if there is sufficient input
         // 0.0003 z-ZEC out, 0.00015 t-ZEC out, 0.00015 t-ZEC fee, 0.0006 z-ZEC in

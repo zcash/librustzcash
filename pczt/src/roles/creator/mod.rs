@@ -120,7 +120,7 @@ impl Creator {
         // Spends and outputs not modifiable.
         let mut tx_modifiable = 0b0000_0000;
         // Check if any input is using `SIGHASH_SINGLE` (with or without `ANYONECANPAY`).
-        if parts.transparent.as_ref().map_or(false, |bundle| {
+        if parts.transparent.as_ref().is_some_and(|bundle| {
             bundle.inputs().iter().any(|input| {
                 (input.sighash_type().encode() & !SIGHASH_ANYONECANPAY) == SIGHASH_SINGLE
             })
