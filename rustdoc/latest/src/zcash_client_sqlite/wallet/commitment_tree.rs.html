@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/commitment_tree.rs`."><title>commitment_tree.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-cf3c48c1.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.86.0-nightly (a730edcd6 2025-01-30)" data-channel="nightly" data-search-js="search-2d513d54.js" data-settings-js="settings-6dad6058.js" ><script src="../../../static.files/storage-302de22f.js"></script><script defer src="../../../static.files/src-script-8fee9dc5.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-9b5d7e41.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>commitment_tree.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/commitment_tree.rs`."><title>commitment_tree.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-cf3c48c1.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.86.0-nightly (a9730c3b5 2025-02-05)" data-channel="nightly" data-search-js="search-581efc7a.js" data-settings-js="settings-6dad6058.js" ><script src="../../../static.files/storage-3a5871a4.js"></script><script defer src="../../../static.files/src-script-8fee9dc5.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-4d63596a.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>commitment_tree.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -1279,7 +1279,24 @@
 <a href="#1278" id="1278">1278</a>
 <a href="#1279" id="1279">1279</a>
 <a href="#1280" id="1280">1280</a>
-<a href="#1281" id="1281">1281</a></pre></div><pre class="rust"><code><span class="kw">use </span>rusqlite::{<span class="self">self</span>, named_params, OptionalExtension};
+<a href="#1281" id="1281">1281</a>
+<a href="#1282" id="1282">1282</a>
+<a href="#1283" id="1283">1283</a>
+<a href="#1284" id="1284">1284</a>
+<a href="#1285" id="1285">1285</a>
+<a href="#1286" id="1286">1286</a>
+<a href="#1287" id="1287">1287</a>
+<a href="#1288" id="1288">1288</a>
+<a href="#1289" id="1289">1289</a>
+<a href="#1290" id="1290">1290</a>
+<a href="#1291" id="1291">1291</a>
+<a href="#1292" id="1292">1292</a>
+<a href="#1293" id="1293">1293</a>
+<a href="#1294" id="1294">1294</a>
+<a href="#1295" id="1295">1295</a>
+<a href="#1296" id="1296">1296</a>
+<a href="#1297" id="1297">1297</a>
+<a href="#1298" id="1298">1298</a></pre></div><pre class="rust"><code><span class="kw">use </span>rusqlite::{<span class="self">self</span>, named_params, OptionalExtension};
 <span class="kw">use </span>std::{
     collections::BTreeSet,
     error, fmt,
@@ -1648,7 +1665,13 @@
     .map_err(Error::Query)<span class="question-mark">?
     </span>.map(|(shard_data, root_hash)| {
         <span class="kw">let </span>shard_tree = read_shard(<span class="kw-2">&amp;mut </span>Cursor::new(shard_data)).map_err(Error::Serialization)<span class="question-mark">?</span>;
-        <span class="kw">let </span>located_tree = LocatedPrunableTree::from_parts(shard_root_addr, shard_tree);
+        <span class="kw">let </span>located_tree =
+            LocatedPrunableTree::from_parts(shard_root_addr, shard_tree).map_err(|e| {
+                Error::Serialization(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    <span class="macro">format!</span>(<span class="string">"Tree contained invalid data at address {:?}"</span>, e),
+                ))
+            })<span class="question-mark">?</span>;
         <span class="kw">if let </span><span class="prelude-val">Some</span>(root_hash_data) = root_hash {
             <span class="kw">let </span>root_hash = H::read(Cursor::new(root_hash_data)).map_err(Error::Serialization)<span class="question-mark">?</span>;
             <span class="prelude-val">Ok</span>(located_tree.reannotate_root(<span class="prelude-val">Some</span>(Arc::new(root_hash))))
@@ -1684,7 +1707,12 @@
     </span>.map(|(shard_index, shard_data)| {
         <span class="kw">let </span>shard_root = Address::from_parts(shard_root_level, shard_index);
         <span class="kw">let </span>shard_tree = read_shard(<span class="kw-2">&amp;mut </span>Cursor::new(shard_data)).map_err(Error::Serialization)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(LocatedPrunableTree::from_parts(shard_root, shard_tree))
+        LocatedPrunableTree::from_parts(shard_root, shard_tree).map_err(|e| {
+            Error::Serialization(io::Error::new(
+                io::ErrorKind::InvalidData,
+                <span class="macro">format!</span>(<span class="string">"Tree contained invalid data at address {:?}"</span>, e),
+            ))
+        })
     })
     .transpose()
 }
@@ -2313,7 +2341,13 @@
         Address::from_parts((DEPTH - SHARD_HEIGHT).into(), <span class="number">0</span>),
         get_cap::&lt;LevelShifter&lt;H, SHARD_HEIGHT&gt;&gt;(conn, table_prefix)
             .map_err(ShardTreeError::Storage)<span class="question-mark">?</span>,
-    );
+    )
+    .map_err(|e| {
+        ShardTreeError::Storage(Error::Serialization(io::Error::new(
+            io::ErrorKind::InvalidData,
+            <span class="macro">format!</span>(<span class="string">"Note commitment tree cap was invalid at address {:?}"</span>, e),
+        )))
+    })<span class="question-mark">?</span>;
 
     <span class="kw">let </span>insert_into_cap = <span class="macro">tracing::info_span!</span>(<span class="string">"insert_into_cap"</span>).entered();
     <span class="kw">let </span>cap_result = cap

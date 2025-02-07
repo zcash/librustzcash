@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/builder.rs`."><title>builder.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-cf3c48c1.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.86.0-nightly (a730edcd6 2025-01-30)" data-channel="nightly" data-search-js="search-2d513d54.js" data-settings-js="settings-6dad6058.js" ><script src="../../../static.files/storage-302de22f.js"></script><script defer src="../../../static.files/src-script-8fee9dc5.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-9b5d7e41.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/</div>builder.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_primitives/src/transaction/builder.rs`."><title>builder.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-cf3c48c1.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_primitives" data-themes="" data-resource-suffix="" data-rustdoc-version="1.86.0-nightly (a9730c3b5 2025-02-05)" data-channel="nightly" data-search-js="search-581efc7a.js" data-settings-js="settings-6dad6058.js" ><script src="../../../static.files/storage-3a5871a4.js"></script><script defer src="../../../static.files/src-script-8fee9dc5.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-4d63596a.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_primitives/transaction/</div>builder.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
 <a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
@@ -1693,7 +1693,7 @@
     _progress_notifier: U,
 }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">'a</span>, P, U: sapling::builder::ProverProgress&gt; Builder&lt;<span class="lifetime">'a</span>, P, U&gt; {
+<span class="kw">impl</span>&lt;P, U: sapling::builder::ProverProgress&gt; Builder&lt;<span class="lifetime">'_</span>, P, U&gt; {
     <span class="doccomment">/// Returns the network parameters that the builder has been configured for.
     </span><span class="kw">pub fn </span>params(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>P {
         <span class="kw-2">&amp;</span><span class="self">self</span>.params
@@ -1802,7 +1802,7 @@
     }
 }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">'a</span>, P: consensus::Parameters, U: sapling::builder::ProverProgress&gt; Builder&lt;<span class="lifetime">'a</span>, P, U&gt; {
+<span class="kw">impl</span>&lt;P: consensus::Parameters, U: sapling::builder::ProverProgress&gt; Builder&lt;<span class="lifetime">'_</span>, P, U&gt; {
     <span class="doccomment">/// Adds an Orchard note to be spent in this bundle.
     ///
     /// Returns an error if the given Merkle path does not have the required anchor for
@@ -2389,7 +2389,7 @@
     <span class="kw">use super</span>::{BuildResult, Builder, Error};
     <span class="kw">use </span><span class="kw">crate</span>::transaction::fees::zip317;
 
-    <span class="kw">impl</span>&lt;<span class="lifetime">'a</span>, P: consensus::Parameters, U: sapling::builder::ProverProgress&gt; Builder&lt;<span class="lifetime">'a</span>, P, U&gt; {
+    <span class="kw">impl</span>&lt;P: consensus::Parameters, U: sapling::builder::ProverProgress&gt; Builder&lt;<span class="lifetime">'_</span>, P, U&gt; {
         <span class="doccomment">/// Build the transaction using mocked randomness and proving capabilities.
         /// DO NOT USE EXCEPT FOR UNIT TESTING.
         </span><span class="kw">pub fn </span>mock_build&lt;R: RngCore&gt;(
@@ -2546,7 +2546,7 @@
         <span class="kw">let </span>cmu1 = Node::from_cmu(<span class="kw-2">&amp;</span>note1.cmu());
         <span class="kw">let </span><span class="kw-2">mut </span>tree = CommitmentTree::&lt;Node, <span class="number">32</span>&gt;::empty();
         tree.append(cmu1).unwrap();
-        <span class="kw">let </span>witness1 = IncrementalWitness::from_tree(tree);
+        <span class="kw">let </span>witness1 = IncrementalWitness::from_tree(tree).unwrap();
 
         <span class="kw">let </span>tx_height = TEST_NETWORK
             .activation_height(NetworkUpgrade::Sapling)
@@ -2660,7 +2660,7 @@
         <span class="kw">let </span>cmu1 = Node::from_cmu(<span class="kw-2">&amp;</span>note1.cmu());
         <span class="kw">let </span><span class="kw-2">mut </span>tree = CommitmentTree::&lt;Node, <span class="number">32</span>&gt;::empty();
         tree.append(cmu1).unwrap();
-        <span class="kw">let </span><span class="kw-2">mut </span>witness1 = IncrementalWitness::from_tree(tree.clone());
+        <span class="kw">let </span><span class="kw-2">mut </span>witness1 = IncrementalWitness::from_tree(tree.clone()).unwrap();
 
         <span class="comment">// Fail if there is insufficient input
         // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
@@ -2704,7 +2704,7 @@
         <span class="kw">let </span>cmu2 = Node::from_cmu(<span class="kw-2">&amp;</span>note2.cmu());
         tree.append(cmu2).unwrap();
         witness1.append(cmu2).unwrap();
-        <span class="kw">let </span>witness2 = IncrementalWitness::from_tree(tree);
+        <span class="kw">let </span>witness2 = IncrementalWitness::from_tree(tree).unwrap();
 
         <span class="comment">// Succeeds if there is sufficient input
         // 0.0003 z-ZEC out, 0.00015 t-ZEC out, 0.00015 t-ZEC fee, 0.0006 z-ZEC in
