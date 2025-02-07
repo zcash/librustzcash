@@ -24,6 +24,7 @@ use {
     },
     ::transparent::keys::{IncomingViewingKey as _, NonHardenedChildIndex},
     zcash_keys::encoding::AddressCodec as _,
+    zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA,
     zip32::DiversifierIndex,
 };
 
@@ -131,10 +132,12 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             }
         }
 
-        // We now have to re-create the `addresses` table in order to fix the constraints.
-        // Note that we do not include `used_in_tx` or `seen_in_tx` columns as these are
-        // duplicative of information that can be discovered via joins with the various
-        // `*_received_{notes|outputs}` tables, which we will create a view to perform below.
+        // We now have to re-create the `addresses` table in order to fix the constraints. Note
+        // that we do not include the `seen_in_tx` column as this is duplicative of information
+        // that can be discovered via joins with the various `*_received_{notes|outputs}` tables,
+        // which we will create a view to perform below. The `used_in_tx` column data is used only
+        // to determine the height at which the address was exposed (for which we use the target
+        // height for the transaction.)
         conn.execute_batch(&format!(
             r#"
             CREATE TABLE addresses_new (
@@ -171,21 +174,27 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 r#"
                 INSERT INTO addresses_new (
                     account_id, key_scope, diversifier_index_be, address,
-                    transparent_child_index, cached_transparent_receiver_address
+                    transparent_child_index, cached_transparent_receiver_address,
+                    exposed_at_height
                 ) VALUES (
                     :account_id, :key_scope, :diversifier_index_be, :address,
-                    :transparent_child_index, :cached_transparent_receiver_address
+                    :transparent_child_index, :cached_transparent_receiver_address,
+                    :exposed_at_height
                 )
                 "#,
             )?;
 
             let mut ea_query = conn.prepare(
                 r#"
-                SELECT account_id, address_index, address
-                FROM ephemeral_addresses
+                SELECT
+                    account_id, address_index, address,
+                    t.expiry_height - :expiry_delta AS exposed_at_height
+                FROM ephemeral_addresses ea
+                LEFT OUTER JOIN transactions t ON t.id_tx = ea.used_in_tx
                 "#,
             )?;
-            let mut rows = ea_query.query([])?;
+            let mut rows =
+                ea_query.query(named_params! {":expiry_delta": DEFAULT_TX_EXPIRY_DELTA })?;
             while let Some(row) = rows.next()? {
                 let account_id: i64 = row.get("account_id")?;
                 let transparent_child_index = row.get::<_, i64>("address_index")?;
@@ -199,6 +208,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         .index(),
                 );
                 let address: String = row.get("address")?;
+                let exposed_at_height: Option<i64> = row.get("exposed_at_height")?;
 
                 // We set both the `address` column and the `cached_transparent_receiver_address`
                 // column to the same value here; there is no Unified address that corresponds to
@@ -209,7 +219,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     ":diversifier_index_be": encode_diversifier_index_be(diversifier_index),
                     ":address": address,
                     ":transparent_child_index": transparent_child_index,
-                    ":cached_transparent_receiver_address": address
+                    ":cached_transparent_receiver_address": address,
+                    ":exposed_at_height": exposed_at_height
                 })?;
 
                 account_ids.insert(account_id);
