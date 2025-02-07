@@ -88,7 +88,7 @@ use wallet::{
     chain_tip_height,
     commitment_tree::{self, put_shard_roots},
     common::spendable_notes_meta,
-    SubtreeProgressEstimator,
+    upsert_address, SubtreeProgressEstimator,
 };
 
 #[cfg(feature = "orchard")]
@@ -1117,11 +1117,29 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters> WalletWrite f
 
     fn get_address_for_index(
         &mut self,
-        _account: Self::AccountId,
-        _diversifier_index: DiversifierIndex,
-        _request: Option<UnifiedAddressRequest>,
+        account: Self::AccountId,
+        diversifier_index: DiversifierIndex,
+        request: Option<UnifiedAddressRequest>,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        todo!()
+        if let Some(account) = self.get_account(account)? {
+            if let Ok(address) = account.uivk().address(diversifier_index, request) {
+                let chain_tip_height = wallet::chain_tip_height(self.conn.borrow())?;
+                upsert_address(
+                    self.conn.borrow(),
+                    &self.params,
+                    account.internal_id(),
+                    diversifier_index,
+                    &address,
+                    Some(chain_tip_height.unwrap_or(account.birthday())),
+                )?;
+
+                Ok(Some(address))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Err(SqliteClientError::AccountUnknown)
+        }
     }
 
     fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error> {
