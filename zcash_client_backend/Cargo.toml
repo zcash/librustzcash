@@ -120,6 +120,7 @@ crossbeam-channel.workspace = true
 rayon.workspace = true
 
 # - Tor
+fs-mistrust = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true, features = ["fs"] }
 tor-rtcompat = { workspace = true, optional = true }
 tower = { workspace = true, optional = true }
@@ -201,6 +202,7 @@ sync = [
 tor = [
     "dep:arti-client",
     "dep:dynosaur",
+    "dep:fs-mistrust",
     "dep:futures-util",
     "dep:http-body-util",
     "dep:hyper",

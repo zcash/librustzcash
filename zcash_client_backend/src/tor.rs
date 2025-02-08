@@ -24,20 +24,33 @@ impl Client {
     /// Preserving the contents of this directory will speed up subsequent calls to
     /// `Client::create`.
     ///
+    /// If `with_permissions` is `None`, the default from [`arti_client`] will be used
+    /// (enable permissions checks unless the `ARTI_FS_DISABLE_PERMISSION_CHECKS` env
+    /// variable is set).
+    ///
     /// Returns an error if `tor_dir` does not exist, or if bootstrapping fails.
-    pub async fn create(tor_dir: &Path) -> Result<Self, Error> {
+    pub async fn create(
+        tor_dir: &Path,
+        with_permissions: Option<impl FnOnce(&mut fs_mistrust::MistrustBuilder)>,
+    ) -> Result<Self, Error> {
         let runtime = PreferredRuntime::current()?;
 
         if !tokio::fs::try_exists(tor_dir).await? {
             return Err(Error::MissingTorDirectory);
         }
 
-        let config = TorClientConfigBuilder::from_directories(
+        let mut config_builder = TorClientConfigBuilder::from_directories(
             tor_dir.join("arti-data"),
             tor_dir.join("arti-cache"),
-        )
-        .build()
-        .expect("all required fields initialized");
+        );
+
+        if let Some(f) = with_permissions {
+            f(config_builder.storage().permissions());
+        }
+
+        let config = config_builder
+            .build()
+            .expect("all required fields initialized");
 
         let client_builder = TorClient::with_runtime(runtime).config(config);
 
