@@ -103,7 +103,7 @@ pub(super) const TABLE_ADDRESSES: &str = r#"
 CREATE TABLE "addresses" (
     id INTEGER NOT NULL PRIMARY KEY,
     account_id INTEGER NOT NULL,
-    key_scope INTEGER NOT NULL DEFAULT 0,
+    key_scope INTEGER NOT NULL,
     diversifier_index_be BLOB NOT NULL,
     address TEXT NOT NULL,
     transparent_child_index INTEGER,
