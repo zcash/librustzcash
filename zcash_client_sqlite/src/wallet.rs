@@ -3664,6 +3664,8 @@ pub mod testing {
                     row.get::<_, Option<u32>>("mined_height")?
                         .map(BlockHeight::from),
                     ZatBalance::from_i64(row.get("account_balance_delta")?)?,
+                    Zatoshis::from_nonnegative_i64(row.get("total_spent")?)?,
+                    Zatoshis::from_nonnegative_i64(row.get("total_received")?)?,
                     row.get::<_, Option<i64>>("fee_paid")?
                         .map(Zatoshis::from_nonnegative_i64)
                         .transpose()?,

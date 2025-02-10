@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::testing::TransactionSummary` has added
+  accessor methods `total_spent` and `total_received`.
+
 ### Changed
 - MSRV is now 1.81.0.
 - Migrated to `bip32 =0.6.0-pre.1`, `nonempty 0.11`, `incrementalmerkletree 0.8`,
@@ -26,6 +30,9 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api::WalletRead::get_known_ephemeral_addresses`
   now takes a `Range<zcash_transparent::keys::NonHardenedChildIndex>` as its
   argument instead of a `Range<u32>`
+- `zcash_client_backend::data_api::testing::TransactionSummary::from_parts`
+  has been modified; it now requires additional `total_spent` and `total_received`
+  arguments.
 
 ### Deprecated
 - `zcash_client_backend::address` (use `zcash_keys::address` instead)

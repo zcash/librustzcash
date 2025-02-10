@@ -322,6 +322,17 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
 
     let tx_history = st.wallet().get_tx_history().unwrap();
     assert_eq!(tx_history.len(), 2);
+    {
+        let tx_0 = &tx_history[0];
+        assert_eq!(tx_0.total_spent(), Zatoshis::const_from_u64(0));
+        assert_eq!(tx_0.total_received(), Zatoshis::const_from_u64(60000));
+    }
+
+    {
+        let tx_1 = &tx_history[1];
+        assert_eq!(tx_1.total_spent(), Zatoshis::const_from_u64(60000));
+        assert_eq!(tx_1.total_received(), Zatoshis::const_from_u64(40000));
+    }
 
     let network = *st.network();
     assert_matches!(
@@ -462,6 +473,18 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
 
     let tx_history = st.wallet().get_tx_history().unwrap();
     assert_eq!(tx_history.len(), 2);
+    {
+        let tx_0 = &tx_history[0];
+        assert_eq!(tx_0.total_spent(), Zatoshis::const_from_u64(0));
+        assert_eq!(tx_0.total_received(), Zatoshis::const_from_u64(650_0000));
+    }
+
+    {
+        let tx_1 = &tx_history[1];
+        assert_eq!(tx_1.total_spent(), Zatoshis::const_from_u64(650_0000));
+        assert_eq!(tx_1.total_received(), Zatoshis::const_from_u64(548_5000));
+        assert_eq!(tx_1.fee_paid(), Some(Zatoshis::const_from_u64(15000)));
+    }
 
     let network = *st.network();
     assert_matches!(

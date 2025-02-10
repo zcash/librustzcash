@@ -24,6 +24,7 @@ mod ufvk_support;
 mod utxos_table;
 mod utxos_to_txos;
 mod v_sapling_shard_unscanned_ranges;
+mod v_transactions_additional_totals;
 mod v_transactions_net;
 mod v_transactions_note_uniqueness;
 mod v_transactions_shielding_balance;
@@ -82,10 +83,10 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //              ------------------------------ tx_retrieval_queue ----------------------------
     //                                                     |
     //                                            support_legacy_sqlite
-    //                                               /           \
-    //                         fix_broken_commitment_trees      add_account_uuids
-    //                                     |
-    //                          fix_bad_change_flagging
+    //                                               /              \
+    //                         fix_broken_commitment_trees         add_account_uuids
+    //                                     |                               |
+    //                          fix_bad_change_flagging     v_transactions_additional_totals
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -149,6 +150,7 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         }),
         Box::new(fix_bad_change_flagging::Migration),
         Box::new(add_account_uuids::Migration),
+        Box::new(v_transactions_additional_totals::Migration),
     ]
 }
 

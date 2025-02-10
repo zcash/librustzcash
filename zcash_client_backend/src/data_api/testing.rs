@@ -99,6 +99,8 @@ pub struct TransactionSummary<AccountId> {
     expiry_height: Option<BlockHeight>,
     mined_height: Option<BlockHeight>,
     account_value_delta: ZatBalance,
+    total_spent: Zatoshis,
+    total_received: Zatoshis,
     fee_paid: Option<Zatoshis>,
     spent_note_count: usize,
     has_change: bool,
@@ -121,6 +123,8 @@ impl<AccountId> TransactionSummary<AccountId> {
         expiry_height: Option<BlockHeight>,
         mined_height: Option<BlockHeight>,
         account_value_delta: ZatBalance,
+        total_spent: Zatoshis,
+        total_received: Zatoshis,
         fee_paid: Option<Zatoshis>,
         spent_note_count: usize,
         has_change: bool,
@@ -136,6 +140,8 @@ impl<AccountId> TransactionSummary<AccountId> {
             expiry_height,
             mined_height,
             account_value_delta,
+            total_spent,
+            total_received,
             fee_paid,
             spent_note_count,
             has_change,
@@ -178,6 +184,16 @@ impl<AccountId> TransactionSummary<AccountId> {
     /// show `-fee_paid` as the account value delta.
     pub fn account_value_delta(&self) -> ZatBalance {
         self.account_value_delta
+    }
+
+    /// Returns the total value of notes spent by the account in this transaction.
+    pub fn total_spent(&self) -> Zatoshis {
+        self.total_spent
+    }
+
+    /// Returns the total value of notes received by the account in this transaction.
+    pub fn total_received(&self) -> Zatoshis {
+        self.total_received
     }
 
     /// Returns the fee paid by this transaction, if known.
