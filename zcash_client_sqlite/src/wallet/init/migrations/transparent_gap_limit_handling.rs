@@ -72,6 +72,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             r#"
             ALTER TABLE addresses ADD COLUMN key_scope INTEGER NOT NULL DEFAULT {external_scope_code};
             ALTER TABLE addresses ADD COLUMN transparent_child_index INTEGER;
+            ALTER TABLE addresses ADD COLUMN exposed_at_height INTEGER;
             "#
         ))?;
 
@@ -86,7 +87,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             // diversifier_index_be) constraint.
             let mut di_query = conn.prepare(
                 r#"
-                SELECT account_id, accounts.uivk AS uivk, diversifier_index_be
+                SELECT account_id, accounts.uivk AS uivk, diversifier_index_be, accounts.birthday_height
                 FROM addresses
                 JOIN accounts ON accounts.id = account_id
                 "#,
@@ -99,6 +100,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 let uivk = decode_uivk(row.get("uivk")?)?;
                 let di_be: Vec<u8> = row.get("diversifier_index_be")?;
                 let diversifier_index = decode_diversifier_index_be(&di_be)?;
+                let account_birthday: i64 = row.get("birthday_height")?;
 
                 let transparent_external = NonHardenedChildIndex::try_from(diversifier_index)
                     .ok()
@@ -120,7 +122,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         r#"
                         UPDATE addresses
                         SET transparent_child_index = :transparent_child_index,
-                            cached_transparent_receiver_address = :t_addr
+                            cached_transparent_receiver_address = :t_addr,
+                            exposed_at_height = :account_birthday
                         WHERE account_id = :account_id
                         AND diversifier_index_be = :diversifier_index_be
                         "#,
@@ -129,6 +132,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             ":diversifier_index_be": &di_be[..],
                             ":transparent_child_index": idx.index(),
                             ":t_addr": t_addr.encode(&self.params),
+                            ":account_birthday": account_birthday,
                         },
                     )?;
                 }
@@ -141,12 +145,11 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         // which we will create a view to perform below. The `used_in_tx` column data is used only
         // to determine the height at which the address was exposed (for which we use the target
         // height for the transaction.)
-        conn.execute_batch(&format!(
-            r#"
+        conn.execute_batch(r#"
             CREATE TABLE addresses_new (
                 id INTEGER NOT NULL PRIMARY KEY,
                 account_id INTEGER NOT NULL,
-                key_scope INTEGER NOT NULL DEFAULT {external_scope_code},
+                key_scope INTEGER NOT NULL,
                 diversifier_index_be BLOB NOT NULL,
                 address TEXT NOT NULL,
                 transparent_child_index INTEGER,
@@ -161,14 +164,15 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
             INSERT INTO addresses_new (
                 account_id, key_scope, diversifier_index_be, address,
-                transparent_child_index, cached_transparent_receiver_address
+                transparent_child_index, cached_transparent_receiver_address,
+                exposed_at_height
             )
             SELECT
                 account_id, key_scope, diversifier_index_be, address,
-                transparent_child_index, cached_transparent_receiver_address
+                transparent_child_index, cached_transparent_receiver_address,
+                exposed_at_height
             FROM addresses;
-            "#
-        ))?;
+            "#)?;
 
         // Now, we add the ephemeral addresses to the newly unified `addresses` table.
         #[cfg(feature = "transparent-inputs")]
