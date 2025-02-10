@@ -1,4 +1,4 @@
-//! Functikjns for wallet support of ephemeral transparent addresses.
+//! Functions for wallet support of ephemeral transparent addresses.
 use std::ops::Range;
 
 use rusqlite::{named_params, OptionalExtension};
