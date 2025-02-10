@@ -124,7 +124,7 @@ pub enum SqliteClientError {
     /// containing outputs belonging to a previously reserved address has been mined. The error
     /// contains the index that could not safely be reserved.
     #[cfg(feature = "transparent-inputs")]
-    ReachedGapLimit(u32, KeyScope),
+    ReachedGapLimit(KeyScope, u32),
 
     /// The wallet attempted to create a transaction that would use of one of the wallet's
     /// previously-used addresses, potentially creating a problem with on-chain transaction
@@ -187,7 +187,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::BalanceError(e) => write!(f, "Balance error: {}", e),
             SqliteClientError::NoteFilterInvalid(s) => write!(f, "Could not evaluate filter query: {:?}", s),
             #[cfg(feature = "transparent-inputs")]
-            SqliteClientError::ReachedGapLimit(bad_index, key_scope) => write!(f,
+            SqliteClientError::ReachedGapLimit(key_scope, bad_index) => write!(f,
                 "The proposal cannot be constructed until a transaction with outputs to a previously reserved {} address has been mined. \
                  The address at index {bad_index} could not be safely reserved.",
                  match key_scope {
