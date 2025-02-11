@@ -17,6 +17,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_sqlite::wallet::init::init_wallet_db` now has an additional
   generic parameter, enabling it to be used with wallets constructed via
   `WalletDb::from_connection`.
+- The `v_transactions` view has added columns `total_spent` and `total_received`.
 
 ## [0.14.0] - 2024-12-16
 
