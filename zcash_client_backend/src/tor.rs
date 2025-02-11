@@ -24,14 +24,15 @@ impl Client {
     /// Preserving the contents of this directory will speed up subsequent calls to
     /// `Client::create`.
     ///
-    /// If `with_permissions` is `None`, the default from [`arti_client`] will be used
-    /// (enable permissions checks unless the `ARTI_FS_DISABLE_PERMISSION_CHECKS` env
-    /// variable is set).
+    /// If the `with_permissions` closure does not make any changes (e.g. is
+    /// passed as `|_| {}`), the default from [`arti_client`] will be used.
+    /// This default will enable permissions checks unless the
+    /// `ARTI_FS_DISABLE_PERMISSION_CHECKS` env variable is set.
     ///
     /// Returns an error if `tor_dir` does not exist, or if bootstrapping fails.
     pub async fn create(
         tor_dir: &Path,
-        with_permissions: Option<impl FnOnce(&mut fs_mistrust::MistrustBuilder)>,
+        with_permissions: impl FnOnce(&mut fs_mistrust::MistrustBuilder),
     ) -> Result<Self, Error> {
         let runtime = PreferredRuntime::current()?;
 
@@ -44,9 +45,7 @@ impl Client {
             tor_dir.join("arti-cache"),
         );
 
-        if let Some(f) = with_permissions {
-            f(config_builder.storage().permissions());
-        }
+        with_permissions(config_builder.storage().permissions());
 
         let config = config_builder
             .build()

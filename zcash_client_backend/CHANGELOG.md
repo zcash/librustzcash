@@ -16,8 +16,9 @@ and this library adheres to Rust's notion of
 - Migrated to `bip32 =0.6.0-pre.1`, `nonempty 0.11`, `incrementalmerkletree 0.8`,
   `shardtree 0.6`.
 - `zcash_client_backend::tor`:
-  - `tor::Client::create` now takes an optional `with_permissions` argument for
-    configuring `fs_mistrust::Mistrust`.
+  - `tor::Client::create` now takes a `with_permissions` argument for configuring
+    `fs_mistrust::Mistrust`. If you don't need to configure it, pass `|_| ()`
+    (the empty closure).
 - `zcash_client_backend::wallet::Recipient` has changed:
   - The `Recipient::External` variant is now a structured variant.
   - The `Recipient::EphemeralTransparent` variant is now only available if
