@@ -24,9 +24,10 @@ impl Client {
     /// Preserving the contents of this directory will speed up subsequent calls to
     /// `Client::create`.
     ///
-    /// If the `with_permissions` closure does not make any changes, the default from
-    /// [`arti_client`] will be used (enable permissions checks unless the
-    /// `ARTI_FS_DISABLE_PERMISSION_CHECKS` env variable is set).
+    /// If the `with_permissions` closure does not make any changes (e.g. is
+    /// passed as `|_| {}`), the default from [`arti_client`] will be used.
+    /// This default will enable permissions checks unless the
+    /// `ARTI_FS_DISABLE_PERMISSION_CHECKS` env variable is set.
     ///
     /// Returns an error if `tor_dir` does not exist, or if bootstrapping fails.
     pub async fn create(
