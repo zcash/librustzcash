@@ -1072,7 +1072,13 @@
 <a href="#1071" id="1071">1071</a>
 <a href="#1072" id="1072">1072</a>
 <a href="#1073" id="1073">1073</a>
-<a href="#1074" id="1074">1074</a></pre></div><pre class="rust"><code><span class="doccomment">//! Documentation about the wallet database structure.
+<a href="#1074" id="1074">1074</a>
+<a href="#1075" id="1075">1075</a>
+<a href="#1076" id="1076">1076</a>
+<a href="#1077" id="1077">1077</a>
+<a href="#1078" id="1078">1078</a>
+<a href="#1079" id="1079">1079</a>
+<a href="#1080" id="1080">1080</a></pre></div><pre class="rust"><code><span class="doccomment">//! Documentation about the wallet database structure.
 //!
 //! The database structure is managed by [`crate::wallet::init::init_wallet_db`], which
 //! applies migrations (defined in `crate::wallet::init::migrations`) that produce the
@@ -1831,6 +1837,8 @@ notes AS (
            ro.pool                    AS pool,
            id_within_pool_table,
            ro.value                   AS value,
+           ro.value                   AS received_value,
+           0                          AS spent_value,
            0                          AS spent_note_count,
            CASE
                 WHEN ro.is_change THEN 1
@@ -1862,6 +1870,8 @@ notes AS (
            ro.pool                    AS pool,
            id_within_pool_table,
            -ro.value                  AS value,
+           0                          AS received_value,
+           ro.value                   AS spent_value,
            1                          AS spent_note_count,
            0                          AS change_note_count,
            0                          AS received_count,
@@ -1910,6 +1920,8 @@ SELECT accounts.uuid                AS account_uuid,
        transactions.expiry_height   AS expiry_height,
        transactions.raw             AS raw,
        SUM(notes.value)             AS account_balance_delta,
+       SUM(notes.spent_value)       AS total_spent,
+       SUM(notes.received_value)    AS total_received,
        transactions.fee             AS fee_paid,
        SUM(notes.change_note_count) &gt; 0  AS has_change,
        MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,

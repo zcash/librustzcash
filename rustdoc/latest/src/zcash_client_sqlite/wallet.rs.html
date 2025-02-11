@@ -3882,7 +3882,9 @@
 <a href="#3881" id="3881">3881</a>
 <a href="#3882" id="3882">3882</a>
 <a href="#3883" id="3883">3883</a>
-<a href="#3884" id="3884">3884</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for querying information in the wallet database.
+<a href="#3884" id="3884">3884</a>
+<a href="#3885" id="3885">3885</a>
+<a href="#3886" id="3886">3886</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for querying information in the wallet database.
 //!
 //! These functions should generally not be used directly; instead,
 //! their functionality is available via the [`WalletRead`] and
@@ -7548,6 +7550,8 @@
                     row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="string">"mined_height"</span>)<span class="question-mark">?
                         </span>.map(BlockHeight::from),
                     ZatBalance::from_i64(row.get(<span class="string">"account_balance_delta"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>,
+                    Zatoshis::from_nonnegative_i64(row.get(<span class="string">"total_spent"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>,
+                    Zatoshis::from_nonnegative_i64(row.get(<span class="string">"total_received"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>,
                     row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;i64&gt;&gt;(<span class="string">"fee_paid"</span>)<span class="question-mark">?
                         </span>.map(Zatoshis::from_nonnegative_i64)
                         .transpose()<span class="question-mark">?</span>,

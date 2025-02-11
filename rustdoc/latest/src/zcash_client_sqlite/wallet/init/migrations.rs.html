@@ -347,7 +347,9 @@
 <a href="#346" id="346">346</a>
 <a href="#347" id="347">347</a>
 <a href="#348" id="348">348</a>
-<a href="#349" id="349">349</a></pre></div><pre class="rust"><code><span class="kw">mod </span>add_account_birthdays;
+<a href="#349" id="349">349</a>
+<a href="#350" id="350">350</a>
+<a href="#351" id="351">351</a></pre></div><pre class="rust"><code><span class="kw">mod </span>add_account_birthdays;
 <span class="kw">mod </span>add_account_uuids;
 <span class="kw">mod </span>add_transaction_views;
 <span class="kw">mod </span>add_utxo_account;
@@ -373,6 +375,7 @@
 <span class="kw">mod </span>utxos_table;
 <span class="kw">mod </span>utxos_to_txos;
 <span class="kw">mod </span>v_sapling_shard_unscanned_ranges;
+<span class="kw">mod </span>v_transactions_additional_totals;
 <span class="kw">mod </span>v_transactions_net;
 <span class="kw">mod </span>v_transactions_note_uniqueness;
 <span class="kw">mod </span>v_transactions_shielding_balance;
@@ -431,10 +434,10 @@
     //              ------------------------------ tx_retrieval_queue ----------------------------
     //                                                     |
     //                                            support_legacy_sqlite
-    //                                               /           \
-    //                         fix_broken_commitment_trees      add_account_uuids
-    //                                     |
-    //                          fix_bad_change_flagging
+    //                                               /              \
+    //                         fix_broken_commitment_trees         add_account_uuids
+    //                                     |                               |
+    //                          fix_bad_change_flagging     v_transactions_additional_totals
     </span><span class="macro">vec!</span>[
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -498,6 +501,7 @@
         }),
         Box::new(fix_bad_change_flagging::Migration),
         Box::new(add_account_uuids::Migration),
+        Box::new(v_transactions_additional_totals::Migration),
     ]
 }
 

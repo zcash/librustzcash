@@ -2825,7 +2825,23 @@
 <a href="#2824" id="2824">2824</a>
 <a href="#2825" id="2825">2825</a>
 <a href="#2826" id="2826">2826</a>
-<a href="#2827" id="2827">2827</a></pre></div><pre class="rust"><code><span class="doccomment">//! Utilities for testing wallets based upon the [`crate::data_api`] traits.
+<a href="#2827" id="2827">2827</a>
+<a href="#2828" id="2828">2828</a>
+<a href="#2829" id="2829">2829</a>
+<a href="#2830" id="2830">2830</a>
+<a href="#2831" id="2831">2831</a>
+<a href="#2832" id="2832">2832</a>
+<a href="#2833" id="2833">2833</a>
+<a href="#2834" id="2834">2834</a>
+<a href="#2835" id="2835">2835</a>
+<a href="#2836" id="2836">2836</a>
+<a href="#2837" id="2837">2837</a>
+<a href="#2838" id="2838">2838</a>
+<a href="#2839" id="2839">2839</a>
+<a href="#2840" id="2840">2840</a>
+<a href="#2841" id="2841">2841</a>
+<a href="#2842" id="2842">2842</a>
+<a href="#2843" id="2843">2843</a></pre></div><pre class="rust"><code><span class="doccomment">//! Utilities for testing wallets based upon the [`crate::data_api`] traits.
 
 </span><span class="kw">use </span>std::{
     collections::{BTreeMap, HashMap},
@@ -2926,6 +2942,8 @@
     expiry_height: <span class="prelude-ty">Option</span>&lt;BlockHeight&gt;,
     mined_height: <span class="prelude-ty">Option</span>&lt;BlockHeight&gt;,
     account_value_delta: ZatBalance,
+    total_spent: Zatoshis,
+    total_received: Zatoshis,
     fee_paid: <span class="prelude-ty">Option</span>&lt;Zatoshis&gt;,
     spent_note_count: usize,
     has_change: bool,
@@ -2948,6 +2966,8 @@
         expiry_height: <span class="prelude-ty">Option</span>&lt;BlockHeight&gt;,
         mined_height: <span class="prelude-ty">Option</span>&lt;BlockHeight&gt;,
         account_value_delta: ZatBalance,
+        total_spent: Zatoshis,
+        total_received: Zatoshis,
         fee_paid: <span class="prelude-ty">Option</span>&lt;Zatoshis&gt;,
         spent_note_count: usize,
         has_change: bool,
@@ -2963,6 +2983,8 @@
             expiry_height,
             mined_height,
             account_value_delta,
+            total_spent,
+            total_received,
             fee_paid,
             spent_note_count,
             has_change,
@@ -3005,6 +3027,16 @@
     /// show `-fee_paid` as the account value delta.
     </span><span class="kw">pub fn </span>account_value_delta(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ZatBalance {
         <span class="self">self</span>.account_value_delta
+    }
+
+    <span class="doccomment">/// Returns the total value of notes spent by the account in this transaction.
+    </span><span class="kw">pub fn </span>total_spent(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Zatoshis {
+        <span class="self">self</span>.total_spent
+    }
+
+    <span class="doccomment">/// Returns the total value of notes received by the account in this transaction.
+    </span><span class="kw">pub fn </span>total_received(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Zatoshis {
+        <span class="self">self</span>.total_received
     }
 
     <span class="doccomment">/// Returns the fee paid by this transaction, if known.
