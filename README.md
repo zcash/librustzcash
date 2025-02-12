@@ -76,6 +76,25 @@ graph TB
 
     librustzcash --> shielded_protocols
     shielded_protocols --> protocol_components
+
+    click zcash_address "https://docs.rs/zcash_address/" _blank
+    click zcash_primitives "https://docs.rs/zcash_primitives/" _blank
+    click zcash_transparent "https://docs.rs/zcash_transparent/" _blank
+    click zcash_proofs "https://docs.rs/zcash_proofs/" _blank
+    click zcash_protocol "https://docs.rs/zcash_protocol/" _blank
+    click zcash_keys "https://docs.rs/zcash_keys/" _blank
+    click zip321 "https://docs.rs/zip321/" _blank
+    click pczt "https://docs.rs/pczt/" _blank
+    click zcash_client_backend "https://docs.rs/zcash_client_backend/" _blank
+    click zcash_client_sqlite "https://docs.rs/zcash_client_sqlite/" _blank
+    click equihash "https://docs.rs/equihash/" _blank
+    click f4jumble "https://docs.rs/f4jumble/" _blank
+    click zcash_encoding "https://docs.rs/zcash_encoding/" _blank
+    click sapling "https://docs.rs/sapling-crypto/" _blank
+    click orchard "https://docs.rs/orchard/" _blank
+    click zcash_note_encryption "https://docs.rs/zcash_note_encryption/" _blank
+    click zip32 "https://docs.rs/zip32/" _blank
+    click zcash_spec "https://docs.rs/zcash_spec/" _blank
 ```
 
 ## Security Warnings
