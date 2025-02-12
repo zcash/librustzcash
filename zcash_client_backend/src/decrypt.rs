@@ -1,6 +1,5 @@
-use std::collections::HashMap;
-
 use sapling::note_encryption::{PreparedIncomingViewingKey, SaplingDomain};
+use std::collections::HashMap;
 use zcash_note_encryption::{try_note_decryption, try_output_recovery_with_ovk};
 use zcash_primitives::{
     consensus::{self, BlockHeight},
@@ -159,7 +158,7 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
         .collect();
 
     #[cfg(feature = "orchard")]
-    let orchard_bundle = tx.orchard_bundle();
+    let orchard_bundle = tx.orchard_bundle().map(|bundle| bundle.as_vanilla_bundle());
     #[cfg(feature = "orchard")]
     let orchard_outputs = orchard_bundle
         .iter()

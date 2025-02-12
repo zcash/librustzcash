@@ -3,10 +3,6 @@ use std::ops::Deref;
 
 use proptest::prelude::*;
 
-use crate::{
-    consensus::BranchId, legacy::Script, transaction::components::amount::NonNegativeAmount,
-};
-
 use super::{
     sapling,
     sighash::{
@@ -19,6 +15,12 @@ use super::{
     transparent::{self},
     txid::TxIdDigester,
     Authorization, Transaction, TransactionData, TxDigests, TxIn,
+};
+use crate::transaction::OrchardBundle::OrchardVanilla;
+#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+use crate::transaction::OrchardBundle::OrchardZSA;
+use crate::{
+    consensus::BranchId, legacy::Script, transaction::components::amount::NonNegativeAmount,
 };
 
 #[cfg(zcash_unstable = "zfuture")]
@@ -53,13 +55,16 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     );
     prop_assert_eq!(tx.sapling_value_balance(), txo.sapling_value_balance());
     prop_assert_eq!(
-        tx.orchard_bundle.as_ref().map(|v| *v.value_balance()),
-        txo.orchard_bundle.as_ref().map(|v| *v.value_balance())
-    );
-    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    prop_assert_eq!(
-        tx.orchard_zsa_bundle.as_ref().map(|v| *v.value_balance()),
-        txo.orchard_zsa_bundle.as_ref().map(|v| *v.value_balance())
+        tx.orchard_bundle.as_ref().map(|v| match v {
+            OrchardVanilla(b) => *b.value_balance(),
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+            OrchardZSA(b) => *b.value_balance(),
+        }),
+        txo.orchard_bundle.as_ref().map(|v| match v {
+            OrchardVanilla(b) => *b.value_balance(),
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+            OrchardZSA(b) => *b.value_balance(),
+        })
     );
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     if tx.issue_bundle.is_some() {
@@ -222,9 +227,6 @@ impl Authorization for TestUnauthorized {
     type OrchardAuth = orchard::bundle::Authorized;
 
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    type OrchardZsaAuth = orchard::bundle::Authorized;
-
-    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     type IssueAuth = orchard::issuance::Signed;
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -295,8 +297,6 @@ fn zip_0244() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
-            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-            txdata.orchard_zsa_bundle().cloned(),
             #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
             txdata.issue_bundle().cloned(),
         );

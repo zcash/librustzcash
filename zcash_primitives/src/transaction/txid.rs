@@ -6,7 +6,6 @@ use blake2b_simd::{Hash as Blake2bHash, Params, State};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
 use orchard::bundle;
-use orchard::orchard_flavor::OrchardVanilla;
 
 use crate::{
     consensus::{BlockHeight, BranchId},
@@ -21,19 +20,20 @@ use super::{
         amount::Amount,
         transparent::{self, TxIn, TxOut},
     },
-    Authorization, Authorized, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
-};
-
-#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-use orchard::{
-    issuance::{IssueBundle, Signed},
-    orchard_flavor::OrchardZSA,
+    Authorization, Authorized, OrchardBundle, TransactionDigest, TransparentDigests, TxDigests,
+    TxId, TxVersion,
 };
 
 #[cfg(zcash_unstable = "zfuture")]
 use super::{
     components::tze::{self, TzeIn, TzeOut},
     TzeDigests,
+};
+use crate::transaction::OrchardBundle::OrchardVanilla;
+#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+use {
+    crate::transaction::OrchardBundle::OrchardZSA,
+    orchard::issuance::{IssueBundle, Signed},
 };
 
 /// TxId tree root personalization
@@ -347,17 +347,15 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
 
     fn digest_orchard(
         &self,
-        orchard_bundle: Option<&bundle::Bundle<A::OrchardAuth, Amount, OrchardVanilla>>,
+        orchard_bundle: Option<&OrchardBundle<A::OrchardAuth>>,
     ) -> Self::OrchardDigest {
-        orchard_bundle.map(|b| b.commitment().0)
-    }
-
-    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    fn digest_orchard_zsa(
-        &self,
-        orchard_bundle: Option<&bundle::Bundle<A::OrchardZsaAuth, Amount, OrchardZSA>>,
-    ) -> Self::OrchardDigest {
-        orchard_bundle.map(|b| b.commitment().0)
+        orchard_bundle.map(|b| {
+            match b {
+                OrchardVanilla(v) => v.commitment().0,
+                #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+                OrchardZSA(z) => z.commitment().0,
+            }
+        })
     }
 
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
@@ -541,20 +539,14 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
 
     fn digest_orchard(
         &self,
-        orchard_bundle: Option<&bundle::Bundle<bundle::Authorized, Amount, OrchardVanilla>>,
+        orchard_bundle: Option<&OrchardBundle<bundle::Authorized>>,
     ) -> Self::OrchardDigest {
         orchard_bundle.map_or_else(bundle::commitments::hash_bundle_auth_empty, |b| {
-            b.authorizing_commitment().0
-        })
-    }
-
-    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    fn digest_orchard_zsa(
-        &self,
-        orchard_bundle: Option<&bundle::Bundle<bundle::Authorized, Amount, OrchardZSA>>,
-    ) -> Self::OrchardDigest {
-        orchard_bundle.map_or_else(bundle::commitments::hash_bundle_auth_empty, |b| {
-            b.authorizing_commitment().0
+            match b {
+                OrchardVanilla(bundle) => bundle.authorizing_commitment().0,
+                #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+                OrchardZSA(bundle) => bundle.authorizing_commitment().0,
+            }
         })
     }
 
