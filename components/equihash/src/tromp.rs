@@ -127,7 +127,7 @@ unsafe fn worker(eq: *mut CEqui, p: Params, curr_state: &State) -> Vec<Vec<u32>>
 /// `next_nonce` function.
 ///
 /// Returns zero or more unique solutions.
-pub fn solve_200_9<const N: usize>(
+fn solve_200_9_uncompressed<const N: usize>(
     input: &[u8],
     mut next_nonce: impl FnMut() -> Option<[u8; N]>,
 ) -> Vec<Vec<u32>> {
@@ -186,12 +186,12 @@ pub fn solve_200_9<const N: usize>(
 /// `next_nonce` function.
 ///
 /// Returns zero or more unique compressed solutions.
-pub fn solve_200_9_compressed<const N: usize>(
+pub fn solve_200_9<const N: usize>(
     input: &[u8],
     next_nonce: impl FnMut() -> Option<[u8; N]>,
 ) -> Vec<Vec<u8>> {
     let p = Params::new(200, 9).expect("should be valid");
-    let solutions = solve_200_9(input, next_nonce);
+    let solutions = solve_200_9_uncompressed(input, next_nonce);
 
     let mut solutions: Vec<Vec<u8>> = solutions
         .iter()
@@ -209,7 +209,7 @@ pub fn solve_200_9_compressed<const N: usize>(
 mod tests {
     use std::println;
 
-    use super::solve_200_9_compressed;
+    use super::solve_200_9;
 
     #[test]
     #[allow(clippy::print_stdout)]
@@ -222,7 +222,7 @@ mod tests {
         let mut nonces = 0..=32_u32;
         let nonce_count = nonces.clone().count();
 
-        let solutions = solve_200_9_compressed(input, || {
+        let solutions = solve_200_9(input, || {
             let variable_nonce = nonces.next()?;
             println!("Using variable nonce [0..4] of {}", variable_nonce);
 
