@@ -2,30 +2,32 @@
 use std::collections::HashSet;
 
 use rusqlite::named_params;
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
-use zcash_client_backend::keys::{
-    UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey,
+use zcash_keys::keys::{
+    ReceiverRequirement::*, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey,
 };
-use zcash_primitives::consensus;
+use zcash_protocol::consensus;
 
 use super::orchard_received_notes;
 use crate::{wallet::init::WalletMigrationError, UA_ORCHARD, UA_TRANSPARENT};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x604349c7_5ce5_4768_bea6_12d106ccda93);
 
+const DEPENDENCIES: &[Uuid] = &[orchard_received_notes::MIGRATION_ID];
+
 pub(super) struct Migration<P> {
     pub(super) params: P,
 }
 
-impl<P> schemer::Migration for Migration<P> {
+impl<P> schemerz::Migration<Uuid> for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [orchard_received_notes::MIGRATION_ID].into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -37,19 +39,13 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &rusqlite::Transaction<'_>) -> Result<(), Self::Error> {
-        let mut get_accounts = transaction.prepare(
-            r#"
-            SELECT id, ufvk, uivk
-            FROM accounts
-            "#,
-        )?;
+        let mut get_accounts = transaction.prepare("SELECT id, ufvk, uivk FROM accounts")?;
 
         let mut update_address = transaction.prepare(
             r#"UPDATE "addresses"
                SET address = :address
                WHERE account_id = :account_id
-               AND diversifier_index_be = :j
-            "#,
+               AND diversifier_index_be = :j"#,
         )?;
 
         let mut accounts = get_accounts.query([])?;
@@ -69,9 +65,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 })?
             };
 
-            let (default_addr, diversifier_index) = uivk.default_address(
-                UnifiedAddressRequest::unsafe_new(UA_ORCHARD, true, UA_TRANSPARENT),
-            )?;
+            let (default_addr, diversifier_index) = uivk.default_address(Some(
+                UnifiedAddressRequest::unsafe_new(UA_ORCHARD, Require, UA_TRANSPARENT),
+            ))?;
 
             let mut di_be = *diversifier_index.as_bytes();
             di_be.reverse();
@@ -96,9 +92,11 @@ mod tests {
     use secrecy::SecretVec;
     use tempfile::NamedTempFile;
 
-    use zcash_client_backend::keys::{UnifiedAddressRequest, UnifiedSpendingKey};
-    use zcash_keys::address::Address;
-    use zcash_primitives::consensus::Network;
+    use zcash_keys::{
+        address::Address,
+        keys::{ReceiverRequirement::*, UnifiedAddressRequest, UnifiedSpendingKey},
+    };
+    use zcash_protocol::consensus::Network;
 
     use crate::{
         wallet::init::{init_wallet_db, init_wallet_db_internal, migrations::addresses_table},
@@ -144,11 +142,11 @@ mod tests {
             .unwrap();
 
         let (addr, diversifier_index) = ufvk
-            .default_address(UnifiedAddressRequest::unsafe_new(
-                false,
-                true,
+            .default_address(Some(UnifiedAddressRequest::unsafe_new(
+                Omit,
+                Require,
                 UA_TRANSPARENT,
-            ))
+            )))
             .unwrap();
         let mut di_be = *diversifier_index.as_bytes();
         di_be.reverse();
@@ -172,9 +170,9 @@ mod tests {
                 Ok(Address::decode(&db_data.params, &row.get::<_, String>(0)?).unwrap())
             }) {
             Ok(Address::Unified(ua)) => {
-                assert!(ua.orchard().is_none());
-                assert!(ua.sapling().is_some());
-                assert_eq!(ua.transparent().is_some(), UA_TRANSPARENT);
+                assert!(!ua.has_orchard());
+                assert!(ua.has_sapling());
+                assert_eq!(ua.has_transparent(), UA_TRANSPARENT == Require);
             }
             other => panic!("Unexpected result from address decoding: {:?}", other),
         }
@@ -190,9 +188,9 @@ mod tests {
                 Ok(Address::decode(&db_data.params, &row.get::<_, String>(0)?).unwrap())
             }) {
             Ok(Address::Unified(ua)) => {
-                assert_eq!(ua.orchard().is_some(), UA_ORCHARD);
-                assert!(ua.sapling().is_some());
-                assert_eq!(ua.transparent().is_some(), UA_TRANSPARENT);
+                assert_eq!(ua.has_orchard(), UA_ORCHARD == Require);
+                assert!(ua.has_sapling());
+                assert_eq!(ua.has_transparent(), UA_TRANSPARENT == Require);
             }
             other => panic!("Unexpected result from address decoding: {:?}", other),
         }

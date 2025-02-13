@@ -7,6 +7,7 @@
 
 use blake2b_simd::{State, PERSONALBYTES};
 
+use std::boxed::Box;
 use std::ptr;
 use std::slice;
 

@@ -2,26 +2,28 @@
 //! as received value.
 use std::collections::HashSet;
 
-use rusqlite::{self, named_params};
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use rusqlite::named_params;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::{PoolType, ShieldedProtocol};
+
+use zcash_protocol::PoolType;
 
 use super::add_transaction_views;
 use crate::wallet::{init::WalletMigrationError, pool_code};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x2aa4d24f_51aa_4a4c_8d9b_e5b8a762865f);
 
+const DEPENDENCIES: &[Uuid] = &[add_transaction_views::MIGRATION_ID];
+
 pub(crate) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [add_transaction_views::MIGRATION_ID].into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -44,7 +46,7 @@ impl RusqliteMigration for Migration {
              SELECT tx, :output_pool, output_index, from_account, from_account, value
              FROM sent_notes",
              named_params![
-                ":output_pool": &pool_code(PoolType::Shielded(ShieldedProtocol::Sapling))
+                ":output_pool": &pool_code(PoolType::SAPLING)
              ]
         )?;
 
@@ -205,8 +207,9 @@ mod tests {
     use rusqlite::{self, params};
     use tempfile::NamedTempFile;
 
-    use zcash_client_backend::keys::UnifiedSpendingKey;
-    use zcash_primitives::{consensus::Network, zip32::AccountId};
+    use zcash_keys::keys::UnifiedSpendingKey;
+    use zcash_protocol::consensus::Network;
+    use zip32::AccountId;
 
     use crate::{
         wallet::init::{init_wallet_db_internal, migrations::add_transaction_views},

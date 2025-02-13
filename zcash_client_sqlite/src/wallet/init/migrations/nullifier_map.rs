@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -13,17 +13,17 @@ use super::received_notes_nullable_nf;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xe2d71ac5_6a44_4c6b_a9a0_6d0a79d355f1);
 
+const DEPENDENCIES: &[Uuid] = &[received_notes_nullable_nf::MIGRATION_ID];
+
 pub(super) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [received_notes_nullable_nf::MIGRATION_ID]
-            .into_iter()
-            .collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -69,5 +69,15 @@ impl RusqliteMigration for Migration {
             DROP TABLE tx_locator_map;",
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::wallet::init::migrations::tests::test_migrate;
+
+    #[test]
+    fn migrate() {
+        test_migrate(&[super::MIGRATION_ID]);
     }
 }

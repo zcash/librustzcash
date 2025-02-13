@@ -2,6 +2,7 @@
 
 use std::marker::{PhantomData, PhantomPinned};
 use std::slice;
+use std::vec::Vec;
 
 use blake2b_simd::State;
 
@@ -206,6 +207,8 @@ pub fn solve_200_9_compressed<const N: usize>(
 
 #[cfg(test)]
 mod tests {
+    use std::println;
+
     use super::solve_200_9_compressed;
 
     #[test]

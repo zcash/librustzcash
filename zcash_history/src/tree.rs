@@ -72,7 +72,7 @@ impl<V: Version> Tree<V> {
         }
     }
 
-    /// New view into the the tree array representation
+    /// New view into the tree array representation
     ///
     /// `length` is total length of the array representation (is generally not a sum of
     ///     peaks.len + extra.len)
@@ -245,7 +245,7 @@ impl<V: Version> Tree<V> {
             }
         }
 
-        let mut new_root = *peaks.get(0).expect("At lest 1 elements in peaks");
+        let mut new_root = *peaks.first().expect("At lest 1 elements in peaks");
 
         for next_peak in peaks.into_iter().skip(1) {
             new_root = self.push_generated(combine_nodes(
@@ -291,7 +291,7 @@ pub struct IndexedNode<'a, V: Version> {
     link: EntryLink,
 }
 
-impl<'a, V: Version> IndexedNode<'a, V> {
+impl<V: Version> IndexedNode<'_, V> {
     fn left(&self) -> Result<EntryLink, Error> {
         self.node.left().map_err(|e| e.augment(self.link))
     }

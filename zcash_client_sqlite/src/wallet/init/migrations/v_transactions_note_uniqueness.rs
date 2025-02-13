@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use crate::wallet::init::WalletMigrationError;
@@ -12,17 +12,17 @@ use super::v_transactions_shielding_balance;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xdba47c86_13b5_4601_94b2_0cde0abe1e45);
 
+const DEPENDENCIES: &[Uuid] = &[v_transactions_shielding_balance::MIGRATION_ID];
+
 pub(super) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [v_transactions_shielding_balance::MIGRATION_ID]
-            .into_iter()
-            .collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -163,8 +163,9 @@ mod tests {
     use rusqlite::{self, params};
     use tempfile::NamedTempFile;
 
-    use zcash_client_backend::keys::UnifiedSpendingKey;
-    use zcash_primitives::{consensus::Network, zip32::AccountId};
+    use zcash_keys::keys::UnifiedSpendingKey;
+    use zcash_protocol::consensus::Network;
+    use zip32::AccountId;
 
     use crate::{
         wallet::init::{init_wallet_db_internal, migrations::v_transactions_net},

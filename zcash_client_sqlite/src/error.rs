@@ -4,19 +4,18 @@ use std::error;
 use std::fmt;
 
 use shardtree::error::ShardTreeError;
-use zcash_client_backend::{
-    encoding::{Bech32DecodeError, TransparentCodecError},
-    PoolType,
-};
+use zcash_address::ParseError;
+use zcash_client_backend::data_api::NoteFilter;
 use zcash_keys::keys::AddressGenerationError;
-use zcash_primitives::zip32;
-use zcash_primitives::{consensus::BlockHeight, transaction::components::amount::BalanceError};
+use zcash_protocol::{consensus::BlockHeight, value::BalanceError, PoolType};
 
-use crate::wallet::commitment_tree;
-use crate::PRUNING_DEPTH;
+use crate::{wallet::commitment_tree, AccountUuid};
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::TransparentAddress;
+use {
+    ::transparent::address::TransparentAddress, zcash_keys::encoding::TransparentCodecError,
+    zcash_primitives::transaction::TxId,
+};
 
 /// The primary error type for the SQLite wallet backend.
 #[derive(Debug)]
@@ -33,15 +32,16 @@ pub enum SqliteClientError {
     /// Illegal attempt to reinitialize an already-initialized wallet database.
     TableNotEmpty,
 
-    /// A Bech32-encoded key or address decoding error
-    Bech32DecodeError(Bech32DecodeError),
+    /// A Zcash key or address decoding error
+    DecodingError(ParseError),
 
     /// An error produced in legacy transparent address derivation
     #[cfg(feature = "transparent-inputs")]
-    HdwalletError(hdwallet::error::Error),
+    TransparentDerivation(bip32::Error),
 
     /// An error encountered in decoding a transparent address from its
     /// serialized form.
+    #[cfg(feature = "transparent-inputs")]
     TransparentAddress(TransparentCodecError),
 
     /// Wrapper for rusqlite errors.
@@ -51,7 +51,7 @@ pub enum SqliteClientError {
     Io(std::io::Error),
 
     /// A received memo cannot be interpreted as a UTF-8 string.
-    InvalidMemo(zcash_primitives::memo::Error),
+    InvalidMemo(zcash_protocol::memo::Error),
 
     /// An attempt to update block data would overwrite the current hash for a block with a
     /// different hash. This indicates that a required rewind was not performed.
@@ -61,14 +61,22 @@ pub enum SqliteClientError {
     NonSequentialBlocks,
 
     /// A requested rewind would violate invariants of the storage layer. The payload returned with
-    /// this error is (safe rewind height, requested height).
-    RequestedRewindInvalid(BlockHeight, BlockHeight),
+    /// this error is (safe rewind height, requested height). If no safe rewind height can be
+    /// determined, the safe rewind height member will be `None`.
+    RequestedRewindInvalid {
+        safe_rewind_height: Option<BlockHeight>,
+        requested_height: BlockHeight,
+    },
 
     /// An error occurred in generating a Zcash address.
     AddressGeneration(AddressGenerationError),
 
     /// The account for which information was requested does not belong to the wallet.
     AccountUnknown,
+
+    /// The account being added collides with an existing account in the wallet with the given ID.
+    /// The collision can be on the seed and ZIP-32 account index, or a shared FVK component.
+    AccountCollision(AccountUuid),
 
     /// The account was imported, and ZIP-32 derivation information is not known for it.
     UnknownZip32Derivation,
@@ -79,15 +87,11 @@ pub enum SqliteClientError {
     /// An error occurred while processing an account due to a failure in deriving the account's keys.
     BadAccountData(String),
 
-    /// A caller attempted to initialize the accounts table with a discontinuous
-    /// set of account identifiers.
-    AccountIdDiscontinuity,
-
-    /// A caller attempted to construct a new account with an invalid account identifier.
-    AccountIdOutOfRange,
+    /// A caller attempted to construct a new account with an invalid ZIP 32 account identifier.
+    Zip32AccountIndexOutOfRange,
 
     /// The address associated with a record being inserted was not recognized as
-    /// belonging to the wallet
+    /// belonging to the wallet.
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
 
@@ -110,13 +114,27 @@ pub enum SqliteClientError {
 
     /// An error occurred in computing wallet balance
     BalanceError(BalanceError),
+
+    /// A note selection query contained an invalid constant or was otherwise not supported.
+    NoteFilterInvalid(NoteFilter),
+
+    /// The proposal cannot be constructed until transactions with previously reserved
+    /// ephemeral address outputs have been mined. The parameters are the account UUID and
+    /// the index that could not safely be reserved.
+    #[cfg(feature = "transparent-inputs")]
+    ReachedGapLimit(AccountUuid, u32),
+
+    /// An ephemeral address would be reused. The parameters are the address in string
+    /// form, and the txid of the earliest transaction in which it is known to have been
+    /// used.
+    #[cfg(feature = "transparent-inputs")]
+    EphemeralAddressReuse(String, TxId),
 }
 
 impl error::Error for SqliteClientError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self {
             SqliteClientError::InvalidMemo(e) => Some(e),
-            SqliteClientError::Bech32DecodeError(Bech32DecodeError::Bech32Error(e)) => Some(e),
             SqliteClientError::DbError(e) => Some(e),
             SqliteClientError::Io(e) => Some(e),
             SqliteClientError::BalanceError(e) => Some(e),
@@ -134,11 +152,16 @@ impl fmt::Display for SqliteClientError {
             }
             SqliteClientError::Protobuf(e) => write!(f, "Failed to parse protobuf-encoded record: {}", e),
             SqliteClientError::InvalidNote => write!(f, "Invalid note"),
-            SqliteClientError::RequestedRewindInvalid(h, r) =>
-                write!(f, "A rewind must be either of less than {} blocks, or at least back to block {} for your wallet; the requested height was {}.", PRUNING_DEPTH, h, r),
-            SqliteClientError::Bech32DecodeError(e) => write!(f, "{}", e),
+            SqliteClientError::RequestedRewindInvalid { safe_rewind_height,  requested_height } => write!(
+                f,
+                "A rewind for your wallet may only target height {} or greater; the requested height was {}.",
+                safe_rewind_height.map_or("<unavailable>".to_owned(), |h0| format!("{}", h0)),
+               requested_height
+            ),
+            SqliteClientError::DecodingError(e) => write!(f, "{}", e),
             #[cfg(feature = "transparent-inputs")]
-            SqliteClientError::HdwalletError(e) => write!(f, "{:?}", e),
+            SqliteClientError::TransparentDerivation(e) => write!(f, "{:?}", e),
+            #[cfg(feature = "transparent-inputs")]
             SqliteClientError::TransparentAddress(e) => write!(f, "{}", e),
             SqliteClientError::TableNotEmpty => write!(f, "Table is not empty"),
             SqliteClientError::DbError(e) => write!(f, "{}", e),
@@ -149,10 +172,10 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::AddressGeneration(e) => write!(f, "{}", e),
             SqliteClientError::AccountUnknown => write!(f, "The account with the given ID does not belong to this wallet."),
             SqliteClientError::UnknownZip32Derivation => write!(f, "ZIP-32 derivation information is not known for this account."),
-            SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {}", u32::from(*acct_id)),
+            SqliteClientError::KeyDerivationError(zip32_index) => write!(f, "Key derivation failed for ZIP 32 account index {}", u32::from(*zip32_index)),
             SqliteClientError::BadAccountData(e) => write!(f, "Failed to add account: {}", e),
-            SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),
-            SqliteClientError::AccountIdOutOfRange => write!(f, "Wallet account identifiers must be less than 0x7FFFFFFF."),
+            SqliteClientError::Zip32AccountIndexOutOfRange => write!(f, "ZIP 32 account identifiers must be less than 0x7FFFFFFF."),
+            SqliteClientError::AccountCollision(account_uuid) => write!(f, "An account corresponding to the data provided already exists in the wallet with UUID {account_uuid:?}."),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::AddressNotRecognized(_) => write!(f, "The address associated with a received txo is not identifiable as belonging to the wallet."),
             SqliteClientError::CommitmentTree(err) => write!(f, "An error occurred accessing or updating note commitment tree data: {}.", err),
@@ -160,6 +183,14 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::ChainHeightUnknown => write!(f, "Chain height unknown; please call `update_chain_tip`"),
             SqliteClientError::UnsupportedPoolType(t) => write!(f, "Pool type is not currently supported: {}", t),
             SqliteClientError::BalanceError(e) => write!(f, "Balance error: {}", e),
+            SqliteClientError::NoteFilterInvalid(s) => write!(f, "Could not evaluate filter query: {:?}", s),
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::ReachedGapLimit(account_id, bad_index) => write!(f,
+                "The proposal cannot be constructed until transactions with previously reserved ephemeral address outputs have been mined. \
+                 The ephemeral address in account {account_id:?} at index {bad_index} could not be safely reserved.",
+            ),
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::EphemeralAddressReuse(address_str, txid) => write!(f, "The ephemeral address {address_str} previously used in txid {txid} would be reused."),
         }
     }
 }
@@ -175,10 +206,9 @@ impl From<std::io::Error> for SqliteClientError {
         SqliteClientError::Io(e)
     }
 }
-
-impl From<Bech32DecodeError> for SqliteClientError {
-    fn from(e: Bech32DecodeError) -> Self {
-        SqliteClientError::Bech32DecodeError(e)
+impl From<ParseError> for SqliteClientError {
+    fn from(e: ParseError) -> Self {
+        SqliteClientError::DecodingError(e)
     }
 }
 
@@ -189,20 +219,21 @@ impl From<prost::DecodeError> for SqliteClientError {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl From<hdwallet::error::Error> for SqliteClientError {
-    fn from(e: hdwallet::error::Error) -> Self {
-        SqliteClientError::HdwalletError(e)
+impl From<bip32::Error> for SqliteClientError {
+    fn from(e: bip32::Error) -> Self {
+        SqliteClientError::TransparentDerivation(e)
     }
 }
 
+#[cfg(feature = "transparent-inputs")]
 impl From<TransparentCodecError> for SqliteClientError {
     fn from(e: TransparentCodecError) -> Self {
         SqliteClientError::TransparentAddress(e)
     }
 }
 
-impl From<zcash_primitives::memo::Error> for SqliteClientError {
-    fn from(e: zcash_primitives::memo::Error) -> Self {
+impl From<zcash_protocol::memo::Error> for SqliteClientError {
+    fn from(e: zcash_protocol::memo::Error) -> Self {
         SqliteClientError::InvalidMemo(e)
     }
 }

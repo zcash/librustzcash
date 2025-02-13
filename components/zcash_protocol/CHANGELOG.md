@@ -7,6 +7,58 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- `zcash_protocol::consensus::NetworkConstants` has added methods:
+  - `hrp_unified_address`
+  - `hrp_unified_fvk`
+  - `hrp_unified_ivk`
+- Migrated to `incrementalmerkletree 0.8` for functionality provided
+  under the `test-dependencies` feature flag.
+
+## [0.4.3] - 2024-12-16
+### Added
+- `zcash_protocol::TxId` (moved from `zcash_primitives::transaction`).
+
+## [0.4.2] - 2024-12-13
+### Added
+- `no-std` compatibility (`alloc` is required). A default-enabled `std` feature
+  flag has been added gating the `std::error::Error` and `memuse` usage.
+
+## [0.4.1] - 2024-11-13
+### Added
+- `zcash_protocol::value::QuotRem`
+- `zcash_protocol::value::Zatoshis::div_with_remainder`
+- `impl Mul<u64> for zcash_protocol::value::Zatoshis`
+- `impl Div<NonZeroU64> for zcash_protocol::value::Zatoshis`
+
+## [0.4.0] - 2024-10-02
+### Added
+- `impl Sub<BlockHeight> for BlockHeight` unlike the implementation that was
+  removed in version `0.3.0`, a saturating subtraction for block heights having
+  a return type of `u32` makes sense for `BlockHeight`. Subtracting one block
+  height from another yields the delta between them.
+
+### Changed
+- Mainnet activation height has been set for `consensus::BranchId::Nu6`.
+- Adding a delta to a `BlockHeight` now uses saturating addition.
+- Subtracting a delta to a `BlockHeight` now uses saturating subtraction.
+
+## [0.3.0] - 2024-08-26
+### Changed
+- Testnet activation height has been set for `consensus::BranchId::Nu6`.
+
+### Removed
+- `impl {Add, Sub} for BlockHeight` - these operations were unused, and it
+  does not make sense to add block heights (it is not a monoid.)
+
+## [0.2.0] - 2024-08-19
+### Added
+- `zcash_protocol::PoolType::{TRANSPARENT, SAPLING, ORCHARD}`
+
+### Changed
+- MSRV is now 1.70.0.
+- `consensus::BranchId` now has an additional `Nu6` variant.
+
 ## [0.1.1] - 2024-03-25
 ### Added
 - `zcash_protocol::memo`:
@@ -49,9 +101,9 @@ The entries below are relative to the `zcash_primitives` crate as of the tag
 - `zcash_protocol::consensus::Parameters` has been split into two traits, with
   the newly added `NetworkConstants` trait providing all network constant
   accessors. Also, the `address_network` method has been replaced with a new
-  `network_type` method that serves the same purpose. A blanket impl of 
+  `network_type` method that serves the same purpose. A blanket impl of
   `NetworkConstants` is provided for all types that implement `Parameters`,
-  so call sites for methods that have moved to `NetworkConstants` should 
+  so call sites for methods that have moved to `NetworkConstants` should
   remain unchanged (though they may require an additional `use` statement.)
 
 ### Removed

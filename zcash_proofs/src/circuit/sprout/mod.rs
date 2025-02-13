@@ -294,7 +294,7 @@ where
         let mut tmp = vec![];
         for b in value
             .iter()
-            .flat_map(|&m| (0..8).rev().map(move |i| m >> i & 1 == 1))
+            .flat_map(|&m| (0..8).rev().map(move |i| (m >> i) & 1 == 1))
             .skip(skip_bits)
         {
             tmp.push(Some(b));
@@ -359,8 +359,8 @@ fn test_sprout_constraints() {
         let mut cs = TestConstraintSystem::<Scalar>::new();
 
         let phi = Some(get_u256(&mut test_vector));
-        let rt = Some(get_u256(&mut test_vector));
-        let h_sig = Some(get_u256(&mut test_vector));
+        let rt = get_u256(&mut test_vector);
+        let h_sig = get_u256(&mut test_vector);
 
         let mut inputs = vec![];
         for _ in 0..2 {
@@ -410,8 +410,8 @@ fn test_sprout_constraints() {
             outputs.push(JsOutput { value, a_pk, r });
         }
 
-        let vpub_old = Some(test_vector.read_u64::<LittleEndian>().unwrap());
-        let vpub_new = Some(test_vector.read_u64::<LittleEndian>().unwrap());
+        let vpub_old = test_vector.read_u64::<LittleEndian>().unwrap();
+        let vpub_new = test_vector.read_u64::<LittleEndian>().unwrap();
 
         let nf1 = get_u256(&mut test_vector);
         let nf2 = get_u256(&mut test_vector);
@@ -423,13 +423,13 @@ fn test_sprout_constraints() {
         let mac2 = get_u256(&mut test_vector);
 
         let js = JoinSplit {
-            vpub_old,
-            vpub_new,
-            h_sig,
+            vpub_old: Some(vpub_old),
+            vpub_new: Some(vpub_new),
+            h_sig: Some(h_sig),
             phi,
             inputs,
             outputs,
-            rt,
+            rt: Some(rt),
         };
 
         js.synthesize(&mut cs).unwrap();
@@ -446,20 +446,16 @@ fn test_sprout_constraints() {
         );
 
         let mut expected_inputs = vec![];
-        expected_inputs.extend(rt.unwrap().to_vec());
-        expected_inputs.extend(h_sig.unwrap().to_vec());
+        expected_inputs.extend(rt.to_vec());
+        expected_inputs.extend(h_sig.to_vec());
         expected_inputs.extend(nf1.to_vec());
         expected_inputs.extend(mac1.to_vec());
         expected_inputs.extend(nf2.to_vec());
         expected_inputs.extend(mac2.to_vec());
         expected_inputs.extend(cm1.to_vec());
         expected_inputs.extend(cm2.to_vec());
-        expected_inputs
-            .write_u64::<LittleEndian>(vpub_old.unwrap())
-            .unwrap();
-        expected_inputs
-            .write_u64::<LittleEndian>(vpub_new.unwrap())
-            .unwrap();
+        expected_inputs.write_u64::<LittleEndian>(vpub_old).unwrap();
+        expected_inputs.write_u64::<LittleEndian>(vpub_new).unwrap();
 
         use bellman::gadgets::multipack;
 

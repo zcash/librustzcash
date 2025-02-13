@@ -1,0 +1,100 @@
+[package]
+name = "pczt"
+version = "0.1.0"
+authors = ["Jack Grigg <jack@electriccoin.co>"]
+edition.workspace = true
+rust-version.workspace = true
+description = "Tools for working with partially-created Zcash transactions"
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+license.workspace = true
+categories.workspace = true
+
+[dependencies]
+zcash_note_encryption = { workspace = true, optional = true }
+zcash_primitives = { workspace = true, optional = true }
+zcash_protocol = { workspace = true, optional = true }
+
+blake2b_simd = { workspace = true, optional = true }
+rand_core = { workspace = true, optional = true }
+
+# Encoding
+postcard = { version = "1", features = ["alloc"] }
+serde.workspace = true
+serde_with = { version = "3", default-features = false, features = ["alloc", "macros"] }
+
+# Payment protocols
+# - Transparent
+secp256k1 = { workspace = true, optional = true }
+transparent = { workspace = true, optional = true }
+
+# - Sapling
+bls12_381 = { workspace = true, optional = true }
+ff = { workspace = true, optional = true }
+jubjub = { workspace = true, optional = true }
+redjubjub = { workspace = true, optional = true }
+sapling = { workspace = true, optional = true }
+
+# - Orchard
+nonempty = { workspace = true, optional = true }
+orchard = { workspace = true, optional = true }
+pasta_curves = { workspace = true, optional = true }
+
+# - Bolierplate
+getset = "0.1"
+
+[dev-dependencies]
+incrementalmerkletree.workspace = true
+secp256k1 = { workspace = true, features = ["rand"] }
+shardtree.workspace = true
+zcash_primitives = { workspace = true, features = [
+    "test-dependencies",
+    "transparent-inputs",
+] }
+zcash_proofs = { workspace = true, features = ["bundled-prover"] }
+zip32.workspace = true
+
+[features]
+orchard = [
+    "dep:ff",
+    "dep:nonempty",
+    "dep:orchard",
+    "dep:pasta_curves",
+    "dep:zcash_protocol",
+]
+sapling = [
+    "dep:bls12_381",
+    "dep:ff",
+    "dep:jubjub",
+    "dep:redjubjub",
+    "dep:sapling",
+    "dep:zcash_note_encryption",
+    "dep:zcash_protocol",
+]
+transparent = ["dep:secp256k1", "dep:transparent", "dep:zcash_protocol"]
+zcp-builder = ["dep:zcash_primitives", "dep:zcash_protocol"]
+io-finalizer = ["dep:zcash_primitives", "orchard", "sapling", "transparent"]
+prover = ["dep:rand_core", "sapling?/temporary-zcashd"]
+signer = [
+    "dep:blake2b_simd",
+    "dep:rand_core",
+    "dep:zcash_primitives",
+    "orchard",
+    "sapling",
+    "transparent",
+]
+spend-finalizer = ["transparent"]
+tx-extractor = [
+    "dep:rand_core",
+    "dep:zcash_primitives",
+    "orchard",
+    "sapling",
+    "transparent",
+]
+
+[[test]]
+name = "end_to_end"
+required-features = ["io-finalizer", "prover", "signer", "tx-extractor"]
+
+[lints]
+workspace = true

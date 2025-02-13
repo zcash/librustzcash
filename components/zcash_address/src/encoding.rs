@@ -1,6 +1,13 @@
-use std::{convert::TryInto, error::Error, fmt, str::FromStr};
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::convert::TryInto;
+use core::fmt;
+use core::str::FromStr;
 
-use bech32::{self, FromBase32, ToBase32, Variant};
+#[cfg(feature = "std")]
+use std::error::Error;
+
+use bech32::{primitives::decode::CheckedHrpstring, Bech32, Bech32m, Checksum, Hrp};
 use zcash_protocol::consensus::{NetworkConstants, NetworkType};
 use zcash_protocol::constants::{mainnet, regtest, testnet};
 
@@ -38,6 +45,7 @@ impl fmt::Display for ParseError {
     }
 }
 
+#[cfg(feature = "std")]
 impl Error for ParseError {}
 
 impl FromStr for ZcashAddress {
@@ -64,48 +72,48 @@ impl FromStr for ZcashAddress {
             }
         }
 
-        // Try decoding as a Sapling or TEX address (Bech32/Bech32m)
-        if let Ok((hrp, data, variant)) = bech32::decode(s) {
-            // If we reached this point, the encoding is found to be valid Bech32 or Bech32m.
-            let data = Vec::<u8>::from_base32(&data).map_err(|_| ParseError::InvalidEncoding)?;
-
-            match variant {
-                Variant::Bech32 => {
-                    let net = match hrp.as_str() {
-                        mainnet::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Main,
-                        testnet::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Test,
-                        regtest::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Regtest,
-                        // We will not define new Bech32 address encodings.
-                        _ => {
-                            return Err(ParseError::NotZcash);
-                        }
-                    };
-
-                    return data[..]
-                        .try_into()
-                        .map(AddressKind::Sapling)
-                        .map_err(|_| ParseError::InvalidEncoding)
-                        .map(|kind| ZcashAddress { net, kind });
+        // Try decoding as a Sapling address (Bech32)
+        if let Ok(parsed) = CheckedHrpstring::new::<Bech32>(s) {
+            // If we reached this point, the encoding is found to be valid Bech32.
+            let net = match parsed.hrp().as_str() {
+                mainnet::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Main,
+                testnet::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Test,
+                regtest::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Regtest,
+                // We will not define new Bech32 address encodings.
+                _ => {
+                    return Err(ParseError::NotZcash);
                 }
-                Variant::Bech32m => {
-                    // Try decoding as a TEX address (Bech32m)
-                    let net = match hrp.as_str() {
-                        mainnet::HRP_TEX_ADDRESS => NetworkType::Main,
-                        testnet::HRP_TEX_ADDRESS => NetworkType::Test,
-                        regtest::HRP_TEX_ADDRESS => NetworkType::Regtest,
-                        // Not recognized as a Zcash address type
-                        _ => {
-                            return Err(ParseError::NotZcash);
-                        }
-                    };
+            };
 
-                    return data[..]
-                        .try_into()
-                        .map(AddressKind::Tex)
-                        .map_err(|_| ParseError::InvalidEncoding)
-                        .map(|kind| ZcashAddress { net, kind });
+            let data = parsed.byte_iter().collect::<Vec<_>>();
+
+            return data
+                .try_into()
+                .map(AddressKind::Sapling)
+                .map_err(|_| ParseError::InvalidEncoding)
+                .map(|kind| ZcashAddress { net, kind });
+        }
+
+        // Try decoding as a TEX address (Bech32m)
+        if let Ok(parsed) = CheckedHrpstring::new::<Bech32m>(s) {
+            // If we reached this point, the encoding is found to be valid Bech32m.
+            let net = match parsed.hrp().as_str() {
+                mainnet::HRP_TEX_ADDRESS => NetworkType::Main,
+                testnet::HRP_TEX_ADDRESS => NetworkType::Test,
+                regtest::HRP_TEX_ADDRESS => NetworkType::Regtest,
+                // Not recognized as a Zcash address type
+                _ => {
+                    return Err(ParseError::NotZcash);
                 }
-            }
+            };
+
+            let data = parsed.byte_iter().collect::<Vec<_>>();
+
+            return data
+                .try_into()
+                .map(AddressKind::Tex)
+                .map_err(|_| ParseError::InvalidEncoding)
+                .map(|kind| ZcashAddress { net, kind });
         }
 
         // The rest use Base58Check.
@@ -144,8 +152,8 @@ impl FromStr for ZcashAddress {
     }
 }
 
-fn encode_bech32(hrp: &str, data: &[u8], variant: Variant) -> String {
-    bech32::encode(hrp, data.to_base32(), variant).expect("hrp is invalid")
+fn encode_bech32<Ck: Checksum>(hrp: &str, data: &[u8]) -> String {
+    bech32::encode::<Ck>(Hrp::parse_unchecked(hrp), data).expect("encoding is short enough")
 }
 
 fn encode_b58(prefix: [u8; 2], data: &[u8]) -> String {
@@ -159,17 +167,13 @@ impl fmt::Display for ZcashAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let encoded = match &self.kind {
             AddressKind::Sprout(data) => encode_b58(self.net.b58_sprout_address_prefix(), data),
-            AddressKind::Sapling(data) => encode_bech32(
-                self.net.hrp_sapling_payment_address(),
-                data,
-                Variant::Bech32,
-            ),
+            AddressKind::Sapling(data) => {
+                encode_bech32::<Bech32>(self.net.hrp_sapling_payment_address(), data)
+            }
             AddressKind::Unified(addr) => addr.encode(&self.net),
             AddressKind::P2pkh(data) => encode_b58(self.net.b58_pubkey_address_prefix(), data),
             AddressKind::P2sh(data) => encode_b58(self.net.b58_script_address_prefix(), data),
-            AddressKind::Tex(data) => {
-                encode_bech32(self.net.hrp_tex_address(), data, Variant::Bech32m)
-            }
+            AddressKind::Tex(data) => encode_bech32::<Bech32m>(self.net.hrp_tex_address(), data),
         };
         write!(f, "{}", encoded)
     }
@@ -177,10 +181,13 @@ impl fmt::Display for ZcashAddress {
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::ToString;
+
     use assert_matches::assert_matches;
 
     use super::*;
-    use crate::{kind::unified, Network};
+    use crate::kind::unified;
+    use zcash_protocol::consensus::NetworkType;
 
     fn encoding(encoded: &str, decoded: ZcashAddress) {
         assert_eq!(decoded.to_string(), encoded);
@@ -191,11 +198,11 @@ mod tests {
     fn sprout() {
         encoding(
             "zc8E5gYid86n4bo2Usdq1cpr7PpfoJGzttwBHEEgGhGkLUg7SPPVFNB2AkRFXZ7usfphup5426dt1buMmY3fkYeRrQGLa8y",
-            ZcashAddress { net: Network::Main, kind: AddressKind::Sprout([0; 64]) },
+            ZcashAddress { net: NetworkType::Main, kind: AddressKind::Sprout([0; 64]) },
         );
         encoding(
             "ztJ1EWLKcGwF2S4NA17pAJVdco8Sdkz4AQPxt1cLTEfNuyNswJJc2BbBqYrsRZsp31xbVZwhF7c7a2L9jsF3p3ZwRWpqqyS",
-            ZcashAddress { net: Network::Test, kind: AddressKind::Sprout([0; 64]) },
+            ZcashAddress { net: NetworkType::Test, kind: AddressKind::Sprout([0; 64]) },
         );
     }
 
@@ -204,21 +211,21 @@ mod tests {
         encoding(
             "zs1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpq6d8g",
             ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::Sapling([0; 43]),
             },
         );
         encoding(
             "ztestsapling1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqfhgwqu",
             ZcashAddress {
-                net: Network::Test,
+                net: NetworkType::Test,
                 kind: AddressKind::Sapling([0; 43]),
             },
         );
         encoding(
             "zregtestsapling1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqknpr3m",
             ZcashAddress {
-                net: Network::Regtest,
+                net: NetworkType::Regtest,
                 kind: AddressKind::Sapling([0; 43]),
             },
         );
@@ -229,21 +236,21 @@ mod tests {
         encoding(
             "u1qpatys4zruk99pg59gcscrt7y6akvl9vrhcfyhm9yxvxz7h87q6n8cgrzzpe9zru68uq39uhmlpp5uefxu0su5uqyqfe5zp3tycn0ecl",
             ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::Unified(unified::Address(vec![unified::address::Receiver::Sapling([0; 43])])),
             },
         );
         encoding(
             "utest10c5kutapazdnf8ztl3pu43nkfsjx89fy3uuff8tsmxm6s86j37pe7uz94z5jhkl49pqe8yz75rlsaygexk6jpaxwx0esjr8wm5ut7d5s",
             ZcashAddress {
-                net: Network::Test,
+                net: NetworkType::Test,
                 kind: AddressKind::Unified(unified::Address(vec![unified::address::Receiver::Sapling([0; 43])])),
             },
         );
         encoding(
             "uregtest15xk7vj4grjkay6mnfl93dhsflc2yeunhxwdh38rul0rq3dfhzzxgm5szjuvtqdha4t4p2q02ks0jgzrhjkrav70z9xlvq0plpcjkd5z3",
             ZcashAddress {
-                net: Network::Regtest,
+                net: NetworkType::Regtest,
                 kind: AddressKind::Unified(unified::Address(vec![unified::address::Receiver::Sapling([0; 43])])),
             },
         );
@@ -260,28 +267,28 @@ mod tests {
         encoding(
             "t1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs",
             ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::P2pkh([0; 20]),
             },
         );
         encoding(
             "tm9iMLAuYMzJ6jtFLcA7rzUmfreGuKvr7Ma",
             ZcashAddress {
-                net: Network::Test,
+                net: NetworkType::Test,
                 kind: AddressKind::P2pkh([0; 20]),
             },
         );
         encoding(
             "t3JZcvsuaXE6ygokL4XUiZSTrQBUoPYFnXJ",
             ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::P2sh([0; 20]),
             },
         );
         encoding(
             "t26YoyZ1iPgiMEWL4zGUm74eVWfhyDMXzY2",
             ZcashAddress {
-                net: Network::Test,
+                net: NetworkType::Test,
                 kind: AddressKind::P2sh([0; 20]),
             },
         );
@@ -294,7 +301,7 @@ mod tests {
 
         // Transcode P2PKH to TEX
         let p2pkh_zaddr: ZcashAddress = p2pkh_str.parse().unwrap();
-        assert_matches!(p2pkh_zaddr.net, Network::Main);
+        assert_matches!(p2pkh_zaddr.net, NetworkType::Main);
         if let AddressKind::P2pkh(zaddr_data) = p2pkh_zaddr.kind {
             let tex_zaddr = ZcashAddress {
                 net: p2pkh_zaddr.net,
@@ -308,7 +315,7 @@ mod tests {
 
         // Transcode TEX to P2PKH
         let tex_zaddr: ZcashAddress = tex_str.parse().unwrap();
-        assert_matches!(tex_zaddr.net, Network::Main);
+        assert_matches!(tex_zaddr.net, NetworkType::Main);
         if let AddressKind::Tex(zaddr_data) = tex_zaddr.kind {
             let p2pkh_zaddr = ZcashAddress {
                 net: tex_zaddr.net,
@@ -328,7 +335,7 @@ mod tests {
 
         // Transcode P2PKH to TEX
         let p2pkh_zaddr: ZcashAddress = p2pkh_str.parse().unwrap();
-        assert_matches!(p2pkh_zaddr.net, Network::Test);
+        assert_matches!(p2pkh_zaddr.net, NetworkType::Test);
         if let AddressKind::P2pkh(zaddr_data) = p2pkh_zaddr.kind {
             let tex_zaddr = ZcashAddress {
                 net: p2pkh_zaddr.net,
@@ -342,7 +349,7 @@ mod tests {
 
         // Transcode TEX to P2PKH
         let tex_zaddr: ZcashAddress = tex_str.parse().unwrap();
-        assert_matches!(tex_zaddr.net, Network::Test);
+        assert_matches!(tex_zaddr.net, NetworkType::Test);
         if let AddressKind::Tex(zaddr_data) = tex_zaddr.kind {
             let p2pkh_zaddr = ZcashAddress {
                 net: tex_zaddr.net,
@@ -360,14 +367,14 @@ mod tests {
         assert_eq!(
             " t1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs".parse(),
             Ok(ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::P2pkh([0; 20])
             }),
         );
         assert_eq!(
             "t1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs ".parse(),
             Ok(ZcashAddress {
-                net: Network::Main,
+                net: NetworkType::Main,
                 kind: AddressKind::P2pkh([0; 20])
             }),
         );

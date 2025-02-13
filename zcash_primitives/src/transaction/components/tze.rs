@@ -1,23 +1,30 @@
 //! Structs representing the TZE components within Zcash transactions.
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::convert::TryFrom;
-use std::fmt::Debug;
-use std::io::{self, Read, Write};
+use alloc::vec::Vec;
+use core::convert::TryFrom;
+use core::fmt::Debug;
+use core2::io::{self, Read, Write};
 
+use crate::{
+    encoding::{ReadBytesExt, WriteBytesExt},
+    extensions::transparent as tze,
+    transaction::TxId,
+};
 use zcash_encoding::{CompactSize, Vector};
-
-use super::amount::Amount;
-use crate::{extensions::transparent as tze, transaction::TxId};
+use zcash_protocol::value::Zatoshis;
 
 pub mod builder;
 
-fn to_io_error(_: std::num::TryFromIntError) -> io::Error {
+fn to_io_error(_: core::num::TryFromIntError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "value out of range")
 }
 
 pub trait Authorization: Debug {
     type Witness: Debug + Clone + PartialEq;
+}
+
+impl Authorization for core::convert::Infallible {
+    type Witness = core::convert::Infallible;
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -30,6 +37,25 @@ impl Authorization for Authorized {
 pub trait MapAuth<A: Authorization, B: Authorization> {
     fn map_witness(&self, s: A::Witness) -> B::Witness;
     fn map_authorization(&self, s: A) -> B;
+}
+
+/// The identity map.
+///
+/// This can be used with [`TransactionData::map_authorization`] when you want to map the
+/// authorization of a subset of the transaction's bundles.
+///
+/// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
+impl MapAuth<Authorized, Authorized> for () {
+    fn map_witness(
+        &self,
+        s: <Authorized as Authorization>::Witness,
+    ) -> <Authorized as Authorization>::Witness {
+        s
+    }
+
+    fn map_authorization(&self, a: Authorized) -> Authorized {
+        a
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -69,13 +95,13 @@ impl OutPoint {
 
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let txid = TxId::read(&mut reader)?;
-        let n = reader.read_u32::<LittleEndian>()?;
+        let n = reader.read_u32_le()?;
         Ok(OutPoint { txid, n })
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.txid.write(&mut writer)?;
-        writer.write_u32::<LittleEndian>(self.n)
+        writer.write_u32_le(self.n)
     }
 
     pub fn n(&self) -> u32 {
@@ -167,7 +193,7 @@ impl TzeIn<<Authorized as Authorization>::Witness> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TzeOut {
-    pub value: Amount,
+    pub value: Zatoshis,
     pub precondition: tze::Precondition,
 }
 
@@ -176,7 +202,7 @@ impl TzeOut {
         let value = {
             let mut tmp = [0; 8];
             reader.read_exact(&mut tmp)?;
-            Amount::from_nonnegative_i64_le_bytes(tmp)
+            Zatoshis::from_nonnegative_i64_le_bytes(tmp)
         }
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
 

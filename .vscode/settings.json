@@ -1,6 +1,4 @@
 {
-    "rust-analyzer.cargo.extraEnv": {
-        "RUSTFLAGS": "--cfg zcash_unstable=\"orchard\""
-    },
-    "rust-analyzer.cargo.features": "all"
+    "rust-analyzer.cargo.features": "all",
+    "rust-analyzer.server.extraEnv": { "RUSTUP_TOOLCHAIN": "stable" }
 }

@@ -1,13 +1,18 @@
 //! Implementation of [ZIP 316](https://zips.z.cash/zip-0316) Unified Addresses and Viewing Keys.
 
-use bech32::{self, FromBase32, ToBase32, Variant};
-use std::cmp;
-use std::convert::{TryFrom, TryInto};
-use std::error::Error;
-use std::fmt;
-use std::num::TryFromIntError;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::cmp;
+use core::convert::{TryFrom, TryInto};
+use core::fmt;
+use core::num::TryFromIntError;
 
-use crate::Network;
+#[cfg(feature = "std")]
+use std::error::Error;
+
+use bech32::{primitives::decode::CheckedHrpstring, Bech32m, Checksum, Hrp};
+
+use zcash_protocol::consensus::NetworkType;
 
 pub(crate) mod address;
 pub(crate) mod fvk;
@@ -155,17 +160,19 @@ impl fmt::Display for ParseError {
     }
 }
 
+#[cfg(feature = "std")]
 impl Error for ParseError {}
 
 pub(crate) mod private {
+    use alloc::borrow::ToOwned;
+    use alloc::vec::Vec;
+    use core::cmp;
+    use core::convert::{TryFrom, TryInto};
+    use core2::io::Write;
+
     use super::{ParseError, Typecode, PADDING_LEN};
-    use crate::Network;
-    use std::{
-        cmp,
-        convert::{TryFrom, TryInto},
-        io::Write,
-    };
     use zcash_encoding::CompactSize;
+    use zcash_protocol::consensus::NetworkType;
 
     /// A raw address or viewing key.
     pub trait SealedItem: for<'a> TryFrom<(u32, &'a [u8]), Error = ParseError> + Clone {
@@ -188,7 +195,7 @@ pub(crate) mod private {
     }
 
     /// A Unified Container containing addresses or viewing keys.
-    pub trait SealedContainer: super::Container + std::marker::Sized {
+    pub trait SealedContainer: super::Container + core::marker::Sized {
         const MAINNET: &'static str;
         const TESTNET: &'static str;
         const REGTEST: &'static str;
@@ -198,21 +205,21 @@ pub(crate) mod private {
         /// general invariants that apply to all unified containers.
         fn from_inner(items: Vec<Self::Item>) -> Self;
 
-        fn network_hrp(network: &Network) -> &'static str {
+        fn network_hrp(network: &NetworkType) -> &'static str {
             match network {
-                Network::Main => Self::MAINNET,
-                Network::Test => Self::TESTNET,
-                Network::Regtest => Self::REGTEST,
+                NetworkType::Main => Self::MAINNET,
+                NetworkType::Test => Self::TESTNET,
+                NetworkType::Regtest => Self::REGTEST,
             }
         }
 
-        fn hrp_network(hrp: &str) -> Option<Network> {
+        fn hrp_network(hrp: &str) -> Option<NetworkType> {
             if hrp == Self::MAINNET {
-                Some(Network::Main)
+                Some(NetworkType::Main)
             } else if hrp == Self::TESTNET {
-                Some(Network::Test)
+                Some(NetworkType::Test)
             } else if hrp == Self::REGTEST {
-                Some(Network::Regtest)
+                Some(NetworkType::Regtest)
             } else {
                 None
             }
@@ -235,14 +242,13 @@ pub(crate) mod private {
         fn to_jumbled_bytes(&self, hrp: &str) -> Vec<u8> {
             assert!(hrp.len() <= PADDING_LEN);
 
-            let mut writer = std::io::Cursor::new(Vec::new());
-            self.write_raw_encoding(&mut writer);
+            let mut padded = Vec::new();
+            self.write_raw_encoding(&mut padded);
 
             let mut padding = [0u8; PADDING_LEN];
             padding[0..hrp.len()].copy_from_slice(hrp.as_bytes());
-            writer.write_all(&padding).unwrap();
+            padded.write_all(&padding).unwrap();
 
-            let padded = writer.into_inner();
             f4jumble::f4jumble(&padded)
                 .unwrap_or_else(|e| panic!("f4jumble failed on {:?}: {}", padded, e))
         }
@@ -250,7 +256,7 @@ pub(crate) mod private {
         /// Parse the items of the unified container.
         fn parse_items<T: Into<Vec<u8>>>(hrp: &str, buf: T) -> Result<Vec<Self::Item>, ParseError> {
             fn read_receiver<R: SealedItem>(
-                mut cursor: &mut std::io::Cursor<&[u8]>,
+                mut cursor: &mut core2::io::Cursor<&[u8]>,
             ) -> Result<R, ParseError> {
                 let typecode = CompactSize::read(&mut cursor)
                     .map(|v| u32::try_from(v).expect("CompactSize::read enforces MAX_SIZE limit"))
@@ -308,7 +314,7 @@ pub(crate) mod private {
                 )),
             }?;
 
-            let mut cursor = std::io::Cursor::new(encoded);
+            let mut cursor = core2::io::Cursor::new(encoded);
             let mut result = vec![];
             while cursor.position() < encoded.len().try_into().unwrap() {
                 result.push(read_receiver(&mut cursor)?);
@@ -358,6 +364,22 @@ pub(crate) mod private {
 
 use private::SealedItem;
 
+/// The bech32m checksum algorithm, defined in [BIP-350], extended to allow all lengths
+/// supported by [ZIP 316].
+///
+/// [BIP-350]: https://github.com/bitcoin/bips/blob/master/bip-0350.mediawiki
+/// [ZIP 316]: https://zips.z.cash/zip-0316#solution
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Bech32mZip316 {}
+impl Checksum for Bech32mZip316 {
+    type MidstateRepr = <Bech32m as Checksum>::MidstateRepr;
+    // l^MAX from ZIP 316.
+    const CODE_LENGTH: usize = 4194368;
+    const CHECKSUM_LENGTH: usize = Bech32m::CHECKSUM_LENGTH;
+    const GENERATOR_SH: [u32; 5] = Bech32m::GENERATOR_SH;
+    const TARGET_RESIDUE: u32 = Bech32m::TARGET_RESIDUE;
+}
+
 /// Trait providing common encoding and decoding logic for Unified containers.
 pub trait Encoding: private::SealedContainer {
     /// Constructs a value of a unified container type from a vector
@@ -378,15 +400,15 @@ pub trait Encoding: private::SealedContainer {
     /// Decodes a unified container from its string representation, preserving
     /// the order of its components so that it correctly obeys round-trip
     /// serialization invariants.
-    fn decode(s: &str) -> Result<(Network, Self), ParseError> {
-        if let Ok((hrp, data, Variant::Bech32m)) = bech32::decode(s) {
+    fn decode(s: &str) -> Result<(NetworkType, Self), ParseError> {
+        if let Ok(parsed) = CheckedHrpstring::new::<Bech32mZip316>(s) {
+            let hrp = parsed.hrp();
             let hrp = hrp.as_str();
             // validate that the HRP corresponds to a known network.
             let net =
                 Self::hrp_network(hrp).ok_or_else(|| ParseError::UnknownPrefix(hrp.to_string()))?;
 
-            let data = Vec::<u8>::from_base32(&data)
-                .map_err(|e| ParseError::InvalidEncoding(e.to_string()))?;
+            let data = parsed.byte_iter().collect::<Vec<_>>();
 
             Self::parse_internal(hrp, data).map(|value| (net, value))
         } else {
@@ -398,18 +420,14 @@ pub trait Encoding: private::SealedContainer {
     /// using the correct constants for the specified network, preserving the
     /// ordering of the contained items such that it correctly obeys round-trip
     /// serialization invariants.
-    fn encode(&self, network: &Network) -> String {
+    fn encode(&self, network: &NetworkType) -> String {
         let hrp = Self::network_hrp(network);
-        bech32::encode(
-            hrp,
-            self.to_jumbled_bytes(hrp).to_base32(),
-            Variant::Bech32m,
-        )
-        .expect("hrp is invalid")
+        bech32::encode::<Bech32mZip316>(Hrp::parse_unchecked(hrp), &self.to_jumbled_bytes(hrp))
+            .expect("F4Jumble ensures length is short enough by construction")
     }
 }
 
-/// Trait for for Unified containers, that exposes the items within them.
+/// Trait for Unified containers, that exposes the items within them.
 pub trait Container {
     /// The type of item in this unified container.
     type Item: SealedItem;

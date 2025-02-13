@@ -1,18 +1,21 @@
 use std::collections::HashSet;
 
 use rusqlite::{named_params, Transaction};
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::{address::Address, keys::UnifiedFullViewingKey};
-use zcash_keys::{address::UnifiedAddress, encoding::AddressCodec, keys::UnifiedAddressRequest};
-use zcash_primitives::consensus;
+
+use zcash_keys::{
+    address::{Address, UnifiedAddress},
+    encoding::AddressCodec,
+    keys::{ReceiverRequirement::*, UnifiedAddressRequest, UnifiedFullViewingKey},
+};
+use zcash_protocol::consensus;
 use zip32::{AccountId, DiversifierIndex};
 
 use crate::{wallet::init::WalletMigrationError, UA_TRANSPARENT};
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::keys::IncomingViewingKey;
+use ::transparent::keys::IncomingViewingKey;
 
 use super::ufvk_support;
 
@@ -20,17 +23,19 @@ use super::ufvk_support;
 /// the `accounts` table.
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xd956978c_9c87_4d6e_815d_fb8f088d094c);
 
+const DEPENDENCIES: &[Uuid] = &[ufvk_support::MIGRATION_ID];
+
 pub(crate) struct Migration<P: consensus::Parameters> {
     pub(crate) params: P,
 }
 
-impl<P: consensus::Parameters> schemer::Migration for Migration<P> {
+impl<P: consensus::Parameters> schemerz::Migration<Uuid> for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [ufvk_support::MIGRATION_ID].into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -85,9 +90,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     "Address in accounts table was not a Unified Address.".to_string(),
                 ));
             };
-            let (expected_address, idx) = ufvk.default_address(
-                UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT),
-            )?;
+            let (expected_address, idx) = ufvk.default_address(Some(
+                UnifiedAddressRequest::unsafe_new(Omit, Require, UA_TRANSPARENT),
+            ))?;
             if decoded_address != expected_address {
                 return Err(WalletMigrationError::CorruptedData(format!(
                     "Decoded UA {} does not match the UFVK's default address {} at {:?}.",
@@ -157,10 +162,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 ],
             )?;
 
-            let (address, d_idx) = ufvk.default_address(UnifiedAddressRequest::unsafe_new(
-                false,
-                true,
-                UA_TRANSPARENT,
+            let (address, d_idx) = ufvk.default_address(Some(
+                UnifiedAddressRequest::unsafe_new(Omit, Require, UA_TRANSPARENT),
             ))?;
             insert_address(transaction, &self.params, account, d_idx, &address)?;
         }
@@ -212,4 +215,14 @@ fn insert_address<P: consensus::Parameters>(
     ])?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::wallet::init::migrations::tests::test_migrate;
+
+    #[test]
+    fn migrate() {
+        test_migrate(&[super::MIGRATION_ID]);
+    }
 }

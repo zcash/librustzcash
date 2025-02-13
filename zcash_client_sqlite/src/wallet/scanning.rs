@@ -1,24 +1,23 @@
 use incrementalmerkletree::{Address, Position};
 use rusqlite::{self, named_params, types::Value, OptionalExtension};
-use shardtree::error::ShardTreeError;
 use std::cmp::{max, min};
 use std::collections::BTreeSet;
 use std::ops::Range;
 use std::rc::Rc;
 use tracing::{debug, trace};
 
-use zcash_client_backend::{
-    data_api::{
-        scanning::{spanning_tree::SpanningTree, ScanPriority, ScanRange},
-        SAPLING_SHARD_HEIGHT,
-    },
+use zcash_client_backend::data_api::{
+    scanning::{spanning_tree::SpanningTree, ScanPriority, ScanRange},
+    SAPLING_SHARD_HEIGHT,
+};
+use zcash_protocol::{
+    consensus::{self, BlockHeight, NetworkUpgrade},
     ShieldedProtocol,
 };
-use zcash_primitives::consensus::{self, BlockHeight, NetworkUpgrade};
 
 use crate::{
     error::SqliteClientError,
-    wallet::{block_height_extrema, commitment_tree, init::WalletMigrationError},
+    wallet::{block_height_extrema, init::WalletMigrationError},
     PRUNING_DEPTH, SAPLING_TABLES_PREFIX, VERIFY_LOOKAHEAD,
 };
 
@@ -28,7 +27,7 @@ use super::wallet_birthday;
 use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT};
 
 #[cfg(not(feature = "orchard"))]
-use zcash_client_backend::PoolType;
+use zcash_protocol::PoolType;
 
 pub(crate) fn priority_code(priority: &ScanPriority) -> i64 {
     use ScanPriority::*;
@@ -119,8 +118,6 @@ pub(crate) fn insert_queue_entries<'a>(
 pub(crate) trait WalletError {
     fn db_error(err: rusqlite::Error) -> Self;
     fn corrupt(message: String) -> Self;
-    fn chain_height_unknown() -> Self;
-    fn commitment_tree(err: ShardTreeError<commitment_tree::Error>) -> Self;
 }
 
 impl WalletError for SqliteClientError {
@@ -131,14 +128,6 @@ impl WalletError for SqliteClientError {
     fn corrupt(message: String) -> Self {
         SqliteClientError::CorruptedData(message)
     }
-
-    fn chain_height_unknown() -> Self {
-        SqliteClientError::ChainHeightUnknown
-    }
-
-    fn commitment_tree(err: ShardTreeError<commitment_tree::Error>) -> Self {
-        SqliteClientError::CommitmentTree(err)
-    }
 }
 
 impl WalletError for WalletMigrationError {
@@ -148,16 +137,6 @@ impl WalletError for WalletMigrationError {
 
     fn corrupt(message: String) -> Self {
         WalletMigrationError::CorruptedData(message)
-    }
-
-    fn chain_height_unknown() -> Self {
-        WalletMigrationError::CorruptedData(
-            "Wallet migration requires a valid account birthday.".to_owned(),
-        )
-    }
-
-    fn commitment_tree(err: ShardTreeError<commitment_tree::Error>) -> Self {
-        WalletMigrationError::CommitmentTree(err)
     }
 }
 
@@ -587,29 +566,44 @@ pub(crate) mod tests {
     use zcash_client_backend::data_api::{
         chain::{ChainState, CommitmentTreeRoot},
         scanning::{spanning_tree::testing::scan_range, ScanPriority},
-        AccountBirthday, Ratio, WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
+        testing::{
+            pool::ShieldedPoolTester, sapling::SaplingPoolTester, AddressType, FakeCompactOutput,
+            InitialChainState, TestBuilder, TestState,
+        },
+        AccountBirthday, Ratio, WalletRead, WalletWrite,
     };
-    use zcash_primitives::{
-        block::BlockHash,
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::{
         consensus::{BlockHeight, NetworkUpgrade, Parameters},
-        transaction::components::amount::NonNegativeAmount,
+        local_consensus::LocalNetwork,
+        value::Zatoshis,
     };
 
     use crate::{
         error::SqliteClientError,
         testing::{
-            pool::ShieldedPoolTester, AddressType, BlockCache, InitialChainState, TestBuilder,
-            TestState,
+            db::{TestDb, TestDbFactory},
+            BlockCache,
         },
-        wallet::{
-            sapling::tests::SaplingPoolTester,
-            scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
-        },
+        wallet::scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
         VERIFY_LOOKAHEAD,
     };
 
     #[cfg(feature = "orchard")]
-    use {crate::wallet::orchard::tests::OrchardPoolTester, orchard::tree::MerkleHashOrchard};
+    use {
+        incrementalmerkletree::Level,
+        orchard::tree::MerkleHashOrchard,
+        std::{convert::Infallible, num::NonZeroU32},
+        zcash_client_backend::{
+            data_api::{
+                testing::orchard::OrchardPoolTester, wallet::input_selection::GreedyInputSelector,
+                WalletCommitmentTrees,
+            },
+            fees::{standard, DustOutputPolicy, StandardFeeRule},
+            wallet::OvkPolicy,
+        },
+        zcash_protocol::memo::Memo,
+    };
 
     #[test]
     fn sapling_scan_complete() {
@@ -635,7 +629,8 @@ pub(crate) mod tests {
         let initial_height_offset = 310;
 
         let mut st = TestBuilder::new()
-            .with_block_cache()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
             .with_initial_chain_state(|rng, network| {
                 let sapling_activation_height =
                     network.activation_height(NetworkUpgrade::Sapling).unwrap();
@@ -689,14 +684,16 @@ pub(crate) mod tests {
         let sapling_activation_height = st.sapling_activation_height();
 
         let dfvk = T::test_account_fvk(&st);
-        let value = NonNegativeAmount::const_from_u64(50000);
+        let value = Zatoshis::const_from_u64(50000);
         let initial_height = sapling_activation_height + initial_height_offset;
         st.generate_block_at(
             initial_height,
             prior_block_hash,
-            &dfvk,
-            AddressType::DefaultExternal,
-            value,
+            &[FakeCompactOutput::new(
+                &dfvk,
+                AddressType::DefaultExternal,
+                value,
+            )],
             initial_sapling_tree_size,
             initial_orchard_tree_size,
             false,
@@ -706,7 +703,7 @@ pub(crate) mod tests {
             st.generate_next_block(
                 &dfvk,
                 AddressType::DefaultExternal,
-                NonNegativeAmount::const_from_u64(10000),
+                Zatoshis::const_from_u64(10000),
             );
         }
 
@@ -715,7 +712,7 @@ pub(crate) mod tests {
         // Verify the that adjacent range needed to make the note spendable has been prioritized.
         let sap_active = u32::from(sapling_activation_height);
         assert_matches!(
-            st.wallet().suggest_scan_ranges(),
+            suggest_scan_ranges(st.wallet().conn(), Historic),
             Ok(scan_ranges) if scan_ranges == vec![
                 scan_range((sap_active + 300)..(sap_active + 310), FoundNote)
             ]
@@ -723,7 +720,7 @@ pub(crate) mod tests {
 
         // Check that the scanned range has been properly persisted.
         assert_matches!(
-            suggest_scan_ranges(&st.wallet().conn, Scanned),
+            suggest_scan_ranges(st.wallet().conn(), Scanned),
             Ok(scan_ranges) if scan_ranges == vec![
                 scan_range((sap_active + 300)..(sap_active + 310), FoundNote),
                 scan_range((sap_active + 310)..(sap_active + 320), Scanned)
@@ -741,7 +738,7 @@ pub(crate) mod tests {
         // Check the scan range again, we should see a `ChainTip` range for the period we've been
         // offline.
         assert_matches!(
-            st.wallet().suggest_scan_ranges(),
+            suggest_scan_ranges(st.wallet().conn(), Historic),
             Ok(scan_ranges) if scan_ranges == vec![
                 scan_range((sap_active + 320)..(sap_active + 341), ChainTip),
                 scan_range((sap_active + 300)..(sap_active + 310), ChainTip)
@@ -758,7 +755,7 @@ pub(crate) mod tests {
         // Check the scan range again, we should see a `Validate` range for the previous wallet
         // tip, and then a `ChainTip` for the remaining range.
         assert_matches!(
-            st.wallet().suggest_scan_ranges(),
+            suggest_scan_ranges(st.wallet().conn(), Historic),
             Ok(scan_ranges) if scan_ranges == vec![
                 scan_range((sap_active + 320)..(sap_active + 330), Verify),
                 scan_range((sap_active + 330)..(sap_active + 451), ChainTip),
@@ -777,47 +774,82 @@ pub(crate) mod tests {
         );
     }
 
+    /// Creates wallet and chain state such that:
+    /// * Shielded chain history begins at NU5 activation
+    /// * Both the Sapling and the Orchard note commitment trees have the following structure:
+    /// * The initial 2^16 shard of the note commitment tree covers `initial_shard_blocks` blocks.
+    ///   If `insert_prior_roots` is set, the root of the initial shard is inserted into each note
+    ///   commitment tree. This can be used to simulate the circumstance where note commitment tree
+    ///   roots have been inserted prior to scanning.
+    /// * The wallet birthday is located `birthday_offset` blocks into the second shard.
+    /// * The note commitment tree contains 2^16+1235 notes at the end of the block prior to the
+    ///   wallet birthday.
     pub(crate) fn test_with_nu5_birthday_offset<T: ShieldedPoolTester>(
+        initial_shard_blocks: u32,
         birthday_offset: u32,
         prior_block_hash: BlockHash,
-    ) -> (TestState<BlockCache>, T::Fvk, AccountBirthday, u32) {
+        insert_prior_roots: bool,
+    ) -> (
+        TestState<BlockCache, TestDb, LocalNetwork>,
+        T::Fvk,
+        AccountBirthday,
+        u32,
+    ) {
         let st = TestBuilder::new()
-            .with_block_cache()
-            .with_account_birthday(|rng, network, initial_chain_state| {
-                // We're constructing the birthday without adding any chain data.
-                assert!(initial_chain_state.is_none());
-
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_initial_chain_state(|rng, network| {
                 // We set the Sapling and Orchard frontiers at the birthday height to be
                 // 1234 notes into the second shard.
                 let frontier_position = Position::from((0x1 << 16) + 1234);
-                let birthday_height =
-                    network.activation_height(NetworkUpgrade::Nu5).unwrap() + birthday_offset;
+                let initial_shard_end =
+                    network.activation_height(NetworkUpgrade::Nu5).unwrap() + initial_shard_blocks;
+                let birthday_height = initial_shard_end + birthday_offset;
 
                 // Construct a fake chain state for the end of the block with the given
-                // birthday_offset from the Nu5 birthday.
-                let (_, sapling_initial_tree) = Frontier::random_with_prior_subtree_roots(
-                    rng,
-                    (frontier_position + 1).into(),
-                    NonZeroU8::new(16).unwrap(),
-                );
+                // birthday_offset from the end of the last shard.
+                let (prior_sapling_roots, sapling_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        (frontier_position + 1).into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
                 #[cfg(feature = "orchard")]
-                let (_, orchard_initial_tree) = Frontier::random_with_prior_subtree_roots(
-                    rng,
-                    (frontier_position + 1).into(),
-                    NonZeroU8::new(16).unwrap(),
-                );
+                let (prior_orchard_roots, orchard_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        (frontier_position + 1).into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
 
-                AccountBirthday::from_parts(
-                    ChainState::new(
+                InitialChainState {
+                    chain_state: ChainState::new(
                         birthday_height,
                         prior_block_hash,
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
                     ),
-                    None,
-                )
+                    prior_sapling_roots: if insert_prior_roots {
+                        prior_sapling_roots
+                            .into_iter()
+                            .map(|root| CommitmentTreeRoot::from_parts(initial_shard_end, root))
+                            .collect()
+                    } else {
+                        vec![]
+                    },
+                    #[cfg(feature = "orchard")]
+                    prior_orchard_roots: if insert_prior_roots {
+                        prior_orchard_roots
+                            .into_iter()
+                            .map(|root| CommitmentTreeRoot::from_parts(initial_shard_end, root))
+                            .collect()
+                    } else {
+                        vec![]
+                    },
+                }
             })
+            .with_account_having_current_birthday()
             .build();
 
         let birthday = st.test_account().unwrap().birthday().clone();
@@ -843,14 +875,14 @@ pub(crate) mod tests {
 
         // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
         let (st, _, birthday, sap_active) =
-            test_with_nu5_birthday_offset::<T>(76, BlockHash([0; 32]));
+            test_with_nu5_birthday_offset::<T>(50, 26, BlockHash([0; 32]), true);
         let birthday_height = birthday.height().into();
 
         let expected = vec![
             // The range up to the wallet's birthday height is ignored.
             scan_range(sap_active..birthday_height, Ignored),
         ];
-        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
     }
 
@@ -858,7 +890,10 @@ pub(crate) mod tests {
     fn update_chain_tip_before_create_account() {
         use ScanPriority::*;
 
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .build();
         let sap_active = st.sapling_activation_height();
 
         // Update the chain tip.
@@ -870,18 +905,20 @@ pub(crate) mod tests {
             // The range up to the chain end is ignored.
             scan_range(sap_active.into()..chain_end, Ignored),
         ];
-        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
 
         // Now add an account.
         let wallet_birthday = sap_active + 500;
         st.wallet_mut()
             .create_account(
+                "",
                 &SecretVec::new(vec![0; 32]),
                 &AccountBirthday::from_parts(
                     ChainState::empty(wallet_birthday - 1, BlockHash([0; 32])),
                     None,
                 ),
+                None,
             )
             .unwrap();
 
@@ -891,7 +928,7 @@ pub(crate) mod tests {
             // The range up to the wallet's birthday height is ignored.
             scan_range(sap_active.into()..wallet_birthday.into(), Ignored),
         ];
-        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
     }
 
@@ -911,7 +948,7 @@ pub(crate) mod tests {
 
         // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
         let (mut st, _, birthday, sap_active) =
-            test_with_nu5_birthday_offset::<T>(76, BlockHash([0; 32]));
+            test_with_nu5_birthday_offset::<T>(50, 26, BlockHash([0; 32]), false);
 
         // Set up the following situation:
         //
@@ -936,7 +973,7 @@ pub(crate) mod tests {
             scan_range(sap_active..wallet_birthday, Ignored),
         ];
 
-        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
     }
 
@@ -956,7 +993,7 @@ pub(crate) mod tests {
 
         // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
         let (mut st, _, birthday, sap_active) =
-            test_with_nu5_birthday_offset::<T>(76, BlockHash([0; 32]));
+            test_with_nu5_birthday_offset::<T>(76, 1000, BlockHash([0; 32]), true);
 
         // Set up the following situation:
         //
@@ -964,19 +1001,6 @@ pub(crate) mod tests {
         //        |<----- 1000 ----->|<--- 500 --->|
         //                    wallet_birthday
         let prior_tip_height = birthday.height();
-
-        // Set up some shard root history before the wallet birthday.
-        let last_shard_start = birthday.height() - 1000;
-        T::put_subtree_roots(
-            &mut st,
-            0,
-            &[CommitmentTreeRoot::from_parts(
-                last_shard_start,
-                // fake a hash, the value doesn't matter
-                T::empty_tree_leaf(),
-            )],
-        )
-        .unwrap();
 
         // Update the chain tip.
         let tip_height = prior_tip_height + 500;
@@ -993,7 +1017,7 @@ pub(crate) mod tests {
             scan_range(sap_active..birthday.height().into(), Ignored),
         ];
 
-        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
     }
 
@@ -1022,7 +1046,8 @@ pub(crate) mod tests {
         // notes beyond the end of the first shard.
         let frontier_tree_size: u32 = (0x1 << 16) + 1234;
         let mut st = TestBuilder::new()
-            .with_block_cache()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
             .with_initial_chain_state(|rng, network| {
                 let birthday_height =
                     network.activation_height(NetworkUpgrade::Nu5).unwrap() + birthday_offset;
@@ -1094,7 +1119,7 @@ pub(crate) mod tests {
             ),
             pre_birthday_range.clone(),
         ];
-        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
 
         // Simulate that in the blocks between the wallet birthday and the max_scanned height,
@@ -1102,10 +1127,12 @@ pub(crate) mod tests {
         st.generate_block_at(
             max_scanned,
             BlockHash([1u8; 32]),
-            &dfvk,
-            AddressType::DefaultExternal,
-            // 1235 notes into into the second shard
-            NonNegativeAmount::const_from_u64(10000),
+            &[FakeCompactOutput::new(
+                &dfvk,
+                AddressType::DefaultExternal,
+                // 1235 notes into the second shard
+                Zatoshis::const_from_u64(10000),
+            )],
             frontier_tree_size + 10,
             frontier_tree_size + 10,
             false,
@@ -1123,7 +1150,7 @@ pub(crate) mod tests {
             pre_birthday_range.clone(),
         ];
 
-        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
 
         // Now simulate shutting down, and then restarting 90 blocks later, after a shard
@@ -1149,7 +1176,7 @@ pub(crate) mod tests {
         .unwrap();
 
         // Just inserting the subtree roots doesn't affect the scan ranges.
-        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
 
         let new_tip = last_shard_start + 20;
@@ -1182,7 +1209,7 @@ pub(crate) mod tests {
             pre_birthday_range,
         ];
 
-        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
     }
 
@@ -1212,7 +1239,8 @@ pub(crate) mod tests {
         // notes beyond the end of the first shard.
         let frontier_tree_size: u32 = (0x1 << 16) + 1234;
         let mut st = TestBuilder::new()
-            .with_block_cache()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
             .with_initial_chain_state(|rng, network| {
                 let birthday_height =
                     network.activation_height(NetworkUpgrade::Nu5).unwrap() + birthday_offset;
@@ -1266,9 +1294,23 @@ pub(crate) mod tests {
         let birthday = account.birthday();
         let sap_active = st.sapling_activation_height();
 
-        // We have scan ranges and a subtree, but have scanned no blocks.
+        // If none of the wallet's accounts have a recover-until height, then there
+        // is no recovery phase for the wallet, and therefore the denominator in the
+        // resulting ratio (the number of notes in the recovery range) is zero.
+        let no_recovery = Some(Ratio::new(0, 0));
+
+        // We have scan ranges and a subtree, but have scanned no blocks. Given the number of
+        // blocks scanned in the previous subtree, we estimate the number of notes in the current
+        // subtree
         let summary = st.get_wallet_summary(1);
-        assert_eq!(summary.and_then(|s| s.scan_progress()), None);
+        assert_eq!(
+            summary.as_ref().and_then(|s| s.progress().recovery()),
+            no_recovery,
+        );
+        assert_matches!(
+            summary.map(|s| s.progress().scan()),
+            Some(ratio) if *ratio.numerator() == 0
+        );
 
         // Set up prior chain state. This simulates us having imported a wallet
         // with a birthday 520 blocks below the chain tip.
@@ -1282,7 +1324,7 @@ pub(crate) mod tests {
             scan_range(sap_active.into()..birthday.height().into(), Ignored),
         ];
 
-        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
 
         // Simulate that in the blocks between the wallet birthday and the max_scanned height,
@@ -1290,9 +1332,11 @@ pub(crate) mod tests {
         st.generate_block_at(
             max_scanned,
             BlockHash([1; 32]),
-            &dfvk,
-            AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(10000),
+            &[FakeCompactOutput::new(
+                &dfvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(10000),
+            )],
             frontier_tree_size + 10,
             frontier_tree_size + 10,
             false,
@@ -1304,24 +1348,29 @@ pub(crate) mod tests {
         let summary = st.get_wallet_summary(1);
         assert_eq!(summary.as_ref().map(|s| T::next_subtree_index(s)), Some(0));
 
+        assert_eq!(
+            summary.as_ref().and_then(|s| s.progress().recovery()),
+            no_recovery
+        );
+
         // Progress denominator depends on which pools are enabled (which changes the
-        // initial tree states). Here we compute the denominator based upon the fact that
-        // the trees are the same size at present.
-        let expected_denom = (1 << SAPLING_SHARD_HEIGHT) * 2 - frontier_tree_size;
+        // initial tree states), and is extrapolated from the scanned range.
+        let expected_denom = 10
+            + ((1234 + 10) * (prior_tip - max_scanned)) / (max_scanned - (birthday.height() - 10));
         #[cfg(feature = "orchard")]
         let expected_denom = expected_denom * 2;
+        let expected_denom = expected_denom + 1;
         assert_eq!(
-            summary.and_then(|s| s.scan_progress()),
+            summary.map(|s| s.progress().scan()),
             Some(Ratio::new(1, u64::from(expected_denom)))
         );
 
-        // Now simulate shutting down, and then restarting 70 blocks later, after a shard
-        // has been completed in one pool. This shard will have index 2, as our birthday
-        // was in shard 1.
+        // Now simulate shutting down, and then restarting 70 blocks later, after the
+        // shard containing our birthday has been completed in one pool.
         let last_shard_start = prior_tip + 50;
         T::put_subtree_roots(
             &mut st,
-            2,
+            1,
             &[CommitmentTreeRoot::from_parts(
                 last_shard_start,
                 // fake a hash, the value doesn't matter
@@ -1333,31 +1382,45 @@ pub(crate) mod tests {
         {
             let mut shard_stmt = st
                 .wallet_mut()
+                .db_mut()
                 .conn
                 .prepare("SELECT shard_index, subtree_end_height FROM sapling_tree_shards")
                 .unwrap();
-            (shard_stmt
-                .query_and_then::<_, rusqlite::Error, _, _>([], |row| {
-                    Ok((row.get::<_, u32>(0)?, row.get::<_, Option<u32>>(1)?))
-                })
+            assert_eq!(
+                (shard_stmt
+                    .query_and_then::<_, rusqlite::Error, _, _>([], |row| {
+                        Ok((row.get::<_, u32>(0)?, row.get::<_, Option<u32>>(1)?))
+                    })
+                    .unwrap()
+                    .collect::<Result<Vec<_>, _>>())
                 .unwrap()
-                .collect::<Result<Vec<_>, _>>())
-            .unwrap();
+                .len(),
+                2,
+            );
         }
 
         {
             let mut shard_stmt = st
                 .wallet_mut()
+                .db_mut()
                 .conn
                 .prepare("SELECT shard_index, subtree_end_height FROM orchard_tree_shards")
                 .unwrap();
-            (shard_stmt
-                .query_and_then::<_, rusqlite::Error, _, _>([], |row| {
-                    Ok((row.get::<_, u32>(0)?, row.get::<_, Option<u32>>(1)?))
-                })
+            #[cfg(not(feature = "orchard"))]
+            let expected_shards = 0;
+            #[cfg(feature = "orchard")]
+            let expected_shards = 2;
+            assert_eq!(
+                (shard_stmt
+                    .query_and_then::<_, rusqlite::Error, _, _>([], |row| {
+                        Ok((row.get::<_, u32>(0)?, row.get::<_, Option<u32>>(1)?))
+                    })
+                    .unwrap()
+                    .collect::<Result<Vec<_>, _>>())
                 .unwrap()
-                .collect::<Result<Vec<_>, _>>())
-            .unwrap();
+                .len(),
+                expected_shards,
+            );
         }
 
         let new_tip = last_shard_start + 20;
@@ -1376,16 +1439,22 @@ pub(crate) mod tests {
             scan_range(sap_active.into()..birthday.height().into(), Ignored),
         ];
 
-        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
 
-        // We've crossed a subtree boundary, but only in one pool. We still only have one scanned
-        // note but in the pool where we crossed the subtree boundary we have two shards worth of
-        // notes to scan.
-        let expected_denom = expected_denom + (1 << 16);
+        // We've crossed a subtree boundary, but only in one pool.
+        let expected_denom = (1 << 16) * 2
+            + ((1 << 16) * (new_tip - last_shard_start))
+                / (last_shard_start - (birthday.height() - 10))
+            - frontier_tree_size;
+        #[cfg(feature = "orchard")]
+        let expected_denom = expected_denom
+            + (10
+                + ((1234 + 10) * (new_tip - max_scanned))
+                    / (max_scanned - (birthday.height() - 10)));
         let summary = st.get_wallet_summary(1);
         assert_eq!(
-            summary.and_then(|s| s.scan_progress()),
+            summary.map(|s| s.progress().scan()),
             Some(Ratio::new(1, u64::from(expected_denom)))
         );
     }
@@ -1394,7 +1463,9 @@ pub(crate) mod tests {
     fn replace_queue_entries_merges_previous_range() {
         use ScanPriority::*;
 
-        let mut st = TestBuilder::new().build();
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
 
         let ranges = vec![
             scan_range(150..200, ChainTip),
@@ -1403,16 +1474,16 @@ pub(crate) mod tests {
         ];
 
         {
-            let tx = st.wallet_mut().conn.transaction().unwrap();
+            let tx = st.wallet_mut().conn_mut().transaction().unwrap();
             insert_queue_entries(&tx, ranges.iter()).unwrap();
             tx.commit().unwrap();
         }
 
-        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, ranges);
 
         {
-            let tx = st.wallet_mut().conn.transaction().unwrap();
+            let tx = st.wallet_mut().conn_mut().transaction().unwrap();
             replace_queue_entries::<SqliteClientError>(
                 &tx,
                 &(BlockHeight::from(150)..BlockHeight::from(160)),
@@ -1429,7 +1500,7 @@ pub(crate) mod tests {
             scan_range(0..100, Ignored),
         ];
 
-        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
     }
 
@@ -1437,7 +1508,9 @@ pub(crate) mod tests {
     fn replace_queue_entries_merges_subsequent_range() {
         use ScanPriority::*;
 
-        let mut st = TestBuilder::new().build();
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
 
         let ranges = vec![
             scan_range(150..200, ChainTip),
@@ -1446,16 +1519,16 @@ pub(crate) mod tests {
         ];
 
         {
-            let tx = st.wallet_mut().conn.transaction().unwrap();
+            let tx = st.wallet_mut().conn_mut().transaction().unwrap();
             insert_queue_entries(&tx, ranges.iter()).unwrap();
             tx.commit().unwrap();
         }
 
-        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, ranges);
 
         {
-            let tx = st.wallet_mut().conn.transaction().unwrap();
+            let tx = st.wallet_mut().conn_mut().transaction().unwrap();
             replace_queue_entries::<SqliteClientError>(
                 &tx,
                 &(BlockHeight::from(90)..BlockHeight::from(100)),
@@ -1472,7 +1545,354 @@ pub(crate) mod tests {
             scan_range(0..90, Ignored),
         ];
 
-        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        let actual = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    /// This sets up the case wherein:
+    /// * The wallet birthday is in the shard prior to the chain tip
+    /// * The user receives funds in the last complete block in the birthday shard,
+    ///   in the last note in that block.
+    /// * The next block crosses the shard boundary, with two notes in the prior
+    ///   shard and two notes in the subsequent shard.
+    /// * An additional 110 blocks are scanned, to ensure that the checkpoint
+    ///   is pruned.
+    ///
+    /// The diagram below shows the arrangement. the position of the X indicates the
+    /// note commitment for the note belonging to our wallet.
+    /// ```
+    /// blocks:      |<---- 5000 ---->|<----- 10 ---->|<--- 11 --->|<- 1  ->|<- 1 ->|<----- 110 ----->|
+    ///       nu5_activation                       birthday                                       chain_tip
+    /// commitments: |<---- 2^16 ---->|<--(2^16-50)-->|<--- 44 --->|<-___X->|<- 4 ->|<----- 110 ------|
+    /// shards:      |<--- shard0 --->|<---------------- shard1 --------------->|<-------- shard2 -------->...
+    /// ```
+    ///
+    /// # Parameters:
+    /// - `with_birthday_subtree_root`: When this is set to `true`, the wallet state will be
+    ///   initialized such that the subtree root containing the wallet birthday has been inserted
+    ///   into the note commitment tree.
+    #[cfg(feature = "orchard")]
+    fn prepare_orchard_block_spanning_test(
+        with_birthday_subtree_root: bool,
+    ) -> TestState<BlockCache, TestDb, LocalNetwork> {
+        let birthday_nu5_offset = 5000;
+        let birthday_prior_block_hash = BlockHash([0; 32]);
+        // We set the Sapling and Orchard frontiers at the birthday block initial state to 50
+        // notes back from the end of the second shard.
+        let birthday_tree_size: u32 = (0x1 << 17) - 50;
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_initial_chain_state(|rng, network| {
+                let birthday_height =
+                    network.activation_height(NetworkUpgrade::Nu5).unwrap() + birthday_nu5_offset;
+
+                let (prior_orchard_roots, orchard_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        birthday_tree_size.into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
+
+                // There will only be one prior root. The completion height of the first shard will
+                // be 10 blocks prior to the wallet birthday height. This isn't actually enough
+                // block space to fit in 2^16-50 note commitments, but that's irrelevant here since
+                // we never need to look at those blocks or those notes.
+                let prior_orchard_roots = prior_orchard_roots
+                    .into_iter()
+                    .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 10, root))
+                    .collect::<Vec<_>>();
+
+                InitialChainState {
+                    chain_state: ChainState::new(
+                        birthday_height - 1,
+                        birthday_prior_block_hash,
+                        Frontier::empty(), // the Sapling tree is unused in this test
+                        orchard_initial_tree,
+                    ),
+                    prior_sapling_roots: vec![],
+                    prior_orchard_roots,
+                }
+            })
+            .with_account_having_current_birthday()
+            .build();
+
+        let account = st.test_account().cloned().unwrap();
+        let birthday = account.birthday();
+
+        let ofvk = OrchardPoolTester::random_fvk(st.rng_mut());
+        let dfvk = OrchardPoolTester::test_account_fvk(&st);
+
+        // Create the cache by adding:
+        // * 11 blocks each containing 4 Orchard notes that are not for this wallet
+        // * 1 block containing 4 Orchard notes, the last of which belongs to this wallet
+        // * 1 block containing 4 Orchard notes not for this wallet, this will cross the shard
+        //   boundary
+        // * another 110 blocks each containing a single note not for this wallet
+        {
+            let fake_output = |for_this_wallet| {
+                FakeCompactOutput::new(
+                    if for_this_wallet {
+                        dfvk.clone()
+                    } else {
+                        ofvk.clone()
+                    },
+                    AddressType::DefaultExternal,
+                    Zatoshis::const_from_u64(100000),
+                )
+            };
+
+            let mut final_orchard_tree = birthday.orchard_frontier().clone();
+            // Generate the birthday block plus 10 more
+            for _ in 0..11 {
+                let (_, res, _) = st.generate_next_block_multi(&vec![fake_output(false); 4]);
+                for c in res.orchard() {
+                    final_orchard_tree.append(*c);
+                }
+            }
+
+            // Generate a block with the last note in the block belonging to the wallet
+            let (_, res, _) = st.generate_next_block_multi(&vec![
+                // 3 Orchard notes not for this wallet
+                fake_output(false),
+                fake_output(false),
+                fake_output(false),
+                // One Orchard note for this wallet
+                fake_output(true),
+            ]);
+            for c in res.orchard() {
+                final_orchard_tree.append(*c);
+            }
+
+            // Generate one block spanning the shard boundary
+            let (spanning_block_height, res, _) =
+                st.generate_next_block_multi(&vec![fake_output(false); 4]);
+
+            // Add two note commitments to the Orchard frontier to complete the 2^16 subtree. We
+            // can then add that subtree root to the Orchard frontier, so that we can compute the
+            // root of the completed subtree.
+            for c in res.orchard().iter().take(2) {
+                final_orchard_tree.append(*c);
+            }
+
+            assert_eq!(final_orchard_tree.tree_size(), 0x1 << 17);
+            assert_eq!(spanning_block_height, birthday.height() + 12);
+
+            // Insert the root of the completed subtree if `with_birthday_subtree_root` is set.
+            // This simulates the situation where the subtree roots have all been inserted prior
+            // to scanning.
+            if with_birthday_subtree_root {
+                st.wallet_mut()
+                    .put_orchard_subtree_roots(
+                        1,
+                        &[CommitmentTreeRoot::from_parts(
+                            spanning_block_height,
+                            final_orchard_tree
+                                .value()
+                                .unwrap()
+                                .root(Some(Level::from(16))),
+                        )],
+                    )
+                    .unwrap();
+            }
+
+            // Add blocks up to the chain tip.
+            let mut chain_tip_height = spanning_block_height;
+            for _ in 0..110 {
+                let (h, res, _) = st.generate_next_block_multi(&vec![fake_output(false)]);
+                for c in res.orchard() {
+                    final_orchard_tree.append(*c);
+                }
+                chain_tip_height = h;
+            }
+
+            assert_eq!(chain_tip_height, birthday.height() + 122);
+        }
+
+        st
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn orchard_block_spanning_tip_boundary_complete() {
+        use zcash_client_backend::data_api::Account as _;
+
+        let mut st = prepare_orchard_block_spanning_test(true);
+        let account = st.test_account().cloned().unwrap();
+        let birthday = account.birthday();
+
+        // set the chain tip to the final block height we expect
+        let new_tip = birthday.height() + 122;
+        st.wallet_mut().update_chain_tip(new_tip).unwrap();
+
+        // Verify that the suggested scan ranges includes only the chain-tip range with ChainTip
+        // priority, and that the range from the wallet birthday to the end of the birthday shard
+        // has Historic priority.
+        let birthday_height = birthday.height().into();
+        let expected = vec![
+            scan_range(
+                (birthday_height + 12)..(new_tip + 1).into(),
+                ScanPriority::ChainTip,
+            ),
+            scan_range(
+                birthday_height..(birthday_height + 12),
+                ScanPriority::Historic,
+            ),
+            scan_range(
+                st.sapling_activation_height().into()..birthday.height().into(),
+                ScanPriority::Ignored,
+            ),
+        ];
+
+        let actual = suggest_scan_ranges(st.wallet().conn(), ScanPriority::Ignored).unwrap();
+        assert_eq!(actual, expected);
+
+        // Scan the chain-tip range.
+        st.scan_cached_blocks(birthday.height() + 12, 112);
+
+        // We haven't yet discovered our note, so balances should still be zero
+        assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
+
+        // Now scan the historic range; this should discover our note, which should now be
+        // spendable.
+        st.scan_cached_blocks(birthday.height(), 12);
+        assert_eq!(
+            st.get_total_balance(account.id()),
+            Zatoshis::const_from_u64(100000)
+        );
+        assert_eq!(
+            st.get_spendable_balance(account.id(), 10),
+            Zatoshis::const_from_u64(100000)
+        );
+
+        // Spend the note.
+        let to_extsk = OrchardPoolTester::sk(&[0xf5; 32]);
+        let to = OrchardPoolTester::sk_default_address(&to_extsk);
+        let request = zip321::TransactionRequest::new(vec![zip321::Payment::without_memo(
+            to.to_zcash_address(st.network()),
+            Zatoshis::const_from_u64(10000),
+        )])
+        .unwrap();
+
+        let fee_rule = StandardFeeRule::Zip317;
+
+        let change_memo = "Test change memo".parse::<Memo>().unwrap();
+        let change_strategy = standard::SingleOutputChangeStrategy::new(
+            fee_rule,
+            Some(change_memo.into()),
+            OrchardPoolTester::SHIELDED_PROTOCOL,
+            DustOutputPolicy::default(),
+        );
+        let input_selector = GreedyInputSelector::new();
+
+        let proposal = st
+            .propose_transfer(
+                account.id(),
+                &input_selector,
+                &change_strategy,
+                request,
+                NonZeroU32::new(10).unwrap(),
+            )
+            .unwrap();
+
+        let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
+        );
+        assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+    }
+
+    /// This test verifies that missing a single block that is required for computing a witness is
+    /// sufficient to prevent witness construction.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn orchard_block_spanning_tip_boundary_incomplete() {
+        use zcash_client_backend::data_api::Account as _;
+
+        let mut st = prepare_orchard_block_spanning_test(false);
+        let account = st.test_account().cloned().unwrap();
+        let birthday = account.birthday();
+
+        // set the chain tip to the final position we expect
+        let new_tip = birthday.height() + 122;
+        st.wallet_mut().update_chain_tip(new_tip).unwrap();
+
+        // Verify that the suggested scan ranges includes only the chain-tip range with ChainTip
+        // priority, and that the range from the wallet birthday to the end of the birthday shard
+        // has Historic priority.
+        let birthday_height = birthday.height().into();
+        let expected = vec![
+            scan_range(
+                birthday_height..(new_tip + 1).into(),
+                ScanPriority::ChainTip,
+            ),
+            scan_range(
+                st.sapling_activation_height().into()..birthday_height,
+                ScanPriority::Ignored,
+            ),
+        ];
+
+        let actual = suggest_scan_ranges(st.wallet().conn(), ScanPriority::Ignored).unwrap();
+        assert_eq!(actual, expected);
+
+        // Scan the chain-tip range, but omitting the spanning block.
+        st.scan_cached_blocks(birthday.height() + 13, 112);
+
+        // We haven't yet discovered our note, so balances should still be zero
+        assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
+
+        // Now scan the historic range; this should discover our note but not
+        // complete the tree. The note should not be considered spendable.
+        st.scan_cached_blocks(birthday.height(), 12);
+        assert_eq!(
+            st.get_total_balance(account.id()),
+            Zatoshis::const_from_u64(100000)
+        );
+        assert_eq!(st.get_spendable_balance(account.id(), 10), Zatoshis::ZERO);
+
+        // Attempting to spend the note should fail to generate a proposal
+        let to_extsk = OrchardPoolTester::sk(&[0xf5; 32]);
+        let to = OrchardPoolTester::sk_default_address(&to_extsk);
+        let request = zip321::TransactionRequest::new(vec![zip321::Payment::without_memo(
+            to.to_zcash_address(st.network()),
+            Zatoshis::const_from_u64(10000),
+        )])
+        .unwrap();
+
+        let fee_rule = StandardFeeRule::Zip317;
+
+        let change_memo = "Test change memo".parse::<Memo>().unwrap();
+        let change_strategy = standard::SingleOutputChangeStrategy::new(
+            fee_rule,
+            Some(change_memo.into()),
+            OrchardPoolTester::SHIELDED_PROTOCOL,
+            DustOutputPolicy::default(),
+        );
+        let input_selector = GreedyInputSelector::new();
+
+        let proposal = st.propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request.clone(),
+            NonZeroU32::new(10).unwrap(),
+        );
+
+        assert_matches!(proposal, Err(_));
+
+        // Scan the missing block
+        st.scan_cached_blocks(birthday.height() + 12, 1);
+
+        // Verify that it's now possible to create the proposal
+        let proposal = st.propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            NonZeroU32::new(10).unwrap(),
+        );
+
+        assert_matches!(proposal, Ok(_));
     }
 }

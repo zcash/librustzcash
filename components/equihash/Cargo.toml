@@ -10,14 +10,15 @@ edition = "2021"
 rust-version = "1.56.1"
 
 [features]
-default = []
+default = ["std"]
+std = []
 
 # Experimental tromp solver support, builds the C++ tromp solver and Rust FFI layer.
-solver = ["dep:cc"]
+solver = ["dep:cc", "std"]
 
 [dependencies]
-blake2b_simd = "1"
-byteorder = "1"
+core2.workspace = true
+blake2b_simd.workspace = true
 
 [build-dependencies]
 cc = { version = "1", optional = true }
@@ -27,3 +28,6 @@ hex = "0.4"
 
 [lib]
 bench = false
+
+[lints]
+workspace = true

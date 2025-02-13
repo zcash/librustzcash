@@ -1,6 +1,9 @@
+use zcash_protocol::{constants, PoolType};
+
 use super::{private::SealedItem, ParseError, Typecode};
 
-use std::convert::{TryFrom, TryInto};
+use alloc::vec::Vec;
+use core::convert::{TryFrom, TryInto};
 
 /// The set of known Receivers for Unified Addresses.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -59,14 +62,16 @@ impl SealedItem for Receiver {
 /// # Examples
 ///
 /// ```
-/// # use std::convert::Infallible;
-/// # use std::error::Error;
+/// # use core::convert::Infallible;
 /// use zcash_address::{
 ///     unified::{self, Container, Encoding},
 ///     ConversionError, TryFromRawAddress, ZcashAddress,
 /// };
 ///
-/// # fn main() -> Result<(), Box<dyn Error>> {
+/// # #[cfg(not(feature = "std"))]
+/// # fn main() {}
+/// # #[cfg(feature = "std")]
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// # let address_from_user = || "u1pg2aaph7jp8rpf6yhsza25722sg5fcn3vaca6ze27hqjw7jvvhhuxkpcg0ge9xh6drsgdkda8qjq5chpehkcpxf87rnjryjqwymdheptpvnljqqrjqzjwkc2ma6hcq666kgwfytxwac8eyex6ndgr6ezte66706e3vaqrd25dzvzkc69kw0jgywtd0cmq52q5lkw6uh7hyvzjse8ksx";
 /// let example_ua: &str = address_from_user();
 ///
@@ -101,23 +106,47 @@ impl SealedItem for Receiver {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Address(pub(crate) Vec<Receiver>);
 
+impl Address {
+    /// Returns whether this address has the ability to receive transfers of the given pool type.
+    pub fn has_receiver_of_type(&self, pool_type: PoolType) -> bool {
+        self.0.iter().any(|r| match r {
+            Receiver::Orchard(_) => pool_type == PoolType::ORCHARD,
+            Receiver::Sapling(_) => pool_type == PoolType::SAPLING,
+            Receiver::P2pkh(_) | Receiver::P2sh(_) => pool_type == PoolType::TRANSPARENT,
+            Receiver::Unknown { .. } => false,
+        })
+    }
+
+    /// Returns whether this address contains the given receiver.
+    pub fn contains_receiver(&self, receiver: &Receiver) -> bool {
+        self.0.contains(receiver)
+    }
+
+    /// Returns whether this address can receive a memo.
+    pub fn can_receive_memo(&self) -> bool {
+        self.0
+            .iter()
+            .any(|r| matches!(r, Receiver::Sapling(_) | Receiver::Orchard(_)))
+    }
+}
+
 impl super::private::SealedContainer for Address {
     /// The HRP for a Bech32m-encoded mainnet Unified Address.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const MAINNET: &'static str = "u";
+    const MAINNET: &'static str = constants::mainnet::HRP_UNIFIED_ADDRESS;
 
     /// The HRP for a Bech32m-encoded testnet Unified Address.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const TESTNET: &'static str = "utest";
+    const TESTNET: &'static str = constants::testnet::HRP_UNIFIED_ADDRESS;
 
     /// The HRP for a Bech32m-encoded regtest Unified Address.
-    const REGTEST: &'static str = "uregtest";
+    const REGTEST: &'static str = constants::regtest::HRP_UNIFIED_ADDRESS;
 
     fn from_inner(receivers: Vec<Self::Item>) -> Self {
         Self(receivers)
@@ -134,26 +163,20 @@ impl super::Container for Address {
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
-pub mod test_vectors;
-
-#[cfg(test)]
-mod tests {
-    use assert_matches::assert_matches;
-    use zcash_encoding::MAX_COMPACT_SIZE;
-
-    use crate::{
-        kind::unified::{private::SealedContainer, Container, Encoding},
-        Network,
-    };
+pub mod testing {
+    use alloc::vec::Vec;
 
     use proptest::{
         array::{uniform11, uniform20, uniform32},
         collection::vec,
         prelude::*,
         sample::select,
+        strategy::Strategy,
     };
+    use zcash_encoding::MAX_COMPACT_SIZE;
 
-    use super::{Address, ParseError, Receiver, Typecode};
+    use super::{Address, Receiver};
+    use crate::unified::Typecode;
 
     prop_compose! {
         fn uniform43()(a in uniform11(0u8..), b in uniform32(0u8..)) -> [u8; 43] {
@@ -164,11 +187,13 @@ mod tests {
         }
     }
 
-    fn arb_transparent_typecode() -> impl Strategy<Value = Typecode> {
+    /// A strategy to generate an arbitrary transparent typecode.
+    pub fn arb_transparent_typecode() -> impl Strategy<Value = Typecode> {
         select(vec![Typecode::P2pkh, Typecode::P2sh])
     }
 
-    fn arb_shielded_typecode() -> impl Strategy<Value = Typecode> {
+    /// A strategy to generate an arbitrary shielded (Sapling, Orchard, or unknown) typecode.
+    pub fn arb_shielded_typecode() -> impl Strategy<Value = Typecode> {
         prop_oneof![
             Just(Typecode::Sapling),
             Just(Typecode::Orchard),
@@ -179,7 +204,7 @@ mod tests {
     /// A strategy to generate an arbitrary valid set of typecodes without
     /// duplication and containing only one of P2sh and P2pkh transparent
     /// typecodes. The resulting vector will be sorted in encoding order.
-    fn arb_typecodes() -> impl Strategy<Value = Vec<Typecode>> {
+    pub fn arb_typecodes() -> impl Strategy<Value = Vec<Typecode>> {
         prop::option::of(arb_transparent_typecode()).prop_flat_map(|transparent| {
             prop::collection::hash_set(arb_shielded_typecode(), 1..4).prop_map(move |xs| {
                 let mut typecodes: Vec<_> = xs.into_iter().chain(transparent).collect();
@@ -189,7 +214,11 @@ mod tests {
         })
     }
 
-    fn arb_unified_address_for_typecodes(
+    /// Generates an arbitrary Unified address containing receivers corresponding to the provided
+    /// set of typecodes. The receivers of this address are likely to not represent valid protocol
+    /// receivers, and should only be used for testing parsing and/or encoding functions that do
+    /// not concern themselves with the validity of the underlying receivers.
+    pub fn arb_unified_address_for_typecodes(
         typecodes: Vec<Typecode>,
     ) -> impl Strategy<Value = Vec<Receiver>> {
         typecodes
@@ -206,16 +235,40 @@ mod tests {
             .collect::<Vec<_>>()
     }
 
-    fn arb_unified_address() -> impl Strategy<Value = Address> {
+    /// Generates an arbitrary Unified address. The receivers of this address are likely to not
+    /// represent valid protocol receivers, and should only be used for testing parsing and/or
+    /// encoding functions that do not concern themselves with the validity of the underlying
+    /// receivers.
+    pub fn arb_unified_address() -> impl Strategy<Value = Address> {
         arb_typecodes()
             .prop_flat_map(arb_unified_address_for_typecodes)
             .prop_map(Address)
     }
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod test_vectors;
+
+#[cfg(test)]
+mod tests {
+    use alloc::borrow::ToOwned;
+
+    use assert_matches::assert_matches;
+    use zcash_protocol::consensus::NetworkType;
+
+    use crate::{
+        kind::unified::{private::SealedContainer, Container, Encoding},
+        unified::address::testing::arb_unified_address,
+    };
+
+    use proptest::{prelude::*, sample::select};
+
+    use super::{Address, ParseError, Receiver, Typecode};
 
     proptest! {
         #[test]
         fn ua_roundtrip(
-            network in select(vec![Network::Main, Network::Test, Network::Regtest]),
+            network in select(vec![NetworkType::Main, NetworkType::Test, NetworkType::Regtest]),
             ua in arb_unified_address(),
         ) {
             let encoded = ua.encode(&network);
@@ -338,7 +391,7 @@ mod tests {
     #[test]
     fn only_transparent() {
         // Encoding of `Address(vec![Receiver::P2pkh([0; 20])])`.
-        let encoded = vec![
+        let encoded = [
             0xf0, 0x9e, 0x9d, 0x6e, 0xf5, 0xa6, 0xac, 0x16, 0x50, 0xf0, 0xdb, 0xe1, 0x2c, 0xa5,
             0x36, 0x22, 0xa2, 0x04, 0x89, 0x86, 0xe9, 0x6a, 0x9b, 0xf3, 0xff, 0x6d, 0x2f, 0xe6,
             0xea, 0xdb, 0xc5, 0x20, 0x62, 0xf9, 0x6f, 0xa9, 0x86, 0xcc,

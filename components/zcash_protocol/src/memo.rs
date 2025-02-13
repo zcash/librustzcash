@@ -1,10 +1,15 @@
 //! Structs for handling encrypted memos.
 
-use std::cmp::Ordering;
+use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
+use alloc::string::String;
+use core::cmp::Ordering;
+use core::fmt;
+use core::ops::Deref;
+use core::str;
+
+#[cfg(feature = "std")]
 use std::error;
-use std::fmt;
-use std::ops::Deref;
-use std::str;
 
 /// Format a byte array as a colon-delimited hex string.
 ///
@@ -30,7 +35,7 @@ where
 /// Errors that may result from attempting to construct an invalid memo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
-    InvalidUtf8(std::str::Utf8Error),
+    InvalidUtf8(core::str::Utf8Error),
     TooLong(usize),
 }
 
@@ -43,6 +48,7 @@ impl fmt::Display for Error {
     }
 }
 
+#[cfg(feature = "std")]
 impl error::Error for Error {}
 
 /// The unencrypted memo bytes received alongside a shielded note in a Zcash transaction.
@@ -144,9 +150,10 @@ impl Deref for TextMemo {
 }
 
 /// An unencrypted memo received alongside a shielded note in a Zcash transaction.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub enum Memo {
     /// An empty memo field.
+    #[default]
     Empty,
     /// A memo field containing a UTF-8 string.
     Text(TextMemo),
@@ -168,12 +175,6 @@ impl fmt::Debug for Memo {
                 write!(f, ")")
             }
         }
-    }
-}
-
-impl Default for Memo {
-    fn default() -> Self {
-        Memo::Empty
     }
 }
 
@@ -286,7 +287,8 @@ impl str::FromStr for Memo {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
+    use alloc::boxed::Box;
+    use alloc::str::FromStr;
 
     use super::{Error, Memo, MemoBytes};
 

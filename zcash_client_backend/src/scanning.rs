@@ -5,7 +5,7 @@ use std::convert::TryFrom;
 use std::fmt::{self, Debug};
 use std::hash::Hash;
 
-use incrementalmerkletree::{Position, Retention};
+use incrementalmerkletree::{Marking, Position, Retention};
 use sapling::{
     note_encryption::{CompactOutputDescription, SaplingDomain},
     SaplingIvk,
@@ -15,9 +15,10 @@ use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use tracing::{debug, trace};
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput, COMPACT_NOTE_SIZE};
-use zcash_primitives::{
+use zcash_primitives::transaction::{components::sapling::zip212_enforcement, TxId};
+use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade},
-    transaction::{components::sapling::zip212_enforcement, TxId},
+    ShieldedProtocol,
 };
 use zip32::Scope;
 
@@ -26,7 +27,6 @@ use crate::{
     proto::compact_formats::CompactBlock,
     scan::{Batch, BatchRunner, CompactDecryptor, DecryptedOutput, Tasks},
     wallet::{WalletOutput, WalletSpend, WalletTx},
-    ShieldedProtocol,
 };
 
 #[cfg(feature = "orchard")]
@@ -633,7 +633,7 @@ where
                         CompactAction::try_from(action).map_err(|_| ScanError::EncodingInvalid {
                             at_height: block_height,
                             txid,
-                            pool_type: ShieldedProtocol::Sapling,
+                            pool_type: ShieldedProtocol::Orchard,
                             index: i,
                         })
                     })
@@ -1100,12 +1100,16 @@ fn find_received<
     {
         // Collect block note commitments
         let node = extract_note_commitment(output);
-        // If the commitment is the last in the block, ensure that is is retained as a checkpoint
+        // If the commitment is the last in the block, ensure that is retained as a checkpoint
         let is_checkpoint = output_idx + 1 == decoded.len() && last_commitments_in_block;
         let retention = match (decrypted_note.is_some(), is_checkpoint) {
             (is_marked, true) => Retention::Checkpoint {
                 id: block_height,
-                is_marked,
+                marking: if is_marked {
+                    Marking::Marked
+                } else {
+                    Marking::None
+                },
             },
             (true, false) => Retention::Marked,
             (false, false) => Retention::Ephemeral,
@@ -1163,10 +1167,12 @@ pub mod testing {
     };
     use zcash_note_encryption::{Domain, COMPACT_NOTE_SIZE};
     use zcash_primitives::{
-        block::BlockHash,
+        block::BlockHash, transaction::components::sapling::zip212_enforcement,
+    };
+    use zcash_protocol::{
         consensus::{BlockHeight, Network},
         memo::MemoBytes,
-        transaction::components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
+        value::Zatoshis,
     };
 
     use crate::proto::compact_formats::{
@@ -1181,7 +1187,7 @@ pub mod testing {
         };
         let fake_cmu = {
             let fake_cmu = bls12_381::Scalar::random(&mut rng);
-            fake_cmu.to_repr().as_ref().to_owned()
+            fake_cmu.to_repr().to_vec()
         };
         let fake_epk = {
             let mut buffer = [0; 64];
@@ -1216,7 +1222,7 @@ pub mod testing {
         prev_hash: BlockHash,
         nf: Nullifier,
         dfvk: &DiversifiableFullViewingKey,
-        value: NonNegativeAmount,
+        value: Zatoshis,
         tx_after: bool,
         initial_tree_sizes: Option<(u32, u32)>,
     ) -> CompactBlock {
@@ -1260,7 +1266,7 @@ pub mod testing {
         let cout = CompactSaplingOutput {
             cmu,
             ephemeral_key,
-            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+            ciphertext: enc_ciphertext[..52].to_vec(),
         };
         let mut ctx = CompactTx::default();
         let mut txid = vec![0; 32];
@@ -1297,15 +1303,15 @@ mod tests {
 
     use std::convert::Infallible;
 
-    use incrementalmerkletree::{Position, Retention};
+    use incrementalmerkletree::{Marking, Position, Retention};
     use sapling::Nullifier;
     use zcash_keys::keys::UnifiedSpendingKey;
-    use zcash_primitives::{
-        block::BlockHash,
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::{
         consensus::{BlockHeight, Network},
-        transaction::components::amount::NonNegativeAmount,
-        zip32::AccountId,
+        value::Zatoshis,
     };
+    use zip32::AccountId;
 
     use crate::{
         data_api::BlockMetadata,
@@ -1330,7 +1336,7 @@ mod tests {
                 BlockHash([0; 32]),
                 Nullifier([0; 32]),
                 &sapling_dfvk,
-                NonNegativeAmount::const_from_u64(5),
+                Zatoshis::const_from_u64(5),
                 false,
                 None,
             );
@@ -1390,7 +1396,7 @@ mod tests {
                     Retention::Ephemeral,
                     Retention::Checkpoint {
                         id: scanned_block.height(),
-                        is_marked: true
+                        marking: Marking::Marked
                     }
                 ]
             );
@@ -1416,7 +1422,7 @@ mod tests {
                 BlockHash([0; 32]),
                 Nullifier([0; 32]),
                 &sapling_dfvk,
-                NonNegativeAmount::const_from_u64(5),
+                Zatoshis::const_from_u64(5),
                 true,
                 Some((0, 0)),
             );
@@ -1466,7 +1472,7 @@ mod tests {
                     Retention::Marked,
                     Retention::Checkpoint {
                         id: scanned_block.height(),
-                        is_marked: false
+                        marking: Marking::None
                     }
                 ]
             );
@@ -1496,7 +1502,7 @@ mod tests {
             BlockHash([0; 32]),
             nf,
             ufvk.sapling().unwrap(),
-            NonNegativeAmount::const_from_u64(5),
+            Zatoshis::const_from_u64(5),
             false,
             Some((0, 0)),
         );
@@ -1525,7 +1531,7 @@ mod tests {
                 Retention::Ephemeral,
                 Retention::Checkpoint {
                     id: scanned_block.height(),
-                    is_marked: false
+                    marking: Marking::None
                 }
             ]
         );

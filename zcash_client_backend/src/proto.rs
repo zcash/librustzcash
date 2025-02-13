@@ -1,4 +1,4 @@
-//! Generated code for handling light client protobuf structs.
+//! This module contains generated code for handling light client protobuf structs.
 
 use incrementalmerkletree::frontier::CommitmentTree;
 use nonempty::NonEmpty;
@@ -13,22 +13,25 @@ use sapling::{self, note::ExtractedNoteCommitment, Node};
 use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
-    consensus::{self, BlockHeight, Parameters},
-    memo::{self, MemoBytes},
     merkle_tree::read_commitment_tree,
-    transaction::{components::amount::NonNegativeAmount, fees::StandardFeeRule, TxId},
+    transaction::TxId,
 };
+use zcash_protocol::{
+    consensus::BlockHeight,
+    memo::{self, MemoBytes},
+    value::Zatoshis,
+    PoolType, ShieldedProtocol,
+};
+use zip321::{TransactionRequest, Zip321Error};
 
 use crate::{
     data_api::{chain::ChainState, InputSource},
-    fees::{ChangeValue, TransactionBalance},
+    fees::{ChangeValue, StandardFeeRule, TransactionBalance},
     proposal::{Proposal, ProposalError, ShieldedInputs, Step, StepOutput, StepOutputIndex},
-    zip321::{TransactionRequest, Zip321Error},
-    PoolType, ShieldedProtocol,
 };
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::transaction::components::OutPoint;
+use transparent::bundle::OutPoint;
 
 #[cfg(feature = "orchard")]
 use orchard::tree::MerkleHashOrchard;
@@ -124,7 +127,7 @@ impl compact_formats::CompactSaplingOutput {
     /// [`CompactOutput.cmu`]: #structfield.cmu
     pub fn cmu(&self) -> Result<ExtractedNoteCommitment, ()> {
         let mut repr = [0; 32];
-        repr.as_mut().copy_from_slice(&self.cmu[..]);
+        repr.copy_from_slice(&self.cmu[..]);
         Option::from(ExtractedNoteCommitment::from_bytes(&repr)).ok_or(())
     }
 
@@ -335,7 +338,7 @@ pub const PROPOSAL_SER_V1: u32 = 1;
 /// representation.
 #[derive(Debug, Clone)]
 pub enum ProposalDecodingError<DbError> {
-    /// The encoded proposal contained no steps
+    /// The encoded proposal contained no steps.
     NoSteps,
     /// The ZIP 321 transaction request URI was invalid.
     Zip321(Zip321Error),
@@ -356,8 +359,8 @@ pub enum ProposalDecodingError<DbError> {
     MemoInvalid(memo::Error),
     /// The serialization version returned by the protobuf was not recognized.
     VersionInvalid(u32),
-    /// The proposal did not correctly specify a standard fee rule.
-    FeeRuleNotSpecified,
+    /// The fee rule specified by the proposal is not supported by the wallet.
+    FeeRuleNotSupported(proposal::FeeRule),
     /// The proposal violated balance or structural constraints.
     ProposalInvalid(ProposalError),
     /// An inputs field for the given protocol was present, but contained no input note references.
@@ -366,6 +369,8 @@ pub enum ProposalDecodingError<DbError> {
     TransparentMemo,
     /// Change outputs to the specified pool are not supported.
     InvalidChangeRecipient(PoolType),
+    /// Ephemeral outputs to the specified pool are not supported.
+    InvalidEphemeralRecipient(PoolType),
 }
 
 impl<E> From<Zip321Error> for ProposalDecodingError<E> {
@@ -407,8 +412,12 @@ impl<E: Display> Display for ProposalDecodingError<E> {
             ProposalDecodingError::VersionInvalid(v) => {
                 write!(f, "Unrecognized proposal version {}", v)
             }
-            ProposalDecodingError::FeeRuleNotSpecified => {
-                write!(f, "Proposal did not specify a known fee rule.")
+            ProposalDecodingError::FeeRuleNotSupported(r) => {
+                write!(
+                    f,
+                    "Fee calculation using the {:?} fee rule is not supported.",
+                    r
+                )
             }
             ProposalDecodingError::ProposalInvalid(err) => write!(f, "{}", err),
             ProposalDecodingError::EmptyShieldedInputs(protocol) => write!(
@@ -422,6 +431,11 @@ impl<E: Display> Display for ProposalDecodingError<E> {
             ProposalDecodingError::InvalidChangeRecipient(pool_type) => write!(
                 f,
                 "Change outputs to the {} pool are not supported.",
+                pool_type
+            ),
+            ProposalDecodingError::InvalidEphemeralRecipient(pool_type) => write!(
+                f,
+                "Ephemeral outputs to the {} pool are not supported.",
                 pool_type
             ),
         }
@@ -441,9 +455,9 @@ impl<E: std::error::Error + 'static> std::error::Error for ProposalDecodingError
 
 fn pool_type<T>(pool_id: i32) -> Result<PoolType, ProposalDecodingError<T>> {
     match proposal::ValuePool::try_from(pool_id) {
-        Ok(proposal::ValuePool::Transparent) => Ok(PoolType::Transparent),
-        Ok(proposal::ValuePool::Sapling) => Ok(PoolType::Shielded(ShieldedProtocol::Sapling)),
-        Ok(proposal::ValuePool::Orchard) => Ok(PoolType::Shielded(ShieldedProtocol::Orchard)),
+        Ok(proposal::ValuePool::Transparent) => Ok(PoolType::TRANSPARENT),
+        Ok(proposal::ValuePool::Sapling) => Ok(PoolType::SAPLING),
+        Ok(proposal::ValuePool::Orchard) => Ok(PoolType::ORCHARD),
         _ => Err(ProposalDecodingError::ValuePoolNotSupported(pool_id)),
     }
 }
@@ -485,17 +499,14 @@ impl From<ShieldedProtocol> for proposal::ValuePool {
 impl proposal::Proposal {
     /// Serializes a [`Proposal`] based upon a supported [`StandardFeeRule`] to its protobuf
     /// representation.
-    pub fn from_standard_proposal<P: Parameters, NoteRef>(
-        params: &P,
-        value: &Proposal<StandardFeeRule, NoteRef>,
-    ) -> Self {
+    pub fn from_standard_proposal<NoteRef>(value: &Proposal<StandardFeeRule, NoteRef>) -> Self {
         use proposal::proposed_input;
         use proposal::{PriorStepChange, PriorStepOutput, ReceivedOutput};
         let steps = value
             .steps()
             .iter()
             .map(|step| {
-                let transaction_request = step.transaction_request().to_uri(params);
+                let transaction_request = step.transaction_request().to_uri();
 
                 let anchor_height = step
                     .shielded_inputs()
@@ -575,6 +586,7 @@ impl proposal::Proposal {
                             memo: change.memo().map(|memo_bytes| proposal::MemoBytes {
                                 value: memo_bytes.as_slice().to_vec(),
                             }),
+                            is_ephemeral: change.is_ephemeral(),
                         })
                         .collect(),
                     fee_required: step.balance().fee_required().into(),
@@ -591,12 +603,9 @@ impl proposal::Proposal {
             })
             .collect();
 
-        #[allow(deprecated)]
         proposal::Proposal {
             proto_version: PROPOSAL_SER_V1,
             fee_rule: match value.fee_rule() {
-                StandardFeeRule::PreZip313 => proposal::FeeRule::PreZip313,
-                StandardFeeRule::Zip313 => proposal::FeeRule::Zip313,
                 StandardFeeRule::Zip317 => proposal::FeeRule::Zip317,
             }
             .into(),
@@ -607,9 +616,8 @@ impl proposal::Proposal {
 
     /// Attempts to parse a [`Proposal`] based upon a supported [`StandardFeeRule`] from its
     /// protobuf representation.
-    pub fn try_into_standard_proposal<P: consensus::Parameters, DbT, DbError>(
+    pub fn try_into_standard_proposal<DbT, DbError>(
         &self,
-        params: &P,
         wallet_db: &DbT,
     ) -> Result<Proposal<StandardFeeRule, DbT::NoteRef>, ProposalDecodingError<DbError>>
     where
@@ -618,20 +626,17 @@ impl proposal::Proposal {
         use self::proposal::proposed_input::Value::*;
         match self.proto_version {
             PROPOSAL_SER_V1 => {
-                #[allow(deprecated)]
                 let fee_rule = match self.fee_rule() {
-                    proposal::FeeRule::PreZip313 => StandardFeeRule::PreZip313,
-                    proposal::FeeRule::Zip313 => StandardFeeRule::Zip313,
                     proposal::FeeRule::Zip317 => StandardFeeRule::Zip317,
-                    proposal::FeeRule::NotSpecified => {
-                        return Err(ProposalDecodingError::FeeRuleNotSpecified);
+                    other => {
+                        return Err(ProposalDecodingError::FeeRuleNotSupported(other));
                     }
                 };
 
                 let mut steps = Vec::with_capacity(self.steps.len());
                 for step in &self.steps {
                     let transaction_request =
-                        TransactionRequest::from_uri(params, &step.transaction_request)?;
+                        TransactionRequest::from_uri(&step.transaction_request)?;
 
                     let payment_pools = step
                         .payment_output_pools
@@ -645,9 +650,7 @@ impl proposal::Proposal {
                         })
                         .collect::<Result<BTreeMap<usize, PoolType>, ProposalDecodingError<DbError>>>()?;
 
-                    #[cfg(not(feature = "transparent-inputs"))]
-                    let transparent_inputs = vec![];
-                    #[cfg(feature = "transparent-inputs")]
+                    #[allow(unused_mut)]
                     let mut transparent_inputs = vec![];
                     let mut received_notes = vec![];
                     let mut prior_step_inputs = vec![];
@@ -666,7 +669,7 @@ impl proposal::Proposal {
                                     PoolType::Transparent => {
                                         #[cfg(not(feature = "transparent-inputs"))]
                                         return Err(ProposalDecodingError::ValuePoolNotSupported(
-                                            1,
+                                            out.value_pool,
                                         ));
 
                                         #[cfg(feature = "transparent-inputs")]
@@ -679,7 +682,7 @@ impl proposal::Proposal {
                                                     .ok_or({
                                                         ProposalDecodingError::InputNotFound(
                                                             txid,
-                                                            PoolType::Transparent,
+                                                            PoolType::TRANSPARENT,
                                                             out.index,
                                                         )
                                                     })?,
@@ -745,7 +748,7 @@ impl proposal::Proposal {
                             .proposed_change
                             .iter()
                             .map(|cv| -> Result<ChangeValue, ProposalDecodingError<_>> {
-                                let value = NonNegativeAmount::from_u64(cv.value)
+                                let value = Zatoshis::from_u64(cv.value)
                                     .map_err(|_| ProposalDecodingError::BalanceInvalid)?;
                                 let memo = cv
                                     .memo
@@ -755,22 +758,31 @@ impl proposal::Proposal {
                                             .map_err(ProposalDecodingError::MemoInvalid)
                                     })
                                     .transpose()?;
-                                match cv.pool_type()? {
-                                    PoolType::Shielded(ShieldedProtocol::Sapling) => {
+                                match (cv.pool_type()?, cv.is_ephemeral) {
+                                    (PoolType::Shielded(ShieldedProtocol::Sapling), false) => {
                                         Ok(ChangeValue::sapling(value, memo))
                                     }
                                     #[cfg(feature = "orchard")]
-                                    PoolType::Shielded(ShieldedProtocol::Orchard) => {
+                                    (PoolType::Shielded(ShieldedProtocol::Orchard), false) => {
                                         Ok(ChangeValue::orchard(value, memo))
                                     }
-                                    PoolType::Transparent if memo.is_some() => {
+                                    (PoolType::Transparent, _) if memo.is_some() => {
                                         Err(ProposalDecodingError::TransparentMemo)
                                     }
-                                    t => Err(ProposalDecodingError::InvalidChangeRecipient(t)),
+                                    #[cfg(feature = "transparent-inputs")]
+                                    (PoolType::Transparent, true) => {
+                                        Ok(ChangeValue::ephemeral_transparent(value))
+                                    }
+                                    (pool, false) => {
+                                        Err(ProposalDecodingError::InvalidChangeRecipient(pool))
+                                    }
+                                    (pool, true) => {
+                                        Err(ProposalDecodingError::InvalidEphemeralRecipient(pool))
+                                    }
                                 }
                             })
                             .collect::<Result<Vec<_>, _>>()?,
-                        NonNegativeAmount::from_u64(proto_balance.fee_required)
+                        Zatoshis::from_u64(proto_balance.fee_required)
                             .map_err(|_| ProposalDecodingError::BalanceInvalid)?,
                     )
                     .map_err(|_| ProposalDecodingError::BalanceInvalid)?;

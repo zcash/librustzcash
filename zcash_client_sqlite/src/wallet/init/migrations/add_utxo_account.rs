@@ -1,10 +1,9 @@
 //! A migration that adds an identifier for the account that received a UTXO to the utxos table
-use rusqlite;
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+
+use schemerz_rusqlite::RusqliteMigration;
 use std::collections::HashSet;
 use uuid::Uuid;
-use zcash_primitives::consensus;
+use zcash_protocol::consensus;
 
 use super::{addresses_table, utxos_table};
 use crate::wallet::init::WalletMigrationError;
@@ -12,35 +11,33 @@ use crate::wallet::init::WalletMigrationError;
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::error::SqliteClientError,
+    ::transparent::{
+        address::TransparentAddress,
+        keys::{IncomingViewingKey, NonHardenedChildIndex},
+    },
     rusqlite::{named_params, OptionalExtension},
     std::collections::HashMap,
-    zcash_client_backend::{
-        encoding::AddressCodec, keys::UnifiedFullViewingKey, wallet::TransparentAddressMetadata,
-    },
-    zcash_keys::address::Address,
-    zcash_primitives::legacy::{
-        keys::{IncomingViewingKey, NonHardenedChildIndex},
-        TransparentAddress,
-    },
+    zcash_client_backend::wallet::TransparentAddressMetadata,
+    zcash_keys::{address::Address, encoding::AddressCodec, keys::UnifiedFullViewingKey},
     zip32::{AccountId, DiversifierIndex, Scope},
 };
 
 /// This migration adds an account identifier column to the UTXOs table.
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x761884d6_30d8_44ef_b204_0b82551c4ca1);
 
+const DEPENDENCIES: &[Uuid] = &[utxos_table::MIGRATION_ID, addresses_table::MIGRATION_ID];
+
 pub(super) struct Migration<P> {
     pub(super) _params: P,
 }
 
-impl<P> schemer::Migration for Migration<P> {
+impl<P> schemerz::Migration<Uuid> for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [utxos_table::MIGRATION_ID, addresses_table::MIGRATION_ID]
-            .into_iter()
-            .collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -186,12 +183,12 @@ fn get_transparent_receivers<P: consensus::Parameters>(
         }
     }
 
-    if let Some((taddr, child_index)) = get_legacy_transparent_address(params, conn, account)? {
+    if let Some((taddr, address_index)) = get_legacy_transparent_address(params, conn, account)? {
         ret.insert(
             taddr,
             Some(TransparentAddressMetadata::new(
                 Scope::External.into(),
-                child_index,
+                address_index,
             )),
         );
     }
@@ -223,10 +220,20 @@ fn get_legacy_transparent_address<P: consensus::Parameters>(
             .map(|tfvk| {
                 tfvk.derive_external_ivk()
                     .map(|tivk| tivk.default_address())
-                    .map_err(SqliteClientError::HdwalletError)
+                    .map_err(SqliteClientError::TransparentDerivation)
             })
             .transpose()
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::wallet::init::migrations::tests::test_migrate;
+
+    #[test]
+    fn migrate() {
+        test_migrate(&[super::MIGRATION_ID]);
     }
 }

@@ -1,21 +1,28 @@
 //! Encoding and decoding functions for Zcash key and address structs.
 //!
 //! Human-Readable Prefixes (HRPs) for Bech32 encodings are located in the
-//! [zcash_primitives::constants] module.
+//! [zcash_protocol::constants] module.
 
 use crate::address::UnifiedAddress;
+use alloc::borrow::ToOwned;
+use alloc::string::{String, ToString};
 use bs58::{self, decode::Error as Bs58Error};
-use std::fmt;
-use zcash_primitives::consensus::NetworkConstants;
+use core::fmt;
 
+use transparent::address::TransparentAddress;
 use zcash_address::unified::{self, Encoding};
-use zcash_primitives::{consensus, legacy::TransparentAddress};
+use zcash_protocol::consensus::{self, NetworkConstants};
 
 #[cfg(feature = "sapling")]
 use {
-    bech32::{self, Error, FromBase32, ToBase32, Variant},
+    alloc::vec::Vec,
+    bech32::{
+        primitives::decode::{CheckedHrpstring, CheckedHrpstringError},
+        Bech32, Hrp,
+    },
+    core2::io::{self, Write},
     sapling::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
-    std::io::{self, Write},
+    zcash_protocol::consensus::NetworkType,
 };
 
 #[cfg(feature = "sapling")]
@@ -25,22 +32,29 @@ where
 {
     let mut data: Vec<u8> = vec![];
     write(&mut data).expect("Should be able to write to a Vec");
-    bech32::encode(hrp, data.to_base32(), Variant::Bech32).expect("hrp is invalid")
+    bech32::encode::<Bech32>(Hrp::parse_unchecked(hrp), &data).expect("encoding is short enough")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg(feature = "sapling")]
 pub enum Bech32DecodeError {
-    Bech32Error(Error),
-    IncorrectVariant(Variant),
+    Bech32Error(bech32::DecodeError),
+    Hrp(CheckedHrpstringError),
     ReadError,
     HrpMismatch { expected: String, actual: String },
 }
 
 #[cfg(feature = "sapling")]
-impl From<Error> for Bech32DecodeError {
-    fn from(err: Error) -> Self {
+impl From<bech32::DecodeError> for Bech32DecodeError {
+    fn from(err: bech32::DecodeError) -> Self {
         Bech32DecodeError::Bech32Error(err)
+    }
+}
+
+#[cfg(feature = "sapling")]
+impl From<CheckedHrpstringError> for Bech32DecodeError {
+    fn from(err: CheckedHrpstringError) -> Self {
+        Bech32DecodeError::Hrp(err)
     }
 }
 
@@ -49,11 +63,7 @@ impl fmt::Display for Bech32DecodeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
             Bech32DecodeError::Bech32Error(e) => write!(f, "{}", e),
-            Bech32DecodeError::IncorrectVariant(variant) => write!(
-                f,
-                "Incorrect bech32 encoding (wrong variant: {:?})",
-                variant
-            ),
+            Bech32DecodeError::Hrp(e) => write!(f, "Incorrect HRP encoding: {e}"),
             Bech32DecodeError::ReadError => {
                 write!(f, "Failed to decode key from its binary representation.")
             }
@@ -66,28 +76,29 @@ impl fmt::Display for Bech32DecodeError {
     }
 }
 
+#[cfg(all(feature = "sapling", feature = "std"))]
+impl std::error::Error for Bech32DecodeError {}
+
 #[cfg(feature = "sapling")]
 fn bech32_decode<T, F>(hrp: &str, s: &str, read: F) -> Result<T, Bech32DecodeError>
 where
     F: Fn(Vec<u8>) -> Option<T>,
 {
-    let (decoded_hrp, data, variant) = bech32::decode(s)?;
-    if variant != Variant::Bech32 {
-        Err(Bech32DecodeError::IncorrectVariant(variant))
-    } else if decoded_hrp != hrp {
+    let parsed = CheckedHrpstring::new::<Bech32>(s)?;
+    if parsed.hrp().as_str() != hrp {
         Err(Bech32DecodeError::HrpMismatch {
             expected: hrp.to_string(),
-            actual: decoded_hrp,
+            actual: parsed.hrp().as_str().to_owned(),
         })
     } else {
-        read(Vec::<u8>::from_base32(&data)?).ok_or(Bech32DecodeError::ReadError)
+        read(parsed.byte_iter().collect::<Vec<_>>()).ok_or(Bech32DecodeError::ReadError)
     }
 }
 
 /// A trait for encoding and decoding Zcash addresses.
 pub trait AddressCodec<P>
 where
-    Self: std::marker::Sized,
+    Self: core::marker::Sized,
 {
     type Error;
 
@@ -124,6 +135,7 @@ impl fmt::Display for TransparentCodecError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for TransparentCodecError {}
 
 impl<P: consensus::Parameters> AddressCodec<P> for TransparentAddress {
@@ -191,10 +203,9 @@ impl<P: consensus::Parameters> AddressCodec<P> for UnifiedAddress {
 /// # Examples
 ///
 /// ```
-/// use zcash_primitives::{
-///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_SPENDING_KEY},
-///     zip32::AccountId,
-/// };
+/// use zcash_protocol::constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_SPENDING_KEY};
+/// use zip32::AccountId;
+///
 /// use zcash_keys::{
 ///     encoding::encode_extended_spending_key,
 ///     keys::sapling,
@@ -226,10 +237,8 @@ pub fn decode_extended_spending_key(
 ///
 /// ```
 /// use ::sapling::zip32::ExtendedFullViewingKey;
-/// use zcash_primitives::{
-///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY},
-///     zip32::AccountId,
-/// };
+/// use zcash_protocol::constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY};
+/// use zip32::AccountId;
 /// use zcash_keys::{
 ///     encoding::encode_extended_full_viewing_key,
 ///     keys::sapling,
@@ -245,15 +254,43 @@ pub fn encode_extended_full_viewing_key(hrp: &str, extfvk: &ExtendedFullViewingK
     bech32_encode(hrp, |w| extfvk.write(w))
 }
 
-/// Decodes an [`ExtendedFullViewingKey`] from a Bech32-encoded string.
-///
-/// [`ExtendedFullViewingKey`]: sapling::zip32::ExtendedFullViewingKey
+/// Decodes an [`ExtendedFullViewingKey`] from a Bech32-encoded string, verifying that it matches
+/// the provided human-readable prefix.
 #[cfg(feature = "sapling")]
 pub fn decode_extended_full_viewing_key(
     hrp: &str,
     s: &str,
 ) -> Result<ExtendedFullViewingKey, Bech32DecodeError> {
     bech32_decode(hrp, s, |data| ExtendedFullViewingKey::read(&data[..]).ok())
+}
+
+/// Decodes an [`ExtendedFullViewingKey`] and the [`NetworkType`] that it is intended for use with
+/// from a Bech32-encoded string.
+#[cfg(feature = "sapling")]
+pub fn decode_extfvk_with_network(
+    s: &str,
+) -> Result<(NetworkType, ExtendedFullViewingKey), Bech32DecodeError> {
+    use zcash_protocol::constants::{mainnet, regtest, testnet};
+
+    let parsed = CheckedHrpstring::new::<Bech32>(s)?;
+    let network = match parsed.hrp().as_str() {
+        mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY => Ok(NetworkType::Main),
+        testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY => Ok(NetworkType::Test),
+        regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY => Ok(NetworkType::Regtest),
+        other => Err(Bech32DecodeError::HrpMismatch {
+            expected: format!(
+                "One of {}, {}, or {}",
+                mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+                testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+                regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+            ),
+            actual: other.to_string(),
+        }),
+    }?;
+    let fvk = ExtendedFullViewingKey::read(&parsed.byte_iter().collect::<Vec<_>>()[..])
+        .map_err(|_| Bech32DecodeError::ReadError)?;
+
+    Ok((network, fvk))
 }
 
 /// Writes a [`PaymentAddress`] as a Bech32-encoded string.
@@ -266,9 +303,7 @@ pub fn decode_extended_full_viewing_key(
 /// use zcash_keys::{
 ///     encoding::encode_payment_address,
 /// };
-/// use zcash_primitives::{
-///     constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
-/// };
+/// use zcash_protocol::constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS;
 ///
 /// let pa = PaymentAddress::from_bytes(&[
 ///     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x8e, 0x11,
@@ -312,9 +347,7 @@ pub fn encode_payment_address_p<P: consensus::Parameters>(
 /// use zcash_keys::{
 ///     encoding::decode_payment_address,
 /// };
-/// use zcash_primitives::{
-///     consensus::{TEST_NETWORK, NetworkConstants, Parameters},
-/// };
+/// use zcash_protocol::consensus::{TEST_NETWORK, NetworkConstants, Parameters};
 ///
 /// let pa = PaymentAddress::from_bytes(&[
 ///     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x8e, 0x11,
@@ -354,13 +387,9 @@ pub fn decode_payment_address(
 /// # Examples
 ///
 /// ```
-/// use zcash_keys::{
-///     encoding::encode_transparent_address,
-/// };
-/// use zcash_primitives::{
-///     consensus::{TEST_NETWORK, NetworkConstants, Parameters},
-///     legacy::TransparentAddress,
-/// };
+/// use zcash_keys::encoding::encode_transparent_address;
+/// use zcash_protocol::consensus::{TEST_NETWORK, NetworkConstants, Parameters};
+/// use transparent::address::TransparentAddress;
 ///
 /// assert_eq!(
 ///     encode_transparent_address(
@@ -379,8 +408,6 @@ pub fn decode_payment_address(
 ///     ),
 ///     "t26YoyZ1iPgiMEWL4zGUm74eVWfhyDMXzY2",
 /// );
-/// ```
-/// [`TransparentAddress`]: zcash_primitives::legacy::TransparentAddress
 pub fn encode_transparent_address(
     pubkey_version: &[u8],
     script_version: &[u8],
@@ -422,10 +449,8 @@ pub fn encode_transparent_address_p<P: consensus::Parameters>(
 /// # Examples
 ///
 /// ```
-/// use zcash_primitives::{
-///     consensus::{TEST_NETWORK, NetworkConstants, Parameters},
-///     legacy::TransparentAddress,
-/// };
+/// use zcash_protocol::consensus::{TEST_NETWORK, NetworkConstants, Parameters};
+/// use transparent::address::TransparentAddress;
 /// use zcash_keys::{
 ///     encoding::decode_transparent_address,
 /// };
@@ -447,8 +472,6 @@ pub fn encode_transparent_address_p<P: consensus::Parameters>(
 ///     ),
 ///     Ok(Some(TransparentAddress::ScriptHash([0; 20]))),
 /// );
-/// ```
-/// [`TransparentAddress`]: zcash_primitives::legacy::TransparentAddress
 pub fn decode_transparent_address(
     pubkey_version: &[u8],
     script_version: &[u8],
@@ -480,7 +503,7 @@ mod tests_sapling {
         Bech32DecodeError,
     };
     use sapling::{zip32::ExtendedSpendingKey, PaymentAddress};
-    use zcash_primitives::constants;
+    use zcash_protocol::constants;
 
     #[test]
     fn extended_spending_key() {

@@ -7,6 +7,49 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- MSRV is now 1.81.0.
+
+## [0.21.0] - 2024-12-16
+### Added
+- `zcash_proofs::prover::LocalTxProver::verifying_keys`
+
+### Changed
+- Migrated to `sapling-crypto` version `0.4`, `zcash_primitives 0.21`.
+
+## [0.20.0] - 2024-11-14
+
+### Changed
+- Migrated to `zcash_primitives 0.20`.
+- MSRV is now 1.77.0.
+
+## [0.19.0] - 2024-10-02
+
+### Changed
+- Migrated to `zcash_primitives 0.19`.
+
+### Fixed
+- The previous release of `zcash_primitives` did not bump `zcash_address` and
+  ended up depending on multiple versions of `zcash_protocol`, which didn't
+  cause a code conflict but results in two different consensus protocol states
+  being present in the dependency tree.
+
+## [0.18.0] - 2024-10-02
+
+### Changed
+- Migrated to `sapling-crypto 0.3`, `zcash_primitives 0.18`.
+
+## [0.17.0] - 2024-08-26
+
+### Changed
+- Migrated to `zcash_primitives 0.17`.
+
+## [0.16.0] - 2024-08-19
+
+### Changed
+- MSRV is now 1.70.0.
+- Migrated to `zcash_primitives 0.16`.
+
 ## [0.15.0] - 2024-03-25
 
 ### Changed

@@ -7,6 +7,36 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Deprecated
+- `zcash_address::Network` (use `zcash_protocol::consensus::NetworkType` instead).
+
+## [0.6.2] - 2024-12-13
+### Fixed
+- Migrated to `f4jumble 0.1.1` to fix `no-std` support.
+
+## [0.6.1] - 2024-12-13
+### Added
+- `no-std` support, via a default-enabled `std` feature flag.
+
+## [0.6.0] - 2024-10-02
+### Changed
+- Migrated to `zcash_protocol 0.4`.
+
+## [0.5.0] - 2024-08-26
+### Changed
+- Updated `zcash_protocol` dependency to version `0.3`
+
+## [0.4.0] - 2024-08-19
+### Added
+- `zcash_address::ZcashAddress::{can_receive_memo, can_receive_as, matches_receiver}`
+- `zcash_address::unified::Address::{can_receive_memo, has_receiver_of_type, contains_receiver}`
+- Module `zcash_address::testing` under the `test-dependencies` feature.
+- Module `zcash_address::unified::address::testing` under the
+  `test-dependencies` feature.
+
+### Changed
+- Updated `zcash_protocol` dependency to version `0.2`
+
 ## [0.3.2] - 2024-03-06
 ### Added
 - `zcash_address::convert`:

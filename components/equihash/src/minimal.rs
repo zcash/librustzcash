@@ -1,7 +1,6 @@
-use std::io::Cursor;
-use std::mem::size_of;
-
-use byteorder::{BigEndian, ReadBytesExt};
+use alloc::vec::Vec;
+use core::mem::size_of;
+use core2::io::{Cursor, Read};
 
 use crate::params::Params;
 
@@ -118,6 +117,12 @@ pub(crate) fn minimal_from_indices(p: Params, indices: &[u32]) -> Vec<u8> {
     compress_array(&array, c_bit_len + 1, byte_pad)
 }
 
+fn read_u32_be(csr: &mut Cursor<Vec<u8>>) -> core2::io::Result<u32> {
+    let mut n = [0; 4];
+    csr.read_exact(&mut n)?;
+    Ok(u32::from_be_bytes(n))
+}
+
 /// Returns `None` if the parameters are invalid for this minimal encoding.
 pub(crate) fn indices_from_minimal(p: Params, minimal: &[u8]) -> Option<Vec<u32>> {
     let c_bit_len = p.collision_bit_length();
@@ -135,7 +140,7 @@ pub(crate) fn indices_from_minimal(p: Params, minimal: &[u8]) -> Option<Vec<u32>
 
     // Big-endian so that lexicographic array comparison is equivalent to integer
     // comparison
-    while let Ok(i) = csr.read_u32::<BigEndian>() {
+    while let Ok(i) = read_u32_be(&mut csr) {
         ret.push(i);
     }
 

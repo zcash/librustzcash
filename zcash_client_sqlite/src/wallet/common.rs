@@ -1,19 +1,30 @@
 //! Functions common to Sapling and Orchard support in the wallet.
 
 use rusqlite::{named_params, types::Value, Connection, Row};
-use std::rc::Rc;
+use std::{num::NonZeroU64, rc::Rc};
 
-use zcash_client_backend::{wallet::ReceivedNote, ShieldedProtocol};
-use zcash_primitives::transaction::{components::amount::NonNegativeAmount, TxId};
-use zcash_protocol::consensus::{self, BlockHeight};
+use zcash_client_backend::{
+    data_api::{NoteFilter, PoolMeta},
+    wallet::ReceivedNote,
+};
+use zcash_primitives::transaction::TxId;
+use zcash_protocol::{
+    consensus::{self, BlockHeight},
+    value::{BalanceError, Zatoshis},
+    PoolType, ShieldedProtocol,
+};
 
 use super::wallet_birthday;
-use crate::{error::SqliteClientError, AccountId, ReceivedNoteId, SAPLING_TABLES_PREFIX};
+use crate::{
+    error::SqliteClientError, wallet::pool_code, AccountUuid, ReceivedNoteId, SAPLING_TABLES_PREFIX,
+};
 
 #[cfg(feature = "orchard")]
 use crate::ORCHARD_TABLES_PREFIX;
 
-fn per_protocol_names(protocol: ShieldedProtocol) -> (&'static str, &'static str, &'static str) {
+pub(crate) fn per_protocol_names(
+    protocol: ShieldedProtocol,
+) -> (&'static str, &'static str, &'static str) {
     match protocol {
         ShieldedProtocol::Sapling => (SAPLING_TABLES_PREFIX, "output_index", "rcm"),
         #[cfg(feature = "orchard")]
@@ -106,8 +117,8 @@ where
 pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     conn: &Connection,
     params: &P,
-    account: AccountId,
-    target_value: NonNegativeAmount,
+    account: AccountUuid,
+    target_value: Zatoshis,
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
@@ -157,8 +168,9 @@ where
                     ON accounts.id = {table_prefix}_received_notes.account_id
                  INNER JOIN transactions
                     ON transactions.id_tx = {table_prefix}_received_notes.tx
-                 WHERE {table_prefix}_received_notes.account_id = :account
-                 AND value >= 5000 -- FIXME #1016, allow selection of a dust inputs
+                 WHERE accounts.uuid = :account_uuid
+                 AND {table_prefix}_received_notes.account_id = accounts.id
+                 AND value > 5000 -- FIXME #1316, allow selection of dust inputs
                  AND accounts.ufvk IS NOT NULL
                  AND recipient_key_scope IS NOT NULL
                  AND nf IS NOT NULL
@@ -210,7 +222,7 @@ where
 
     let notes = stmt_select_notes.query_and_then(
         named_params![
-            ":account": account.0,
+            ":account_uuid": account.0,
             ":anchor_height": &u32::from(anchor_height),
             ":target_value": &u64::from(target_value),
             ":exclude": &excluded_ptr,
@@ -222,4 +234,190 @@ where
     notes
         .filter_map(|r| r.transpose())
         .collect::<Result<_, _>>()
+}
+
+pub(crate) fn spendable_notes_meta(
+    conn: &rusqlite::Connection,
+    protocol: ShieldedProtocol,
+    chain_tip_height: BlockHeight,
+    account: AccountUuid,
+    filter: &NoteFilter,
+    exclude: &[ReceivedNoteId],
+) -> Result<Option<PoolMeta>, SqliteClientError> {
+    let (table_prefix, _, _) = per_protocol_names(protocol);
+
+    let excluded: Vec<Value> = exclude
+        .iter()
+        .filter_map(|ReceivedNoteId(p, n)| {
+            if *p == protocol {
+                Some(Value::from(*n))
+            } else {
+                None
+            }
+        })
+        .collect();
+    let excluded_ptr = Rc::new(excluded);
+
+    fn zatoshis(value: i64) -> Result<Zatoshis, SqliteClientError> {
+        Zatoshis::from_nonnegative_i64(value).map_err(|_| {
+            SqliteClientError::CorruptedData(format!("Negative received note value: {}", value))
+        })
+    }
+
+    let run_selection = |min_value| {
+        conn.query_row_and_then::<_, SqliteClientError, _, _>(
+            &format!(
+                "SELECT COUNT(*), SUM(rn.value)
+                 FROM {table_prefix}_received_notes rn
+                 INNER JOIN accounts a ON a.id = rn.account_id
+                 INNER JOIN transactions ON transactions.id_tx = rn.tx
+                 WHERE a.uuid = :account_uuid
+                 AND a.ufvk IS NOT NULL
+                 AND rn.value >= :min_value
+                 AND transactions.mined_height IS NOT NULL
+                 AND rn.id NOT IN rarray(:exclude)
+                 AND rn.id NOT IN (
+                   SELECT {table_prefix}_received_note_id
+                   FROM {table_prefix}_received_note_spends rns
+                   JOIN transactions stx ON stx.id_tx = rns.transaction_id
+                   WHERE stx.block IS NOT NULL -- the spending tx is mined
+                   OR stx.expiry_height IS NULL -- the spending tx will not expire
+                   OR stx.expiry_height > :chain_tip_height -- the spending tx is unexpired
+                 )"
+            ),
+            named_params![
+                ":account_uuid": account.0,
+                ":min_value": u64::from(min_value),
+                ":exclude": &excluded_ptr,
+                ":chain_tip_height": u32::from(chain_tip_height)
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, usize>(0)?,
+                    row.get::<_, Option<i64>>(1)?.map(zatoshis).transpose()?,
+                ))
+            },
+        )
+    };
+
+    // Evaluates the provided note filter conditions against the wallet database in order to
+    // determine the minimum value of notes to be produced by note splitting.
+    fn min_note_value(
+        conn: &rusqlite::Connection,
+        account: AccountUuid,
+        filter: &NoteFilter,
+        chain_tip_height: BlockHeight,
+    ) -> Result<Option<Zatoshis>, SqliteClientError> {
+        match filter {
+            NoteFilter::ExceedsMinValue(v) => Ok(Some(*v)),
+            NoteFilter::ExceedsPriorSendPercentile(n) => {
+                let mut bucket_query = conn.prepare(
+                    "WITH bucketed AS (
+                        SELECT s.value, NTILE(10) OVER (ORDER BY s.value) AS bucket_index
+                        FROM sent_notes s
+                        JOIN transactions t ON s.tx = t.id_tx
+                        JOIN accounts a on a.id = s.from_account_id
+                        WHERE a.uuid = :account_uuid
+                        -- only count mined transactions
+                        AND t.mined_height IS NOT NULL
+                        -- exclude change and account-internal sends
+                        AND (s.to_account_id IS NULL OR s.from_account_id != s.to_account_id)
+                    )
+                    SELECT MAX(value) as value
+                    FROM bucketed
+                    GROUP BY bucket_index
+                    ORDER BY bucket_index",
+                )?;
+
+                let bucket_maxima = bucket_query
+                    .query_and_then::<_, SqliteClientError, _, _>(
+                        named_params![":account_uuid": account.0],
+                        |row| {
+                            Zatoshis::from_nonnegative_i64(row.get::<_, i64>(0)?).map_err(|_| {
+                                SqliteClientError::CorruptedData(format!(
+                                    "Negative received note value: {}",
+                                    n.value()
+                                ))
+                            })
+                        },
+                    )?
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                // Pick a bucket index by scaling the requested percentile to the number of buckets
+                let i = (bucket_maxima.len() * usize::from(*n) / 100).saturating_sub(1);
+                Ok(bucket_maxima.get(i).copied())
+            }
+            NoteFilter::ExceedsBalancePercentage(p) => {
+                let balance = conn.query_row_and_then::<_, SqliteClientError, _, _>(
+                    "SELECT SUM(rn.value)
+                     FROM v_received_outputs rn
+                     INNER JOIN accounts a ON a.id = rn.account_id
+                     INNER JOIN transactions ON transactions.id_tx = rn.transaction_id
+                     WHERE a.uuid = :account_uuid
+                     AND a.ufvk IS NOT NULL
+                     AND transactions.mined_height IS NOT NULL
+                     AND rn.pool != :transparent_pool
+                     AND (rn.pool, rn.id_within_pool_table) NOT IN (
+                       SELECT rns.pool, rns.received_output_id
+                       FROM v_received_output_spends rns
+                       JOIN transactions stx ON stx.id_tx = rns.transaction_id
+                       WHERE (
+                           stx.block IS NOT NULL -- the spending tx is mined
+                           OR stx.expiry_height IS NULL -- the spending tx will not expire
+                           OR stx.expiry_height > :chain_tip_height -- the spending tx is unexpired
+                       )
+                     )",
+                    named_params![
+                        ":account_uuid": account.0,
+                        ":chain_tip_height": u32::from(chain_tip_height),
+                        ":transparent_pool": pool_code(PoolType::Transparent)
+                    ],
+                    |row| row.get::<_, Option<i64>>(0)?.map(zatoshis).transpose(),
+                )?;
+
+                Ok(match balance {
+                    None => None,
+                    Some(b) => {
+                        let numerator = (b * u64::from(p.value())).ok_or(BalanceError::Overflow)?;
+                        Some(numerator / NonZeroU64::new(100).expect("Constant is nonzero."))
+                    }
+                })
+            }
+            NoteFilter::Combine(a, b) => {
+                // All the existing note selectors set lower bounds on note value, so the "and"
+                // operation is just taking the maximum of the two lower bounds.
+                let a_min_value = min_note_value(conn, account, a.as_ref(), chain_tip_height)?;
+                let b_min_value = min_note_value(conn, account, b.as_ref(), chain_tip_height)?;
+                Ok(a_min_value
+                    .zip(b_min_value)
+                    .map(|(av, bv)| std::cmp::max(av, bv))
+                    .or(a_min_value)
+                    .or(b_min_value))
+            }
+            NoteFilter::Attempt {
+                condition,
+                fallback,
+            } => {
+                let cond = min_note_value(conn, account, condition.as_ref(), chain_tip_height)?;
+                if cond.is_none() {
+                    min_note_value(conn, account, fallback, chain_tip_height)
+                } else {
+                    Ok(cond)
+                }
+            }
+        }
+    }
+
+    // TODO: Simplify the query before executing it. Not worrying about this now because queries
+    // will be developer-configured, not end-user defined.
+    if let Some(min_value) = min_note_value(conn, account, filter, chain_tip_height)? {
+        let (note_count, total_value) = run_selection(min_value)?;
+
+        Ok(Some(PoolMeta::new(
+            note_count,
+            total_value.unwrap_or(Zatoshis::ZERO),
+        )))
+    } else {
+        Ok(None)
+    }
 }
