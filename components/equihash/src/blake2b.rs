@@ -12,7 +12,7 @@ use std::ptr;
 use std::slice;
 
 #[no_mangle]
-pub extern "C" fn blake2b_init(
+pub(crate) extern "C" fn blake2b_init(
     output_len: usize,
     personalization: *const [u8; PERSONALBYTES],
 ) -> *mut State {
@@ -27,21 +27,21 @@ pub extern "C" fn blake2b_init(
 }
 
 #[no_mangle]
-pub extern "C" fn blake2b_clone(state: *const State) -> *mut State {
+pub(crate) extern "C" fn blake2b_clone(state: *const State) -> *mut State {
     unsafe { state.as_ref() }
         .map(|state| Box::into_raw(Box::new(state.clone())))
         .unwrap_or(ptr::null_mut())
 }
 
 #[no_mangle]
-pub extern "C" fn blake2b_free(state: *mut State) {
+pub(crate) extern "C" fn blake2b_free(state: *mut State) {
     if !state.is_null() {
         drop(unsafe { Box::from_raw(state) });
     }
 }
 
 #[no_mangle]
-pub extern "C" fn blake2b_update(state: *mut State, input: *const u8, input_len: usize) {
+pub(crate) extern "C" fn blake2b_update(state: *mut State, input: *const u8, input_len: usize) {
     let state = unsafe { state.as_mut().unwrap() };
     let input = unsafe { slice::from_raw_parts(input, input_len) };
 
@@ -49,7 +49,7 @@ pub extern "C" fn blake2b_update(state: *mut State, input: *const u8, input_len:
 }
 
 #[no_mangle]
-pub extern "C" fn blake2b_finalize(state: *mut State, output: *mut u8, output_len: usize) {
+pub(crate) extern "C" fn blake2b_finalize(state: *mut State, output: *mut u8, output_len: usize) {
     let state = unsafe { state.as_mut().unwrap() };
     let output = unsafe { slice::from_raw_parts_mut(output, output_len) };
 
