@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `equihash::tromp` module behind the experimental `solver` feature flag.
 
 ## [0.2.0] - 2022-06-24
 ### Changed

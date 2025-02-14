@@ -1426,7 +1426,9 @@ name = "equihash"
 version = "0.2.0"
 dependencies = [
  "blake2b_simd",
+ "cc",
  "core2",
+ "hex",
 ]
 
 [[package]]
