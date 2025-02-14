@@ -199,6 +199,51 @@ pub trait InputSelector {
         ChangeT: ChangeStrategy<MetaSource = Self::InputSource>;
 }
 
+pub trait SendMaxSelector {
+    /// The type of errors that may be generated in input selection
+    type Error;
+    /// The type of data source that the input selector expects to access to obtain input
+    /// from the source pool. This associated type permits input selectors that may use specialized
+    /// knowledge of the internals of a particular backing data store, if the generic API of
+    /// [`InputSource`] does not provide sufficiently fine-grained operations for a
+    /// particular backing store to optimally perform input selection.
+    type InputSource: InputSource;
+
+    /// Performs input selection and returns a proposal for the construction of a transaction 
+    /// that sends the maximum amount possible from a given account to the specified recipient
+    /// ignoring notes that are below MARGINAL_FEE amount. This transaction will use all the
+    /// funds available minus the resulting fees that will vary according to ZIP-317 specifications.
+    /// 
+    ///
+    /// Implementations should return the maximum possible number of economically useful inputs
+    /// required to supply at least the requested value, choosing only inputs received at the
+    /// specified source addresses. If insufficient funds are available to satisfy the required
+    /// outputs for the shielding request, this operation must fail and return
+    /// [`InputSelectorError::InsufficientFunds`].
+    fn propose_send_max<ParamsT, ChangeT>(
+        &self,
+        params: &ParamsT,
+        wallet_db: &Self::InputSource,
+        change_strategy: &ChangeT,
+        recipient: Address,
+        source_account: <Self::InputSource as InputSource>::AccountId,
+        spend_pool: PoolType,
+        target_height: BlockHeight,
+        min_confirmations: u32,
+    ) -> Result<
+        Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
+        InputSelectorError<
+            <Self::InputSource as InputSource>::Error,
+            Self::Error,
+            ChangeT::Error,
+            Infallible,
+        >,
+    >
+    where
+        ParamsT: consensus::Parameters,
+        ChangeT: ChangeStrategy<MetaSource = Self::InputSource>;
+}
+
 /// A strategy for selecting transaction inputs and proposing transaction outputs
 /// for shielding-only transactions (transactions which spend transparent UTXOs and
 /// send all transaction outputs to the wallet's shielded internal address(es)).
