@@ -198,3 +198,6 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zf
 orchard = { git = "https://github.com/zcash/orchard.git", rev = "b1c22c07300db22239235d16dab096e23369948f" }
 redjubjub = { git = "https://github.com/ZcashFoundation/redjubjub", rev = "eae848c5c14d9c795d000dd9f4c4762d1aee7ee1" }
 sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "6ca338532912adcd82369220faeea31aab4720c5" }
+incrementalmerkletree = { path = "../../incrementalmerkletree/canon/incrementalmerkletree/" }
+incrementalmerkletree-testing = { path = "../../incrementalmerkletree/canon/incrementalmerkletree-testing/" }
+shardtree = { path = "../../incrementalmerkletree/canon/shardtree/" }
