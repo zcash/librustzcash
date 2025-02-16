@@ -23,7 +23,9 @@ use zip32::Scope;
 
 use crate::{error::SqliteClientError, AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef};
 
-use super::{get_account, get_account_ref, memo_repr, upsert_address, KeyScope};
+use super::{
+    common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address, KeyScope,
+};
 
 /// This trait provides a generalization over shielded output representations.
 pub(crate) trait ReceivedSaplingOutput {
@@ -237,6 +239,19 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
         exclude,
         ShieldedProtocol::Sapling,
         to_spendable_note,
+    )
+}
+
+pub(crate) fn select_unspent_note_meta(
+    conn: &Connection,
+    chain_tip_height: BlockHeight,
+    wallet_birthday: BlockHeight,
+) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
+    super::common::select_unspent_note_meta(
+        conn,
+        ShieldedProtocol::Sapling,
+        chain_tip_height,
+        wallet_birthday,
     )
 }
 
