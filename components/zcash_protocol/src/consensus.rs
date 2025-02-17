@@ -875,7 +875,7 @@ mod tests {
         );
         assert_eq!(
             BranchId::for_height(&MAIN_NETWORK, BlockHeight(5_000_000)),
-            BranchId::Nu6,
+            BranchId::Nu7,
         );
     }
 }
