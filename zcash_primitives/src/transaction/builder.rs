@@ -312,7 +312,7 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     sapling_builder: Option<sapling::builder::Builder>,
     orchard_builder: Option<orchard::builder::Builder>,
     #[cfg(feature = "zip-233")]
-    burn_amount: Option<NonNegativeAmount>,
+    zip233_amount: Option<NonNegativeAmount>,
     #[cfg(zcash_unstable = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(zcash_unstable = "zfuture"))]
@@ -397,7 +397,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             sapling_builder,
             orchard_builder,
             #[cfg(feature = "zip-233")]
-            burn_amount: None,
+            zip233_amount: None,
             #[cfg(zcash_unstable = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
@@ -426,7 +426,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             sapling_builder: self.sapling_builder,
             orchard_builder: self.orchard_builder,
             #[cfg(feature = "zip-233")]
-            burn_amount: self.burn_amount,
+            zip233_amount: self.burn_amount,
             tze_builder: self.tze_builder,
             _progress_notifier,
         }
@@ -549,7 +549,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             )?,
             #[cfg(feature = "zip-233")]
             -self
-                .burn_amount
+                .zip233_amount
                 .map(Into::into)
                 .unwrap_or(ZatBalance::zero()),
             #[cfg(zcash_unstable = "zfuture")]
@@ -657,8 +657,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
     }
 
     #[cfg(feature = "zip-233")]
-    pub fn set_burn_amount(&mut self, burn_amount: Option<NonNegativeAmount>) {
-        self.burn_amount = burn_amount;
+    pub fn set_zip233_amount(&mut self, zip233_amount: Option<NonNegativeAmount>) {
+        self.zip233_amount = zip233_amount;
     }
 
     /// Builds a transaction from the configured spends and outputs.
@@ -815,7 +815,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             sapling_bundle,
             orchard_bundle,
             #[cfg(feature = "zip-233")]
-            burn_amount: self.burn_amount,
+            zip233_amount: self.zip233_amount,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
         };
@@ -893,7 +893,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             sapling_bundle,
             orchard_bundle,
             #[cfg(feature = "zip-233")]
-            burn_amount: self.burn_amount,
+            zip233_amount: self.zip233_amount,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
         };
@@ -1134,7 +1134,7 @@ mod tests {
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder: None,
             #[cfg(feature = "zip-233")]
-            burn_amount: None,
+            zip233_amount: None,
             #[cfg(zcash_unstable = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
@@ -1309,7 +1309,7 @@ mod tests {
                 orchard_anchor: Some(orchard::Anchor::empty_tree()),
             };
             let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
-            builder.set_burn_amount(Some(NonNegativeAmount::const_from_u64(50000)));
+            builder.set_zip233_amount(Some(NonNegativeAmount::const_from_u64(50000)));
 
             assert_matches!(
                 builder.mock_build(OsRng),
@@ -1388,7 +1388,7 @@ mod tests {
                     NonNegativeAmount::const_from_u64(5000),
                 )
                 .unwrap();
-            builder.set_burn_amount(Some(NonNegativeAmount::const_from_u64(10000)));
+            builder.set_zip233_amount(Some(NonNegativeAmount::const_from_u64(10000)));
             assert_matches!(
                 builder.mock_build(OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected == Amount::const_from_i64(1)
@@ -1489,7 +1489,7 @@ mod tests {
                     NonNegativeAmount::const_from_u64(20000),
                 )
                 .unwrap();
-            builder.set_burn_amount(Some(NonNegativeAmount::const_from_u64(10000)));
+            builder.set_zip233_amount(Some(NonNegativeAmount::const_from_u64(10000)));
             assert_matches!(
                 builder.mock_build(OsRng),
                 Ok(res) if res.transaction().fee_paid(|_| Err(BalanceError::Overflow)).unwrap() == Amount::const_from_i64(10_000)

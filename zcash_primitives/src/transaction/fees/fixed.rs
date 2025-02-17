@@ -5,7 +5,7 @@ use zcash_protocol::{
     value::Zatoshis,
 };
 
-#[cfg(zcash_unstable = "zfuture")]
+#[cfg(zcash_unstable = "tze")]
 use crate::transaction::fees::tze;
 
 /// A fee rule that always returns a fixed fee, irrespective of the structure of
@@ -44,7 +44,7 @@ impl super::FeeRule for FeeRule {
     }
 }
 
-#[cfg(zcash_unstable = "zfuture")]
+#[cfg(zcash_unstable = "tze")]
 impl super::FutureFeeRule for FeeRule {
     fn fee_required_zfuture<P: consensus::Parameters>(
         &self,

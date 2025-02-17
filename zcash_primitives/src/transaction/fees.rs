@@ -11,7 +11,7 @@ pub mod fixed;
 pub mod transparent;
 pub mod zip317;
 
-#[cfg(zcash_unstable = "zfuture")]
+#[cfg(zcash_unstable = "tze")]
 pub mod tze;
 
 /// A trait that represents the ability to compute the fees that must be paid
@@ -39,7 +39,7 @@ pub trait FeeRule {
 
 /// A trait that represents the ability to compute the fees that must be paid by a transaction
 /// having a specified set of inputs and outputs, for use when experimenting with the TZE feature.
-#[cfg(zcash_unstable = "zfuture")]
+#[cfg(zcash_unstable = "tze")]
 pub trait FutureFeeRule: FeeRule {
     /// Computes the total fee required for a transaction given the provided inputs and outputs.
     ///
