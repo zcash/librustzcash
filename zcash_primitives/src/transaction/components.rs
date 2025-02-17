@@ -16,7 +16,7 @@ pub mod orchard;
 pub mod sapling;
 pub mod sprout;
 pub mod transparent;
-#[cfg(zcash_unstable = "zfuture")]
+#[cfg(zcash_unstable = "tze")]
 pub mod tze;
 
 pub use self::{
@@ -26,7 +26,7 @@ pub use self::{
 };
 pub use crate::sapling::bundle::{OutputDescription, SpendDescription};
 
-#[cfg(zcash_unstable = "zfuture")]
+#[cfg(zcash_unstable = "tze")]
 pub use self::tze::{TzeIn, TzeOut};
 
 // π_A + π_B + π_C

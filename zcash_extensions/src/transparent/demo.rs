@@ -514,6 +514,7 @@ mod tests {
                 NetworkUpgrade::Canopy => Some(BlockHeight::from_u32(1_028_500)),
                 NetworkUpgrade::Nu5 => Some(BlockHeight::from_u32(1_200_000)),
                 NetworkUpgrade::Nu6 => Some(BlockHeight::from_u32(1_300_000)),
+                NetworkUpgrade::Nu7 => Some(BlockHeight::from_u32(1_350_000)),
                 NetworkUpgrade::ZFuture => Some(BlockHeight::from_u32(1_400_000)),
             }
         }
@@ -681,7 +682,6 @@ mod tests {
             None,
             None,
             None,
-            #[cfg(zcash_unstable = "nsm")]
             None,
             Some(Bundle {
                 vin: vec![],
@@ -714,7 +714,6 @@ mod tests {
             None,
             None,
             None,
-            #[cfg(zcash_unstable = "nsm")]
             None,
             Some(Bundle {
                 vin: vec![in_b],
@@ -739,6 +738,7 @@ mod tests {
             BranchId::ZFuture,
             0,
             0u32.into(),
+            None,
             None,
             None,
             None,

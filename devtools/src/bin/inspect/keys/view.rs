@@ -132,6 +132,7 @@ pub(crate) fn inspect_sapling_extfvk(
                         canopy: None,
                         nu5: None,
                         nu6: None,
+                        nu7: None,
                         #[cfg(zcash_unstable = "zfuture")]
                         z_future: None,
                     }),
@@ -152,6 +153,7 @@ pub(crate) fn inspect_sapling_extfvk(
                         canopy: None,
                         nu5: None,
                         nu6: None,
+                        nu7: None,
                         #[cfg(zcash_unstable = "zfuture")]
                         z_future: None,
                     }),

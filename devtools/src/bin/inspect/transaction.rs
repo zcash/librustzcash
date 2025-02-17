@@ -169,6 +169,9 @@ pub(crate) fn inspect(
         TxVersion::Zip225 => {
             eprintln!(" - Consensus branch ID: {:?}", tx.consensus_branch_id());
         }
+        TxVersion::Zip230 => {
+            eprintln!(" - Consensus branch ID: {:?}", tx.consensus_branch_id());
+        }
         #[cfg(zcash_unstable = "zfuture")]
         TxVersion::ZFuture => {
             eprintln!(" - Consensus branch ID: {:?}", tx.consensus_branch_id());

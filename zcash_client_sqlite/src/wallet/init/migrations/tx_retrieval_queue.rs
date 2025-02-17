@@ -293,8 +293,9 @@ mod tests {
             None,
             None,
             None,
-            #[cfg(zcash_unstable = "nsm")] None,
-            #[cfg(zcash_unstable = "tze")] None,
+            None,
+            #[cfg(zcash_unstable = "tze")]
+            None,
         ));
 
         // Check that we can apply this migration.

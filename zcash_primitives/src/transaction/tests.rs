@@ -4,7 +4,9 @@ use std::ops::Deref;
 use proptest::prelude::*;
 
 use crate::{
-    consensus::BranchId, legacy::Script, transaction::components::amount::NonNegativeAmount,
+    consensus::BranchId,
+    legacy::Script,
+    transaction::{components::amount::NonNegativeAmount, TxVersion},
 };
 
 use super::{
@@ -55,6 +57,9 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
         tx.orchard_bundle.as_ref().map(|v| *v.value_balance()),
         txo.orchard_bundle.as_ref().map(|v| *v.value_balance())
     );
+    if tx.version == TxVersion::Zip230 {
+        prop_assert_eq!(tx.zip233_amount, txo.zip233_amount);
+    }
     Ok(())
 }
 
@@ -115,6 +120,14 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]
     fn tx_serialization_roundtrip_nu5(tx in arb_tx(BranchId::Nu5)) {
+        check_roundtrip(tx)?;
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(10))]
+    #[test]
+    fn tx_serialization_roundtrip_nu7(tx in arb_tx(BranchId::Nu7)) {
         check_roundtrip(tx)?;
     }
 }
@@ -261,8 +274,7 @@ fn zip_0244() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
-            #[cfg(zcash_unstable = "nsm")]
-            txdata.burn_amount,
+            txdata.zip233_amount,
             #[cfg(zcash_unstable = "tze")]
             txdata.tze_bundle().cloned(),
         );
@@ -348,13 +360,13 @@ fn zip_0244() {
     }
 }
 
-#[cfg(all(zcash_unstable = "nsm", not(zcash_unstable = "tze")))]
+#[cfg(not(zcash_unstable = "tze"))]
 #[test]
-fn zip_nsm() {
+fn zip_0233() {
     fn to_test_txdata(
-        tv: &self::data::zip_nsm::TestVector,
+        tv: &self::data::zip_0233::TestVector,
     ) -> (TransactionData<TestUnauthorized>, TxDigests<Blake2bHash>) {
-        let tx = Transaction::read(&tv.tx[..], BranchId::ZFuture).unwrap();
+        let tx = Transaction::read(&tv.tx[..], BranchId::Nu7).unwrap();
 
         assert_eq!(tx.txid.as_ref(), &tv.txid);
         assert_eq!(tx.auth_commitment().as_ref(), &tv.auth_digest);
@@ -404,15 +416,13 @@ fn zip_nsm() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
-            txdata.burn_amount,
-            #[cfg(zcash_unstable = "tze")]
-            None,
+            txdata.zip233_amount,
         );
 
         (tdata, txdata.digest(TxIdDigester))
     }
 
-    for tv in self::data::zip_nsm::make_test_vectors() {
+    for tv in self::data::zip_0233::make_test_vectors() {
         let (txdata, txid_parts) = to_test_txdata(&tv);
 
         assert_eq!(

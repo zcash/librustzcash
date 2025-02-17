@@ -29,7 +29,7 @@ pub enum SignableInput<'a> {
         script_pubkey: &'a Script,
         value: NonNegativeAmount,
     },
-    #[cfg(zcash_unstable = "zfuture")]
+    #[cfg(zcash_unstable = "tze")]
     Tze {
         index: usize,
         precondition: &'a Precondition,
@@ -42,7 +42,7 @@ impl<'a> SignableInput<'a> {
         match self {
             SignableInput::Shielded => SIGHASH_ALL,
             SignableInput::Transparent { hash_type, .. } => *hash_type,
-            #[cfg(zcash_unstable = "zfuture")]
+            #[cfg(zcash_unstable = "tze")]
             SignableInput::Tze { .. } => SIGHASH_ALL,
         }
     }
@@ -90,6 +90,8 @@ pub fn signature_hash<
         }
 
         TxVersion::Zip225 => v5_signature_hash(tx, signable_input, txid_parts),
+
+        TxVersion::Zip230 => v5_signature_hash(tx, signable_input, txid_parts),
 
         #[cfg(zcash_unstable = "zfuture")]
         TxVersion::ZFuture => v5_signature_hash(tx, signable_input, txid_parts),
