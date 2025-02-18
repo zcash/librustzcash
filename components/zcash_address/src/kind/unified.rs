@@ -456,6 +456,8 @@ pub trait Item: SealedItem {
     /// Returns the opaque typed encoding of this item.
     ///
     /// This is the same encoding used internally by [`Encoding::encode`].
+    /// This API is for advanced usage; in most cases you should not depend
+    /// on the typed encoding of items.
     fn typed_encoding(&self) -> Vec<u8> {
         let mut ret = vec![];
         self.write_raw_encoding(&mut ret);
