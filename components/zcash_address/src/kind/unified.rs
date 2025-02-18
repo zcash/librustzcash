@@ -192,6 +192,17 @@ pub(crate) mod private {
                 res => res,
             }
         }
+
+        fn write_raw_encoding<W: Write>(&self, mut writer: W) {
+            let data = self.data();
+            CompactSize::write(
+                &mut writer,
+                <u32>::from(self.typecode()).try_into().unwrap(),
+            )
+            .unwrap();
+            CompactSize::write(&mut writer, data.len()).unwrap();
+            writer.write_all(data).unwrap();
+        }
     }
 
     /// A Unified Container containing addresses or viewing keys.
@@ -227,14 +238,7 @@ pub(crate) mod private {
 
         fn write_raw_encoding<W: Write>(&self, mut writer: W) {
             for item in self.items_as_parsed() {
-                let data = item.data();
-                CompactSize::write(
-                    &mut writer,
-                    <u32>::from(item.typecode()).try_into().unwrap(),
-                )
-                .unwrap();
-                CompactSize::write(&mut writer, data.len()).unwrap();
-                writer.write_all(data).unwrap();
+                item.write_raw_encoding(&mut writer);
             }
         }
 
@@ -430,7 +434,7 @@ pub trait Encoding: private::SealedContainer {
 /// Trait for Unified containers, that exposes the items within them.
 pub trait Container {
     /// The type of item in this unified container.
-    type Item: SealedItem;
+    type Item: Item;
 
     /// Returns the items contained within this container, sorted in preference order.
     fn items(&self) -> Vec<Self::Item> {
@@ -446,3 +450,17 @@ pub trait Container {
     /// This API is for advanced usage; in most cases you should use `Self::items`.
     fn items_as_parsed(&self) -> &[Self::Item];
 }
+
+/// Trait for unified items, exposing specific methods on them.
+pub trait Item: SealedItem {
+    /// Returns the opaque typed encoding of this item.
+    ///
+    /// This is the same encoding used internally by [`Encoding::encode`].
+    fn typed_encoding(&self) -> Vec<u8> {
+        let mut ret = vec![];
+        self.write_raw_encoding(&mut ret);
+        ret
+    }
+}
+
+impl<T: SealedItem> Item for T {}

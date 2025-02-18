@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_address::unified::Item` to expose the opaque typed encoding of unified
+  items.
+
 ### Deprecated
 - `zcash_address::Network` (use `zcash_protocol::consensus::NetworkType` instead).
 
