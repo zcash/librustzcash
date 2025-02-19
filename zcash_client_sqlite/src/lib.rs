@@ -39,6 +39,7 @@ use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, ShardTree};
 use std::{
     borrow::{Borrow, BorrowMut},
+    cmp::{max, min},
     collections::HashMap,
     convert::AsRef,
     fmt,
@@ -140,6 +141,7 @@ pub mod wallet;
 use wallet::{
     commitment_tree::{self, put_shard_roots},
     common::spendable_notes_meta,
+    scanning::replace_queue_entries,
     SubtreeProgressEstimator,
 };
 
@@ -301,6 +303,49 @@ impl<C: BorrowMut<Connection>, P: consensus::Parameters + Clone> WalletDb<C, P> 
         let result = f(&mut wdb)?;
         tx.commit()?;
         Ok(result)
+    }
+
+    /// Attempts to construct a witness for each note belonging to the wallet that is believed by
+    /// the wallet to currently be spendable, and returns a vector of .
+    ///
+    /// This method is intended for repairing wallets that broke due to bugs in `shardtree`.
+    ///
+    /// Returns a vector of the ranges that must be rescanned in order to correct missing witness
+    /// data.
+    pub fn check_witnesses(&mut self) -> Result<Vec<Range<BlockHeight>>, SqliteClientError> {
+        self.transactionally(|wdb| wallet::commitment_tree::check_witnesses(&wdb.conn.0))
+    }
+
+    /// Updates the scan queue by inserting scan ranges for the given range of block heights, with
+    /// the specified scanning priority.
+    pub fn queue_rescans(
+        &mut self,
+        rescan_ranges: NonEmpty<Range<BlockHeight>>,
+        priority: ScanPriority,
+    ) -> Result<(), SqliteClientError> {
+        let query_range = rescan_ranges
+            .iter()
+            .fold(None, |acc: Option<Range<BlockHeight>>, scan_range| {
+                if let Some(range) = acc {
+                    Some(min(range.start, scan_range.start)..max(range.end, scan_range.end))
+                } else {
+                    Some(scan_range.clone())
+                }
+            })
+            .expect("rescan_ranges is nonempty");
+
+        self.transactionally::<_, _, SqliteClientError>(|wdb| {
+            replace_queue_entries(
+                wdb.conn.0,
+                &query_range,
+                rescan_ranges
+                    .into_iter()
+                    .map(|r| ScanRange::from_parts(r, priority)),
+                true,
+            )
+        })?;
+
+        Ok(())
     }
 }
 
