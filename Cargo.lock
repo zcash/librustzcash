@@ -6417,7 +6417,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.4.3"
+version = "0.5.0"
 dependencies = [
  "core2",
  "document-features",

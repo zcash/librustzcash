@@ -12,7 +12,7 @@ and this library adheres to Rust's notion of
   items.
 
 ### Changed
-- Migrated to `zcash_encoding 0.3`.
+- Migrated to `zcash_encoding 0.3`, `zcash_protocol 0.5`.
 
 ### Deprecated
 - `zcash_address::Network` (use `zcash_protocol::consensus::NetworkType` instead).
