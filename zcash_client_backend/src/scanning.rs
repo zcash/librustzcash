@@ -1236,7 +1236,7 @@ pub mod testing {
         let encryptor = sapling_note_encryption(
             Some(dfvk.fvk().ovk),
             note.clone(),
-            *MemoBytes::empty().as_array(),
+            MemoBytes::empty().into_bytes(),
             &mut rng,
         );
         let cmu = note.cmu().to_bytes().to_vec();

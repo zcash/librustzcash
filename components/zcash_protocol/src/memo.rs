@@ -115,6 +115,11 @@ impl MemoBytes {
         &self.0
     }
 
+    /// Consumes this `MemoBytes` value and returns the underlying byte array.
+    pub fn into_bytes(self) -> [u8; 512] {
+        *self.0
+    }
+
     /// Returns a slice of the raw bytes, excluding null padding.
     pub fn as_slice(&self) -> &[u8] {
         let first_null = self

@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::memo::MemoBytes::into_bytes`
+
 ### Changed
 - `zcash_protocol::consensus::NetworkConstants` has added methods:
   - `hrp_unified_address`

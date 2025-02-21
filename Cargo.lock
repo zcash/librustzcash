@@ -2762,8 +2762,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchard"
-version = "0.10.1"
-source = "git+https://github.com/zcash/orchard.git?rev=b1c22c07300db22239235d16dab096e23369948f#b1c22c07300db22239235d16dab096e23369948f"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1ef66fcf99348242a20d582d7434da381a867df8dc155b3a980eca767c56137"
 dependencies = [
  "aes",
  "bitvec",
@@ -3437,8 +3438,9 @@ dependencies = [
 
 [[package]]
 name = "redjubjub"
-version = "0.7.0"
-source = "git+https://github.com/ZcashFoundation/redjubjub?rev=eae848c5c14d9c795d000dd9f4c4762d1aee7ee1#eae848c5c14d9c795d000dd9f4c4762d1aee7ee1"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89b0ac1bc6bb3696d2c6f52cff8fba57238b81da8c0214ee6cd146eb8fde364e"
 dependencies = [
  "rand_core",
  "reddsa",
@@ -3781,8 +3783,9 @@ dependencies = [
 
 [[package]]
 name = "sapling-crypto"
-version = "0.4.0"
-source = "git+https://github.com/zcash/sapling-crypto.git?rev=6ca338532912adcd82369220faeea31aab4720c5#6ca338532912adcd82369220faeea31aab4720c5"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9d3c081c83f1dc87403d9d71a06f52301c0aa9ea4c17da2a3435bbf493ffba4"
 dependencies = [
  "aes",
  "bellman",
@@ -6427,9 +6430,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_spec"
-version = "0.1.2"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cede95491c2191d3e278cab76e097a44b17fde8d6ca0d4e3a22cf4807b2d857"
+checksum = "ded3f58b93486aa79b85acba1001f5298f27a46489859934954d262533ee2915"
 dependencies = [
  "blake2b_simd",
 ]
@@ -6499,9 +6502,9 @@ dependencies = [
 
 [[package]]
 name = "zip32"
-version = "0.1.3"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e9943793abf9060b68e1889012dafbd5523ab5b125c0fcc24802d69182f2ac9"
+checksum = "13ff9ea444cdbce820211f91e6aa3d3a56bde7202d3c0961b7c38f793abf5637"
 dependencies = [
  "blake2b_simd",
  "memuse",
