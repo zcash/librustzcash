@@ -745,6 +745,12 @@ user-id = 6289 # Jack Grigg (str4d)
 start = "2020-06-26"
 end = "2025-04-22"
 
+[[trusted.equihash]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2025-02-21"
+end = "2026-02-21"
+
 [[trusted.f4jumble]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
 user-id = 6289 # Jack Grigg (str4d)
@@ -1002,6 +1008,12 @@ criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
 start = "2021-08-31"
 end = "2025-12-13"
+
+[[trusted.zcash_encoding]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2024-08-19"
+end = "2026-02-21"
 
 [[trusted.zcash_extensions]]
 criteria = "safe-to-deploy"
