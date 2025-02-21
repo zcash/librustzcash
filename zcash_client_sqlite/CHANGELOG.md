@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.15.0] - 2025-02-21
+
 ### Added
 - `zcash_client_sqlite::WalletDb::from_connection`
 
