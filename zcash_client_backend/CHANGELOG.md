@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.17.0] - 2025-02-21
+
 ### Added
 - `zcash_client_backend::data_api::testing::TransactionSummary` has added
   accessor methods `total_spent` and `total_received`.
