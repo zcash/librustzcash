@@ -11,6 +11,9 @@ and this library adheres to Rust's notion of
 - `zcash_address::unified::Item` to expose the opaque typed encoding of unified
   items.
 
+### Changed
+- Migrated to `zcash_encoding 0.3`.
+
 ### Deprecated
 - `zcash_address::Network` (use `zcash_protocol::consensus::NetworkType` instead).
 

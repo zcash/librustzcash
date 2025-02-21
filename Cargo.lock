@@ -6269,7 +6269,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_encoding"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "core2",
  "nonempty",
