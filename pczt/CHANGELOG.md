@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.2.0] - 2025-02-21
+
 ### Added
 - `pczt::common`:
   - `Global::{tx_version, version_group_id, consensus_branch_id, expiry_height}`

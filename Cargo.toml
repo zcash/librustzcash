@@ -44,7 +44,7 @@ zcash_note_encryption = "0.4.1"
 zcash_primitives = { version = "0.22", path = "zcash_primitives", default-features = false }
 zcash_proofs = { version = "0.22", path = "zcash_proofs", default-features = false }
 
-pczt = { version = "0.1", path = "pczt" }
+pczt = { version = "0.2", path = "pczt" }
 
 # Shielded protocols
 bellman = { version = "0.14", default-features = false, features = ["groth16"] }
