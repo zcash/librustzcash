@@ -13,6 +13,9 @@ repository.workspace = true
 license.workspace = true
 categories.workspace = true
 
+[package.metadata.release]
+release = false
+
 [dependencies]
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)

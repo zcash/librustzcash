@@ -14,6 +14,9 @@ categories.workspace = true
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[package.metadata.release]
+release = false
+
 [dependencies]
 blake2b_simd.workspace = true
 zcash_primitives = { workspace = true, features = ["non-standard-fees"] }
