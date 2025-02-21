@@ -9,7 +9,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.81.0.
-- Migrated to `redjubjub 0.8`
+- Migrated to `redjubjub 0.8`, `zcash_primitives 0.22`.
 
 ## [0.21.0] - 2024-12-16
 ### Added

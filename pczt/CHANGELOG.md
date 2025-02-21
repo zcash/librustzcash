@@ -32,7 +32,8 @@ and this library adheres to Rust's notion of
 ### Changed
 - MSRV is now 1.81.0.
 - Migrated to `nonempty 0.11`, `secp256k1 0.29`, `redjubjub 0.8`, `orchard 0.11`,
-  `sapling-crypto 0.5`, `zcash_protocol 0.5`, `zcash_transparent 0.2`.
+  `sapling-crypto 0.5`, `zcash_protocol 0.5`, `zcash_transparent 0.2`,
+  `zcash_primitives 0.22`.
 
 
 ## [0.1.0] - 2024-12-16

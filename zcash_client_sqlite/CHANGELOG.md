@@ -14,7 +14,8 @@ and this library adheres to Rust's notion of
 - MSRV is now 1.81.0.
 - Migrated to `bip32 =0.6.0-pre.1`, `nonempty 0.11`.`incrementalmerkletree 0.8`,
   `shardtree 0.6`, `orchard 0.11`, `sapling-crypto 0.5`, `zcash_encoding 0.3`,
-  `zcash_protocol 0.5`, `zcash_address 0.7`, `zcash_transparent 0.2`.
+  `zcash_protocol 0.5`, `zcash_address 0.7`, `zcash_transparent 0.2`,
+  `zcash_primitives 0.22`.
 - `zcash_client_sqlite::wallet::init::init_wallet_db` now has an additional
   generic parameter, enabling it to be used with wallets constructed via
   `WalletDb::from_connection`.

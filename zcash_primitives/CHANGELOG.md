@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.22.0] - 2025-02-21
+
 ### Changed
 - MSRV is now 1.81.0.
 - Migrated to `bip32 =0.6.0-pre.1`, `nonempty 0.11`, `secp256k1 0.29`,
