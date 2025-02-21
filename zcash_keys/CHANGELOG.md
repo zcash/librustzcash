@@ -14,7 +14,8 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.81.0.
-- Migrated to `bip32 =0.6.0-pre.1`, `nonempty 0.11`.
+- Migrated to `bip32 =0.6.0-pre.1`, `nonempty 0.11`, `orchard 0.11`,
+  `sapling-crypto 0.5`.
 - `zcash_keys::keys::UnifiedAddressRequest` has been substantially modified;
   instead of a collection of boolean flags, it is now a collection of
   `ReceiverRequirement` values that describe how addresses may be constructed
@@ -26,14 +27,14 @@ and this library adheres to Rust's notion of
   return `Err(())`
 
 ### Removed
-- `zcash_keys::keys::UnifiedAddressRequest::all` (use 
+- `zcash_keys::keys::UnifiedAddressRequest::all` (use
   `UnifiedAddressRequest::ALLOW_ALL` or
   `UnifiedFullViewingKey::to_address_request` instead)
 
 ## [0.6.0] - 2024-12-16
 
 ### Changed
-- Migrated to `bech32 0.11`, `sapling-crypto 0.4`. 
+- Migrated to `bech32 0.11`, `sapling-crypto 0.4`.
 - Added dependency on `zcash_transparent 0.1` to replace dependency
   on `zcash_primitives`.
 - The `UnifiedAddressRequest` argument to the following methods is now optional:

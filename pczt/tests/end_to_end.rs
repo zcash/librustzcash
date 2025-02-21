@@ -21,7 +21,11 @@ use zcash_primitives::transaction::{
     fees::zip317,
 };
 use zcash_proofs::prover::LocalTxProver;
-use zcash_protocol::{consensus::MainNetwork, memo::MemoBytes, value::Zatoshis};
+use zcash_protocol::{
+    consensus::MainNetwork,
+    memo::{Memo, MemoBytes},
+    value::Zatoshis,
+};
 
 static ORCHARD_PROVING_KEY: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
 
@@ -157,7 +161,12 @@ fn sapling_to_orchard() {
             sapling::Anchor::empty_tree(),
         );
         sapling_builder
-            .add_output(None, sapling_recipient, value, None)
+            .add_output(
+                None,
+                sapling_recipient,
+                value,
+                Memo::Empty.encode().into_bytes(),
+            )
             .unwrap();
         let (bundle, meta) = sapling_builder
             .build::<LocalTxProver, LocalTxProver, _, i64>(&[], &mut rng)
@@ -323,7 +332,7 @@ fn orchard_to_orchard() {
             orchard::Anchor::empty_tree(),
         );
         orchard_builder
-            .add_output(None, recipient, value, None)
+            .add_output(None, recipient, value, Memo::Empty.encode().into_bytes())
             .unwrap();
         let (bundle, meta) = orchard_builder.build::<i64>(&mut rng).unwrap().unwrap();
         let action = bundle

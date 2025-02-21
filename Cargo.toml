@@ -52,7 +52,7 @@ ff = { version = "0.13", default-features = false }
 group = "0.13"
 incrementalmerkletree = { version = "0.8.2", default-features = false }
 shardtree = "0.6.1"
-zcash_spec = "0.1"
+zcash_spec = "0.2"
 
 # Payment protocols
 # - Sapling
@@ -60,11 +60,11 @@ bitvec = { version = "1", default-features = false, features = ["alloc"] }
 blake2s_simd = { version = "1", default-features = false }
 bls12_381 = "0.8"
 jubjub = "0.10"
-redjubjub = { version = "0.7", default-features = false }
-sapling = { package = "sapling-crypto", version = "0.4", default-features = false }
+redjubjub = { version = "0.8", default-features = false }
+sapling = { package = "sapling-crypto", version = "0.5", default-features = false }
 
 # - Orchard
-orchard = { version = "0.10.1", default-features = false }
+orchard = { version = "0.11", default-features = false }
 pasta_curves = "0.5"
 
 # - Transparent
@@ -167,7 +167,7 @@ trait-variant = "0.1"
 # ZIP 32
 aes = "0.8"
 fpe = { version = "0.6", default-features = false, features = ["alloc"] }
-zip32 = { version = "0.1.1", default-features = false }
+zip32 = { version = "0.2", default-features = false }
 
 [profile.release]
 lto = true
@@ -193,8 +193,3 @@ debug = true
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
-
-[patch.crates-io]
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "b1c22c07300db22239235d16dab096e23369948f" }
-redjubjub = { git = "https://github.com/ZcashFoundation/redjubjub", rev = "eae848c5c14d9c795d000dd9f4c4762d1aee7ee1" }
-sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "6ca338532912adcd82369220faeea31aab4720c5" }

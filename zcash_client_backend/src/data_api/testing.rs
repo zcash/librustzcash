@@ -2042,7 +2042,8 @@ fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
         ::sapling::value::NoteValue::from_raw(value.into_u64()),
         rseed,
     );
-    let encryptor = sapling_note_encryption(ovk, note.clone(), *MemoBytes::empty().as_array(), rng);
+    let encryptor =
+        sapling_note_encryption(ovk, note.clone(), MemoBytes::empty().into_bytes(), rng);
     let cmu = note.cmu().to_bytes().to_vec();
     let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
     let enc_ciphertext = encryptor.encrypt_note_plaintext();

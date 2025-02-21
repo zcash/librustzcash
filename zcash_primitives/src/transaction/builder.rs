@@ -458,7 +458,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
                 ovk,
                 recipient,
                 orchard::value::NoteValue::from_raw(value),
-                Some(*memo.as_array()),
+                memo.into_bytes(),
             )
             .map_err(Error::OrchardRecipient)
     }
@@ -496,7 +496,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
                 ovk,
                 to,
                 sapling::value::NoteValue::from_raw(value.into()),
-                Some(*memo.as_array()),
+                memo.into_bytes(),
             )
             .map_err(Error::SaplingBuild)
     }
