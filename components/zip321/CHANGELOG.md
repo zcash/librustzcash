@@ -9,7 +9,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.81.0.
-- Migrated to `zcash_protocol 0.5`.
+- Migrated to `zcash_protocol 0.5`, `zcash_address 0.7`.
 
 ## [0.2.0] 2024-10-04
 

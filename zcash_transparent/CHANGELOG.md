@@ -17,7 +17,7 @@ and this library adheres to Rust's notion of
 ### Changed
 - MSRV is now 1.81.0.
 - Migrated to `bip32 =0.6.0-pre.1`, `secp256k1 0.29`, `zcash_encoding 0.3`,
-  `zcash_protocol 0.5`.
+  `zcash_protocol 0.5`, `zcash_address 0.7`.
 
 ## [0.1.0] - 2024-12-16
 
