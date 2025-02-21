@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.2.0] - 2025-02-21
 ### Fixed
 - `zcash_transparent::keys::AccountPubKey::derive_pubkey_at_bip32_path` now
   returns the correct result for valid paths instead of an error or panic.
