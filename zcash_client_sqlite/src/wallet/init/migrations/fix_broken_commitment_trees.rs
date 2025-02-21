@@ -12,6 +12,9 @@ use crate::wallet::{
     init::{migrations::support_legacy_sqlite, WalletMigrationError},
 };
 
+#[cfg(feature = "transparent-inputs")]
+use crate::GapLimits;
+
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x9fa43ce0_a387_45d1_be03_57a3edc76d01);
 
 const DEPENDENCIES: &[Uuid] = &[support_legacy_sqlite::MIGRATION_ID];
@@ -59,7 +62,13 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             .flatten();
 
         if let Some(h) = max_block_height {
-            wallet::truncate_to_height(transaction, &self.params, h)?;
+            wallet::truncate_to_height(
+                transaction,
+                &self.params,
+                #[cfg(feature = "transparent-inputs")]
+                &GapLimits::default(),
+                h,
+            )?;
         }
 
         Ok(())

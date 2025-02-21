@@ -10,8 +10,10 @@ and this library adheres to Rust's notion of
 ## [0.17.0] - 2025-02-21
 
 ### Added
-- `zcash_client_backend::data_api::testing::TransactionSummary` has added
-  accessor methods `total_spent` and `total_received`.
+- `zcash_client_backend::data_api::testing`:
+  - `TransactionSummary` has added accessor methods `total_spent` and `total_received`.
+  - `struct transparent::GapLimits`
+  - `transparent::gap_limits` high-level test for gap limit handling
 
 ### Changed
 - MSRV is now 1.81.0.
@@ -32,12 +34,19 @@ and this library adheres to Rust's notion of
     `map_internal_account_note` and `map_ephemeral_transparent_outpoint` and
     `internal_account_note_transpose_option` methods have consequently been
     removed.
-- `zcash_client_backend::data_api::WalletRead::get_known_ephemeral_addresses`
-  now takes a `Range<zcash_transparent::keys::NonHardenedChildIndex>` as its
-  argument instead of a `Range<u32>`
 - `zcash_client_backend::data_api::testing::TransactionSummary::from_parts`
   has been modified; it now requires additional `total_spent` and `total_received`
   arguments.
+- `zcash_client_backend::data_api::WalletRead`:
+    - `get_transparent_receivers` now takes additional `include_change` and
+      `include_ephemeral` arguments.
+    - `get_known_ephemeral_addresses` now takes a
+      `Range<zcash_transparent::keys::NonHardenedChildIndex>` as its argument
+      instead of a `Range<u32>`
+    - Has added method `utxo_query_height` when the `transparent-inputs` feature
+      flag is active.
+- `zcash_client_backend::data_api::WalletWrite` has an added method
+  `get_address_for_index`
 
 ### Deprecated
 - `zcash_client_backend::address` (use `zcash_keys::address` instead)
@@ -46,6 +55,11 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::zip321` (use the `zip321` crate instead)
 - `zcash_client_backend::PoolType` (use `zcash_protocol::PoolType` instead)
 - `zcash_client_backend::ShieldedProtocol` (use `zcash_protocol::ShieldedProtocol` instead)
+
+### Removed
+- `zcash_client_backend::data_api::GAP_LIMIT` gap limits are now configured
+  based upon the key scope that they're associated with; there is no longer a
+  globally applicable gap limit.
 
 ## [0.16.0] - 2024-12-16
 

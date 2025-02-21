@@ -5,12 +5,11 @@ use std::collections::HashSet;
 use rusqlite::named_params;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zip32::Scope;
 
 use crate::{
     wallet::{
         init::{migrations::fix_broken_commitment_trees, WalletMigrationError},
-        scope_code,
+        KeyScope,
     },
     SAPLING_TABLES_PREFIX,
 };
@@ -52,7 +51,7 @@ impl RusqliteMigration for Migration {
                      AND sn.from_account_id = {table_prefix}_received_notes.account_id
                      AND {table_prefix}_received_notes.recipient_key_scope = :internal_scope"
                 ),
-                named_params! {":internal_scope": scope_code(Scope::Internal)},
+                named_params! {":internal_scope": KeyScope::INTERNAL.encode()},
             )
         };
 

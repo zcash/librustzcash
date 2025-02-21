@@ -85,10 +85,11 @@ use {
     ::orchard::tree::MerkleHashOrchard, group::ff::PrimeField, pasta_curves::pallas,
 };
 
-#[cfg(feature = "orchard")]
-pub mod orchard;
 pub mod pool;
 pub mod sapling;
+
+#[cfg(feature = "orchard")]
+pub mod orchard;
 #[cfg(feature = "transparent-inputs")]
 pub mod transparent;
 
@@ -2616,6 +2617,7 @@ impl WalletRead for MockWalletDb {
     fn get_transparent_receivers(
         &self,
         _account: Self::AccountId,
+        _include_change: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         Ok(HashMap::new())
     }
@@ -2645,6 +2647,11 @@ impl WalletRead for MockWalletDb {
         _index_range: Option<Range<NonHardenedChildIndex>>,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         Ok(vec![])
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn utxo_query_height(&self, _account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
+        Ok(BlockHeight::from(0u32))
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -2701,6 +2708,15 @@ impl WalletWrite for MockWalletDb {
     fn get_next_available_address(
         &mut self,
         _account: Self::AccountId,
+        _request: Option<UnifiedAddressRequest>,
+    ) -> Result<Option<UnifiedAddress>, Self::Error> {
+        Ok(None)
+    }
+
+    fn get_address_for_index(
+        &mut self,
+        _account: Self::AccountId,
+        _diversifier_index: DiversifierIndex,
         _request: Option<UnifiedAddressRequest>,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         Ok(None)

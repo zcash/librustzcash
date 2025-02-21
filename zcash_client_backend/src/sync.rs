@@ -48,7 +48,7 @@ use {
         address::Script,
         bundle::{OutPoint, TxOut},
     },
-    zcash_protocol::{consensus::NetworkUpgrade, value::Zatoshis},
+    zcash_protocol::value::Zatoshis,
 };
 
 /// Scans the chain until the wallet is up-to-date.
@@ -72,27 +72,11 @@ where
     <DbT as WalletRead>::Error: std::error::Error + Send + Sync + 'static,
     <DbT as WalletCommitmentTrees>::Error: std::error::Error + Send + Sync + 'static,
 {
-    #[cfg(feature = "transparent-inputs")]
-    let wallet_birthday = db_data
-        .get_wallet_birthday()
-        .map_err(Error::Wallet)?
-        .unwrap_or_else(|| params.activation_height(NetworkUpgrade::Sapling).unwrap());
-
     // 1) Download note commitment tree data from lightwalletd
     // 2) Pass the commitment tree data to the database.
     update_subtree_roots(client, db_data).await?;
 
-    while running(
-        client,
-        params,
-        db_cache,
-        db_data,
-        batch_size,
-        #[cfg(feature = "transparent-inputs")]
-        wallet_birthday,
-    )
-    .await?
-    {}
+    while running(client, params, db_cache, db_data, batch_size).await? {}
 
     Ok(())
 }
@@ -103,7 +87,6 @@ async fn running<P, ChT, CaT, DbT, TrErr>(
     db_cache: &CaT,
     db_data: &mut DbT,
     batch_size: u32,
-    #[cfg(feature = "transparent-inputs")] wallet_birthday: BlockHeight,
 ) -> Result<bool, Error<CaT::Error, <DbT as WalletRead>::Error, TrErr>>
 where
     P: Parameters + Send + 'static,
@@ -127,10 +110,8 @@ where
     #[cfg(feature = "transparent-inputs")]
     for account_id in db_data.get_account_ids().map_err(Error::Wallet)? {
         let start_height = db_data
-            .block_fully_scanned()
-            .map_err(Error::Wallet)?
-            .map(|meta| meta.block_height())
-            .unwrap_or(wallet_birthday);
+            .utxo_query_height(account_id)
+            .map_err(Error::Wallet)?;
         info!(
             "Refreshing UTXOs for {:?} from height {}",
             account_id, start_height,
@@ -507,7 +488,7 @@ where
 {
     let request = service::GetAddressUtxosArg {
         addresses: db_data
-            .get_transparent_receivers(account_id)
+            .get_transparent_receivers(account_id, true)
             .map_err(Error::Wallet)?
             .into_keys()
             .map(|addr| addr.encode(params))

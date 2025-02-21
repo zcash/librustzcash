@@ -2,6 +2,7 @@
 
 use bip32::ChildNumber;
 use subtle::{Choice, ConstantTimeEq};
+use zip32::DiversifierIndex;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -67,7 +68,7 @@ impl From<TransparentKeyScope> for ChildNumber {
 /// A child index for a derived transparent address.
 ///
 /// Only NON-hardened derivation is supported.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NonHardenedChildIndex(u32);
 
 impl ConstantTimeEq for NonHardenedChildIndex {
@@ -77,13 +78,17 @@ impl ConstantTimeEq for NonHardenedChildIndex {
 }
 
 impl NonHardenedChildIndex {
+    /// The minimum valid non-hardened child index.
     pub const ZERO: NonHardenedChildIndex = NonHardenedChildIndex(0);
+
+    /// The maximum valid non-hardened child index.
+    pub const MAX: NonHardenedChildIndex = NonHardenedChildIndex((1 << 31) - 1);
 
     /// Parses the given ZIP 32 child index.
     ///
     /// Returns `None` if the hardened bit is set.
-    pub fn from_index(i: u32) -> Option<Self> {
-        if i < (1 << 31) {
+    pub const fn from_index(i: u32) -> Option<Self> {
+        if i <= Self::MAX.0 {
             Some(NonHardenedChildIndex(i))
         } else {
             None
@@ -91,14 +96,31 @@ impl NonHardenedChildIndex {
     }
 
     /// Returns the index as a 32-bit integer.
-    pub fn index(&self) -> u32 {
+    pub const fn index(&self) -> u32 {
         self.0
     }
 
-    pub fn next(&self) -> Option<Self> {
+    /// Returns the successor to this index.
+    pub const fn next(&self) -> Option<Self> {
         // overflow cannot happen because self.0 is 31 bits, and the next index is at most 32 bits
         // which in that case would lead from_index to return None.
         Self::from_index(self.0 + 1)
+    }
+
+    /// Subtracts the given delta from this index.
+    pub const fn saturating_sub(&self, delta: u32) -> Self {
+        NonHardenedChildIndex(self.0.saturating_sub(delta))
+    }
+
+    /// Adds the given delta to this index, returning a maximum possible value of
+    /// [`NonHardenedChildIndex::MAX`].
+    pub const fn saturating_add(&self, delta: u32) -> Self {
+        let idx = self.0.saturating_add(delta);
+        if idx > Self::MAX.0 {
+            Self::MAX
+        } else {
+            NonHardenedChildIndex(idx)
+        }
     }
 }
 
@@ -117,6 +139,21 @@ impl TryFrom<ChildNumber> for NonHardenedChildIndex {
 impl From<NonHardenedChildIndex> for ChildNumber {
     fn from(value: NonHardenedChildIndex) -> Self {
         Self::new(value.index(), false).expect("NonHardenedChildIndex is correct by construction")
+    }
+}
+
+impl TryFrom<DiversifierIndex> for NonHardenedChildIndex {
+    type Error = ();
+
+    fn try_from(value: DiversifierIndex) -> Result<Self, Self::Error> {
+        let idx = u32::try_from(value).map_err(|_| ())?;
+        NonHardenedChildIndex::from_index(idx).ok_or(())
+    }
+}
+
+impl From<NonHardenedChildIndex> for DiversifierIndex {
+    fn from(value: NonHardenedChildIndex) -> Self {
+        DiversifierIndex::from(value.0)
     }
 }
 
