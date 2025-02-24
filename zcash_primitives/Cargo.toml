@@ -95,7 +95,7 @@ workspace = true
 features = ["pre-zip-212"]
 
 [dev-dependencies]
-chacha20poly1305 = "0.10"
+chacha20poly1305 = { workspace = true }
 criterion.workspace = true
 incrementalmerkletree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
 proptest.workspace = true

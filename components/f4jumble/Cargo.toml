@@ -24,11 +24,11 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-blake2b_simd = { version = "1", default-features = false }
+blake2b_simd = { workspace = true }
 
 [dev-dependencies]
-hex = "0.4"
-proptest = "1"
+hex = { workspace = true }
+proptest = { workspace = true }
 
 [features]
 default = ["std"]

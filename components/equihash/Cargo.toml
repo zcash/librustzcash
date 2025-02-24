@@ -21,10 +21,10 @@ core2.workspace = true
 blake2b_simd.workspace = true
 
 [build-dependencies]
-cc = { version = "1", optional = true }
+cc = { workspace = true, optional = true }
 
 [dev-dependencies]
-hex = "0.4"
+hex = { workspace = true }
 
 [lib]
 bench = false

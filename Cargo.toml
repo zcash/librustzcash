@@ -168,6 +168,23 @@ trait-variant = "0.1"
 aes = "0.8"
 fpe = { version = "0.6", default-features = false, features = ["alloc"] }
 zip32 = { version = "0.2", default-features = false }
+async-trait = "0.1"
+cc = "1"
+chacha20poly1305 = "0.10"
+f4jumble = { version = "0.1.1", path = "components/f4jumble", default-features = false }
+futures-util = "0.3"
+gumdrop = "0.8"
+home = "0.5"
+known-folders = "1"
+minreq = "2"
+nom = "7"
+primitive-types = { version = "0.12", default-features = false }
+regex = "1.4"
+serde_with = { version = "3", default-features = false }
+tempfile = "3.5.0"
+wagyu-zcash-parameters = "0.2"
+which = "6"
+xdg = "2.5"
 
 [workspace.metadata.release]
 consolidate-commits = false

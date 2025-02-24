@@ -39,7 +39,7 @@ pczt = { workspace = true, optional = true }
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - Data Access API
-time = "0.3.22"
+time = { workspace = true }
 nonempty.workspace = true
 
 # - CSPRNG
@@ -74,8 +74,8 @@ orchard = { workspace = true, optional = true }
 sapling.workspace = true
 
 # - Sync engine
-async-trait = { version = "0.1", optional = true }
-futures-util = { version = "0.3", optional = true }
+async-trait = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
 
 # - Note commitment trees
 incrementalmerkletree.workspace = true
@@ -91,7 +91,7 @@ rand_chacha = { workspace = true, optional = true }
 zcash_proofs = { workspace = true, optional = true }
 
 # - ZIP 321
-nom = "7"
+nom = { workspace = true }
 
 # - Tor
 # -- Exposed error types: `arti_client::Error`, `arti_client::config::ConfigBuildError`,
@@ -135,19 +135,19 @@ webpki-roots = { workspace = true, optional = true }
 
 [build-dependencies]
 tonic-build = { workspace = true, features = ["prost"] }
-which = "6"
+which = { workspace = true }
 
 [dev-dependencies]
 ambassador.workspace = true
 assert_matches.workspace = true
-gumdrop = "0.8"
+gumdrop = { workspace = true }
 incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
 jubjub.workspace = true
 proptest.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 shardtree = { workspace = true, features = ["test-dependencies"] }
-tokio = { version = "1.21.0", features = ["rt-multi-thread"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
 zcash_primitives = { workspace = true, features = ["test-dependencies"] }

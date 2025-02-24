@@ -19,9 +19,9 @@ blake2b_simd = { workspace = true, optional = true }
 rand_core = { workspace = true, optional = true }
 
 # Encoding
-postcard = { version = "1", features = ["alloc"] }
+postcard = { workspace = true, features = ["alloc"] }
 serde.workspace = true
-serde_with = { version = "3", default-features = false, features = ["alloc", "macros"] }
+serde_with = { workspace = true, features = ["alloc", "macros"] }
 
 # Payment protocols
 # - Transparent
@@ -41,7 +41,7 @@ orchard = { workspace = true, optional = true }
 pasta_curves = { workspace = true, optional = true }
 
 # - Bolierplate
-getset = "0.1"
+getset = { workspace = true }
 
 [dev-dependencies]
 incrementalmerkletree.workspace = true

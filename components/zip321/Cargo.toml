@@ -18,7 +18,7 @@ zcash_address.workspace = true
 zcash_protocol = { workspace = true, features = ["std"] }
 
 # - Parsing and Encoding
-nom = "7"
+nom = { workspace = true }
 base64.workspace = true
 percent-encoding.workspace = true
 

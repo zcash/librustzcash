@@ -73,7 +73,7 @@ schemerz.workspace = true
 schemerz-rusqlite.workspace = true
 time.workspace = true
 uuid = { workspace = true, features = ["v4"] }
-regex = "1.4"
+regex = { workspace = true }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
@@ -92,7 +92,7 @@ orchard = { workspace = true, features = ["test-dependencies"] }
 proptest.workspace = true
 rand_chacha.workspace = true
 rand_core.workspace = true
-tempfile = "3.5.0"
+tempfile = { workspace = true }
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
 zcash_note_encryption.workspace = true
 zcash_proofs = { workspace = true, features = ["bundled-prover"] }
