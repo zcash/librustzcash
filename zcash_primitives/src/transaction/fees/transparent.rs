@@ -5,10 +5,11 @@ use core::convert::Infallible;
 
 use crate::transaction::fees::zip317::P2PKH_STANDARD_INPUT_SIZE;
 use transparent::{
-    address::{Script, TransparentAddress},
+    address::Script,
     bundle::{OutPoint, TxOut},
 };
 use zcash_protocol::value::Zatoshis;
+use zcash_script::{script, solver};
 
 #[cfg(feature = "transparent-inputs")]
 use transparent::builder::TransparentInputInfo;
@@ -40,8 +41,12 @@ pub trait InputView: core::fmt::Debug {
 
     /// The size of the transparent script required to spend this input.
     fn serialized_size(&self) -> InputSize {
-        match self.coin().script_pubkey().address() {
-            Some(TransparentAddress::PublicKeyHash(_)) => InputSize::STANDARD_P2PKH,
+        match script::PubKey::parse(&self.coin().script_pubkey().0)
+            .ok()
+            .as_ref()
+            .and_then(solver::standard)
+        {
+            Some(solver::ScriptKind::PubKeyHash { .. }) => InputSize::STANDARD_P2PKH,
             _ => InputSize::Unknown(self.outpoint().clone()),
         }
     }

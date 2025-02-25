@@ -49,6 +49,7 @@ use {
     },
     zcash_keys::encoding::AddressCodec as _,
     zcash_protocol::value::Zatoshis,
+    zcash_script::script,
 };
 
 /// Scans the chain until the wallet is up-to-date.
@@ -519,7 +520,7 @@ where
                     TxOut::new(
                         Zatoshis::from_nonnegative_i64(reply.value_zat)
                             .map_err(|_| Error::MisbehavingServer)?,
-                        Script(reply.script),
+                        Script(script::Code(reply.script)),
                     ),
                     Some(
                         BlockHeight::try_from(reply.height)

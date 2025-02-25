@@ -2,8 +2,9 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use ripemd::Ripemd160;
 use sha2::{Digest, Sha256};
+use zcash_script::script::{self, Evaluable};
 
-use crate::address::{Script, TransparentAddress};
+use crate::address::TransparentAddress;
 
 use super::{Bip32Derivation, Bundle, Input, Output};
 
@@ -63,9 +64,14 @@ impl InputUpdater<'_> {
     ///
     /// Returns an error if the input is not P2SH, or the given `redeem_script` does not
     /// match the input's `script_pubkey`.
-    pub fn set_redeem_script(&mut self, redeem_script: Script) -> Result<(), UpdaterError> {
-        if let Some(TransparentAddress::ScriptHash(hash)) = self.0.script_pubkey.address() {
-            if hash[..] == Ripemd160::digest(Sha256::digest(&redeem_script.0))[..] {
+    pub fn set_redeem_script(
+        &mut self,
+        redeem_script: script::FromChain,
+    ) -> Result<(), UpdaterError> {
+        if let Some(TransparentAddress::ScriptHash(hash)) =
+            TransparentAddress::from_script_from_chain(&self.0.script_pubkey)
+        {
+            if hash[..] == Ripemd160::digest(Sha256::digest(redeem_script.to_bytes()))[..] {
                 self.0.redeem_script = Some(redeem_script);
                 Ok(())
             } else {
@@ -119,9 +125,11 @@ impl OutputUpdater<'_> {
     ///
     /// Returns an error if the output is not P2SH, or the given `redeem_script` does not
     /// match the output's `script_pubkey`.
-    pub fn set_redeem_script(&mut self, redeem_script: Script) -> Result<(), UpdaterError> {
-        if let Some(TransparentAddress::ScriptHash(hash)) = self.0.script_pubkey.address() {
-            if hash[..] == Ripemd160::digest(Sha256::digest(&redeem_script.0))[..] {
+    pub fn set_redeem_script(&mut self, redeem_script: script::Redeem) -> Result<(), UpdaterError> {
+        if let Some(TransparentAddress::ScriptHash(hash)) =
+            TransparentAddress::from_script_pubkey(&self.0.script_pubkey)
+        {
+            if hash[..] == Ripemd160::digest(Sha256::digest(redeem_script.to_bytes()))[..] {
                 self.0.redeem_script = Some(redeem_script);
                 Ok(())
             } else {

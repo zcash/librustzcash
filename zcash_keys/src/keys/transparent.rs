@@ -339,6 +339,7 @@ mod tests {
     use secrecy::SecretString;
     use transparent::address::TransparentAddress;
     use zcash_protocol::consensus::NetworkType;
+    use zcash_script::script::Evaluable;
 
     use super::{
         test_vectors::{VectorKind, INVALID, VALID},
@@ -387,7 +388,7 @@ mod tests {
                             .convert_if_network(v.network)
                             .unwrap();
                     let script = destination.script();
-                    assert_eq!(hex::encode(&script.0), v.raw_bytes_hex);
+                    assert_eq!(hex::encode(script.to_bytes()), v.raw_bytes_hex);
 
                     // Public key must be invalid private key
                     assert!(Key::decode_base58(

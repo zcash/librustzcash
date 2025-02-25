@@ -3,6 +3,7 @@
 use alloc::vec::Vec;
 use core::fmt::Debug;
 use core2::io::{self, Read, Write};
+use zcash_script::script;
 
 use zcash_protocol::{
     value::{BalanceError, ZatBalance, Zatoshis},
@@ -297,7 +298,10 @@ impl TxOut {
 
     /// Returns the address to which the TxOut was sent, if this is a valid P2SH or P2PKH output.
     pub fn recipient_address(&self) -> Option<TransparentAddress> {
-        self.script_pubkey.address()
+        script::PubKey::parse(&self.script_pubkey.0)
+            .ok()
+            .as_ref()
+            .and_then(TransparentAddress::from_script_pubkey)
     }
 
     pub fn value(&self) -> Zatoshis {
@@ -315,13 +319,14 @@ pub mod testing {
     use proptest::prelude::*;
     use proptest::sample::select;
     use zcash_protocol::value::testing::arb_zatoshis;
+    use zcash_script::script;
 
     use crate::address::Script;
 
     use super::{Authorized, Bundle, OutPoint, TxIn, TxOut};
 
     pub const VALID_OPCODES: [u8; 8] = [
-        0x00, // OP_FALSE,
+        0x00, // OP_0,
         0x51, // OP_1,
         0x52, // OP_2,
         0x53, // OP_3,
@@ -338,15 +343,21 @@ pub mod testing {
     }
 
     prop_compose! {
-        pub fn arb_script()(v in vec(select(&VALID_OPCODES[..]), 1..256)) -> Script {
-            Script(v)
+        pub fn arb_script_sig()(v in vec(select(&VALID_OPCODES[..]), 1..256)) -> Script {
+            Script(script::Code(v))
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_script_pubkey()(v in vec(select(&VALID_OPCODES[..]), 1..256)) -> Script {
+            Script(script::Code(v))
         }
     }
 
     prop_compose! {
         pub fn arb_txin()(
             prevout in arb_outpoint(),
-            script_sig in arb_script(),
+            script_sig in arb_script_sig(),
             sequence in any::<u32>()
         ) -> TxIn<Authorized> {
             TxIn::from_parts(prevout, script_sig, sequence)
@@ -354,7 +365,7 @@ pub mod testing {
     }
 
     prop_compose! {
-        pub fn arb_txout()(value in arb_zatoshis(), script_pubkey in arb_script()) -> TxOut {
+        pub fn arb_txout()(value in arb_zatoshis(), script_pubkey in arb_script_pubkey()) -> TxOut {
             TxOut::new(value, script_pubkey)
         }
     }

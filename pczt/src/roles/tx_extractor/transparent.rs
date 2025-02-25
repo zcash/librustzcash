@@ -20,7 +20,7 @@ impl MapAuth<Unbound, Authorized> for RemoveInputInfo {
         &self,
         s: <Unbound as Authorization>::ScriptSig,
     ) -> <Authorized as Authorization>::ScriptSig {
-        s
+        s.into()
     }
 
     fn map_authorization(&self, _: Unbound) -> Authorized {

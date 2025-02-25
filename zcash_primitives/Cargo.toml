@@ -23,6 +23,7 @@ equihash.workspace = true
 zcash_address.workspace = true
 zcash_encoding.workspace = true
 zcash_protocol.workspace = true
+zcash_script.workspace = true
 zip32.workspace = true
 
 # Dependencies exposed in a public API:

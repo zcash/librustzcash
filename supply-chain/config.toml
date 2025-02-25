@@ -67,6 +67,9 @@ audit-as-crates-io = true
 [policy.zcash_protocol]
 audit-as-crates-io = true
 
+[policy.zcash_script]
+audit-as-crates-io = true
+
 [policy.zcash_transparent]
 audit-as-crates-io = true
 
@@ -221,6 +224,10 @@ criteria = "safe-to-deploy"
 version = "0.8.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.bounded-vec]]
+version = "0.9.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.bounded-vec-deque]]
 version = "0.1.1"
 criteria = "safe-to-deploy"
@@ -259,6 +266,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.chrono]]
 version = "0.4.38"
+criteria = "safe-to-deploy"
+
+[[exemptions.clang-sys]]
+version = "1.8.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.coarsetime]]
@@ -717,6 +728,10 @@ criteria = "safe-to-deploy"
 version = "0.2.154"
 criteria = "safe-to-deploy"
 
+[[exemptions.libloading]]
+version = "0.8.9"
+criteria = "safe-to-deploy"
+
 [[exemptions.libm]]
 version = "0.2.2"
 criteria = "safe-to-deploy"
@@ -1153,6 +1168,10 @@ criteria = "safe-to-deploy"
 version = "3.8.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.sha-1]]
+version = "0.10.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.sha2]]
 version = "0.11.0-pre.4"
 criteria = "safe-to-deploy"
@@ -1545,6 +1564,10 @@ criteria = "safe-to-deploy"
 version = "0.4.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.windows-link]]
+version = "0.2.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.winnow]]
 version = "0.5.40"
 criteria = "safe-to-deploy"
@@ -1575,6 +1598,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.xz2]]
 version = "0.1.7"
+criteria = "safe-to-deploy"
+
+[[exemptions.zcash_script]]
+version = "0.3.2@git:2827ece4edc7ba9e144106da777a8e6cc23ea7a9"
 criteria = "safe-to-deploy"
 
 [[exemptions.zeroize]]
