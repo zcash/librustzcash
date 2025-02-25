@@ -2400,8 +2400,8 @@ pub(crate) fn get_max_height_hash(
     .optional()
 }
 
-pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
-    wdb: &mut WalletDb<SqlTransaction<'_>, P>,
+pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters, CL>(
+    wdb: &mut WalletDb<SqlTransaction<'_>, P, CL>,
     sent_tx: &SentTransaction<AccountUuid>,
 ) -> Result<(), SqliteClientError> {
     let tx_ref = put_tx_data(
@@ -2742,6 +2742,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         let mut wdb = WalletDb {
             conn: SqlTransaction(conn),
             params: params.clone(),
+            clock: (),
             #[cfg(feature = "transparent-inputs")]
             gap_limits: *gap_limits,
         };

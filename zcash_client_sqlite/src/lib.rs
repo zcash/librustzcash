@@ -48,6 +48,7 @@ use std::{
 };
 use subtle::ConditionallySelectable;
 use tracing::{debug, trace, warn};
+use util::Clock;
 use uuid::Uuid;
 
 use zcash_client_backend::{
@@ -351,9 +352,10 @@ impl From<GapLimits> for zcash_client_backend::data_api::testing::transparent::G
 }
 
 /// A wrapper for the SQLite connection to the wallet database.
-pub struct WalletDb<C, P> {
+pub struct WalletDb<C, P, CL> {
     conn: C,
     params: P,
+    clock: CL,
     #[cfg(feature = "transparent-inputs")]
     gap_limits: GapLimits,
 }
@@ -367,14 +369,19 @@ impl Borrow<rusqlite::Connection> for SqlTransaction<'_> {
     }
 }
 
-impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
+impl<P, CL> WalletDb<Connection, P, CL> {
     /// Construct a connection to the wallet database stored at the specified path.
-    pub fn for_path<F: AsRef<Path>>(path: F, params: P) -> Result<Self, rusqlite::Error> {
+    pub fn for_path<F: AsRef<Path>>(
+        path: F,
+        params: P,
+        clock: CL,
+    ) -> Result<Self, rusqlite::Error> {
         Connection::open(path).and_then(move |conn| {
             rusqlite::vtab::array::load_module(&conn)?;
             Ok(WalletDb {
                 conn,
                 params,
+                clock,
                 #[cfg(feature = "transparent-inputs")]
                 gap_limits: GapLimits::default(),
             })
@@ -383,7 +390,7 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl<C, P> WalletDb<C, P> {
+impl<C, P, CL> WalletDb<C, P, CL> {
     /// Sets the gap limits to be used by the wallet in transparent address generation.
     pub fn with_gap_limits(mut self, gap_limits: GapLimits) -> Self {
         self.gap_limits = gap_limits;
@@ -391,7 +398,7 @@ impl<C, P> WalletDb<C, P> {
     }
 }
 
-impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters + Clone> WalletDb<C, P> {
+impl<C: Borrow<rusqlite::Connection>, P, CL> WalletDb<C, P, CL> {
     /// Constructs a new wrapper around the given connection.
     ///
     /// This is provided for use cases such as connection pooling, where `conn` may be an
@@ -399,25 +406,27 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters + Clone> WalletDb
     ///
     /// The caller must ensure that [`rusqlite::vtab::array::load_module`] has been called
     /// on the connection.
-    pub fn from_connection(conn: C, params: P) -> Self {
+    pub fn from_connection(conn: C, params: P, clock: CL) -> Self {
         WalletDb {
             conn,
             params,
+            clock,
             #[cfg(feature = "transparent-inputs")]
             gap_limits: GapLimits::default(),
         }
     }
 }
 
-impl<C: BorrowMut<Connection>, P: consensus::Parameters + Clone> WalletDb<C, P> {
+impl<C: BorrowMut<Connection>, P: Clone, CL: Clone> WalletDb<C, P, CL> {
     pub fn transactionally<F, A, E: From<rusqlite::Error>>(&mut self, f: F) -> Result<A, E>
     where
-        F: FnOnce(&mut WalletDb<SqlTransaction<'_>, P>) -> Result<A, E>,
+        F: FnOnce(&mut WalletDb<SqlTransaction<'_>, P, CL>) -> Result<A, E>,
     {
         let tx = self.conn.borrow_mut().transaction()?;
         let mut wdb = WalletDb {
             conn: SqlTransaction(&tx),
             params: self.params.clone(),
+            clock: self.clock.clone(),
             #[cfg(feature = "transparent-inputs")]
             gap_limits: self.gap_limits,
         };
@@ -427,7 +436,9 @@ impl<C: BorrowMut<Connection>, P: consensus::Parameters + Clone> WalletDb<C, P> 
     }
 }
 
-impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for WalletDb<C, P> {
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> InputSource
+    for WalletDb<C, P, CL>
+{
     type Error = SqliteClientError;
     type NoteRef = ReceivedNoteId;
     type AccountId = AccountUuid;
@@ -558,7 +569,9 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
     }
 }
 
-impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for WalletDb<C, P> {
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> WalletRead
+    for WalletDb<C, P, CL>
+{
     type Error = SqliteClientError;
     type AccountId = AccountUuid;
     type Account = wallet::Account;
@@ -856,7 +869,9 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
-impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletTest for WalletDb<C, P> {
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> WalletTest
+    for WalletDb<C, P, CL>
+{
     fn get_tx_history(
         &self,
     ) -> Result<Vec<TransactionSummary<<Self as WalletRead>::AccountId>>, <Self as WalletRead>::Error>
@@ -992,7 +1007,9 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletTest for W
     }
 }
 
-impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters> WalletWrite for WalletDb<C, P> {
+impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> WalletWrite
+    for WalletDb<C, P, CL>
+{
     type UtxoRef = UtxoId;
 
     fn create_account(
@@ -1743,8 +1760,8 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters> WalletWrite f
     }
 }
 
-impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters> WalletCommitmentTrees
-    for WalletDb<C, P>
+impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL> WalletCommitmentTrees
+    for WalletDb<C, P, CL>
 {
     type Error = commitment_tree::Error;
     type SaplingShardStore<'a> =
@@ -1858,7 +1875,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters> WalletCommitm
     }
 }
 
-impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTransaction<'_>, P> {
+impl<P: consensus::Parameters, CL> WalletCommitmentTrees for WalletDb<SqlTransaction<'_>, P, CL> {
     type Error = commitment_tree::Error;
     type SaplingShardStore<'a> =
         SqliteShardStore<&'a rusqlite::Transaction<'a>, sapling::Node, SAPLING_SHARD_HEIGHT>;

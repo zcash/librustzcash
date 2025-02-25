@@ -2,7 +2,7 @@
 
 use std::time::SystemTime;
 
-pub trait Clock {
+pub trait Clock: Clone {
     fn now(&self) -> SystemTime;
 }
 

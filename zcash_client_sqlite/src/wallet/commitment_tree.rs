@@ -1129,13 +1129,18 @@ mod tests {
     use zcash_protocol::consensus::{BlockHeight, Network};
 
     use super::SqliteShardStore;
-    use crate::{testing::pool::ShieldedPoolPersistence, wallet::init::init_wallet_db, WalletDb};
+    use crate::{
+        testing::{db::test_clock, pool::ShieldedPoolPersistence},
+        wallet::init::init_wallet_db,
+        WalletDb,
+    };
 
     fn new_tree<T: ShieldedPoolTester + ShieldedPoolPersistence>(
         m: usize,
     ) -> ShardTree<SqliteShardStore<rusqlite::Connection, String, 3>, 4, 3> {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), Network::TestNetwork, test_clock()).unwrap();
         data_file.keep().unwrap();
 
         init_wallet_db(&mut db_data, None).unwrap();
@@ -1233,7 +1238,8 @@ mod tests {
 
     fn put_shard_roots<T: ShieldedPoolTester + ShieldedPoolPersistence>() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), Network::TestNetwork, test_clock).unwrap();
         data_file.keep().unwrap();
 
         init_wallet_db(&mut db_data, None).unwrap();

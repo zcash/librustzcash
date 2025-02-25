@@ -1,7 +1,8 @@
 use ambassador::Delegate;
 use rusqlite::Connection;
-use std::collections::HashMap;
 use std::num::NonZeroU32;
+use std::time::Duration;
+use std::{collections::HashMap, time::SystemTime};
 use uuid::Uuid;
 
 use tempfile::NamedTempFile;
@@ -35,6 +36,7 @@ use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{
     error::SqliteClientError,
+    util::testing::FixedClock,
     wallet::init::{init_wallet_db, init_wallet_db_internal},
     AccountUuid, WalletDb,
 };
@@ -46,6 +48,12 @@ use {
     core::ops::Range,
 };
 
+const TEST_EPOCH_SECONDS_OFFSET: Duration = Duration::from_secs(1740441600);
+
+pub(crate) fn test_clock() -> FixedClock {
+    FixedClock::new(SystemTime::UNIX_EPOCH + TEST_EPOCH_SECONDS_OFFSET)
+}
+
 #[allow(clippy::duplicated_attributes, reason = "False positive")]
 #[derive(Delegate)]
 #[delegate(InputSource, target = "wallet_db")]
@@ -54,23 +62,26 @@ use {
 #[delegate(WalletWrite, target = "wallet_db")]
 #[delegate(WalletCommitmentTrees, target = "wallet_db")]
 pub(crate) struct TestDb {
-    wallet_db: WalletDb<Connection, LocalNetwork>,
+    wallet_db: WalletDb<Connection, LocalNetwork, FixedClock>,
     data_file: NamedTempFile,
 }
 
 impl TestDb {
-    fn from_parts(wallet_db: WalletDb<Connection, LocalNetwork>, data_file: NamedTempFile) -> Self {
+    fn from_parts(
+        wallet_db: WalletDb<Connection, LocalNetwork, FixedClock>,
+        data_file: NamedTempFile,
+    ) -> Self {
         Self {
             wallet_db,
             data_file,
         }
     }
 
-    pub(crate) fn db(&self) -> &WalletDb<Connection, LocalNetwork> {
+    pub(crate) fn db(&self) -> &WalletDb<Connection, LocalNetwork, FixedClock> {
         &self.wallet_db
     }
 
-    pub(crate) fn db_mut(&mut self) -> &mut WalletDb<Connection, LocalNetwork> {
+    pub(crate) fn db_mut(&mut self) -> &mut WalletDb<Connection, LocalNetwork, FixedClock> {
         &mut self.wallet_db
     }
 
@@ -163,7 +174,7 @@ impl DataStoreFactory for TestDbFactory {
 
     fn new_data_store(&self, network: LocalNetwork) -> Result<Self::DataStore, Self::Error> {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), network, test_clock()).unwrap();
         if let Some(migrations) = &self.target_migrations {
             init_wallet_db_internal(&mut db_data, None, migrations, true).unwrap();
         } else {

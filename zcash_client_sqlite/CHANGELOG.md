@@ -13,6 +13,13 @@ and this library adheres to Rust's notion of
 - `zcash_client_sqlite::util`
 
 ### Changed
+- `zcash_client_sqlite::WalletDb` has an added `Clock` field and corresponding
+  type parameter. Tests that make use of a `WalletDb` instance now use a
+  `zcash_client_sqlite::util::FixedClock` for their clock instance, and the
+  following methods have been changed to accept an additional parameter as a
+  result:
+  - `WalletDb::for_path`
+  - `WalletDb::from_connection`
 - `zcash_client_sqlite::error::SqliteClientError` variants have changed:
   - The `EphemeralAddressReuse` variant has been removed and replaced
     by a new generalized `AddressReuse` error variant.

@@ -1376,7 +1376,7 @@ mod tests {
             .update_chain_tip(birthday.height())
             .unwrap();
 
-        let check = |db: &WalletDb<_, _>, account_id| {
+        let check = |db: &WalletDb<_, _, _>, account_id| {
             eprintln!("checking {account_id:?}");
             assert_matches!(
                 find_gap_start(&db.conn, account_id, KeyScope::Ephemeral, db.gap_limits.ephemeral()), Ok(addr_index)
