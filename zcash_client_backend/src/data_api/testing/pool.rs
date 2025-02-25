@@ -1766,7 +1766,7 @@ where
 
     let uaddr = st
         .wallet()
-        .get_current_address(account.id())
+        .get_last_generated_address(account.id(), None)
         .unwrap()
         .unwrap();
     let taddr = uaddr.transparent().unwrap();

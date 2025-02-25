@@ -6224,6 +6224,7 @@ dependencies = [
  "ambassador",
  "assert_matches",
  "bip32",
+ "bitflags 2.6.0",
  "bls12_381",
  "bs58",
  "byteorder",

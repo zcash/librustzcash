@@ -67,10 +67,7 @@ use zcash_client_backend::{
 };
 use zcash_keys::{
     address::UnifiedAddress,
-    keys::{
-        AddressGenerationError, ReceiverRequirement, UnifiedAddressRequest, UnifiedFullViewingKey,
-        UnifiedSpendingKey,
-    },
+    keys::{ReceiverRequirement, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
 };
 use zcash_primitives::{
     block::BlockHash,
@@ -86,7 +83,6 @@ use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 use wallet::{
-    chain_tip_height,
     commitment_tree::{self, put_shard_roots},
     common::spendable_notes_meta,
     upsert_address, SubtreeProgressEstimator,
@@ -670,11 +666,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> WalletRead
         wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
     }
 
-    fn get_current_address(
+    fn get_last_generated_address(
         &self,
         account: Self::AccountId,
+        request: Option<UnifiedAddressRequest>,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        wallet::get_current_address(self.conn.borrow(), &self.params, account)
+        wallet::get_last_generated_address(self.conn.borrow(), &self.params, account, request)
             .map(|res| res.map(|(addr, _)| addr))
     }
 
@@ -1129,39 +1126,18 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> Wa
         &mut self,
         account_uuid: Self::AccountId,
         request: Option<UnifiedAddressRequest>,
-    ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        self.transactionally(
-            |wdb| match wdb.get_unified_full_viewing_keys()?.get(&account_uuid) {
-                Some(ufvk) => {
-                    let search_from =
-                        match wallet::get_current_address(wdb.conn.0, &wdb.params, account_uuid)? {
-                            Some((_, mut last_diversifier_index)) => {
-                                last_diversifier_index.increment().map_err(|_| {
-                                    AddressGenerationError::DiversifierSpaceExhausted
-                                })?;
-                                last_diversifier_index
-                            }
-                            None => DiversifierIndex::default(),
-                        };
-
-                    let (addr, diversifier_index) = ufvk.find_address(search_from, request)?;
-                    let account_id = wallet::get_account_ref(wdb.conn.0, account_uuid)?;
-                    let chain_tip_height = chain_tip_height(wdb.conn.0)?
-                        .ok_or(SqliteClientError::ChainHeightUnknown)?;
-                    wallet::upsert_address(
-                        wdb.conn.0,
-                        &wdb.params,
-                        account_id,
-                        diversifier_index,
-                        &addr,
-                        Some(chain_tip_height),
-                    )?;
-
-                    Ok(Some(addr))
-                }
-                None => Ok(None),
-            },
-        )
+    ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, Self::Error> {
+        self.transactionally(|wdb| {
+            wallet::get_next_available_address(
+                wdb.conn.0,
+                &wdb.params,
+                &wdb.clock, // TODO: make an abstract Clock a field of `WalletDb`
+                account_uuid,
+                request,
+                #[cfg(feature = "transparent-inputs")]
+                &wdb.gap_limits,
+            )
+        })
     }
 
     fn get_address_for_index(
@@ -1180,6 +1156,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> Wa
                     diversifier_index,
                     &address,
                     Some(chain_tip_height.unwrap_or(account.birthday())),
+                    true,
                 )?;
 
                 Ok(Some(address))
@@ -2222,6 +2199,8 @@ extern crate assert_matches;
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, SystemTime};
+
     use secrecy::{ExposeSecret, Secret, SecretVec};
     use uuid::Uuid;
     use zcash_client_backend::data_api::{
@@ -2230,11 +2209,14 @@ mod tests {
         Account, AccountBirthday, AccountPurpose, AccountSource, WalletRead, WalletTest,
         WalletWrite,
     };
-    use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
+    use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey};
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::consensus;
 
-    use crate::{error::SqliteClientError, testing::db::TestDbFactory, AccountUuid};
+    use crate::{
+        error::SqliteClientError, testing::db::TestDbFactory, util::Clock as _,
+        wallet::MIN_SHIELDED_DIVERSIFIER_OFFSET, AccountUuid,
+    };
 
     #[cfg(feature = "unstable")]
     use zcash_keys::keys::sapling;
@@ -2283,18 +2265,76 @@ mod tests {
             .update_chain_tip(account.birthday().height())
             .unwrap();
 
-        let current_addr = st.wallet().get_current_address(account.id()).unwrap();
+        let current_addr = st
+            .wallet()
+            .get_last_generated_address(account.id(), None)
+            .unwrap();
         assert!(current_addr.is_some());
 
         let addr2 = st
             .wallet_mut()
             .get_next_available_address(account.id(), None)
-            .unwrap();
+            .unwrap()
+            .map(|(a, _)| a);
         assert!(addr2.is_some());
         assert_ne!(current_addr, addr2);
 
-        let addr2_cur = st.wallet().get_current_address(account.id()).unwrap();
+        let addr2_cur = st
+            .wallet()
+            .get_last_generated_address(account.id(), None)
+            .unwrap();
         assert_eq!(addr2, addr2_cur);
+
+        // Perform similar tests for shielded-only addresses. These should be timestamp-based; we
+        // will tick the clock between each generation.
+        use zcash_keys::keys::ReceiverRequirement::*;
+        #[cfg(feature = "orchard")]
+        let shielded_only_request = UnifiedAddressRequest::unsafe_new(Require, Require, Omit);
+        #[cfg(not(feature = "orchard"))]
+        let shielded_only_request = UnifiedAddressRequest::unsafe_new(Omit, Require, Omit);
+
+        let cur_shielded_only = st
+            .wallet()
+            .get_last_generated_address(account.id(), Some(shielded_only_request))
+            .unwrap();
+        assert!(cur_shielded_only.is_none());
+
+        let di_lower = st
+            .wallet()
+            .db()
+            .clock
+            .now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("current time is valid")
+            .as_secs()
+            .saturating_add(MIN_SHIELDED_DIVERSIFIER_OFFSET);
+
+        let (shielded_only, di) = st
+            .wallet_mut()
+            .get_next_available_address(account.id(), Some(shielded_only_request))
+            .unwrap()
+            .expect("generated a shielded-only address");
+
+        // since not every Sapling diversifier index is valid, the resulting index will be bounded
+        // by the current time, but may not be equal to it
+        assert!(u128::from(di) >= u128::from(di_lower));
+
+        let cur_shielded_only = st
+            .wallet()
+            .get_last_generated_address(account.id(), Some(shielded_only_request))
+            .unwrap()
+            .expect("retrieved the last-generated shielded-only address");
+        assert_eq!(cur_shielded_only, shielded_only);
+
+        st.wallet_mut().db_mut().clock.tick(Duration::from_secs(10));
+
+        let (shielded_only_2, di_2) = st
+            .wallet_mut()
+            .get_next_available_address(account.id(), Some(shielded_only_request))
+            .unwrap()
+            .expect("generated a shielded-only address");
+        assert_ne!(shielded_only_2, shielded_only);
+        assert!(dbg!(u128::from(di_2)) >= dbg!(u128::from(di_lower) + 10));
     }
 
     #[test]

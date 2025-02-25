@@ -8,8 +8,10 @@ use shardtree::error::ShardTreeError;
 
 use zcash_address::ParseError;
 use zcash_client_backend::data_api::NoteFilter;
+use zcash_keys::address::UnifiedAddress;
 use zcash_keys::keys::AddressGenerationError;
 use zcash_protocol::{consensus::BlockHeight, value::BalanceError, PoolType, TxId};
+use zip32::DiversifierIndex;
 
 use crate::{wallet::commitment_tree, AccountUuid};
 
@@ -126,6 +128,11 @@ pub enum SqliteClientError {
     #[cfg(feature = "transparent-inputs")]
     ReachedGapLimit(KeyScope, u32),
 
+    /// The backend encountered an attempt to reuse a diversifier index to generate an address
+    /// having different receivers from an address that had previously been exposed for that
+    /// diversifier index. Returns the previously exposed address.
+    DiversifierIndexReuse(DiversifierIndex, Box<UnifiedAddress>),
+
     /// The wallet attempted to create a transaction that would use of one of the wallet's
     /// previously-used addresses, potentially creating a problem with on-chain transaction
     /// linkability. The returned value contains the string encoding of the address and the txid(s)
@@ -196,6 +203,13 @@ impl fmt::Display for SqliteClientError {
                      KeyScope::Ephemeral => "ephemeral transparent",
                  }
             ),
+            SqliteClientError::DiversifierIndexReuse(i, _) => {
+                write!(
+                    f,
+                    "An address has already been exposed for diversifier index {}",
+                    u128::from(*i)
+                )
+            }
             SqliteClientError::AddressReuse(address_str, txids) => {
                 write!(f, "The address {address_str} previously used in txid(s) {:?} would be reused.", txids)
             }

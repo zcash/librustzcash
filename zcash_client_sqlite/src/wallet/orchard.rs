@@ -264,6 +264,7 @@ pub(crate) fn ensure_address<
             diversifier_index,
             &ua,
             exposure_height,
+            false,
         )
         .map(Some)
     } else {

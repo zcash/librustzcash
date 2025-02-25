@@ -14,15 +14,19 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - `zcash_client_backend::data_api::WalletRead`:
-    - `get_transparent_receivers` now takes additional `include_change` and
-      `include_ephemeral` arguments.
-    - `get_known_ephemeral_addresses` now takes a
-      `Range<zcash_transparent::keys::NonHardenedChildIndex>` as its argument
-      instead of a `Range<u32>`
-    - Has added method `utxo_query_height` when the `transparent-inputs` feature
-      flag is active.
-- `zcash_client_backend::data_api::WalletWrite` has an added method
-  `get_address_for_index`
+  - `get_transparent_receivers` now takes additional `include_change` and
+    `include_ephemeral` arguments.
+  - `get_known_ephemeral_addresses` now takes a
+    `Range<zcash_transparent::keys::NonHardenedChildIndex>` as its argument
+    instead of a `Range<u32>`
+  - Has added method `utxo_query_height` when the `transparent-inputs` feature
+    flag is active.
+  - has removed method `get_current_address`. It has been replaced by
+    added method `WalletWrite::get_last_generated_address`
+- `zcash_client_backend::data_api::WalletWrite`:
+  - has added method `get_address_for_index`
+  - `get_next_available_address` now returns the diversifier index at which the
+    address was generated in addition to the address.
 
 ### Removed
 - `zcash_client_backend::data_api::GAP_LIMIT` gap limits are now configured

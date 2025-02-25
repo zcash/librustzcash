@@ -51,7 +51,7 @@ pub mod testing {
         /// that instant.
         pub fn tick(&self, delta: Duration) {
             let mut w = self.now.write().unwrap();
-            *w = *w + delta;
+            *w += delta;
         }
     }
 

@@ -2523,9 +2523,10 @@ impl WalletRead for MockWalletDb {
         Ok(None)
     }
 
-    fn get_current_address(
+    fn get_last_generated_address(
         &self,
         _account: Self::AccountId,
+        _request: Option<UnifiedAddressRequest>,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         Ok(None)
     }
@@ -2709,7 +2710,7 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _account: Self::AccountId,
         _request: Option<UnifiedAddressRequest>,
-    ) -> Result<Option<UnifiedAddress>, Self::Error> {
+    ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, Self::Error> {
         Ok(None)
     }
 

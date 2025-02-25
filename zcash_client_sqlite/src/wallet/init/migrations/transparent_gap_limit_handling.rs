@@ -7,12 +7,13 @@ use uuid::Uuid;
 use rusqlite::{named_params, Transaction};
 use schemerz_rusqlite::RusqliteMigration;
 
+use zcash_address::ZcashAddress;
 use zcash_keys::keys::UnifiedIncomingViewingKey;
 use zcash_protocol::consensus::{self, BlockHeight};
 
 use super::add_account_uuids;
 use crate::{
-    wallet::{self, init::WalletMigrationError, KeyScope},
+    wallet::{self, encoding::ReceiverFlags, init::WalletMigrationError, KeyScope},
     AccountRef,
 };
 
@@ -73,13 +74,12 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             ALTER TABLE addresses ADD COLUMN key_scope INTEGER NOT NULL DEFAULT {external_scope_code};
             ALTER TABLE addresses ADD COLUMN transparent_child_index INTEGER;
             ALTER TABLE addresses ADD COLUMN exposed_at_height INTEGER;
+            ALTER TABLE addresses ADD COLUMN receiver_flags INTEGER;
             "#
         ))?;
 
-        #[cfg(feature = "transparent-inputs")]
         let mut account_ids = HashSet::new();
 
-        #[cfg(feature = "transparent-inputs")]
         {
             // If the diversifier index is in the valid range of non-hardened child indices, set
             // `transparent_child_index` so that we can use it for gap limit handling.
@@ -87,7 +87,12 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             // diversifier_index_be) constraint.
             let mut di_query = conn.prepare(
                 r#"
-                SELECT account_id, accounts.uivk AS uivk, diversifier_index_be, accounts.birthday_height
+                SELECT
+                    account_id,
+                    address,
+                    accounts.uivk AS uivk,
+                    diversifier_index_be,
+                    accounts.birthday_height
                 FROM addresses
                 JOIN accounts ON accounts.id = account_id
                 "#,
@@ -97,44 +102,84 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 let account_id: i64 = row.get("account_id")?;
                 account_ids.insert(account_id);
 
-                let uivk = decode_uivk(row.get("uivk")?)?;
+                let addr_str: String = row.get("address")?;
+                let address = ZcashAddress::try_from_encoded(&addr_str).map_err(|e| {
+                    WalletMigrationError::CorruptedData(format!(
+                        "Encoded address {} is not a valid zcash address: {}",
+                        addr_str, e
+                    ))
+                })?;
+                let receiver_flags = address.convert::<ReceiverFlags>().map_err(|_| {
+                    WalletMigrationError::CorruptedData("Unexpected address type".to_string())
+                })?;
                 let di_be: Vec<u8> = row.get("diversifier_index_be")?;
-                let diversifier_index = decode_diversifier_index_be(&di_be)?;
                 let account_birthday: i64 = row.get("birthday_height")?;
 
-                let transparent_external = NonHardenedChildIndex::try_from(diversifier_index)
-                    .ok()
-                    .and_then(|idx| {
-                        uivk.transparent()
-                            .as_ref()
-                            .and_then(|external_ivk| external_ivk.derive_address(idx).ok())
-                            .map(|t_addr| (idx, t_addr))
-                    });
-
-                // Add transparent address index metadata and the transparent address corresponding
-                // to the index to the addresses table. We unconditionally set the cached
-                // transparent receiver address in order to simplify gap limit handling; even if a
-                // unified address is generated without a transparent receiver, we still assume
-                // that a transparent-only wallet for which we have imported the seed may have
-                // generated an address at that index.
-                if let Some((idx, t_addr)) = transparent_external {
+                let update_without_taddr = || {
                     conn.execute(
                         r#"
                         UPDATE addresses
-                        SET transparent_child_index = :transparent_child_index,
-                            cached_transparent_receiver_address = :t_addr,
-                            exposed_at_height = :account_birthday
+                        SET exposed_at_height = :account_birthday,
+                            receiver_flags = :receiver_flags
                         WHERE account_id = :account_id
                         AND diversifier_index_be = :diversifier_index_be
                         "#,
                         named_params! {
                             ":account_id": account_id,
                             ":diversifier_index_be": &di_be[..],
-                            ":transparent_child_index": idx.index(),
-                            ":t_addr": t_addr.encode(&self.params),
                             ":account_birthday": account_birthday,
+                            ":receiver_flags": receiver_flags.bits()
                         },
-                    )?;
+                    )
+                };
+
+                #[cfg(feature = "transparent-inputs")]
+                {
+                    let uivk = decode_uivk(row.get("uivk")?)?;
+                    let diversifier_index = decode_diversifier_index_be(&di_be)?;
+                    let transparent_external = NonHardenedChildIndex::try_from(diversifier_index)
+                        .ok()
+                        .and_then(|idx| {
+                            uivk.transparent()
+                                .as_ref()
+                                .and_then(|external_ivk| external_ivk.derive_address(idx).ok())
+                                .map(|t_addr| (idx, t_addr.encode(&self.params)))
+                        });
+
+                    // Add transparent address index metadata and the transparent address corresponding
+                    // to the index to the addresses table. We unconditionally set the cached
+                    // transparent receiver address in order to simplify gap limit handling; even if a
+                    // unified address is generated without a transparent receiver, we still assume
+                    // that a transparent-only wallet for which we have imported the seed may have
+                    // generated an address at that index.
+                    if let Some((idx, t_addr)) = transparent_external {
+                        conn.execute(
+                            r#"
+                            UPDATE addresses
+                            SET transparent_child_index = :transparent_child_index,
+                                cached_transparent_receiver_address = :t_addr,
+                                exposed_at_height = :account_birthday,
+                                receiver_flags = :receiver_flags
+                            WHERE account_id = :account_id
+                            AND diversifier_index_be = :diversifier_index_be
+                            "#,
+                            named_params! {
+                                ":account_id": account_id,
+                                ":diversifier_index_be": &di_be[..],
+                                ":transparent_child_index": idx.index(),
+                                ":t_addr": t_addr,
+                                ":account_birthday": account_birthday,
+                                ":receiver_flags": receiver_flags.bits()
+                            },
+                        )?;
+                    } else {
+                        update_without_taddr()?;
+                    }
+                }
+
+                #[cfg(not(feature = "transparent-inputs"))]
+                {
+                    update_without_taddr()?;
                 }
             }
         }
@@ -155,6 +200,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 transparent_child_index INTEGER,
                 cached_transparent_receiver_address TEXT,
                 exposed_at_height INTEGER,
+                receiver_flags INTEGER NOT NULL,
                 FOREIGN KEY (account_id) REFERENCES accounts(id),
                 CONSTRAINT diversification UNIQUE (account_id, key_scope, diversifier_index_be),
                 CONSTRAINT transparent_index_consistency CHECK (
@@ -165,12 +211,12 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             INSERT INTO addresses_new (
                 account_id, key_scope, diversifier_index_be, address,
                 transparent_child_index, cached_transparent_receiver_address,
-                exposed_at_height
+                exposed_at_height, receiver_flags
             )
             SELECT
                 account_id, key_scope, diversifier_index_be, address,
                 transparent_child_index, cached_transparent_receiver_address,
-                exposed_at_height
+                exposed_at_height, receiver_flags
             FROM addresses;
             "#)?;
 
@@ -182,11 +228,11 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 INSERT INTO addresses_new (
                     account_id, key_scope, diversifier_index_be, address,
                     transparent_child_index, cached_transparent_receiver_address,
-                    exposed_at_height
+                    exposed_at_height, receiver_flags
                 ) VALUES (
                     :account_id, :key_scope, :diversifier_index_be, :address,
                     :transparent_child_index, :cached_transparent_receiver_address,
-                    :exposed_at_height
+                    :exposed_at_height, :receiver_flags
                 )
                 "#,
             )?;
@@ -227,7 +273,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     ":address": address,
                     ":transparent_child_index": transparent_child_index,
                     ":cached_transparent_receiver_address": address,
-                    ":exposed_at_height": exposed_at_height
+                    ":exposed_at_height": exposed_at_height,
+                    ":receiver_flags": ReceiverFlags::P2PKH.bits()
                 })?;
 
                 account_ids.insert(account_id);
@@ -328,6 +375,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         di,
                         &ua,
                         mined_height,
+                        false,
                     )?;
 
                     conn.execute(
@@ -391,6 +439,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         di,
                         &ua,
                         mined_height,
+                        false,
                     )?;
 
                     conn.execute(

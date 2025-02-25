@@ -6,6 +6,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::keys::UnifiedAddressRequest::{sapling, orchard, p2pkh}` methods
+
 ## [0.7.0] - 2025-02-21
 
 ### Added

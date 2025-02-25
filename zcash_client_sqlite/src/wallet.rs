@@ -70,8 +70,10 @@ use std::{
     io::{self, Cursor},
     num::NonZeroU32,
     ops::RangeInclusive,
+    time::SystemTime,
 };
 
+use encoding::ReceiverFlags;
 use incrementalmerkletree::{Marking, Retention};
 use rusqlite::{self, named_params, params, Connection, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
@@ -95,7 +97,7 @@ use zcash_keys::{
     address::{Address, Receiver, UnifiedAddress},
     encoding::AddressCodec,
     keys::{
-        AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey,
+        AddressGenerationError, ReceiverRequirement, UnifiedAddressRequest, UnifiedFullViewingKey,
         UnifiedIncomingViewingKey, UnifiedSpendingKey,
     },
 };
@@ -105,7 +107,7 @@ use zcash_primitives::{
     transaction::{Transaction, TransactionData},
 };
 use zcash_protocol::{
-    consensus::{self, BlockHeight, BranchId, NetworkConstants as _, NetworkUpgrade, Parameters},
+    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     value::{ZatBalance, Zatoshis},
     PoolType, ShieldedProtocol, TxId,
@@ -115,6 +117,7 @@ use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 use self::scanning::{parse_priority_code, priority_code, replace_queue_entries};
 use crate::{
     error::SqliteClientError,
+    util::Clock,
     wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
     AccountRef, AccountUuid, AddressRef, SqlTransaction, TransferType, TxRef,
     WalletCommitmentTrees, WalletDb, PRUNING_DEPTH, SAPLING_TABLES_PREFIX, VERIFY_LOOKAHEAD,
@@ -136,6 +139,7 @@ use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD
 pub mod commitment_tree;
 pub(crate) mod common;
 mod db;
+pub(crate) mod encoding;
 pub mod init;
 #[cfg(feature = "orchard")]
 pub(crate) mod orchard;
@@ -145,6 +149,15 @@ pub(crate) mod scanning;
 pub(crate) mod transparent;
 
 pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
+
+/// A constant for use in converting Unix timestamps to shielded-only diversifier indices. The
+/// value here is intended to be added to the current time, in seconds since the epoch, to obtain
+/// an index that is greater than or equal to 2^31. While it would be possible to use indices in
+/// the range 2^31..2^32, we wish to avoid any confusion with indices in the non-hardened BIP 32
+/// child index derivation space.
+///
+/// 2^32 - (date --date "Oct 28, 2016 07:56 UTC" +%s)
+pub(crate) const MIN_SHIELDED_DIVERSIFIER_OFFSET: u64 = 2817325936;
 
 fn parse_account_source(
     account_kind: u32,
@@ -704,6 +717,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         d_idx,
         &address,
         Some(birthday.height()),
+        false,
     )?;
 
     // Pre-generate transparent addresses up to the gap limits for the external, internal,
@@ -716,29 +730,180 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     Ok(account)
 }
 
-pub(crate) fn get_current_address<P: consensus::Parameters>(
+pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    clock: &C,
+    account_uuid: AccountUuid,
+    request: Option<UnifiedAddressRequest>,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
+) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, SqliteClientError> {
+    let account: Account = match get_account(conn, params, account_uuid)? {
+        Some(account) => account,
+        None => {
+            return Ok(None);
+        }
+    };
+
+    let request = request.unwrap_or_else(|| {
+        account
+            .uivk()
+            .to_address_request()
+            .expect("uivk can produce a valid address")
+    });
+
+    let (addr, diversifier_index) = if request.p2pkh() == ReceiverRequirement::Require {
+        #[cfg(not(feature = "transparent-inputs"))]
+        {
+            return Err(SqliteClientError::AddressGeneration(
+                AddressGenerationError::ReceiverTypeNotSupported(Typecode::P2pkh),
+            ));
+        }
+
+        // If a p2pkh receiver is required, return the first un-exposed address from within the
+        // transparent gap limit.
+        #[cfg(feature = "transparent-inputs")]
+        {
+            // First, ensure that we have pre-generated as many addresses as we can.
+            transparent::generate_gap_addresses(
+                conn,
+                params,
+                account.internal_id(),
+                KeyScope::EXTERNAL,
+                gap_limits,
+                None,
+            )?;
+
+            // Select indicies from the transparent gap limit that are available for use as
+            // diversifier indices.
+            let (gap_start, addrs) = transparent::select_addrs_to_reserve(
+                conn,
+                params,
+                account.internal_id(),
+                KeyScope::EXTERNAL,
+                gap_limits.external(),
+                gap_limits
+                    .external()
+                    .try_into()
+                    .expect("gap limit fits in usize"),
+            )?;
+
+            // Find the first index that generates an address conforming to the request.
+            addrs
+                .iter()
+                .find_map(|(_, _, meta)| {
+                    let j = DiversifierIndex::from(meta.address_index());
+                    account
+                        .uivk()
+                        .address(j, Some(request))
+                        .ok()
+                        .map(|ua| (ua, j))
+                })
+                .ok_or(SqliteClientError::ReachedGapLimit(
+                    KeyScope::EXTERNAL,
+                    gap_start.index() + gap_limits.external(),
+                ))?
+        }
+    } else {
+        // compute a base diversifier index from the timestamp
+        let mut j = DiversifierIndex::from(
+            clock
+                .now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("system time is valid")
+                .as_secs()
+                .saturating_add(MIN_SHIELDED_DIVERSIFIER_OFFSET),
+        );
+
+        let mut find_collision = conn.prepare(
+            "SELECT exposed_at_height
+             FROM addresses
+             WHERE account_id = :account_id
+             AND key_scope = :key_scope
+             AND diversifier_index_be = :diversifier_index_be",
+        )?;
+
+        // search the diversifier space for a diversifier index that creates a valid address
+        // satisfying the request and is currently not used in an exposed address
+        loop {
+            let found_addr = account.uivk().find_address(j, Some(request))?;
+            let collision = find_collision
+                .query_row(
+                    named_params! {
+                        ":account_id": account.internal_id().0,
+                        ":key_scope": KeyScope::EXTERNAL.encode(),
+                        ":diversifier_index_be": &encode_diversifier_index_be(found_addr.1)
+                    },
+                    |row| row.get::<_, Option<u32>>(0),
+                )
+                .optional()?
+                .flatten();
+
+            if collision.is_none() {
+                break found_addr;
+            } else {
+                j.increment().map_err(|_| {
+                    SqliteClientError::AddressGeneration(
+                        AddressGenerationError::DiversifierSpaceExhausted,
+                    )
+                })?;
+            }
+        }
+    };
+
+    let chain_tip_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
+    upsert_address(
+        conn,
+        params,
+        account.internal_id(),
+        diversifier_index,
+        &addr,
+        Some(chain_tip_height),
+        true,
+    )?;
+
+    Ok(Some((addr, diversifier_index)))
+}
+
+pub(crate) fn get_last_generated_address<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account_uuid: AccountUuid,
+    request: Option<UnifiedAddressRequest>,
 ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, SqliteClientError> {
-    let ua_prefix = params.network_type().hrp_unified_address();
-    // This returns the most recently generated address.
+    let account: Account = match get_account(conn, params, account_uuid)? {
+        Some(account) => account,
+        None => {
+            return Ok(None);
+        }
+    };
+    let request = request
+        .map_or_else(|| account.uivk().to_address_request(), Ok)
+        .map_err(|_| {
+            SqliteClientError::BadAccountData(
+                "Could not generate UnifiedAddressRequest for UIVK".to_string(),
+            )
+        })?;
+    let require_flags = ReceiverFlags::required(request);
+    let omit_flags = ReceiverFlags::omitted(request);
+    // This returns the most recently exposed external-scope address (the request that was exposed
+    // at the greatest block height) that conforms to the specified request.
     let addr: Option<(String, Vec<u8>)> = conn
         .query_row(
-            &format!(
-                "SELECT address, diversifier_index_be
-                 FROM addresses
-                 JOIN accounts ON addresses.account_id = accounts.id
-                 WHERE accounts.uuid = :account_uuid
-                 AND key_scope = :key_scope
-                 AND address LIKE '{ua_prefix}%'
-                 AND exposed_at_height IS NOT NULL
-                 ORDER BY diversifier_index_be DESC
-                 LIMIT 1"
-            ),
+            "SELECT address, diversifier_index_be
+             FROM addresses
+             WHERE account_id = :account_id
+             AND key_scope = :key_scope
+             AND (receiver_flags & :require_flags) = :require_flags
+             AND (receiver_flags & :omit_flags) = 0
+             AND exposed_at_height IS NOT NULL
+             ORDER BY exposed_at_height DESC, diversifier_index_be DESC
+             LIMIT 1",
             named_params![
-                ":account_uuid": account_uuid.0,
-                ":key_scope": KeyScope::EXTERNAL.encode()
+                ":account_id": account.internal_id().0,
+                ":key_scope": KeyScope::EXTERNAL.encode(),
+                ":require_flags": require_flags.bits(),
+                ":omit_flags": omit_flags.bits(),
             ],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -765,6 +930,17 @@ pub(crate) fn get_current_address<P: consensus::Parameters>(
 /// Adds the given external address and diversifier index to the addresses table.
 ///
 /// Returns the primary key identifier for the newly-inserted address.
+///
+/// ## Parameters
+/// - `account_id`: The account that the address was generated for.
+/// - `diversifier_index`: The diversifier index used to generate the address.
+/// - `address`: The unified address itself.
+/// - `exposed_at_height`: The block height at the earliest time that the address may have been
+///   exposed to a user, assuming a single generator of addresses.
+/// - `force_update_address`: If this argument is set to `true`, an address has already been
+///   inserted for the given account an diversifier index, and the `exposed_at_height` column
+///   is currently `NULL` (i.e. the address at this diversifier index has not yet been exposed)
+///   then the value of the `address` column will be replaced with the provided address.
 pub(crate) fn upsert_address<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -772,7 +948,50 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
     diversifier_index: DiversifierIndex,
     address: &UnifiedAddress,
     exposed_at_height: Option<BlockHeight>,
+    force_update_address: bool,
 ) -> Result<AddressRef, SqliteClientError> {
+    // the diversifier index is stored in big-endian order to allow sorting
+    let di_be = encode_diversifier_index_be(diversifier_index);
+
+    // If a force-update was requested, check whether an address has previously been exposed for
+    // this diversifier index. If so, and if that address differs from the given address, return an
+    // error.
+    if force_update_address {
+        let previously_exposed_as = conn
+            .query_row(
+                "SELECT address, exposed_at_height
+                 FROM addresses
+                 WHERE account_id = :account_id
+                 AND diversifier_index_be = :diversifier_index_be
+                 AND key_scope = :key_scope",
+                named_params![
+                    ":account_id": account_id.0,
+                    ":diversifier_index_be": di_be,
+                    ":key_scope": KeyScope::EXTERNAL.encode(),
+                ],
+                |row| {
+                    let address = row.get::<_, String>("address")?;
+                    let exposed_at = row.get::<_, Option<u32>>("exposed_at_height")?;
+                    Ok(exposed_at.map(|_| address))
+                },
+            )
+            .optional()?
+            .flatten()
+            .map(|addr_str| UnifiedAddress::decode(params, &addr_str))
+            .transpose()
+            .map_err(SqliteClientError::CorruptedData)?;
+
+        match previously_exposed_as {
+            Some(addr) if &addr != address => {
+                return Err(SqliteClientError::DiversifierIndexReuse(
+                    diversifier_index,
+                    Box::new(addr),
+                ));
+            }
+            _ => (),
+        }
+    }
+
     let mut stmt = conn.prepare_cached(
         "INSERT INTO addresses (
             account_id,
@@ -781,7 +1000,8 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
             address,
             transparent_child_index,
             cached_transparent_receiver_address,
-            exposed_at_height
+            exposed_at_height,
+            receiver_flags
         )
         VALUES (
             :account_id,
@@ -790,14 +1010,25 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
             :address,
             :transparent_child_index,
             :cached_transparent_receiver_address,
-            :exposed_at_height
+            :exposed_at_height,
+            :receiver_flags
         )
         ON CONFLICT (account_id, diversifier_index_be, key_scope) DO UPDATE
         SET exposed_at_height = COALESCE(
-            MIN(exposed_at_height, :exposed_at_height),
-            exposed_at_height, 
-            :exposed_at_height
-        )
+                MIN(exposed_at_height, :exposed_at_height),
+                exposed_at_height,
+                :exposed_at_height
+            ),
+            address = IIF(
+                exposed_at_height IS NULL AND :force_update_address,
+                :address,
+                address
+            ),
+            receiver_flags = IIF(
+                exposed_at_height IS NULL AND :force_update_address,
+                :receiver_flags,
+                receiver_flags
+            )
         RETURNING id",
     )?;
 
@@ -812,12 +1043,14 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
         named_params![
             ":account_id": account_id.0,
             // the diversifier index is stored in big-endian order to allow sorting
-            ":diversifier_index_be": encode_diversifier_index_be(diversifier_index),
+            ":diversifier_index_be": &di_be,
             ":key_scope": KeyScope::EXTERNAL.encode(),
             ":address": &address.encode(params),
             ":transparent_child_index": transparent_child_index,
             ":cached_transparent_receiver_address": &address.transparent().map(|r| r.encode(params)),
-            ":exposed_at_height": exposed_at_height.map(u32::from)
+            ":exposed_at_height": exposed_at_height.map(u32::from),
+            ":force_update_address": force_update_address,
+            ":receiver_flags": ReceiverFlags::from(address).bits()
         ],
         |row| row.get(0).map(AddressRef)
     ).map_err(SqliteClientError::from)
@@ -4009,11 +4242,15 @@ mod tests {
         );
 
         // The default address is set for the test account
-        assert_matches!(st.wallet().get_current_address(account.id()), Ok(Some(_)));
+        assert_matches!(
+            st.wallet().get_last_generated_address(account.id(), None),
+            Ok(Some(_))
+        );
 
         // No default address is set for an un-initialized account
         assert_matches!(
-            st.wallet().get_current_address(AccountUuid(Uuid::nil())),
+            st.wallet()
+                .get_last_generated_address(AccountUuid(Uuid::nil()), None),
             Ok(None)
         );
     }

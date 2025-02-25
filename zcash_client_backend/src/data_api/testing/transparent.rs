@@ -102,7 +102,7 @@ where
     let account_id = st.test_account().unwrap().id();
     let uaddr = st
         .wallet()
-        .get_current_address(account_id)
+        .get_last_generated_address(account_id, None)
         .unwrap()
         .unwrap();
     let taddr = uaddr.transparent().unwrap();
@@ -193,7 +193,7 @@ where
     let account = st.test_account().cloned().unwrap();
     let uaddr = st
         .wallet()
-        .get_current_address(account.id())
+        .get_last_generated_address(account.id(), None)
         .unwrap()
         .unwrap();
     let taddr = uaddr.transparent().unwrap();
@@ -301,7 +301,7 @@ where
     let account = st.test_account().cloned().unwrap();
     let uaddr = st
         .wallet()
-        .get_current_address(account.id())
+        .get_last_generated_address(account.id(), None)
         .unwrap()
         .unwrap();
     let taddr = uaddr.transparent().unwrap();

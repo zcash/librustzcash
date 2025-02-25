@@ -31,6 +31,7 @@ use zcash_protocol::{
 };
 use zip32::Scope;
 
+use super::encoding::ReceiverFlags;
 use super::{
     account_birthday_internal, chain_tip_height, decode_diversifier_index_be,
     encode_diversifier_index_be, get_account_ids, get_account_internal, KeyScope,
@@ -254,30 +255,34 @@ pub(crate) fn decode_transparent_child_index(
         })
 }
 
-/// Returns a vector with the next `n` previously unreserved transparent addresses for
-/// the given account. These addresses must have been previously generated using
-/// `generate_gap_addresses`.
+/// Returns the current gap start, along with a vector with at most the next `n` previously
+/// unreserved transparent addresses for the given account. These addresses must have been
+/// previously generated using `generate_gap_addresses`.
+///
+/// WARNING: the addresses returned by this method have not been marked as exposed; it is the
+/// responsibility of the caller to correctly update the `exposed_at_height` value for each
+/// returned address before such an address is exposed to a user.
 ///
 /// # Errors
 ///
 /// * `SqliteClientError::AccountUnknown`, if there is no account with the given id.
-/// * `SqliteClientError::ReachedGapLimit`, if it is not possible to reserve `n` addresses
-///   within the gap limit after the last address in this account that is known to have an
-///   output in a mined transaction.
 /// * `SqliteClientError::AddressGeneration(AddressGenerationError::DiversifierSpaceExhausted)`,
 ///   if the limit on transparent address indices has been reached.
-pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
+#[allow(clippy::type_complexity)]
+pub(crate) fn select_addrs_to_reserve<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     account_id: AccountRef,
     key_scope: KeyScope,
     gap_limit: u32,
     n: usize,
-) -> Result<Vec<(AddressRef, TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
-    if n == 0 {
-        return Ok(vec![]);
-    }
-
+) -> Result<
+    (
+        NonHardenedChildIndex,
+        Vec<(AddressRef, TransparentAddress, TransparentAddressMetadata)>,
+    ),
+    SqliteClientError,
+> {
     let gap_start = find_gap_start(conn, account_id, key_scope, gap_limit)?.ok_or(
         SqliteClientError::AddressGeneration(AddressGenerationError::DiversifierSpaceExhausted),
     )?;
@@ -327,6 +332,39 @@ pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
         )?
         .filter_map(|r| r.transpose())
         .collect::<Result<Vec<_>, _>>()?;
+
+    Ok((gap_start, addresses_to_reserve))
+}
+
+/// Returns a vector with the next `n` previously unreserved transparent addresses for the given
+/// account, having marked each address as having been exposed at the current chain-tip height.
+/// These addresses must have been previously generated using `generate_gap_addresses`.
+///
+/// # Errors
+///
+/// * [`SqliteClientError::AccountUnknown`], if there is no account with the given id.
+/// * [`SqliteClientError::ReachedGapLimit`], if it is not possible to reserve `n` addresses
+///   within the gap limit after the last address in this account that is known to have an
+///   output in a mined transaction.
+/// * [`SqliteClientError::AddressGeneration(AddressGenerationError::DiversifierSpaceExhausted)`]
+///   if the limit on transparent address indices has been reached.
+///
+/// [`SqliteClientError::AddressGeneration(AddressGenerationError::DiversifierSpaceExhausted)`]:
+/// SqliteClientError::AddressGeneration
+pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_id: AccountRef,
+    key_scope: KeyScope,
+    gap_limit: u32,
+    n: usize,
+) -> Result<Vec<(AddressRef, TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
+    if n == 0 {
+        return Ok(vec![]);
+    }
+
+    let (gap_start, addresses_to_reserve) =
+        select_addrs_to_reserve(conn, params, account_id, key_scope, gap_limit, n)?;
 
     if addresses_to_reserve.len() < n {
         return Err(SqliteClientError::ReachedGapLimit(
@@ -453,11 +491,13 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
         let mut stmt_insert_address = conn.prepare_cached(
             "INSERT INTO addresses (
                 account_id, diversifier_index_be, key_scope, address,
-                transparent_child_index, cached_transparent_receiver_address
+                transparent_child_index, cached_transparent_receiver_address,
+                receiver_flags
              )
              VALUES (
                 :account_id, :diversifier_index_be, :key_scope, :address,
-                :transparent_child_index, :transparent_address
+                :transparent_child_index, :transparent_address,
+                :receiver_flags
              )
              ON CONFLICT (account_id, diversifier_index_be, key_scope) DO NOTHING",
         )?;
@@ -467,6 +507,10 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
                 .expect("restricted to valid range above");
             let (zcash_address, transparent_address) =
                 gen_addrs(key_scope, transparent_child_index)?;
+            let receiver_flags: ReceiverFlags = zcash_address
+                .clone()
+                .convert::<ReceiverFlags>()
+                .expect("address is valid");
 
             stmt_insert_address.execute(named_params![
                 ":account_id": account_id.0,
@@ -474,7 +518,8 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
                 ":key_scope": key_scope.encode(),
                 ":address": zcash_address.encode(),
                 ":transparent_child_index": raw_index,
-                ":transparent_address": transparent_address.encode(params)
+                ":transparent_address": transparent_address.encode(params),
+                ":receiver_flags": receiver_flags.bits()
             ])?;
         }
     }

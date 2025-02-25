@@ -27,6 +27,7 @@ and this library adheres to Rust's notion of
     for the account that reached the limit in its payload. In addition
     to the transparent address index, it also contains the key scope
     involved when the error was encountered.
+  - A new `DiversifierIndexReuse` variant has been added.
 - Each row returned from the `v_received_outputs` view now exposes an
   internal identifier for the address that received that output. This should
   be ignored by external consumers of this view.

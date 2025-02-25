@@ -1225,14 +1225,19 @@ pub trait WalletRead {
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<Self::Account>, Self::Error>;
 
-    /// Returns the most recently generated unified address for the specified account, if the
-    /// account identifier specified refers to a valid account for this wallet.
+    /// Returns the most recently generated unified address for the specified account that conforms
+    /// to the specified address request, if the account identifier specified refers to a valid
+    /// account for this wallet.
+    ///
+    /// If the `request` parameter is `None`, this will be interpreted as a request for an address
+    /// having a receiver corresponding to each data item in the account's UIVK.
     ///
     /// This will return `Ok(None)` if the account identifier does not correspond to a known
-    /// account.
-    fn get_current_address(
+    /// account, or if no previously generated address conforms to the specified request.
+    fn get_last_generated_address(
         &self,
         account: Self::AccountId,
+        request: Option<UnifiedAddressRequest>,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
     /// Returns the birthday height for the given account, or an error if the account is not known
@@ -2380,7 +2385,7 @@ pub trait WalletWrite: WalletRead {
         &mut self,
         account: Self::AccountId,
         request: Option<UnifiedAddressRequest>,
-    ) -> Result<Option<UnifiedAddress>, Self::Error>;
+    ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, Self::Error>;
 
     /// Generates, persists, and marks as exposed a diversified address for the specified account
     /// at the provided diversifier index. If the `request` parameter is `None`, an address should
@@ -2392,7 +2397,9 @@ pub trait WalletWrite: WalletRead {
     /// [`ReceiverRequirement::Require`]'ed receiver.
     ///
     /// Address generation should fail if a transparent receiver would be generated that violates
-    /// the backend's internally configured gap limit for HD-seed-based recovery.
+    /// the backend's internally configured gap limit for HD-seed-based recovery, or if an address
+    /// has already been exposed for the given diversifier index and the given request produced an
+    /// address having different receivers than what was originally exposed.
     ///
     /// [`ReceiverRequirement::Require`]: zcash_keys::keys::ReceiverRequirement::Require
     fn get_address_for_index(

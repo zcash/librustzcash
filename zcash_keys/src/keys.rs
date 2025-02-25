@@ -655,6 +655,21 @@ impl UnifiedAddressRequest {
             p2pkh,
         }
     }
+
+    /// Returns the [`ReceiverRequirement`] for inclusion of an Orchard receiver.
+    pub fn orchard(&self) -> ReceiverRequirement {
+        self.orchard
+    }
+
+    /// Returns the [`ReceiverRequirement`] for inclusion of a Sapling receiver.
+    pub fn sapling(&self) -> ReceiverRequirement {
+        self.sapling
+    }
+
+    /// Returns the [`ReceiverRequirement`] for inclusion of a P2pkh receiver.
+    pub fn p2pkh(&self) -> ReceiverRequirement {
+        self.p2pkh
+    }
 }
 
 #[cfg(feature = "transparent-inputs")]

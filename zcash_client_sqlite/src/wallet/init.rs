@@ -224,6 +224,12 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::ReachedGapLimit(..) => {
             unreachable!("we don't do ephemeral address tracking")
         }
+        SqliteClientError::DiversifierIndexReuse(i, _) => {
+            WalletMigrationError::CorruptedData(format!(
+                "invalid attempt to overwrite address at diversifier index {}",
+                u128::from(i)
+            ))
+        }
         SqliteClientError::AddressReuse(_, _) => {
             unreachable!("we don't create transactions in migrations")
         }
@@ -1129,18 +1135,27 @@ mod tests {
             if let Some(Address::Unified(tvua)) =
                 Address::decode(&Network::MainNetwork, tv.unified_addr)
             {
-                let (ua, di) =
-                    wallet::get_current_address(&db_data.conn, &db_data.params, account_id)
-                        .unwrap()
-                        .expect("create_account generated the first address");
+                // hardcoded with knowledge of test vectors
+                let ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, Require);
+
+                let (ua, di) = wallet::get_last_generated_address(
+                    &db_data.conn,
+                    &db_data.params,
+                    account_id,
+                    if tv.diversifier_index == 0 {
+                        None
+                    } else {
+                        Some(ua_request)
+                    },
+                )
+                .unwrap()
+                .expect("create_account generated the first address");
                 assert_eq!(DiversifierIndex::from(tv.diversifier_index), di);
                 assert_eq!(tvua.transparent(), ua.transparent());
                 assert_eq!(tvua.sapling(), ua.sapling());
                 #[cfg(not(feature = "orchard"))]
                 assert_eq!(tv.unified_addr, ua.encode(&Network::MainNetwork));
 
-                // hardcoded with knowledge of what's coming next
-                let ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, Require);
                 db_data
                     .get_next_available_address(account_id, Some(ua_request))
                     .unwrap()
