@@ -69,6 +69,8 @@ pasta_curves = "0.5"
 
 # - Transparent
 bip32 = { version = "=0.6.0-pre.1", default-features = false }
+block-buffer = { version = "=0.11.0-rc.3" } # later RCs require edition2024
+crypto-common = { version = "=0.2.0-rc.1" } # later RCs require edition2024
 ripemd = { version = "0.1", default-features = false }
 secp256k1 = { version = "0.29", default-features = false, features = ["alloc"] }
 transparent = { package = "zcash_transparent", version = "0.2", path = "zcash_transparent", default-features = false }
