@@ -240,11 +240,7 @@ fn zip_0244() {
             .iter()
             .map(|amount| Zatoshis::from_nonnegative_i64(*amount).unwrap())
             .collect();
-        let input_scriptpubkeys = tv
-            .script_pubkeys
-            .iter()
-            .map(|s| Script(s.clone()))
-            .collect();
+        let input_scriptpubkeys = tv.script_pubkeys.iter().cloned().map(Script).collect();
 
         let test_bundle = txdata
             .transparent_bundle

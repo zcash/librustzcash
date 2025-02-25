@@ -54,6 +54,7 @@ sapling.workspace = true
 
 # - Transparent protocol
 secp256k1 = { workspace = true, optional = true }
+zcash_script.workspace = true
 
 # - Note commitment trees
 incrementalmerkletree.workspace = true

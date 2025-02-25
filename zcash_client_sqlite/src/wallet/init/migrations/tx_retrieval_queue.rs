@@ -396,7 +396,7 @@ mod tests {
                 vin: vec![TxIn::from_parts(OutPoint::fake(), Script(vec![]), 0)],
                 vout: vec![TxOut::new(
                     Zatoshis::const_from_u64(10_000),
-                    TransparentAddress::PublicKeyHash([7; 20]).script(),
+                    TransparentAddress::PublicKeyHash([7; 20]).script().into(),
                 )],
                 authorization: transparent::bundle::Authorized,
             }),

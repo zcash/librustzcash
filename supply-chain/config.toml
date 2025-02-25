@@ -67,6 +67,9 @@ audit-as-crates-io = true
 [policy.zcash_protocol]
 audit-as-crates-io = true
 
+[policy.zcash_script]
+audit-as-crates-io = true
+
 [policy.zcash_transparent]
 audit-as-crates-io = true
 
@@ -221,6 +224,10 @@ criteria = "safe-to-deploy"
 version = "0.8.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.bounded-vec]]
+version = "0.9.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.bounded-vec-deque]]
 version = "0.1.1"
 criteria = "safe-to-deploy"
@@ -259,6 +266,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.chrono]]
 version = "0.4.38"
+criteria = "safe-to-deploy"
+
+[[exemptions.clang-sys]]
+version = "1.8.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.coarsetime]]
@@ -475,6 +486,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.enum-ordinalize]]
 version = "3.1.15"
+criteria = "safe-to-deploy"
+
+[[exemptions.enum_primitive]]
+version = "0.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.env_home]]
@@ -717,6 +732,10 @@ criteria = "safe-to-deploy"
 version = "0.2.154"
 criteria = "safe-to-deploy"
 
+[[exemptions.libloading]]
+version = "0.8.8"
+criteria = "safe-to-deploy"
+
 [[exemptions.libm]]
 version = "0.2.2"
 criteria = "safe-to-deploy"
@@ -788,6 +807,10 @@ criteria = "safe-to-deploy"
 [[exemptions.num-format]]
 version = "0.4.4"
 criteria = "safe-to-run"
+
+[[exemptions.num-traits]]
+version = "0.1.43"
+criteria = "safe-to-deploy"
 
 [[exemptions.num_cpus]]
 version = "1.16.0"
@@ -1151,6 +1174,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.serde_with_macros]]
 version = "3.8.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.sha-1]]
+version = "0.10.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.sha2]]
@@ -1575,6 +1602,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.xz2]]
 version = "0.1.7"
+criteria = "safe-to-deploy"
+
+[[exemptions.zcash_script]]
+version = "0.3.2@git:96363951c0fade4f99446d2a847efe706deff35c"
 criteria = "safe-to-deploy"
 
 [[exemptions.zeroize]]

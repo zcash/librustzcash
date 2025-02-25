@@ -1177,7 +1177,8 @@ mod tests {
                 .unwrap()
                 .derive_address(NonHardenedChildIndex::ZERO)
                 .unwrap()
-                .script(),
+                .script()
+                .into(),
         );
         builder
             .add_transparent_input(pubkey, OutPoint::fake(), prev_coin)

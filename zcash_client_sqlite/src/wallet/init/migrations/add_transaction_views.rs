@@ -282,7 +282,6 @@ mod tests {
     use {
         crate::wallet::init::migrations::{ufvk_support, utxos_table},
         ::transparent::{
-            address::Script,
             bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut},
             keys::IncomingViewingKey,
         },
@@ -394,7 +393,7 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn migrate_from_wm2() {
-        use ::transparent::keys::NonHardenedChildIndex;
+        use ::transparent::{address::Script, keys::NonHardenedChildIndex};
         use zcash_client_backend::keys::UnifiedAddressRequest;
         use zcash_keys::keys::ReceiverRequirement::*;
         use zcash_protocol::value::Zatoshis;

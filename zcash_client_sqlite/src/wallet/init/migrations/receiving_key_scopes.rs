@@ -385,7 +385,8 @@ mod tests {
                         .unwrap()
                         .default_address()
                         .0
-                        .script(),
+                        .script()
+                        .into(),
                 ),
             )
             .unwrap();
