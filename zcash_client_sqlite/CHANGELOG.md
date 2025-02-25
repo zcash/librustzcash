@@ -10,6 +10,7 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_client_sqlite::WalletDb::with_gap_limits`
 - `zcash_client_sqlite::GapLimits`
+- `zcash_client_sqlite::util`
 
 ### Changed
 - `zcash_client_sqlite::error::SqliteClientError` variants have changed:
