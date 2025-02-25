@@ -43,6 +43,7 @@ zip321 = { version = "0.3", path = "components/zip321" }
 zcash_note_encryption = "0.4.1"
 zcash_primitives = { version = "0.22", path = "zcash_primitives", default-features = false }
 zcash_proofs = { version = "0.22", path = "zcash_proofs", default-features = false }
+zcash_script = "0.2.0"
 
 pczt = { version = "0.2", path = "pczt" }
 
@@ -209,3 +210,6 @@ debug = true
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
+
+[patch.crates-io]
+zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script.git", rev = "d0365cd7d75ca45c4595af09d9732146e6132fb2" }
