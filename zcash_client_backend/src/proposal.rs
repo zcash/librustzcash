@@ -260,7 +260,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     ///
     /// Parameters:
     /// * `transaction_request`: The ZIP 321 transaction request describing the payments to be
-    ///    made.
+    ///   made.
     /// * `payment_pools`: A map from payment index to pool type.
     /// * `transparent_inputs`: The set of previous transparent outputs to be spent.
     /// * `shielded_inputs`: The sets of previous shielded outputs to be spent.
@@ -268,7 +268,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// * `fee_rule`: The fee rule observed by the proposed transaction.
     /// * `min_target_height`: The minimum block height at which the transaction may be created.
     /// * `is_shielding`: A flag that identifies whether this is a wallet-internal shielding
-    ///    transaction.
+    ///   transaction.
     #[allow(clippy::too_many_arguments)]
     pub fn single_step(
         transaction_request: TransactionRequest,
