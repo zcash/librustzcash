@@ -13,7 +13,7 @@ categories.workspace = true
 [dependencies]
 zcash_note_encryption = { workspace = true, optional = true }
 zcash_primitives = { workspace = true, optional = true }
-zcash_protocol = { workspace = true, optional = true }
+zcash_protocol = { workspace = true, default-features = false }
 
 blake2b_simd = { workspace = true, optional = true }
 rand_core = { workspace = true, optional = true }
@@ -60,7 +60,6 @@ orchard = [
     "dep:nonempty",
     "dep:orchard",
     "dep:pasta_curves",
-    "dep:zcash_protocol",
 ]
 sapling = [
     "dep:bls12_381",
@@ -69,10 +68,9 @@ sapling = [
     "dep:redjubjub",
     "dep:sapling",
     "dep:zcash_note_encryption",
-    "dep:zcash_protocol",
 ]
-transparent = ["dep:secp256k1", "dep:transparent", "dep:zcash_protocol"]
-zcp-builder = ["dep:zcash_primitives", "dep:zcash_protocol"]
+transparent = ["dep:secp256k1", "dep:transparent"]
+zcp-builder = ["dep:zcash_primitives"]
 io-finalizer = ["dep:zcash_primitives", "orchard", "sapling", "transparent"]
 prover = ["dep:rand_core", "sapling?/temporary-zcashd"]
 signer = [

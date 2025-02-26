@@ -40,24 +40,13 @@ use ::sapling::builder as sapling_builder;
 #[cfg(zcash_unstable = "zfuture")]
 use self::components::tze::{self, TzeIn, TzeOut};
 
-const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
-const OVERWINTER_TX_VERSION: u32 = 3;
-const SAPLING_VERSION_GROUP_ID: u32 = 0x892F2085;
-const SAPLING_TX_VERSION: u32 = 4;
+use zcash_protocol::constants::{
+    OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION,
+    SAPLING_VERSION_GROUP_ID, V5_TX_VERSION, V5_VERSION_GROUP_ID,
+};
 
-const V5_TX_VERSION: u32 = 5;
-const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
-
-/// These versions are used exclusively for in-development transaction
-/// serialization, and will never be active under the consensus rules.
-/// When new consensus transaction versions are added, all call sites
-/// using these constants should be inspected, and use of these constants
-/// should be removed as appropriate in favor of the new consensus
-/// transaction version and group.
 #[cfg(zcash_unstable = "zfuture")]
-const ZFUTURE_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
-#[cfg(zcash_unstable = "zfuture")]
-const ZFUTURE_TX_VERSION: u32 = 0x0000FFFF;
+use zcash_protocol::constants::{ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID};
 
 pub use zcash_protocol::TxId;
 
