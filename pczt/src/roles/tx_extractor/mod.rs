@@ -10,9 +10,12 @@ use zcash_primitives::transaction::{
     txid::TxIdDigester,
     Authorization, Transaction, TransactionData, TxVersion,
 };
-use zcash_protocol::consensus::BranchId;
+use zcash_protocol::{
+    consensus::BranchId,
+    constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID},
+};
 
-use crate::{common::determine_lock_time, Pczt, V5_TX_VERSION, V5_VERSION_GROUP_ID};
+use crate::{common::determine_lock_time, Pczt};
 
 mod orchard;
 pub use self::orchard::OrchardError;

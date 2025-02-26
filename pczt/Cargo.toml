@@ -17,7 +17,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 zcash_note_encryption = { workspace = true, optional = true }
 zcash_primitives = { workspace = true, optional = true }
-zcash_protocol = { workspace = true, optional = true }
+zcash_protocol = { workspace = true, default-features = false }
 
 blake2b_simd = { workspace = true, optional = true }
 rand_core = { workspace = true, optional = true }
@@ -73,7 +73,6 @@ orchard = [
     "dep:nonempty",
     "dep:orchard",
     "dep:pasta_curves",
-    "dep:zcash_protocol",
 ]
 
 ## Enables functionality that requires Sapling protocol types.
@@ -84,14 +83,13 @@ sapling = [
     "dep:redjubjub",
     "dep:sapling",
     "dep:zcash_note_encryption",
-    "dep:zcash_protocol",
 ]
 
 ## Enables functionality that requires Zcash transparent protocol types.
-transparent = ["dep:secp256k1", "dep:transparent", "dep:zcash_protocol"]
+transparent = ["dep:secp256k1", "dep:transparent"]
 
 ## Enables building a PCZT from the output of `zcash_primitives`'s `Builder::build_for_pczt`.
-zcp-builder = ["dep:zcash_primitives", "dep:zcash_protocol"]
+zcp-builder = ["dep:zcash_primitives"]
 
 #! ### PCZT roles behind feature flags
 #!
