@@ -730,7 +730,16 @@ impl Transaction {
     fn read_v5_header_fragment<R: Read>(mut reader: R) -> io::Result<(BranchId, u32, BlockHeight)> {
         let consensus_branch_id = reader.read_u32_le().and_then(|value| {
             BranchId::try_from(value).map_err(|_e| {
-                io::Error::new(io::ErrorKind::InvalidInput, "invalid consensus branch id")
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    #[cfg(not(feature = "std"))]
+                    "invalid consensus branch id",
+                    #[cfg(feature = "std")]
+                    format!(
+                        "invalid consensus branch id 0x{}",
+                        hex::encode(value.to_be_bytes())
+                    ),
+                )
             })
         })?;
         let lock_time = reader.read_u32_le()?;
