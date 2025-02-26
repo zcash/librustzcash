@@ -756,7 +756,9 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
         #[cfg(not(feature = "transparent-inputs"))]
         {
             return Err(SqliteClientError::AddressGeneration(
-                AddressGenerationError::ReceiverTypeNotSupported(Typecode::P2pkh),
+                AddressGenerationError::ReceiverTypeNotSupported(
+                    zcash_address::unified::Typecode::P2pkh,
+                ),
             ));
         }
 
