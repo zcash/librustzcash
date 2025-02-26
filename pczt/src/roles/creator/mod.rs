@@ -9,8 +9,10 @@ use crate::{
         FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
     },
-    Pczt, V5_TX_VERSION, V5_VERSION_GROUP_ID,
+    Pczt,
 };
+
+use zcash_protocol::constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID};
 
 /// Initial flags allowing any modification.
 const INITIAL_TX_MODIFIABLE: u8 = FLAG_TRANSPARENT_INPUTS_MODIFIABLE
@@ -108,9 +110,9 @@ impl Creator {
         parts: zcash_primitives::transaction::builder::PcztParts<P>,
     ) -> Option<Pczt> {
         use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_SINGLE};
-        use zcash_protocol::consensus::NetworkConstants;
+        use zcash_protocol::{consensus::NetworkConstants, constants::SAPLING_TX_VERSION};
 
-        use crate::{common::FLAG_HAS_SIGHASH_SINGLE, SAPLING_TX_VERSION};
+        use crate::common::FLAG_HAS_SIGHASH_SINGLE;
 
         let tx_version = match parts.version {
             zcash_primitives::transaction::TxVersion::Sprout(_)
