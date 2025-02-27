@@ -527,38 +527,30 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
     Ok(())
 }
 
-/// If `address` is one of our addresses, check whether it was used as the recipient address for
-/// any of our received outputs.
+/// Check whether `address` has previously been used as the recipient address for any previously
+/// received output. This is intended primarily for use in ensuring that the wallet does not create
+/// ZIP 320 transactions that reuse the same ephemeral address, although it is written in such a
+/// way that it may be used for detection of transparent address reuse more generally.
 ///
 /// If the address was already used in an output we received, this method will return
 /// [`SqliteClientError::AddressReuse`].
-pub(crate) fn check_address_reuse<P: consensus::Parameters>(
+pub(crate) fn check_ephemeral_address_reuse<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
-    address: &Address,
+    address: &TransparentAddress,
 ) -> Result<(), SqliteClientError> {
-    // TODO: ideally we would do something better than string matching here - the best would be to
-    // have the diversifier index for the address passed to us instead of the address itself, but
-    // not all call sites currently have a good way to obtain the diversifier index. We could
-    // trial-decrypt with each of the wallet's IVKs if we wanted to do it here, but a better
-    // approach is to restructure the call sites so that we don't discard diversifier index
-    // information in the process of passing it through to here.
-    let addr_str = address.encode(params);
-    let taddr_str = address.to_transparent_address().map(|a| a.encode(params));
-
+    let taddr_str = address.encode(params);
     let mut stmt = conn.prepare_cached(
         "SELECT t.txid
          FROM transactions t
          JOIN v_received_outputs vro ON vro.transaction_id = t.id_tx
          JOIN addresses a ON a.id = vro.address_id
-         WHERE a.address = :address
-            OR a.cached_transparent_receiver_address = :transparent_address",
+         WHERE a.cached_transparent_receiver_address = :transparent_address",
     )?;
 
     let txids = stmt
         .query_and_then(
             named_params![
-                ":address": addr_str,
                 ":transparent_address": taddr_str,
             ],
             |row| Ok(TxId::from_bytes(row.get::<_, [u8; 32]>(0)?)),
@@ -566,7 +558,7 @@ pub(crate) fn check_address_reuse<P: consensus::Parameters>(
         .collect::<Result<Vec<_>, SqliteClientError>>()?;
 
     if let Some(txids) = NonEmpty::from_vec(txids) {
-        return Err(SqliteClientError::AddressReuse(addr_str, txids));
+        return Err(SqliteClientError::AddressReuse(taddr_str, txids));
     }
 
     Ok(())

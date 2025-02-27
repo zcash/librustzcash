@@ -2749,10 +2749,10 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters, CL>(
             } => {
                 // First check to verify that creation of this output does not result in reuse of
                 // an ephemeral address.
-                transparent::check_address_reuse(
+                transparent::check_ephemeral_address_reuse(
                     wdb.conn.0,
                     &wdb.params,
-                    &Address::Transparent(*ephemeral_address),
+                    ephemeral_address,
                 )?;
 
                 transparent::put_transparent_output(
