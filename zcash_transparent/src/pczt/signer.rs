@@ -1,5 +1,6 @@
 use crate::sighash::SignableInput;
 use alloc::vec::Vec;
+use zcash_script::script::Parsable;
 
 impl super::Input {
     /// Signs the transparent spend with the given spend authorizing key.
@@ -27,7 +28,11 @@ impl super::Input {
             hash_type: self.sighash_type,
             index,
             // for p2pkh, always the same as script_pubkey
-            script_code: self.redeem_script.as_ref().unwrap_or(&self.script_pubkey),
+            script_code: &self
+                .redeem_script
+                .as_ref()
+                .unwrap_or(&self.script_pubkey)
+                .to_bytes(),
             script_pubkey: &self.script_pubkey,
             value: self.value,
         });

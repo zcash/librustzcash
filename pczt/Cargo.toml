@@ -14,6 +14,7 @@ categories.workspace = true
 zcash_note_encryption = { workspace = true, optional = true }
 zcash_primitives = { workspace = true, optional = true }
 zcash_protocol = { workspace = true, optional = true }
+zcash_script.workspace = true
 
 blake2b_simd = { workspace = true, optional = true }
 rand_core = { workspace = true, optional = true }
