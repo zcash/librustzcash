@@ -31,8 +31,7 @@ impl<V: Version> Entry<V> {
 
     /// Returns if is this node complete (has total of 2^N leaves)
     pub fn complete(&self) -> bool {
-        let leaves = self.leaf_count();
-        leaves & (leaves - 1) == 0
+        self.leaf_count().is_power_of_two()
     }
 
     /// Number of leaves under this node.

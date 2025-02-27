@@ -1974,8 +1974,8 @@ impl<AccountId> SentTransactionOutput<AccountId> {
     /// ### Fields:
     /// * `output_index` - the index of the output or action in the sent transaction
     /// * `recipient` - the recipient of the output, either a Zcash address or a
-    ///    wallet-internal account and the note belonging to the wallet created by
-    ///    the output
+    ///   wallet-internal account and the note belonging to the wallet created by
+    ///   the output
     /// * `value` - the value of the output, in zatoshis
     /// * `memo` - the memo that was sent with this output
     pub fn from_parts(
@@ -2047,14 +2047,14 @@ impl AccountBirthday {
     /// Constructs a new [`AccountBirthday`] from its constituent parts.
     ///
     /// * `prior_chain_state`: The chain state prior to the birthday height of the account. The
-    ///    birthday height is defined as the height of the first block to be scanned in wallet
-    ///    recovery.
+    ///   birthday height is defined as the height of the first block to be scanned in wallet
+    ///   recovery.
     /// * `recover_until`: An optional height at which the wallet should exit "recovery mode". In
-    ///    order to avoid confusing shifts in wallet balance and spendability that may temporarily be
-    ///    visible to a user during the process of recovering from seed, wallets may optionally set a
-    ///    "recover until" height. The wallet is considered to be in "recovery mode" until there
-    ///    exist no unscanned ranges between the wallet's birthday height and the provided
-    ///    `recover_until` height, exclusive.
+    ///   order to avoid confusing shifts in wallet balance and spendability that may temporarily be
+    ///   visible to a user during the process of recovering from seed, wallets may optionally set a
+    ///   "recover until" height. The wallet is considered to be in "recovery mode" until there
+    ///   exist no unscanned ranges between the wallet's birthday height and the provided
+    ///   `recover_until` height, exclusive.
     ///
     /// This API is intended primarily to be used in testing contexts; under normal circumstances,
     /// [`AccountBirthday::from_treestate`] should be used instead.
@@ -2069,13 +2069,13 @@ impl AccountBirthday {
     /// Constructs a new [`AccountBirthday`] from a [`TreeState`] returned from `lightwalletd`.
     ///
     /// * `treestate`: The tree state corresponding to the last block prior to the wallet's
-    ///    birthday height.
+    ///   birthday height.
     /// * `recover_until`: An optional height at which the wallet should exit "recovery mode". In
-    ///    order to avoid confusing shifts in wallet balance and spendability that may temporarily be
-    ///    visible to a user during the process of recovering from seed, wallets may optionally set a
-    ///    "recover until" height. The wallet is considered to be in "recovery mode" until there
-    ///    exist no unscanned ranges between the wallet's birthday height and the provided
-    ///    `recover_until` height, exclusive.
+    ///   order to avoid confusing shifts in wallet balance and spendability that may temporarily be
+    ///   visible to a user during the process of recovering from seed, wallets may optionally set a
+    ///   "recover until" height. The wallet is considered to be in "recovery mode" until there
+    ///   exist no unscanned ranges between the wallet's birthday height and the provided
+    ///   `recover_until` height, exclusive.
     pub fn from_treestate(
         treestate: TreeState,
         recover_until: Option<BlockHeight>,
