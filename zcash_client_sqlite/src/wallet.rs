@@ -873,12 +873,9 @@ pub(crate) fn get_last_generated_address<P: consensus::Parameters>(
     account_uuid: AccountUuid,
     request: Option<UnifiedAddressRequest>,
 ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, SqliteClientError> {
-    let account: Account = match get_account(conn, params, account_uuid)? {
-        Some(account) => account,
-        None => {
-            return Ok(None);
-        }
-    };
+    let account: Account =
+        get_account(conn, params, account_uuid)?.ok_or(SqliteClientError::AccountUnknown)?;
+
     let request = request
         .map_or_else(|| account.uivk().to_address_request(), Ok)
         .map_err(|_| {
@@ -4218,6 +4215,7 @@ mod tests {
     use zcash_protocol::value::Zatoshis;
 
     use crate::{
+        error::SqliteClientError,
         testing::{db::TestDbFactory, BlockCache},
         AccountUuid,
     };
@@ -4253,7 +4251,7 @@ mod tests {
         assert_matches!(
             st.wallet()
                 .get_last_generated_address(AccountUuid(Uuid::nil()), None),
-            Ok(None)
+            Err(SqliteClientError::AccountUnknown)
         );
     }
 

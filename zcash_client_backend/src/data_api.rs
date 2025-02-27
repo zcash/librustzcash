@@ -1232,8 +1232,8 @@ pub trait WalletRead {
     /// If the `request` parameter is `None`, this will be interpreted as a request for an address
     /// having a receiver corresponding to each data item in the account's UIVK.
     ///
-    /// This will return `Ok(None)` if the account identifier does not correspond to a known
-    /// account, or if no previously generated address conforms to the specified request.
+    /// This will return `Ok(None)` if no previously generated address conforms to the specified
+    /// request.
     fn get_last_generated_address(
         &self,
         account: Self::AccountId,
