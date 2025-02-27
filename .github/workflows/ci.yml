@@ -393,7 +393,6 @@ jobs:
           TOOLCHAIN: ${{steps.toolchain.outputs.name}}
       - name: Run Clippy (beta)
         uses: actions-rs/clippy-check@v1
-        continue-on-error: true
         with:
           name: Clippy (beta)
           token: ${{ secrets.GITHUB_TOKEN }}
