@@ -475,7 +475,7 @@ where
 
     // Create a transaction & scan the block. Since the txid corresponds to one our wallet
     // generated, this should cause the gap limit to be bumped (generating addresses with index
-    // 10..15
+    // 10..15)
     let txids = st
         .create_standard_transaction(&test_account, to, Zatoshis::const_from_u64(20000))
         .unwrap();
