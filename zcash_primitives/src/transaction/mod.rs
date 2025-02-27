@@ -40,24 +40,16 @@ use ::sapling::builder as sapling_builder;
 #[cfg(zcash_unstable = "zfuture")]
 use self::components::tze::{self, TzeIn, TzeOut};
 
-const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
-const OVERWINTER_TX_VERSION: u32 = 3;
-const SAPLING_VERSION_GROUP_ID: u32 = 0x892F2085;
-const SAPLING_TX_VERSION: u32 = 4;
+use zcash_protocol::constants::{
+    OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION,
+    SAPLING_VERSION_GROUP_ID, V5_TX_VERSION, V5_VERSION_GROUP_ID,
+};
 
-const V5_TX_VERSION: u32 = 5;
-const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
+#[cfg(zcash_unstable = "nu7")]
+use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
 
-/// These versions are used exclusively for in-development transaction
-/// serialization, and will never be active under the consensus rules.
-/// When new consensus transaction versions are added, all call sites
-/// using these constants should be inspected, and use of these constants
-/// should be removed as appropriate in favor of the new consensus
-/// transaction version and group.
 #[cfg(zcash_unstable = "zfuture")]
-const ZFUTURE_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
-#[cfg(zcash_unstable = "zfuture")]
-const ZFUTURE_TX_VERSION: u32 = 0x0000FFFF;
+use zcash_protocol::constants::{ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID};
 
 pub use zcash_protocol::TxId;
 
@@ -74,6 +66,8 @@ pub enum TxVersion {
     Overwinter,
     Sapling,
     Zip225,
+    #[cfg(zcash_unstable = "nu7")]
+    Zip230,
     #[cfg(zcash_unstable = "zfuture")]
     ZFuture,
 }
@@ -89,6 +83,8 @@ impl TxVersion {
                 (OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID) => Ok(TxVersion::Overwinter),
                 (SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID) => Ok(TxVersion::Sapling),
                 (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::Zip225),
+                #[cfg(zcash_unstable = "nu7")]
+                (V6_TX_VERSION, V6_VERSION_GROUP_ID) => Ok(TxVersion::Zip230),
                 #[cfg(zcash_unstable = "zfuture")]
                 (ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID) => Ok(TxVersion::ZFuture),
                 _ => Err(io::Error::new(
@@ -119,6 +115,8 @@ impl TxVersion {
                 TxVersion::Overwinter => OVERWINTER_TX_VERSION,
                 TxVersion::Sapling => SAPLING_TX_VERSION,
                 TxVersion::Zip225 => V5_TX_VERSION,
+                #[cfg(zcash_unstable = "nu7")]
+                TxVersion::Zip230 => V6_TX_VERSION,
                 #[cfg(zcash_unstable = "zfuture")]
                 TxVersion::ZFuture => ZFUTURE_TX_VERSION,
             }
@@ -130,6 +128,8 @@ impl TxVersion {
             TxVersion::Overwinter => OVERWINTER_VERSION_GROUP_ID,
             TxVersion::Sapling => SAPLING_VERSION_GROUP_ID,
             TxVersion::Zip225 => V5_VERSION_GROUP_ID,
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::Zip230 => V6_VERSION_GROUP_ID,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => ZFUTURE_VERSION_GROUP_ID,
         }
@@ -149,8 +149,10 @@ impl TxVersion {
             TxVersion::Sprout(v) => *v >= 2u32,
             TxVersion::Overwinter | TxVersion::Sapling => true,
             TxVersion::Zip225 => false,
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::Zip230 => false,
             #[cfg(zcash_unstable = "zfuture")]
-            TxVersion::ZFuture => true,
+            TxVersion::ZFuture => false,
         }
     }
 
@@ -164,6 +166,8 @@ impl TxVersion {
             TxVersion::Sprout(_) | TxVersion::Overwinter => false,
             TxVersion::Sapling => true,
             TxVersion::Zip225 => true,
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::Zip230 => true,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
         }
@@ -174,6 +178,8 @@ impl TxVersion {
         match self {
             TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => false,
             TxVersion::Zip225 => true,
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::Zip230 => true,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
         }
@@ -194,6 +200,8 @@ impl TxVersion {
             }
             BranchId::Nu5 => TxVersion::Zip225,
             BranchId::Nu6 => TxVersion::Zip225,
+            #[cfg(zcash_unstable = "nu7")]
+            BranchId::Nu7 => TxVersion::Zip230,
             #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => TxVersion::ZFuture,
         }
@@ -549,6 +557,8 @@ impl Transaction {
                 Self::from_data_v4(data)
             }
             TxVersion::Zip225 => Ok(Self::from_data_v5(data)),
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::Zip230 => todo!(),
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => Ok(Self::from_data_v5(data)),
         }
@@ -592,6 +602,8 @@ impl Transaction {
                 Self::read_v4(reader, version, consensus_branch_id)
             }
             TxVersion::Zip225 => Self::read_v5(reader.into_base_reader(), version),
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::Zip230 => todo!(),
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => Self::read_v5(reader.into_base_reader(), version),
         }
@@ -775,6 +787,8 @@ impl Transaction {
                 self.write_v4(writer)
             }
             TxVersion::Zip225 => self.write_v5(writer),
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::Zip230 => todo!(),
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => self.write_v5(writer),
         }
@@ -994,6 +1008,8 @@ pub mod testing {
             }
             BranchId::Nu5 => Just(TxVersion::Zip225).boxed(),
             BranchId::Nu6 => Just(TxVersion::Zip225).boxed(),
+            #[cfg(zcash_unstable = "nu7")]
+            BranchId::Nu7 => Just(TxVersion::Zip230).boxed(),
             #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => Just(TxVersion::ZFuture).boxed(),
         }

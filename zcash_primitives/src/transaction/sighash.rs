@@ -73,6 +73,8 @@ pub fn signature_hash<
 
         TxVersion::Zip225 => v5_signature_hash(tx, signable_input, txid_parts),
 
+        #[cfg(zcash_unstable = "nu7")]
+        TxVersion::Zip230 => todo!(),
         #[cfg(zcash_unstable = "zfuture")]
         TxVersion::ZFuture => v5_signature_hash(tx, signable_input, txid_parts),
     })
