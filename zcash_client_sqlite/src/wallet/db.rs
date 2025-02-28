@@ -99,6 +99,10 @@ pub(super) const INDEX_HD_ACCOUNT: &str =
 ///   - In the case of an address with its first use discovered in a transaction obtained by scanning
 ///     the chain, this will be set to the mined height of that transaction. In recover from seed
 ///     cases, this is what user-generated addresses will be assigned.
+/// - `receiver_flags`: A set of bitflags that describes which receiver types are included in
+///   `address`. See the documentation of [`ReceiverFlags`] for details.
+///
+/// [`ReceiverFlags`]: crate::wallet::encoding::ReceiverFlags
 pub(super) const TABLE_ADDRESSES: &str = r#"
 CREATE TABLE "addresses" (
     id INTEGER NOT NULL PRIMARY KEY,

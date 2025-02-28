@@ -347,7 +347,9 @@ impl From<GapLimits> for zcash_client_backend::data_api::testing::transparent::G
     }
 }
 
-/// A wrapper for the SQLite connection to the wallet database.
+/// A wrapper for the SQLite connection to the wallet database, along with a capability to read the
+/// system from the clock. A `WalletDb` encapsulates the full set of capabilities that are required
+/// in order to implement the [`WalletRead`], [`WalletWrite`] and [`WalletCommitmentTrees`] traits.
 pub struct WalletDb<C, P, CL> {
     conn: C,
     params: P,
@@ -366,7 +368,13 @@ impl Borrow<rusqlite::Connection> for SqlTransaction<'_> {
 }
 
 impl<P, CL> WalletDb<Connection, P, CL> {
-    /// Construct a connection to the wallet database stored at the specified path.
+    /// Construct a [`WalletDb`] instance that connects to the wallet database stored at the
+    /// specified path.
+    ///
+    /// ## Parameters
+    /// - `path`: The path to the SQLite database used to store wallet data.
+    /// - `params`: Parameters associated with the Zcash network that the wallet will connect to.
+    /// - `clock`: The clock to use in the case that the backend needs access to the system time.
     pub fn for_path<F: AsRef<Path>>(
         path: F,
         params: P,
@@ -402,6 +410,11 @@ impl<C: Borrow<rusqlite::Connection>, P, CL> WalletDb<C, P, CL> {
     ///
     /// The caller must ensure that [`rusqlite::vtab::array::load_module`] has been called
     /// on the connection.
+    ///
+    /// ## Parameters
+    /// - `conn`: A connection to the wallet database.
+    /// - `params`: Parameters associated with the Zcash network that the wallet will connect to.
+    /// - `clock`: The clock to use in the case that the backend needs access to the system time.
     pub fn from_connection(conn: C, params: P, clock: CL) -> Self {
         WalletDb {
             conn,
@@ -413,16 +426,16 @@ impl<C: Borrow<rusqlite::Connection>, P, CL> WalletDb<C, P, CL> {
     }
 }
 
-impl<C: BorrowMut<Connection>, P: Clone, CL: Clone> WalletDb<C, P, CL> {
+impl<C: BorrowMut<Connection>, P, CL> WalletDb<C, P, CL> {
     pub fn transactionally<F, A, E: From<rusqlite::Error>>(&mut self, f: F) -> Result<A, E>
     where
-        F: FnOnce(&mut WalletDb<SqlTransaction<'_>, P, CL>) -> Result<A, E>,
+        F: FnOnce(&mut WalletDb<SqlTransaction<'_>, &P, &CL>) -> Result<A, E>,
     {
         let tx = self.conn.borrow_mut().transaction()?;
         let mut wdb = WalletDb {
             conn: SqlTransaction(&tx),
-            params: self.params.clone(),
-            clock: self.clock.clone(),
+            params: &self.params,
+            clock: &self.clock,
             #[cfg(feature = "transparent-inputs")]
             gap_limits: self.gap_limits,
         };
@@ -1131,7 +1144,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> Wa
             wallet::get_next_available_address(
                 wdb.conn.0,
                 &wdb.params,
-                &wdb.clock, // TODO: make an abstract Clock a field of `WalletDb`
+                &wdb.clock,
                 account_uuid,
                 request,
                 #[cfg(feature = "transparent-inputs")]
@@ -2326,7 +2339,14 @@ mod tests {
             .expect("retrieved the last-generated shielded-only address");
         assert_eq!(cur_shielded_only, shielded_only);
 
-        st.wallet_mut().db_mut().clock.tick(Duration::from_secs(10));
+        // This gives around a 2^{-32} probability of `di` and `di_2` colliding, which is
+        // low enough for unit tests.
+        let collision_offset = 32;
+
+        st.wallet_mut()
+            .db_mut()
+            .clock
+            .tick(Duration::from_secs(collision_offset));
 
         let (shielded_only_2, di_2) = st
             .wallet_mut()
@@ -2334,7 +2354,7 @@ mod tests {
             .unwrap()
             .expect("generated a shielded-only address");
         assert_ne!(shielded_only_2, shielded_only);
-        assert!(dbg!(u128::from(di_2)) >= dbg!(u128::from(di_lower) + 10));
+        assert!(u128::from(di_2) >= u128::from(di_lower) + u128::from(collision_offset));
     }
 
     #[test]

@@ -937,7 +937,7 @@ pub(crate) fn get_last_generated_address<P: consensus::Parameters>(
 /// - `exposed_at_height`: The block height at the earliest time that the address may have been
 ///   exposed to a user, assuming a single generator of addresses.
 /// - `force_update_address`: If this argument is set to `true`, an address has already been
-///   inserted for the given account an diversifier index, and the `exposed_at_height` column
+///   inserted for the given account and diversifier index, and the `exposed_at_height` column
 ///   is currently `NULL` (i.e. the address at this diversifier index has not yet been exposed)
 ///   then the value of the `address` column will be replaced with the provided address.
 pub(crate) fn upsert_address<P: consensus::Parameters>(

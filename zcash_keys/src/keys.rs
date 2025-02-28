@@ -666,7 +666,7 @@ impl UnifiedAddressRequest {
         self.sapling
     }
 
-    /// Returns the [`ReceiverRequirement`] for inclusion of a P2pkh receiver.
+    /// Returns the [`ReceiverRequirement`] for inclusion of a P2PKH receiver.
     pub fn p2pkh(&self) -> ReceiverRequirement {
         self.p2pkh
     }
