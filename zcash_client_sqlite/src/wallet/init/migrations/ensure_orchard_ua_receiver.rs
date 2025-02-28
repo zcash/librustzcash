@@ -99,7 +99,6 @@ mod tests {
     use zcash_protocol::consensus::Network;
 
     use crate::{
-        testing::db::test_clock,
         wallet::init::{init_wallet_db, init_wallet_db_internal, migrations::addresses_table},
         WalletDb, UA_ORCHARD, UA_TRANSPARENT,
     };
@@ -107,8 +106,7 @@ mod tests {
     #[test]
     fn init_migrate_add_orchard_receiver() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data =
-            WalletDb::for_path(data_file.path(), Network::TestNetwork, test_clock()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork, ()).unwrap();
 
         let seed = vec![0x10; 32];
         let account_id = 0u32;

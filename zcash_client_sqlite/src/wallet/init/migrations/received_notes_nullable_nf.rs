@@ -231,7 +231,6 @@ mod tests {
     use zip32::AccountId;
 
     use crate::{
-        testing::db::test_clock,
         wallet::init::{init_wallet_db_internal, migrations::v_transactions_net},
         WalletDb,
     };
@@ -239,8 +238,7 @@ mod tests {
     #[test]
     fn received_notes_nullable_migration() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data =
-            WalletDb::for_path(data_file.path(), Network::TestNetwork, test_clock()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork, ()).unwrap();
         init_wallet_db_internal(
             &mut db_data,
             None,

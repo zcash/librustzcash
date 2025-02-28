@@ -321,7 +321,6 @@ mod tests {
 
     use crate::{
         error::SqliteClientError,
-        testing::db::test_clock,
         wallet::{
             init::{
                 init_wallet_db_internal,
@@ -528,7 +527,7 @@ mod tests {
 
         // Create wallet upgraded to just before the current migration.
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), params, test_clock()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), params, ()).unwrap();
         init_wallet_db_internal(
             &mut db_data,
             None,
@@ -627,7 +626,7 @@ mod tests {
 
         // Create wallet upgraded to just before the current migration.
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), params, test_clock).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), params, ()).unwrap();
         init_wallet_db_internal(
             &mut db_data,
             None,

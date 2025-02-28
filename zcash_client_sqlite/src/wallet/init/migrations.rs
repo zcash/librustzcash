@@ -284,14 +284,13 @@ mod tests {
     use uuid::Uuid;
     use zcash_protocol::consensus::Network;
 
-    use crate::{testing::db::test_clock, wallet::init::init_wallet_db_internal, WalletDb};
+    use crate::{wallet::init::init_wallet_db_internal, WalletDb};
 
     /// Tests that we can migrate from a completely empty wallet database to the target
     /// migrations.
     pub(crate) fn test_migrate(migrations: &[Uuid]) {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data =
-            WalletDb::for_path(data_file.path(), Network::TestNetwork, test_clock()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork, ()).unwrap();
 
         let seed = [0xab; 32];
         assert_matches!(
@@ -308,8 +307,7 @@ mod tests {
     #[test]
     fn migrate_between_releases_without_data() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data =
-            WalletDb::for_path(data_file.path(), Network::TestNetwork, test_clock).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork, ()).unwrap();
 
         let seed = [0xab; 32].to_vec();
 

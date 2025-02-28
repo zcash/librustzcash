@@ -278,7 +278,6 @@ mod tests {
     use zip32::AccountId;
 
     use crate::{
-        testing::db::test_clock,
         wallet::init::{init_wallet_db_internal, migrations::addresses_table},
         WalletDb,
     };
@@ -303,7 +302,7 @@ mod tests {
     fn transaction_views() {
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network, test_clock()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), network, ()).unwrap();
         init_wallet_db_internal(&mut db_data, None, &[addresses_table::MIGRATION_ID], false)
             .unwrap();
         let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32][..], AccountId::ZERO).unwrap();
@@ -402,7 +401,7 @@ mod tests {
 
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network, test_clock()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), network, ()).unwrap();
         init_wallet_db_internal(
             &mut db_data,
             None,
