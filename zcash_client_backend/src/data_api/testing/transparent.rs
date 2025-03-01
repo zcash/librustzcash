@@ -102,7 +102,7 @@ where
     let account_id = st.test_account().unwrap().id();
     let uaddr = st
         .wallet()
-        .get_last_generated_address(account_id, UnifiedAddressRequest::AllAvailableKeys)
+        .get_last_generated_address_matching(account_id, UnifiedAddressRequest::AllAvailableKeys)
         .unwrap()
         .unwrap();
     let taddr = uaddr.transparent().unwrap();
@@ -193,7 +193,7 @@ where
     let account = st.test_account().cloned().unwrap();
     let uaddr = st
         .wallet()
-        .get_last_generated_address(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
         .unwrap()
         .unwrap();
     let taddr = uaddr.transparent().unwrap();
@@ -301,7 +301,7 @@ where
     let account = st.test_account().cloned().unwrap();
     let uaddr = st
         .wallet()
-        .get_last_generated_address(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
         .unwrap()
         .unwrap();
     let taddr = uaddr.transparent().unwrap();

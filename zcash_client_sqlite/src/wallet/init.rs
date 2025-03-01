@@ -1135,7 +1135,7 @@ mod tests {
                 // hardcoded with knowledge of test vectors
                 let ua_request = UnifiedAddressRequest::unsafe_custom(Omit, Require, Require);
 
-                let (ua, di) = wallet::get_last_generated_address(
+                let (ua, di) = wallet::get_last_generated_address_matching(
                     &db_data.conn,
                     &db_data.params,
                     account_id,

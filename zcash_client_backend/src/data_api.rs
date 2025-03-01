@@ -1231,7 +1231,7 @@ pub trait WalletRead {
     ///
     /// This will return `Ok(None)` if no previously generated address conforms to the specified
     /// request.
-    fn get_last_generated_address(
+    fn get_last_generated_address_matching(
         &self,
         account: Self::AccountId,
         address_filter: UnifiedAddressRequest,

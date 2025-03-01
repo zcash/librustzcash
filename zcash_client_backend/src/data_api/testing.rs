@@ -2523,7 +2523,7 @@ impl WalletRead for MockWalletDb {
         Ok(None)
     }
 
-    fn get_last_generated_address(
+    fn get_last_generated_address_matching(
         &self,
         _account: Self::AccountId,
         _request: UnifiedAddressRequest,

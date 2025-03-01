@@ -7,22 +7,25 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
-- `zcash_keys::keys::UnifiedAddressRequest::{sapling, orchard, p2pkh}`
-- `zcash_keys::keys::UnifiedIncomingViewingKey::{has_sapling, has_orchard, has_p2pkh,
-  receiver_requirements, to_receiver_requirements}`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::{has_sapling, has_orchard,
+  has_transparent, receiver_requirements, to_receiver_requirements}`
 - `zcash_keys::keys::ReceiverRequirements`
 
 ### Changed
 - `zcash_keys::keys::UnifiedAddressRequest` is now an enum instead of a struct.
   The `new` and `unsafe_new` methods have been replaced by `custom` and
   `unsafe_custom` respectively.
+- Arguments to `zcash_keys::keys::UnifiedIncomingViewingKey::address` have been
+  modified; the `request` argument to this method now has type
+  `UnifiedAddressRequest` instead of `Option<UnifiedAddressRequest>`. Use
+  `UnifiedAddressRequest::AllAvailableKeys` where `None` was previously
+  used to obtain the same semantics.
 
 ### Removed
 - `UnifiedAddressRequest::{new, unsafe_new}`: use `{custom, unsafe_custom}`
   respectively instead.
-- `UnifiedAddressRequest::{intersect, orchard, sapling, p2pkh}`: replacements
-  for these methods are now provided on the newly-added `ReceiverRequirements`
-  type.
+- `UnifiedAddressRequest::intersect`: a replacement for this method is now
+  provided with the newly-added `ReceiverRequirements` type.
 
 ## [0.7.0] - 2025-02-21
 

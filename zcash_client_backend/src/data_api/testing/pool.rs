@@ -1768,7 +1768,7 @@ where
 
     let uaddr = st
         .wallet()
-        .get_last_generated_address(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
         .unwrap()
         .unwrap();
     let taddr = uaddr.transparent().unwrap();

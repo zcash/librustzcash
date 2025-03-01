@@ -600,10 +600,7 @@ pub enum UnifiedAddressRequest {
 
 impl UnifiedAddressRequest {
     /// Constructs a new unified address request that allows a receiver of each type.
-    pub const ALLOW_ALL: Self = {
-        use ReceiverRequirement::*;
-        Self::unsafe_custom(Allow, Allow, Allow)
-    };
+    pub const ALLOW_ALL: Self = Self::Custom(ReceiverRequirements::ALLOW_ALL);
 
     pub fn custom(
         orchard: ReceiverRequirement,

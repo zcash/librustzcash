@@ -759,7 +759,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
     Ok(Some((addr, diversifier_index)))
 }
 
-pub(crate) fn get_last_generated_address<P: consensus::Parameters>(
+pub(crate) fn get_last_generated_address_matching<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account_uuid: AccountUuid,
@@ -4145,14 +4145,16 @@ mod tests {
 
         // The default address is set for the test account
         assert_matches!(
-            st.wallet()
-                .get_last_generated_address(account.id(), UnifiedAddressRequest::AllAvailableKeys),
+            st.wallet().get_last_generated_address_matching(
+                account.id(),
+                UnifiedAddressRequest::AllAvailableKeys
+            ),
             Ok(Some(_))
         );
 
         // No default address is set for an un-initialized account
         assert_matches!(
-            st.wallet().get_last_generated_address(
+            st.wallet().get_last_generated_address_matching(
                 AccountUuid(Uuid::nil()),
                 UnifiedAddressRequest::AllAvailableKeys
             ),

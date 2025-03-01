@@ -679,13 +679,18 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> WalletRead
         wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
     }
 
-    fn get_last_generated_address(
+    fn get_last_generated_address_matching(
         &self,
         account: Self::AccountId,
         request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        wallet::get_last_generated_address(self.conn.borrow(), &self.params, account, request)
-            .map(|res| res.map(|(addr, _)| addr))
+        wallet::get_last_generated_address_matching(
+            self.conn.borrow(),
+            &self.params,
+            account,
+            request,
+        )
+        .map(|res| res.map(|(addr, _)| addr))
     }
 
     fn get_account_birthday(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
@@ -2282,7 +2287,10 @@ mod tests {
 
         let current_addr = st
             .wallet()
-            .get_last_generated_address(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+            .get_last_generated_address_matching(
+                account.id(),
+                UnifiedAddressRequest::AllAvailableKeys,
+            )
             .unwrap();
         assert!(current_addr.is_some());
 
@@ -2296,7 +2304,10 @@ mod tests {
 
         let addr2_cur = st
             .wallet()
-            .get_last_generated_address(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+            .get_last_generated_address_matching(
+                account.id(),
+                UnifiedAddressRequest::AllAvailableKeys,
+            )
             .unwrap();
         assert_eq!(addr2, addr2_cur);
 
@@ -2310,7 +2321,7 @@ mod tests {
 
         let cur_shielded_only = st
             .wallet()
-            .get_last_generated_address(account.id(), shielded_only_request)
+            .get_last_generated_address_matching(account.id(), shielded_only_request)
             .unwrap();
         assert!(cur_shielded_only.is_none());
 
@@ -2336,7 +2347,7 @@ mod tests {
 
         let cur_shielded_only = st
             .wallet()
-            .get_last_generated_address(account.id(), shielded_only_request)
+            .get_last_generated_address_matching(account.id(), shielded_only_request)
             .unwrap()
             .expect("retrieved the last-generated shielded-only address");
         assert_eq!(cur_shielded_only, shielded_only);
