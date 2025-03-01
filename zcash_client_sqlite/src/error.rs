@@ -195,10 +195,10 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::ReachedGapLimit(key_scope, bad_index) => write!(f,
                 "The proposal cannot be constructed until a transaction with outputs to a previously reserved {} address has been mined. \
                  The address at index {bad_index} could not be safely reserved.",
-                 match key_scope {
-                     &TransparentKeyScope::EXTERNAL => "external transparent",
-                     &TransparentKeyScope::INTERNAL => "transparent change",
-                     &TransparentKeyScope::EPHEMERAL => "ephemeral transparent",
+                 match *key_scope {
+                     TransparentKeyScope::EXTERNAL => "external transparent",
+                     TransparentKeyScope::INTERNAL => "transparent change",
+                     TransparentKeyScope::EPHEMERAL => "ephemeral transparent",
                      _ => panic!("Unsupported transparent key scope.")
                  }
             ),
