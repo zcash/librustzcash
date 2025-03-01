@@ -460,7 +460,7 @@ impl UnifiedSpendingKey {
     #[cfg(any(test, feature = "test-dependencies"))]
     pub fn default_address(
         &self,
-        request: Option<UnifiedAddressRequest>,
+        request: UnifiedAddressRequest,
     ) -> (UnifiedAddress, DiversifierIndex) {
         self.to_unified_full_viewing_key()
             .default_address(request)
@@ -593,13 +593,44 @@ impl ReceiverRequirement {
 
 /// Specification for how a unified address should be generated from a unified viewing key.
 #[derive(Clone, Copy, Debug)]
-pub struct UnifiedAddressRequest {
+pub enum UnifiedAddressRequest {
+    AllAvailableKeys,
+    Custom(ReceiverRequirements),
+}
+
+impl UnifiedAddressRequest {
+    /// Constructs a new unified address request that allows a receiver of each type.
+    pub const ALLOW_ALL: Self = {
+        use ReceiverRequirement::*;
+        Self::unsafe_custom(Allow, Allow, Allow)
+    };
+
+    pub fn custom(
+        orchard: ReceiverRequirement,
+        sapling: ReceiverRequirement,
+        p2pkh: ReceiverRequirement,
+    ) -> Result<Self, ()> {
+        ReceiverRequirements::new(orchard, sapling, p2pkh).map(UnifiedAddressRequest::Custom)
+    }
+
+    pub const fn unsafe_custom(
+        orchard: ReceiverRequirement,
+        sapling: ReceiverRequirement,
+        p2pkh: ReceiverRequirement,
+    ) -> Self {
+        UnifiedAddressRequest::Custom(ReceiverRequirements::unsafe_new(orchard, sapling, p2pkh))
+    }
+}
+
+/// Specification for how a unified address should be generated from a unified viewing key.
+#[derive(Clone, Copy, Debug)]
+pub struct ReceiverRequirements {
     orchard: ReceiverRequirement,
     sapling: ReceiverRequirement,
     p2pkh: ReceiverRequirement,
 }
 
-impl UnifiedAddressRequest {
+impl ReceiverRequirements {
     /// Construct a new unified address request from its constituent parts.
     ///
     /// Returns `Err(())` if the resulting unified address would not include at least one shielded receiver.
@@ -621,7 +652,7 @@ impl UnifiedAddressRequest {
     }
 
     /// Constructs a new unified address request that allows a receiver of each type.
-    pub const ALLOW_ALL: UnifiedAddressRequest = {
+    pub const ALLOW_ALL: ReceiverRequirements = {
         use ReceiverRequirement::*;
         Self::unsafe_new(Allow, Allow, Allow)
     };
@@ -629,7 +660,7 @@ impl UnifiedAddressRequest {
     /// Constructs a new unified address request that includes only the receivers that are allowed
     /// both in itself and a given other request. Returns [`None`] if requirements are incompatible
     /// or if no shielded receiver type is allowed.
-    pub fn intersect(&self, other: &UnifiedAddressRequest) -> Result<UnifiedAddressRequest, ()> {
+    pub fn intersect(&self, other: &ReceiverRequirements) -> Result<ReceiverRequirements, ()> {
         let orchard = self.orchard.intersect(other.orchard)?;
         let sapling = self.sapling.intersect(other.sapling)?;
         let p2pkh = self.p2pkh.intersect(other.p2pkh)?;
@@ -954,7 +985,7 @@ impl UnifiedFullViewingKey {
     pub fn address(
         &self,
         j: DiversifierIndex,
-        request: Option<UnifiedAddressRequest>,
+        request: UnifiedAddressRequest,
     ) -> Result<UnifiedAddress, AddressGenerationError> {
         self.to_unified_incoming_viewing_key().address(j, request)
     }
@@ -969,7 +1000,7 @@ impl UnifiedFullViewingKey {
     pub fn find_address(
         &self,
         j: DiversifierIndex,
-        request: Option<UnifiedAddressRequest>,
+        request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.to_unified_incoming_viewing_key()
             .find_address(j, request)
@@ -983,7 +1014,7 @@ impl UnifiedFullViewingKey {
     /// required to satisfy the unified address request are not properly enabled.
     pub fn default_address(
         &self,
-        request: Option<UnifiedAddressRequest>,
+        request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.find_address(DiversifierIndex::new(), request)
     }
@@ -1151,16 +1182,46 @@ impl UnifiedIncomingViewingKey {
             .expect("UnifiedIncomingViewingKey should only be constructed safely.")
     }
 
+    /// Returns whether this uivk has a transparent key item.
+    ///
+    /// This method is available irrespective of whether the `transparent-inputs` feature flag is enabled.
+    pub fn has_transparent(&self) -> bool {
+        #[cfg(not(feature = "transparent-inputs"))]
+        return false;
+        #[cfg(feature = "transparent-inputs")]
+        return self.transparent.is_some();
+    }
+
     /// Returns the Transparent external IVK, if present.
     #[cfg(feature = "transparent-inputs")]
     pub fn transparent(&self) -> &Option<transparent::keys::ExternalIvk> {
         &self.transparent
     }
 
+    /// Returns whether this uivk has a Sapling key item.
+    ///
+    /// This method is available irrespective of whether the `sapling` feature flag is enabled.
+    pub fn has_sapling(&self) -> bool {
+        #[cfg(not(feature = "sapling"))]
+        return false;
+        #[cfg(feature = "sapling")]
+        return self.sapling.is_some();
+    }
+
     /// Returns the Sapling IVK, if present.
     #[cfg(feature = "sapling")]
     pub fn sapling(&self) -> &Option<::sapling::zip32::IncomingViewingKey> {
         &self.sapling
+    }
+
+    /// Returns whether this uivk has an Orchard key item.
+    ///
+    /// This method is available irrespective of whether the `orchard` feature flag is enabled.
+    pub fn has_orchard(&self) -> bool {
+        #[cfg(not(feature = "orchard"))]
+        return false;
+        #[cfg(feature = "orchard")]
+        return self.orchard.is_some();
     }
 
     /// Returns the Orchard IVK, if present.
@@ -1178,13 +1239,24 @@ impl UnifiedIncomingViewingKey {
     pub fn address(
         &self,
         _j: DiversifierIndex,
-        request: Option<UnifiedAddressRequest>,
+        request: UnifiedAddressRequest,
     ) -> Result<UnifiedAddress, AddressGenerationError> {
         use ReceiverRequirement::*;
 
-        let request = request
-            .or(self.to_address_request().ok())
-            .ok_or(AddressGenerationError::ShieldedReceiverRequired)?;
+        let request = self
+            .receiver_requirements(request)
+            .map_err(|_| AddressGenerationError::ShieldedReceiverRequired)?;
+
+        // If we need to generate a transparent receiver, check that the user has not
+        // specified an invalid transparent child index, from which we can never search to
+        // find a valid index.
+        #[cfg(feature = "transparent-inputs")]
+        if request.p2pkh == ReceiverRequirement::Require
+            && self.transparent.is_some()
+            && to_transparent_child_index(_j).is_none()
+        {
+            return Err(AddressGenerationError::InvalidTransparentChildIndex(_j));
+        }
 
         #[cfg(feature = "orchard")]
         let mut orchard = None;
@@ -1289,26 +1361,11 @@ impl UnifiedIncomingViewingKey {
     pub fn find_address(
         &self,
         mut j: DiversifierIndex,
-        request: Option<UnifiedAddressRequest>,
+        request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
-        let request = request
-            .or_else(|| self.to_address_request().ok())
-            .ok_or(AddressGenerationError::ShieldedReceiverRequired)?;
-
-        // If we need to generate a transparent receiver, check that the user has not
-        // specified an invalid transparent child index, from which we can never search to
-        // find a valid index.
-        #[cfg(feature = "transparent-inputs")]
-        if request.p2pkh == ReceiverRequirement::Require
-            && self.transparent.is_some()
-            && to_transparent_child_index(j).is_none()
-        {
-            return Err(AddressGenerationError::InvalidTransparentChildIndex(j));
-        }
-
         // Find a working diversifier and construct the associated address.
         loop {
-            let res = self.address(j, Some(request));
+            let res = self.address(j, request);
             match res {
                 Ok(ua) => {
                     return Ok((ua, j));
@@ -1334,16 +1391,54 @@ impl UnifiedIncomingViewingKey {
     /// type at any diversifier index.
     pub fn default_address(
         &self,
-        request: Option<UnifiedAddressRequest>,
+        request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.find_address(DiversifierIndex::new(), request)
     }
 
-    /// Constructs a [`UnifiedAddressRequest`] that requires a receiver for each data item of this UIVK.
+    /// Convenience method for choosing a set of receiver requirements based upon the given unified
+    /// address request and the available items of this key.
+    ///
+    /// Returns an error if the provided request cannot be satisfied in address generation using
+    /// this key.
+    pub fn receiver_requirements(
+        &self,
+        request: UnifiedAddressRequest,
+    ) -> Result<ReceiverRequirements, AddressGenerationError> {
+        use ReceiverRequirement::*;
+        match request {
+            UnifiedAddressRequest::AllAvailableKeys => self
+                .to_receiver_requirements()
+                .map_err(|_| AddressGenerationError::ShieldedReceiverRequired),
+            UnifiedAddressRequest::Custom(req) => {
+                if req.orchard() == Require && !self.has_orchard() {
+                    return Err(AddressGenerationError::ReceiverTypeNotSupported(
+                        Typecode::Orchard,
+                    ));
+                }
+
+                if req.sapling() == Require && !self.has_sapling() {
+                    return Err(AddressGenerationError::ReceiverTypeNotSupported(
+                        Typecode::Sapling,
+                    ));
+                }
+
+                if req.p2pkh() == Require && !self.has_transparent() {
+                    return Err(AddressGenerationError::ReceiverTypeNotSupported(
+                        Typecode::P2pkh,
+                    ));
+                }
+
+                Ok(req)
+            }
+        }
+    }
+
+    /// Constructs the [`ReceiverRequirements`] that requires a receiver for each data item of this UIVK.
     ///
     /// Returns [`Err`] if the resulting request would not include a shielded receiver.
     #[allow(unused_mut)]
-    pub fn to_address_request(&self) -> Result<UnifiedAddressRequest, ()> {
+    pub fn to_receiver_requirements(&self) -> Result<ReceiverRequirements, ()> {
         use ReceiverRequirement::*;
 
         let mut orchard = Omit;
@@ -1364,7 +1459,7 @@ impl UnifiedIncomingViewingKey {
             p2pkh = Require;
         }
 
-        UnifiedAddressRequest::new(orchard, sapling, p2pkh)
+        ReceiverRequirements::new(orchard, sapling, p2pkh)
     }
 }
 
@@ -1605,7 +1700,7 @@ mod tests {
             let ua = ufvk
                 .address(
                     d_idx,
-                    Some(UnifiedAddressRequest::unsafe_new(Omit, Require, Require)),
+                    UnifiedAddressRequest::unsafe_custom(Omit, Require, Require),
                 )
                 .unwrap_or_else(|err| {
                     panic!(
@@ -1789,7 +1884,7 @@ mod tests {
             let ua = uivk
                 .address(
                     d_idx,
-                    Some(UnifiedAddressRequest::unsafe_new(Omit, Require, Require)),
+                    UnifiedAddressRequest::unsafe_custom(Omit, Require, Require),
                 )
                 .unwrap_or_else(|err| {
                     panic!(

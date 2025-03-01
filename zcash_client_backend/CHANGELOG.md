@@ -26,7 +26,14 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api::WalletWrite`:
   - has added method `get_address_for_index`
   - `get_next_available_address` now returns the diversifier index at which the
-    address was generated in addition to the address.
+    address was generated in addition to the address. In addition, the
+    `UnifiedAddressRequest` argument is now non-optional; use
+    `UnifiedAddressRequest::AllAvailableKeys` to indicate that all available
+    keys should be used to generate receivers instead of `None`.
+  - Arguments to `get_address_for_index` have changed: the
+    `UnifiedAddressRequest` argument is now non-optional; use
+    `UnifiedAddressRequest::AllAvailableKeys` to indicate that all available
+    keys should be used to generate receivers instead of `None`.
 
 ### Removed
 - `zcash_client_backend::data_api::GAP_LIMIT` gap limits are now configured

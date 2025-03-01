@@ -1011,9 +1011,9 @@ mod tests {
 
             // Unified addresses at the time of the addition of migrations did not contain an
             // Orchard component.
-            let ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, UA_TRANSPARENT);
+            let ua_request = UnifiedAddressRequest::unsafe_custom(Omit, Require, UA_TRANSPARENT);
             let address_str = Address::Unified(
-                ufvk.default_address(Some(ua_request))
+                ufvk.default_address(ua_request)
                     .expect("A valid default address exists for the UFVK")
                     .0,
             )
@@ -1033,7 +1033,7 @@ mod tests {
             {
                 let taddr = Address::Transparent(
                     *ufvk
-                        .default_address(Some(ua_request))
+                        .default_address(ua_request)
                         .expect("A valid default address exists for the UFVK")
                         .0
                         .transparent()
@@ -1133,16 +1133,16 @@ mod tests {
                 Address::decode(&Network::MainNetwork, tv.unified_addr)
             {
                 // hardcoded with knowledge of test vectors
-                let ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, Require);
+                let ua_request = UnifiedAddressRequest::unsafe_custom(Omit, Require, Require);
 
                 let (ua, di) = wallet::get_last_generated_address(
                     &db_data.conn,
                     &db_data.params,
                     account_id,
                     if tv.diversifier_index == 0 {
-                        None
+                        UnifiedAddressRequest::AllAvailableKeys
                     } else {
-                        Some(ua_request)
+                        ua_request
                     },
                 )
                 .unwrap()
@@ -1154,7 +1154,7 @@ mod tests {
                 assert_eq!(tv.unified_addr, ua.encode(&Network::MainNetwork));
 
                 db_data
-                    .get_next_available_address(account_id, Some(ua_request))
+                    .get_next_available_address(account_id, ua_request)
                     .unwrap()
                     .expect("get_next_available_address generated an address");
             } else {

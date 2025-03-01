@@ -1226,18 +1226,15 @@ pub trait WalletRead {
     ) -> Result<Option<Self::Account>, Self::Error>;
 
     /// Returns the most recently generated unified address for the specified account that conforms
-    /// to the specified address request, if the account identifier specified refers to a valid
+    /// to the specified address filter, if the account identifier specified refers to a valid
     /// account for this wallet.
-    ///
-    /// If the `request` parameter is `None`, this will be interpreted as a request for an address
-    /// having a receiver corresponding to each data item in the account's UIVK.
     ///
     /// This will return `Ok(None)` if no previously generated address conforms to the specified
     /// request.
     fn get_last_generated_address(
         &self,
         account: Self::AccountId,
-        request: Option<UnifiedAddressRequest>,
+        address_filter: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
     /// Returns the birthday height for the given account, or an error if the account is not known
@@ -2375,21 +2372,18 @@ pub trait WalletWrite: WalletRead {
     ) -> Result<Self::Account, Self::Error>;
 
     /// Generates, persists, and marks as exposed the next available diversified address for the
-    /// specified account, given the current addresses known to the wallet. If the `request`
-    /// parameter is `None`, an address should be generated using all of the available receivers
-    /// for the account's UFVK.
+    /// specified account, given the current addresses known to the wallet.
     ///
     /// Returns `Ok(None)` if the account identifier does not correspond to a known
     /// account.
     fn get_next_available_address(
         &mut self,
         account: Self::AccountId,
-        request: Option<UnifiedAddressRequest>,
+        request: UnifiedAddressRequest,
     ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, Self::Error>;
 
     /// Generates, persists, and marks as exposed a diversified address for the specified account
-    /// at the provided diversifier index. If the `request` parameter is `None`, an address should
-    /// be generated using all of the available receivers for the account's UFVK.
+    /// at the provided diversifier index.
     ///
     /// Returns `Ok(None)` in the case that it is not possible to generate an address conforming
     /// to the provided request at the specified diversifier index. Such a result might arise from
@@ -2406,7 +2400,7 @@ pub trait WalletWrite: WalletRead {
         &mut self,
         account: Self::AccountId,
         diversifier_index: DiversifierIndex,
-        request: Option<UnifiedAddressRequest>,
+        request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
     /// Updates the wallet's view of the blockchain.

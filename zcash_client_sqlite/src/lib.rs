@@ -682,7 +682,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> WalletRead
     fn get_last_generated_address(
         &self,
         account: Self::AccountId,
-        request: Option<UnifiedAddressRequest>,
+        request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         wallet::get_last_generated_address(self.conn.borrow(), &self.params, account, request)
             .map(|res| res.map(|(addr, _)| addr))
@@ -1138,7 +1138,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> Wa
     fn get_next_available_address(
         &mut self,
         account_uuid: Self::AccountId,
-        request: Option<UnifiedAddressRequest>,
+        request: UnifiedAddressRequest,
     ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, Self::Error> {
         self.transactionally(|wdb| {
             wallet::get_next_available_address(
@@ -1157,7 +1157,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> Wa
         &mut self,
         account: Self::AccountId,
         diversifier_index: DiversifierIndex,
-        request: Option<UnifiedAddressRequest>,
+        request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         if let Some(account) = self.get_account(account)? {
             if let Ok(address) = account.uivk().address(diversifier_index, request) {
@@ -1391,13 +1391,14 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> Wa
 
             #[cfg(feature = "transparent-inputs")]
             for (account_id, key_scope) in wallet::involved_accounts(wdb.conn.0, tx_refs)? {
+                use ReceiverRequirement::*;
                 wallet::transparent::generate_gap_addresses(
                     wdb.conn.0,
                     &wdb.params,
                     account_id,
                     key_scope,
                     &wdb.gap_limits,
-                    None,
+                    UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
                 )?;
             }
 
@@ -1663,13 +1664,14 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> Wa
                     _output,
                 )?;
 
+            use ReceiverRequirement::*;
             wallet::transparent::generate_gap_addresses(
                 wdb.conn.0,
                 &wdb.params,
                 account_id,
                 key_scope,
                 &wdb.gap_limits,
-                None,
+                UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
             )?;
 
             Ok(utxo_id)
@@ -2280,13 +2282,13 @@ mod tests {
 
         let current_addr = st
             .wallet()
-            .get_last_generated_address(account.id(), None)
+            .get_last_generated_address(account.id(), UnifiedAddressRequest::AllAvailableKeys)
             .unwrap();
         assert!(current_addr.is_some());
 
         let addr2 = st
             .wallet_mut()
-            .get_next_available_address(account.id(), None)
+            .get_next_available_address(account.id(), UnifiedAddressRequest::AllAvailableKeys)
             .unwrap()
             .map(|(a, _)| a);
         assert!(addr2.is_some());
@@ -2294,7 +2296,7 @@ mod tests {
 
         let addr2_cur = st
             .wallet()
-            .get_last_generated_address(account.id(), None)
+            .get_last_generated_address(account.id(), UnifiedAddressRequest::AllAvailableKeys)
             .unwrap();
         assert_eq!(addr2, addr2_cur);
 
@@ -2302,13 +2304,13 @@ mod tests {
         // will tick the clock between each generation.
         use zcash_keys::keys::ReceiverRequirement::*;
         #[cfg(feature = "orchard")]
-        let shielded_only_request = UnifiedAddressRequest::unsafe_new(Require, Require, Omit);
+        let shielded_only_request = UnifiedAddressRequest::unsafe_custom(Require, Require, Omit);
         #[cfg(not(feature = "orchard"))]
-        let shielded_only_request = UnifiedAddressRequest::unsafe_new(Omit, Require, Omit);
+        let shielded_only_request = UnifiedAddressRequest::unsafe_custom(Omit, Require, Omit);
 
         let cur_shielded_only = st
             .wallet()
-            .get_last_generated_address(account.id(), Some(shielded_only_request))
+            .get_last_generated_address(account.id(), shielded_only_request)
             .unwrap();
         assert!(cur_shielded_only.is_none());
 
@@ -2324,7 +2326,7 @@ mod tests {
 
         let (shielded_only, di) = st
             .wallet_mut()
-            .get_next_available_address(account.id(), Some(shielded_only_request))
+            .get_next_available_address(account.id(), shielded_only_request)
             .unwrap()
             .expect("generated a shielded-only address");
 
@@ -2334,7 +2336,7 @@ mod tests {
 
         let cur_shielded_only = st
             .wallet()
-            .get_last_generated_address(account.id(), Some(shielded_only_request))
+            .get_last_generated_address(account.id(), shielded_only_request)
             .unwrap()
             .expect("retrieved the last-generated shielded-only address");
         assert_eq!(cur_shielded_only, shielded_only);
@@ -2350,7 +2352,7 @@ mod tests {
 
         let (shielded_only_2, di_2) = st
             .wallet_mut()
-            .get_next_available_address(account.id(), Some(shielded_only_request))
+            .get_next_available_address(account.id(), shielded_only_request)
             .unwrap()
             .expect("generated a shielded-only address");
         assert_ne!(shielded_only_2, shielded_only);
@@ -2602,7 +2604,7 @@ mod tests {
 
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(
-            ufvk.default_address(None)
+            ufvk.default_address(UnifiedAddressRequest::AllAvailableKeys)
                 .expect("A valid default address exists for the UFVK")
                 .0
                 .transparent()

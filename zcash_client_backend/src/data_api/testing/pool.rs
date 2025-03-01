@@ -1755,6 +1755,8 @@ where
     DSF: DataStoreFactory,
     <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
+    use zcash_keys::keys::UnifiedAddressRequest;
+
     let mut st = TestBuilder::new()
         .with_data_store_factory(ds_factory)
         .with_block_cache(cache)
@@ -1766,7 +1768,7 @@ where
 
     let uaddr = st
         .wallet()
-        .get_last_generated_address(account.id(), None)
+        .get_last_generated_address(account.id(), UnifiedAddressRequest::AllAvailableKeys)
         .unwrap()
         .unwrap();
     let taddr = uaddr.transparent().unwrap();

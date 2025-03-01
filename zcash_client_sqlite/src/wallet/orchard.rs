@@ -256,7 +256,7 @@ pub(crate) fn ensure_address<
 
         let ua = account
             .uivk()
-            .address(diversifier_index, Some(UnifiedAddressRequest::ALLOW_ALL))?;
+            .address(diversifier_index, UnifiedAddressRequest::ALLOW_ALL)?;
         upsert_address(
             conn,
             params,

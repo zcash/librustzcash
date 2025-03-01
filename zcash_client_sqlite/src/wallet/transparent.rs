@@ -20,7 +20,6 @@ use zcash_client_backend::{
 use zcash_keys::{
     address::Address,
     encoding::AddressCodec,
-    keys::ReceiverRequirement,
     keys::{AddressGenerationError, UnifiedAddressRequest},
 };
 use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
@@ -414,20 +413,15 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
     account_id: AccountRef,
     key_scope: KeyScope,
     gap_limits: &GapLimits,
-    request: Option<UnifiedAddressRequest>,
+    request: UnifiedAddressRequest,
 ) -> Result<(), SqliteClientError> {
     let account = get_account_internal(conn, params, account_id)?
         .ok_or_else(|| SqliteClientError::AccountUnknown)?;
 
-    let request = request.unwrap_or_else(|| {
-        use ReceiverRequirement::*;
-        UnifiedAddressRequest::unsafe_new(Allow, Allow, Require)
-    });
-
     let gen_addrs = |key_scope: KeyScope, index: NonHardenedChildIndex| {
         Ok::<_, SqliteClientError>(match key_scope {
             KeyScope::Zip32(zip32::Scope::External) => {
-                let ua = account.uivk().address(index.into(), Some(request));
+                let ua = account.uivk().address(index.into(), request);
                 let transparent_address = account
                     .uivk()
                     .transparent()

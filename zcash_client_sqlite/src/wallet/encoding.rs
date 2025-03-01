@@ -10,7 +10,7 @@ use zcash_address::{
 use zcash_client_backend::data_api::AccountSource;
 use zcash_keys::{
     address::{Address, UnifiedAddress},
-    keys::{ReceiverRequirement, UnifiedAddressRequest},
+    keys::{ReceiverRequirement, ReceiverRequirements},
 };
 use zcash_protocol::{consensus::NetworkType, memo::MemoBytes, PoolType, ShieldedProtocol};
 use zip32::DiversifierIndex;
@@ -149,7 +149,7 @@ bitflags! {
 }
 
 impl ReceiverFlags {
-    pub(crate) fn required(request: UnifiedAddressRequest) -> Self {
+    pub(crate) fn required(request: ReceiverRequirements) -> Self {
         let mut flags = ReceiverFlags::UNKNOWN;
         if matches!(request.orchard(), ReceiverRequirement::Require) {
             flags |= ReceiverFlags::ORCHARD;
@@ -163,7 +163,7 @@ impl ReceiverFlags {
         flags
     }
 
-    pub(crate) fn omitted(request: UnifiedAddressRequest) -> Self {
+    pub(crate) fn omitted(request: ReceiverRequirements) -> Self {
         let mut flags = ReceiverFlags::UNKNOWN;
         if matches!(request.orchard(), ReceiverRequirement::Omit) {
             flags |= ReceiverFlags::ORCHARD;

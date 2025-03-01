@@ -8,7 +8,7 @@ use rusqlite::{named_params, Transaction};
 use schemerz_rusqlite::RusqliteMigration;
 
 use zcash_address::ZcashAddress;
-use zcash_keys::keys::UnifiedIncomingViewingKey;
+use zcash_keys::keys::{ReceiverRequirement, UnifiedAddressRequest, UnifiedIncomingViewingKey};
 use zcash_protocol::consensus::{self, BlockHeight};
 
 use super::add_account_uuids;
@@ -367,7 +367,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     let di = ivk
                         .diversifier_index(&ivk.address(diversifier))
                         .expect("roundtrip");
-                    let ua = uivk.address(di, None)?;
+                    let ua = uivk.address(di, UnifiedAddressRequest::AllAvailableKeys)?;
                     let address_id = wallet::upsert_address(
                         conn,
                         &self.params,
@@ -431,7 +431,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                                 .expect("previously generated an address"),
                         )
                         .expect("roundtrip");
-                    let ua = uivk.address(di, None)?;
+                    let ua = uivk.address(di, UnifiedAddressRequest::AllAvailableKeys)?;
                     let address_id = wallet::upsert_address(
                         conn,
                         &self.params,
@@ -589,13 +589,14 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         #[cfg(feature = "transparent-inputs")]
         for account_id in account_ids {
             for key_scope in [KeyScope::EXTERNAL, KeyScope::INTERNAL] {
+                use ReceiverRequirement::*;
                 generate_gap_addresses(
                     conn,
                     &self.params,
                     AccountRef(account_id.try_into().unwrap()),
                     key_scope,
                     &GapLimits::default(),
-                    None,
+                    UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
                 )?;
             }
         }

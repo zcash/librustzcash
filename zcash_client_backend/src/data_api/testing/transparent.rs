@@ -18,7 +18,7 @@ use ::transparent::{
     bundle::{OutPoint, TxOut},
 };
 use sapling::zip32::ExtendedSpendingKey;
-use zcash_keys::address::Address;
+use zcash_keys::{address::Address, keys::UnifiedAddressRequest};
 use zcash_primitives::block::BlockHash;
 use zcash_protocol::{local_consensus::LocalNetwork, value::Zatoshis};
 
@@ -102,7 +102,7 @@ where
     let account_id = st.test_account().unwrap().id();
     let uaddr = st
         .wallet()
-        .get_last_generated_address(account_id, None)
+        .get_last_generated_address(account_id, UnifiedAddressRequest::AllAvailableKeys)
         .unwrap()
         .unwrap();
     let taddr = uaddr.transparent().unwrap();
@@ -193,7 +193,7 @@ where
     let account = st.test_account().cloned().unwrap();
     let uaddr = st
         .wallet()
-        .get_last_generated_address(account.id(), None)
+        .get_last_generated_address(account.id(), UnifiedAddressRequest::AllAvailableKeys)
         .unwrap()
         .unwrap();
     let taddr = uaddr.transparent().unwrap();
@@ -301,7 +301,7 @@ where
     let account = st.test_account().cloned().unwrap();
     let uaddr = st
         .wallet()
-        .get_last_generated_address(account.id(), None)
+        .get_last_generated_address(account.id(), UnifiedAddressRequest::AllAvailableKeys)
         .unwrap()
         .unwrap();
     let taddr = uaddr.transparent().unwrap();

@@ -239,7 +239,7 @@ impl Account {
     /// receiver, and there was no valid Sapling receiver at diversifier index zero.
     pub(crate) fn default_address(
         &self,
-        request: Option<UnifiedAddressRequest>,
+        request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.uivk().default_address(request)
     }
@@ -314,8 +314,10 @@ pub(crate) fn seed_matches_derived_account<P: consensus::Parameters>(
         let usk = UnifiedSpendingKey::from_seed(params, &seed.expose_secret()[..], account_index)
             .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
 
-        let (seed_addr, _) = usk.to_unified_full_viewing_key().default_address(None)?;
-        let (uivk_addr, _) = uivk.default_address(None)?;
+        let (seed_addr, _) = usk
+            .to_unified_full_viewing_key()
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)?;
+        let (uivk_addr, _) = uivk.default_address(UnifiedAddressRequest::AllAvailableKeys)?;
 
         #[cfg(not(feature = "orchard"))]
         let orchard_match = false;
@@ -598,7 +600,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     // Always derive the default Unified Address for the account. If the account's viewing
     // key has fewer components than the wallet supports (most likely due to this being an
     // imported viewing key), derive an address containing the common subset of receivers.
-    let (address, d_idx) = account.default_address(None)?;
+    let (address, d_idx) = account.default_address(UnifiedAddressRequest::AllAvailableKeys)?;
     upsert_address(
         conn,
         params,
@@ -613,7 +615,15 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     // and ephemeral key scopes.
     #[cfg(feature = "transparent-inputs")]
     for key_scope in [KeyScope::EXTERNAL, KeyScope::INTERNAL, KeyScope::Ephemeral] {
-        transparent::generate_gap_addresses(conn, params, account_id, key_scope, gap_limits, None)?;
+        use ReceiverRequirement::*;
+        transparent::generate_gap_addresses(
+            conn,
+            params,
+            account_id,
+            key_scope,
+            gap_limits,
+            UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+        )?;
     }
 
     Ok(account)
@@ -624,7 +634,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
     params: &P,
     clock: &C,
     account_uuid: AccountUuid,
-    request: Option<UnifiedAddressRequest>,
+    request: UnifiedAddressRequest,
     #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
 ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, SqliteClientError> {
     let account: Account = match get_account(conn, params, account_uuid)? {
@@ -634,14 +644,10 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
         }
     };
 
-    let request = request.unwrap_or_else(|| {
-        account
-            .uivk()
-            .to_address_request()
-            .expect("uivk can produce a valid address")
-    });
+    // This will also ensure that the provided request can be satisfied by the account's UIVK
+    let requirements = account.uivk().receiver_requirements(request)?;
 
-    let (addr, diversifier_index) = if request.p2pkh() == ReceiverRequirement::Require {
+    let (addr, diversifier_index) = if requirements.p2pkh() == ReceiverRequirement::Require {
         #[cfg(not(feature = "transparent-inputs"))]
         {
             return Err(SqliteClientError::AddressGeneration(
@@ -655,6 +661,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
         // transparent gap limit.
         #[cfg(feature = "transparent-inputs")]
         {
+            use ReceiverRequirement::*;
             // First, ensure that we have pre-generated as many addresses as we can.
             transparent::generate_gap_addresses(
                 conn,
@@ -662,7 +669,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
                 account.internal_id(),
                 KeyScope::EXTERNAL,
                 gap_limits,
-                None,
+                UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
             )?;
 
             // Select indicies from the transparent gap limit that are available for use as
@@ -684,11 +691,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
                 .iter()
                 .find_map(|(_, _, meta)| {
                     let j = DiversifierIndex::from(meta.address_index());
-                    account
-                        .uivk()
-                        .address(j, Some(request))
-                        .ok()
-                        .map(|ua| (ua, j))
+                    account.uivk().address(j, request).ok().map(|ua| (ua, j))
                 })
                 .ok_or(SqliteClientError::ReachedGapLimit(
                     TransparentKeyScope::EXTERNAL,
@@ -717,7 +720,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
         // search the diversifier space for a diversifier index that creates a valid address
         // satisfying the request and is currently not used in an exposed address
         loop {
-            let found_addr = account.uivk().find_address(j, Some(request))?;
+            let found_addr = account.uivk().find_address(j, request)?;
             let collision = find_collision
                 .query_row(
                     named_params! {
@@ -760,22 +763,23 @@ pub(crate) fn get_last_generated_address<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account_uuid: AccountUuid,
-    request: Option<UnifiedAddressRequest>,
+    address_filter: UnifiedAddressRequest,
 ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, SqliteClientError> {
     let account: Account =
         get_account(conn, params, account_uuid)?.ok_or(SqliteClientError::AccountUnknown)?;
 
-    let request = request
-        .map_or_else(|| account.uivk().to_address_request(), Ok)
+    let requirements = account
+        .uivk()
+        .receiver_requirements(address_filter)
         .map_err(|_| {
             SqliteClientError::BadAccountData(
                 "Could not generate UnifiedAddressRequest for UIVK".to_string(),
             )
         })?;
-    let require_flags = ReceiverFlags::required(request);
-    let omit_flags = ReceiverFlags::omitted(request);
-    // This returns the most recently exposed external-scope address (the request that was exposed
-    // at the greatest block height) that conforms to the specified request.
+    let require_flags = ReceiverFlags::required(requirements);
+    let omit_flags = ReceiverFlags::omitted(requirements);
+    // This returns the most recently exposed external-scope address (the address that was exposed
+    // at the greatest block height) that conforms to the specified requirements.
     let addr: Option<(String, Vec<u8>)> = conn
         .query_row(
             "SELECT address, diversifier_index_be
@@ -3390,7 +3394,15 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
 
     #[cfg(feature = "transparent-inputs")]
     for (account_id, key_scope) in receiving_accounts {
-        transparent::generate_gap_addresses(conn, params, account_id, key_scope, gap_limits, None)?;
+        use ReceiverRequirement::*;
+        transparent::generate_gap_addresses(
+            conn,
+            params,
+            account_id,
+            key_scope,
+            gap_limits,
+            UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+        )?;
     }
 
     // If the transaction has outputs that belong to the wallet as well as transparent
@@ -4100,6 +4112,7 @@ mod tests {
         testing::{AddressType, DataStoreFactory, FakeCompactOutput, TestBuilder, TestState},
         Account as _, AccountSource, WalletRead, WalletWrite,
     };
+    use zcash_keys::keys::UnifiedAddressRequest;
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::value::Zatoshis;
 
@@ -4132,14 +4145,17 @@ mod tests {
 
         // The default address is set for the test account
         assert_matches!(
-            st.wallet().get_last_generated_address(account.id(), None),
+            st.wallet()
+                .get_last_generated_address(account.id(), UnifiedAddressRequest::AllAvailableKeys),
             Ok(Some(_))
         );
 
         // No default address is set for an un-initialized account
         assert_matches!(
-            st.wallet()
-                .get_last_generated_address(AccountUuid(Uuid::nil()), None),
+            st.wallet().get_last_generated_address(
+                AccountUuid(Uuid::nil()),
+                UnifiedAddressRequest::AllAvailableKeys
+            ),
             Err(SqliteClientError::AccountUnknown)
         );
     }
