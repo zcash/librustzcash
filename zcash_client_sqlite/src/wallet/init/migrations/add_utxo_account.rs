@@ -132,7 +132,7 @@ fn get_transparent_receivers<P: consensus::Parameters>(
     params: &P,
     account: AccountId,
 ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, SqliteClientError> {
-    use crate::wallet::decode_diversifier_index_be;
+    use crate::wallet::encoding::decode_diversifier_index_be;
 
     let mut ret: HashMap<TransparentAddress, Option<TransparentAddressMetadata>> = HashMap::new();
 

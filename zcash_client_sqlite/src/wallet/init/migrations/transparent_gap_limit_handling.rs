@@ -21,7 +21,7 @@ use crate::{
 use {
     crate::{
         wallet::{
-            decode_diversifier_index_be, encode_diversifier_index_be,
+            encoding::{decode_diversifier_index_be, encode_diversifier_index_be},
             transparent::generate_gap_addresses,
         },
         GapLimits,

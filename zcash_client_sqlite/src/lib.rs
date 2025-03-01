@@ -118,7 +118,7 @@ use {
 };
 
 #[cfg(any(test, feature = "test-dependencies", feature = "transparent-inputs"))]
-use crate::wallet::KeyScope;
+use crate::wallet::encoding::KeyScope;
 
 #[cfg(any(test, feature = "test-dependencies", not(feature = "orchard")))]
 use zcash_protocol::PoolType;
@@ -894,7 +894,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> WalletTest
         txid: &TxId,
         protocol: ShieldedProtocol,
     ) -> Result<Vec<NoteId>, <Self as WalletRead>::Error> {
-        use crate::wallet::pool_code;
+        use crate::wallet::encoding::pool_code;
 
         let mut stmt_sent_notes = self.conn.borrow().prepare(
             "SELECT output_index

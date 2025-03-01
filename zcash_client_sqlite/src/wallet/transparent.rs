@@ -33,8 +33,9 @@ use zip32::Scope;
 
 use super::encoding::ReceiverFlags;
 use super::{
-    account_birthday_internal, chain_tip_height, decode_diversifier_index_be,
-    encode_diversifier_index_be, get_account_ids, get_account_internal, KeyScope,
+    account_birthday_internal, chain_tip_height,
+    encoding::{decode_diversifier_index_be, encode_diversifier_index_be},
+    get_account_ids, get_account_internal, KeyScope,
 };
 use crate::{error::SqliteClientError, AccountUuid, TxRef, UtxoId};
 use crate::{AccountRef, AddressRef, GapLimits};
