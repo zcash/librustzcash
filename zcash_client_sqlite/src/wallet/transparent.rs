@@ -368,7 +368,7 @@ pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
 
     if addresses_to_reserve.len() < n {
         return Err(SqliteClientError::ReachedGapLimit(
-            key_scope,
+            key_scope.into(),
             gap_start.index() + gap_limit,
         ));
     }

@@ -372,7 +372,7 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
 /// This extends the [`zip32::Scope`] type to include the custom scope used to generate keys for
 /// ephemeral transparent addresses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum KeyScope {
+pub(crate) enum KeyScope {
     /// A key scope corresponding to a [`zip32::Scope`].
     Zip32(zip32::Scope),
     /// An ephemeral transparent address, which is derived from an account's transparent
@@ -802,7 +802,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
                         .map(|ua| (ua, j))
                 })
                 .ok_or(SqliteClientError::ReachedGapLimit(
-                    KeyScope::EXTERNAL,
+                    TransparentKeyScope::EXTERNAL,
                     gap_start.index() + gap_limits.external(),
                 ))?
         }

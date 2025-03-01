@@ -6,6 +6,7 @@ use std::fmt;
 use nonempty::NonEmpty;
 use shardtree::error::ShardTreeError;
 
+use transparent::keys::TransparentKeyScope;
 use zcash_address::ParseError;
 use zcash_client_backend::data_api::NoteFilter;
 use zcash_keys::address::UnifiedAddress;
@@ -16,10 +17,7 @@ use zip32::DiversifierIndex;
 use crate::{wallet::commitment_tree, AccountUuid};
 
 #[cfg(feature = "transparent-inputs")]
-use {
-    crate::wallet::KeyScope, ::transparent::address::TransparentAddress,
-    zcash_keys::encoding::TransparentCodecError, zip32::Scope,
-};
+use {::transparent::address::TransparentAddress, zcash_keys::encoding::TransparentCodecError};
 
 /// The primary error type for the SQLite wallet backend.
 #[derive(Debug)]
@@ -126,7 +124,7 @@ pub enum SqliteClientError {
     /// containing outputs belonging to a previously reserved address has been mined. The error
     /// contains the index that could not safely be reserved.
     #[cfg(feature = "transparent-inputs")]
-    ReachedGapLimit(KeyScope, u32),
+    ReachedGapLimit(TransparentKeyScope, u32),
 
     /// The backend encountered an attempt to reuse a diversifier index to generate an address
     /// having different receivers from an address that had previously been exposed for that
@@ -198,9 +196,10 @@ impl fmt::Display for SqliteClientError {
                 "The proposal cannot be constructed until a transaction with outputs to a previously reserved {} address has been mined. \
                  The address at index {bad_index} could not be safely reserved.",
                  match key_scope {
-                     KeyScope::Zip32(Scope::External) => "external transparent",
-                     KeyScope::Zip32(Scope::Internal) => "transparent change",
-                     KeyScope::Ephemeral => "ephemeral transparent",
+                     &TransparentKeyScope::EXTERNAL => "external transparent",
+                     &TransparentKeyScope::INTERNAL => "transparent change",
+                     &TransparentKeyScope::EPHEMERAL => "ephemeral transparent",
+                     _ => panic!("Unsupported transparent key scope.")
                  }
             ),
             SqliteClientError::DiversifierIndexReuse(i, _) => {
