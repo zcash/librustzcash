@@ -387,15 +387,15 @@ impl GapLimits {
         }
     }
 
-    pub(crate) fn external(&self) -> u32 {
+    pub fn external(&self) -> u32 {
         self.external
     }
 
-    pub(crate) fn internal(&self) -> u32 {
+    pub fn internal(&self) -> u32 {
         self.internal
     }
 
-    pub(crate) fn ephemeral(&self) -> u32 {
+    pub fn ephemeral(&self) -> u32 {
         self.ephemeral
     }
 }

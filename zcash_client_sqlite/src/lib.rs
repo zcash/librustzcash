@@ -306,7 +306,7 @@ impl GapLimits {
 ///
 /// - external addresses: 10
 /// - transparent internal (change) addresses: 5
-/// - ephemeral addresses: 3
+/// - ephemeral addresses: 5
 ///
 /// These limits are chosen with the following rationale:
 /// - At present, many wallets query light wallet servers with a set of addresses, because querying
@@ -331,12 +331,15 @@ impl Default for GapLimits {
         Self {
             external: 10,
             internal: 5,
-            ephemeral: 3,
+            ephemeral: 5,
         }
     }
 }
 
-#[cfg(all(test, feature = "transparent-inputs"))]
+#[cfg(all(
+    any(test, feature = "test-dependencies"),
+    feature = "transparent-inputs"
+))]
 impl From<GapLimits> for zcash_client_backend::data_api::testing::transparent::GapLimits {
     fn from(value: GapLimits) -> Self {
         zcash_client_backend::data_api::testing::transparent::GapLimits::new(
@@ -344,6 +347,16 @@ impl From<GapLimits> for zcash_client_backend::data_api::testing::transparent::G
             value.internal,
             value.ephemeral,
         )
+    }
+}
+
+#[cfg(all(
+    any(test, feature = "test-dependencies"),
+    feature = "transparent-inputs"
+))]
+impl From<zcash_client_backend::data_api::testing::transparent::GapLimits> for GapLimits {
+    fn from(value: zcash_client_backend::data_api::testing::transparent::GapLimits) -> Self {
+        GapLimits::from_parts(value.external(), value.internal(), value.ephemeral())
     }
 }
 

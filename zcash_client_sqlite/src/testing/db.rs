@@ -3,6 +3,7 @@ use rusqlite::Connection;
 use std::num::NonZeroU32;
 use std::time::Duration;
 use std::{collections::HashMap, time::SystemTime};
+use testing::transparent::GapLimits;
 use uuid::Uuid;
 
 use tempfile::NamedTempFile;
@@ -173,9 +174,18 @@ impl DataStoreFactory for TestDbFactory {
     type DsError = SqliteClientError;
     type DataStore = TestDb;
 
-    fn new_data_store(&self, network: LocalNetwork) -> Result<Self::DataStore, Self::Error> {
+    fn new_data_store(
+        &self,
+        network: LocalNetwork,
+        #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
+    ) -> Result<Self::DataStore, Self::Error> {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), network, test_clock()).unwrap();
+        #[cfg(feature = "transparent-inputs")]
+        {
+            db_data = db_data.with_gap_limits(gap_limits.into());
+        }
+
         if let Some(migrations) = &self.target_migrations {
             init_wallet_db_internal(&mut db_data, None, migrations, true).unwrap();
         } else {
@@ -190,9 +200,12 @@ impl Reset for TestDb {
 
     fn reset<C>(st: &mut TestState<C, Self, LocalNetwork>) -> NamedTempFile {
         let network = *st.network();
+        let gap_limits = st.wallet().db().gap_limits;
         let old_db = std::mem::replace(
             st.wallet_mut(),
-            TestDbFactory::default().new_data_store(network).unwrap(),
+            TestDbFactory::default()
+                .new_data_store(network, gap_limits.into())
+                .unwrap(),
         );
         old_db.take_data_file()
     }

@@ -86,11 +86,6 @@ use zcash_protocol::PoolType;
 #[cfg(feature = "pczt")]
 use pczt::roles::{prover::Prover, signer::Signer};
 
-/// The number of ephemeral addresses that can be safely reserved without observing any
-/// of them to be mined.
-#[cfg(feature = "transparent-inputs")]
-pub const EPHEMERAL_ADDR_GAP_LIMIT: usize = 3;
-
 /// Trait that exposes the pool-specific types and operations necessary to run the
 /// single-shielded-pool tests on a given pool.
 ///
@@ -538,12 +533,14 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 {
     use ::transparent::builder::TransparentSigningSet;
 
-    use crate::data_api::OutputOfSentTx;
+    use crate::data_api::{testing::transparent::GapLimits, OutputOfSentTx};
 
+    let gap_limits = GapLimits::new(10, 5, 3);
     let mut st = TestBuilder::new()
         .with_data_store_factory(ds_factory)
         .with_block_cache(cache)
         .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_gap_limits(gap_limits)
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -750,7 +747,10 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         .wallet()
         .get_known_ephemeral_addresses(account_id, None)
         .unwrap();
-    assert_eq!(known_addrs.len(), EPHEMERAL_ADDR_GAP_LIMIT + 2);
+    assert_eq!(
+        known_addrs.len(),
+        usize::try_from(gap_limits.ephemeral() + 2).unwrap()
+    );
 
     // Check that the addresses are all distinct.
     let known_set: HashSet<_> = known_addrs.iter().map(|(addr, _)| addr).collect();
@@ -775,7 +775,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         },
     );
     let mut transparent_signing_set = TransparentSigningSet::new();
-    let (colliding_addr, _) = &known_addrs[EPHEMERAL_ADDR_GAP_LIMIT - 1];
+    let (colliding_addr, _) = &known_addrs[usize::try_from(gap_limits.ephemeral() - 1).unwrap()];
     let utxo_value = (value - zip317::MINIMUM_FEE).unwrap();
     assert_matches!(
         builder.add_transparent_output(colliding_addr, utxo_value),
@@ -818,7 +818,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     let txid = build_result.transaction().txid();
 
     // Now, store the transaction, pretending it has been mined (we will actually mine the block
-    // next). This will cause the the gap start to move & a new `EPHEMERAL_ADDR_GAP_LIMIT` of
+    // next). This will cause the the gap start to move & a new `gap_limits.ephemeral()` of
     // addresses to be created.
     let target_height = st.latest_cached_block().unwrap().height() + 1;
     st.wallet_mut()
@@ -839,46 +839,48 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     st.scan_cached_blocks(h, 1);
     assert_eq!(h, target_height);
 
-    // At this point the start of the gap should be at index `EPHEMERAL_ADDR_GAP_LIMIT` and the new
-    // size of the known address set should be `EPHEMERAL_ADDR_GAP_LIMIT * 2`.
+    // At this point the start of the gap should be at index `gap_limits.ephemeral()` and the new
+    // size of the known address set should be `gap_limits.ephemeral() * 2`.
     let new_known_addrs = st
         .wallet()
         .get_known_ephemeral_addresses(account_id, None)
         .unwrap();
-    assert_eq!(new_known_addrs.len(), EPHEMERAL_ADDR_GAP_LIMIT * 2);
+    assert_eq!(
+        new_known_addrs.len(),
+        usize::try_from(gap_limits.ephemeral() * 2).unwrap()
+    );
     assert!(new_known_addrs.starts_with(&known_addrs));
 
-    let reservation_should_succeed = |st: &mut TestState<_, DSF::DataStore, _>, n| {
+    let reservation_should_succeed = |st: &mut TestState<_, DSF::DataStore, _>, n: u32| {
         let reserved = st
             .wallet_mut()
-            .reserve_next_n_ephemeral_addresses(account_id, n)
+            .reserve_next_n_ephemeral_addresses(account_id, n.try_into().unwrap())
             .unwrap();
-        assert_eq!(reserved.len(), n);
+        assert_eq!(reserved.len(), usize::try_from(n).unwrap());
         reserved
     };
     let reservation_should_fail =
-        |st: &mut TestState<_, DSF::DataStore, _>, n, expected_bad_index| {
+        |st: &mut TestState<_, DSF::DataStore, _>, n: u32, expected_bad_index| {
             assert_matches!(st
             .wallet_mut()
-            .reserve_next_n_ephemeral_addresses(account_id, n),
+            .reserve_next_n_ephemeral_addresses(account_id, n.try_into().unwrap()),
             Err(e) if is_reached_gap_limit(&e, account_id, expected_bad_index));
         };
 
     let next_reserved = reservation_should_succeed(&mut st, 1);
-    assert_eq!(next_reserved[0], known_addrs[EPHEMERAL_ADDR_GAP_LIMIT]);
+    assert_eq!(
+        next_reserved[0],
+        known_addrs[usize::try_from(gap_limits.ephemeral()).unwrap()]
+    );
 
     // The range of address indices that are safe to reserve now is
-    // 0..(EPHEMERAL_ADDR_GAP_LIMIT * 2 - 1)`, and we have already reserved or used
-    // `EPHEMERAL_ADDR_GAP_LIMIT + 1`, addresses, so trying to reserve another
-    // `EPHEMERAL_ADDR_GAP_LIMIT` should fail.
-    reservation_should_fail(
-        &mut st,
-        EPHEMERAL_ADDR_GAP_LIMIT,
-        (EPHEMERAL_ADDR_GAP_LIMIT * 2) as u32,
-    );
-    reservation_should_succeed(&mut st, EPHEMERAL_ADDR_GAP_LIMIT - 1);
+    // 0..(gap_limits.ephemeral() * 2 - 1)`, and we have already reserved or used
+    // `gap_limits.ephemeral() + 1`, addresses, so trying to reserve another
+    // `gap_limits.ephemeral()` should fail.
+    reservation_should_fail(&mut st, gap_limits.ephemeral(), gap_limits.ephemeral() * 2);
+    reservation_should_succeed(&mut st, gap_limits.ephemeral() - 1);
     // Now we've reserved everything we can, we can't reserve one more
-    reservation_should_fail(&mut st, 1, (EPHEMERAL_ADDR_GAP_LIMIT * 2) as u32);
+    reservation_should_fail(&mut st, 1, gap_limits.ephemeral() * 2);
 }
 
 #[cfg(feature = "transparent-inputs")]
