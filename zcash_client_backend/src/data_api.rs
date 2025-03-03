@@ -2390,10 +2390,18 @@ pub trait WalletWrite: WalletRead {
     /// either a key not being available or the diversifier index not being valid for a
     /// [`ReceiverRequirement::Require`]'ed receiver.
     ///
-    /// Address generation should fail if a transparent receiver would be generated that violates
-    /// the backend's internally configured gap limit for HD-seed-based recovery, or if an address
-    /// has already been exposed for the given diversifier index and the given request produced an
-    /// address having different receivers than what was originally exposed.
+    /// Address generation should fail if an address has already been exposed for the given
+    /// diversifier index and the given request produced an address having different receivers than
+    /// what was originally exposed.
+    ///
+    /// # WARNINGS
+    /// If an address generated using this method has a transparent receiver and the
+    /// chosen diversifier index would be outside the wallet's internally-configured gap limit,
+    /// funds sent to these address are **likely to not be discovered on recovery from seed**. It
+    /// up to the caller of this method to either ensure that they only request transparent
+    /// receivers with indices within the range of a reasonable gap limit, or that they ensure that
+    /// their wallet provides backup facilities that can be used to ensure that funds sent to such
+    /// addresses are recoverable after a loss of wallet data.
     ///
     /// [`ReceiverRequirement::Require`]: zcash_keys::keys::ReceiverRequirement::Require
     fn get_address_for_index(
