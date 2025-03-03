@@ -209,3 +209,8 @@ debug = true
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
+
+[patch.crates-io]
+incrementalmerkletree = { path = "../../incrementalmerkletree/canon/incrementalmerkletree/" }
+incrementalmerkletree-testing = { path = "../../incrementalmerkletree/canon/incrementalmerkletree-testing/" }
+shardtree = { path = "../../incrementalmerkletree/canon/shardtree/" }
