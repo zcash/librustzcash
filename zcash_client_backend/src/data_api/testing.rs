@@ -1153,14 +1153,12 @@ where
 
         let prover = LocalTxProver::bundled();
         let (spend_vk, output_vk) = prover.verifying_keys();
-        let orchard_vk = ::orchard::circuit::VerifyingKey::build();
 
         extract_and_store_transaction_from_pczt(
             self.wallet_mut(),
             pczt,
-            &spend_vk,
-            &output_vk,
-            &orchard_vk,
+            Some((&spend_vk, &output_vk)),
+            None,
         )
     }
 

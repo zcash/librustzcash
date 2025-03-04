@@ -1681,13 +1681,23 @@ where
 /// metadata necessary for the wallet backend.
 ///
 /// Returns the transaction ID for the resulting transaction.
+///
+/// - `sapling_vk` is optional to allow the caller to check whether a PCZT has Sapling
+///   with [`pczt::roles::prover::Prover::requires_sapling_proofs`], and avoid downloading
+///   the Sapling parameters if they are not needed. If `sapling_vk` is `None`, and the
+///   PCZT has a Sapling bundle, this function will return an error.
+/// - `orchard_vk` is optional to allow the caller to control where the Orchard verifying
+///   key is generated or cached. If `orchard_vk` is `None`, and the PCZT has an Orchard
+///   bundle, an Orchard verifying key will be generated on the fly.
 #[cfg(feature = "pczt")]
 pub fn extract_and_store_transaction_from_pczt<DbT, N>(
     wallet_db: &mut DbT,
     pczt: pczt::Pczt,
-    spend_vk: &sapling::circuit::SpendVerifyingKey,
-    output_vk: &sapling::circuit::OutputVerifyingKey,
-    #[cfg(feature = "orchard")] orchard_vk: &orchard::circuit::VerifyingKey,
+    sapling_vk: Option<(
+        &sapling::circuit::SpendVerifyingKey,
+        &sapling::circuit::OutputVerifyingKey,
+    )>,
+    #[cfg(feature = "orchard")] orchard_vk: Option<&orchard::circuit::VerifyingKey>,
 ) -> Result<TxId, ExtractErrT<DbT, N>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
@@ -1853,10 +1863,14 @@ where
         })
         .collect::<Result<BTreeMap<_, _>, _>>()?;
 
-    let transaction = TransactionExtractor::new(finalized)
-        .with_sapling(spend_vk, output_vk)
-        .with_orchard(orchard_vk)
-        .extract()?;
+    let mut tx_extractor = TransactionExtractor::new(finalized);
+    if let Some((spend_vk, output_vk)) = sapling_vk {
+        tx_extractor = tx_extractor.with_sapling(spend_vk, output_vk);
+    }
+    if let Some(orchard_vk) = orchard_vk {
+        tx_extractor = tx_extractor.with_orchard(orchard_vk);
+    }
+    let transaction = tx_extractor.extract()?;
     let txid = transaction.txid();
 
     #[allow(clippy::too_many_arguments)]
