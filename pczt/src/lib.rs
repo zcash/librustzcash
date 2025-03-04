@@ -45,8 +45,16 @@
 //!   - Combines partial transparent signatures into `script_sig`s.
 //! - Transaction Extractor (anyone can execute)
 //!   - Creates bindingSig and extracts the final transaction.
+//!
+#![cfg_attr(feature = "std", doc = "## Feature flags")]
+#![cfg_attr(feature = "std", doc = document_features::document_features!())]
+//!
 
 #![no_std]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+// Catch documentation errors caused by code changes.
+#![deny(rustdoc::broken_intra_doc_links)]
 
 #[macro_use]
 extern crate alloc;

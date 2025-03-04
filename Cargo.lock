@@ -2915,6 +2915,7 @@ version = "0.2.0"
 dependencies = [
  "blake2b_simd",
  "bls12_381",
+ "document-features",
  "ff",
  "getset",
  "incrementalmerkletree",

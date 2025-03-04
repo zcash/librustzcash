@@ -10,6 +10,10 @@ repository.workspace = true
 license.workspace = true
 categories.workspace = true
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 zcash_note_encryption = { workspace = true, optional = true }
 zcash_primitives = { workspace = true, optional = true }
@@ -40,8 +44,13 @@ nonempty = { workspace = true, optional = true }
 orchard = { workspace = true, optional = true }
 pasta_curves = { workspace = true, optional = true }
 
-# - Bolierplate
-getset = "0.1"
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Boilerplate
+getset.workspace = true
+
+# - Documentation
+document-features = { workspace = true, optional = true }
 
 [dev-dependencies]
 incrementalmerkletree.workspace = true
@@ -55,6 +64,10 @@ zcash_proofs = { workspace = true, features = ["bundled-prover"] }
 zip32.workspace = true
 
 [features]
+default = ["std"]
+std = ["document-features"]
+
+## Enables functionality that requires Orchard protocol types.
 orchard = [
     "dep:ff",
     "dep:nonempty",
@@ -62,6 +75,8 @@ orchard = [
     "dep:pasta_curves",
     "dep:zcash_protocol",
 ]
+
+## Enables functionality that requires Sapling protocol types.
 sapling = [
     "dep:bls12_381",
     "dep:ff",
@@ -71,10 +86,25 @@ sapling = [
     "dep:zcash_note_encryption",
     "dep:zcash_protocol",
 ]
+
+## Enables functionality that requires Zcash transparent protocol types.
 transparent = ["dep:secp256k1", "dep:transparent", "dep:zcash_protocol"]
+
+## Enables building a PCZT from the output of `zcash_primitives`'s `Builder::build_for_pczt`.
 zcp-builder = ["dep:zcash_primitives", "dep:zcash_protocol"]
+
+#! ### PCZT roles behind feature flags
+#!
+#! These roles require awareness of at least one payment protocol's types in order to
+#! function.
+
+## Enables the I/O Finalizer role.
 io-finalizer = ["dep:zcash_primitives", "orchard", "sapling", "transparent"]
+
+## Enables the Prover role.
 prover = ["dep:rand_core", "sapling?/temporary-zcashd"]
+
+## Enables the Signer role.
 signer = [
     "dep:blake2b_simd",
     "dep:rand_core",
@@ -83,7 +113,11 @@ signer = [
     "sapling",
     "transparent",
 ]
+
+## Enables the Spend Finalizer role.
 spend-finalizer = ["transparent"]
+
+## Enables the Transaction Extractor role.
 tx-extractor = [
     "dep:rand_core",
     "dep:zcash_primitives",
