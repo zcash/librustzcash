@@ -469,18 +469,17 @@ mod tests {
     use zcash_protocol::consensus::{self, BlockHeight, BranchId, Network, NetworkConstants};
     use zip32::AccountId;
 
-    use crate::{
-        testing::db::{test_clock, TestDbFactory},
-        wallet::db,
-        WalletDb, UA_TRANSPARENT,
-    };
+    use crate::{testing::db::TestDbFactory, wallet::db, WalletDb, UA_TRANSPARENT};
 
     use super::init_wallet_db;
 
     #[cfg(feature = "transparent-inputs")]
     use {
         super::WalletMigrationError,
-        crate::wallet::{self, pool_code, PoolType},
+        crate::{
+            testing::db::test_clock,
+            wallet::{self, pool_code, PoolType},
+        },
         zcash_address::test_vectors,
         zcash_client_backend::data_api::WalletWrite,
         zip32::DiversifierIndex,

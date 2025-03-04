@@ -2,7 +2,7 @@
 //! database.
 
 use bitflags::bitflags;
-use transparent::{address::TransparentAddress::*, keys::TransparentKeyScope};
+use transparent::address::TransparentAddress::*;
 use zcash_address::{
     unified::{Container, Receiver},
     ConversionError, TryFromAddress,
@@ -16,6 +16,9 @@ use zcash_protocol::{consensus::NetworkType, memo::MemoBytes, PoolType, Shielded
 use zip32::DiversifierIndex;
 
 use crate::error::SqliteClientError;
+
+#[cfg(feature = "transparent-inputs")]
+use transparent::keys::TransparentKeyScope;
 
 pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     // These constants are *incidentally* shared with the typecodes

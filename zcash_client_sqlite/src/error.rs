@@ -6,7 +6,6 @@ use std::fmt;
 use nonempty::NonEmpty;
 use shardtree::error::ShardTreeError;
 
-use transparent::keys::TransparentKeyScope;
 use zcash_address::ParseError;
 use zcash_client_backend::data_api::NoteFilter;
 use zcash_keys::address::UnifiedAddress;
@@ -17,7 +16,10 @@ use zip32::DiversifierIndex;
 use crate::{wallet::commitment_tree, AccountUuid};
 
 #[cfg(feature = "transparent-inputs")]
-use {::transparent::address::TransparentAddress, zcash_keys::encoding::TransparentCodecError};
+use {
+    ::transparent::{address::TransparentAddress, keys::TransparentKeyScope},
+    zcash_keys::encoding::TransparentCodecError,
+};
 
 /// The primary error type for the SQLite wallet backend.
 #[derive(Debug)]

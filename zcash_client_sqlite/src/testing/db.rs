@@ -3,7 +3,6 @@ use rusqlite::Connection;
 use std::num::NonZeroU32;
 use std::time::Duration;
 use std::{collections::HashMap, time::SystemTime};
-use testing::transparent::GapLimits;
 use uuid::Uuid;
 
 use tempfile::NamedTempFile;
@@ -47,6 +46,7 @@ use {
     crate::TransparentAddressMetadata,
     ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     core::ops::Range,
+    testing::transparent::GapLimits,
 };
 
 /// Tuesday, 25 February 2025 00:00:00Z (the day the clock code was added).
@@ -200,6 +200,7 @@ impl Reset for TestDb {
 
     fn reset<C>(st: &mut TestState<C, Self, LocalNetwork>) -> NamedTempFile {
         let network = *st.network();
+        #[cfg(feature = "transparent-inputs")]
         let gap_limits = st.wallet().db().gap_limits;
         let old_db = std::mem::replace(
             st.wallet_mut(),

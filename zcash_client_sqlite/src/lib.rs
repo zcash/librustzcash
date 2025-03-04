@@ -277,7 +277,7 @@ impl GapLimits {
     ///
     /// This constructor is only available under the `unstable` feature, as it is not recommended
     /// for general use.
-    #[cfg(feature = "unstable")]
+    #[cfg(any(test, feature = "test-dependencies", feature = "unstable"))]
     pub fn from_parts(external: u32, internal: u32, ephemeral: u32) -> Self {
         Self {
             external,
