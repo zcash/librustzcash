@@ -7,6 +7,40 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::testing`:
+  - `struct transparent::GapLimits`
+  - `transparent::gap_limits` high-level test for gap limit handling
+
+### Changed
+- `zcash_client_backend::data_api::WalletRead`:
+  - `get_transparent_receivers` now takes additional `include_change` and
+    `include_ephemeral` arguments.
+  - `get_known_ephemeral_addresses` now takes a
+    `Range<zcash_transparent::keys::NonHardenedChildIndex>` as its argument
+    instead of a `Range<u32>`
+  - Has added method `utxo_query_height` when the `transparent-inputs` feature
+    flag is active.
+  - has removed method `get_current_address`. It has been replaced by
+    added method `WalletRead::get_last_generated_address_matching`
+- `zcash_client_backend::data_api::WalletWrite`:
+  - has added method `get_address_for_index`. Please note the WARNINGS section
+    in the documentation for use of this method.
+  - `get_next_available_address` now returns the diversifier index at which the
+    address was generated in addition to the address. In addition, the
+    `UnifiedAddressRequest` argument is now non-optional; use
+    `UnifiedAddressRequest::AllAvailableKeys` to indicate that all available
+    keys should be used to generate receivers instead of `None`.
+  - Arguments to `get_address_for_index` have changed: the
+    `UnifiedAddressRequest` argument is now non-optional; use
+    `UnifiedAddressRequest::AllAvailableKeys` to indicate that all available
+    keys should be used to generate receivers instead of `None`.
+
+### Removed
+- `zcash_client_backend::data_api::GAP_LIMIT` gap limits are now configured
+  based upon the key scope that they're associated with; there is no longer a
+  globally applicable gap limit.
+
 ## [0.17.0] - 2025-02-21
 
 ### Added
@@ -32,9 +66,6 @@ and this library adheres to Rust's notion of
     `map_internal_account_note` and `map_ephemeral_transparent_outpoint` and
     `internal_account_note_transpose_option` methods have consequently been
     removed.
-- `zcash_client_backend::data_api::WalletRead::get_known_ephemeral_addresses`
-  now takes a `Range<zcash_transparent::keys::NonHardenedChildIndex>` as its
-  argument instead of a `Range<u32>`
 - `zcash_client_backend::data_api::testing::TransactionSummary::from_parts`
   has been modified; it now requires additional `total_spent` and `total_received`
   arguments.

@@ -1,7 +1,8 @@
 use ambassador::Delegate;
 use rusqlite::Connection;
-use std::collections::HashMap;
 use std::num::NonZeroU32;
+use std::time::Duration;
+use std::{collections::HashMap, time::SystemTime};
 use uuid::Uuid;
 
 use tempfile::NamedTempFile;
@@ -9,7 +10,6 @@ use tempfile::NamedTempFile;
 use rusqlite::{self};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, ShardTree};
-use zip32::fingerprint::SeedFingerprint;
 
 use zcash_client_backend::{
     data_api::{
@@ -32,9 +32,11 @@ use zcash_protocol::{
     consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo, value::Zatoshis,
     ShieldedProtocol,
 };
+use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{
     error::SqliteClientError,
+    util::testing::FixedClock,
     wallet::init::{init_wallet_db, init_wallet_db_internal},
     AccountUuid, WalletDb,
 };
@@ -44,7 +46,15 @@ use {
     crate::TransparentAddressMetadata,
     ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     core::ops::Range,
+    testing::transparent::GapLimits,
 };
+
+/// Tuesday, 25 February 2025 00:00:00Z (the day the clock code was added).
+const TEST_EPOCH_SECONDS_OFFSET: Duration = Duration::from_secs(1740441600);
+
+pub(crate) fn test_clock() -> FixedClock {
+    FixedClock::new(SystemTime::UNIX_EPOCH + TEST_EPOCH_SECONDS_OFFSET)
+}
 
 #[allow(clippy::duplicated_attributes, reason = "False positive")]
 #[derive(Delegate)]
@@ -54,23 +64,26 @@ use {
 #[delegate(WalletWrite, target = "wallet_db")]
 #[delegate(WalletCommitmentTrees, target = "wallet_db")]
 pub(crate) struct TestDb {
-    wallet_db: WalletDb<Connection, LocalNetwork>,
+    wallet_db: WalletDb<Connection, LocalNetwork, FixedClock>,
     data_file: NamedTempFile,
 }
 
 impl TestDb {
-    fn from_parts(wallet_db: WalletDb<Connection, LocalNetwork>, data_file: NamedTempFile) -> Self {
+    fn from_parts(
+        wallet_db: WalletDb<Connection, LocalNetwork, FixedClock>,
+        data_file: NamedTempFile,
+    ) -> Self {
         Self {
             wallet_db,
             data_file,
         }
     }
 
-    pub(crate) fn db(&self) -> &WalletDb<Connection, LocalNetwork> {
+    pub(crate) fn db(&self) -> &WalletDb<Connection, LocalNetwork, FixedClock> {
         &self.wallet_db
     }
 
-    pub(crate) fn db_mut(&mut self) -> &mut WalletDb<Connection, LocalNetwork> {
+    pub(crate) fn db_mut(&mut self) -> &mut WalletDb<Connection, LocalNetwork, FixedClock> {
         &mut self.wallet_db
     }
 
@@ -154,15 +167,6 @@ pub(crate) struct TestDbFactory {
     target_migrations: Option<Vec<Uuid>>,
 }
 
-impl TestDbFactory {
-    #[allow(dead_code)]
-    pub(crate) fn new(target_migrations: Vec<Uuid>) -> Self {
-        Self {
-            target_migrations: Some(target_migrations),
-        }
-    }
-}
-
 impl DataStoreFactory for TestDbFactory {
     type Error = ();
     type AccountId = AccountUuid;
@@ -170,9 +174,18 @@ impl DataStoreFactory for TestDbFactory {
     type DsError = SqliteClientError;
     type DataStore = TestDb;
 
-    fn new_data_store(&self, network: LocalNetwork) -> Result<Self::DataStore, Self::Error> {
+    fn new_data_store(
+        &self,
+        network: LocalNetwork,
+        #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
+    ) -> Result<Self::DataStore, Self::Error> {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), network, test_clock()).unwrap();
+        #[cfg(feature = "transparent-inputs")]
+        {
+            db_data = db_data.with_gap_limits(gap_limits.into());
+        }
+
         if let Some(migrations) = &self.target_migrations {
             init_wallet_db_internal(&mut db_data, None, migrations, true).unwrap();
         } else {
@@ -187,9 +200,17 @@ impl Reset for TestDb {
 
     fn reset<C>(st: &mut TestState<C, Self, LocalNetwork>) -> NamedTempFile {
         let network = *st.network();
+        #[cfg(feature = "transparent-inputs")]
+        let gap_limits = st.wallet().db().gap_limits;
         let old_db = std::mem::replace(
             st.wallet_mut(),
-            TestDbFactory::default().new_data_store(network).unwrap(),
+            TestDbFactory::default()
+                .new_data_store(
+                    network,
+                    #[cfg(feature = "transparent-inputs")]
+                    gap_limits.into(),
+                )
+                .unwrap(),
         );
         old_db.take_data_file()
     }

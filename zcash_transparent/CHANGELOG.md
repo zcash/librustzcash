@@ -7,7 +7,16 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_transparent::keys::NonHardenedChildIndex::saturating_sub`
+- `zcash_transparent::keys::NonHardenedChildIndex::saturating_add`
+- `zcash_transparent::keys::NonHardenedChildIndex::MAX`
+- `impl From<NonHardenedChildIndex> for zip32::DiversifierIndex`
+- `impl TryFrom<zip32::DiversifierIndex> for NonHardenedChildIndex`
+- `impl {PartialOrd, Ord} for NonHardenedChildIndex`
+
 ## [0.2.0] - 2025-02-21
+
 ### Fixed
 - `zcash_transparent::keys::AccountPubKey::derive_pubkey_at_bip32_path` now
   returns the correct result for valid paths instead of an error or panic.

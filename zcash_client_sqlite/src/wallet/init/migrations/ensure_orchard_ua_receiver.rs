@@ -65,9 +65,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 })?
             };
 
-            let (default_addr, diversifier_index) = uivk.default_address(Some(
-                UnifiedAddressRequest::unsafe_new(UA_ORCHARD, Require, UA_TRANSPARENT),
-            ))?;
+            let (default_addr, diversifier_index) = uivk.default_address(
+                UnifiedAddressRequest::unsafe_custom(UA_ORCHARD, Require, UA_TRANSPARENT),
+            )?;
 
             let mut di_be = *diversifier_index.as_bytes();
             di_be.reverse();
@@ -106,7 +106,7 @@ mod tests {
     #[test]
     fn init_migrate_add_orchard_receiver() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork, ()).unwrap();
 
         let seed = vec![0x10; 32];
         let account_id = 0u32;
@@ -142,11 +142,11 @@ mod tests {
             .unwrap();
 
         let (addr, diversifier_index) = ufvk
-            .default_address(Some(UnifiedAddressRequest::unsafe_new(
+            .default_address(UnifiedAddressRequest::unsafe_custom(
                 Omit,
                 Require,
                 UA_TRANSPARENT,
-            )))
+            ))
             .unwrap();
         let mut di_be = *diversifier_index.as_bytes();
         di_be.reverse();

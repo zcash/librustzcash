@@ -48,11 +48,11 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_multi_step_proposed_transfer::<T, _>(
         TestDbFactory::default(),
         BlockCache::new(),
-        |e, account_id, expected_bad_index| {
+        |e, _, expected_bad_index| {
             matches!(
                 e,
-                crate::error::SqliteClientError::ReachedGapLimit(acct, bad_index)
-                if acct == &account_id && bad_index == &expected_bad_index)
+                crate::error::SqliteClientError::ReachedGapLimit(_, bad_index)
+                if bad_index == &expected_bad_index)
         },
     )
 }

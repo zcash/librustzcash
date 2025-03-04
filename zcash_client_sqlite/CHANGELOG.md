@@ -7,6 +7,31 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_sqlite::WalletDb::with_gap_limits`
+- `zcash_client_sqlite::GapLimits`
+- `zcash_client_sqlite::util`
+
+### Changed
+- `zcash_client_sqlite::WalletDb` has an added `Clock` field and corresponding
+  type parameter. Tests that make use of a `WalletDb` instance now use a
+  `zcash_client_sqlite::util::FixedClock` for their clock instance, and the
+  following methods have been changed to accept an additional parameter as a
+  result:
+  - `WalletDb::for_path`
+  - `WalletDb::from_connection`
+- `zcash_client_sqlite::error::SqliteClientError` variants have changed:
+  - The `EphemeralAddressReuse` variant has been removed and replaced
+    by a new generalized `AddressReuse` error variant.
+  - The `ReachedGapLimit` variant no longer includes the account UUID
+    for the account that reached the limit in its payload. In addition
+    to the transparent address index, it also contains the key scope
+    involved when the error was encountered.
+  - A new `DiversifierIndexReuse` variant has been added.
+- Each row returned from the `v_received_outputs` view now exposes an
+  internal identifier for the address that received that output. This should
+  be ignored by external consumers of this view.
+
 ## [0.15.0] - 2025-02-21
 
 ### Added

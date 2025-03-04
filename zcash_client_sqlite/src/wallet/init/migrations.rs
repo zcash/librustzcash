@@ -19,6 +19,7 @@ mod sent_notes_to_internal;
 mod shardtree_support;
 mod spend_key_available;
 mod support_legacy_sqlite;
+mod transparent_gap_limit_handling;
 mod tx_retrieval_queue;
 mod ufvk_support;
 mod utxos_table;
@@ -87,6 +88,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                         fix_broken_commitment_trees         add_account_uuids
     //                                     |                               |
     //                          fix_bad_change_flagging     v_transactions_additional_totals
+    //                                                                     |
+    //                                                       transparent_gap_limit_handling
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -151,6 +154,9 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(fix_bad_change_flagging::Migration),
         Box::new(add_account_uuids::Migration),
         Box::new(v_transactions_additional_totals::Migration),
+        Box::new(transparent_gap_limit_handling::Migration {
+            params: params.clone(),
+        }),
     ]
 }
 
@@ -284,7 +290,7 @@ mod tests {
     /// migrations.
     pub(crate) fn test_migrate(migrations: &[Uuid]) {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork, ()).unwrap();
 
         let seed = [0xab; 32];
         assert_matches!(
@@ -301,7 +307,7 @@ mod tests {
     #[test]
     fn migrate_between_releases_without_data() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork, ()).unwrap();
 
         let seed = [0xab; 32].to_vec();
 

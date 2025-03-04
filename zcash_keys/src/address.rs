@@ -462,7 +462,7 @@ pub mod testing {
         params: Network,
         request: UnifiedAddressRequest,
     ) -> impl Strategy<Value = UnifiedAddress> {
-        arb_unified_spending_key(params).prop_map(move |k| k.default_address(Some(request)).0)
+        arb_unified_spending_key(params).prop_map(move |k| k.default_address(request).0)
     }
 
     #[cfg(feature = "sapling")]

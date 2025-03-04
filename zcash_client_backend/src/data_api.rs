@@ -81,7 +81,7 @@ use zcash_protocol::{
     value::{BalanceError, Zatoshis},
     ShieldedProtocol, TxId,
 };
-use zip32::fingerprint::SeedFingerprint;
+use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use self::{
     chain::{ChainState, CommitmentTreeRoot},
@@ -126,10 +126,6 @@ pub const SAPLING_SHARD_HEIGHT: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH / 2;
 /// `lightwalletd` when using the `GetSubtreeRoots` GRPC call.
 #[cfg(feature = "orchard")]
 pub const ORCHARD_SHARD_HEIGHT: u8 = { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 } / 2;
-
-/// The number of ephemeral addresses that can be safely reserved without observing any
-/// of them to be mined. This is the same as the gap limit in Bitcoin.
-pub const GAP_LIMIT: u32 = 20;
 
 /// An enumeration of constraints that can be applied when querying for nullifiers for notes
 /// belonging to the wallet.
@@ -1229,14 +1225,16 @@ pub trait WalletRead {
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<Self::Account>, Self::Error>;
 
-    /// Returns the most recently generated unified address for the specified account, if the
-    /// account identifier specified refers to a valid account for this wallet.
+    /// Returns the most recently generated unified address for the specified account that conforms
+    /// to the specified address filter, if the account identifier specified refers to a valid
+    /// account for this wallet.
     ///
-    /// This will return `Ok(None)` if the account identifier does not correspond to a known
-    /// account.
-    fn get_current_address(
+    /// This will return `Ok(None)` if no previously generated address conforms to the specified
+    /// request.
+    fn get_last_generated_address_matching(
         &self,
         account: Self::AccountId,
+        address_filter: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
     /// Returns the birthday height for the given account, or an error if the account is not known
@@ -1369,6 +1367,7 @@ pub trait WalletRead {
     fn get_transparent_receivers(
         &self,
         _account: Self::AccountId,
+        _include_change: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         Ok(HashMap::new())
     }
@@ -1393,7 +1392,7 @@ pub trait WalletRead {
     /// This is equivalent to (but may be implemented more efficiently than):
     /// ```compile_fail
     /// Ok(
-    ///     if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
+    ///     if let Some(result) = self.get_transparent_receivers(account, true)?.get(address) {
     ///         result.clone()
     ///     } else {
     ///         self.get_known_ephemeral_addresses(account, None)?
@@ -1414,7 +1413,7 @@ pub trait WalletRead {
     ) -> Result<Option<TransparentAddressMetadata>, Self::Error> {
         // This should be overridden.
         Ok(
-            if let Some(result) = self.get_transparent_receivers(account)?.get(address) {
+            if let Some(result) = self.get_transparent_receivers(account, true)?.get(address) {
                 result.clone()
             } else {
                 self.get_known_ephemeral_addresses(account, None)?
@@ -1425,10 +1424,22 @@ pub trait WalletRead {
         )
     }
 
+    /// Returns the maximum block height at which a transparent output belonging to the wallet has
+    /// been observed.
+    ///
+    /// We must start looking for UTXOs for addresses within the current gap limit as of the block
+    /// height at which they might have first been revealed. This would have occurred when the gap
+    /// advanced as a consequence of a transaction being mined. The address at the start of the current
+    /// gap was potentially first revealed after the address at index `gap_start - (gap_limit + 1)`
+    /// received an output in a mined transaction; therefore, we take that height to be where we
+    /// should start searching for UTXOs.
+    #[cfg(feature = "transparent-inputs")]
+    fn utxo_query_height(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error>;
+
     /// Returns a vector of ephemeral transparent addresses associated with the given
     /// account controlled by this wallet, along with their metadata. The result includes
-    /// reserved addresses, and addresses for [`GAP_LIMIT`] additional indices (capped to
-    /// the maximum index).
+    /// reserved addresses, and addresses for the backend's configured gap limit worth
+    /// of additional indices (capped to the maximum index).
     ///
     /// If `index_range` is some `Range`, it limits the result to addresses with indices
     /// in that range. An `index_range` of `None` is defined to be equivalent to
@@ -2360,16 +2371,44 @@ pub trait WalletWrite: WalletRead {
         key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error>;
 
-    /// Generates and persists the next available diversified address for the specified account,
-    /// given the current addresses known to the wallet. If the `request` parameter is `None`,
-    /// an address should be generated using all of the available receivers for the account's UFVK.
+    /// Generates, persists, and marks as exposed the next available diversified address for the
+    /// specified account, given the current addresses known to the wallet.
     ///
     /// Returns `Ok(None)` if the account identifier does not correspond to a known
     /// account.
     fn get_next_available_address(
         &mut self,
         account: Self::AccountId,
-        request: Option<UnifiedAddressRequest>,
+        request: UnifiedAddressRequest,
+    ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, Self::Error>;
+
+    /// Generates, persists, and marks as exposed a diversified address for the specified account
+    /// at the provided diversifier index.
+    ///
+    /// Returns `Ok(None)` in the case that it is not possible to generate an address conforming
+    /// to the provided request at the specified diversifier index. Such a result might arise from
+    /// either a key not being available or the diversifier index not being valid for a
+    /// [`ReceiverRequirement::Require`]'ed receiver.
+    ///
+    /// Address generation should fail if an address has already been exposed for the given
+    /// diversifier index and the given request produced an address having different receivers than
+    /// what was originally exposed.
+    ///
+    /// # WARNINGS
+    /// If an address generated using this method has a transparent receiver and the
+    /// chosen diversifier index would be outside the wallet's internally-configured gap limit,
+    /// funds sent to these address are **likely to not be discovered on recovery from seed**. It
+    /// up to the caller of this method to either ensure that they only request transparent
+    /// receivers with indices within the range of a reasonable gap limit, or that they ensure that
+    /// their wallet provides backup facilities that can be used to ensure that funds sent to such
+    /// addresses are recoverable after a loss of wallet data.
+    ///
+    /// [`ReceiverRequirement::Require`]: zcash_keys::keys::ReceiverRequirement::Require
+    fn get_address_for_index(
+        &mut self,
+        account: Self::AccountId,
+        diversifier_index: DiversifierIndex,
+        request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
     /// Updates the wallet's view of the blockchain.

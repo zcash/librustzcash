@@ -4,27 +4,26 @@ use std::{collections::HashSet, rc::Rc};
 
 use group::ff::PrimeField;
 use incrementalmerkletree::Position;
-use rusqlite::{named_params, types::Value, Connection, Row, Transaction};
+use rusqlite::{named_params, types::Value, Connection, Row};
 
 use sapling::{self, Diversifier, Nullifier, Rseed};
 use zcash_client_backend::{
-    data_api::NullifierQuery,
+    data_api::{Account, NullifierQuery},
     wallet::{ReceivedNote, WalletSaplingOutput},
     DecryptedOutput, TransferType,
 };
-use zcash_keys::keys::UnifiedFullViewingKey;
-use zcash_primitives::transaction::TxId;
+use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::Zatoshis,
-    ShieldedProtocol,
+    ShieldedProtocol, TxId,
 };
 use zip32::Scope;
 
-use crate::{error::SqliteClientError, AccountUuid, ReceivedNoteId, TxRef};
+use crate::{error::SqliteClientError, AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef};
 
-use super::{get_account_ref, memo_repr, parse_scope, scope_code};
+use super::{get_account, get_account_ref, memo_repr, upsert_address, KeyScope};
 
 /// This trait provides a generalization over shielded output representations.
 pub(crate) trait ReceivedSaplingOutput {
@@ -162,9 +161,13 @@ fn to_spendable_note<P: consensus::Parameters>(
             let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
                 .map_err(SqliteClientError::CorruptedData)?;
 
-            let spending_key_scope = parse_scope(scope_code).ok_or_else(|| {
-                SqliteClientError::CorruptedData(format!("Invalid key scope code {}", scope_code))
-            })?;
+            let spending_key_scope = zip32::Scope::try_from(KeyScope::decode(scope_code)?)
+                .map_err(|_| {
+                    SqliteClientError::CorruptedData(format!(
+                        "Invalid key scope code {}",
+                        scope_code
+                    ))
+                })?;
 
             let recipient = match spending_key_scope {
                 Scope::Internal => ufvk
@@ -330,27 +333,80 @@ pub(crate) fn mark_sapling_note_spent(
     }
 }
 
+pub(crate) fn ensure_address<
+    T: ReceivedSaplingOutput<AccountId = AccountUuid>,
+    P: consensus::Parameters,
+>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    output: &T,
+    exposure_height: Option<BlockHeight>,
+) -> Result<Option<AddressRef>, SqliteClientError> {
+    if output.recipient_key_scope() != Some(Scope::Internal) {
+        let account = get_account(conn, params, output.account_id())?
+            .ok_or(SqliteClientError::AccountUnknown)?;
+
+        let uivk = account.uivk();
+        let ivk = uivk
+            .sapling()
+            .as_ref()
+            .expect("uivk decrypted this output.");
+        let to = output.note().recipient();
+        let diversifier_index = ivk
+            .decrypt_diversifier(&to)
+            .expect("address corresponds to account");
+
+        let ua = account
+            .uivk()
+            .address(diversifier_index, UnifiedAddressRequest::ALLOW_ALL)?;
+
+        upsert_address(
+            conn,
+            params,
+            account.internal_id(),
+            diversifier_index,
+            &ua,
+            exposure_height,
+            false,
+        )
+        .map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
 /// Records the specified shielded output as having been received.
 ///
 /// This implementation relies on the facts that:
 /// - A transaction will not contain more than 2^63 shielded outputs.
 /// - A note value will never exceed 2^63 zatoshis.
-pub(crate) fn put_received_note<T: ReceivedSaplingOutput<AccountId = AccountUuid>>(
-    conn: &Transaction,
+///
+/// Returns the internal account identifier of the account that received the output.
+pub(crate) fn put_received_note<
+    T: ReceivedSaplingOutput<AccountId = AccountUuid>,
+    P: consensus::Parameters,
+>(
+    conn: &rusqlite::Transaction,
+    params: &P,
     output: &T,
     tx_ref: TxRef,
+    target_or_mined_height: Option<BlockHeight>,
     spent_in: Option<TxRef>,
-) -> Result<(), SqliteClientError> {
+) -> Result<AccountRef, SqliteClientError> {
     let account_id = get_account_ref(conn, output.account_id())?;
+    let address_id = ensure_address(conn, params, output, target_or_mined_height)?;
     let mut stmt_upsert_received_note = conn.prepare_cached(
-        "INSERT INTO sapling_received_notes
-        (tx, output_index, account_id, diversifier, value, rcm, memo, nf,
-         is_change, commitment_tree_position,
-         recipient_key_scope)
+        "INSERT INTO sapling_received_notes (
+            tx, output_index, account_id, address_id,
+            diversifier, value, rcm, memo, nf,
+            is_change, commitment_tree_position,
+            recipient_key_scope
+        )
         VALUES (
             :tx,
             :output_index,
             :account_id,
+            :address_id,
             :diversifier,
             :value,
             :rcm,
@@ -362,6 +418,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput<AccountId = AccountUuid
         )
         ON CONFLICT (tx, output_index) DO UPDATE
         SET account_id = :account_id,
+            address_id = :address_id,
             diversifier = :diversifier,
             value = :value,
             rcm = :rcm,
@@ -381,6 +438,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput<AccountId = AccountUuid
         ":tx": tx_ref.0,
         ":output_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
         ":account_id": account_id.0,
+        ":address_id": address_id.map(|a| a.0),
         ":diversifier": &diversifier.0,
         ":value": output.note().value().inner(),
         ":rcm": &rcm,
@@ -388,7 +446,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput<AccountId = AccountUuid
         ":memo": memo_repr(output.memo()),
         ":is_change": output.is_change(),
         ":commitment_tree_position": output.note_commitment_tree_position().map(u64::from),
-        ":recipient_key_scope": output.recipient_key_scope().map(scope_code)
+        ":recipient_key_scope": output.recipient_key_scope().map(|s| KeyScope::from(s).encode()),
     ];
 
     let received_note_id = stmt_upsert_received_note
@@ -407,7 +465,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput<AccountId = AccountUuid
         )?;
     }
 
-    Ok(())
+    Ok(account_id)
 }
 
 #[cfg(test)]

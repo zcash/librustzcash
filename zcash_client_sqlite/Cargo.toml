@@ -45,6 +45,7 @@ bs58.workspace = true
 tracing.workspace = true
 
 # - Serialization
+bitflags.workspace = true
 byteorder.workspace = true
 nonempty.workspace = true
 prost.workspace = true

@@ -77,6 +77,7 @@ use {
     crate::wallet::TransparentAddressMetadata,
     ::transparent::{address::TransparentAddress, keys::NonHardenedChildIndex},
     std::ops::Range,
+    transparent::GapLimits,
 };
 
 #[cfg(feature = "orchard")]
@@ -85,10 +86,11 @@ use {
     ::orchard::tree::MerkleHashOrchard, group::ff::PrimeField, pasta_curves::pallas,
 };
 
-#[cfg(feature = "orchard")]
-pub mod orchard;
 pub mod pool;
 pub mod sapling;
+
+#[cfg(feature = "orchard")]
+pub mod orchard;
 #[cfg(feature = "transparent-inputs")]
 pub mod transparent;
 
@@ -1363,7 +1365,11 @@ pub trait DataStoreFactory {
         + WalletCommitmentTrees;
 
     /// Constructs a new data store.
-    fn new_data_store(&self, network: LocalNetwork) -> Result<Self::DataStore, Self::Error>;
+    fn new_data_store(
+        &self,
+        network: LocalNetwork,
+        #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
+    ) -> Result<Self::DataStore, Self::Error>;
 }
 
 /// A [`TestState`] builder, that configures the environment for a test.
@@ -1375,6 +1381,8 @@ pub struct TestBuilder<Cache, DataStoreFactory> {
     initial_chain_state: Option<InitialChainState>,
     account_birthday: Option<AccountBirthday>,
     account_index: Option<zip32::AccountId>,
+    #[cfg(feature = "transparent-inputs")]
+    gap_limits: GapLimits,
 }
 
 impl TestBuilder<(), ()> {
@@ -1404,6 +1412,8 @@ impl TestBuilder<(), ()> {
             initial_chain_state: None,
             account_birthday: None,
             account_index: None,
+            #[cfg(feature = "transparent-inputs")]
+            gap_limits: GapLimits::new(10, 5, 5),
         }
     }
 }
@@ -1425,6 +1435,8 @@ impl<A> TestBuilder<(), A> {
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
             account_index: self.account_index,
+            #[cfg(feature = "transparent-inputs")]
+            gap_limits: self.gap_limits,
         }
     }
 }
@@ -1443,6 +1455,24 @@ impl<A> TestBuilder<A, ()> {
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
             account_index: self.account_index,
+            #[cfg(feature = "transparent-inputs")]
+            gap_limits: self.gap_limits,
+        }
+    }
+}
+
+impl<A, B> TestBuilder<A, B> {
+    #[cfg(feature = "transparent-inputs")]
+    pub fn with_gap_limits(self, gap_limits: GapLimits) -> TestBuilder<A, B> {
+        TestBuilder {
+            rng: self.rng,
+            network: self.network,
+            cache: self.cache,
+            ds_factory: self.ds_factory,
+            initial_chain_state: self.initial_chain_state,
+            account_birthday: self.account_birthday,
+            account_index: self.account_index,
+            gap_limits,
         }
     }
 }
@@ -1603,7 +1633,14 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
     /// Builds the state for this test.
     pub fn build(self) -> TestState<Cache, DsFactory::DataStore, LocalNetwork> {
         let mut cached_blocks = BTreeMap::new();
-        let mut wallet_data = self.ds_factory.new_data_store(self.network).unwrap();
+        let mut wallet_data = self
+            .ds_factory
+            .new_data_store(
+                self.network,
+                #[cfg(feature = "transparent-inputs")]
+                self.gap_limits,
+            )
+            .unwrap();
 
         if let Some(initial_state) = &self.initial_chain_state {
             wallet_data
@@ -2522,9 +2559,10 @@ impl WalletRead for MockWalletDb {
         Ok(None)
     }
 
-    fn get_current_address(
+    fn get_last_generated_address_matching(
         &self,
         _account: Self::AccountId,
+        _request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         Ok(None)
     }
@@ -2616,6 +2654,7 @@ impl WalletRead for MockWalletDb {
     fn get_transparent_receivers(
         &self,
         _account: Self::AccountId,
+        _include_change: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         Ok(HashMap::new())
     }
@@ -2645,6 +2684,11 @@ impl WalletRead for MockWalletDb {
         _index_range: Option<Range<NonHardenedChildIndex>>,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         Ok(vec![])
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn utxo_query_height(&self, _account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
+        Ok(BlockHeight::from(0u32))
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -2701,7 +2745,16 @@ impl WalletWrite for MockWalletDb {
     fn get_next_available_address(
         &mut self,
         _account: Self::AccountId,
-        _request: Option<UnifiedAddressRequest>,
+        _request: UnifiedAddressRequest,
+    ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, Self::Error> {
+        Ok(None)
+    }
+
+    fn get_address_for_index(
+        &mut self,
+        _account: Self::AccountId,
+        _diversifier_index: DiversifierIndex,
+        _request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         Ok(None)
     }

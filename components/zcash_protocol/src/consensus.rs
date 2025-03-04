@@ -335,6 +335,16 @@ pub trait Parameters: Clone {
     }
 }
 
+impl<P: Parameters> Parameters for &P {
+    fn network_type(&self) -> NetworkType {
+        (*self).network_type()
+    }
+
+    fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight> {
+        (*self).activation_height(nu)
+    }
+}
+
 impl<P: Parameters> NetworkConstants for P {
     fn coin_type(&self) -> u32 {
         self.network_type().coin_type()

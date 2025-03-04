@@ -29,7 +29,7 @@ use crate::{
         chain_tip_height,
         commitment_tree::SqliteShardStore,
         init::{migrations::shardtree_support, WalletMigrationError},
-        scope_code,
+        KeyScope,
     },
     PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
 };
@@ -109,7 +109,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         transaction.execute_batch(
             &format!(
                 "ALTER TABLE sapling_received_notes ADD COLUMN recipient_key_scope INTEGER NOT NULL DEFAULT {};",
-                scope_code(Scope::External)
+                KeyScope::EXTERNAL.encode()
             )
         )?;
 
@@ -204,7 +204,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     transaction.execute(
                         "UPDATE sapling_received_notes SET recipient_key_scope = :scope
                          WHERE id_note = :note_id",
-                        named_params! {":scope": scope_code(Scope::Internal), ":note_id": note_id},
+                        named_params! {":scope": KeyScope::INTERNAL.encode(), ":note_id": note_id},
                     )?;
                 }
             } else {
@@ -261,7 +261,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     transaction.execute(
                         "UPDATE sapling_received_notes SET recipient_key_scope = :scope
                          WHERE id_note = :note_id",
-                        named_params! {":scope": scope_code(Scope::Internal), ":note_id": note_id},
+                        named_params! {":scope": KeyScope::INTERNAL.encode(), ":note_id": note_id},
                     )?;
                 }
             }
@@ -326,8 +326,9 @@ mod tests {
                 init_wallet_db_internal,
                 migrations::{add_account_birthdays, shardtree_support, wallet_summaries},
             },
-            memo_repr, parse_scope,
+            memo_repr,
             sapling::ReceivedSaplingOutput,
+            KeyScope,
         },
         AccountRef, TxRef, WalletDb,
     };
@@ -336,8 +337,8 @@ mod tests {
     const EXTERNAL_VALUE: u64 = 10;
     const INTERNAL_VALUE: u64 = 5;
 
-    fn prepare_wallet_state<P: Parameters>(
-        db_data: &mut WalletDb<Connection, P>,
+    fn prepare_wallet_state<P: Parameters, CL>(
+        db_data: &mut WalletDb<Connection, P, CL>,
     ) -> (UnifiedFullViewingKey, BlockHeight, BuildResult) {
         // Create an account in the wallet
         let usk0 =
@@ -526,7 +527,7 @@ mod tests {
 
         // Create wallet upgraded to just before the current migration.
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), params).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), params, ()).unwrap();
         init_wallet_db_internal(
             &mut db_data,
             None,
@@ -604,10 +605,10 @@ mod tests {
         while let Some(row) = rows.next().unwrap() {
             row_count += 1;
             let value: u64 = row.get(0).unwrap();
-            let scope = parse_scope(row.get(1).unwrap());
+            let scope = KeyScope::decode(row.get(1).unwrap()).unwrap();
             match value {
-                EXTERNAL_VALUE => assert_eq!(scope, Some(Scope::External)),
-                INTERNAL_VALUE => assert_eq!(scope, Some(Scope::Internal)),
+                EXTERNAL_VALUE => assert_eq!(scope, KeyScope::EXTERNAL),
+                INTERNAL_VALUE => assert_eq!(scope, KeyScope::INTERNAL),
                 _ => {
                     panic!(
                         "(Value, Scope) pair {:?} is not expected to exist in the wallet.",
@@ -625,7 +626,7 @@ mod tests {
 
         // Create wallet upgraded to just before the current migration.
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), params).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), params, ()).unwrap();
         init_wallet_db_internal(
             &mut db_data,
             None,
@@ -782,10 +783,10 @@ mod tests {
         while let Some(row) = rows.next().unwrap() {
             row_count += 1;
             let value: u64 = row.get(0).unwrap();
-            let scope = parse_scope(row.get(1).unwrap());
+            let scope = KeyScope::decode(row.get(1).unwrap()).unwrap();
             match value {
-                EXTERNAL_VALUE => assert_eq!(scope, Some(Scope::External)),
-                INTERNAL_VALUE => assert_eq!(scope, Some(Scope::Internal)),
+                EXTERNAL_VALUE => assert_eq!(scope, KeyScope::EXTERNAL),
+                INTERNAL_VALUE => assert_eq!(scope, KeyScope::INTERNAL),
                 _ => {
                     panic!(
                         "(Value, Scope) pair {:?} is not expected to exist in the wallet.",

@@ -221,12 +221,17 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
             unreachable!("we don't call methods that require a known chain height")
         }
         #[cfg(feature = "transparent-inputs")]
-        SqliteClientError::ReachedGapLimit(_, _) => {
+        SqliteClientError::ReachedGapLimit(..) => {
             unreachable!("we don't do ephemeral address tracking")
         }
-        #[cfg(feature = "transparent-inputs")]
-        SqliteClientError::EphemeralAddressReuse(_, _) => {
-            unreachable!("we don't do ephemeral address tracking")
+        SqliteClientError::DiversifierIndexReuse(i, _) => {
+            WalletMigrationError::CorruptedData(format!(
+                "invalid attempt to overwrite address at diversifier index {}",
+                u128::from(i)
+            ))
+        }
+        SqliteClientError::AddressReuse(_, _) => {
+            unreachable!("we don't create transactions in migrations")
         }
         SqliteClientError::NoteFilterInvalid(_) => {
             unreachable!("we don't do note selection in migrations")
@@ -281,6 +286,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// use zcash_protocol::consensus::Network;
 /// use zcash_client_sqlite::{
 ///     WalletDb,
+///     util::SystemClock,
 ///     wallet::init::{WalletMigrationError, init_wallet_db},
 /// };
 ///
@@ -288,7 +294,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// # let data_file = NamedTempFile::new().unwrap();
 /// # let get_data_db_path = || data_file.path();
 /// # let load_seed = || -> Result<_, String> { Ok(SecretVec::new(vec![])) };
-/// let mut db = WalletDb::for_path(get_data_db_path(), Network::TestNetwork)?;
+/// let mut db = WalletDb::for_path(get_data_db_path(), Network::TestNetwork, SystemClock)?;
 /// match init_wallet_db(&mut db, None) {
 ///     Err(e)
 ///         if matches!(
@@ -310,8 +316,12 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 // the library that does not support transparent use. It might be a good idea to add an explicit
 // check for unspent transparent outputs whenever running initialization with a version of the
 // library *not* compiled with the `transparent-inputs` feature flag, and fail if any are present.
-pub fn init_wallet_db<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters + 'static>(
-    wdb: &mut WalletDb<C, P>,
+pub fn init_wallet_db<
+    C: BorrowMut<rusqlite::Connection>,
+    P: consensus::Parameters + 'static,
+    CL,
+>(
+    wdb: &mut WalletDb<C, P, CL>,
     seed: Option<SecretVec<u8>>,
 ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
     init_wallet_db_internal(wdb, seed, &[], true)
@@ -320,8 +330,9 @@ pub fn init_wallet_db<C: BorrowMut<rusqlite::Connection>, P: consensus::Paramete
 pub(crate) fn init_wallet_db_internal<
     C: BorrowMut<rusqlite::Connection>,
     P: consensus::Parameters + 'static,
+    CL,
 >(
-    wdb: &mut WalletDb<C, P>,
+    wdb: &mut WalletDb<C, P, CL>,
     seed: Option<SecretVec<u8>>,
     target_migrations: &[Uuid],
     verify_seed_relevance: bool,
@@ -465,7 +476,10 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     use {
         super::WalletMigrationError,
-        crate::wallet::{self, pool_code, PoolType},
+        crate::{
+            testing::db::test_clock,
+            wallet::{self, pool_code, PoolType},
+        },
         zcash_address::test_vectors,
         zcash_client_backend::data_api::WalletWrite,
         zip32::DiversifierIndex,
@@ -493,7 +507,6 @@ mod tests {
             db::TABLE_ACCOUNTS,
             db::TABLE_ADDRESSES,
             db::TABLE_BLOCKS,
-            db::TABLE_EPHEMERAL_ADDRESSES,
             db::TABLE_NULLIFIER_MAP,
             db::TABLE_ORCHARD_RECEIVED_NOTE_SPENDS,
             db::TABLE_ORCHARD_RECEIVED_NOTES,
@@ -535,6 +548,8 @@ mod tests {
             db::INDEX_ACCOUNTS_UUID,
             db::INDEX_HD_ACCOUNT,
             db::INDEX_ADDRESSES_ACCOUNTS,
+            db::INDEX_ADDRESSES_INDICES,
+            db::INDEX_ADDRESSES_T_INDICES,
             db::INDEX_NF_MAP_LOCATOR_IDX,
             db::INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT,
             db::INDEX_ORCHARD_RECEIVED_NOTES_TX,
@@ -563,6 +578,8 @@ mod tests {
         }
 
         let expected_views = vec![
+            db::VIEW_ADDRESS_FIRST_USE.to_owned(),
+            db::VIEW_ADDRESS_USES.to_owned(),
             db::view_orchard_shard_scan_ranges(st.network()),
             db::view_orchard_shard_unscanned_ranges(),
             db::VIEW_ORCHARD_SHARDS_SCAN_STATE.to_owned(),
@@ -595,8 +612,8 @@ mod tests {
 
     #[test]
     fn init_migrate_from_0_3_0() {
-        fn init_0_3_0<P: consensus::Parameters>(
-            wdb: &mut WalletDb<rusqlite::Connection, P>,
+        fn init_0_3_0<P: consensus::Parameters, CL>(
+            wdb: &mut WalletDb<rusqlite::Connection, P, CL>,
             extfvk: &ExtendedFullViewingKey,
             account: AccountId,
         ) -> Result<(), rusqlite::Error> {
@@ -700,7 +717,7 @@ mod tests {
         }
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork, ()).unwrap();
 
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
@@ -717,8 +734,8 @@ mod tests {
 
     #[test]
     fn init_migrate_from_autoshielding_poc() {
-        fn init_autoshielding<P: consensus::Parameters>(
-            wdb: &mut WalletDb<rusqlite::Connection, P>,
+        fn init_autoshielding<P: consensus::Parameters, CL>(
+            wdb: &mut WalletDb<rusqlite::Connection, P, CL>,
             extfvk: &ExtendedFullViewingKey,
             account: AccountId,
         ) -> Result<(), rusqlite::Error> {
@@ -872,7 +889,7 @@ mod tests {
         }
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork, ()).unwrap();
 
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
@@ -889,8 +906,8 @@ mod tests {
 
     #[test]
     fn init_migrate_from_main_pre_migrations() {
-        fn init_main<P: consensus::Parameters>(
-            wdb: &mut WalletDb<rusqlite::Connection, P>,
+        fn init_main<P: consensus::Parameters, CL>(
+            wdb: &mut WalletDb<rusqlite::Connection, P, CL>,
             ufvk: &UnifiedFullViewingKey,
             account: AccountId,
         ) -> Result<(), rusqlite::Error> {
@@ -993,9 +1010,9 @@ mod tests {
 
             // Unified addresses at the time of the addition of migrations did not contain an
             // Orchard component.
-            let ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, UA_TRANSPARENT);
+            let ua_request = UnifiedAddressRequest::unsafe_custom(Omit, Require, UA_TRANSPARENT);
             let address_str = Address::Unified(
-                ufvk.default_address(Some(ua_request))
+                ufvk.default_address(ua_request)
                     .expect("A valid default address exists for the UFVK")
                     .0,
             )
@@ -1015,7 +1032,7 @@ mod tests {
             {
                 let taddr = Address::Transparent(
                     *ufvk
-                        .default_address(Some(ua_request))
+                        .default_address(ua_request)
                         .expect("A valid default address exists for the UFVK")
                         .0
                         .transparent()
@@ -1040,7 +1057,7 @@ mod tests {
         }
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork, ()).unwrap();
 
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
@@ -1066,7 +1083,7 @@ mod tests {
 
         let network = Network::MainNetwork;
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), network, test_clock()).unwrap();
         assert_matches!(init_wallet_db(&mut db_data, None), Ok(_));
 
         // Prior to adding any accounts, every seed phrase is relevant to the wallet.
@@ -1085,6 +1102,11 @@ mod tests {
         let (account_id, _usk) = db_data
             .create_account("", &Secret::new(seed.to_vec()), &birthday, None)
             .unwrap();
+
+        // We have to have the chain tip height in order to allocate new addresses, to record the
+        // exposed-at height.
+        db_data.update_chain_tip(birthday.height()).unwrap();
+
         assert_matches!(
             db_data.get_account(account_id),
             Ok(Some(account)) if matches!(
@@ -1109,20 +1131,29 @@ mod tests {
             if let Some(Address::Unified(tvua)) =
                 Address::decode(&Network::MainNetwork, tv.unified_addr)
             {
-                let (ua, di) =
-                    wallet::get_current_address(&db_data.conn, &db_data.params, account_id)
-                        .unwrap()
-                        .expect("create_account generated the first address");
+                // hardcoded with knowledge of test vectors
+                let ua_request = UnifiedAddressRequest::unsafe_custom(Omit, Require, Require);
+
+                let (ua, di) = wallet::get_last_generated_address_matching(
+                    &db_data.conn,
+                    &db_data.params,
+                    account_id,
+                    if tv.diversifier_index == 0 {
+                        UnifiedAddressRequest::AllAvailableKeys
+                    } else {
+                        ua_request
+                    },
+                )
+                .unwrap()
+                .expect("create_account generated the first address");
                 assert_eq!(DiversifierIndex::from(tv.diversifier_index), di);
                 assert_eq!(tvua.transparent(), ua.transparent());
                 assert_eq!(tvua.sapling(), ua.sapling());
                 #[cfg(not(feature = "orchard"))]
                 assert_eq!(tv.unified_addr, ua.encode(&Network::MainNetwork));
 
-                // hardcoded with knowledge of what's coming next
-                let ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, Require);
                 db_data
-                    .get_next_available_address(account_id, Some(ua_request))
+                    .get_next_available_address(account_id, ua_request)
                     .unwrap()
                     .expect("get_next_available_address generated an address");
             } else {

@@ -96,6 +96,7 @@ document-features = "0.2"
 # Encodings
 base64 = "0.22"
 bech32 = { version = "0.11", default-features = false, features = ["alloc"] }
+bitflags = "2"
 bs58 = { version = "0.5", default-features = false, features = ["alloc", "check"] }
 byteorder = "1"
 hex = { version = "0.4", default-features = false, features = ["alloc"] }

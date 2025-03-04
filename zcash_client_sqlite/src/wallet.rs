@@ -64,32 +64,34 @@
 //!   wallet.
 //! - `memo` the shielded memo associated with the output, if any.
 
-use incrementalmerkletree::{Marking, Retention};
+use std::{
+    collections::{HashMap, HashSet},
+    convert::TryFrom,
+    io::{self, Cursor},
+    num::NonZeroU32,
+    ops::RangeInclusive,
+    time::SystemTime,
+};
 
+use encoding::{
+    account_kind_code, decode_diversifier_index_be, encode_diversifier_index_be, memo_repr,
+    pool_code, KeyScope, ReceiverFlags,
+};
+use incrementalmerkletree::{Marking, Retention};
 use rusqlite::{self, named_params, params, Connection, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-use uuid::Uuid;
-use zcash_client_backend::data_api::{
-    AccountPurpose, DecryptedTransaction, Progress, TransactionDataRequest, TransactionStatus,
-    Zip32Derivation,
-};
-use zip32::fingerprint::SeedFingerprint;
-
-use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
-use std::io::{self, Cursor};
-use std::num::NonZeroU32;
-use std::ops::RangeInclusive;
-
 use tracing::{debug, warn};
+use uuid::Uuid;
 
 use zcash_address::ZcashAddress;
 use zcash_client_backend::{
     data_api::{
         scanning::{ScanPriority, ScanRange},
-        Account as _, AccountBalance, AccountBirthday, AccountSource, BlockMetadata, Ratio,
-        SentTransaction, SentTransactionOutput, WalletSummary, SAPLING_SHARD_HEIGHT,
+        Account as _, AccountBalance, AccountBirthday, AccountPurpose, AccountSource,
+        BlockMetadata, DecryptedTransaction, Progress, Ratio, SentTransaction,
+        SentTransactionOutput, TransactionDataRequest, TransactionStatus, WalletSummary,
+        Zip32Derivation, SAPLING_SHARD_HEIGHT,
     },
     wallet::{Note, NoteId, Recipient, WalletTx},
     DecryptedOutput,
@@ -98,34 +100,41 @@ use zcash_keys::{
     address::{Address, Receiver, UnifiedAddress},
     encoding::AddressCodec,
     keys::{
-        AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey,
+        AddressGenerationError, ReceiverRequirement, UnifiedAddressRequest, UnifiedFullViewingKey,
         UnifiedIncomingViewingKey, UnifiedSpendingKey,
     },
 };
 use zcash_primitives::{
     block::BlockHash,
     merkle_tree::read_commitment_tree,
-    transaction::{Transaction, TransactionData, TxId},
+    transaction::{Transaction, TransactionData},
 };
 use zcash_protocol::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     value::{ZatBalance, Zatoshis},
-    PoolType, ShieldedProtocol,
+    PoolType, ShieldedProtocol, TxId,
 };
-use zip32::{DiversifierIndex, Scope};
+use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use self::scanning::{parse_priority_code, priority_code, replace_queue_entries};
 use crate::{
     error::SqliteClientError,
+    util::Clock,
     wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
-    AccountRef, SqlTransaction, TransferType, WalletCommitmentTrees, WalletDb, PRUNING_DEPTH,
-    SAPLING_TABLES_PREFIX,
+    AccountRef, AccountUuid, AddressRef, SqlTransaction, TransferType, TxRef,
+    WalletCommitmentTrees, WalletDb, PRUNING_DEPTH, SAPLING_TABLES_PREFIX, VERIFY_LOOKAHEAD,
 };
-use crate::{AccountUuid, TxRef, VERIFY_LOOKAHEAD};
 
 #[cfg(feature = "transparent-inputs")]
-use ::transparent::bundle::{OutPoint, TxOut};
+use {
+    crate::GapLimits,
+    ::transparent::{
+        bundle::{OutPoint, TxOut},
+        keys::{NonHardenedChildIndex, TransparentKeyScope},
+    },
+    std::collections::BTreeMap,
+};
 
 #[cfg(feature = "orchard")]
 use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT};
@@ -133,6 +142,7 @@ use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD
 pub mod commitment_tree;
 pub(crate) mod common;
 mod db;
+pub(crate) mod encoding;
 pub mod init;
 #[cfg(feature = "orchard")]
 pub(crate) mod orchard;
@@ -142,6 +152,15 @@ pub(crate) mod scanning;
 pub(crate) mod transparent;
 
 pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
+
+/// A constant for use in converting Unix timestamps to shielded-only diversifier indices. The
+/// value here is intended to be added to the current time, in seconds since the epoch, to obtain
+/// an index that is greater than or equal to 2^32. While it would be possible to use indices in
+/// the range 2^31..2^32, we wish to avoid any confusion with indices in the BIP 32 child
+/// index derivation space.
+///
+/// 2^32 - (date --date "Oct 28, 2016 07:56 UTC" +%s)
+pub(crate) const MIN_SHIELDED_DIVERSIFIER_OFFSET: u64 = 2817325936;
 
 fn parse_account_source(
     account_kind: u32,
@@ -185,13 +204,6 @@ fn parse_account_source(
     }
 }
 
-fn account_kind_code(value: &AccountSource) -> u32 {
-    match value {
-        AccountSource::Derived { .. } => 0,
-        AccountSource::Imported { .. } => 1,
-    }
-}
-
 /// The viewing key that an [`Account`] has available to it.
 #[derive(Debug, Clone)]
 pub(crate) enum ViewingKey {
@@ -211,10 +223,12 @@ pub(crate) enum ViewingKey {
 /// An account stored in a `zcash_client_sqlite` database.
 #[derive(Debug, Clone)]
 pub struct Account {
+    id: AccountRef,
     uuid: AccountUuid,
     name: Option<String>,
     kind: AccountSource,
     viewing_key: ViewingKey,
+    birthday: BlockHeight,
 }
 
 impl Account {
@@ -225,9 +239,17 @@ impl Account {
     /// receiver, and there was no valid Sapling receiver at diversifier index zero.
     pub(crate) fn default_address(
         &self,
-        request: Option<UnifiedAddressRequest>,
+        request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.uivk().default_address(request)
+    }
+
+    pub(crate) fn internal_id(&self) -> AccountRef {
+        self.id
+    }
+
+    pub(crate) fn birthday(&self) -> BlockHeight {
+        self.birthday
     }
 }
 
@@ -292,8 +314,10 @@ pub(crate) fn seed_matches_derived_account<P: consensus::Parameters>(
         let usk = UnifiedSpendingKey::from_seed(params, &seed.expose_secret()[..], account_index)
             .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
 
-        let (seed_addr, _) = usk.to_unified_full_viewing_key().default_address(None)?;
-        let (uivk_addr, _) = uivk.default_address(None)?;
+        let (seed_addr, _) = usk
+            .to_unified_full_viewing_key()
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)?;
+        let (uivk_addr, _) = uivk.default_address(UnifiedAddressRequest::AllAvailableKeys)?;
 
         #[cfg(not(feature = "orchard"))]
         let orchard_match = false;
@@ -329,43 +353,6 @@ pub(crate) fn seed_matches_derived_account<P: consensus::Parameters>(
     }
 }
 
-pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
-    // These constants are *incidentally* shared with the typecodes
-    // for unified addresses, but this is exclusively an internal
-    // implementation detail.
-    match pool_type {
-        PoolType::Transparent => 0i64,
-        PoolType::Shielded(ShieldedProtocol::Sapling) => 2i64,
-        PoolType::Shielded(ShieldedProtocol::Orchard) => 3i64,
-    }
-}
-
-pub(crate) fn scope_code(scope: Scope) -> i64 {
-    match scope {
-        Scope::External => 0i64,
-        Scope::Internal => 1i64,
-    }
-}
-
-pub(crate) fn parse_scope(code: i64) -> Option<Scope> {
-    match code {
-        0i64 => Some(Scope::External),
-        1i64 => Some(Scope::Internal),
-        _ => None,
-    }
-}
-
-pub(crate) fn memo_repr(memo: Option<&MemoBytes>) -> Option<&[u8]> {
-    memo.map(|m| {
-        if m == &MemoBytes::empty() {
-            // we store the empty memo as a single 0xf6 byte
-            &[0xf6]
-        } else {
-            m.as_slice()
-        }
-    })
-}
-
 // Returns the highest used account index for a given seed.
 pub(crate) fn max_zip32_account_index(
     conn: &rusqlite::Connection,
@@ -390,6 +377,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     kind: &AccountSource,
     viewing_key: ViewingKey,
     birthday: &AccountBirthday,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
 ) -> Result<Account, SqliteClientError> {
     if let Some(ufvk) = viewing_key.ufvk() {
         // Check whether any component of this UFVK collides with an existing imported or derived FVK.
@@ -508,10 +496,12 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         })?;
 
     let account = Account {
+        id: account_id,
         name: Some(account_name.to_owned()),
         uuid: account_uuid,
         kind: kind.clone(),
         viewing_key,
+        birthday: birthday.height(),
     };
 
     // If a birthday frontier is available, insert it into the note commitment tree. If the
@@ -610,41 +600,210 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     // Always derive the default Unified Address for the account. If the account's viewing
     // key has fewer components than the wallet supports (most likely due to this being an
     // imported viewing key), derive an address containing the common subset of receivers.
-    let (address, d_idx) = account.default_address(None)?;
-    insert_address(conn, params, account_id, d_idx, &address)?;
+    let (address, d_idx) = account.default_address(UnifiedAddressRequest::AllAvailableKeys)?;
+    upsert_address(
+        conn,
+        params,
+        account_id,
+        d_idx,
+        &address,
+        Some(birthday.height()),
+        false,
+    )?;
 
-    // Initialize the `ephemeral_addresses` table.
+    // Pre-generate transparent addresses up to the gap limits for the external, internal,
+    // and ephemeral key scopes.
     #[cfg(feature = "transparent-inputs")]
-    transparent::ephemeral::init_account(conn, params, account_id)?;
+    for key_scope in [KeyScope::EXTERNAL, KeyScope::INTERNAL, KeyScope::Ephemeral] {
+        use ReceiverRequirement::*;
+        transparent::generate_gap_addresses(
+            conn,
+            params,
+            account_id,
+            key_scope,
+            gap_limits,
+            UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+        )?;
+    }
 
     Ok(account)
 }
 
-pub(crate) fn get_current_address<P: consensus::Parameters>(
+pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    clock: &C,
+    account_uuid: AccountUuid,
+    request: UnifiedAddressRequest,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
+) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, SqliteClientError> {
+    let account: Account = match get_account(conn, params, account_uuid)? {
+        Some(account) => account,
+        None => {
+            return Ok(None);
+        }
+    };
+
+    // This will also ensure that the provided request can be satisfied by the account's UIVK
+    let requirements = account.uivk().receiver_requirements(request)?;
+
+    let (addr, diversifier_index) = if requirements.p2pkh() == ReceiverRequirement::Require {
+        #[cfg(not(feature = "transparent-inputs"))]
+        {
+            return Err(SqliteClientError::AddressGeneration(
+                AddressGenerationError::ReceiverTypeNotSupported(
+                    zcash_address::unified::Typecode::P2pkh,
+                ),
+            ));
+        }
+
+        // If a p2pkh receiver is required, return the first un-exposed address from within the
+        // transparent gap limit.
+        #[cfg(feature = "transparent-inputs")]
+        {
+            use ReceiverRequirement::*;
+            // First, ensure that we have pre-generated as many addresses as we can.
+            transparent::generate_gap_addresses(
+                conn,
+                params,
+                account.internal_id(),
+                KeyScope::EXTERNAL,
+                gap_limits,
+                UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+            )?;
+
+            // Select indices from the transparent gap limit that are available for use as
+            // diversifier indices.
+            let (gap_start, addrs) = transparent::select_addrs_to_reserve(
+                conn,
+                params,
+                account.internal_id(),
+                KeyScope::EXTERNAL,
+                gap_limits.external(),
+                gap_limits
+                    .external()
+                    .try_into()
+                    .expect("gap limit fits in usize"),
+            )?;
+
+            // Find the first index that generates an address conforming to the request.
+            addrs
+                .iter()
+                .find_map(|(_, _, meta)| {
+                    let j = DiversifierIndex::from(meta.address_index());
+                    account.uivk().address(j, request).ok().map(|ua| (ua, j))
+                })
+                .ok_or(SqliteClientError::ReachedGapLimit(
+                    TransparentKeyScope::EXTERNAL,
+                    gap_start.index() + gap_limits.external(),
+                ))?
+        }
+    } else {
+        // compute a base diversifier index from the timestamp
+        let mut j = DiversifierIndex::from(
+            clock
+                .now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("system time is valid")
+                .as_secs()
+                .saturating_add(MIN_SHIELDED_DIVERSIFIER_OFFSET),
+        );
+
+        let mut find_collision = conn.prepare(
+            "SELECT exposed_at_height
+             FROM addresses
+             WHERE account_id = :account_id
+             AND key_scope = :key_scope
+             AND diversifier_index_be = :diversifier_index_be",
+        )?;
+
+        // search the diversifier space for a diversifier index that creates a valid address
+        // satisfying the request and is currently not used in an exposed address
+        loop {
+            let found_addr = account.uivk().find_address(j, request)?;
+            let collision = find_collision
+                .query_row(
+                    named_params! {
+                        ":account_id": account.internal_id().0,
+                        ":key_scope": KeyScope::EXTERNAL.encode(),
+                        ":diversifier_index_be": &encode_diversifier_index_be(found_addr.1)
+                    },
+                    |row| row.get::<_, Option<u32>>(0),
+                )
+                .optional()?
+                .flatten();
+
+            if collision.is_none() {
+                break found_addr;
+            } else {
+                j.increment().map_err(|_| {
+                    SqliteClientError::AddressGeneration(
+                        AddressGenerationError::DiversifierSpaceExhausted,
+                    )
+                })?;
+            }
+        }
+    };
+
+    let chain_tip_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
+    upsert_address(
+        conn,
+        params,
+        account.internal_id(),
+        diversifier_index,
+        &addr,
+        Some(chain_tip_height),
+        true,
+    )?;
+
+    Ok(Some((addr, diversifier_index)))
+}
+
+pub(crate) fn get_last_generated_address_matching<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account_uuid: AccountUuid,
+    address_filter: UnifiedAddressRequest,
 ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, SqliteClientError> {
-    // This returns the most recently generated address.
+    let account: Account =
+        get_account(conn, params, account_uuid)?.ok_or(SqliteClientError::AccountUnknown)?;
+
+    let requirements = account
+        .uivk()
+        .receiver_requirements(address_filter)
+        .map_err(|_| {
+            SqliteClientError::BadAccountData(
+                "Could not generate UnifiedAddressRequest for UIVK".to_string(),
+            )
+        })?;
+    let require_flags = ReceiverFlags::required(requirements);
+    let omit_flags = ReceiverFlags::omitted(requirements);
+    // This returns the most recently exposed external-scope address (the address that was exposed
+    // at the greatest block height, using the largest diversifier index to break ties)
+    // that conforms to the specified requirements.
     let addr: Option<(String, Vec<u8>)> = conn
         .query_row(
             "SELECT address, diversifier_index_be
              FROM addresses
-             JOIN accounts ON addresses.account_id = accounts.id
-             WHERE accounts.uuid = :account_uuid
-             ORDER BY diversifier_index_be DESC
+             WHERE account_id = :account_id
+             AND key_scope = :key_scope
+             AND (receiver_flags & :require_flags) = :require_flags
+             AND (receiver_flags & :omit_flags) = 0
+             AND exposed_at_height IS NOT NULL
+             ORDER BY exposed_at_height DESC, diversifier_index_be DESC
              LIMIT 1",
-            named_params![":account_uuid": account_uuid.0],
+            named_params![
+                ":account_id": account.internal_id().0,
+                ":key_scope": KeyScope::EXTERNAL.encode(),
+                ":require_flags": require_flags.bits(),
+                ":omit_flags": omit_flags.bits(),
+            ],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
 
     addr.map(|(addr_str, di_vec)| {
-        let mut di_be: [u8; 11] = di_vec.try_into().map_err(|_| {
-            SqliteClientError::CorruptedData("Diversifier index is not an 11-byte value".to_owned())
-        })?;
-        di_be.reverse();
-
+        let diversifier_index = decode_diversifier_index_be(&di_vec)?;
         Address::decode(params, &addr_str)
             .ok_or_else(|| {
                 SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
@@ -656,47 +815,171 @@ pub(crate) fn get_current_address<P: consensus::Parameters>(
                     addr_str,
                 ))),
             })
-            .map(|addr| (addr, DiversifierIndex::from(di_be)))
+            .map(|addr| (addr, diversifier_index))
     })
     .transpose()
 }
 
-/// Adds the given address and diversifier index to the addresses table.
+/// Adds the given external address and diversifier index to the addresses table.
 ///
-/// Returns the database row for the newly-inserted address.
-pub(crate) fn insert_address<P: consensus::Parameters>(
+/// Returns the primary key identifier for the newly-inserted address.
+///
+/// ## Parameters
+/// - `account_id`: The account that the address was generated for.
+/// - `diversifier_index`: The diversifier index used to generate the address.
+/// - `address`: The unified address itself.
+/// - `exposed_at_height`: The block height at the earliest time that the address may have been
+///   exposed to a user, assuming a single generator of addresses.
+/// - `force_update_address`: If this argument is set to `true`, an address has already been
+///   inserted for the given account and diversifier index, and the `exposed_at_height` column
+///   is currently `NULL` (i.e. the address at this diversifier index has not yet been exposed)
+///   then the value of the `address` column will be replaced with the provided address.
+pub(crate) fn upsert_address<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account_id: AccountRef,
     diversifier_index: DiversifierIndex,
     address: &UnifiedAddress,
-) -> Result<(), SqliteClientError> {
+    exposed_at_height: Option<BlockHeight>,
+    force_update_address: bool,
+) -> Result<AddressRef, SqliteClientError> {
+    // the diversifier index is stored in big-endian order to allow sorting
+    let di_be = encode_diversifier_index_be(diversifier_index);
+
+    // If a force-update was requested, check whether an address has previously been exposed for
+    // this diversifier index. If so, and if that address differs from the given address, return an
+    // error.
+    if force_update_address {
+        let previously_exposed_as = conn
+            .query_row(
+                "SELECT address, exposed_at_height
+                 FROM addresses
+                 WHERE account_id = :account_id
+                 AND diversifier_index_be = :diversifier_index_be
+                 AND key_scope = :key_scope",
+                named_params![
+                    ":account_id": account_id.0,
+                    ":diversifier_index_be": di_be,
+                    ":key_scope": KeyScope::EXTERNAL.encode(),
+                ],
+                |row| {
+                    let address = row.get::<_, String>("address")?;
+                    let exposed_at = row.get::<_, Option<u32>>("exposed_at_height")?;
+                    Ok(exposed_at.map(|_| address))
+                },
+            )
+            .optional()?
+            .flatten()
+            .map(|addr_str| UnifiedAddress::decode(params, &addr_str))
+            .transpose()
+            .map_err(SqliteClientError::CorruptedData)?;
+
+        match previously_exposed_as {
+            Some(addr) if &addr != address => {
+                return Err(SqliteClientError::DiversifierIndexReuse(
+                    diversifier_index,
+                    Box::new(addr),
+                ));
+            }
+            _ => (),
+        }
+    }
+
     let mut stmt = conn.prepare_cached(
         "INSERT INTO addresses (
             account_id,
             diversifier_index_be,
+            key_scope,
             address,
-            cached_transparent_receiver_address
+            transparent_child_index,
+            cached_transparent_receiver_address,
+            exposed_at_height,
+            receiver_flags
         )
         VALUES (
             :account_id,
             :diversifier_index_be,
+            :key_scope,
             :address,
-            :cached_transparent_receiver_address
-        )",
+            :transparent_child_index,
+            :cached_transparent_receiver_address,
+            :exposed_at_height,
+            :receiver_flags
+        )
+        ON CONFLICT (account_id, diversifier_index_be, key_scope) DO UPDATE
+        SET exposed_at_height = COALESCE(
+                MIN(exposed_at_height, :exposed_at_height),
+                exposed_at_height,
+                :exposed_at_height
+            ),
+            address = IIF(
+                exposed_at_height IS NULL AND :force_update_address,
+                :address,
+                address
+            ),
+            receiver_flags = IIF(
+                exposed_at_height IS NULL AND :force_update_address,
+                :receiver_flags,
+                receiver_flags
+            )
+        RETURNING id",
     )?;
 
-    // the diversifier index is stored in big-endian order to allow sorting
-    let mut di_be = *diversifier_index.as_bytes();
-    di_be.reverse();
-    stmt.execute(named_params![
-        ":account_id": account_id.0,
-        ":diversifier_index_be": &di_be[..],
-        ":address": &address.encode(params),
-        ":cached_transparent_receiver_address": &address.transparent().map(|r| r.encode(params)),
-    ])?;
+    #[cfg(feature = "transparent-inputs")]
+    let transparent_child_index = NonHardenedChildIndex::try_from(diversifier_index)
+        .ok()
+        .map(|i| i.index());
+    #[cfg(not(feature = "transparent-inputs"))]
+    let transparent_child_index: Option<u32> = None;
 
-    Ok(())
+    stmt.query_row(
+        named_params![
+            ":account_id": account_id.0,
+            // the diversifier index is stored in big-endian order to allow sorting
+            ":diversifier_index_be": &di_be,
+            ":key_scope": KeyScope::EXTERNAL.encode(),
+            ":address": &address.encode(params),
+            ":transparent_child_index": transparent_child_index,
+            ":cached_transparent_receiver_address": &address.transparent().map(|r| r.encode(params)),
+            ":exposed_at_height": exposed_at_height.map(u32::from),
+            ":force_update_address": force_update_address,
+            ":receiver_flags": ReceiverFlags::from(address).bits()
+        ],
+        |row| row.get(0).map(AddressRef)
+    ).map_err(SqliteClientError::from)
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn involved_accounts(
+    conn: &rusqlite::Connection,
+    tx_refs: impl IntoIterator<Item = TxRef>,
+) -> Result<Vec<(AccountRef, KeyScope)>, SqliteClientError> {
+    use rusqlite::types::Value;
+    use std::rc::Rc;
+
+    let mut stmt = conn.prepare_cached(
+        "SELECT account_id, key_scope
+         FROM v_address_uses
+         WHERE transaction_id IN rarray(:tx_refs_ptr)",
+    )?;
+
+    let tx_refs_values: Vec<Value> = tx_refs.into_iter().map(|r| Value::Integer(r.0)).collect();
+    let tx_refs_ptr = Rc::new(tx_refs_values);
+    let result = stmt
+        .query_and_then(
+            named_params! {
+                ":tx_refs_ptr": &tx_refs_ptr
+            },
+            |row| {
+                Ok::<_, SqliteClientError>((
+                    row.get(0).map(AccountRef)?,
+                    KeyScope::decode(row.get(1)?)?,
+                ))
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(result)
 }
 
 /// Returns the [`UnifiedFullViewingKey`]s for the wallet.
@@ -732,6 +1015,7 @@ fn parse_account_row<P: consensus::Parameters>(
     row: &rusqlite::Row<'_>,
     params: &P,
 ) -> Result<Account, SqliteClientError> {
+    let account_id = AccountRef(row.get("id")?);
     let account_name = row.get("name")?;
     let account_uuid = AccountUuid(row.get("uuid")?);
     let kind = parse_account_source(
@@ -764,11 +1048,15 @@ fn parse_account_row<P: consensus::Parameters>(
         ))
     };
 
+    let birthday = BlockHeight::from(row.get::<_, u32>("birthday_height")?);
+
     Ok(Account {
+        id: account_id,
         name: account_name,
         uuid: account_uuid,
         kind,
         viewing_key,
+        birthday,
     })
 }
 
@@ -779,9 +1067,9 @@ pub(crate) fn get_account<P: Parameters>(
 ) -> Result<Option<Account>, SqliteClientError> {
     let mut stmt = conn.prepare_cached(
         r#"
-        SELECT name, uuid, account_kind,
+        SELECT id, name, uuid, account_kind,
                hd_seed_fingerprint, hd_account_index, key_source,
-               ufvk, uivk, has_spend_key
+               ufvk, uivk, has_spend_key, birthday_height
         FROM accounts
         WHERE uuid = :account_uuid
         "#,
@@ -789,6 +1077,30 @@ pub(crate) fn get_account<P: Parameters>(
 
     let mut rows = stmt.query_and_then::<_, SqliteClientError, _, _>(
         named_params![":account_uuid": account_uuid.0],
+        |row| parse_account_row(row, params),
+    )?;
+
+    rows.next().transpose()
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn get_account_internal<P: Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    account_id: AccountRef,
+) -> Result<Option<Account>, SqliteClientError> {
+    let mut stmt = conn.prepare_cached(
+        r#"
+        SELECT id, name, uuid, account_kind,
+               hd_seed_fingerprint, hd_account_index, key_source,
+               ufvk, uivk, has_spend_key, birthday_height
+        FROM accounts
+        WHERE id = :account_id
+        "#,
+    )?;
+
+    let mut rows = stmt.query_and_then::<_, SqliteClientError, _, _>(
+        named_params![":account_id": account_id.0],
         |row| parse_account_row(row, params),
     )?;
 
@@ -815,9 +1127,9 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     let transparent_item: Option<Vec<u8>> = None;
 
     let mut stmt = conn.prepare(
-        "SELECT name, uuid, account_kind,
+        "SELECT id, name, uuid, account_kind,
                 hd_seed_fingerprint, hd_account_index, key_source,
-                ufvk, uivk, has_spend_key
+                ufvk, uivk, has_spend_key, birthday_height
          FROM accounts
          WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
             OR sapling_fvk_item_cache = :sapling_fvk_item_cache
@@ -853,7 +1165,7 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
     account_index: zip32::AccountId,
 ) -> Result<Option<Account>, SqliteClientError> {
     let mut stmt = conn.prepare(
-        "SELECT name, key_source, uuid, ufvk
+        "SELECT id, name, key_source, uuid, ufvk, birthday_height
          FROM accounts
          WHERE hd_seed_fingerprint = :hd_seed_fingerprint
          AND hd_account_index = :hd_account_index",
@@ -865,6 +1177,7 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
             ":hd_account_index": u32::from(account_index),
         ],
         |row| {
+            let account_id = AccountRef(row.get("id")?);
             let account_name = row.get("name")?;
             let key_source = row.get("key_source")?;
             let account_uuid = AccountUuid(row.get("uuid")?);
@@ -880,7 +1193,10 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
                     ))
                 }),
             }?;
+            let birthday = BlockHeight::from(row.get::<_, u32>("birthday_height")?);
+
             Ok(Account {
+                id: account_id,
                 name: account_name,
                 uuid: account_uuid,
                 kind: AccountSource::Derived {
@@ -888,6 +1204,7 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
                     key_source,
                 },
                 viewing_key: ViewingKey::Full(Box::new(ufvk)),
+                birthday,
             })
         },
     )?;
@@ -1893,6 +2210,23 @@ pub(crate) fn account_birthday(
     .and_then(|opt| opt.ok_or(SqliteClientError::AccountUnknown))
 }
 
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn account_birthday_internal(
+    conn: &rusqlite::Connection,
+    account_ref: AccountRef,
+) -> Result<BlockHeight, SqliteClientError> {
+    conn.query_row(
+        "SELECT birthday_height
+         FROM accounts
+         WHERE id = :account_ref",
+        named_params![":account_ref": account_ref.0],
+        |row| row.get::<_, u32>(0).map(BlockHeight::from),
+    )
+    .optional()
+    .map_err(SqliteClientError::from)
+    .and_then(|opt| opt.ok_or(SqliteClientError::AccountUnknown))
+}
+
 /// Returns the maximum recover-until height for accounts in the wallet.
 pub(crate) fn recover_until_height(
     conn: &rusqlite::Connection,
@@ -1928,20 +2262,6 @@ pub(crate) fn get_account_ref(
         "SELECT id FROM accounts WHERE uuid = :account_uuid",
         named_params! {":account_uuid": account_uuid.0},
         |row| row.get("id").map(AccountRef),
-    )
-    .optional()?
-    .ok_or(SqliteClientError::AccountUnknown)
-}
-
-#[cfg(feature = "transparent-inputs")]
-pub(crate) fn get_account_uuid(
-    conn: &rusqlite::Connection,
-    account_id: AccountRef,
-) -> Result<AccountUuid, SqliteClientError> {
-    conn.query_row(
-        "SELECT uuid FROM accounts WHERE id = :account_id",
-        named_params! {":account_id": account_id.0},
-        |row| row.get("uuid").map(AccountUuid),
     )
     .optional()?
     .ok_or(SqliteClientError::AccountUnknown)
@@ -2206,8 +2526,8 @@ pub(crate) fn get_max_height_hash(
     .optional()
 }
 
-pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
-    wdb: &mut WalletDb<SqlTransaction<'_>, P>,
+pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters, CL>(
+    wdb: &mut WalletDb<SqlTransaction<'_>, P, CL>,
     sent_tx: &SentTransaction<AccountUuid>,
 ) -> Result<(), SqliteClientError> {
     let tx_ref = put_tx_data(
@@ -2262,6 +2582,13 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
         )?;
 
         match output.recipient() {
+            Recipient::External {
+                recipient_address: _addr,
+                output_pool: _pool,
+                ..
+            } => {
+                // Nothing to do for external recipients.
+            }
             Recipient::InternalAccount {
                 receiving_account,
                 note,
@@ -2270,6 +2597,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                 Note::Sapling(note) => {
                     sapling::put_received_note(
                         wdb.conn.0,
+                        &wdb.params,
                         &DecryptedOutput::new(
                             output.output_index(),
                             note.clone(),
@@ -2280,6 +2608,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                             TransferType::WalletInternal,
                         ),
                         tx_ref,
+                        Some(sent_tx.target_height()),
                         None,
                     )?;
                 }
@@ -2287,6 +2616,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                 Note::Orchard(note) => {
                     orchard::put_received_note(
                         wdb.conn.0,
+                        &wdb.params,
                         &DecryptedOutput::new(
                             output.output_index(),
                             *note,
@@ -2297,16 +2627,25 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                             TransferType::WalletInternal,
                         ),
                         tx_ref,
+                        Some(sent_tx.target_height()),
                         None,
                     )?;
                 }
             },
             #[cfg(feature = "transparent-inputs")]
             Recipient::EphemeralTransparent {
-                receiving_account,
                 ephemeral_address,
                 outpoint,
+                ..
             } => {
+                // First check to verify that creation of this output does not result in reuse of
+                // an ephemeral address.
+                transparent::check_ephemeral_address_reuse(
+                    wdb.conn.0,
+                    &wdb.params,
+                    ephemeral_address,
+                )?;
+
                 transparent::put_transparent_output(
                     wdb.conn.0,
                     &wdb.params,
@@ -2317,17 +2656,9 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                     },
                     None,
                     ephemeral_address,
-                    *receiving_account,
                     true,
                 )?;
-                transparent::ephemeral::mark_ephemeral_address_as_used(
-                    wdb.conn.0,
-                    &wdb.params,
-                    ephemeral_address,
-                    tx_ref,
-                )?;
             }
-            _ => {}
         }
     }
 
@@ -2420,6 +2751,7 @@ pub(crate) fn set_transaction_status(
 pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
     max_height: BlockHeight,
 ) -> Result<BlockHeight, SqliteClientError> {
     // Determine a checkpoint to which we can rewind, if any.
@@ -2536,6 +2868,9 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         let mut wdb = WalletDb {
             conn: SqlTransaction(conn),
             params: params.clone(),
+            clock: (),
+            #[cfg(feature = "transparent-inputs")]
+            gap_limits: *gap_limits,
         };
         wdb.with_sapling_tree_mut(|tree| {
             tree.truncate_to_checkpoint(&truncation_height)?;
@@ -2693,6 +3028,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     d_tx: DecryptedTransaction<AccountUuid>,
+    #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
 ) -> Result<(), SqliteClientError> {
     let tx_ref = put_tx_data(conn, d_tx.tx(), None, None, None)?;
     if let Some(height) = d_tx.mined_height() {
@@ -2716,6 +3052,9 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     // recover transparent transaction history.
     #[cfg(feature = "transparent-inputs")]
     let mut tx_has_wallet_outputs = false;
+
+    #[cfg(feature = "transparent-inputs")]
+    let mut receiving_accounts = BTreeMap::new();
 
     for output in d_tx.sapling_outputs() {
         #[cfg(feature = "transparent-inputs")]
@@ -2748,7 +3087,14 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                 )?;
             }
             TransferType::WalletInternal => {
-                sapling::put_received_note(conn, output, tx_ref, None)?;
+                sapling::put_received_note(
+                    conn,
+                    params,
+                    output,
+                    tx_ref,
+                    d_tx.mined_height(),
+                    None,
+                )?;
 
                 let recipient = Recipient::InternalAccount {
                     receiving_account: *output.account(),
@@ -2768,7 +3114,17 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                 )?;
             }
             TransferType::Incoming => {
-                sapling::put_received_note(conn, output, tx_ref, None)?;
+                let _account_id = sapling::put_received_note(
+                    conn,
+                    params,
+                    output,
+                    tx_ref,
+                    d_tx.mined_height(),
+                    None,
+                )?;
+
+                #[cfg(feature = "transparent-inputs")]
+                receiving_accounts.insert(_account_id, KeyScope::EXTERNAL);
 
                 if let Some(account_id) = funding_account {
                     let recipient = Recipient::InternalAccount {
@@ -2837,7 +3193,14 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                 )?;
             }
             TransferType::WalletInternal => {
-                orchard::put_received_note(conn, output, tx_ref, None)?;
+                orchard::put_received_note(
+                    conn,
+                    params,
+                    output,
+                    tx_ref,
+                    d_tx.mined_height(),
+                    None,
+                )?;
 
                 let recipient = Recipient::InternalAccount {
                     receiving_account: *output.account(),
@@ -2857,7 +3220,17 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                 )?;
             }
             TransferType::Incoming => {
-                orchard::put_received_note(conn, output, tx_ref, None)?;
+                let _account_id = orchard::put_received_note(
+                    conn,
+                    params,
+                    output,
+                    tx_ref,
+                    d_tx.mined_height(),
+                    None,
+                )?;
+
+                #[cfg(feature = "transparent-inputs")]
+                receiving_accounts.insert(_account_id, KeyScope::EXTERNAL);
 
                 if let Some(account_id) = funding_account {
                     // Even if the recipient address is external, record the send as internal.
@@ -2923,18 +3296,9 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                     address.encode(params)
                 );
 
-                // The transaction is not necessarily mined yet, but we want to record
-                // that an output to the address was seen in this tx anyway. This will
-                // advance the gap regardless of whether it is mined, but an output in
-                // an unmined transaction won't advance the range of safe indices.
-                #[cfg(feature = "transparent-inputs")]
-                transparent::ephemeral::mark_ephemeral_address_as_seen(
-                    conn, params, &address, tx_ref,
-                )?;
-
                 // If the output belongs to the wallet, add it to `transparent_received_outputs`.
                 #[cfg(feature = "transparent-inputs")]
-                if let Some(account_uuid) =
+                if let Some((account_uuid, key_scope)) =
                     transparent::find_account_uuid_for_transparent_address(conn, params, &address)?
                 {
                     debug!(
@@ -2943,7 +3307,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                         output_index,
                         account_uuid
                     );
-                    transparent::put_transparent_output(
+                    let (account_id, _, _) = transparent::put_transparent_output(
                         conn,
                         params,
                         &OutPoint::new(
@@ -2953,9 +3317,10 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                         txout,
                         d_tx.mined_height(),
                         &address,
-                        account_uuid,
                         false,
                     )?;
+
+                    receiving_accounts.insert(account_id, key_scope);
 
                     // Since the wallet created the transparent output, we need to ensure
                     // that any transparent inputs belonging to the wallet will be
@@ -3026,6 +3391,19 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
                 );
             }
         }
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    for (account_id, key_scope) in receiving_accounts {
+        use ReceiverRequirement::*;
+        transparent::generate_gap_addresses(
+            conn,
+            params,
+            account_id,
+            key_scope,
+            gap_limits,
+            UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+        )?;
     }
 
     // If the transaction has outputs that belong to the wallet as well as transparent
@@ -3106,10 +3484,14 @@ pub(crate) fn select_receiving_address<P: consensus::Parameters>(
                 "SELECT address
                  FROM addresses
                  JOIN accounts ON accounts.id = addresses.account_id
-                 WHERE accounts.uuid = :account_uuid",
+                 WHERE accounts.uuid = :account_uuid
+                 AND key_scope = :key_scope",
             )?;
 
-            let mut result = stmt.query(named_params! { ":account_uuid": account.0 })?;
+            let mut result = stmt.query(named_params! {
+                ":account_uuid": account.0,
+                ":key_scope": KeyScope::EXTERNAL.encode(),
+            })?;
             while let Some(row) = result.next()? {
                 let addr_str = row.get::<_, String>(0)?;
                 let decoded = addr_str.parse::<ZcashAddress>()?;
@@ -3360,7 +3742,7 @@ fn flag_previously_received_change(
             ),
             named_params! {
                 ":tx": tx_ref.0,
-                ":internal_scope": scope_code(Scope::Internal)
+                ":internal_scope": KeyScope::INTERNAL.encode()
             },
         )
     };
@@ -3731,10 +4113,12 @@ mod tests {
         testing::{AddressType, DataStoreFactory, FakeCompactOutput, TestBuilder, TestState},
         Account as _, AccountSource, WalletRead, WalletWrite,
     };
+    use zcash_keys::keys::UnifiedAddressRequest;
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::value::Zatoshis;
 
     use crate::{
+        error::SqliteClientError,
         testing::{db::TestDbFactory, BlockCache},
         AccountUuid,
     };
@@ -3761,12 +4145,21 @@ mod tests {
         );
 
         // The default address is set for the test account
-        assert_matches!(st.wallet().get_current_address(account.id()), Ok(Some(_)));
+        assert_matches!(
+            st.wallet().get_last_generated_address_matching(
+                account.id(),
+                UnifiedAddressRequest::AllAvailableKeys
+            ),
+            Ok(Some(_))
+        );
 
         // No default address is set for an un-initialized account
         assert_matches!(
-            st.wallet().get_current_address(AccountUuid(Uuid::nil())),
-            Ok(None)
+            st.wallet().get_last_generated_address_matching(
+                AccountUuid(Uuid::nil()),
+                UnifiedAddressRequest::AllAvailableKeys
+            ),
+            Err(SqliteClientError::AccountUnknown)
         );
     }
 

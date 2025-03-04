@@ -3,18 +3,22 @@
 use std::error;
 use std::fmt;
 
+use nonempty::NonEmpty;
 use shardtree::error::ShardTreeError;
+
 use zcash_address::ParseError;
 use zcash_client_backend::data_api::NoteFilter;
+use zcash_keys::address::UnifiedAddress;
 use zcash_keys::keys::AddressGenerationError;
-use zcash_protocol::{consensus::BlockHeight, value::BalanceError, PoolType};
+use zcash_protocol::{consensus::BlockHeight, value::BalanceError, PoolType, TxId};
+use zip32::DiversifierIndex;
 
 use crate::{wallet::commitment_tree, AccountUuid};
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    ::transparent::address::TransparentAddress, zcash_keys::encoding::TransparentCodecError,
-    zcash_primitives::transaction::TxId,
+    ::transparent::{address::TransparentAddress, keys::TransparentKeyScope},
+    zcash_keys::encoding::TransparentCodecError,
 };
 
 /// The primary error type for the SQLite wallet backend.
@@ -118,17 +122,22 @@ pub enum SqliteClientError {
     /// A note selection query contained an invalid constant or was otherwise not supported.
     NoteFilterInvalid(NoteFilter),
 
-    /// The proposal cannot be constructed until transactions with previously reserved
-    /// ephemeral address outputs have been mined. The parameters are the account UUID and
-    /// the index that could not safely be reserved.
+    /// An address cannot be reserved, or a proposal cannot be constructed until a transaction
+    /// containing outputs belonging to a previously reserved address has been mined. The error
+    /// contains the index that could not safely be reserved.
     #[cfg(feature = "transparent-inputs")]
-    ReachedGapLimit(AccountUuid, u32),
+    ReachedGapLimit(TransparentKeyScope, u32),
 
-    /// An ephemeral address would be reused. The parameters are the address in string
-    /// form, and the txid of the earliest transaction in which it is known to have been
-    /// used.
-    #[cfg(feature = "transparent-inputs")]
-    EphemeralAddressReuse(String, TxId),
+    /// The backend encountered an attempt to reuse a diversifier index to generate an address
+    /// having different receivers from an address that had previously been exposed for that
+    /// diversifier index. Returns the previously exposed address.
+    DiversifierIndexReuse(DiversifierIndex, Box<UnifiedAddress>),
+
+    /// The wallet attempted to create a transaction that would use of one of the wallet's
+    /// previously-used addresses, potentially creating a problem with on-chain transaction
+    /// linkability. The returned value contains the string encoding of the address and the txid(s)
+    /// of the transactions in which it is known to have been used.
+    AddressReuse(String, NonEmpty<TxId>),
 }
 
 impl error::Error for SqliteClientError {
@@ -185,12 +194,26 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::BalanceError(e) => write!(f, "Balance error: {}", e),
             SqliteClientError::NoteFilterInvalid(s) => write!(f, "Could not evaluate filter query: {:?}", s),
             #[cfg(feature = "transparent-inputs")]
-            SqliteClientError::ReachedGapLimit(account_id, bad_index) => write!(f,
-                "The proposal cannot be constructed until transactions with previously reserved ephemeral address outputs have been mined. \
-                 The ephemeral address in account {account_id:?} at index {bad_index} could not be safely reserved.",
+            SqliteClientError::ReachedGapLimit(key_scope, bad_index) => write!(f,
+                "The proposal cannot be constructed until a transaction with outputs to a previously reserved {} address has been mined. \
+                 The address at index {bad_index} could not be safely reserved.",
+                 match *key_scope {
+                     TransparentKeyScope::EXTERNAL => "external transparent",
+                     TransparentKeyScope::INTERNAL => "transparent change",
+                     TransparentKeyScope::EPHEMERAL => "ephemeral transparent",
+                     _ => panic!("Unsupported transparent key scope.")
+                 }
             ),
-            #[cfg(feature = "transparent-inputs")]
-            SqliteClientError::EphemeralAddressReuse(address_str, txid) => write!(f, "The ephemeral address {address_str} previously used in txid {txid} would be reused."),
+            SqliteClientError::DiversifierIndexReuse(i, _) => {
+                write!(
+                    f,
+                    "An address has already been exposed for diversifier index {}",
+                    u128::from(*i)
+                )
+            }
+            SqliteClientError::AddressReuse(address_str, txids) => {
+                write!(f, "The address {address_str} previously used in txid(s) {:?} would be reused.", txids)
+            }
         }
     }
 }

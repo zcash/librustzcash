@@ -302,7 +302,7 @@ mod tests {
     fn transaction_views() {
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), network, ()).unwrap();
         init_wallet_db_internal(&mut db_data, None, &[addresses_table::MIGRATION_ID], false)
             .unwrap();
         let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32][..], AccountId::ZERO).unwrap();
@@ -401,7 +401,7 @@ mod tests {
 
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), network, ()).unwrap();
         init_wallet_db_internal(
             &mut db_data,
             None,
@@ -441,11 +441,11 @@ mod tests {
         let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32][..], AccountId::ZERO).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
         let (ua, _) = ufvk
-            .default_address(Some(UnifiedAddressRequest::unsafe_new(
+            .default_address(UnifiedAddressRequest::unsafe_custom(
                 Omit,
                 Require,
                 UA_TRANSPARENT,
-            )))
+            ))
             .expect("A valid default address exists for the UFVK");
         let taddr = ufvk
             .transparent()
