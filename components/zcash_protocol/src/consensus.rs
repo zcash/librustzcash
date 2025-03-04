@@ -138,7 +138,6 @@ pub trait NetworkConstants: Clone {
     ///
     /// Defined in [ZIP 32].
     ///
-    /// [`ExtendedSpendingKey`]: zcash_primitives::zip32::ExtendedSpendingKey
     /// [ZIP 32]: https://github.com/zcash/zips/blob/master/zip-0032.rst
     fn hrp_sapling_extended_spending_key(&self) -> &'static str;
 
@@ -147,7 +146,6 @@ pub trait NetworkConstants: Clone {
     ///
     /// Defined in [ZIP 32].
     ///
-    /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
     /// [ZIP 32]: https://github.com/zcash/zips/blob/master/zip-0032.rst
     fn hrp_sapling_extended_full_viewing_key(&self) -> &'static str;
 
@@ -156,7 +154,6 @@ pub trait NetworkConstants: Clone {
     ///
     /// Defined in section 5.6.4 of the [Zcash Protocol Specification].
     ///
-    /// [`PaymentAddress`]: zcash_primitives::primitives::PaymentAddress
     /// [Zcash Protocol Specification]: https://github.com/zcash/zips/blob/master/protocol/protocol.pdf
     fn hrp_sapling_payment_address(&self) -> &'static str;
 
@@ -172,14 +169,10 @@ pub trait NetworkConstants: Clone {
     /// Returns the human-readable prefix for Base58Check-encoded transparent
     /// pay-to-public-key-hash payment addresses for the network to which this NetworkConstants value
     /// applies.
-    ///
-    /// [`TransparentAddress::PublicKey`]: zcash_primitives::legacy::TransparentAddress::PublicKey
     fn b58_pubkey_address_prefix(&self) -> [u8; 2];
 
     /// Returns the human-readable prefix for Base58Check-encoded transparent pay-to-script-hash
     /// payment addresses for the network to which this NetworkConstants value applies.
-    ///
-    /// [`TransparentAddress::Script`]: zcash_primitives::legacy::TransparentAddress::Script
     fn b58_script_address_prefix(&self) -> [u8; 2];
 
     /// Returns the Bech32-encoded human-readable prefix for TEX addresses, for the
