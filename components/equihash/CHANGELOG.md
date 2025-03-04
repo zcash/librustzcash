@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+Documentation improvements and rendering fix; no code changes.
+
 ## [0.2.1] - 2025-02-21
 ### Added
 - `equihash::tromp` module behind the experimental `solver` feature flag.

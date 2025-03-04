@@ -1428,6 +1428,7 @@ dependencies = [
  "blake2b_simd",
  "cc",
  "core2",
+ "document-features",
  "hex",
 ]
 
