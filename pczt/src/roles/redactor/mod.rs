@@ -1,3 +1,10 @@
+//! The Redactor role (anyone can execute).
+//!
+//! - Removes information that is unnecessary for subsequent entities to proceed.
+//! - This can be useful e.g. when creating a transaction that has inputs from multiple
+//!   independent Signers; each can receive a PCZT with just the information they need
+//!   to sign, but (e.g.) not the `alpha` values for other Signers.
+
 use crate::{common::Global, Pczt};
 
 pub mod orchard;

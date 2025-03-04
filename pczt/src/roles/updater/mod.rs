@@ -1,3 +1,8 @@
+//! The Updater role (anyone can contribute).
+//!
+//! - Adds information necessary for subsequent entities to proceed, such as key paths
+//!   for signing spends.
+
 use alloc::string::String;
 use alloc::vec::Vec;
 

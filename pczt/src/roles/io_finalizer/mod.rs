@@ -1,3 +1,8 @@
+//! The IO Finalizer role (anyone can execute).
+//!
+//! - Sets the appropriate bits in `Global.tx_modifiable` to 0.
+//! - Updates the various bsk values using the rcv information from spends and outputs.
+
 use rand_core::OsRng;
 use zcash_primitives::transaction::{
     sighash::SignableInput, sighash_v5::v5_signature_hash, txid::TxIdDigester,

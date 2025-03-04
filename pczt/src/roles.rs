@@ -1,3 +1,13 @@
+//! Implementations of the PCZT roles.
+//!
+//! The roles currently without an implementation are:
+//! - Constructor (anyone can contribute)
+//!   - Adds spends and outputs to the PCZT.
+//!   - Before any input or output may be added, the constructor must check the
+//!     `Global.tx_modifiable` field. Inputs may only be added if the Inputs Modifiable
+//!     flag is True. Outputs may only be added if the Outputs Modifiable flag is True.
+//!   - A single entity is likely to be both a Creator and Constructor.
+
 pub mod creator;
 
 #[cfg(feature = "io-finalizer")]
