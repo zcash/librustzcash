@@ -272,11 +272,8 @@ pub struct GapLimits {
 impl GapLimits {
     /// Constructs a new `GapLimits` value from its constituent parts.
     ///
-    /// The following gap limits are recommended for use with this crate, and are supplied by the
-    /// [`Default`] implementation for this type.
-    /// - external addresses: 10
-    /// - transparent internal (change) addresses: 5
-    /// - ephemeral addresses: 3
+    /// The gap limits recommended for use with this crate are supplied by the [`Default`]
+    /// implementation for this type.
     ///
     /// This constructor is only available under the `unstable` feature, as it is not recommended
     /// for general use.

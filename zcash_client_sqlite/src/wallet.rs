@@ -155,9 +155,9 @@ pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
 
 /// A constant for use in converting Unix timestamps to shielded-only diversifier indices. The
 /// value here is intended to be added to the current time, in seconds since the epoch, to obtain
-/// an index that is greater than or equal to 2^31. While it would be possible to use indices in
-/// the range 2^31..2^32, we wish to avoid any confusion with indices in the non-hardened BIP 32
-/// child index derivation space.
+/// an index that is greater than or equal to 2^32. While it would be possible to use indices in
+/// the range 2^31..2^32, we wish to avoid any confusion with indices in the BIP 32 child
+/// index derivation space.
 ///
 /// 2^32 - (date --date "Oct 28, 2016 07:56 UTC" +%s)
 pub(crate) const MIN_SHIELDED_DIVERSIFIER_OFFSET: u64 = 2817325936;
@@ -672,7 +672,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
                 UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
             )?;
 
-            // Select indicies from the transparent gap limit that are available for use as
+            // Select indices from the transparent gap limit that are available for use as
             // diversifier indices.
             let (gap_start, addrs) = transparent::select_addrs_to_reserve(
                 conn,
@@ -779,7 +779,8 @@ pub(crate) fn get_last_generated_address_matching<P: consensus::Parameters>(
     let require_flags = ReceiverFlags::required(requirements);
     let omit_flags = ReceiverFlags::omitted(requirements);
     // This returns the most recently exposed external-scope address (the address that was exposed
-    // at the greatest block height) that conforms to the specified requirements.
+    // at the greatest block height, using the largest diversifier index to break ties)
+    // that conforms to the specified requirements.
     let addr: Option<(String, Vec<u8>)> = conn
         .query_row(
             "SELECT address, diversifier_index_be

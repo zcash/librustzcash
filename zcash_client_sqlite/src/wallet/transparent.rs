@@ -223,7 +223,7 @@ pub(crate) fn find_gap_start(
                 -- so the gap between them is one less than their difference
                 next_child_index - transparent_child_index - 1 AS gap_len
             FROM offsets
-            -- if gap_len is equal to the gap limit, then we have found a gap.
+            -- if gap_len is at least the gap limit, then we have found a gap.
             -- if next_child_index is NULL, then we have reached the end of
             -- the allocated indices (the remainder of the index space is a gap).
             WHERE gap_len >= :gap_limit OR next_child_index IS NULL
@@ -397,7 +397,7 @@ pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
 /// transparent addresses is available from the first gap in existing indices of addresses at which
 /// a received transaction has been observed on the chain, for each key scope.
 ///
-/// The provided [`UnifiedAddressRequest`] is used to pregenerate unified addresses that correspond
+/// The provided [`UnifiedAddressRequest`] is used to pre-generate unified addresses that correspond
 /// to the transparent address index in question; such unified addresses need not internally
 /// contain a transparent receiver, and may be overwritten when these addresses are exposed via the
 /// [`WalletWrite::get_next_available_address`] or [`WalletWrite::get_address_for_index`] methods.

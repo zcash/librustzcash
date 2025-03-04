@@ -22,7 +22,7 @@ and this library adheres to Rust's notion of
   - Has added method `utxo_query_height` when the `transparent-inputs` feature
     flag is active.
   - has removed method `get_current_address`. It has been replaced by
-    added method `WalletWrite::get_last_generated_address_matching`
+    added method `WalletRead::get_last_generated_address_matching`
 - `zcash_client_backend::data_api::WalletWrite`:
   - has added method `get_address_for_index`. Please note the WARNINGS section
     in the documentation for use of this method.

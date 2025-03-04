@@ -73,8 +73,8 @@ fn init_accounts<P: consensus::Parameters>(
                 )?;
 
                 // NB: we have reduced the initial space of generated ephemeral addresses
-                // from 20 addresses to 3, as ephemeral addresses should always be used in
-                // a transaction immediatly after being reserved, and as a consequence
+                // from 20 addresses to 5, as ephemeral addresses should always be used in
+                // a transaction immediately after being reserved, and as a consequence
                 // there is no significant benefit in having a larger gap limit.
                 for i in 0..ephemeral_gap_limit {
                     let address = ephemeral_ivk

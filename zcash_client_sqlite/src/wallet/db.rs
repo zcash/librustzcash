@@ -206,7 +206,7 @@ CREATE TABLE "transactions" (
 /// - `memo`: the memo output associated with the note, if known
 /// - `commitment_tree_position`: the 0-based index of the note in the leaves of the note
 ///   commitment tree.
-/// - `receipient_key_scope`: the ZIP 32 key scope of the key that decrypted this output,
+/// - `recipient_key_scope`: the ZIP 32 key scope of the key that decrypted this output,
 ///   encoded as `0` for external scope and `1` for internal scope.
 /// - `address_id`: a foreign key to the address that this note was sent to; null in the
 ///   case that the note was sent to an internally-scoped address (we never store addresses
@@ -279,7 +279,7 @@ CREATE TABLE sapling_received_note_spends (
 /// - `memo`: the memo output associated with the note, if known
 /// - `commitment_tree_position`: the 0-based index of the note in the leaves of the note
 ///   commitment tree.
-/// - `receipient_key_scope`: the ZIP 32 key scope of the key that decrypted this output,
+/// - `recipient_key_scope`: the ZIP 32 key scope of the key that decrypted this output,
 ///   encoded as `0` for external scope and `1` for internal scope.
 /// - `address_id`: a foreign key to the address that this note was sent to; null in the
 ///   case that the note was sent to an internally-scoped address (we never store addresses

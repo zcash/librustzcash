@@ -88,8 +88,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                         fix_broken_commitment_trees         add_account_uuids
     //                                     |                               |
     //                          fix_bad_change_flagging     v_transactions_additional_totals
-    //                                                                 |
-    //                                                     transparent_gap_limit_handling
+    //                                                                     |
+    //                                                       transparent_gap_limit_handling
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),

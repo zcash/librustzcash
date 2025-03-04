@@ -305,7 +305,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
         // Add foreign key references from the *_received_{notes|outputs} tables to the addresses
         // table to make it possible to identify which address was involved. These foreign key
-        // columns  must be nullable as for shielded account-internal. Ideally the foreign key
+        // columns must be nullable as for shielded account-internal. Ideally the foreign key
         // relationship between `transparent_received_outputs` and `addresses` would not be
         // nullable, but we allow it to be so here in order to avoid having to re-create that
         // table.
