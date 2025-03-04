@@ -1635,7 +1635,11 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
         let mut cached_blocks = BTreeMap::new();
         let mut wallet_data = self
             .ds_factory
-            .new_data_store(self.network, self.gap_limits)
+            .new_data_store(
+                self.network,
+                #[cfg(feature = "transparent-inputs")]
+                self.gap_limits,
+            )
             .unwrap();
 
         if let Some(initial_state) = &self.initial_chain_state {

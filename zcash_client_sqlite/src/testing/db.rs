@@ -204,7 +204,11 @@ impl Reset for TestDb {
         let old_db = std::mem::replace(
             st.wallet_mut(),
             TestDbFactory::default()
-                .new_data_store(network, gap_limits.into())
+                .new_data_store(
+                    network,
+                    #[cfg(feature = "transparent-inputs")]
+                    gap_limits.into(),
+                )
                 .unwrap(),
         );
         old_db.take_data_file()
