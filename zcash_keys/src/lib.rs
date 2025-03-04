@@ -3,7 +3,6 @@
 //! `zcash_keys` contains Rust structs, traits and functions for creating Zcash spending
 //! and viewing keys and addresses.
 //!
-//! ## Feature flags
 #![cfg_attr(feature = "std", doc = "## Feature flags")]
 #![cfg_attr(feature = "std", doc = document_features::document_features!())]
 //!
