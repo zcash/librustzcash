@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.2.1] - 2025-03-04
+
 Documentation improvements and rendering fix; no code changes.
 
 ## [0.2.0] - 2025-02-21
