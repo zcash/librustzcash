@@ -2387,203 +2387,204 @@
 <a href=#2387 id=2387 data-nosnippet>2387</a>    ///
 <a href=#2388 id=2388 data-nosnippet>2388</a>    /// Returns `Ok(None)` in the case that it is not possible to generate an address conforming
 <a href=#2389 id=2389 data-nosnippet>2389</a>    /// to the provided request at the specified diversifier index. Such a result might arise from
-<a href=#2390 id=2390 data-nosnippet>2390</a>    /// either a key not being available or the diversifier index not being valid for a
-<a href=#2391 id=2391 data-nosnippet>2391</a>    /// [`ReceiverRequirement::Require`]'ed receiver.
-<a href=#2392 id=2392 data-nosnippet>2392</a>    ///
-<a href=#2393 id=2393 data-nosnippet>2393</a>    /// Address generation should fail if an address has already been exposed for the given
-<a href=#2394 id=2394 data-nosnippet>2394</a>    /// diversifier index and the given request produced an address having different receivers than
-<a href=#2395 id=2395 data-nosnippet>2395</a>    /// what was originally exposed.
-<a href=#2396 id=2396 data-nosnippet>2396</a>    ///
-<a href=#2397 id=2397 data-nosnippet>2397</a>    /// # WARNINGS
-<a href=#2398 id=2398 data-nosnippet>2398</a>    /// If an address generated using this method has a transparent receiver and the
-<a href=#2399 id=2399 data-nosnippet>2399</a>    /// chosen diversifier index would be outside the wallet's internally-configured gap limit,
-<a href=#2400 id=2400 data-nosnippet>2400</a>    /// funds sent to these address are **likely to not be discovered on recovery from seed**. It
-<a href=#2401 id=2401 data-nosnippet>2401</a>    /// up to the caller of this method to either ensure that they only request transparent
-<a href=#2402 id=2402 data-nosnippet>2402</a>    /// receivers with indices within the range of a reasonable gap limit, or that they ensure that
-<a href=#2403 id=2403 data-nosnippet>2403</a>    /// their wallet provides backup facilities that can be used to ensure that funds sent to such
-<a href=#2404 id=2404 data-nosnippet>2404</a>    /// addresses are recoverable after a loss of wallet data.
-<a href=#2405 id=2405 data-nosnippet>2405</a>    ///
-<a href=#2406 id=2406 data-nosnippet>2406</a>    /// [`ReceiverRequirement::Require`]: zcash_keys::keys::ReceiverRequirement::Require
-<a href=#2407 id=2407 data-nosnippet>2407</a>    </span><span class="kw">fn </span>get_address_for_index(
-<a href=#2408 id=2408 data-nosnippet>2408</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#2409 id=2409 data-nosnippet>2409</a>        account: <span class="self">Self</span>::AccountId,
-<a href=#2410 id=2410 data-nosnippet>2410</a>        diversifier_index: DiversifierIndex,
-<a href=#2411 id=2411 data-nosnippet>2411</a>        request: UnifiedAddressRequest,
-<a href=#2412 id=2412 data-nosnippet>2412</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;UnifiedAddress&gt;, <span class="self">Self</span>::Error&gt;;
-<a href=#2413 id=2413 data-nosnippet>2413</a>
-<a href=#2414 id=2414 data-nosnippet>2414</a>    <span class="doccomment">/// Updates the wallet's view of the blockchain.
-<a href=#2415 id=2415 data-nosnippet>2415</a>    ///
-<a href=#2416 id=2416 data-nosnippet>2416</a>    /// This method is used to provide the wallet with information about the state of the
-<a href=#2417 id=2417 data-nosnippet>2417</a>    /// blockchain, and detect any previously scanned data that needs to be re-validated
-<a href=#2418 id=2418 data-nosnippet>2418</a>    /// before proceeding with scanning. It should be called at wallet startup prior to calling
-<a href=#2419 id=2419 data-nosnippet>2419</a>    /// [`WalletRead::suggest_scan_ranges`] in order to provide the wallet with the information it
-<a href=#2420 id=2420 data-nosnippet>2420</a>    /// needs to correctly prioritize scanning operations.
-<a href=#2421 id=2421 data-nosnippet>2421</a>    </span><span class="kw">fn </span>update_chain_tip(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tip_height: BlockHeight) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::Error&gt;;
-<a href=#2422 id=2422 data-nosnippet>2422</a>
-<a href=#2423 id=2423 data-nosnippet>2423</a>    <span class="doccomment">/// Updates the state of the wallet database by persisting the provided block information,
-<a href=#2424 id=2424 data-nosnippet>2424</a>    /// along with the note commitments that were detected when scanning the block for transactions
-<a href=#2425 id=2425 data-nosnippet>2425</a>    /// pertaining to this wallet.
-<a href=#2426 id=2426 data-nosnippet>2426</a>    ///
-<a href=#2427 id=2427 data-nosnippet>2427</a>    /// ### Arguments
-<a href=#2428 id=2428 data-nosnippet>2428</a>    /// - `from_state` must be the chain state for the block height prior to the first
-<a href=#2429 id=2429 data-nosnippet>2429</a>    ///   block in `blocks`.
-<a href=#2430 id=2430 data-nosnippet>2430</a>    /// - `blocks` must be sequential, in order of increasing block height.
-<a href=#2431 id=2431 data-nosnippet>2431</a>    </span><span class="kw">fn </span>put_blocks(
-<a href=#2432 id=2432 data-nosnippet>2432</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#2433 id=2433 data-nosnippet>2433</a>        from_state: <span class="kw-2">&amp;</span>ChainState,
-<a href=#2434 id=2434 data-nosnippet>2434</a>        blocks: Vec&lt;ScannedBlock&lt;<span class="self">Self</span>::AccountId&gt;&gt;,
-<a href=#2435 id=2435 data-nosnippet>2435</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::Error&gt;;
-<a href=#2436 id=2436 data-nosnippet>2436</a>
-<a href=#2437 id=2437 data-nosnippet>2437</a>    <span class="doccomment">/// Adds a transparent UTXO received by the wallet to the data store.
-<a href=#2438 id=2438 data-nosnippet>2438</a>    </span><span class="kw">fn </span>put_received_transparent_utxo(
-<a href=#2439 id=2439 data-nosnippet>2439</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#2440 id=2440 data-nosnippet>2440</a>        output: <span class="kw-2">&amp;</span>WalletTransparentOutput,
-<a href=#2441 id=2441 data-nosnippet>2441</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::UtxoRef, <span class="self">Self</span>::Error&gt;;
-<a href=#2442 id=2442 data-nosnippet>2442</a>
-<a href=#2443 id=2443 data-nosnippet>2443</a>    <span class="doccomment">/// Caches a decrypted transaction in the persistent wallet store.
-<a href=#2444 id=2444 data-nosnippet>2444</a>    </span><span class="kw">fn </span>store_decrypted_tx(
-<a href=#2445 id=2445 data-nosnippet>2445</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#2446 id=2446 data-nosnippet>2446</a>        received_tx: DecryptedTransaction&lt;<span class="self">Self</span>::AccountId&gt;,
-<a href=#2447 id=2447 data-nosnippet>2447</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::Error&gt;;
-<a href=#2448 id=2448 data-nosnippet>2448</a>
-<a href=#2449 id=2449 data-nosnippet>2449</a>    <span class="doccomment">/// Saves information about transactions constructed by the wallet to the persistent
-<a href=#2450 id=2450 data-nosnippet>2450</a>    /// wallet store.
-<a href=#2451 id=2451 data-nosnippet>2451</a>    ///
-<a href=#2452 id=2452 data-nosnippet>2452</a>    /// This must be called before the transactions are sent to the network.
-<a href=#2453 id=2453 data-nosnippet>2453</a>    ///
-<a href=#2454 id=2454 data-nosnippet>2454</a>    /// Transactions that have been stored by this method should be retransmitted while it
-<a href=#2455 id=2455 data-nosnippet>2455</a>    /// is still possible that they could be mined.
-<a href=#2456 id=2456 data-nosnippet>2456</a>    </span><span class="kw">fn </span>store_transactions_to_be_sent(
-<a href=#2457 id=2457 data-nosnippet>2457</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#2458 id=2458 data-nosnippet>2458</a>        transactions: <span class="kw-2">&amp;</span>[SentTransaction&lt;<span class="self">Self</span>::AccountId&gt;],
-<a href=#2459 id=2459 data-nosnippet>2459</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::Error&gt;;
-<a href=#2460 id=2460 data-nosnippet>2460</a>
-<a href=#2461 id=2461 data-nosnippet>2461</a>    <span class="doccomment">/// Truncates the wallet database to at most the specified height.
-<a href=#2462 id=2462 data-nosnippet>2462</a>    ///
-<a href=#2463 id=2463 data-nosnippet>2463</a>    /// Implementations of this method may choose a lower block height to which the data store will
-<a href=#2464 id=2464 data-nosnippet>2464</a>    /// be truncated if it is not possible to truncate exactly to the specified height. Upon
-<a href=#2465 id=2465 data-nosnippet>2465</a>    /// successful truncation, this method returns the height to which the data store was actually
-<a href=#2466 id=2466 data-nosnippet>2466</a>    /// truncated.
-<a href=#2467 id=2467 data-nosnippet>2467</a>    ///
-<a href=#2468 id=2468 data-nosnippet>2468</a>    /// This method assumes that the state of the underlying data store is consistent up to a
-<a href=#2469 id=2469 data-nosnippet>2469</a>    /// particular block height. Since it is possible that a chain reorg might invalidate some
-<a href=#2470 id=2470 data-nosnippet>2470</a>    /// stored state, this method must be implemented in order to allow users of this API to
-<a href=#2471 id=2471 data-nosnippet>2471</a>    /// "reset" the data store to correctly represent chainstate as of at most the requested block
-<a href=#2472 id=2472 data-nosnippet>2472</a>    /// height.
-<a href=#2473 id=2473 data-nosnippet>2473</a>    ///
-<a href=#2474 id=2474 data-nosnippet>2474</a>    /// After calling this method, the block at the returned height will be the most recent block
-<a href=#2475 id=2475 data-nosnippet>2475</a>    /// and all other operations will treat this block as the chain tip for balance determination
-<a href=#2476 id=2476 data-nosnippet>2476</a>    /// purposes.
-<a href=#2477 id=2477 data-nosnippet>2477</a>    ///
-<a href=#2478 id=2478 data-nosnippet>2478</a>    /// There may be restrictions on heights to which it is possible to truncate. Specifically, it
-<a href=#2479 id=2479 data-nosnippet>2479</a>    /// will only be possible to truncate to heights at which is is possible to create a witness
-<a href=#2480 id=2480 data-nosnippet>2480</a>    /// given the current state of the wallet's note commitment tree.
-<a href=#2481 id=2481 data-nosnippet>2481</a>    </span><span class="kw">fn </span>truncate_to_height(<span class="kw-2">&amp;mut </span><span class="self">self</span>, max_height: BlockHeight) -&gt; <span class="prelude-ty">Result</span>&lt;BlockHeight, <span class="self">Self</span>::Error&gt;;
-<a href=#2482 id=2482 data-nosnippet>2482</a>
-<a href=#2483 id=2483 data-nosnippet>2483</a>    <span class="doccomment">/// Reserves the next `n` available ephemeral addresses for the given account.
-<a href=#2484 id=2484 data-nosnippet>2484</a>    /// This cannot be undone, so as far as possible, errors associated with transaction
-<a href=#2485 id=2485 data-nosnippet>2485</a>    /// construction should have been reported before calling this method.
-<a href=#2486 id=2486 data-nosnippet>2486</a>    ///
-<a href=#2487 id=2487 data-nosnippet>2487</a>    /// To ensure that sufficient information is stored on-chain to allow recovering
-<a href=#2488 id=2488 data-nosnippet>2488</a>    /// funds sent back to any of the used addresses, a "gap limit" of 20 addresses
-<a href=#2489 id=2489 data-nosnippet>2489</a>    /// should be observed as described in [BIP 44].
-<a href=#2490 id=2490 data-nosnippet>2490</a>    ///
-<a href=#2491 id=2491 data-nosnippet>2491</a>    /// Returns an error if there is insufficient space within the gap limit to allocate
-<a href=#2492 id=2492 data-nosnippet>2492</a>    /// the given number of addresses, or if the account identifier does not correspond
-<a href=#2493 id=2493 data-nosnippet>2493</a>    /// to a known account.
-<a href=#2494 id=2494 data-nosnippet>2494</a>    ///
-<a href=#2495 id=2495 data-nosnippet>2495</a>    /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki#user-content-Address_gap_limit
-<a href=#2496 id=2496 data-nosnippet>2496</a>    </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#2497 id=2497 data-nosnippet>2497</a>    </span><span class="kw">fn </span>reserve_next_n_ephemeral_addresses(
-<a href=#2498 id=2498 data-nosnippet>2498</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#2499 id=2499 data-nosnippet>2499</a>        _account_id: <span class="self">Self</span>::AccountId,
-<a href=#2500 id=2500 data-nosnippet>2500</a>        _n: usize,
-<a href=#2501 id=2501 data-nosnippet>2501</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(TransparentAddress, TransparentAddressMetadata)&gt;, <span class="self">Self</span>::Error&gt; {
-<a href=#2502 id=2502 data-nosnippet>2502</a>        <span class="comment">// Default impl is required for feature-flagged trait methods to prevent
-<a href=#2503 id=2503 data-nosnippet>2503</a>        // breakage due to inadvertent activation of features by transitive dependencies
-<a href=#2504 id=2504 data-nosnippet>2504</a>        // of the implementing crate.
-<a href=#2505 id=2505 data-nosnippet>2505</a>        </span><span class="prelude-val">Ok</span>(<span class="macro">vec!</span>[])
-<a href=#2506 id=2506 data-nosnippet>2506</a>    }
-<a href=#2507 id=2507 data-nosnippet>2507</a>
-<a href=#2508 id=2508 data-nosnippet>2508</a>    <span class="doccomment">/// Updates the wallet backend with respect to the status of a specific transaction, from the
-<a href=#2509 id=2509 data-nosnippet>2509</a>    /// perspective of the main chain.
-<a href=#2510 id=2510 data-nosnippet>2510</a>    ///
-<a href=#2511 id=2511 data-nosnippet>2511</a>    /// Fully transparent transactions, and transactions that do not contain either shielded inputs
-<a href=#2512 id=2512 data-nosnippet>2512</a>    /// or shielded outputs belonging to the wallet, may not be discovered by the process of chain
-<a href=#2513 id=2513 data-nosnippet>2513</a>    /// scanning; as a consequence, the wallet must actively query to determine whether such
-<a href=#2514 id=2514 data-nosnippet>2514</a>    /// transactions have been mined.
-<a href=#2515 id=2515 data-nosnippet>2515</a>    </span><span class="kw">fn </span>set_transaction_status(
-<a href=#2516 id=2516 data-nosnippet>2516</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#2517 id=2517 data-nosnippet>2517</a>        _txid: TxId,
-<a href=#2518 id=2518 data-nosnippet>2518</a>        _status: TransactionStatus,
-<a href=#2519 id=2519 data-nosnippet>2519</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::Error&gt;;
-<a href=#2520 id=2520 data-nosnippet>2520</a>}
-<a href=#2521 id=2521 data-nosnippet>2521</a>
-<a href=#2522 id=2522 data-nosnippet>2522</a><span class="doccomment">/// This trait describes a capability for manipulating wallet note commitment trees.
-<a href=#2523 id=2523 data-nosnippet>2523</a></span><span class="attr">#[cfg_attr(feature = <span class="string">"test-dependencies"</span>, delegatable_trait)]
-<a href=#2524 id=2524 data-nosnippet>2524</a></span><span class="kw">pub trait </span>WalletCommitmentTrees {
-<a href=#2525 id=2525 data-nosnippet>2525</a>    <span class="kw">type </span>Error: Debug;
-<a href=#2526 id=2526 data-nosnippet>2526</a>
-<a href=#2527 id=2527 data-nosnippet>2527</a>    <span class="doccomment">/// The type of the backing [`ShardStore`] for the Sapling note commitment tree.
-<a href=#2528 id=2528 data-nosnippet>2528</a>    </span><span class="kw">type </span>SaplingShardStore&lt;<span class="lifetime">'a</span>&gt;: ShardStore&lt;
-<a href=#2529 id=2529 data-nosnippet>2529</a>        H = sapling::Node,
-<a href=#2530 id=2530 data-nosnippet>2530</a>        CheckpointId = BlockHeight,
-<a href=#2531 id=2531 data-nosnippet>2531</a>        Error = <span class="self">Self</span>::Error,
-<a href=#2532 id=2532 data-nosnippet>2532</a>    &gt;;
-<a href=#2533 id=2533 data-nosnippet>2533</a>
-<a href=#2534 id=2534 data-nosnippet>2534</a>    <span class="doccomment">/// Evaluates the given callback function with a reference to the Sapling
-<a href=#2535 id=2535 data-nosnippet>2535</a>    /// note commitment tree maintained by the wallet.
-<a href=#2536 id=2536 data-nosnippet>2536</a>    </span><span class="kw">fn </span>with_sapling_tree_mut&lt;F, A, E&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, callback: F) -&gt; <span class="prelude-ty">Result</span>&lt;A, E&gt;
-<a href=#2537 id=2537 data-nosnippet>2537</a>    <span class="kw">where
-<a href=#2538 id=2538 data-nosnippet>2538</a>        for</span>&lt;<span class="lifetime">'a</span>&gt; F: FnMut(
-<a href=#2539 id=2539 data-nosnippet>2539</a>            <span class="kw-2">&amp;</span><span class="lifetime">'a </span><span class="kw-2">mut </span>ShardTree&lt;
-<a href=#2540 id=2540 data-nosnippet>2540</a>                <span class="self">Self</span>::SaplingShardStore&lt;<span class="lifetime">'a</span>&gt;,
-<a href=#2541 id=2541 data-nosnippet>2541</a>                { sapling::NOTE_COMMITMENT_TREE_DEPTH },
-<a href=#2542 id=2542 data-nosnippet>2542</a>                SAPLING_SHARD_HEIGHT,
-<a href=#2543 id=2543 data-nosnippet>2543</a>            &gt;,
-<a href=#2544 id=2544 data-nosnippet>2544</a>        ) -&gt; <span class="prelude-ty">Result</span>&lt;A, E&gt;,
-<a href=#2545 id=2545 data-nosnippet>2545</a>        E: From&lt;ShardTreeError&lt;<span class="self">Self</span>::Error&gt;&gt;;
-<a href=#2546 id=2546 data-nosnippet>2546</a>
-<a href=#2547 id=2547 data-nosnippet>2547</a>    <span class="doccomment">/// Adds a sequence of Sapling note commitment tree subtree roots to the data store.
-<a href=#2548 id=2548 data-nosnippet>2548</a>    ///
-<a href=#2549 id=2549 data-nosnippet>2549</a>    /// Each such value should be the Merkle root of a subtree of the Sapling note commitment tree
-<a href=#2550 id=2550 data-nosnippet>2550</a>    /// containing 2^[`SAPLING_SHARD_HEIGHT`] note commitments.
-<a href=#2551 id=2551 data-nosnippet>2551</a>    </span><span class="kw">fn </span>put_sapling_subtree_roots(
-<a href=#2552 id=2552 data-nosnippet>2552</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#2553 id=2553 data-nosnippet>2553</a>        start_index: u64,
-<a href=#2554 id=2554 data-nosnippet>2554</a>        roots: <span class="kw-2">&amp;</span>[CommitmentTreeRoot&lt;sapling::Node&gt;],
-<a href=#2555 id=2555 data-nosnippet>2555</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), ShardTreeError&lt;<span class="self">Self</span>::Error&gt;&gt;;
-<a href=#2556 id=2556 data-nosnippet>2556</a>
-<a href=#2557 id=2557 data-nosnippet>2557</a>    <span class="doccomment">/// The type of the backing [`ShardStore`] for the Orchard note commitment tree.
-<a href=#2558 id=2558 data-nosnippet>2558</a>    </span><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#2559 id=2559 data-nosnippet>2559</a>    </span><span class="kw">type </span>OrchardShardStore&lt;<span class="lifetime">'a</span>&gt;: ShardStore&lt;
-<a href=#2560 id=2560 data-nosnippet>2560</a>        H = orchard::tree::MerkleHashOrchard,
-<a href=#2561 id=2561 data-nosnippet>2561</a>        CheckpointId = BlockHeight,
-<a href=#2562 id=2562 data-nosnippet>2562</a>        Error = <span class="self">Self</span>::Error,
-<a href=#2563 id=2563 data-nosnippet>2563</a>    &gt;;
-<a href=#2564 id=2564 data-nosnippet>2564</a>
-<a href=#2565 id=2565 data-nosnippet>2565</a>    <span class="doccomment">/// Evaluates the given callback function with a reference to the Orchard
-<a href=#2566 id=2566 data-nosnippet>2566</a>    /// note commitment tree maintained by the wallet.
-<a href=#2567 id=2567 data-nosnippet>2567</a>    </span><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#2568 id=2568 data-nosnippet>2568</a>    </span><span class="kw">fn </span>with_orchard_tree_mut&lt;F, A, E&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, callback: F) -&gt; <span class="prelude-ty">Result</span>&lt;A, E&gt;
-<a href=#2569 id=2569 data-nosnippet>2569</a>    <span class="kw">where
-<a href=#2570 id=2570 data-nosnippet>2570</a>        for</span>&lt;<span class="lifetime">'a</span>&gt; F: FnMut(
-<a href=#2571 id=2571 data-nosnippet>2571</a>            <span class="kw-2">&amp;</span><span class="lifetime">'a </span><span class="kw-2">mut </span>ShardTree&lt;
-<a href=#2572 id=2572 data-nosnippet>2572</a>                <span class="self">Self</span>::OrchardShardStore&lt;<span class="lifetime">'a</span>&gt;,
-<a href=#2573 id=2573 data-nosnippet>2573</a>                { ORCHARD_SHARD_HEIGHT * <span class="number">2 </span>},
-<a href=#2574 id=2574 data-nosnippet>2574</a>                ORCHARD_SHARD_HEIGHT,
-<a href=#2575 id=2575 data-nosnippet>2575</a>            &gt;,
-<a href=#2576 id=2576 data-nosnippet>2576</a>        ) -&gt; <span class="prelude-ty">Result</span>&lt;A, E&gt;,
-<a href=#2577 id=2577 data-nosnippet>2577</a>        E: From&lt;ShardTreeError&lt;<span class="self">Self</span>::Error&gt;&gt;;
-<a href=#2578 id=2578 data-nosnippet>2578</a>
-<a href=#2579 id=2579 data-nosnippet>2579</a>    <span class="doccomment">/// Adds a sequence of Orchard note commitment tree subtree roots to the data store.
-<a href=#2580 id=2580 data-nosnippet>2580</a>    ///
-<a href=#2581 id=2581 data-nosnippet>2581</a>    /// Each such value should be the Merkle root of a subtree of the Orchard note commitment tree
-<a href=#2582 id=2582 data-nosnippet>2582</a>    /// containing 2^[`ORCHARD_SHARD_HEIGHT`] note commitments.
-<a href=#2583 id=2583 data-nosnippet>2583</a>    </span><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#2584 id=2584 data-nosnippet>2584</a>    </span><span class="kw">fn </span>put_orchard_subtree_roots(
-<a href=#2585 id=2585 data-nosnippet>2585</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#2586 id=2586 data-nosnippet>2586</a>        start_index: u64,
-<a href=#2587 id=2587 data-nosnippet>2587</a>        roots: <span class="kw-2">&amp;</span>[CommitmentTreeRoot&lt;orchard::tree::MerkleHashOrchard&gt;],
-<a href=#2588 id=2588 data-nosnippet>2588</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), ShardTreeError&lt;<span class="self">Self</span>::Error&gt;&gt;;
-<a href=#2589 id=2589 data-nosnippet>2589</a>}</code></pre></div></section></main></body></html>
+<a href=#2390 id=2390 data-nosnippet>2390</a>    /// the diversifier index not being valid for a [`ReceiverRequirement::Require`]'ed receiver.
+<a href=#2391 id=2391 data-nosnippet>2391</a>    /// Some implementations of this trait may return `Err(_)` in some cases to expose more
+<a href=#2392 id=2392 data-nosnippet>2392</a>    /// information, which is only accessible in a backend-specific context.
+<a href=#2393 id=2393 data-nosnippet>2393</a>    ///
+<a href=#2394 id=2394 data-nosnippet>2394</a>    /// Address generation should fail if an address has already been exposed for the given
+<a href=#2395 id=2395 data-nosnippet>2395</a>    /// diversifier index and the given request produced an address having different receivers than
+<a href=#2396 id=2396 data-nosnippet>2396</a>    /// what was originally exposed.
+<a href=#2397 id=2397 data-nosnippet>2397</a>    ///
+<a href=#2398 id=2398 data-nosnippet>2398</a>    /// # WARNINGS
+<a href=#2399 id=2399 data-nosnippet>2399</a>    /// If an address generated using this method has a transparent receiver and the
+<a href=#2400 id=2400 data-nosnippet>2400</a>    /// chosen diversifier index would be outside the wallet's internally-configured gap limit,
+<a href=#2401 id=2401 data-nosnippet>2401</a>    /// funds sent to these address are **likely to not be discovered on recovery from seed**. It
+<a href=#2402 id=2402 data-nosnippet>2402</a>    /// up to the caller of this method to either ensure that they only request transparent
+<a href=#2403 id=2403 data-nosnippet>2403</a>    /// receivers with indices within the range of a reasonable gap limit, or that they ensure that
+<a href=#2404 id=2404 data-nosnippet>2404</a>    /// their wallet provides backup facilities that can be used to ensure that funds sent to such
+<a href=#2405 id=2405 data-nosnippet>2405</a>    /// addresses are recoverable after a loss of wallet data.
+<a href=#2406 id=2406 data-nosnippet>2406</a>    ///
+<a href=#2407 id=2407 data-nosnippet>2407</a>    /// [`ReceiverRequirement::Require`]: zcash_keys::keys::ReceiverRequirement::Require
+<a href=#2408 id=2408 data-nosnippet>2408</a>    </span><span class="kw">fn </span>get_address_for_index(
+<a href=#2409 id=2409 data-nosnippet>2409</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#2410 id=2410 data-nosnippet>2410</a>        account: <span class="self">Self</span>::AccountId,
+<a href=#2411 id=2411 data-nosnippet>2411</a>        diversifier_index: DiversifierIndex,
+<a href=#2412 id=2412 data-nosnippet>2412</a>        request: UnifiedAddressRequest,
+<a href=#2413 id=2413 data-nosnippet>2413</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;UnifiedAddress&gt;, <span class="self">Self</span>::Error&gt;;
+<a href=#2414 id=2414 data-nosnippet>2414</a>
+<a href=#2415 id=2415 data-nosnippet>2415</a>    <span class="doccomment">/// Updates the wallet's view of the blockchain.
+<a href=#2416 id=2416 data-nosnippet>2416</a>    ///
+<a href=#2417 id=2417 data-nosnippet>2417</a>    /// This method is used to provide the wallet with information about the state of the
+<a href=#2418 id=2418 data-nosnippet>2418</a>    /// blockchain, and detect any previously scanned data that needs to be re-validated
+<a href=#2419 id=2419 data-nosnippet>2419</a>    /// before proceeding with scanning. It should be called at wallet startup prior to calling
+<a href=#2420 id=2420 data-nosnippet>2420</a>    /// [`WalletRead::suggest_scan_ranges`] in order to provide the wallet with the information it
+<a href=#2421 id=2421 data-nosnippet>2421</a>    /// needs to correctly prioritize scanning operations.
+<a href=#2422 id=2422 data-nosnippet>2422</a>    </span><span class="kw">fn </span>update_chain_tip(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tip_height: BlockHeight) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::Error&gt;;
+<a href=#2423 id=2423 data-nosnippet>2423</a>
+<a href=#2424 id=2424 data-nosnippet>2424</a>    <span class="doccomment">/// Updates the state of the wallet database by persisting the provided block information,
+<a href=#2425 id=2425 data-nosnippet>2425</a>    /// along with the note commitments that were detected when scanning the block for transactions
+<a href=#2426 id=2426 data-nosnippet>2426</a>    /// pertaining to this wallet.
+<a href=#2427 id=2427 data-nosnippet>2427</a>    ///
+<a href=#2428 id=2428 data-nosnippet>2428</a>    /// ### Arguments
+<a href=#2429 id=2429 data-nosnippet>2429</a>    /// - `from_state` must be the chain state for the block height prior to the first
+<a href=#2430 id=2430 data-nosnippet>2430</a>    ///   block in `blocks`.
+<a href=#2431 id=2431 data-nosnippet>2431</a>    /// - `blocks` must be sequential, in order of increasing block height.
+<a href=#2432 id=2432 data-nosnippet>2432</a>    </span><span class="kw">fn </span>put_blocks(
+<a href=#2433 id=2433 data-nosnippet>2433</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#2434 id=2434 data-nosnippet>2434</a>        from_state: <span class="kw-2">&amp;</span>ChainState,
+<a href=#2435 id=2435 data-nosnippet>2435</a>        blocks: Vec&lt;ScannedBlock&lt;<span class="self">Self</span>::AccountId&gt;&gt;,
+<a href=#2436 id=2436 data-nosnippet>2436</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::Error&gt;;
+<a href=#2437 id=2437 data-nosnippet>2437</a>
+<a href=#2438 id=2438 data-nosnippet>2438</a>    <span class="doccomment">/// Adds a transparent UTXO received by the wallet to the data store.
+<a href=#2439 id=2439 data-nosnippet>2439</a>    </span><span class="kw">fn </span>put_received_transparent_utxo(
+<a href=#2440 id=2440 data-nosnippet>2440</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#2441 id=2441 data-nosnippet>2441</a>        output: <span class="kw-2">&amp;</span>WalletTransparentOutput,
+<a href=#2442 id=2442 data-nosnippet>2442</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::UtxoRef, <span class="self">Self</span>::Error&gt;;
+<a href=#2443 id=2443 data-nosnippet>2443</a>
+<a href=#2444 id=2444 data-nosnippet>2444</a>    <span class="doccomment">/// Caches a decrypted transaction in the persistent wallet store.
+<a href=#2445 id=2445 data-nosnippet>2445</a>    </span><span class="kw">fn </span>store_decrypted_tx(
+<a href=#2446 id=2446 data-nosnippet>2446</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#2447 id=2447 data-nosnippet>2447</a>        received_tx: DecryptedTransaction&lt;<span class="self">Self</span>::AccountId&gt;,
+<a href=#2448 id=2448 data-nosnippet>2448</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::Error&gt;;
+<a href=#2449 id=2449 data-nosnippet>2449</a>
+<a href=#2450 id=2450 data-nosnippet>2450</a>    <span class="doccomment">/// Saves information about transactions constructed by the wallet to the persistent
+<a href=#2451 id=2451 data-nosnippet>2451</a>    /// wallet store.
+<a href=#2452 id=2452 data-nosnippet>2452</a>    ///
+<a href=#2453 id=2453 data-nosnippet>2453</a>    /// This must be called before the transactions are sent to the network.
+<a href=#2454 id=2454 data-nosnippet>2454</a>    ///
+<a href=#2455 id=2455 data-nosnippet>2455</a>    /// Transactions that have been stored by this method should be retransmitted while it
+<a href=#2456 id=2456 data-nosnippet>2456</a>    /// is still possible that they could be mined.
+<a href=#2457 id=2457 data-nosnippet>2457</a>    </span><span class="kw">fn </span>store_transactions_to_be_sent(
+<a href=#2458 id=2458 data-nosnippet>2458</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#2459 id=2459 data-nosnippet>2459</a>        transactions: <span class="kw-2">&amp;</span>[SentTransaction&lt;<span class="self">Self</span>::AccountId&gt;],
+<a href=#2460 id=2460 data-nosnippet>2460</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::Error&gt;;
+<a href=#2461 id=2461 data-nosnippet>2461</a>
+<a href=#2462 id=2462 data-nosnippet>2462</a>    <span class="doccomment">/// Truncates the wallet database to at most the specified height.
+<a href=#2463 id=2463 data-nosnippet>2463</a>    ///
+<a href=#2464 id=2464 data-nosnippet>2464</a>    /// Implementations of this method may choose a lower block height to which the data store will
+<a href=#2465 id=2465 data-nosnippet>2465</a>    /// be truncated if it is not possible to truncate exactly to the specified height. Upon
+<a href=#2466 id=2466 data-nosnippet>2466</a>    /// successful truncation, this method returns the height to which the data store was actually
+<a href=#2467 id=2467 data-nosnippet>2467</a>    /// truncated.
+<a href=#2468 id=2468 data-nosnippet>2468</a>    ///
+<a href=#2469 id=2469 data-nosnippet>2469</a>    /// This method assumes that the state of the underlying data store is consistent up to a
+<a href=#2470 id=2470 data-nosnippet>2470</a>    /// particular block height. Since it is possible that a chain reorg might invalidate some
+<a href=#2471 id=2471 data-nosnippet>2471</a>    /// stored state, this method must be implemented in order to allow users of this API to
+<a href=#2472 id=2472 data-nosnippet>2472</a>    /// "reset" the data store to correctly represent chainstate as of at most the requested block
+<a href=#2473 id=2473 data-nosnippet>2473</a>    /// height.
+<a href=#2474 id=2474 data-nosnippet>2474</a>    ///
+<a href=#2475 id=2475 data-nosnippet>2475</a>    /// After calling this method, the block at the returned height will be the most recent block
+<a href=#2476 id=2476 data-nosnippet>2476</a>    /// and all other operations will treat this block as the chain tip for balance determination
+<a href=#2477 id=2477 data-nosnippet>2477</a>    /// purposes.
+<a href=#2478 id=2478 data-nosnippet>2478</a>    ///
+<a href=#2479 id=2479 data-nosnippet>2479</a>    /// There may be restrictions on heights to which it is possible to truncate. Specifically, it
+<a href=#2480 id=2480 data-nosnippet>2480</a>    /// will only be possible to truncate to heights at which is is possible to create a witness
+<a href=#2481 id=2481 data-nosnippet>2481</a>    /// given the current state of the wallet's note commitment tree.
+<a href=#2482 id=2482 data-nosnippet>2482</a>    </span><span class="kw">fn </span>truncate_to_height(<span class="kw-2">&amp;mut </span><span class="self">self</span>, max_height: BlockHeight) -&gt; <span class="prelude-ty">Result</span>&lt;BlockHeight, <span class="self">Self</span>::Error&gt;;
+<a href=#2483 id=2483 data-nosnippet>2483</a>
+<a href=#2484 id=2484 data-nosnippet>2484</a>    <span class="doccomment">/// Reserves the next `n` available ephemeral addresses for the given account.
+<a href=#2485 id=2485 data-nosnippet>2485</a>    /// This cannot be undone, so as far as possible, errors associated with transaction
+<a href=#2486 id=2486 data-nosnippet>2486</a>    /// construction should have been reported before calling this method.
+<a href=#2487 id=2487 data-nosnippet>2487</a>    ///
+<a href=#2488 id=2488 data-nosnippet>2488</a>    /// To ensure that sufficient information is stored on-chain to allow recovering
+<a href=#2489 id=2489 data-nosnippet>2489</a>    /// funds sent back to any of the used addresses, a "gap limit" of 20 addresses
+<a href=#2490 id=2490 data-nosnippet>2490</a>    /// should be observed as described in [BIP 44].
+<a href=#2491 id=2491 data-nosnippet>2491</a>    ///
+<a href=#2492 id=2492 data-nosnippet>2492</a>    /// Returns an error if there is insufficient space within the gap limit to allocate
+<a href=#2493 id=2493 data-nosnippet>2493</a>    /// the given number of addresses, or if the account identifier does not correspond
+<a href=#2494 id=2494 data-nosnippet>2494</a>    /// to a known account.
+<a href=#2495 id=2495 data-nosnippet>2495</a>    ///
+<a href=#2496 id=2496 data-nosnippet>2496</a>    /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki#user-content-Address_gap_limit
+<a href=#2497 id=2497 data-nosnippet>2497</a>    </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#2498 id=2498 data-nosnippet>2498</a>    </span><span class="kw">fn </span>reserve_next_n_ephemeral_addresses(
+<a href=#2499 id=2499 data-nosnippet>2499</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#2500 id=2500 data-nosnippet>2500</a>        _account_id: <span class="self">Self</span>::AccountId,
+<a href=#2501 id=2501 data-nosnippet>2501</a>        _n: usize,
+<a href=#2502 id=2502 data-nosnippet>2502</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(TransparentAddress, TransparentAddressMetadata)&gt;, <span class="self">Self</span>::Error&gt; {
+<a href=#2503 id=2503 data-nosnippet>2503</a>        <span class="comment">// Default impl is required for feature-flagged trait methods to prevent
+<a href=#2504 id=2504 data-nosnippet>2504</a>        // breakage due to inadvertent activation of features by transitive dependencies
+<a href=#2505 id=2505 data-nosnippet>2505</a>        // of the implementing crate.
+<a href=#2506 id=2506 data-nosnippet>2506</a>        </span><span class="prelude-val">Ok</span>(<span class="macro">vec!</span>[])
+<a href=#2507 id=2507 data-nosnippet>2507</a>    }
+<a href=#2508 id=2508 data-nosnippet>2508</a>
+<a href=#2509 id=2509 data-nosnippet>2509</a>    <span class="doccomment">/// Updates the wallet backend with respect to the status of a specific transaction, from the
+<a href=#2510 id=2510 data-nosnippet>2510</a>    /// perspective of the main chain.
+<a href=#2511 id=2511 data-nosnippet>2511</a>    ///
+<a href=#2512 id=2512 data-nosnippet>2512</a>    /// Fully transparent transactions, and transactions that do not contain either shielded inputs
+<a href=#2513 id=2513 data-nosnippet>2513</a>    /// or shielded outputs belonging to the wallet, may not be discovered by the process of chain
+<a href=#2514 id=2514 data-nosnippet>2514</a>    /// scanning; as a consequence, the wallet must actively query to determine whether such
+<a href=#2515 id=2515 data-nosnippet>2515</a>    /// transactions have been mined.
+<a href=#2516 id=2516 data-nosnippet>2516</a>    </span><span class="kw">fn </span>set_transaction_status(
+<a href=#2517 id=2517 data-nosnippet>2517</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#2518 id=2518 data-nosnippet>2518</a>        _txid: TxId,
+<a href=#2519 id=2519 data-nosnippet>2519</a>        _status: TransactionStatus,
+<a href=#2520 id=2520 data-nosnippet>2520</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::Error&gt;;
+<a href=#2521 id=2521 data-nosnippet>2521</a>}
+<a href=#2522 id=2522 data-nosnippet>2522</a>
+<a href=#2523 id=2523 data-nosnippet>2523</a><span class="doccomment">/// This trait describes a capability for manipulating wallet note commitment trees.
+<a href=#2524 id=2524 data-nosnippet>2524</a></span><span class="attr">#[cfg_attr(feature = <span class="string">"test-dependencies"</span>, delegatable_trait)]
+<a href=#2525 id=2525 data-nosnippet>2525</a></span><span class="kw">pub trait </span>WalletCommitmentTrees {
+<a href=#2526 id=2526 data-nosnippet>2526</a>    <span class="kw">type </span>Error: Debug;
+<a href=#2527 id=2527 data-nosnippet>2527</a>
+<a href=#2528 id=2528 data-nosnippet>2528</a>    <span class="doccomment">/// The type of the backing [`ShardStore`] for the Sapling note commitment tree.
+<a href=#2529 id=2529 data-nosnippet>2529</a>    </span><span class="kw">type </span>SaplingShardStore&lt;<span class="lifetime">'a</span>&gt;: ShardStore&lt;
+<a href=#2530 id=2530 data-nosnippet>2530</a>        H = sapling::Node,
+<a href=#2531 id=2531 data-nosnippet>2531</a>        CheckpointId = BlockHeight,
+<a href=#2532 id=2532 data-nosnippet>2532</a>        Error = <span class="self">Self</span>::Error,
+<a href=#2533 id=2533 data-nosnippet>2533</a>    &gt;;
+<a href=#2534 id=2534 data-nosnippet>2534</a>
+<a href=#2535 id=2535 data-nosnippet>2535</a>    <span class="doccomment">/// Evaluates the given callback function with a reference to the Sapling
+<a href=#2536 id=2536 data-nosnippet>2536</a>    /// note commitment tree maintained by the wallet.
+<a href=#2537 id=2537 data-nosnippet>2537</a>    </span><span class="kw">fn </span>with_sapling_tree_mut&lt;F, A, E&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, callback: F) -&gt; <span class="prelude-ty">Result</span>&lt;A, E&gt;
+<a href=#2538 id=2538 data-nosnippet>2538</a>    <span class="kw">where
+<a href=#2539 id=2539 data-nosnippet>2539</a>        for</span>&lt;<span class="lifetime">'a</span>&gt; F: FnMut(
+<a href=#2540 id=2540 data-nosnippet>2540</a>            <span class="kw-2">&amp;</span><span class="lifetime">'a </span><span class="kw-2">mut </span>ShardTree&lt;
+<a href=#2541 id=2541 data-nosnippet>2541</a>                <span class="self">Self</span>::SaplingShardStore&lt;<span class="lifetime">'a</span>&gt;,
+<a href=#2542 id=2542 data-nosnippet>2542</a>                { sapling::NOTE_COMMITMENT_TREE_DEPTH },
+<a href=#2543 id=2543 data-nosnippet>2543</a>                SAPLING_SHARD_HEIGHT,
+<a href=#2544 id=2544 data-nosnippet>2544</a>            &gt;,
+<a href=#2545 id=2545 data-nosnippet>2545</a>        ) -&gt; <span class="prelude-ty">Result</span>&lt;A, E&gt;,
+<a href=#2546 id=2546 data-nosnippet>2546</a>        E: From&lt;ShardTreeError&lt;<span class="self">Self</span>::Error&gt;&gt;;
+<a href=#2547 id=2547 data-nosnippet>2547</a>
+<a href=#2548 id=2548 data-nosnippet>2548</a>    <span class="doccomment">/// Adds a sequence of Sapling note commitment tree subtree roots to the data store.
+<a href=#2549 id=2549 data-nosnippet>2549</a>    ///
+<a href=#2550 id=2550 data-nosnippet>2550</a>    /// Each such value should be the Merkle root of a subtree of the Sapling note commitment tree
+<a href=#2551 id=2551 data-nosnippet>2551</a>    /// containing 2^[`SAPLING_SHARD_HEIGHT`] note commitments.
+<a href=#2552 id=2552 data-nosnippet>2552</a>    </span><span class="kw">fn </span>put_sapling_subtree_roots(
+<a href=#2553 id=2553 data-nosnippet>2553</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#2554 id=2554 data-nosnippet>2554</a>        start_index: u64,
+<a href=#2555 id=2555 data-nosnippet>2555</a>        roots: <span class="kw-2">&amp;</span>[CommitmentTreeRoot&lt;sapling::Node&gt;],
+<a href=#2556 id=2556 data-nosnippet>2556</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), ShardTreeError&lt;<span class="self">Self</span>::Error&gt;&gt;;
+<a href=#2557 id=2557 data-nosnippet>2557</a>
+<a href=#2558 id=2558 data-nosnippet>2558</a>    <span class="doccomment">/// The type of the backing [`ShardStore`] for the Orchard note commitment tree.
+<a href=#2559 id=2559 data-nosnippet>2559</a>    </span><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#2560 id=2560 data-nosnippet>2560</a>    </span><span class="kw">type </span>OrchardShardStore&lt;<span class="lifetime">'a</span>&gt;: ShardStore&lt;
+<a href=#2561 id=2561 data-nosnippet>2561</a>        H = orchard::tree::MerkleHashOrchard,
+<a href=#2562 id=2562 data-nosnippet>2562</a>        CheckpointId = BlockHeight,
+<a href=#2563 id=2563 data-nosnippet>2563</a>        Error = <span class="self">Self</span>::Error,
+<a href=#2564 id=2564 data-nosnippet>2564</a>    &gt;;
+<a href=#2565 id=2565 data-nosnippet>2565</a>
+<a href=#2566 id=2566 data-nosnippet>2566</a>    <span class="doccomment">/// Evaluates the given callback function with a reference to the Orchard
+<a href=#2567 id=2567 data-nosnippet>2567</a>    /// note commitment tree maintained by the wallet.
+<a href=#2568 id=2568 data-nosnippet>2568</a>    </span><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#2569 id=2569 data-nosnippet>2569</a>    </span><span class="kw">fn </span>with_orchard_tree_mut&lt;F, A, E&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, callback: F) -&gt; <span class="prelude-ty">Result</span>&lt;A, E&gt;
+<a href=#2570 id=2570 data-nosnippet>2570</a>    <span class="kw">where
+<a href=#2571 id=2571 data-nosnippet>2571</a>        for</span>&lt;<span class="lifetime">'a</span>&gt; F: FnMut(
+<a href=#2572 id=2572 data-nosnippet>2572</a>            <span class="kw-2">&amp;</span><span class="lifetime">'a </span><span class="kw-2">mut </span>ShardTree&lt;
+<a href=#2573 id=2573 data-nosnippet>2573</a>                <span class="self">Self</span>::OrchardShardStore&lt;<span class="lifetime">'a</span>&gt;,
+<a href=#2574 id=2574 data-nosnippet>2574</a>                { ORCHARD_SHARD_HEIGHT * <span class="number">2 </span>},
+<a href=#2575 id=2575 data-nosnippet>2575</a>                ORCHARD_SHARD_HEIGHT,
+<a href=#2576 id=2576 data-nosnippet>2576</a>            &gt;,
+<a href=#2577 id=2577 data-nosnippet>2577</a>        ) -&gt; <span class="prelude-ty">Result</span>&lt;A, E&gt;,
+<a href=#2578 id=2578 data-nosnippet>2578</a>        E: From&lt;ShardTreeError&lt;<span class="self">Self</span>::Error&gt;&gt;;
+<a href=#2579 id=2579 data-nosnippet>2579</a>
+<a href=#2580 id=2580 data-nosnippet>2580</a>    <span class="doccomment">/// Adds a sequence of Orchard note commitment tree subtree roots to the data store.
+<a href=#2581 id=2581 data-nosnippet>2581</a>    ///
+<a href=#2582 id=2582 data-nosnippet>2582</a>    /// Each such value should be the Merkle root of a subtree of the Orchard note commitment tree
+<a href=#2583 id=2583 data-nosnippet>2583</a>    /// containing 2^[`ORCHARD_SHARD_HEIGHT`] note commitments.
+<a href=#2584 id=2584 data-nosnippet>2584</a>    </span><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#2585 id=2585 data-nosnippet>2585</a>    </span><span class="kw">fn </span>put_orchard_subtree_roots(
+<a href=#2586 id=2586 data-nosnippet>2586</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#2587 id=2587 data-nosnippet>2587</a>        start_index: u64,
+<a href=#2588 id=2588 data-nosnippet>2588</a>        roots: <span class="kw-2">&amp;</span>[CommitmentTreeRoot&lt;orchard::tree::MerkleHashOrchard&gt;],
+<a href=#2589 id=2589 data-nosnippet>2589</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), ShardTreeError&lt;<span class="self">Self</span>::Error&gt;&gt;;
+<a href=#2590 id=2590 data-nosnippet>2590</a>}</code></pre></div></section></main></body></html>
