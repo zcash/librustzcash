@@ -1,3 +1,5 @@
+//! A low-level variant of the Signer role, for dependency-constrained environments.
+
 use crate::Pczt;
 
 pub struct Signer {

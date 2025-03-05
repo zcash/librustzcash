@@ -1,3 +1,18 @@
+//! The Signer role (capability holders can contribute).
+//!
+//! - Needs the spend authorization randomizers to create signatures.
+//! - Needs sufficient information to verify that the proof is over the correct data,
+//!   without needing to verify the proof itself.
+//! - A Signer should only need to implement:
+//!   - Pedersen commitments using Jubjub / Pallas arithmetic (for note and value
+//!     commitments)
+//!   - BLAKE2b and BLAKE2s (and the various PRFs / CRHs they are used in)
+//!   - Nullifier check (using Jubjub / Pallas arithmetic)
+//!   - KDF plus note decryption (AEAD_CHACHA20_POLY1305)
+//!   - SignatureHash algorithm
+//!   - Signatures (RedJubjub / RedPallas)
+//!   - A source of randomness.
+
 use blake2b_simd::Hash as Blake2bHash;
 use rand_core::OsRng;
 

@@ -1,7 +1,7 @@
 [package]
 name = "equihash"
 description = "The Equihash Proof-of-Work function"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Jack Grigg <jack@z.cash>"]
 homepage = "https://github.com/zcash/librustzcash"
 repository = "https://github.com/zcash/librustzcash"
@@ -9,16 +9,25 @@ license = "MIT OR Apache-2.0"
 edition = "2021"
 rust-version = "1.56.1"
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [features]
 default = ["std"]
-std = []
+std = ["document-features"]
 
-# Experimental tromp solver support, builds the C++ tromp solver and Rust FFI layer.
+## Experimental tromp solver support, builds the C++ tromp solver and Rust FFI layer.
 solver = ["dep:cc", "std"]
 
 [dependencies]
 core2.workspace = true
 blake2b_simd.workspace = true
+
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Documentation
+document-features = { workspace = true, optional = true }
 
 [build-dependencies]
 cc = { version = "1", optional = true }

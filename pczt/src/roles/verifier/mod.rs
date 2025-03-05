@@ -1,3 +1,8 @@
+//! The Verifier role (anyone can inspect).
+//!
+//! This isn't a real role per se; it's instead a way for accessing the parsed
+//! protocol-specific bundles for individual access and verification.
+
 use crate::Pczt;
 
 #[cfg(feature = "orchard")]

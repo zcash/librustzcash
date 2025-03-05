@@ -1,3 +1,7 @@
+//! The Creator role (single entity).
+//!
+//!  - Creates the base PCZT with no information about spends or outputs.
+
 use alloc::collections::BTreeMap;
 
 use crate::{

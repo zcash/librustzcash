@@ -1,3 +1,5 @@
+//! The transparent fields of a PCZT.
+
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -22,6 +24,7 @@ pub struct Bundle {
     pub(crate) outputs: Vec<Output>,
 }
 
+/// Information about a transparent input within a transaction.
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
 pub struct Input {
@@ -132,6 +135,7 @@ pub struct Input {
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
+/// Information about a transparent output within a transaction.
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
 pub struct Output {

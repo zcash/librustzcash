@@ -184,8 +184,8 @@ impl ZcashAddress {
     /// [ZIP 316](https://zips.z.cash/zip-0316). The [`Display` implementation] can also
     /// be used to produce this encoding using [`address.to_string()`].
     ///
-    /// [`Display` implementation]: std::fmt::Display
-    /// [`address.to_string()`]: std::string::ToString
+    /// [`Display` implementation]: core::fmt::Display
+    /// [`address.to_string()`]: alloc::string::ToString
     pub fn encode(&self) -> String {
         format!("{}", self)
     }
@@ -194,7 +194,7 @@ impl ZcashAddress {
     ///
     /// This simply calls [`s.parse()`], leveraging the [`FromStr` implementation].
     ///
-    /// [`s.parse()`]: std::primitive::str::parse
+    /// [`s.parse()`]: str::parse
     /// [`FromStr` implementation]: ZcashAddress#impl-FromStr
     ///
     /// # Errors
@@ -229,8 +229,8 @@ impl ZcashAddress {
     /// method or the [`Display` implementation] via [`address.to_string()`] instead.
     ///
     /// [`encode`]: Self::encode
-    /// [`Display` implementation]: std::fmt::Display
-    /// [`address.to_string()`]: std::string::ToString
+    /// [`Display` implementation]: core::fmt::Display
+    /// [`address.to_string()`]: alloc::string::ToString
     pub fn convert<T: TryFromAddress>(self) -> Result<T, ConversionError<T::Error>> {
         match self.kind {
             AddressKind::Sprout(data) => T::try_from_sprout(self.net, data),
@@ -254,8 +254,8 @@ impl ZcashAddress {
     /// method or the [`Display` implementation] via [`address.to_string()`] instead.
     ///
     /// [`encode`]: Self::encode
-    /// [`Display` implementation]: std::fmt::Display
-    /// [`address.to_string()`]: std::string::ToString
+    /// [`Display` implementation]: core::fmt::Display
+    /// [`address.to_string()`]: alloc::string::ToString
     pub fn convert_if_network<T: TryFromRawAddress>(
         self,
         net: NetworkType,
