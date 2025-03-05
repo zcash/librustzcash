@@ -623,6 +623,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             key_scope,
             gap_limits,
             UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+            false,
         )?;
     }
 
@@ -670,6 +671,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
                 KeyScope::EXTERNAL,
                 gap_limits,
                 UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                true,
             )?;
 
             // Select indices from the transparent gap limit that are available for use as
@@ -926,9 +928,19 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
     )?;
 
     #[cfg(feature = "transparent-inputs")]
-    let transparent_child_index = NonHardenedChildIndex::try_from(diversifier_index)
-        .ok()
-        .map(|i| i.index());
+    let (transparent_child_index, cached_taddr) = {
+        let idx = NonHardenedChildIndex::try_from(diversifier_index)
+            .ok()
+            .map(|i| i.index());
+
+        // This upholds the `transparent_index_consistency` check on the `addresses` table.
+        match (idx, address.transparent()) {
+            (Some(idx), Some(r)) => Ok((Some(idx), Some(r.encode(params)))),
+            (_, None) => Ok((None, None)),
+            (None, Some(addr)) => Err(SqliteClientError::AddressNotRecognized(*addr)),
+        }
+    }?;
+
     #[cfg(not(feature = "transparent-inputs"))]
     let transparent_child_index: Option<u32> = None;
 
@@ -940,13 +952,14 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
             ":key_scope": KeyScope::EXTERNAL.encode(),
             ":address": &address.encode(params),
             ":transparent_child_index": transparent_child_index,
-            ":cached_transparent_receiver_address": &address.transparent().map(|r| r.encode(params)),
+            ":cached_transparent_receiver_address": &cached_taddr,
             ":exposed_at_height": exposed_at_height.map(u32::from),
             ":force_update_address": force_update_address,
             ":receiver_flags": ReceiverFlags::from(address).bits()
         ],
-        |row| row.get(0).map(AddressRef)
-    ).map_err(SqliteClientError::from)
+        |row| row.get(0).map(AddressRef),
+    )
+    .map_err(SqliteClientError::from)
 }
 
 #[cfg(feature = "transparent-inputs")]
@@ -3403,6 +3416,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
             key_scope,
             gap_limits,
             UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+            false,
         )?;
     }
 

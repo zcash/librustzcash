@@ -414,9 +414,20 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
     key_scope: KeyScope,
     gap_limits: &GapLimits,
     request: UnifiedAddressRequest,
+    require_key: bool,
 ) -> Result<(), SqliteClientError> {
     let account = get_account_internal(conn, params, account_id)?
         .ok_or_else(|| SqliteClientError::AccountUnknown)?;
+
+    if !account.uivk().has_transparent() {
+        if require_key {
+            return Err(SqliteClientError::AddressGeneration(
+                AddressGenerationError::KeyNotAvailable(Typecode::P2pkh),
+            ));
+        } else {
+            return Ok(());
+        }
+    }
 
     let gen_addrs = |key_scope: KeyScope, index: NonHardenedChildIndex| {
         Ok::<_, SqliteClientError>(match key_scope {
@@ -426,7 +437,7 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
                     .uivk()
                     .transparent()
                     .as_ref()
-                    .ok_or(AddressGenerationError::KeyNotAvailable(Typecode::P2pkh))?
+                    .expect("presence of transparent key was checked above.")
                     .derive_address(index)?;
                 (
                     ua.map_or_else(
@@ -448,7 +459,7 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
                 let internal_address = account
                     .ufvk()
                     .and_then(|k| k.transparent())
-                    .ok_or(AddressGenerationError::KeyNotAvailable(Typecode::P2pkh))?
+                    .expect("presence of transparent key was checked above.")
                     .derive_internal_ivk()?
                     .derive_address(index)?;
                 (
@@ -460,7 +471,7 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
                 let ephemeral_address = account
                     .ufvk()
                     .and_then(|k| k.transparent())
-                    .ok_or(AddressGenerationError::KeyNotAvailable(Typecode::P2pkh))?
+                    .expect("presence of transparent key was checked above.")
                     .derive_ephemeral_ivk()?
                     .derive_ephemeral_address(index)?;
                 (

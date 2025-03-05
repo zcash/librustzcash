@@ -1175,21 +1175,27 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> Wa
         request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         if let Some(account) = self.get_account(account)? {
-            if let Ok(address) = account.uivk().address(diversifier_index, request) {
-                let chain_tip_height = wallet::chain_tip_height(self.conn.borrow())?;
-                upsert_address(
-                    self.conn.borrow(),
-                    &self.params,
-                    account.internal_id(),
-                    diversifier_index,
-                    &address,
-                    Some(chain_tip_height.unwrap_or(account.birthday())),
-                    true,
-                )?;
+            use zcash_keys::keys::AddressGenerationError::*;
 
-                Ok(Some(address))
-            } else {
-                Ok(None)
+            match account.uivk().address(diversifier_index, request) {
+                Ok(address) => {
+                    let chain_tip_height = wallet::chain_tip_height(self.conn.borrow())?;
+                    upsert_address(
+                        self.conn.borrow(),
+                        &self.params,
+                        account.internal_id(),
+                        diversifier_index,
+                        &address,
+                        Some(chain_tip_height.unwrap_or(account.birthday())),
+                        true,
+                    )?;
+
+                    Ok(Some(address))
+                }
+                #[cfg(feature = "transparent-inputs")]
+                Err(InvalidTransparentChildIndex(_)) => Ok(None),
+                Err(InvalidSaplingDiversifierIndex(_)) => Ok(None),
+                Err(e) => Err(SqliteClientError::AddressGeneration(e)),
             }
         } else {
             Err(SqliteClientError::AccountUnknown)
@@ -1414,6 +1420,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> Wa
                     key_scope,
                     &wdb.gap_limits,
                     UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                    false,
                 )?;
             }
 
@@ -1687,6 +1694,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> Wa
                 key_scope,
                 &wdb.gap_limits,
                 UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                true,
             )?;
 
             Ok(utxo_id)

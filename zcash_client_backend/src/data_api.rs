@@ -2387,8 +2387,9 @@ pub trait WalletWrite: WalletRead {
     ///
     /// Returns `Ok(None)` in the case that it is not possible to generate an address conforming
     /// to the provided request at the specified diversifier index. Such a result might arise from
-    /// either a key not being available or the diversifier index not being valid for a
-    /// [`ReceiverRequirement::Require`]'ed receiver.
+    /// the diversifier index not being valid for a [`ReceiverRequirement::Require`]'ed receiver.
+    /// Some implementations of this trait may return `Err(_)` in some cases to expose more
+    /// information, which is only accessible in a backend-specific context.
     ///
     /// Address generation should fail if an address has already been exposed for the given
     /// diversifier index and the given request produced an address having different receivers than
