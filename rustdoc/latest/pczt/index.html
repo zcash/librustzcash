@@ -1,82 +1,23 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="The Partially Created Zcash Transaction (PCZT) format."><title>pczt - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-88e6a092.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="pczt" data-themes="" data-resource-suffix="" data-rustdoc-version="1.86.0-nightly (a567209da 2025-02-13)" data-channel="nightly" data-search-js="search-581efc7a.js" data-settings-js="settings-6dad6058.js" ><script src="../static.files/storage-3a5871a4.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-4d63596a.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button></nav><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../pczt/index.html">pczt</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#modules">Crate Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer"></div><main><div class="width-limiter"><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1>Crate <span>pczt</span><button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/pczt/lib.rs.html#1-155">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>The Partially Created Zcash Transaction (PCZT) format.</p>
-<p>Goal is to split up the parts of creating a transaction across distinct entities.
-The entity roles roughly match BIP 174: Partially Signed Bitcoin Transaction Format.</p>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="The Partially Created Zcash Transaction (PCZT) format."><title>pczt - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-916cea96.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="pczt" data-themes="" data-resource-suffix="" data-rustdoc-version="1.87.0-nightly (f9e0239a7 2025-03-04)" data-channel="nightly" data-search-js="search-f7327375.js" data-settings-js="settings-d72f25bb.js" ><script src="../static.files/storage-d8ac8691.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-a7bf3405.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button></nav><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../pczt/index.html">pczt</a><span class="version">0.2.1</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#feature-flags" title="Feature flags">Feature flags</a><ul><li><a href="#pczt-roles-behind-feature-flags" title="PCZT roles behind feature flags">PCZT roles behind feature flags</a></li></ul></li></ul><h3><a href="#modules">Crate Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer"></div><main><div class="width-limiter"><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1>Crate <span>pczt</span><button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/pczt/lib.rs.html#1-125">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>The Partially Created Zcash Transaction (PCZT) format.</p>
+<p>This format enables splitting up the logical steps of creating a Zcash transaction
+across distinct entities. The entity roles roughly match those specified in
+<a href="https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki">BIP 174: Partially Signed Bitcoin Transaction Format</a> and <a href="https://github.com/bitcoin/bips/blob/master/bip-0370.mediawiki">BIP 370: PSBT Version 2</a>,
+with additional Zcash-specific roles.</p>
+<h3 id="feature-flags"><a class="doc-anchor" href="#feature-flags">§</a>Feature flags</h3>
 <ul>
-<li>Creator (single entity)
+<li><strong><code>orchard</code></strong> —  Enables functionality that requires Orchard protocol types.</li>
+<li><strong><code>sapling</code></strong> —  Enables functionality that requires Sapling protocol types.</li>
+<li><strong><code>transparent</code></strong> —  Enables functionality that requires Zcash transparent protocol types.</li>
+<li><strong><code>zcp-builder</code></strong> —  Enables building a PCZT from the output of <code>zcash_primitives</code>’s <code>Builder::build_for_pczt</code>.</li>
+</ul>
+<h4 id="pczt-roles-behind-feature-flags"><a class="doc-anchor" href="#pczt-roles-behind-feature-flags">§</a>PCZT roles behind feature flags</h4>
+<p>These roles require awareness of at least one payment protocol’s types in order to
+function.</p>
 <ul>
-<li>Creates the base PCZT with no information about spends or outputs.</li>
+<li><strong><code>io-finalizer</code></strong> —  Enables the I/O Finalizer role.</li>
+<li><strong><code>prover</code></strong> —  Enables the Prover role.</li>
+<li><strong><code>signer</code></strong> —  Enables the Signer role.</li>
+<li><strong><code>spend-finalizer</code></strong> —  Enables the Spend Finalizer role.</li>
+<li><strong><code>tx-extractor</code></strong> —  Enables the Transaction Extractor role.</li>
 </ul>
-</li>
-<li>Constructor (anyone can contribute)
-<ul>
-<li>Adds spends and outputs to the PCZT.</li>
-<li>Before any input or output may be added, the constructor must check the
-<code>Global.tx_modifiable</code> field. Inputs may only be added if the Inputs Modifiable
-flag is True. Outputs may only be added if the Outputs Modifiable flag is True.</li>
-<li>A single entity is likely to be both a Creator and Constructor.</li>
-</ul>
-</li>
-<li>IO Finalizer (anyone can execute)
-<ul>
-<li>Sets the appropriate bits in <code>Global.tx_modifiable</code> to 0.</li>
-<li>Updates the various bsk values using the rcv information from spends and outputs.</li>
-</ul>
-</li>
-<li>Updater (anyone can contribute)
-<ul>
-<li>Adds information necessary for subsequent entities to proceed, such as key paths
-for signing spends.</li>
-</ul>
-</li>
-<li>Redactor (anyone can execute)
-<ul>
-<li>Removes information that is unnecessary for subsequent entities to proceed.</li>
-<li>This can be useful e.g. when creating a transaction that has inputs from multiple
-independent Signers; each can receive a PCZT with just the information they need
-to sign, but (e.g.) not the <code>alpha</code> values for other Signers.</li>
-</ul>
-</li>
-<li>Prover (capability holders can contribute)
-<ul>
-<li>Needs all private information for a single spend or output.</li>
-<li>In practice, the Updater that adds a given spend or output will either act as
-the Prover themselves, or add the necessary data, offload to the Prover, and
-then receive back the PCZT with private data stripped and proof added.</li>
-</ul>
-</li>
-<li>Signer (capability holders can contribute)
-<ul>
-<li>Needs the spend authorization randomizers to create signatures.</li>
-<li>Needs sufficient information to verify that the proof is over the correct data,
-without needing to verify the proof itself.</li>
-<li>A Signer should only need to implement:
-<ul>
-<li>Pedersen commitments using Jubjub / Pallas arithmetic (for note and value
-commitments)</li>
-<li>BLAKE2b and BLAKE2s (and the various PRFs / CRHs they are used in)</li>
-<li>Nullifier check (using Jubjub / Pallas arithmetic)</li>
-<li>KDF plus note decryption (AEAD_CHACHA20_POLY1305)</li>
-<li>SignatureHash algorithm</li>
-<li>Signatures (RedJubjub / RedPallas)</li>
-<li>A source of randomness.</li>
-</ul>
-</li>
-</ul>
-</li>
-<li>Combiner (anyone can execute)
-<ul>
-<li>Combines several PCZTs that represent the same transaction into a single PCZT.</li>
-</ul>
-</li>
-<li>Spend Finalizer (anyone can execute)
-<ul>
-<li>Combines partial transparent signatures into <code>script_sig</code>s.</li>
-</ul>
-</li>
-<li>Transaction Extractor (anyone can execute)
-<ul>
-<li>Creates bindingSig and extracts the final transaction.</li>
-</ul>
-</li>
-</ul>
-</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="common/index.html" title="mod pczt::common">common</a></dt><dt><a class="mod" href="orchard/index.html" title="mod pczt::orchard">orchard</a></dt><dt><a class="mod" href="roles/index.html" title="mod pczt::roles">roles</a></dt><dt><a class="mod" href="sapling/index.html" title="mod pczt::sapling">sapling</a></dt><dt><a class="mod" href="transparent/index.html" title="mod pczt::transparent">transparent</a></dt></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Pczt.html" title="struct pczt::Pczt">Pczt</a></dt><dd>A partially-created Zcash transaction.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.ParseError.html" title="enum pczt::ParseError">Parse<wbr>Error</a></dt><dd>Errors that can occur while parsing a PCZT.</dd></dl></section></div></main></body></html>
+</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="common/index.html" title="mod pczt::common">common</a></dt><dd>The common fields of a PCZT.</dd><dt><a class="mod" href="orchard/index.html" title="mod pczt::orchard">orchard</a></dt><dd>The Orchard fields of a PCZT.</dd><dt><a class="mod" href="roles/index.html" title="mod pczt::roles">roles</a></dt><dd>Implementations of the PCZT roles.</dd><dt><a class="mod" href="sapling/index.html" title="mod pczt::sapling">sapling</a></dt><dd>The Sapling fields of a PCZT.</dd><dt><a class="mod" href="transparent/index.html" title="mod pczt::transparent">transparent</a></dt><dd>The transparent fields of a PCZT.</dd></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Pczt.html" title="struct pczt::Pczt">Pczt</a></dt><dd>A partially-created Zcash transaction.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.ParseError.html" title="enum pczt::ParseError">Parse<wbr>Error</a></dt><dd>Errors that can occur while parsing a PCZT.</dd></dl></section></div></main></body></html>

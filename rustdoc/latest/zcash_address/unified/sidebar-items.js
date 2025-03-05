@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Bech32mZip316","Fvk","Ivk","ParseError","Receiver","Typecode"],"struct":["Address","Ufvk","Uivk"],"trait":["Container","Encoding"]};
+window.SIDEBAR_ITEMS = {"enum":["Bech32mZip316","Fvk","Ivk","ParseError","Receiver","Typecode"],"struct":["Address","Ufvk","Uivk"],"trait":["Container","Encoding","Item"]};

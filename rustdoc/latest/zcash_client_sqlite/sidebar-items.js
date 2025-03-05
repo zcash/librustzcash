@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["FsBlockDbError"],"mod":["chain","error","wallet"],"struct":["AccountUuid","BlockDb","FsBlockDb","ReceivedNoteId","SqlTransaction","UtxoId","WalletDb"]};
+window.SIDEBAR_ITEMS = {"enum":["FsBlockDbError"],"mod":["chain","error","util","wallet"],"struct":["AccountUuid","BlockDb","FsBlockDb","GapLimits","ReceivedNoteId","SqlTransaction","UtxoId","WalletDb"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["put_received_transparent_utxo","transparent_balance_across_shielding","transparent_balance_spendability"]};
+window.SIDEBAR_ITEMS = {"fn":["gap_limits","put_received_transparent_utxo","transparent_balance_across_shielding","transparent_balance_spendability"],"struct":["GapLimits"]};
