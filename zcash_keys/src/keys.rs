@@ -602,6 +602,12 @@ impl UnifiedAddressRequest {
     /// Constructs a new unified address request that allows a receiver of each type.
     pub const ALLOW_ALL: Self = Self::Custom(ReceiverRequirements::ALLOW_ALL);
 
+    /// Constructs a new unified address request that allows only shielded receivers.
+    pub const SHIELDED: Self = Self::Custom(ReceiverRequirements::SHIELDED);
+
+    /// Constructs a new unified address request that requires an Orchard receiver and no others.
+    pub const ORCHARD: Self = Self::Custom(ReceiverRequirements::ORCHARD);
+
     pub fn custom(
         orchard: ReceiverRequirement,
         sapling: ReceiverRequirement,
@@ -652,6 +658,18 @@ impl ReceiverRequirements {
     pub const ALLOW_ALL: ReceiverRequirements = {
         use ReceiverRequirement::*;
         Self::unsafe_new(Allow, Allow, Allow)
+    };
+
+    /// Constructs a new unified address request that allows only shielded receivers.
+    pub const SHIELDED: ReceiverRequirements = {
+        use ReceiverRequirement::*;
+        Self::unsafe_new(Allow, Allow, Omit)
+    };
+
+    /// Constructs a new unified address request that requires an Orchard receiver, and no others.
+    pub const ORCHARD: ReceiverRequirements = {
+        use ReceiverRequirement::*;
+        Self::unsafe_new(Require, Omit, Omit)
     };
 
     /// Constructs a new unified address request that includes only the receivers that are allowed
