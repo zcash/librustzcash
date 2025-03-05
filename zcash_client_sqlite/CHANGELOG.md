@@ -20,6 +20,9 @@ and this library adheres to Rust's notion of
   result:
   - `WalletDb::for_path`
   - `WalletDb::from_connection`
+- `zcash_client_sqlite::WalletDb::get_address_for_index` now returns some of
+  its failure modes via `Err(SqliteClientError::AddressGeneration)` instead of
+  `Ok(None)`.
 - `zcash_client_sqlite::error::SqliteClientError` variants have changed:
   - The `EphemeralAddressReuse` variant has been removed and replaced
     by a new generalized `AddressReuse` error variant.
