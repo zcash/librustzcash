@@ -1420,6 +1420,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> Wa
                     key_scope,
                     &wdb.gap_limits,
                     UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                    false,
                 )?;
             }
 
@@ -1693,6 +1694,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> Wa
                 key_scope,
                 &wdb.gap_limits,
                 UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                true,
             )?;
 
             Ok(utxo_id)

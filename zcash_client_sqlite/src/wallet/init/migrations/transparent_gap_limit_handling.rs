@@ -597,6 +597,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     key_scope,
                     &GapLimits::default(),
                     UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                    false,
                 )?;
             }
         }

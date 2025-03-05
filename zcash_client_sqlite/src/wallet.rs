@@ -623,6 +623,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             key_scope,
             gap_limits,
             UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+            false,
         )?;
     }
 
@@ -670,6 +671,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
                 KeyScope::EXTERNAL,
                 gap_limits,
                 UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                true,
             )?;
 
             // Select indices from the transparent gap limit that are available for use as
@@ -3414,6 +3416,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
             key_scope,
             gap_limits,
             UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+            false,
         )?;
     }
 
