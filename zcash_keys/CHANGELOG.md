@@ -10,6 +10,7 @@ and this library adheres to Rust's notion of
 - `zcash_keys::keys::UnifiedIncomingViewingKey::{has_sapling, has_orchard,
   has_transparent, receiver_requirements, to_receiver_requirements}`
 - `zcash_keys::keys::ReceiverRequirements`
+- `zcash_keys::keys::UnifiedAddressRequest::{SHIELDED, ORCHARD}`
 
 ### Changed
 - `zcash_keys::keys::UnifiedAddressRequest` is now an enum instead of a struct.
