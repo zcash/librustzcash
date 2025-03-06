@@ -433,6 +433,79 @@ mod tests {
                     balance.fee_required() == Zatoshis::const_from_u64(25000)
             );
         }
+
+        {
+            // spend a single Sapling note and produce no change outputs, as the value of outputs
+            // has been requested such that it exactly empties the wallet
+            let result = change_strategy.compute_balance(
+                &Network::TestNetwork,
+                Network::TestNetwork
+                    .activation_height(NetworkUpgrade::Nu5)
+                    .unwrap(),
+                &[] as &[TestTransparentInput],
+                &[] as &[TxOut],
+                &(
+                    sapling::builder::BundleType::DEFAULT,
+                    &[TestSaplingInput {
+                        note_id: 0,
+                        value: Zatoshis::const_from_u64(50000),
+                    }][..],
+                    &[SaplingPayment::new(Zatoshis::const_from_u64(40000))][..],
+                ),
+                #[cfg(feature = "orchard")]
+                &orchard_fees::EmptyBundleView,
+                None,
+                // after excluding the inputs we're spending, we have no notes in the wallet
+                &AccountMeta::new(
+                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
+                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
+                ),
+            );
+
+            assert_matches!(
+                result,
+                Ok(balance) if
+                    balance.proposed_change() == [] &&
+                    balance.fee_required() == Zatoshis::const_from_u64(10000)
+            );
+        }
+
+        {
+            // spend a single Sapling note and produce a single change output, where the value of
+            // notes spent is sufficient to cover the fee and would not produce dust, but would not
+            // be sufficient to pay for the maximum number of possible splits
+            let result = change_strategy.compute_balance(
+                &Network::TestNetwork,
+                Network::TestNetwork
+                    .activation_height(NetworkUpgrade::Nu5)
+                    .unwrap(),
+                &[] as &[TestTransparentInput],
+                &[] as &[TxOut],
+                &(
+                    sapling::builder::BundleType::DEFAULT,
+                    &[TestSaplingInput {
+                        note_id: 0,
+                        value: Zatoshis::const_from_u64(50000),
+                    }][..],
+                    &[SaplingPayment::new(Zatoshis::const_from_u64(35000))][..],
+                ),
+                #[cfg(feature = "orchard")]
+                &orchard_fees::EmptyBundleView,
+                None,
+                // after excluding the inputs we're spending, we have no notes in the wallet
+                &AccountMeta::new(
+                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
+                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
+                ),
+            );
+
+            assert_matches!(
+                result,
+                Ok(balance) if
+                    balance.proposed_change() == [ChangeValue::sapling(Zatoshis::const_from_u64(5000), None)] &&
+                    balance.fee_required() == Zatoshis::const_from_u64(10000)
+            );
+        }
     }
 
     #[test]
