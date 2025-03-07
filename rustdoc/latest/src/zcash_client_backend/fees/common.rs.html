@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/fees/common.rs`."><title>common.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-916cea96.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.87.0-nightly (f9e0239a7 2025-03-04)" data-channel="nightly" data-search-js="search-f7327375.js" data-settings-js="settings-d72f25bb.js" ><script src="../../../static.files/storage-d8ac8691.js"></script><script defer src="../../../static.files/src-script-b8d3f215.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-a7bf3405.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/fees/</div>common.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>core::cmp::{max, min};
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/fees/common.rs`."><title>common.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-916cea96.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.87.0-nightly (b74da9613 2025-03-06)" data-channel="nightly" data-search-js="search-e7298875.js" data-settings-js="settings-d72f25bb.js" ><script src="../../../static.files/storage-d8ac8691.js"></script><script defer src="../../../static.files/src-script-b8d3f215.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-a7bf3405.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/fees/</div>common.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>core::cmp::{max, min, Ordering};
 <a href=#2 id=2 data-nosnippet>2</a><span class="kw">use </span>std::num::{NonZeroU64, NonZeroUsize};
 <a href=#3 id=3 data-nosnippet>3</a>
 <a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span>zcash_primitives::transaction::fees::{
@@ -252,532 +252,518 @@
 <a href=#252 id=252 data-nosnippet>252</a>            <span class="number">0
 <a href=#253 id=253 data-nosnippet>253</a>        </span>},
 <a href=#254 id=254 data-nosnippet>254</a>    };
-<a href=#255 id=255 data-nosnippet>255</a>
-<a href=#256 id=256 data-nosnippet>256</a>    <span class="comment">// We don't create a fully-transparent transaction if a change memo is used.
-<a href=#257 id=257 data-nosnippet>257</a>    </span><span class="kw">let </span>transparent = net_flows.is_transparent() &amp;&amp; change_memo.is_none();
-<a href=#258 id=258 data-nosnippet>258</a>
-<a href=#259 id=259 data-nosnippet>259</a>    <span class="comment">// If we have a non-zero marginal fee, we need to check for uneconomic inputs.
-<a href=#260 id=260 data-nosnippet>260</a>    // This is basically assuming that fee rules with non-zero marginal fee are
-<a href=#261 id=261 data-nosnippet>261</a>    // "ZIP 317-like", but we can generalize later if needed.
-<a href=#262 id=262 data-nosnippet>262</a>    </span><span class="kw">if </span>cfg.marginal_fee.is_positive() {
-<a href=#263 id=263 data-nosnippet>263</a>        <span class="comment">// Is it certain that there will be a change output? If it is not certain,
-<a href=#264 id=264 data-nosnippet>264</a>        // we should call `check_for_uneconomic_inputs` with `possible_change`
-<a href=#265 id=265 data-nosnippet>265</a>        // including both possibilities.
-<a href=#266 id=266 data-nosnippet>266</a>        </span><span class="kw">let </span>possible_change = {
-<a href=#267 id=267 data-nosnippet>267</a>            <span class="comment">// These are the situations where we might not have a change output.
-<a href=#268 id=268 data-nosnippet>268</a>            </span><span class="kw">if </span>transparent
-<a href=#269 id=269 data-nosnippet>269</a>                || (cfg.dust_output_policy.action() == DustAction::AddDustToFee
-<a href=#270 id=270 data-nosnippet>270</a>                    &amp;&amp; change_memo.is_none())
-<a href=#271 id=271 data-nosnippet>271</a>            {
-<a href=#272 id=272 data-nosnippet>272</a>                <span class="macro">vec!</span>[OutputManifest::ZERO, target_change_counts]
-<a href=#273 id=273 data-nosnippet>273</a>            } <span class="kw">else </span>{
-<a href=#274 id=274 data-nosnippet>274</a>                <span class="macro">vec!</span>[target_change_counts]
-<a href=#275 id=275 data-nosnippet>275</a>            }
-<a href=#276 id=276 data-nosnippet>276</a>        };
-<a href=#277 id=277 data-nosnippet>277</a>
-<a href=#278 id=278 data-nosnippet>278</a>        check_for_uneconomic_inputs(
-<a href=#279 id=279 data-nosnippet>279</a>            transparent_inputs,
-<a href=#280 id=280 data-nosnippet>280</a>            transparent_outputs,
-<a href=#281 id=281 data-nosnippet>281</a>            sapling,
-<a href=#282 id=282 data-nosnippet>282</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#283 id=283 data-nosnippet>283</a>            </span>orchard,
-<a href=#284 id=284 data-nosnippet>284</a>            cfg.marginal_fee,
-<a href=#285 id=285 data-nosnippet>285</a>            cfg.grace_actions,
-<a href=#286 id=286 data-nosnippet>286</a>            <span class="kw-2">&amp;</span>possible_change[..],
-<a href=#287 id=287 data-nosnippet>287</a>            ephemeral_balance,
-<a href=#288 id=288 data-nosnippet>288</a>        )<span class="question-mark">?</span>;
-<a href=#289 id=289 data-nosnippet>289</a>    }
-<a href=#290 id=290 data-nosnippet>290</a>
-<a href=#291 id=291 data-nosnippet>291</a>    <span class="kw">let </span>total_in = net_flows
-<a href=#292 id=292 data-nosnippet>292</a>        .total_in()
-<a href=#293 id=293 data-nosnippet>293</a>        .map_err(|e| ChangeError::StrategyError(E::from(e)))<span class="question-mark">?</span>;
-<a href=#294 id=294 data-nosnippet>294</a>    <span class="kw">let </span>total_out = net_flows
-<a href=#295 id=295 data-nosnippet>295</a>        .total_out()
-<a href=#296 id=296 data-nosnippet>296</a>        .map_err(|e| ChangeError::StrategyError(E::from(e)))<span class="question-mark">?</span>;
-<a href=#297 id=297 data-nosnippet>297</a>
-<a href=#298 id=298 data-nosnippet>298</a>    <span class="kw">let </span>sapling_input_count = sapling
-<a href=#299 id=299 data-nosnippet>299</a>        .bundle_type()
-<a href=#300 id=300 data-nosnippet>300</a>        .num_spends(sapling.inputs().len())
-<a href=#301 id=301 data-nosnippet>301</a>        .map_err(ChangeError::BundleError)<span class="question-mark">?</span>;
-<a href=#302 id=302 data-nosnippet>302</a>    <span class="kw">let </span>sapling_output_count = |change_count| {
-<a href=#303 id=303 data-nosnippet>303</a>        sapling
-<a href=#304 id=304 data-nosnippet>304</a>            .bundle_type()
-<a href=#305 id=305 data-nosnippet>305</a>            .num_outputs(
-<a href=#306 id=306 data-nosnippet>306</a>                sapling.inputs().len(),
-<a href=#307 id=307 data-nosnippet>307</a>                sapling.outputs().len() + change_count,
-<a href=#308 id=308 data-nosnippet>308</a>            )
-<a href=#309 id=309 data-nosnippet>309</a>            .map_err(ChangeError::BundleError)
-<a href=#310 id=310 data-nosnippet>310</a>    };
-<a href=#311 id=311 data-nosnippet>311</a>
-<a href=#312 id=312 data-nosnippet>312</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#313 id=313 data-nosnippet>313</a>    </span><span class="kw">let </span>orchard_action_count = |change_count| {
-<a href=#314 id=314 data-nosnippet>314</a>        orchard
-<a href=#315 id=315 data-nosnippet>315</a>            .bundle_type()
-<a href=#316 id=316 data-nosnippet>316</a>            .num_actions(
-<a href=#317 id=317 data-nosnippet>317</a>                orchard.inputs().len(),
-<a href=#318 id=318 data-nosnippet>318</a>                orchard.outputs().len() + change_count,
-<a href=#319 id=319 data-nosnippet>319</a>            )
-<a href=#320 id=320 data-nosnippet>320</a>            .map_err(ChangeError::BundleError)
-<a href=#321 id=321 data-nosnippet>321</a>    };
-<a href=#322 id=322 data-nosnippet>322</a>    <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
-<a href=#323 id=323 data-nosnippet>323</a>    </span><span class="kw">let </span>orchard_action_count = |change_count: usize| -&gt; <span class="prelude-ty">Result</span>&lt;usize, ChangeError&lt;E, NoteRefT&gt;&gt; {
-<a href=#324 id=324 data-nosnippet>324</a>        <span class="kw">if </span>change_count != <span class="number">0 </span>{
-<a href=#325 id=325 data-nosnippet>325</a>            <span class="prelude-val">Err</span>(ChangeError::BundleError(
-<a href=#326 id=326 data-nosnippet>326</a>                <span class="string">"Nonzero Orchard change requested but the `orchard` feature is not enabled."</span>,
-<a href=#327 id=327 data-nosnippet>327</a>            ))
-<a href=#328 id=328 data-nosnippet>328</a>        } <span class="kw">else </span>{
-<a href=#329 id=329 data-nosnippet>329</a>            <span class="prelude-val">Ok</span>(<span class="number">0</span>)
-<a href=#330 id=330 data-nosnippet>330</a>        }
-<a href=#331 id=331 data-nosnippet>331</a>    };
-<a href=#332 id=332 data-nosnippet>332</a>
-<a href=#333 id=333 data-nosnippet>333</a>    <span class="comment">// Once we calculate the balance with and without change, there are five cases:
-<a href=#334 id=334 data-nosnippet>334</a>    //
-<a href=#335 id=335 data-nosnippet>335</a>    // 1. Insufficient funds even without change.
-<a href=#336 id=336 data-nosnippet>336</a>    // 2. The fee amount without change exactly cancels out the net flow balance.
-<a href=#337 id=337 data-nosnippet>337</a>    // 3. The fee amount without change is smaller than the change.
-<a href=#338 id=338 data-nosnippet>338</a>    //    3a. Insufficient funds once the change output is added.
-<a href=#339 id=339 data-nosnippet>339</a>    //    3b. The fee amount with change exactly cancels out the net flow balance.
-<a href=#340 id=340 data-nosnippet>340</a>    //    3c. The fee amount with change leaves a non-zero change value.
-<a href=#341 id=341 data-nosnippet>341</a>    //
-<a href=#342 id=342 data-nosnippet>342</a>    // Case 2 happens for the second transaction of a ZIP 320 pair. In that case
-<a href=#343 id=343 data-nosnippet>343</a>    // the transaction will be fully transparent, and there must be no change.
-<a href=#344 id=344 data-nosnippet>344</a>    //
-<a href=#345 id=345 data-nosnippet>345</a>    // If cases 2 or 3b happen for a transaction with any shielded flows, we
-<a href=#346 id=346 data-nosnippet>346</a>    // want there to be a zero-value shielded change output anyway (i.e. treat
-<a href=#347 id=347 data-nosnippet>347</a>    // case 2 as case 3, and case 3b as case 3c), because:
-<a href=#348 id=348 data-nosnippet>348</a>    // * being able to distinguish these cases potentially leaks too much
-<a href=#349 id=349 data-nosnippet>349</a>    //   information (an adversary that knows the number of external recipients
-<a href=#350 id=350 data-nosnippet>350</a>    //   and the sum of their outputs learns the sum of the inputs if no change
-<a href=#351 id=351 data-nosnippet>351</a>    //   output is present); and
-<a href=#352 id=352 data-nosnippet>352</a>    // * we will then always have an shielded output in which to put change_memo,
-<a href=#353 id=353 data-nosnippet>353</a>    //   if one is used.
-<a href=#354 id=354 data-nosnippet>354</a>    //
-<a href=#355 id=355 data-nosnippet>355</a>    // Note that using the `DustAction::AddDustToFee` policy inherently leaks
-<a href=#356 id=356 data-nosnippet>356</a>    // more information.
-<a href=#357 id=357 data-nosnippet>357</a>
-<a href=#358 id=358 data-nosnippet>358</a>    </span><span class="kw">let </span>transparent_input_sizes = transparent_inputs
-<a href=#359 id=359 data-nosnippet>359</a>        .iter()
-<a href=#360 id=360 data-nosnippet>360</a>        .map(|i| i.serialized_size())
-<a href=#361 id=361 data-nosnippet>361</a>        .chain(
-<a href=#362 id=362 data-nosnippet>362</a>            ephemeral_balance
-<a href=#363 id=363 data-nosnippet>363</a>                .and_then(|b| b.ephemeral_input_amount())
-<a href=#364 id=364 data-nosnippet>364</a>                .map(|<span class="kw">_</span>| transparent::InputSize::STANDARD_P2PKH),
-<a href=#365 id=365 data-nosnippet>365</a>        );
-<a href=#366 id=366 data-nosnippet>366</a>    <span class="kw">let </span>transparent_output_sizes = transparent_outputs
-<a href=#367 id=367 data-nosnippet>367</a>        .iter()
-<a href=#368 id=368 data-nosnippet>368</a>        .map(|i| i.serialized_size())
-<a href=#369 id=369 data-nosnippet>369</a>        .chain(
-<a href=#370 id=370 data-nosnippet>370</a>            ephemeral_balance
-<a href=#371 id=371 data-nosnippet>371</a>                .and_then(|b| b.ephemeral_output_amount())
-<a href=#372 id=372 data-nosnippet>372</a>                .map(|<span class="kw">_</span>| P2PKH_STANDARD_OUTPUT_SIZE),
-<a href=#373 id=373 data-nosnippet>373</a>        );
-<a href=#374 id=374 data-nosnippet>374</a>
-<a href=#375 id=375 data-nosnippet>375</a>    <span class="kw">let </span>fee_without_change = cfg
-<a href=#376 id=376 data-nosnippet>376</a>        .fee_rule
-<a href=#377 id=377 data-nosnippet>377</a>        .fee_required(
-<a href=#378 id=378 data-nosnippet>378</a>            cfg.params,
-<a href=#379 id=379 data-nosnippet>379</a>            target_height,
-<a href=#380 id=380 data-nosnippet>380</a>            transparent_input_sizes.clone(),
-<a href=#381 id=381 data-nosnippet>381</a>            transparent_output_sizes.clone(),
-<a href=#382 id=382 data-nosnippet>382</a>            sapling_input_count,
-<a href=#383 id=383 data-nosnippet>383</a>            sapling_output_count(<span class="number">0</span>)<span class="question-mark">?</span>,
-<a href=#384 id=384 data-nosnippet>384</a>            orchard_action_count(<span class="number">0</span>)<span class="question-mark">?</span>,
-<a href=#385 id=385 data-nosnippet>385</a>        )
-<a href=#386 id=386 data-nosnippet>386</a>        .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))<span class="question-mark">?</span>;
-<a href=#387 id=387 data-nosnippet>387</a>
-<a href=#388 id=388 data-nosnippet>388</a>    <span class="kw">let </span>fee_with_change = max(
-<a href=#389 id=389 data-nosnippet>389</a>        fee_without_change,
-<a href=#390 id=390 data-nosnippet>390</a>        cfg.fee_rule
-<a href=#391 id=391 data-nosnippet>391</a>            .fee_required(
-<a href=#392 id=392 data-nosnippet>392</a>                cfg.params,
-<a href=#393 id=393 data-nosnippet>393</a>                target_height,
-<a href=#394 id=394 data-nosnippet>394</a>                transparent_input_sizes.clone(),
-<a href=#395 id=395 data-nosnippet>395</a>                transparent_output_sizes.clone(),
-<a href=#396 id=396 data-nosnippet>396</a>                sapling_input_count,
-<a href=#397 id=397 data-nosnippet>397</a>                sapling_output_count(target_change_counts.sapling())<span class="question-mark">?</span>,
-<a href=#398 id=398 data-nosnippet>398</a>                orchard_action_count(target_change_counts.orchard())<span class="question-mark">?</span>,
-<a href=#399 id=399 data-nosnippet>399</a>            )
-<a href=#400 id=400 data-nosnippet>400</a>            .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))<span class="question-mark">?</span>,
-<a href=#401 id=401 data-nosnippet>401</a>    );
-<a href=#402 id=402 data-nosnippet>402</a>
-<a href=#403 id=403 data-nosnippet>403</a>    <span class="kw">let </span>total_out_plus_fee_without_change =
-<a href=#404 id=404 data-nosnippet>404</a>        (total_out + fee_without_change).ok_or_else(overflow)<span class="question-mark">?</span>;
-<a href=#405 id=405 data-nosnippet>405</a>    <span class="kw">let </span>total_out_plus_fee_with_change = (total_out + fee_with_change).ok_or_else(overflow)<span class="question-mark">?</span>;
-<a href=#406 id=406 data-nosnippet>406</a>
-<a href=#407 id=407 data-nosnippet>407</a>    <span class="attr">#[allow(unused_mut)]
-<a href=#408 id=408 data-nosnippet>408</a>    </span><span class="kw">let </span>(<span class="kw-2">mut </span>change, fee) = {
-<a href=#409 id=409 data-nosnippet>409</a>        <span class="kw">if </span>transparent &amp;&amp; total_in &lt; total_out_plus_fee_without_change {
-<a href=#410 id=410 data-nosnippet>410</a>            <span class="comment">// Case 1 for a tx with all transparent flows.
-<a href=#411 id=411 data-nosnippet>411</a>            </span><span class="kw">return </span><span class="prelude-val">Err</span>(ChangeError::InsufficientFunds {
-<a href=#412 id=412 data-nosnippet>412</a>                available: total_in,
-<a href=#413 id=413 data-nosnippet>413</a>                required: total_out_plus_fee_without_change,
-<a href=#414 id=414 data-nosnippet>414</a>            });
-<a href=#415 id=415 data-nosnippet>415</a>        } <span class="kw">else if </span>transparent &amp;&amp; total_in == total_out_plus_fee_without_change {
-<a href=#416 id=416 data-nosnippet>416</a>            <span class="comment">// Case 2 for a tx with all transparent flows.
-<a href=#417 id=417 data-nosnippet>417</a>            </span>(<span class="macro">vec!</span>[], fee_without_change)
-<a href=#418 id=418 data-nosnippet>418</a>        } <span class="kw">else if </span>total_in &lt; total_out_plus_fee_with_change {
-<a href=#419 id=419 data-nosnippet>419</a>            <span class="comment">// Case 3a, or case 1 or 2 with non-transparent flows.
-<a href=#420 id=420 data-nosnippet>420</a>            </span><span class="kw">return </span><span class="prelude-val">Err</span>(ChangeError::InsufficientFunds {
-<a href=#421 id=421 data-nosnippet>421</a>                available: total_in,
-<a href=#422 id=422 data-nosnippet>422</a>                required: total_out_plus_fee_with_change,
-<a href=#423 id=423 data-nosnippet>423</a>            });
-<a href=#424 id=424 data-nosnippet>424</a>        } <span class="kw">else </span>{
-<a href=#425 id=425 data-nosnippet>425</a>            <span class="comment">// Case 3b or 3c.
-<a href=#426 id=426 data-nosnippet>426</a>            </span><span class="kw">let </span>proposed_change =
-<a href=#427 id=427 data-nosnippet>427</a>                (total_in - total_out_plus_fee_with_change).expect(<span class="string">"checked above"</span>);
-<a href=#428 id=428 data-nosnippet>428</a>
-<a href=#429 id=429 data-nosnippet>429</a>            <span class="comment">// We obtain a split count based on the total number of notes of sufficient size
-<a href=#430 id=430 data-nosnippet>430</a>            // available in the wallet, irrespective of pool. If we don't have any wallet metadata
-<a href=#431 id=431 data-nosnippet>431</a>            // available, we fall back to generating a single change output.
-<a href=#432 id=432 data-nosnippet>432</a>            </span><span class="kw">let </span>split_count = wallet_meta.map_or(NonZeroUsize::MIN, |wm| {
-<a href=#433 id=433 data-nosnippet>433</a>                cfg.split_policy.split_count(
-<a href=#434 id=434 data-nosnippet>434</a>                    wm.total_note_count(),
-<a href=#435 id=435 data-nosnippet>435</a>                    wm.total_value(),
-<a href=#436 id=436 data-nosnippet>436</a>                    proposed_change,
-<a href=#437 id=437 data-nosnippet>437</a>                )
-<a href=#438 id=438 data-nosnippet>438</a>            });
-<a href=#439 id=439 data-nosnippet>439</a>            <span class="kw">let </span>per_output_change = proposed_change.div_with_remainder(
-<a href=#440 id=440 data-nosnippet>440</a>                NonZeroU64::new(
-<a href=#441 id=441 data-nosnippet>441</a>                    u64::try_from(usize::from(split_count)).expect(<span class="string">"usize fits into u64"</span>),
-<a href=#442 id=442 data-nosnippet>442</a>                )
-<a href=#443 id=443 data-nosnippet>443</a>                .unwrap(),
-<a href=#444 id=444 data-nosnippet>444</a>            );
-<a href=#445 id=445 data-nosnippet>445</a>
-<a href=#446 id=446 data-nosnippet>446</a>            <span class="comment">// If we don't have as many change outputs as we expected, recompute the fee.
-<a href=#447 id=447 data-nosnippet>447</a>            </span><span class="kw">let </span>(fee_with_change, excess_fee) =
-<a href=#448 id=448 data-nosnippet>448</a>                <span class="kw">if </span>usize::from(split_count) &lt; target_change_counts.total_shielded() {
-<a href=#449 id=449 data-nosnippet>449</a>                    <span class="kw">let </span>new_fee_with_change = cfg
-<a href=#450 id=450 data-nosnippet>450</a>                        .fee_rule
-<a href=#451 id=451 data-nosnippet>451</a>                        .fee_required(
-<a href=#452 id=452 data-nosnippet>452</a>                            cfg.params,
-<a href=#453 id=453 data-nosnippet>453</a>                            target_height,
-<a href=#454 id=454 data-nosnippet>454</a>                            transparent_input_sizes,
-<a href=#455 id=455 data-nosnippet>455</a>                            transparent_output_sizes,
-<a href=#456 id=456 data-nosnippet>456</a>                            sapling_input_count,
-<a href=#457 id=457 data-nosnippet>457</a>                            sapling_output_count(<span class="kw">if </span>change_pool == ShieldedProtocol::Sapling {
-<a href=#458 id=458 data-nosnippet>458</a>                                usize::from(split_count)
-<a href=#459 id=459 data-nosnippet>459</a>                            } <span class="kw">else </span>{
-<a href=#460 id=460 data-nosnippet>460</a>                                <span class="number">0
-<a href=#461 id=461 data-nosnippet>461</a>                            </span>})<span class="question-mark">?</span>,
-<a href=#462 id=462 data-nosnippet>462</a>                            orchard_action_count(<span class="kw">if </span>change_pool == ShieldedProtocol::Orchard {
-<a href=#463 id=463 data-nosnippet>463</a>                                usize::from(split_count)
-<a href=#464 id=464 data-nosnippet>464</a>                            } <span class="kw">else </span>{
-<a href=#465 id=465 data-nosnippet>465</a>                                <span class="number">0
-<a href=#466 id=466 data-nosnippet>466</a>                            </span>})<span class="question-mark">?</span>,
-<a href=#467 id=467 data-nosnippet>467</a>                        )
-<a href=#468 id=468 data-nosnippet>468</a>                        .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))<span class="question-mark">?</span>;
-<a href=#469 id=469 data-nosnippet>469</a>                    (
-<a href=#470 id=470 data-nosnippet>470</a>                        new_fee_with_change,
-<a href=#471 id=471 data-nosnippet>471</a>                        (fee_with_change - new_fee_with_change).unwrap_or(Zatoshis::ZERO),
-<a href=#472 id=472 data-nosnippet>472</a>                    )
-<a href=#473 id=473 data-nosnippet>473</a>                } <span class="kw">else </span>{
-<a href=#474 id=474 data-nosnippet>474</a>                    (fee_with_change, Zatoshis::ZERO)
-<a href=#475 id=475 data-nosnippet>475</a>                };
-<a href=#476 id=476 data-nosnippet>476</a>
-<a href=#477 id=477 data-nosnippet>477</a>            <span class="kw">let </span>simple_case = || {
-<a href=#478 id=478 data-nosnippet>478</a>                (
-<a href=#479 id=479 data-nosnippet>479</a>                    (<span class="number">0usize</span>..split_count.into())
-<a href=#480 id=480 data-nosnippet>480</a>                        .map(|i| {
-<a href=#481 id=481 data-nosnippet>481</a>                            ChangeValue::shielded(
-<a href=#482 id=482 data-nosnippet>482</a>                                change_pool,
-<a href=#483 id=483 data-nosnippet>483</a>                                <span class="kw">if </span>i == <span class="number">0 </span>{
-<a href=#484 id=484 data-nosnippet>484</a>                                    <span class="comment">// Add any remainder to the first output only
-<a href=#485 id=485 data-nosnippet>485</a>                                    </span>(<span class="kw-2">*</span>per_output_change.quotient()
-<a href=#486 id=486 data-nosnippet>486</a>                                        + <span class="kw-2">*</span>per_output_change.remainder()
-<a href=#487 id=487 data-nosnippet>487</a>                                        + excess_fee)
-<a href=#488 id=488 data-nosnippet>488</a>                                        .unwrap()
-<a href=#489 id=489 data-nosnippet>489</a>                                } <span class="kw">else </span>{
-<a href=#490 id=490 data-nosnippet>490</a>                                    <span class="comment">// For any other output, the change value will just be the
-<a href=#491 id=491 data-nosnippet>491</a>                                    // quotient.
-<a href=#492 id=492 data-nosnippet>492</a>                                    </span><span class="kw-2">*</span>per_output_change.quotient()
-<a href=#493 id=493 data-nosnippet>493</a>                                },
-<a href=#494 id=494 data-nosnippet>494</a>                                change_memo.cloned(),
-<a href=#495 id=495 data-nosnippet>495</a>                            )
-<a href=#496 id=496 data-nosnippet>496</a>                        })
-<a href=#497 id=497 data-nosnippet>497</a>                        .collect(),
-<a href=#498 id=498 data-nosnippet>498</a>                    fee_with_change,
-<a href=#499 id=499 data-nosnippet>499</a>                )
-<a href=#500 id=500 data-nosnippet>500</a>            };
-<a href=#501 id=501 data-nosnippet>501</a>
-<a href=#502 id=502 data-nosnippet>502</a>            <span class="kw">let </span>change_dust_threshold = cfg
-<a href=#503 id=503 data-nosnippet>503</a>                .dust_output_policy
-<a href=#504 id=504 data-nosnippet>504</a>                .dust_threshold()
-<a href=#505 id=505 data-nosnippet>505</a>                .unwrap_or(cfg.default_dust_threshold);
-<a href=#506 id=506 data-nosnippet>506</a>
-<a href=#507 id=507 data-nosnippet>507</a>            <span class="kw">if </span>proposed_change &lt; change_dust_threshold {
-<a href=#508 id=508 data-nosnippet>508</a>                <span class="kw">match </span>cfg.dust_output_policy.action() {
-<a href=#509 id=509 data-nosnippet>509</a>                    DustAction::Reject =&gt; {
-<a href=#510 id=510 data-nosnippet>510</a>                        <span class="comment">// Always allow zero-valued change even for the `Reject` policy:
-<a href=#511 id=511 data-nosnippet>511</a>                        // * it should be allowed in order to record change memos and to improve
-<a href=#512 id=512 data-nosnippet>512</a>                        //   indistinguishability;
-<a href=#513 id=513 data-nosnippet>513</a>                        // * this case occurs in practice when sending all funds from an account;
-<a href=#514 id=514 data-nosnippet>514</a>                        // * zero-valued notes do not require witness tracking;
-<a href=#515 id=515 data-nosnippet>515</a>                        // * the effect on trial decryption overhead is small.
-<a href=#516 id=516 data-nosnippet>516</a>                        </span><span class="kw">if </span>proposed_change.is_zero() &amp;&amp; excess_fee.is_zero() {
-<a href=#517 id=517 data-nosnippet>517</a>                            simple_case()
-<a href=#518 id=518 data-nosnippet>518</a>                        } <span class="kw">else </span>{
-<a href=#519 id=519 data-nosnippet>519</a>                            <span class="kw">let </span>shortfall =
-<a href=#520 id=520 data-nosnippet>520</a>                                (change_dust_threshold - proposed_change).ok_or_else(underflow)<span class="question-mark">?</span>;
-<a href=#521 id=521 data-nosnippet>521</a>
-<a href=#522 id=522 data-nosnippet>522</a>                            <span class="kw">return </span><span class="prelude-val">Err</span>(ChangeError::InsufficientFunds {
-<a href=#523 id=523 data-nosnippet>523</a>                                available: total_in,
-<a href=#524 id=524 data-nosnippet>524</a>                                required: (total_in + shortfall).ok_or_else(overflow)<span class="question-mark">?</span>,
-<a href=#525 id=525 data-nosnippet>525</a>                            });
-<a href=#526 id=526 data-nosnippet>526</a>                        }
-<a href=#527 id=527 data-nosnippet>527</a>                    }
-<a href=#528 id=528 data-nosnippet>528</a>                    DustAction::AllowDustChange =&gt; simple_case(),
-<a href=#529 id=529 data-nosnippet>529</a>                    DustAction::AddDustToFee =&gt; {
-<a href=#530 id=530 data-nosnippet>530</a>                        <span class="comment">// Zero-valued change is also always allowed for this policy, but when
-<a href=#531 id=531 data-nosnippet>531</a>                        // no change memo is given, we might omit the change output instead.
-<a href=#532 id=532 data-nosnippet>532</a>
-<a href=#533 id=533 data-nosnippet>533</a>                        </span><span class="kw">let </span>fee_with_dust = (total_in - total_out)
-<a href=#534 id=534 data-nosnippet>534</a>                            .expect(<span class="string">"we already checked for sufficient funds"</span>);
-<a href=#535 id=535 data-nosnippet>535</a>                        <span class="comment">// We can add a change output if necessary.
-<a href=#536 id=536 data-nosnippet>536</a>                        </span><span class="macro">assert!</span>(fee_with_change &lt;= fee_with_dust);
-<a href=#537 id=537 data-nosnippet>537</a>
-<a href=#538 id=538 data-nosnippet>538</a>                        <span class="kw">let </span>reasonable_fee = (fee_with_change + (MINIMUM_FEE * <span class="number">10u64</span>).unwrap())
-<a href=#539 id=539 data-nosnippet>539</a>                            .ok_or_else(overflow)<span class="question-mark">?</span>;
-<a href=#540 id=540 data-nosnippet>540</a>
-<a href=#541 id=541 data-nosnippet>541</a>                        <span class="kw">if </span>fee_with_dust &gt; reasonable_fee {
-<a href=#542 id=542 data-nosnippet>542</a>                            <span class="comment">// Defend against losing money by using AddDustToFee with a too-high
-<a href=#543 id=543 data-nosnippet>543</a>                            // dust threshold.
-<a href=#544 id=544 data-nosnippet>544</a>                            </span>simple_case()
-<a href=#545 id=545 data-nosnippet>545</a>                        } <span class="kw">else if </span>change_memo.is_some() {
-<a href=#546 id=546 data-nosnippet>546</a>                            (
-<a href=#547 id=547 data-nosnippet>547</a>                                <span class="macro">vec!</span>[ChangeValue::shielded(
-<a href=#548 id=548 data-nosnippet>548</a>                                    change_pool,
-<a href=#549 id=549 data-nosnippet>549</a>                                    Zatoshis::ZERO,
-<a href=#550 id=550 data-nosnippet>550</a>                                    change_memo.cloned(),
-<a href=#551 id=551 data-nosnippet>551</a>                                )],
-<a href=#552 id=552 data-nosnippet>552</a>                                fee_with_dust,
-<a href=#553 id=553 data-nosnippet>553</a>                            )
-<a href=#554 id=554 data-nosnippet>554</a>                        } <span class="kw">else </span>{
-<a href=#555 id=555 data-nosnippet>555</a>                            (<span class="macro">vec!</span>[], fee_with_dust)
-<a href=#556 id=556 data-nosnippet>556</a>                        }
-<a href=#557 id=557 data-nosnippet>557</a>                    }
-<a href=#558 id=558 data-nosnippet>558</a>                }
-<a href=#559 id=559 data-nosnippet>559</a>            } <span class="kw">else </span>{
-<a href=#560 id=560 data-nosnippet>560</a>                simple_case()
-<a href=#561 id=561 data-nosnippet>561</a>            }
-<a href=#562 id=562 data-nosnippet>562</a>        }
-<a href=#563 id=563 data-nosnippet>563</a>    };
-<a href=#564 id=564 data-nosnippet>564</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#565 id=565 data-nosnippet>565</a>    </span>change.extend(
-<a href=#566 id=566 data-nosnippet>566</a>        ephemeral_balance
-<a href=#567 id=567 data-nosnippet>567</a>            .and_then(|b| b.ephemeral_output_amount())
-<a href=#568 id=568 data-nosnippet>568</a>            .map(ChangeValue::ephemeral_transparent),
-<a href=#569 id=569 data-nosnippet>569</a>    );
-<a href=#570 id=570 data-nosnippet>570</a>
-<a href=#571 id=571 data-nosnippet>571</a>    TransactionBalance::new(change, fee).map_err(|<span class="kw">_</span>| overflow())
-<a href=#572 id=572 data-nosnippet>572</a>}
-<a href=#573 id=573 data-nosnippet>573</a>
-<a href=#574 id=574 data-nosnippet>574</a><span class="doccomment">/// Returns a `[ChangeStrategy::DustInputs]` error if some of the inputs provided
-<a href=#575 id=575 data-nosnippet>575</a>/// to the transaction have value less than the marginal fee, and could not be
-<a href=#576 id=576 data-nosnippet>576</a>/// determined to have any economic value in the context of this input selection.
-<a href=#577 id=577 data-nosnippet>577</a>///
-<a href=#578 id=578 data-nosnippet>578</a>/// This determination is potentially conservative in the sense that outputs
-<a href=#579 id=579 data-nosnippet>579</a>/// with value less than the marginal fee might be excluded, even though in
-<a href=#580 id=580 data-nosnippet>580</a>/// practice they would not cause the fee to increase. Outputs with value
-<a href=#581 id=581 data-nosnippet>581</a>/// greater than the marginal fee will never be excluded.
-<a href=#582 id=582 data-nosnippet>582</a>///
-<a href=#583 id=583 data-nosnippet>583</a>/// `possible_change` is a slice of `(transparent_change, sapling_change, orchard_change)`
-<a href=#584 id=584 data-nosnippet>584</a>/// tuples indicating possible combinations of how many change outputs (0 or 1)
-<a href=#585 id=585 data-nosnippet>585</a>/// might be included in the transaction for each pool. The shape of the tuple
-<a href=#586 id=586 data-nosnippet>586</a>/// does not depend on which protocol features are enabled.
-<a href=#587 id=587 data-nosnippet>587</a></span><span class="attr">#[allow(clippy::too_many_arguments)]
-<a href=#588 id=588 data-nosnippet>588</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>check_for_uneconomic_inputs&lt;NoteRefT: Clone, E&gt;(
-<a href=#589 id=589 data-nosnippet>589</a>    transparent_inputs: <span class="kw-2">&amp;</span>[<span class="kw">impl </span>transparent::InputView],
-<a href=#590 id=590 data-nosnippet>590</a>    transparent_outputs: <span class="kw-2">&amp;</span>[<span class="kw">impl </span>transparent::OutputView],
-<a href=#591 id=591 data-nosnippet>591</a>    sapling: <span class="kw-2">&amp;</span><span class="kw">impl </span>sapling_fees::BundleView&lt;NoteRefT&gt;,
-<a href=#592 id=592 data-nosnippet>592</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)] </span>orchard: <span class="kw-2">&amp;</span><span class="kw">impl </span>orchard_fees::BundleView&lt;NoteRefT&gt;,
-<a href=#593 id=593 data-nosnippet>593</a>    marginal_fee: Zatoshis,
-<a href=#594 id=594 data-nosnippet>594</a>    grace_actions: usize,
-<a href=#595 id=595 data-nosnippet>595</a>    possible_change: <span class="kw-2">&amp;</span>[OutputManifest],
-<a href=#596 id=596 data-nosnippet>596</a>    ephemeral_balance: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>EphemeralBalance&gt;,
-<a href=#597 id=597 data-nosnippet>597</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), ChangeError&lt;E, NoteRefT&gt;&gt; {
-<a href=#598 id=598 data-nosnippet>598</a>    <span class="kw">let </span><span class="kw-2">mut </span>t_dust: Vec&lt;<span class="kw">_</span>&gt; = transparent_inputs
+<a href=#255 id=255 data-nosnippet>255</a>    <span class="macro">assert!</span>(target_change_counts.total_shielded() == target_change_count);
+<a href=#256 id=256 data-nosnippet>256</a>
+<a href=#257 id=257 data-nosnippet>257</a>    <span class="comment">// We don't create a fully-transparent transaction if a change memo is used.
+<a href=#258 id=258 data-nosnippet>258</a>    </span><span class="kw">let </span>fully_transparent = net_flows.is_transparent() &amp;&amp; change_memo.is_none();
+<a href=#259 id=259 data-nosnippet>259</a>
+<a href=#260 id=260 data-nosnippet>260</a>    <span class="comment">// If we have a non-zero marginal fee, we need to check for uneconomic inputs.
+<a href=#261 id=261 data-nosnippet>261</a>    // This is basically assuming that fee rules with non-zero marginal fee are
+<a href=#262 id=262 data-nosnippet>262</a>    // "ZIP 317-like", but we can generalize later if needed.
+<a href=#263 id=263 data-nosnippet>263</a>    </span><span class="kw">if </span>cfg.marginal_fee.is_positive() {
+<a href=#264 id=264 data-nosnippet>264</a>        <span class="comment">// Is it certain that there will be a change output? If it is not certain,
+<a href=#265 id=265 data-nosnippet>265</a>        // we should call `check_for_uneconomic_inputs` with `possible_change`
+<a href=#266 id=266 data-nosnippet>266</a>        // including both possibilities.
+<a href=#267 id=267 data-nosnippet>267</a>        </span><span class="kw">let </span>possible_change = {
+<a href=#268 id=268 data-nosnippet>268</a>            <span class="comment">// These are the situations where we might not have a change output.
+<a href=#269 id=269 data-nosnippet>269</a>            </span><span class="kw">if </span>fully_transparent
+<a href=#270 id=270 data-nosnippet>270</a>                || (cfg.dust_output_policy.action() == DustAction::AddDustToFee
+<a href=#271 id=271 data-nosnippet>271</a>                    &amp;&amp; change_memo.is_none())
+<a href=#272 id=272 data-nosnippet>272</a>            {
+<a href=#273 id=273 data-nosnippet>273</a>                <span class="macro">vec!</span>[OutputManifest::ZERO, target_change_counts]
+<a href=#274 id=274 data-nosnippet>274</a>            } <span class="kw">else </span>{
+<a href=#275 id=275 data-nosnippet>275</a>                <span class="macro">vec!</span>[target_change_counts]
+<a href=#276 id=276 data-nosnippet>276</a>            }
+<a href=#277 id=277 data-nosnippet>277</a>        };
+<a href=#278 id=278 data-nosnippet>278</a>
+<a href=#279 id=279 data-nosnippet>279</a>        check_for_uneconomic_inputs(
+<a href=#280 id=280 data-nosnippet>280</a>            transparent_inputs,
+<a href=#281 id=281 data-nosnippet>281</a>            transparent_outputs,
+<a href=#282 id=282 data-nosnippet>282</a>            sapling,
+<a href=#283 id=283 data-nosnippet>283</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#284 id=284 data-nosnippet>284</a>            </span>orchard,
+<a href=#285 id=285 data-nosnippet>285</a>            cfg.marginal_fee,
+<a href=#286 id=286 data-nosnippet>286</a>            cfg.grace_actions,
+<a href=#287 id=287 data-nosnippet>287</a>            <span class="kw-2">&amp;</span>possible_change[..],
+<a href=#288 id=288 data-nosnippet>288</a>            ephemeral_balance,
+<a href=#289 id=289 data-nosnippet>289</a>        )<span class="question-mark">?</span>;
+<a href=#290 id=290 data-nosnippet>290</a>    }
+<a href=#291 id=291 data-nosnippet>291</a>
+<a href=#292 id=292 data-nosnippet>292</a>    <span class="kw">let </span>total_in = net_flows
+<a href=#293 id=293 data-nosnippet>293</a>        .total_in()
+<a href=#294 id=294 data-nosnippet>294</a>        .map_err(|e| ChangeError::StrategyError(E::from(e)))<span class="question-mark">?</span>;
+<a href=#295 id=295 data-nosnippet>295</a>    <span class="kw">let </span>subtotal_out = net_flows
+<a href=#296 id=296 data-nosnippet>296</a>        .total_out()
+<a href=#297 id=297 data-nosnippet>297</a>        .map_err(|e| ChangeError::StrategyError(E::from(e)))<span class="question-mark">?</span>;
+<a href=#298 id=298 data-nosnippet>298</a>
+<a href=#299 id=299 data-nosnippet>299</a>    <span class="kw">let </span>sapling_input_count = sapling
+<a href=#300 id=300 data-nosnippet>300</a>        .bundle_type()
+<a href=#301 id=301 data-nosnippet>301</a>        .num_spends(sapling.inputs().len())
+<a href=#302 id=302 data-nosnippet>302</a>        .map_err(ChangeError::BundleError)<span class="question-mark">?</span>;
+<a href=#303 id=303 data-nosnippet>303</a>    <span class="kw">let </span>sapling_output_count = |change_count| {
+<a href=#304 id=304 data-nosnippet>304</a>        sapling
+<a href=#305 id=305 data-nosnippet>305</a>            .bundle_type()
+<a href=#306 id=306 data-nosnippet>306</a>            .num_outputs(
+<a href=#307 id=307 data-nosnippet>307</a>                sapling.inputs().len(),
+<a href=#308 id=308 data-nosnippet>308</a>                sapling.outputs().len() + change_count,
+<a href=#309 id=309 data-nosnippet>309</a>            )
+<a href=#310 id=310 data-nosnippet>310</a>            .map_err(ChangeError::BundleError)
+<a href=#311 id=311 data-nosnippet>311</a>    };
+<a href=#312 id=312 data-nosnippet>312</a>
+<a href=#313 id=313 data-nosnippet>313</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#314 id=314 data-nosnippet>314</a>    </span><span class="kw">let </span>orchard_action_count = |change_count| {
+<a href=#315 id=315 data-nosnippet>315</a>        orchard
+<a href=#316 id=316 data-nosnippet>316</a>            .bundle_type()
+<a href=#317 id=317 data-nosnippet>317</a>            .num_actions(
+<a href=#318 id=318 data-nosnippet>318</a>                orchard.inputs().len(),
+<a href=#319 id=319 data-nosnippet>319</a>                orchard.outputs().len() + change_count,
+<a href=#320 id=320 data-nosnippet>320</a>            )
+<a href=#321 id=321 data-nosnippet>321</a>            .map_err(ChangeError::BundleError)
+<a href=#322 id=322 data-nosnippet>322</a>    };
+<a href=#323 id=323 data-nosnippet>323</a>    <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
+<a href=#324 id=324 data-nosnippet>324</a>    </span><span class="kw">let </span>orchard_action_count = |change_count: usize| -&gt; <span class="prelude-ty">Result</span>&lt;usize, ChangeError&lt;E, NoteRefT&gt;&gt; {
+<a href=#325 id=325 data-nosnippet>325</a>        <span class="kw">if </span>change_count != <span class="number">0 </span>{
+<a href=#326 id=326 data-nosnippet>326</a>            <span class="prelude-val">Err</span>(ChangeError::BundleError(
+<a href=#327 id=327 data-nosnippet>327</a>                <span class="string">"Nonzero Orchard change requested but the `orchard` feature is not enabled."</span>,
+<a href=#328 id=328 data-nosnippet>328</a>            ))
+<a href=#329 id=329 data-nosnippet>329</a>        } <span class="kw">else </span>{
+<a href=#330 id=330 data-nosnippet>330</a>            <span class="prelude-val">Ok</span>(<span class="number">0</span>)
+<a href=#331 id=331 data-nosnippet>331</a>        }
+<a href=#332 id=332 data-nosnippet>332</a>    };
+<a href=#333 id=333 data-nosnippet>333</a>
+<a href=#334 id=334 data-nosnippet>334</a>    <span class="kw">let </span>transparent_input_sizes = transparent_inputs
+<a href=#335 id=335 data-nosnippet>335</a>        .iter()
+<a href=#336 id=336 data-nosnippet>336</a>        .map(|i| i.serialized_size())
+<a href=#337 id=337 data-nosnippet>337</a>        .chain(
+<a href=#338 id=338 data-nosnippet>338</a>            ephemeral_balance
+<a href=#339 id=339 data-nosnippet>339</a>                .and_then(|b| b.ephemeral_input_amount())
+<a href=#340 id=340 data-nosnippet>340</a>                .map(|<span class="kw">_</span>| transparent::InputSize::STANDARD_P2PKH),
+<a href=#341 id=341 data-nosnippet>341</a>        );
+<a href=#342 id=342 data-nosnippet>342</a>    <span class="kw">let </span>transparent_output_sizes = transparent_outputs
+<a href=#343 id=343 data-nosnippet>343</a>        .iter()
+<a href=#344 id=344 data-nosnippet>344</a>        .map(|i| i.serialized_size())
+<a href=#345 id=345 data-nosnippet>345</a>        .chain(
+<a href=#346 id=346 data-nosnippet>346</a>            ephemeral_balance
+<a href=#347 id=347 data-nosnippet>347</a>                .and_then(|b| b.ephemeral_output_amount())
+<a href=#348 id=348 data-nosnippet>348</a>                .map(|<span class="kw">_</span>| P2PKH_STANDARD_OUTPUT_SIZE),
+<a href=#349 id=349 data-nosnippet>349</a>        );
+<a href=#350 id=350 data-nosnippet>350</a>
+<a href=#351 id=351 data-nosnippet>351</a>    <span class="comment">// Once we calculate the balance with minimum fee (i.e. with no change),
+<a href=#352 id=352 data-nosnippet>352</a>    // there are three cases:
+<a href=#353 id=353 data-nosnippet>353</a>    //
+<a href=#354 id=354 data-nosnippet>354</a>    // 1. Insufficient funds even with minimum fee.
+<a href=#355 id=355 data-nosnippet>355</a>    // 2. The minimum fee exactly cancels out the net flow balance.
+<a href=#356 id=356 data-nosnippet>356</a>    // 3. The minimum fee is smaller than the change.
+<a href=#357 id=357 data-nosnippet>357</a>    //
+<a href=#358 id=358 data-nosnippet>358</a>    // If case 2 happens for a transaction with any shielded flows, we want there
+<a href=#359 id=359 data-nosnippet>359</a>    // to be a zero-value shielded change output anyway (i.e. treat this like case 3),
+<a href=#360 id=360 data-nosnippet>360</a>    // because:
+<a href=#361 id=361 data-nosnippet>361</a>    // * being able to distinguish these cases potentially leaks too much
+<a href=#362 id=362 data-nosnippet>362</a>    //   information (an adversary that knows the number of external recipients
+<a href=#363 id=363 data-nosnippet>363</a>    //   and the sum of their outputs learns the sum of the inputs if no change
+<a href=#364 id=364 data-nosnippet>364</a>    //   output is present); and
+<a href=#365 id=365 data-nosnippet>365</a>    // * we will then always have an shielded output in which to put change_memo,
+<a href=#366 id=366 data-nosnippet>366</a>    //   if one is used.
+<a href=#367 id=367 data-nosnippet>367</a>    //
+<a href=#368 id=368 data-nosnippet>368</a>    // Note that using the `DustAction::AddDustToFee` policy inherently leaks
+<a href=#369 id=369 data-nosnippet>369</a>    // more information.
+<a href=#370 id=370 data-nosnippet>370</a>
+<a href=#371 id=371 data-nosnippet>371</a>    </span><span class="kw">let </span>min_fee = cfg
+<a href=#372 id=372 data-nosnippet>372</a>        .fee_rule
+<a href=#373 id=373 data-nosnippet>373</a>        .fee_required(
+<a href=#374 id=374 data-nosnippet>374</a>            cfg.params,
+<a href=#375 id=375 data-nosnippet>375</a>            target_height,
+<a href=#376 id=376 data-nosnippet>376</a>            transparent_input_sizes.clone(),
+<a href=#377 id=377 data-nosnippet>377</a>            transparent_output_sizes.clone(),
+<a href=#378 id=378 data-nosnippet>378</a>            sapling_input_count,
+<a href=#379 id=379 data-nosnippet>379</a>            sapling_output_count(<span class="number">0</span>)<span class="question-mark">?</span>,
+<a href=#380 id=380 data-nosnippet>380</a>            orchard_action_count(<span class="number">0</span>)<span class="question-mark">?</span>,
+<a href=#381 id=381 data-nosnippet>381</a>        )
+<a href=#382 id=382 data-nosnippet>382</a>        .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))<span class="question-mark">?</span>;
+<a href=#383 id=383 data-nosnippet>383</a>
+<a href=#384 id=384 data-nosnippet>384</a>    <span class="kw">let </span>total_out_with_min_fee = (subtotal_out + min_fee).ok_or_else(overflow)<span class="question-mark">?</span>;
+<a href=#385 id=385 data-nosnippet>385</a>
+<a href=#386 id=386 data-nosnippet>386</a>    <span class="attr">#[allow(unused_mut)]
+<a href=#387 id=387 data-nosnippet>387</a>    </span><span class="kw">let </span>(<span class="kw-2">mut </span>change, fee) = <span class="kw">match </span>total_in.cmp(<span class="kw-2">&amp;</span>total_out_with_min_fee) {
+<a href=#388 id=388 data-nosnippet>388</a>        Ordering::Less =&gt; {
+<a href=#389 id=389 data-nosnippet>389</a>            <span class="comment">// Case 1. Insufficient input value exists to pay the minimum fee; there's no way
+<a href=#390 id=390 data-nosnippet>390</a>            // we can construct the transaction.
+<a href=#391 id=391 data-nosnippet>391</a>            </span><span class="kw">return </span><span class="prelude-val">Err</span>(ChangeError::InsufficientFunds {
+<a href=#392 id=392 data-nosnippet>392</a>                available: total_in,
+<a href=#393 id=393 data-nosnippet>393</a>                required: total_out_with_min_fee,
+<a href=#394 id=394 data-nosnippet>394</a>            });
+<a href=#395 id=395 data-nosnippet>395</a>        }
+<a href=#396 id=396 data-nosnippet>396</a>        Ordering::Equal <span class="kw">if </span>fully_transparent =&gt; {
+<a href=#397 id=397 data-nosnippet>397</a>            <span class="comment">// Case 2 for a tx with all transparent flows and no change memo
+<a href=#398 id=398 data-nosnippet>398</a>            // (e.g. the second transaction of a ZIP 320 pair).
+<a href=#399 id=399 data-nosnippet>399</a>            </span>(<span class="macro">vec!</span>[], min_fee)
+<a href=#400 id=400 data-nosnippet>400</a>        }
+<a href=#401 id=401 data-nosnippet>401</a>        <span class="kw">_ </span>=&gt; {
+<a href=#402 id=402 data-nosnippet>402</a>            <span class="kw">let </span>max_fee = max(
+<a href=#403 id=403 data-nosnippet>403</a>                min_fee,
+<a href=#404 id=404 data-nosnippet>404</a>                cfg.fee_rule
+<a href=#405 id=405 data-nosnippet>405</a>                    .fee_required(
+<a href=#406 id=406 data-nosnippet>406</a>                        cfg.params,
+<a href=#407 id=407 data-nosnippet>407</a>                        target_height,
+<a href=#408 id=408 data-nosnippet>408</a>                        transparent_input_sizes.clone(),
+<a href=#409 id=409 data-nosnippet>409</a>                        transparent_output_sizes.clone(),
+<a href=#410 id=410 data-nosnippet>410</a>                        sapling_input_count,
+<a href=#411 id=411 data-nosnippet>411</a>                        sapling_output_count(target_change_counts.sapling())<span class="question-mark">?</span>,
+<a href=#412 id=412 data-nosnippet>412</a>                        orchard_action_count(target_change_counts.orchard())<span class="question-mark">?</span>,
+<a href=#413 id=413 data-nosnippet>413</a>                    )
+<a href=#414 id=414 data-nosnippet>414</a>                    .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))<span class="question-mark">?</span>,
+<a href=#415 id=415 data-nosnippet>415</a>            );
+<a href=#416 id=416 data-nosnippet>416</a>
+<a href=#417 id=417 data-nosnippet>417</a>            <span class="kw">let </span>total_out_with_max_fee = (subtotal_out + max_fee).ok_or_else(overflow)<span class="question-mark">?</span>;
+<a href=#418 id=418 data-nosnippet>418</a>
+<a href=#419 id=419 data-nosnippet>419</a>            <span class="comment">// We obtain a split count based on the total number of notes of sufficient size
+<a href=#420 id=420 data-nosnippet>420</a>            // available in the wallet, irrespective of pool. If we don't have any wallet metadata
+<a href=#421 id=421 data-nosnippet>421</a>            // available, we fall back to generating a single change output.
+<a href=#422 id=422 data-nosnippet>422</a>            </span><span class="kw">let </span>split_count = usize::from(wallet_meta.map_or(NonZeroUsize::MIN, |wm| {
+<a href=#423 id=423 data-nosnippet>423</a>                cfg.split_policy.split_count(
+<a href=#424 id=424 data-nosnippet>424</a>                    wm.total_note_count(),
+<a href=#425 id=425 data-nosnippet>425</a>                    wm.total_value(),
+<a href=#426 id=426 data-nosnippet>426</a>                    <span class="comment">// We use a saturating subtraction here because there may be insufficient funds to pay
+<a href=#427 id=427 data-nosnippet>427</a>                    // the fee, *if* the requested number of split outputs are created. If there is no
+<a href=#428 id=428 data-nosnippet>428</a>                    // proposed change, the split policy should recommend only a single change output.
+<a href=#429 id=429 data-nosnippet>429</a>                    </span>(total_in - total_out_with_max_fee).unwrap_or(Zatoshis::ZERO),
+<a href=#430 id=430 data-nosnippet>430</a>                )
+<a href=#431 id=431 data-nosnippet>431</a>            }));
+<a href=#432 id=432 data-nosnippet>432</a>
+<a href=#433 id=433 data-nosnippet>433</a>            <span class="comment">// If we don't have as many change outputs as we expected, recompute the fee.
+<a href=#434 id=434 data-nosnippet>434</a>            </span><span class="kw">let </span>total_fee = <span class="kw">if </span>split_count &lt; target_change_count {
+<a href=#435 id=435 data-nosnippet>435</a>                cfg.fee_rule
+<a href=#436 id=436 data-nosnippet>436</a>                    .fee_required(
+<a href=#437 id=437 data-nosnippet>437</a>                        cfg.params,
+<a href=#438 id=438 data-nosnippet>438</a>                        target_height,
+<a href=#439 id=439 data-nosnippet>439</a>                        transparent_input_sizes,
+<a href=#440 id=440 data-nosnippet>440</a>                        transparent_output_sizes,
+<a href=#441 id=441 data-nosnippet>441</a>                        sapling_input_count,
+<a href=#442 id=442 data-nosnippet>442</a>                        sapling_output_count(<span class="kw">if </span>change_pool == ShieldedProtocol::Sapling {
+<a href=#443 id=443 data-nosnippet>443</a>                            split_count
+<a href=#444 id=444 data-nosnippet>444</a>                        } <span class="kw">else </span>{
+<a href=#445 id=445 data-nosnippet>445</a>                            <span class="number">0
+<a href=#446 id=446 data-nosnippet>446</a>                        </span>})<span class="question-mark">?</span>,
+<a href=#447 id=447 data-nosnippet>447</a>                        orchard_action_count(<span class="kw">if </span>change_pool == ShieldedProtocol::Orchard {
+<a href=#448 id=448 data-nosnippet>448</a>                            split_count
+<a href=#449 id=449 data-nosnippet>449</a>                        } <span class="kw">else </span>{
+<a href=#450 id=450 data-nosnippet>450</a>                            <span class="number">0
+<a href=#451 id=451 data-nosnippet>451</a>                        </span>})<span class="question-mark">?</span>,
+<a href=#452 id=452 data-nosnippet>452</a>                    )
+<a href=#453 id=453 data-nosnippet>453</a>                    .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))<span class="question-mark">?
+<a href=#454 id=454 data-nosnippet>454</a>            </span>} <span class="kw">else </span>{
+<a href=#455 id=455 data-nosnippet>455</a>                max_fee
+<a href=#456 id=456 data-nosnippet>456</a>            };
+<a href=#457 id=457 data-nosnippet>457</a>
+<a href=#458 id=458 data-nosnippet>458</a>            <span class="kw">let </span>total_out = (subtotal_out + total_fee).ok_or_else(overflow)<span class="question-mark">?</span>;
+<a href=#459 id=459 data-nosnippet>459</a>            <span class="kw">let </span>total_change =
+<a href=#460 id=460 data-nosnippet>460</a>                (total_in - total_out).ok_or_else(|| ChangeError::InsufficientFunds {
+<a href=#461 id=461 data-nosnippet>461</a>                    available: total_in,
+<a href=#462 id=462 data-nosnippet>462</a>                    required: total_out,
+<a href=#463 id=463 data-nosnippet>463</a>                })<span class="question-mark">?</span>;
+<a href=#464 id=464 data-nosnippet>464</a>
+<a href=#465 id=465 data-nosnippet>465</a>            <span class="kw">let </span>per_output_change = total_change.div_with_remainder(
+<a href=#466 id=466 data-nosnippet>466</a>                NonZeroU64::new(u64::try_from(split_count).expect(<span class="string">"usize fits into u64"</span>)).unwrap(),
+<a href=#467 id=467 data-nosnippet>467</a>            );
+<a href=#468 id=468 data-nosnippet>468</a>            <span class="kw">let </span>simple_case = || {
+<a href=#469 id=469 data-nosnippet>469</a>                (
+<a href=#470 id=470 data-nosnippet>470</a>                    (<span class="number">0usize</span>..split_count)
+<a href=#471 id=471 data-nosnippet>471</a>                        .map(|i| {
+<a href=#472 id=472 data-nosnippet>472</a>                            ChangeValue::shielded(
+<a href=#473 id=473 data-nosnippet>473</a>                                change_pool,
+<a href=#474 id=474 data-nosnippet>474</a>                                <span class="kw">if </span>i == <span class="number">0 </span>{
+<a href=#475 id=475 data-nosnippet>475</a>                                    <span class="comment">// Add any remainder to the first output only
+<a href=#476 id=476 data-nosnippet>476</a>                                    </span>(<span class="kw-2">*</span>per_output_change.quotient() + <span class="kw-2">*</span>per_output_change.remainder())
+<a href=#477 id=477 data-nosnippet>477</a>                                        .unwrap()
+<a href=#478 id=478 data-nosnippet>478</a>                                } <span class="kw">else </span>{
+<a href=#479 id=479 data-nosnippet>479</a>                                    <span class="comment">// For any other output, the change value will just be the
+<a href=#480 id=480 data-nosnippet>480</a>                                    // quotient.
+<a href=#481 id=481 data-nosnippet>481</a>                                    </span><span class="kw-2">*</span>per_output_change.quotient()
+<a href=#482 id=482 data-nosnippet>482</a>                                },
+<a href=#483 id=483 data-nosnippet>483</a>                                change_memo.cloned(),
+<a href=#484 id=484 data-nosnippet>484</a>                            )
+<a href=#485 id=485 data-nosnippet>485</a>                        })
+<a href=#486 id=486 data-nosnippet>486</a>                        .collect(),
+<a href=#487 id=487 data-nosnippet>487</a>                    total_fee,
+<a href=#488 id=488 data-nosnippet>488</a>                )
+<a href=#489 id=489 data-nosnippet>489</a>            };
+<a href=#490 id=490 data-nosnippet>490</a>
+<a href=#491 id=491 data-nosnippet>491</a>            <span class="kw">let </span>change_dust_threshold = cfg
+<a href=#492 id=492 data-nosnippet>492</a>                .dust_output_policy
+<a href=#493 id=493 data-nosnippet>493</a>                .dust_threshold()
+<a href=#494 id=494 data-nosnippet>494</a>                .unwrap_or(cfg.default_dust_threshold);
+<a href=#495 id=495 data-nosnippet>495</a>
+<a href=#496 id=496 data-nosnippet>496</a>            <span class="kw">if </span>total_change &lt; change_dust_threshold {
+<a href=#497 id=497 data-nosnippet>497</a>                <span class="kw">match </span>cfg.dust_output_policy.action() {
+<a href=#498 id=498 data-nosnippet>498</a>                    DustAction::Reject =&gt; {
+<a href=#499 id=499 data-nosnippet>499</a>                        <span class="comment">// Always allow zero-valued change even for the `Reject` policy:
+<a href=#500 id=500 data-nosnippet>500</a>                        // * it should be allowed in order to record change memos and to improve
+<a href=#501 id=501 data-nosnippet>501</a>                        //   indistinguishability;
+<a href=#502 id=502 data-nosnippet>502</a>                        // * this case occurs in practice when sending all funds from an account;
+<a href=#503 id=503 data-nosnippet>503</a>                        // * zero-valued notes do not require witness tracking;
+<a href=#504 id=504 data-nosnippet>504</a>                        // * the effect on trial decryption overhead is small.
+<a href=#505 id=505 data-nosnippet>505</a>                        </span><span class="kw">if </span>total_change.is_zero() {
+<a href=#506 id=506 data-nosnippet>506</a>                            simple_case()
+<a href=#507 id=507 data-nosnippet>507</a>                        } <span class="kw">else </span>{
+<a href=#508 id=508 data-nosnippet>508</a>                            <span class="kw">let </span>shortfall =
+<a href=#509 id=509 data-nosnippet>509</a>                                (change_dust_threshold - total_change).ok_or_else(underflow)<span class="question-mark">?</span>;
+<a href=#510 id=510 data-nosnippet>510</a>
+<a href=#511 id=511 data-nosnippet>511</a>                            <span class="kw">return </span><span class="prelude-val">Err</span>(ChangeError::InsufficientFunds {
+<a href=#512 id=512 data-nosnippet>512</a>                                available: total_in,
+<a href=#513 id=513 data-nosnippet>513</a>                                required: (total_in + shortfall).ok_or_else(overflow)<span class="question-mark">?</span>,
+<a href=#514 id=514 data-nosnippet>514</a>                            });
+<a href=#515 id=515 data-nosnippet>515</a>                        }
+<a href=#516 id=516 data-nosnippet>516</a>                    }
+<a href=#517 id=517 data-nosnippet>517</a>                    DustAction::AllowDustChange =&gt; simple_case(),
+<a href=#518 id=518 data-nosnippet>518</a>                    DustAction::AddDustToFee =&gt; {
+<a href=#519 id=519 data-nosnippet>519</a>                        <span class="comment">// Zero-valued change is also always allowed for this policy, but when
+<a href=#520 id=520 data-nosnippet>520</a>                        // no change memo is given, we might omit the change output instead.
+<a href=#521 id=521 data-nosnippet>521</a>                        </span><span class="kw">let </span>fee_with_dust = (total_change + total_fee).ok_or_else(overflow)<span class="question-mark">?</span>;
+<a href=#522 id=522 data-nosnippet>522</a>
+<a href=#523 id=523 data-nosnippet>523</a>                        <span class="kw">let </span>reasonable_fee =
+<a href=#524 id=524 data-nosnippet>524</a>                            (total_fee + (MINIMUM_FEE * <span class="number">10u64</span>).unwrap()).ok_or_else(overflow)<span class="question-mark">?</span>;
+<a href=#525 id=525 data-nosnippet>525</a>
+<a href=#526 id=526 data-nosnippet>526</a>                        <span class="kw">if </span>fee_with_dust &gt; reasonable_fee {
+<a href=#527 id=527 data-nosnippet>527</a>                            <span class="comment">// Defend against losing money by using AddDustToFee with a too-high
+<a href=#528 id=528 data-nosnippet>528</a>                            // dust threshold.
+<a href=#529 id=529 data-nosnippet>529</a>                            </span>simple_case()
+<a href=#530 id=530 data-nosnippet>530</a>                        } <span class="kw">else if </span>change_memo.is_some() {
+<a href=#531 id=531 data-nosnippet>531</a>                            (
+<a href=#532 id=532 data-nosnippet>532</a>                                <span class="macro">vec!</span>[ChangeValue::shielded(
+<a href=#533 id=533 data-nosnippet>533</a>                                    change_pool,
+<a href=#534 id=534 data-nosnippet>534</a>                                    Zatoshis::ZERO,
+<a href=#535 id=535 data-nosnippet>535</a>                                    change_memo.cloned(),
+<a href=#536 id=536 data-nosnippet>536</a>                                )],
+<a href=#537 id=537 data-nosnippet>537</a>                                fee_with_dust,
+<a href=#538 id=538 data-nosnippet>538</a>                            )
+<a href=#539 id=539 data-nosnippet>539</a>                        } <span class="kw">else </span>{
+<a href=#540 id=540 data-nosnippet>540</a>                            (<span class="macro">vec!</span>[], fee_with_dust)
+<a href=#541 id=541 data-nosnippet>541</a>                        }
+<a href=#542 id=542 data-nosnippet>542</a>                    }
+<a href=#543 id=543 data-nosnippet>543</a>                }
+<a href=#544 id=544 data-nosnippet>544</a>            } <span class="kw">else </span>{
+<a href=#545 id=545 data-nosnippet>545</a>                simple_case()
+<a href=#546 id=546 data-nosnippet>546</a>            }
+<a href=#547 id=547 data-nosnippet>547</a>        }
+<a href=#548 id=548 data-nosnippet>548</a>    };
+<a href=#549 id=549 data-nosnippet>549</a>
+<a href=#550 id=550 data-nosnippet>550</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#551 id=551 data-nosnippet>551</a>    </span>change.extend(
+<a href=#552 id=552 data-nosnippet>552</a>        ephemeral_balance
+<a href=#553 id=553 data-nosnippet>553</a>            .and_then(|b| b.ephemeral_output_amount())
+<a href=#554 id=554 data-nosnippet>554</a>            .map(ChangeValue::ephemeral_transparent),
+<a href=#555 id=555 data-nosnippet>555</a>    );
+<a href=#556 id=556 data-nosnippet>556</a>
+<a href=#557 id=557 data-nosnippet>557</a>    TransactionBalance::new(change, fee).map_err(|<span class="kw">_</span>| overflow())
+<a href=#558 id=558 data-nosnippet>558</a>}
+<a href=#559 id=559 data-nosnippet>559</a>
+<a href=#560 id=560 data-nosnippet>560</a><span class="doccomment">/// Returns a `[ChangeStrategy::DustInputs]` error if some of the inputs provided
+<a href=#561 id=561 data-nosnippet>561</a>/// to the transaction have value less than the marginal fee, and could not be
+<a href=#562 id=562 data-nosnippet>562</a>/// determined to have any economic value in the context of this input selection.
+<a href=#563 id=563 data-nosnippet>563</a>///
+<a href=#564 id=564 data-nosnippet>564</a>/// This determination is potentially conservative in the sense that outputs
+<a href=#565 id=565 data-nosnippet>565</a>/// with value less than the marginal fee might be excluded, even though in
+<a href=#566 id=566 data-nosnippet>566</a>/// practice they would not cause the fee to increase. Outputs with value
+<a href=#567 id=567 data-nosnippet>567</a>/// greater than the marginal fee will never be excluded.
+<a href=#568 id=568 data-nosnippet>568</a>///
+<a href=#569 id=569 data-nosnippet>569</a>/// `possible_change` is a slice of `(transparent_change, sapling_change, orchard_change)`
+<a href=#570 id=570 data-nosnippet>570</a>/// tuples indicating possible combinations of how many change outputs (0 or 1)
+<a href=#571 id=571 data-nosnippet>571</a>/// might be included in the transaction for each pool. The shape of the tuple
+<a href=#572 id=572 data-nosnippet>572</a>/// does not depend on which protocol features are enabled.
+<a href=#573 id=573 data-nosnippet>573</a></span><span class="attr">#[allow(clippy::too_many_arguments)]
+<a href=#574 id=574 data-nosnippet>574</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>check_for_uneconomic_inputs&lt;NoteRefT: Clone, E&gt;(
+<a href=#575 id=575 data-nosnippet>575</a>    transparent_inputs: <span class="kw-2">&amp;</span>[<span class="kw">impl </span>transparent::InputView],
+<a href=#576 id=576 data-nosnippet>576</a>    transparent_outputs: <span class="kw-2">&amp;</span>[<span class="kw">impl </span>transparent::OutputView],
+<a href=#577 id=577 data-nosnippet>577</a>    sapling: <span class="kw-2">&amp;</span><span class="kw">impl </span>sapling_fees::BundleView&lt;NoteRefT&gt;,
+<a href=#578 id=578 data-nosnippet>578</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)] </span>orchard: <span class="kw-2">&amp;</span><span class="kw">impl </span>orchard_fees::BundleView&lt;NoteRefT&gt;,
+<a href=#579 id=579 data-nosnippet>579</a>    marginal_fee: Zatoshis,
+<a href=#580 id=580 data-nosnippet>580</a>    grace_actions: usize,
+<a href=#581 id=581 data-nosnippet>581</a>    possible_change: <span class="kw-2">&amp;</span>[OutputManifest],
+<a href=#582 id=582 data-nosnippet>582</a>    ephemeral_balance: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>EphemeralBalance&gt;,
+<a href=#583 id=583 data-nosnippet>583</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), ChangeError&lt;E, NoteRefT&gt;&gt; {
+<a href=#584 id=584 data-nosnippet>584</a>    <span class="kw">let </span><span class="kw-2">mut </span>t_dust: Vec&lt;<span class="kw">_</span>&gt; = transparent_inputs
+<a href=#585 id=585 data-nosnippet>585</a>        .iter()
+<a href=#586 id=586 data-nosnippet>586</a>        .filter_map(|i| {
+<a href=#587 id=587 data-nosnippet>587</a>            <span class="comment">// For now, we're just assuming P2PKH inputs, so we don't check the
+<a href=#588 id=588 data-nosnippet>588</a>            // size of the input script.
+<a href=#589 id=589 data-nosnippet>589</a>            </span><span class="kw">if </span>i.coin().value &lt;= marginal_fee {
+<a href=#590 id=590 data-nosnippet>590</a>                <span class="prelude-val">Some</span>(i.outpoint().clone())
+<a href=#591 id=591 data-nosnippet>591</a>            } <span class="kw">else </span>{
+<a href=#592 id=592 data-nosnippet>592</a>                <span class="prelude-val">None
+<a href=#593 id=593 data-nosnippet>593</a>            </span>}
+<a href=#594 id=594 data-nosnippet>594</a>        })
+<a href=#595 id=595 data-nosnippet>595</a>        .collect();
+<a href=#596 id=596 data-nosnippet>596</a>
+<a href=#597 id=597 data-nosnippet>597</a>    <span class="kw">let </span><span class="kw-2">mut </span>s_dust: Vec&lt;<span class="kw">_</span>&gt; = sapling
+<a href=#598 id=598 data-nosnippet>598</a>        .inputs()
 <a href=#599 id=599 data-nosnippet>599</a>        .iter()
 <a href=#600 id=600 data-nosnippet>600</a>        .filter_map(|i| {
-<a href=#601 id=601 data-nosnippet>601</a>            <span class="comment">// For now, we're just assuming P2PKH inputs, so we don't check the
-<a href=#602 id=602 data-nosnippet>602</a>            // size of the input script.
-<a href=#603 id=603 data-nosnippet>603</a>            </span><span class="kw">if </span>i.coin().value &lt;= marginal_fee {
-<a href=#604 id=604 data-nosnippet>604</a>                <span class="prelude-val">Some</span>(i.outpoint().clone())
-<a href=#605 id=605 data-nosnippet>605</a>            } <span class="kw">else </span>{
-<a href=#606 id=606 data-nosnippet>606</a>                <span class="prelude-val">None
-<a href=#607 id=607 data-nosnippet>607</a>            </span>}
-<a href=#608 id=608 data-nosnippet>608</a>        })
-<a href=#609 id=609 data-nosnippet>609</a>        .collect();
-<a href=#610 id=610 data-nosnippet>610</a>
-<a href=#611 id=611 data-nosnippet>611</a>    <span class="kw">let </span><span class="kw-2">mut </span>s_dust: Vec&lt;<span class="kw">_</span>&gt; = sapling
-<a href=#612 id=612 data-nosnippet>612</a>        .inputs()
-<a href=#613 id=613 data-nosnippet>613</a>        .iter()
-<a href=#614 id=614 data-nosnippet>614</a>        .filter_map(|i| {
-<a href=#615 id=615 data-nosnippet>615</a>            <span class="kw">if </span>sapling_fees::InputView::&lt;NoteRefT&gt;::value(i) &lt;= marginal_fee {
-<a href=#616 id=616 data-nosnippet>616</a>                <span class="prelude-val">Some</span>(sapling_fees::InputView::&lt;NoteRefT&gt;::note_id(i).clone())
-<a href=#617 id=617 data-nosnippet>617</a>            } <span class="kw">else </span>{
-<a href=#618 id=618 data-nosnippet>618</a>                <span class="prelude-val">None
-<a href=#619 id=619 data-nosnippet>619</a>            </span>}
-<a href=#620 id=620 data-nosnippet>620</a>        })
-<a href=#621 id=621 data-nosnippet>621</a>        .collect();
-<a href=#622 id=622 data-nosnippet>622</a>
-<a href=#623 id=623 data-nosnippet>623</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#624 id=624 data-nosnippet>624</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>o_dust: Vec&lt;NoteRefT&gt; = orchard
-<a href=#625 id=625 data-nosnippet>625</a>        .inputs()
-<a href=#626 id=626 data-nosnippet>626</a>        .iter()
-<a href=#627 id=627 data-nosnippet>627</a>        .filter_map(|i| {
-<a href=#628 id=628 data-nosnippet>628</a>            <span class="kw">if </span>orchard_fees::InputView::&lt;NoteRefT&gt;::value(i) &lt;= marginal_fee {
-<a href=#629 id=629 data-nosnippet>629</a>                <span class="prelude-val">Some</span>(orchard_fees::InputView::&lt;NoteRefT&gt;::note_id(i).clone())
-<a href=#630 id=630 data-nosnippet>630</a>            } <span class="kw">else </span>{
-<a href=#631 id=631 data-nosnippet>631</a>                <span class="prelude-val">None
-<a href=#632 id=632 data-nosnippet>632</a>            </span>}
-<a href=#633 id=633 data-nosnippet>633</a>        })
-<a href=#634 id=634 data-nosnippet>634</a>        .collect();
-<a href=#635 id=635 data-nosnippet>635</a>    <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
-<a href=#636 id=636 data-nosnippet>636</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>o_dust: Vec&lt;NoteRefT&gt; = <span class="macro">vec!</span>[];
-<a href=#637 id=637 data-nosnippet>637</a>
-<a href=#638 id=638 data-nosnippet>638</a>    <span class="comment">// If we don't have any dust inputs, there is nothing to check.
-<a href=#639 id=639 data-nosnippet>639</a>    </span><span class="kw">if </span>t_dust.is_empty() &amp;&amp; s_dust.is_empty() &amp;&amp; o_dust.is_empty() {
-<a href=#640 id=640 data-nosnippet>640</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#641 id=641 data-nosnippet>641</a>    }
+<a href=#601 id=601 data-nosnippet>601</a>            <span class="kw">if </span>sapling_fees::InputView::&lt;NoteRefT&gt;::value(i) &lt;= marginal_fee {
+<a href=#602 id=602 data-nosnippet>602</a>                <span class="prelude-val">Some</span>(sapling_fees::InputView::&lt;NoteRefT&gt;::note_id(i).clone())
+<a href=#603 id=603 data-nosnippet>603</a>            } <span class="kw">else </span>{
+<a href=#604 id=604 data-nosnippet>604</a>                <span class="prelude-val">None
+<a href=#605 id=605 data-nosnippet>605</a>            </span>}
+<a href=#606 id=606 data-nosnippet>606</a>        })
+<a href=#607 id=607 data-nosnippet>607</a>        .collect();
+<a href=#608 id=608 data-nosnippet>608</a>
+<a href=#609 id=609 data-nosnippet>609</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#610 id=610 data-nosnippet>610</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>o_dust: Vec&lt;NoteRefT&gt; = orchard
+<a href=#611 id=611 data-nosnippet>611</a>        .inputs()
+<a href=#612 id=612 data-nosnippet>612</a>        .iter()
+<a href=#613 id=613 data-nosnippet>613</a>        .filter_map(|i| {
+<a href=#614 id=614 data-nosnippet>614</a>            <span class="kw">if </span>orchard_fees::InputView::&lt;NoteRefT&gt;::value(i) &lt;= marginal_fee {
+<a href=#615 id=615 data-nosnippet>615</a>                <span class="prelude-val">Some</span>(orchard_fees::InputView::&lt;NoteRefT&gt;::note_id(i).clone())
+<a href=#616 id=616 data-nosnippet>616</a>            } <span class="kw">else </span>{
+<a href=#617 id=617 data-nosnippet>617</a>                <span class="prelude-val">None
+<a href=#618 id=618 data-nosnippet>618</a>            </span>}
+<a href=#619 id=619 data-nosnippet>619</a>        })
+<a href=#620 id=620 data-nosnippet>620</a>        .collect();
+<a href=#621 id=621 data-nosnippet>621</a>    <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
+<a href=#622 id=622 data-nosnippet>622</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>o_dust: Vec&lt;NoteRefT&gt; = <span class="macro">vec!</span>[];
+<a href=#623 id=623 data-nosnippet>623</a>
+<a href=#624 id=624 data-nosnippet>624</a>    <span class="comment">// If we don't have any dust inputs, there is nothing to check.
+<a href=#625 id=625 data-nosnippet>625</a>    </span><span class="kw">if </span>t_dust.is_empty() &amp;&amp; s_dust.is_empty() &amp;&amp; o_dust.is_empty() {
+<a href=#626 id=626 data-nosnippet>626</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#627 id=627 data-nosnippet>627</a>    }
+<a href=#628 id=628 data-nosnippet>628</a>
+<a href=#629 id=629 data-nosnippet>629</a>    <span class="kw">let </span>(t_inputs_len, t_outputs_len) = (
+<a href=#630 id=630 data-nosnippet>630</a>        transparent_inputs.len() + usize::from(ephemeral_balance.is_some_and(|b| b.is_input())),
+<a href=#631 id=631 data-nosnippet>631</a>        transparent_outputs.len() + usize::from(ephemeral_balance.is_some_and(|b| b.is_output())),
+<a href=#632 id=632 data-nosnippet>632</a>    );
+<a href=#633 id=633 data-nosnippet>633</a>    <span class="kw">let </span>(s_inputs_len, s_outputs_len) = (sapling.inputs().len(), sapling.outputs().len());
+<a href=#634 id=634 data-nosnippet>634</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#635 id=635 data-nosnippet>635</a>    </span><span class="kw">let </span>(o_inputs_len, o_outputs_len) = (orchard.inputs().len(), orchard.outputs().len());
+<a href=#636 id=636 data-nosnippet>636</a>    <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
+<a href=#637 id=637 data-nosnippet>637</a>    </span><span class="kw">let </span>(o_inputs_len, o_outputs_len) = (<span class="number">0usize</span>, <span class="number">0usize</span>);
+<a href=#638 id=638 data-nosnippet>638</a>
+<a href=#639 id=639 data-nosnippet>639</a>    <span class="kw">let </span>t_non_dust = t_inputs_len.checked_sub(t_dust.len()).unwrap();
+<a href=#640 id=640 data-nosnippet>640</a>    <span class="kw">let </span>s_non_dust = s_inputs_len.checked_sub(s_dust.len()).unwrap();
+<a href=#641 id=641 data-nosnippet>641</a>    <span class="kw">let </span>o_non_dust = o_inputs_len.checked_sub(o_dust.len()).unwrap();
 <a href=#642 id=642 data-nosnippet>642</a>
-<a href=#643 id=643 data-nosnippet>643</a>    <span class="kw">let </span>(t_inputs_len, t_outputs_len) = (
-<a href=#644 id=644 data-nosnippet>644</a>        transparent_inputs.len() + usize::from(ephemeral_balance.is_some_and(|b| b.is_input())),
-<a href=#645 id=645 data-nosnippet>645</a>        transparent_outputs.len() + usize::from(ephemeral_balance.is_some_and(|b| b.is_output())),
-<a href=#646 id=646 data-nosnippet>646</a>    );
-<a href=#647 id=647 data-nosnippet>647</a>    <span class="kw">let </span>(s_inputs_len, s_outputs_len) = (sapling.inputs().len(), sapling.outputs().len());
-<a href=#648 id=648 data-nosnippet>648</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#649 id=649 data-nosnippet>649</a>    </span><span class="kw">let </span>(o_inputs_len, o_outputs_len) = (orchard.inputs().len(), orchard.outputs().len());
-<a href=#650 id=650 data-nosnippet>650</a>    <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
-<a href=#651 id=651 data-nosnippet>651</a>    </span><span class="kw">let </span>(o_inputs_len, o_outputs_len) = (<span class="number">0usize</span>, <span class="number">0usize</span>);
-<a href=#652 id=652 data-nosnippet>652</a>
-<a href=#653 id=653 data-nosnippet>653</a>    <span class="kw">let </span>t_non_dust = t_inputs_len.checked_sub(t_dust.len()).unwrap();
-<a href=#654 id=654 data-nosnippet>654</a>    <span class="kw">let </span>s_non_dust = s_inputs_len.checked_sub(s_dust.len()).unwrap();
-<a href=#655 id=655 data-nosnippet>655</a>    <span class="kw">let </span>o_non_dust = o_inputs_len.checked_sub(o_dust.len()).unwrap();
+<a href=#643 id=643 data-nosnippet>643</a>    <span class="comment">// Return the number of allowed dust inputs from each pool.
+<a href=#644 id=644 data-nosnippet>644</a>    </span><span class="kw">let </span>allowed_dust = |change: <span class="kw-2">&amp;</span>OutputManifest| {
+<a href=#645 id=645 data-nosnippet>645</a>        <span class="comment">// Here we assume a "ZIP 317-like" fee model in which the existence of an output
+<a href=#646 id=646 data-nosnippet>646</a>        // to a given pool implies that a corresponding input from that pool can be
+<a href=#647 id=647 data-nosnippet>647</a>        // provided without increasing the fee. (This is also likely to be true for
+<a href=#648 id=648 data-nosnippet>648</a>        // future fee models if we do not want to penalize use of Orchard relative to
+<a href=#649 id=649 data-nosnippet>649</a>        // other pools.)
+<a href=#650 id=650 data-nosnippet>650</a>        //
+<a href=#651 id=651 data-nosnippet>651</a>        // Under that assumption, we want to calculate the maximum number of dust inputs
+<a href=#652 id=652 data-nosnippet>652</a>        // from each pool, out of the ones we actually have, that can be economically
+<a href=#653 id=653 data-nosnippet>653</a>        // spent along with the non-dust inputs. Get an initial estimate by calculating
+<a href=#654 id=654 data-nosnippet>654</a>        // the number of dust inputs in each pool that will be allowed regardless of
+<a href=#655 id=655 data-nosnippet>655</a>        // padding or grace.
 <a href=#656 id=656 data-nosnippet>656</a>
-<a href=#657 id=657 data-nosnippet>657</a>    <span class="comment">// Return the number of allowed dust inputs from each pool.
-<a href=#658 id=658 data-nosnippet>658</a>    </span><span class="kw">let </span>allowed_dust = |change: <span class="kw-2">&amp;</span>OutputManifest| {
-<a href=#659 id=659 data-nosnippet>659</a>        <span class="comment">// Here we assume a "ZIP 317-like" fee model in which the existence of an output
-<a href=#660 id=660 data-nosnippet>660</a>        // to a given pool implies that a corresponding input from that pool can be
-<a href=#661 id=661 data-nosnippet>661</a>        // provided without increasing the fee. (This is also likely to be true for
-<a href=#662 id=662 data-nosnippet>662</a>        // future fee models if we do not want to penalize use of Orchard relative to
-<a href=#663 id=663 data-nosnippet>663</a>        // other pools.)
-<a href=#664 id=664 data-nosnippet>664</a>        //
-<a href=#665 id=665 data-nosnippet>665</a>        // Under that assumption, we want to calculate the maximum number of dust inputs
-<a href=#666 id=666 data-nosnippet>666</a>        // from each pool, out of the ones we actually have, that can be economically
-<a href=#667 id=667 data-nosnippet>667</a>        // spent along with the non-dust inputs. Get an initial estimate by calculating
-<a href=#668 id=668 data-nosnippet>668</a>        // the number of dust inputs in each pool that will be allowed regardless of
-<a href=#669 id=669 data-nosnippet>669</a>        // padding or grace.
-<a href=#670 id=670 data-nosnippet>670</a>
-<a href=#671 id=671 data-nosnippet>671</a>        </span><span class="kw">let </span>t_allowed = min(
-<a href=#672 id=672 data-nosnippet>672</a>            t_dust.len(),
-<a href=#673 id=673 data-nosnippet>673</a>            (t_outputs_len + change.transparent).saturating_sub(t_non_dust),
-<a href=#674 id=674 data-nosnippet>674</a>        );
-<a href=#675 id=675 data-nosnippet>675</a>        <span class="kw">let </span>s_allowed = min(
-<a href=#676 id=676 data-nosnippet>676</a>            s_dust.len(),
-<a href=#677 id=677 data-nosnippet>677</a>            (s_outputs_len + change.sapling).saturating_sub(s_non_dust),
-<a href=#678 id=678 data-nosnippet>678</a>        );
-<a href=#679 id=679 data-nosnippet>679</a>        <span class="kw">let </span>o_allowed = min(
-<a href=#680 id=680 data-nosnippet>680</a>            o_dust.len(),
-<a href=#681 id=681 data-nosnippet>681</a>            (o_outputs_len + change.orchard).saturating_sub(o_non_dust),
-<a href=#682 id=682 data-nosnippet>682</a>        );
-<a href=#683 id=683 data-nosnippet>683</a>
-<a href=#684 id=684 data-nosnippet>684</a>        <span class="comment">// We'll be spending the non-dust and allowed dust in each pool.
-<a href=#685 id=685 data-nosnippet>685</a>        </span><span class="kw">let </span>t_req_inputs = t_non_dust + t_allowed;
-<a href=#686 id=686 data-nosnippet>686</a>        <span class="kw">let </span>s_req_inputs = s_non_dust + s_allowed;
-<a href=#687 id=687 data-nosnippet>687</a>        <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#688 id=688 data-nosnippet>688</a>        </span><span class="kw">let </span>o_req_inputs = o_non_dust + o_allowed;
-<a href=#689 id=689 data-nosnippet>689</a>
-<a href=#690 id=690 data-nosnippet>690</a>        <span class="comment">// This calculates the hypothetical number of actions with given extra inputs,
-<a href=#691 id=691 data-nosnippet>691</a>        // for ZIP 317 and the padding rules in effect. The padding rules for each
-<a href=#692 id=692 data-nosnippet>692</a>        // pool are subtle (they also depend on `bundle_required` for example), so we
-<a href=#693 id=693 data-nosnippet>693</a>        // must actually call them rather than try to predict their effect. To tell
-<a href=#694 id=694 data-nosnippet>694</a>        // whether we can freely add an extra input from a given pool, we need to call
-<a href=#695 id=695 data-nosnippet>695</a>        // them both with and without that input; if the number of actions does not
-<a href=#696 id=696 data-nosnippet>696</a>        // increase, then the input is free to add.
-<a href=#697 id=697 data-nosnippet>697</a>        </span><span class="kw">let </span>hypothetical_actions = |t_extra, s_extra, _o_extra| {
-<a href=#698 id=698 data-nosnippet>698</a>            <span class="kw">let </span>s_spend_count = sapling
-<a href=#699 id=699 data-nosnippet>699</a>                .bundle_type()
-<a href=#700 id=700 data-nosnippet>700</a>                .num_spends(s_req_inputs + s_extra)
-<a href=#701 id=701 data-nosnippet>701</a>                .map_err(ChangeError::BundleError)<span class="question-mark">?</span>;
-<a href=#702 id=702 data-nosnippet>702</a>
-<a href=#703 id=703 data-nosnippet>703</a>            <span class="kw">let </span>s_output_count = sapling
-<a href=#704 id=704 data-nosnippet>704</a>                .bundle_type()
-<a href=#705 id=705 data-nosnippet>705</a>                .num_outputs(s_req_inputs + s_extra, s_outputs_len + change.sapling)
-<a href=#706 id=706 data-nosnippet>706</a>                .map_err(ChangeError::BundleError)<span class="question-mark">?</span>;
-<a href=#707 id=707 data-nosnippet>707</a>
-<a href=#708 id=708 data-nosnippet>708</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#709 id=709 data-nosnippet>709</a>            </span><span class="kw">let </span>o_action_count = orchard
-<a href=#710 id=710 data-nosnippet>710</a>                .bundle_type()
-<a href=#711 id=711 data-nosnippet>711</a>                .num_actions(o_req_inputs + _o_extra, o_outputs_len + change.orchard)
-<a href=#712 id=712 data-nosnippet>712</a>                .map_err(ChangeError::BundleError)<span class="question-mark">?</span>;
-<a href=#713 id=713 data-nosnippet>713</a>            <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
-<a href=#714 id=714 data-nosnippet>714</a>            </span><span class="kw">let </span>o_action_count = <span class="number">0</span>;
-<a href=#715 id=715 data-nosnippet>715</a>
-<a href=#716 id=716 data-nosnippet>716</a>            <span class="comment">// To calculate the number of unused actions, we assume that transparent inputs
-<a href=#717 id=717 data-nosnippet>717</a>            // and outputs are P2PKH.
-<a href=#718 id=718 data-nosnippet>718</a>            </span><span class="prelude-val">Ok</span>(
-<a href=#719 id=719 data-nosnippet>719</a>                max(t_req_inputs + t_extra, t_outputs_len + change.transparent)
-<a href=#720 id=720 data-nosnippet>720</a>                    + max(s_spend_count, s_output_count)
-<a href=#721 id=721 data-nosnippet>721</a>                    + o_action_count,
-<a href=#722 id=722 data-nosnippet>722</a>            )
-<a href=#723 id=723 data-nosnippet>723</a>        };
-<a href=#724 id=724 data-nosnippet>724</a>
-<a href=#725 id=725 data-nosnippet>725</a>        <span class="comment">// First calculate the baseline number of logical actions with only the definitely
-<a href=#726 id=726 data-nosnippet>726</a>        // allowed inputs estimated above. If it is less than `grace_actions`, try to allocate
-<a href=#727 id=727 data-nosnippet>727</a>        // a grace input first to transparent dust, then to Sapling dust, then to Orchard dust.
-<a href=#728 id=728 data-nosnippet>728</a>        // If the number of actions increases, it was not possible to allocate that input for
-<a href=#729 id=729 data-nosnippet>729</a>        // free. This approach is sufficient because at most one such input can be allocated,
-<a href=#730 id=730 data-nosnippet>730</a>        // since `grace_actions` is at most 2 for ZIP 317 and there must be at least one
-<a href=#731 id=731 data-nosnippet>731</a>        // logical action. (If `grace_actions` were greater than 2 then the code would still
-<a href=#732 id=732 data-nosnippet>732</a>        // be correct, it would just not find all potential extra inputs.)
-<a href=#733 id=733 data-nosnippet>733</a>
-<a href=#734 id=734 data-nosnippet>734</a>        </span><span class="kw">let </span>baseline = hypothetical_actions(<span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>)<span class="question-mark">?</span>;
-<a href=#735 id=735 data-nosnippet>735</a>
-<a href=#736 id=736 data-nosnippet>736</a>        <span class="kw">let </span>(t_extra, s_extra, o_extra) = <span class="kw">if </span>baseline &gt;= grace_actions {
-<a href=#737 id=737 data-nosnippet>737</a>            (<span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>)
-<a href=#738 id=738 data-nosnippet>738</a>        } <span class="kw">else if </span>t_dust.len() &gt; t_allowed &amp;&amp; hypothetical_actions(<span class="number">1</span>, <span class="number">0</span>, <span class="number">0</span>)<span class="question-mark">? </span>&lt;= baseline {
-<a href=#739 id=739 data-nosnippet>739</a>            (<span class="number">1</span>, <span class="number">0</span>, <span class="number">0</span>)
-<a href=#740 id=740 data-nosnippet>740</a>        } <span class="kw">else if </span>s_dust.len() &gt; s_allowed &amp;&amp; hypothetical_actions(<span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>)<span class="question-mark">? </span>&lt;= baseline {
-<a href=#741 id=741 data-nosnippet>741</a>            (<span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>)
-<a href=#742 id=742 data-nosnippet>742</a>        } <span class="kw">else if </span>o_dust.len() &gt; o_allowed &amp;&amp; hypothetical_actions(<span class="number">0</span>, <span class="number">0</span>, <span class="number">1</span>)<span class="question-mark">? </span>&lt;= baseline {
-<a href=#743 id=743 data-nosnippet>743</a>            (<span class="number">0</span>, <span class="number">0</span>, <span class="number">1</span>)
-<a href=#744 id=744 data-nosnippet>744</a>        } <span class="kw">else </span>{
-<a href=#745 id=745 data-nosnippet>745</a>            (<span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>)
-<a href=#746 id=746 data-nosnippet>746</a>        };
-<a href=#747 id=747 data-nosnippet>747</a>        <span class="prelude-val">Ok</span>(OutputManifest {
-<a href=#748 id=748 data-nosnippet>748</a>            transparent: t_allowed + t_extra,
-<a href=#749 id=749 data-nosnippet>749</a>            sapling: s_allowed + s_extra,
-<a href=#750 id=750 data-nosnippet>750</a>            orchard: o_allowed + o_extra,
-<a href=#751 id=751 data-nosnippet>751</a>        })
-<a href=#752 id=752 data-nosnippet>752</a>    };
-<a href=#753 id=753 data-nosnippet>753</a>
-<a href=#754 id=754 data-nosnippet>754</a>    <span class="comment">// Find the least number of allowed dust inputs for each pool for any `possible_change`.
-<a href=#755 id=755 data-nosnippet>755</a>    </span><span class="kw">let </span>allowed = possible_change
-<a href=#756 id=756 data-nosnippet>756</a>        .iter()
-<a href=#757 id=757 data-nosnippet>757</a>        .map(allowed_dust)
-<a href=#758 id=758 data-nosnippet>758</a>        .collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?
-<a href=#759 id=759 data-nosnippet>759</a>        </span>.into_iter()
-<a href=#760 id=760 data-nosnippet>760</a>        .reduce(|l, r| OutputManifest {
-<a href=#761 id=761 data-nosnippet>761</a>            transparent: min(l.transparent, r.transparent),
-<a href=#762 id=762 data-nosnippet>762</a>            sapling: min(l.sapling, r.sapling),
-<a href=#763 id=763 data-nosnippet>763</a>            orchard: min(l.orchard, r.orchard),
-<a href=#764 id=764 data-nosnippet>764</a>        })
-<a href=#765 id=765 data-nosnippet>765</a>        .expect(<span class="string">"possible_change is nonempty"</span>);
-<a href=#766 id=766 data-nosnippet>766</a>
-<a href=#767 id=767 data-nosnippet>767</a>    <span class="comment">// The inputs in the tail of each list after the first `*_allowed` are returned as uneconomic.
-<a href=#768 id=768 data-nosnippet>768</a>    // The caller should order the inputs from most to least preferred to spend.
-<a href=#769 id=769 data-nosnippet>769</a>    </span><span class="kw">let </span>t_dust = t_dust.split_off(allowed.transparent);
-<a href=#770 id=770 data-nosnippet>770</a>    <span class="kw">let </span>s_dust = s_dust.split_off(allowed.sapling);
-<a href=#771 id=771 data-nosnippet>771</a>    <span class="kw">let </span>o_dust = o_dust.split_off(allowed.orchard);
-<a href=#772 id=772 data-nosnippet>772</a>
-<a href=#773 id=773 data-nosnippet>773</a>    <span class="kw">if </span>t_dust.is_empty() &amp;&amp; s_dust.is_empty() &amp;&amp; o_dust.is_empty() {
-<a href=#774 id=774 data-nosnippet>774</a>        <span class="prelude-val">Ok</span>(())
-<a href=#775 id=775 data-nosnippet>775</a>    } <span class="kw">else </span>{
-<a href=#776 id=776 data-nosnippet>776</a>        <span class="prelude-val">Err</span>(ChangeError::DustInputs {
-<a href=#777 id=777 data-nosnippet>777</a>            transparent: t_dust,
-<a href=#778 id=778 data-nosnippet>778</a>            sapling: s_dust,
-<a href=#779 id=779 data-nosnippet>779</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#780 id=780 data-nosnippet>780</a>            </span>orchard: o_dust,
-<a href=#781 id=781 data-nosnippet>781</a>        })
-<a href=#782 id=782 data-nosnippet>782</a>    }
-<a href=#783 id=783 data-nosnippet>783</a>}</code></pre></div></section></main></body></html>
+<a href=#657 id=657 data-nosnippet>657</a>        </span><span class="kw">let </span>t_allowed = min(
+<a href=#658 id=658 data-nosnippet>658</a>            t_dust.len(),
+<a href=#659 id=659 data-nosnippet>659</a>            (t_outputs_len + change.transparent).saturating_sub(t_non_dust),
+<a href=#660 id=660 data-nosnippet>660</a>        );
+<a href=#661 id=661 data-nosnippet>661</a>        <span class="kw">let </span>s_allowed = min(
+<a href=#662 id=662 data-nosnippet>662</a>            s_dust.len(),
+<a href=#663 id=663 data-nosnippet>663</a>            (s_outputs_len + change.sapling).saturating_sub(s_non_dust),
+<a href=#664 id=664 data-nosnippet>664</a>        );
+<a href=#665 id=665 data-nosnippet>665</a>        <span class="kw">let </span>o_allowed = min(
+<a href=#666 id=666 data-nosnippet>666</a>            o_dust.len(),
+<a href=#667 id=667 data-nosnippet>667</a>            (o_outputs_len + change.orchard).saturating_sub(o_non_dust),
+<a href=#668 id=668 data-nosnippet>668</a>        );
+<a href=#669 id=669 data-nosnippet>669</a>
+<a href=#670 id=670 data-nosnippet>670</a>        <span class="comment">// We'll be spending the non-dust and allowed dust in each pool.
+<a href=#671 id=671 data-nosnippet>671</a>        </span><span class="kw">let </span>t_req_inputs = t_non_dust + t_allowed;
+<a href=#672 id=672 data-nosnippet>672</a>        <span class="kw">let </span>s_req_inputs = s_non_dust + s_allowed;
+<a href=#673 id=673 data-nosnippet>673</a>        <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#674 id=674 data-nosnippet>674</a>        </span><span class="kw">let </span>o_req_inputs = o_non_dust + o_allowed;
+<a href=#675 id=675 data-nosnippet>675</a>
+<a href=#676 id=676 data-nosnippet>676</a>        <span class="comment">// This calculates the hypothetical number of actions with given extra inputs,
+<a href=#677 id=677 data-nosnippet>677</a>        // for ZIP 317 and the padding rules in effect. The padding rules for each
+<a href=#678 id=678 data-nosnippet>678</a>        // pool are subtle (they also depend on `bundle_required` for example), so we
+<a href=#679 id=679 data-nosnippet>679</a>        // must actually call them rather than try to predict their effect. To tell
+<a href=#680 id=680 data-nosnippet>680</a>        // whether we can freely add an extra input from a given pool, we need to call
+<a href=#681 id=681 data-nosnippet>681</a>        // them both with and without that input; if the number of actions does not
+<a href=#682 id=682 data-nosnippet>682</a>        // increase, then the input is free to add.
+<a href=#683 id=683 data-nosnippet>683</a>        </span><span class="kw">let </span>hypothetical_actions = |t_extra, s_extra, _o_extra| {
+<a href=#684 id=684 data-nosnippet>684</a>            <span class="kw">let </span>s_spend_count = sapling
+<a href=#685 id=685 data-nosnippet>685</a>                .bundle_type()
+<a href=#686 id=686 data-nosnippet>686</a>                .num_spends(s_req_inputs + s_extra)
+<a href=#687 id=687 data-nosnippet>687</a>                .map_err(ChangeError::BundleError)<span class="question-mark">?</span>;
+<a href=#688 id=688 data-nosnippet>688</a>
+<a href=#689 id=689 data-nosnippet>689</a>            <span class="kw">let </span>s_output_count = sapling
+<a href=#690 id=690 data-nosnippet>690</a>                .bundle_type()
+<a href=#691 id=691 data-nosnippet>691</a>                .num_outputs(s_req_inputs + s_extra, s_outputs_len + change.sapling)
+<a href=#692 id=692 data-nosnippet>692</a>                .map_err(ChangeError::BundleError)<span class="question-mark">?</span>;
+<a href=#693 id=693 data-nosnippet>693</a>
+<a href=#694 id=694 data-nosnippet>694</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#695 id=695 data-nosnippet>695</a>            </span><span class="kw">let </span>o_action_count = orchard
+<a href=#696 id=696 data-nosnippet>696</a>                .bundle_type()
+<a href=#697 id=697 data-nosnippet>697</a>                .num_actions(o_req_inputs + _o_extra, o_outputs_len + change.orchard)
+<a href=#698 id=698 data-nosnippet>698</a>                .map_err(ChangeError::BundleError)<span class="question-mark">?</span>;
+<a href=#699 id=699 data-nosnippet>699</a>            <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
+<a href=#700 id=700 data-nosnippet>700</a>            </span><span class="kw">let </span>o_action_count = <span class="number">0</span>;
+<a href=#701 id=701 data-nosnippet>701</a>
+<a href=#702 id=702 data-nosnippet>702</a>            <span class="comment">// To calculate the number of unused actions, we assume that transparent inputs
+<a href=#703 id=703 data-nosnippet>703</a>            // and outputs are P2PKH.
+<a href=#704 id=704 data-nosnippet>704</a>            </span><span class="prelude-val">Ok</span>(
+<a href=#705 id=705 data-nosnippet>705</a>                max(t_req_inputs + t_extra, t_outputs_len + change.transparent)
+<a href=#706 id=706 data-nosnippet>706</a>                    + max(s_spend_count, s_output_count)
+<a href=#707 id=707 data-nosnippet>707</a>                    + o_action_count,
+<a href=#708 id=708 data-nosnippet>708</a>            )
+<a href=#709 id=709 data-nosnippet>709</a>        };
+<a href=#710 id=710 data-nosnippet>710</a>
+<a href=#711 id=711 data-nosnippet>711</a>        <span class="comment">// First calculate the baseline number of logical actions with only the definitely
+<a href=#712 id=712 data-nosnippet>712</a>        // allowed inputs estimated above. If it is less than `grace_actions`, try to allocate
+<a href=#713 id=713 data-nosnippet>713</a>        // a grace input first to transparent dust, then to Sapling dust, then to Orchard dust.
+<a href=#714 id=714 data-nosnippet>714</a>        // If the number of actions increases, it was not possible to allocate that input for
+<a href=#715 id=715 data-nosnippet>715</a>        // free. This approach is sufficient because at most one such input can be allocated,
+<a href=#716 id=716 data-nosnippet>716</a>        // since `grace_actions` is at most 2 for ZIP 317 and there must be at least one
+<a href=#717 id=717 data-nosnippet>717</a>        // logical action. (If `grace_actions` were greater than 2 then the code would still
+<a href=#718 id=718 data-nosnippet>718</a>        // be correct, it would just not find all potential extra inputs.)
+<a href=#719 id=719 data-nosnippet>719</a>
+<a href=#720 id=720 data-nosnippet>720</a>        </span><span class="kw">let </span>baseline = hypothetical_actions(<span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>)<span class="question-mark">?</span>;
+<a href=#721 id=721 data-nosnippet>721</a>
+<a href=#722 id=722 data-nosnippet>722</a>        <span class="kw">let </span>(t_extra, s_extra, o_extra) = <span class="kw">if </span>baseline &gt;= grace_actions {
+<a href=#723 id=723 data-nosnippet>723</a>            (<span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>)
+<a href=#724 id=724 data-nosnippet>724</a>        } <span class="kw">else if </span>t_dust.len() &gt; t_allowed &amp;&amp; hypothetical_actions(<span class="number">1</span>, <span class="number">0</span>, <span class="number">0</span>)<span class="question-mark">? </span>&lt;= baseline {
+<a href=#725 id=725 data-nosnippet>725</a>            (<span class="number">1</span>, <span class="number">0</span>, <span class="number">0</span>)
+<a href=#726 id=726 data-nosnippet>726</a>        } <span class="kw">else if </span>s_dust.len() &gt; s_allowed &amp;&amp; hypothetical_actions(<span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>)<span class="question-mark">? </span>&lt;= baseline {
+<a href=#727 id=727 data-nosnippet>727</a>            (<span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>)
+<a href=#728 id=728 data-nosnippet>728</a>        } <span class="kw">else if </span>o_dust.len() &gt; o_allowed &amp;&amp; hypothetical_actions(<span class="number">0</span>, <span class="number">0</span>, <span class="number">1</span>)<span class="question-mark">? </span>&lt;= baseline {
+<a href=#729 id=729 data-nosnippet>729</a>            (<span class="number">0</span>, <span class="number">0</span>, <span class="number">1</span>)
+<a href=#730 id=730 data-nosnippet>730</a>        } <span class="kw">else </span>{
+<a href=#731 id=731 data-nosnippet>731</a>            (<span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>)
+<a href=#732 id=732 data-nosnippet>732</a>        };
+<a href=#733 id=733 data-nosnippet>733</a>        <span class="prelude-val">Ok</span>(OutputManifest {
+<a href=#734 id=734 data-nosnippet>734</a>            transparent: t_allowed + t_extra,
+<a href=#735 id=735 data-nosnippet>735</a>            sapling: s_allowed + s_extra,
+<a href=#736 id=736 data-nosnippet>736</a>            orchard: o_allowed + o_extra,
+<a href=#737 id=737 data-nosnippet>737</a>        })
+<a href=#738 id=738 data-nosnippet>738</a>    };
+<a href=#739 id=739 data-nosnippet>739</a>
+<a href=#740 id=740 data-nosnippet>740</a>    <span class="comment">// Find the least number of allowed dust inputs for each pool for any `possible_change`.
+<a href=#741 id=741 data-nosnippet>741</a>    </span><span class="kw">let </span>allowed = possible_change
+<a href=#742 id=742 data-nosnippet>742</a>        .iter()
+<a href=#743 id=743 data-nosnippet>743</a>        .map(allowed_dust)
+<a href=#744 id=744 data-nosnippet>744</a>        .collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?
+<a href=#745 id=745 data-nosnippet>745</a>        </span>.into_iter()
+<a href=#746 id=746 data-nosnippet>746</a>        .reduce(|l, r| OutputManifest {
+<a href=#747 id=747 data-nosnippet>747</a>            transparent: min(l.transparent, r.transparent),
+<a href=#748 id=748 data-nosnippet>748</a>            sapling: min(l.sapling, r.sapling),
+<a href=#749 id=749 data-nosnippet>749</a>            orchard: min(l.orchard, r.orchard),
+<a href=#750 id=750 data-nosnippet>750</a>        })
+<a href=#751 id=751 data-nosnippet>751</a>        .expect(<span class="string">"possible_change is nonempty"</span>);
+<a href=#752 id=752 data-nosnippet>752</a>
+<a href=#753 id=753 data-nosnippet>753</a>    <span class="comment">// The inputs in the tail of each list after the first `*_allowed` are returned as uneconomic.
+<a href=#754 id=754 data-nosnippet>754</a>    // The caller should order the inputs from most to least preferred to spend.
+<a href=#755 id=755 data-nosnippet>755</a>    </span><span class="kw">let </span>t_dust = t_dust.split_off(allowed.transparent);
+<a href=#756 id=756 data-nosnippet>756</a>    <span class="kw">let </span>s_dust = s_dust.split_off(allowed.sapling);
+<a href=#757 id=757 data-nosnippet>757</a>    <span class="kw">let </span>o_dust = o_dust.split_off(allowed.orchard);
+<a href=#758 id=758 data-nosnippet>758</a>
+<a href=#759 id=759 data-nosnippet>759</a>    <span class="kw">if </span>t_dust.is_empty() &amp;&amp; s_dust.is_empty() &amp;&amp; o_dust.is_empty() {
+<a href=#760 id=760 data-nosnippet>760</a>        <span class="prelude-val">Ok</span>(())
+<a href=#761 id=761 data-nosnippet>761</a>    } <span class="kw">else </span>{
+<a href=#762 id=762 data-nosnippet>762</a>        <span class="prelude-val">Err</span>(ChangeError::DustInputs {
+<a href=#763 id=763 data-nosnippet>763</a>            transparent: t_dust,
+<a href=#764 id=764 data-nosnippet>764</a>            sapling: s_dust,
+<a href=#765 id=765 data-nosnippet>765</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#766 id=766 data-nosnippet>766</a>            </span>orchard: o_dust,
+<a href=#767 id=767 data-nosnippet>767</a>        })
+<a href=#768 id=768 data-nosnippet>768</a>    }
+<a href=#769 id=769 data-nosnippet>769</a>}</code></pre></div></section></main></body></html>
