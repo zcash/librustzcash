@@ -2,6 +2,7 @@ use blake2b_simd::{Hash as Blake2bHash, Params};
 use core2::io::Write;
 
 use ::transparent::{
+    address::write_script_pubkey,
     bundle::{self as transparent, TxOut},
     sighash::{
         TransparentAuthorizingContext, SIGHASH_ANYONECANPAY, SIGHASH_MASK, SIGHASH_NONE,
@@ -85,7 +86,7 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
                     Array::write(
                         &mut h,
                         bundle.authorization.input_scriptpubkeys(),
-                        |w, script| script.write(w),
+                        |w, script| write_script_pubkey(&script, w),
                     )
                     .unwrap();
                 }
@@ -123,7 +124,7 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
                 let txin = &bundle.vin[*input.index()];
                 txin.prevout.write(&mut ch).unwrap();
                 ch.write_all(&input.value().to_i64_le_bytes()).unwrap();
-                input.script_pubkey().write(&mut ch).unwrap();
+                write_script_pubkey(&input.script_pubkey(), &mut ch).unwrap();
                 ch.write_all(&txin.sequence.to_le_bytes()).unwrap();
             }
             let txin_sig_digest = ch.finalize();

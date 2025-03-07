@@ -1,8 +1,9 @@
 use alloc::vec::Vec;
 use getset::Getters;
 use zcash_protocol::value::Zatoshis;
+use zcash_script::script;
 
-use crate::{address::Script, bundle::Authorization};
+use crate::bundle::Authorization;
 
 pub const SIGHASH_ALL: u8 = 0x01;
 pub const SIGHASH_NONE: u8 = 0x02;
@@ -55,7 +56,7 @@ pub trait TransparentAuthorizingContext: Authorization {
     /// so that wallets can commit to the transparent input breakdown
     /// without requiring the full data of the previous transactions
     /// providing these inputs.
-    fn input_scriptpubkeys(&self) -> Vec<Script>;
+    fn input_scriptpubkeys(&self) -> Vec<script::PubKey>;
 }
 
 /// A transparent input that is signable because we know its value and `script_pubkey`.
@@ -64,8 +65,10 @@ pub trait TransparentAuthorizingContext: Authorization {
 pub struct SignableInput<'a> {
     pub(crate) hash_type: SighashType,
     pub(crate) index: usize,
-    pub(crate) script_code: &'a Script,
-    pub(crate) script_pubkey: &'a Script,
+    /// FIXME: I _think_ this should probably be `[u8]`, because it’s basically the untouched input,
+    /// and we only use it for hashing, etc.
+    pub(crate) script_code: &'a Vec<u8>,
+    pub(crate) script_pubkey: &'a script::PubKey,
     pub(crate) value: Zatoshis,
 }
 
@@ -75,8 +78,8 @@ impl<'a> SignableInput<'a> {
     pub fn from_parts(
         hash_type: SighashType,
         index: usize,
-        script_code: &'a Script,
-        script_pubkey: &'a Script,
+        script_code: &'a Vec<u8>,
+        script_pubkey: &'a script::PubKey,
         value: Zatoshis,
     ) -> Self {
         Self {
