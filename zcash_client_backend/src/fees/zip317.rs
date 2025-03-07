@@ -471,9 +471,7 @@ mod tests {
         }
 
         {
-            // spend a single Sapling note and produce a single change output, where the value of
-            // notes spent is sufficient to cover the fee and would not produce dust, but would not
-            // be sufficient to pay for the maximum number of possible splits
+            // spend a single Sapling note, with insufficient funds to cover the minimum fee.
             let result = change_strategy.compute_balance(
                 &Network::TestNetwork,
                 Network::TestNetwork
@@ -487,7 +485,7 @@ mod tests {
                         note_id: 0,
                         value: Zatoshis::const_from_u64(50000),
                     }][..],
-                    &[SaplingPayment::new(Zatoshis::const_from_u64(35000))][..],
+                    &[SaplingPayment::new(Zatoshis::const_from_u64(40001))][..],
                 ),
                 #[cfg(feature = "orchard")]
                 &orchard_fees::EmptyBundleView,
@@ -501,9 +499,52 @@ mod tests {
 
             assert_matches!(
                 result,
-                Ok(balance) if
-                    balance.proposed_change() == [ChangeValue::sapling(Zatoshis::const_from_u64(5000), None)] &&
-                    balance.fee_required() == Zatoshis::const_from_u64(10000)
+                Err(ChangeError::InsufficientFunds { available, required })
+                    if available == Zatoshis::const_from_u64(50000)
+                       && required == Zatoshis::const_from_u64(50001)
+            );
+        }
+
+        {
+            // Spend a single Sapling note, creating two output notes that cause the transaction to
+            // balance exactly. This will fail, because even though there are enough funds in the
+            // wallet for the transaction to go through, and the fee is correct for a two-output
+            // transaction, we prohibit this case in order to prevent the transaction recipients
+            // from being able to reason about the value of the input note via knowledge that there
+            // is no change output.
+            let result = change_strategy.compute_balance(
+                &Network::TestNetwork,
+                Network::TestNetwork
+                    .activation_height(NetworkUpgrade::Nu5)
+                    .unwrap(),
+                &[] as &[TestTransparentInput],
+                &[] as &[TxOut],
+                &(
+                    sapling::builder::BundleType::DEFAULT,
+                    &[TestSaplingInput {
+                        note_id: 0,
+                        value: Zatoshis::const_from_u64(50000),
+                    }][..],
+                    &[
+                        SaplingPayment::new(Zatoshis::const_from_u64(30000)),
+                        SaplingPayment::new(Zatoshis::const_from_u64(10000)),
+                    ][..],
+                ),
+                #[cfg(feature = "orchard")]
+                &orchard_fees::EmptyBundleView,
+                None,
+                // after excluding the inputs we're spending, we have no notes in the wallet
+                &AccountMeta::new(
+                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
+                    Some(PoolMeta::new(0, Zatoshis::ZERO)),
+                ),
+            );
+
+            assert_matches!(
+                result,
+                Err(ChangeError::InsufficientFunds { available, required })
+                    if available == Zatoshis::const_from_u64(50000)
+                       && required == Zatoshis::const_from_u64(55000)
             );
         }
     }

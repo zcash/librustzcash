@@ -1,4 +1,4 @@
-use core::cmp::{max, min};
+use core::cmp::{max, min, Ordering};
 use std::num::{NonZeroU64, NonZeroUsize};
 
 use zcash_primitives::transaction::fees::{
@@ -252,6 +252,7 @@ where
             0
         },
     };
+    assert!(target_change_counts.total_shielded() == target_change_count);
 
     // We don't create a fully-transparent transaction if a change memo is used.
     let fully_transparent = net_flows.is_transparent() && change_memo.is_none();
@@ -291,7 +292,7 @@ where
     let total_in = net_flows
         .total_in()
         .map_err(|e| ChangeError::StrategyError(E::from(e)))?;
-    let total_out = net_flows
+    let subtotal_out = net_flows
         .total_out()
         .map_err(|e| ChangeError::StrategyError(E::from(e)))?;
 
@@ -330,31 +331,6 @@ where
         }
     };
 
-    // Once we calculate the balance with and without change, there are five cases:
-    //
-    // 1. Insufficient funds even without change.
-    // 2. The fee amount without change exactly cancels out the net flow balance.
-    // 3. The fee amount without change is smaller than the change.
-    //    3a. Insufficient funds once the change output is added.
-    //    3b. The fee amount with change exactly cancels out the net flow balance.
-    //    3c. The fee amount with change leaves a non-zero change value.
-    //
-    // Case 2 happens for the second transaction of a ZIP 320 pair. In that case
-    // the transaction will be fully transparent, and there must be no change.
-    //
-    // If cases 2 or 3b happen for a transaction with any shielded flows, we
-    // want there to be a zero-value shielded change output anyway (i.e. treat
-    // case 2 as case 3, and case 3b as case 3c), because:
-    // * being able to distinguish these cases potentially leaks too much
-    //   information (an adversary that knows the number of external recipients
-    //   and the sum of their outputs learns the sum of the inputs if no change
-    //   output is present); and
-    // * we will then always have an shielded output in which to put change_memo,
-    //   if one is used.
-    //
-    // Note that using the `DustAction::AddDustToFee` policy inherently leaks
-    // more information.
-
     let transparent_input_sizes = transparent_inputs
         .iter()
         .map(|i| i.serialized_size())
@@ -372,6 +348,26 @@ where
                 .map(|_| P2PKH_STANDARD_OUTPUT_SIZE),
         );
 
+    // Once we calculate the balance with minimum fee (i.e. with no change),
+    // there are three cases:
+    //
+    // 1. Insufficient funds even with minimum fee.
+    // 2. The minimum fee exactly cancels out the net flow balance.
+    // 3. The minimum fee is smaller than the change.
+    //
+    // If case 2 happens for a transaction with any shielded flows, we want there
+    // to be a zero-value shielded change output anyway (i.e. treat this like case 3),
+    // because:
+    // * being able to distinguish these cases potentially leaks too much
+    //   information (an adversary that knows the number of external recipients
+    //   and the sum of their outputs learns the sum of the inputs if no change
+    //   output is present); and
+    // * we will then always have an shielded output in which to put change_memo,
+    //   if one is used.
+    //
+    // Note that using the `DustAction::AddDustToFee` policy inherently leaks
+    // more information.
+
     let min_fee = cfg
         .fee_rule
         .fee_required(
@@ -385,36 +381,41 @@ where
         )
         .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?;
 
-    let max_fee = max(
-        min_fee,
-        cfg.fee_rule
-            .fee_required(
-                cfg.params,
-                target_height,
-                transparent_input_sizes.clone(),
-                transparent_output_sizes.clone(),
-                sapling_input_count,
-                sapling_output_count(target_change_counts.sapling())?,
-                orchard_action_count(target_change_counts.orchard())?,
-            )
-            .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?,
-    );
-
-    let total_out_plus_min_fee = (total_out + min_fee).ok_or_else(overflow)?;
-    let total_out_plus_max_fee = (total_out + max_fee).ok_or_else(overflow)?;
+    let total_out_with_min_fee = (subtotal_out + min_fee).ok_or_else(overflow)?;
 
     #[allow(unused_mut)]
-    let (mut change, fee) = {
-        if total_in < total_out_plus_min_fee {
-            // Insufficient inputs exist to pay the minimum fee; there's no way we can construct
-            // the transaction.
+    let (mut change, fee) = match total_in.cmp(&total_out_with_min_fee) {
+        Ordering::Less => {
+            // Case 1. Insufficient input value exists to pay the minimum fee; there's no way
+            // we can construct the transaction.
             return Err(ChangeError::InsufficientFunds {
                 available: total_in,
-                required: total_out_plus_min_fee,
+                required: total_out_with_min_fee,
             });
-        } else if fully_transparent && total_in == total_out_plus_min_fee {
+        }
+        Ordering::Equal if fully_transparent => {
+            // Case 2 for a tx with all transparent flows and no change memo
+            // (e.g. the second transaction of a ZIP 320 pair).
             (vec![], min_fee)
-        } else {
+        }
+        _ => {
+            let max_fee = max(
+                min_fee,
+                cfg.fee_rule
+                    .fee_required(
+                        cfg.params,
+                        target_height,
+                        transparent_input_sizes.clone(),
+                        transparent_output_sizes.clone(),
+                        sapling_input_count,
+                        sapling_output_count(target_change_counts.sapling())?,
+                        orchard_action_count(target_change_counts.orchard())?,
+                    )
+                    .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?,
+            );
+
+            let total_out_with_max_fee = (subtotal_out + max_fee).ok_or_else(overflow)?;
+
             // We obtain a split count based on the total number of notes of sufficient size
             // available in the wallet, irrespective of pool. If we don't have any wallet metadata
             // available, we fall back to generating a single change output.
@@ -425,12 +426,12 @@ where
                     // We use a saturating subtraction here because there may be insufficient funds to pay
                     // the fee, *if* the requested number of split outputs are created. If there is no
                     // proposed change, the split policy should recommend only a single change output.
-                    (total_in - total_out_plus_max_fee).unwrap_or(Zatoshis::ZERO),
+                    (total_in - total_out_with_max_fee).unwrap_or(Zatoshis::ZERO),
                 )
             }));
 
             // If we don't have as many change outputs as we expected, recompute the fee.
-            let total_fee = if split_count < target_change_counts.total_shielded() {
+            let total_fee = if split_count < target_change_count {
                 cfg.fee_rule
                     .fee_required(
                         cfg.params,
@@ -449,13 +450,18 @@ where
                             0
                         })?,
                     )
-                    .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))
+                    .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?
             } else {
-                Ok(max_fee)
-            }?;
+                max_fee
+            };
 
-            let total_change = (total_in - (total_out + total_fee).ok_or_else(overflow)?)
-                .unwrap_or(Zatoshis::ZERO);
+            let total_out = (subtotal_out + total_fee).ok_or_else(overflow)?;
+            let total_change =
+                (total_in - total_out).ok_or_else(|| ChangeError::InsufficientFunds {
+                    available: total_in,
+                    required: total_out,
+                })?;
+
             let per_output_change = total_change.div_with_remainder(
                 NonZeroU64::new(u64::try_from(split_count).expect("usize fits into u64")).unwrap(),
             );
@@ -512,11 +518,7 @@ where
                     DustAction::AddDustToFee => {
                         // Zero-valued change is also always allowed for this policy, but when
                         // no change memo is given, we might omit the change output instead.
-
-                        let fee_with_dust = (total_in - total_out)
-                            .expect("we already checked for sufficient funds");
-                        // We can add a change output if necessary.
-                        assert!(total_fee <= fee_with_dust);
+                        let fee_with_dust = (total_change + total_fee).ok_or_else(overflow)?;
 
                         let reasonable_fee =
                             (total_fee + (MINIMUM_FEE * 10u64).unwrap()).ok_or_else(overflow)?;
