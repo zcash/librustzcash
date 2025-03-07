@@ -425,10 +425,10 @@ mod tests {
                 result,
                 Ok(balance) if
                     balance.proposed_change() == [
-                        ChangeValue::sapling(Zatoshis::const_from_u64(124_7500), None),
-                        ChangeValue::sapling(Zatoshis::const_from_u64(124_2500), None),
-                        ChangeValue::sapling(Zatoshis::const_from_u64(124_2500), None),
-                        ChangeValue::sapling(Zatoshis::const_from_u64(124_2500), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(124_3750), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(124_3750), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(124_3750), None),
+                        ChangeValue::sapling(Zatoshis::const_from_u64(124_3750), None),
                     ] &&
                     balance.fee_required() == Zatoshis::const_from_u64(25000)
             );
@@ -465,7 +465,7 @@ mod tests {
             assert_matches!(
                 result,
                 Ok(balance) if
-                    balance.proposed_change() == [] &&
+                    balance.proposed_change() == [ChangeValue::sapling(Zatoshis::ZERO, None)] &&
                     balance.fee_required() == Zatoshis::const_from_u64(10000)
             );
         }
