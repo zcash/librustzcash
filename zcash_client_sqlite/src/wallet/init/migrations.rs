@@ -1,3 +1,12 @@
+//! Migrations for the `zcash_client_sqlite` wallet database.
+//!
+//! The constants in this module cover all states of the migration DAG that have been
+//! exposed in a public crate release, in the order that crate users would have
+//! encountered them.
+//!
+//! Omitted versions had the same migration state as the first prior version that is
+//! included.
+
 mod add_account_birthdays;
 mod add_account_uuids;
 mod add_transaction_views;
@@ -190,20 +199,20 @@ const PUBLIC_MIGRATION_STATES: &[&[Uuid]] = &[
 ];
 
 /// Leaf migrations in the 0.4.0 release.
-const V_0_4_0: &[Uuid] = &[add_transaction_views::MIGRATION_ID];
+pub const V_0_4_0: &[Uuid] = &[add_transaction_views::MIGRATION_ID];
 
 /// Leaf migrations in the 0.6.0 release.
-const V_0_6_0: &[Uuid] = &[v_transactions_net::MIGRATION_ID];
+pub const V_0_6_0: &[Uuid] = &[v_transactions_net::MIGRATION_ID];
 
 /// Leaf migrations in the 0.8.0 release.
-const V_0_8_0: &[Uuid] = &[
+pub const V_0_8_0: &[Uuid] = &[
     nullifier_map::MIGRATION_ID,
     v_transactions_note_uniqueness::MIGRATION_ID,
     wallet_summaries::MIGRATION_ID,
 ];
 
 /// Leaf migrations in the 0.9.0 release.
-const V_0_9_0: &[Uuid] = &[
+pub const V_0_9_0: &[Uuid] = &[
     nullifier_map::MIGRATION_ID,
     receiving_key_scopes::MIGRATION_ID,
     v_transactions_note_uniqueness::MIGRATION_ID,
@@ -211,21 +220,21 @@ const V_0_9_0: &[Uuid] = &[
 ];
 
 /// Leaf migrations in the 0.10.0 release.
-const V_0_10_0: &[Uuid] = &[
+pub const V_0_10_0: &[Uuid] = &[
     nullifier_map::MIGRATION_ID,
     orchard_received_notes::MIGRATION_ID,
     orchard_shardtree::MIGRATION_ID,
 ];
 
 /// Leaf migrations in the 0.10.3 release.
-const V_0_10_3: &[Uuid] = &[
+pub const V_0_10_3: &[Uuid] = &[
     ensure_orchard_ua_receiver::MIGRATION_ID,
     nullifier_map::MIGRATION_ID,
     orchard_shardtree::MIGRATION_ID,
 ];
 
 /// Leaf migrations in the 0.11.0 release.
-const V_0_11_0: &[Uuid] = &[
+pub const V_0_11_0: &[Uuid] = &[
     ensure_orchard_ua_receiver::MIGRATION_ID,
     ephemeral_addresses::MIGRATION_ID,
     nullifier_map::MIGRATION_ID,
@@ -235,25 +244,25 @@ const V_0_11_0: &[Uuid] = &[
 ];
 
 /// Leaf migrations in the 0.11.1 release.
-const V_0_11_1: &[Uuid] = &[tx_retrieval_queue::MIGRATION_ID];
+pub const V_0_11_1: &[Uuid] = &[tx_retrieval_queue::MIGRATION_ID];
 
 /// Leaf migrations in the 0.11.2 release.
-const V_0_11_2: &[Uuid] = &[support_legacy_sqlite::MIGRATION_ID];
+pub const V_0_11_2: &[Uuid] = &[support_legacy_sqlite::MIGRATION_ID];
 
 /// Leaf migrations in the 0.12.0 release.
-const V_0_12_0: &[Uuid] = &[fix_broken_commitment_trees::MIGRATION_ID];
+pub const V_0_12_0: &[Uuid] = &[fix_broken_commitment_trees::MIGRATION_ID];
 
 /// Leaf migrations in the 0.13.0 release.
-const V_0_13_0: &[Uuid] = &[fix_bad_change_flagging::MIGRATION_ID];
+pub const V_0_13_0: &[Uuid] = &[fix_bad_change_flagging::MIGRATION_ID];
 
 /// Leaf migrations in the 0.14.0 release.
-const V_0_14_0: &[Uuid] = &[
+pub const V_0_14_0: &[Uuid] = &[
     fix_bad_change_flagging::MIGRATION_ID,
     add_account_uuids::MIGRATION_ID,
 ];
 
 /// Leaf migrations in the 0.15.0 release.
-const V_0_15_0: &[Uuid] = &[
+pub const V_0_15_0: &[Uuid] = &[
     fix_bad_change_flagging::MIGRATION_ID,
     v_transactions_additional_totals::MIGRATION_ID,
 ];

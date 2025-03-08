@@ -7,7 +7,7 @@ use std::rc::Rc;
 use rand_core::RngCore;
 use regex::Regex;
 use schemerz::{Migrator, MigratorError};
-use schemerz_rusqlite::RusqliteAdapter;
+use schemerz_rusqlite::{RusqliteAdapter, RusqliteMigration};
 use secrecy::SecretVec;
 use shardtree::error::ShardTreeError;
 use uuid::Uuid;
@@ -21,7 +21,7 @@ use self::migrations::verify_network_compatibility;
 use super::commitment_tree;
 use crate::{error::SqliteClientError, util::Clock, WalletDb};
 
-mod migrations;
+pub mod migrations;
 
 const SQLITE_MAJOR_VERSION: u32 = 3;
 const MIN_SQLITE_MINOR_VERSION: u32 = 35;
@@ -417,6 +417,7 @@ pub fn init_wallet_db<
 pub struct WalletMigrator {
     seed: Option<SecretVec<u8>>,
     verify_seed_relevance: bool,
+    external_migrations: Option<Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>>>,
 }
 
 impl Default for WalletMigrator {
@@ -431,6 +432,7 @@ impl WalletMigrator {
         Self {
             seed: None,
             verify_seed_relevance: true,
+            external_migrations: None,
         }
     }
 
@@ -444,6 +446,61 @@ impl WalletMigrator {
     #[cfg(test)]
     pub(crate) fn ignore_seed_relevance(mut self) -> Self {
         self.verify_seed_relevance = false;
+        self
+    }
+
+    /// Sets the external migration graph to apply alongside the internal migrations.
+    ///
+    /// From a data management perspective, it can be useful to store additional data
+    /// alongside the `zcash_client_sqlite` wallet database. This method enables you to
+    /// provide an external [`schemerz`] migration graph that the migrator will apply to
+    /// the wallet database.
+    ///
+    /// # WARNING
+    ///
+    /// **DO NOT** depend on or modify internal details of the `zcash_client_sqlite`
+    /// schema!
+    ///
+    /// The internal migrations are written to take into account internal relationships
+    /// between the `zcash_client_sqlite` tables, but they will never take into account
+    /// external tables. In particular, this means that you **MUST NOT**:
+    /// - Modify the structure or contents of any internal table.
+    /// - Create foreign keys in your tables pointing to internal tables.
+    ///
+    /// The `zcash_client_sqlite` schema does not have any common prefix it uses for
+    /// tables, indexes, or views. However, we promise to not use the prefix `ext_` for
+    /// any internal names. Schema created by external migrations **MUST** use name
+    /// prefixing with a prefix that is unlikely to collide with either the internal names
+    /// or other potential external schemas (e.g. `ext_myappname_*`).
+    ///
+    /// # Integration
+    ///
+    /// In order to enable anchoring your external migrations correctly with respect to
+    /// this library's internal migrations, we provide constants in the [`migrations`]
+    /// module (for each release that adds a migration) which you can include within your
+    /// [`schemerz::Migration::dependencies`] set.
+    ///
+    /// Each migration runs inside a database transaction, which has the following
+    /// implications:
+    /// - `PRAGMA foreign_keys` has no effect inside a transaction, so the migrator
+    ///   handles foreign key enforcement itself:
+    ///   - `PRAGMA foreign_keys = OFF` is set before running any migrations.
+    ///   - `PRAGMA foreign_keys = ON` is set after all migrations are successful.
+    /// - `PRAGMA legacy_alter_table` should only be used in cases where its effect is
+    ///   explicitly intended, so the migrator does not use it globally. If you want to
+    ///   rename tables without breaking foreign key relationships, you need to do so
+    ///   yourself inside individual migrations:
+    ///   ```sql
+    ///   PRAGMA legacy_alter_table = ON;
+    ///   DROP TABLE table_name;
+    ///   ALTER TABLE table_name_new RENAME TO table_name;
+    ///   PRAGMA legacy_alter_table = OFF;
+    ///   ```
+    pub fn with_external_migrations(
+        mut self,
+        migrations: Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>>,
+    ) -> Self {
+        self.external_migrations = Some(migrations);
         self
     }
 
@@ -476,6 +533,7 @@ impl WalletMigrator {
         init_wallet_db_internal(
             wdb,
             self.seed,
+            self.external_migrations,
             target_migrations,
             self.verify_seed_relevance,
         )
@@ -490,6 +548,7 @@ fn init_wallet_db_internal<
 >(
     wdb: &mut WalletDb<C, P, CL, R>,
     seed: Option<SecretVec<u8>>,
+    external_migrations: Option<Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>>>,
     target_migrations: &[Uuid],
     verify_seed_relevance: bool,
 ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
@@ -540,6 +599,9 @@ fn init_wallet_db_internal<
             .into_iter(),
         )
         .expect("Wallet migration registration should have been successful.");
+    if let Some(migrations) = external_migrations {
+        migrator.register_multiple(migrations.into_iter())?;
+    }
     if target_migrations.is_empty() {
         migrator.up(None)?;
     } else {
@@ -632,7 +694,7 @@ pub(crate) mod testing {
         wdb: &mut WalletDb<rusqlite::Connection, P, CL, R>,
         seed: Option<SecretVec<u8>>,
     ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
-        super::init_wallet_db_internal(wdb, seed, &[], true)
+        super::init_wallet_db_internal(wdb, seed, None, &[], true)
     }
 }
 
@@ -797,6 +859,25 @@ mod tests {
                 re.replace_all(&expected_views[expected_idx], " ").trim(),
             );
             expected_idx += 1;
+        }
+    }
+
+    #[test]
+    fn external_schema_prefix_unused() {
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let mut names_query = st
+            .wallet()
+            .db()
+            .conn
+            .prepare("SELECT tbl_name FROM sqlite_schema")
+            .unwrap();
+        let mut rows = names_query.query([]).unwrap();
+        while let Some(row) = rows.next().unwrap() {
+            let name: String = row.get(0).unwrap();
+            assert!(!name.starts_with("ext_"));
         }
     }
 
