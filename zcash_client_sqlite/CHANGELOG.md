@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_sqlite::wallet::init::WalletMigrator`
+
 ## [0.16.0] - 2025-03-19
 
 ### Added

@@ -331,10 +331,158 @@ pub fn init_wallet_db<
     wdb: &mut WalletDb<C, P, CL, R>,
     seed: Option<SecretVec<u8>>,
 ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
-    init_wallet_db_internal(wdb, seed, &[], true)
+    if let Some(seed) = seed {
+        WalletMigrator::new().with_seed(seed)
+    } else {
+        WalletMigrator::new()
+    }
+    .init_or_migrate(wdb)
 }
 
-pub(crate) fn init_wallet_db_internal<
+/// A migrator that sets up the internal structure of the wallet database.
+///
+/// This procedure will automatically perform migration operations to update the wallet
+/// database to the database structure required by the current version of this library,
+/// and should be invoked at least once any time a client program upgrades to a new
+/// version of this library. The operation of this procedure is idempotent, so it is safe
+/// (though not required) to invoke this operation every time the wallet is opened.
+///
+/// In order to correctly apply migrations to accounts derived from a seed, sometimes the
+/// seed is required. The migrator should first be used without calling [`Self::with_seed`];
+/// if a pending migration requires the seed, [`Self::init_or_migrate`] returns
+/// `Err(schemerz::MigratorError::Migration { error: WalletMigrationError::SeedRequired, .. })`.
+/// The caller can then call [`Self::with_seed`] and then re-call [`Self::init_or_migrate`]
+/// with the necessary seed.
+///
+/// > Note that currently only one seed can be provided; as such, wallets containing
+/// > accounts derived from several different seeds are unsupported, and will result in an
+/// > error. Support for multi-seed wallets is being tracked in [zcash/librustzcash#1284].
+///
+/// When a seed is provided, it is checked against the database for _relevance_: if any
+/// account in the wallet for which [`Account::source`] is [`AccountSource::Derived`] can
+/// be derived from the given seed, the seed is relevant to the wallet. If the given seed
+/// is not relevant, [`Self::init_or_migrate`] returns
+/// `Err(schemerz::MigratorError::Migration { error: WalletMigrationError::SeedNotRelevant, .. })`
+/// or `Err(schemerz::MigratorError::Adapter(WalletMigrationError::SeedNotRelevant))`.
+///
+/// We do not check whether the seed is relevant to any imported account, because that
+/// would require brute-forcing the ZIP 32 account index space. Consequentially, imported
+/// accounts are not migrated.
+///
+/// It is safe to use a wallet database previously created without the ability to create
+/// transparent spends with a build that enables transparent spends (via use of the
+/// `transparent-inputs` feature flag.) The reverse is unsafe, as wallet balance
+/// calculations would ignore the transparent UTXOs already controlled by the wallet.
+///
+/// [zcash/librustzcash#1284]: https://github.com/zcash/librustzcash/issues/1284
+/// [`Account::source`]: zcash_client_backend::data_api::Account::source
+/// [`AccountSource::Derived`]: zcash_client_backend::data_api::AccountSource::Derived
+///
+/// # Examples
+///
+/// ```
+/// # use std::error::Error;
+/// # use secrecy::SecretVec;
+/// # use tempfile::NamedTempFile;
+/// use rand_core::OsRng;
+/// use zcash_protocol::consensus::Network;
+/// use zcash_client_sqlite::{
+///     WalletDb,
+///     util::SystemClock,
+///     wallet::init::{WalletMigrationError, WalletMigrator},
+/// };
+///
+/// # fn main() -> Result<(), Box<dyn Error>> {
+/// # let data_file = NamedTempFile::new().unwrap();
+/// # let get_data_db_path = || data_file.path();
+/// # let load_seed = || -> Result<_, String> { Ok(SecretVec::new(vec![])) };
+/// let mut db = WalletDb::for_path(get_data_db_path(), Network::TestNetwork, SystemClock, OsRng)?;
+/// match WalletMigrator::new().init_or_migrate(&mut db) {
+///     Err(e)
+///         if matches!(
+///             e.source().and_then(|e| e.downcast_ref()),
+///             Some(&WalletMigrationError::SeedRequired)
+///         ) =>
+///     {
+///         let seed = load_seed()?;
+///         WalletMigrator::new()
+///             .with_seed(seed)
+///             .init_or_migrate(&mut db)
+///     }
+///     res => res,
+/// }?;
+/// # Ok(())
+/// # }
+/// ```
+pub struct WalletMigrator {
+    seed: Option<SecretVec<u8>>,
+    verify_seed_relevance: bool,
+}
+
+impl Default for WalletMigrator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WalletMigrator {
+    /// Constructs a new wallet migrator.
+    pub fn new() -> Self {
+        Self {
+            seed: None,
+            verify_seed_relevance: true,
+        }
+    }
+
+    /// Sets the seed for the migrator to use.
+    pub fn with_seed(mut self, seed: SecretVec<u8>) -> Self {
+        self.seed = Some(seed);
+        self
+    }
+
+    /// API for internal test usage only.
+    #[cfg(test)]
+    pub(crate) fn ignore_seed_relevance(mut self) -> Self {
+        self.verify_seed_relevance = false;
+        self
+    }
+
+    /// Sets up the internal structure of the given wallet database to be compatible with
+    /// this library version.
+    pub fn init_or_migrate<
+        C: BorrowMut<rusqlite::Connection>,
+        P: consensus::Parameters + 'static,
+        CL: Clock + Clone + 'static,
+        R: RngCore + Clone + 'static,
+    >(
+        self,
+        wdb: &mut WalletDb<C, P, CL, R>,
+    ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
+        self.init_or_migrate_to(wdb, &[])
+    }
+
+    /// Sets up the internal structure of the given wallet database to be compatible with
+    /// this library version.
+    pub(crate) fn init_or_migrate_to<
+        C: BorrowMut<rusqlite::Connection>,
+        P: consensus::Parameters + 'static,
+        CL: Clock + Clone + 'static,
+        R: RngCore + Clone + 'static,
+    >(
+        self,
+        wdb: &mut WalletDb<C, P, CL, R>,
+        target_migrations: &[Uuid],
+    ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
+        init_wallet_db_internal(
+            wdb,
+            self.seed,
+            target_migrations,
+            self.verify_seed_relevance,
+        )
+    }
+}
+
+fn init_wallet_db_internal<
     C: BorrowMut<rusqlite::Connection>,
     P: consensus::Parameters + 'static,
     CL: Clock + Clone + 'static,
