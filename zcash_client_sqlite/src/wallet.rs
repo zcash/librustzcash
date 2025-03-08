@@ -942,7 +942,7 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
     }?;
 
     #[cfg(not(feature = "transparent-inputs"))]
-    let transparent_child_index: Option<u32> = None;
+    let (transparent_child_index, cached_taddr): (Option<u32>, Option<String>) = (None, None);
 
     stmt.query_row(
         named_params![
