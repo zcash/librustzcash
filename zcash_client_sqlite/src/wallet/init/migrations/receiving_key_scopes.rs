@@ -323,8 +323,8 @@ mod tests {
         error::SqliteClientError,
         wallet::{
             init::{
-                init_wallet_db_internal,
                 migrations::{add_account_birthdays, shardtree_support, wallet_summaries},
+                WalletMigrator,
             },
             memo_repr,
             sapling::ReceivedSaplingOutput,
@@ -528,16 +528,16 @@ mod tests {
         // Create wallet upgraded to just before the current migration.
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), params, ()).unwrap();
-        init_wallet_db_internal(
-            &mut db_data,
-            None,
-            &[
-                add_account_birthdays::MIGRATION_ID,
-                shardtree_support::MIGRATION_ID,
-            ],
-            false,
-        )
-        .unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(
+                &mut db_data,
+                &[
+                    add_account_birthdays::MIGRATION_ID,
+                    shardtree_support::MIGRATION_ID,
+                ],
+            )
+            .unwrap();
 
         let (ufvk0, height, res) = prepare_wallet_state(&mut db_data);
         let tx = res.transaction();
@@ -590,7 +590,10 @@ mod tests {
             .unwrap();
 
         // Apply the current migration
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[super::MIGRATION_ID])
+            .unwrap();
 
         // There should be two rows in the `sapling_received_notes` table with correct scopes.
         let mut q = db_data
@@ -627,16 +630,16 @@ mod tests {
         // Create wallet upgraded to just before the current migration.
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), params, ()).unwrap();
-        init_wallet_db_internal(
-            &mut db_data,
-            None,
-            &[
-                wallet_summaries::MIGRATION_ID,
-                shardtree_support::MIGRATION_ID,
-            ],
-            false,
-        )
-        .unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(
+                &mut db_data,
+                &[
+                    wallet_summaries::MIGRATION_ID,
+                    shardtree_support::MIGRATION_ID,
+                ],
+            )
+            .unwrap();
 
         let (ufvk0, height, res) = prepare_wallet_state(&mut db_data);
         let tx = res.transaction();
@@ -768,7 +771,10 @@ mod tests {
             .unwrap();
 
         // Apply the current migration
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[super::MIGRATION_ID])
+            .unwrap();
 
         // There should be two rows in the `sapling_received_notes` table with correct scopes.
         let mut q = db_data

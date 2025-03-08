@@ -35,10 +35,8 @@ use zcash_protocol::{
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{
-    error::SqliteClientError,
-    util::testing::FixedClock,
-    wallet::init::{init_wallet_db, init_wallet_db_internal},
-    AccountUuid, WalletDb,
+    error::SqliteClientError, util::testing::FixedClock, wallet::init::WalletMigrator, AccountUuid,
+    WalletDb,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -186,10 +184,13 @@ impl DataStoreFactory for TestDbFactory {
             db_data = db_data.with_gap_limits(gap_limits.into());
         }
 
+        let migrator = WalletMigrator::new();
         if let Some(migrations) = &self.target_migrations {
-            init_wallet_db_internal(&mut db_data, None, migrations, true).unwrap();
+            migrator
+                .init_or_migrate_to(&mut db_data, migrations)
+                .unwrap();
         } else {
-            init_wallet_db(&mut db_data, None).unwrap();
+            migrator.init_or_migrate(&mut db_data).unwrap();
         }
         Ok(TestDb::from_parts(db_data, data_file))
     }

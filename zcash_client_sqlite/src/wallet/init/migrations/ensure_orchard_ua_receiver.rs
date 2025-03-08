@@ -99,7 +99,7 @@ mod tests {
     use zcash_protocol::consensus::Network;
 
     use crate::{
-        wallet::init::{init_wallet_db, init_wallet_db_internal, migrations::addresses_table},
+        wallet::init::{init_wallet_db, migrations::addresses_table, WalletMigrator},
         WalletDb, UA_ORCHARD, UA_TRANSPARENT,
     };
 
@@ -119,12 +119,10 @@ mod tests {
         .to_unified_full_viewing_key();
 
         assert_matches!(
-            init_wallet_db_internal(
-                &mut db_data,
-                Some(SecretVec::new(seed.clone())),
-                &[addresses_table::MIGRATION_ID],
-                false
-            ),
+            WalletMigrator::new()
+                .with_seed(SecretVec::new(seed.clone()))
+                .ignore_seed_relevance()
+                .init_or_migrate_to(&mut db_data, &[addresses_table::MIGRATION_ID]),
             Ok(_)
         );
 

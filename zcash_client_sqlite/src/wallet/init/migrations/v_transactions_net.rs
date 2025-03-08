@@ -212,7 +212,7 @@ mod tests {
     use zip32::AccountId;
 
     use crate::{
-        wallet::init::{init_wallet_db_internal, migrations::add_transaction_views},
+        wallet::init::{migrations::add_transaction_views, WalletMigrator},
         WalletDb,
     };
 
@@ -220,13 +220,10 @@ mod tests {
     fn v_transactions_net() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork, ()).unwrap();
-        init_wallet_db_internal(
-            &mut db_data,
-            None,
-            &[add_transaction_views::MIGRATION_ID],
-            false,
-        )
-        .unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[add_transaction_views::MIGRATION_ID])
+            .unwrap();
 
         // Create two accounts in the wallet.
         let usk0 = UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::ZERO)
@@ -391,7 +388,10 @@ mod tests {
         }
 
         // Run this migration
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[super::MIGRATION_ID])
+            .unwrap();
 
         // Corrected behavior after v_transactions has been updated
         {

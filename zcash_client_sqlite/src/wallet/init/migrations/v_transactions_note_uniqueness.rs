@@ -170,7 +170,7 @@ mod tests {
     use crate::{
         testing::db::test_clock,
         util::testing::FixedClock,
-        wallet::init::{init_wallet_db_internal, migrations::v_transactions_net},
+        wallet::init::{migrations::v_transactions_net, WalletMigrator},
         WalletDb,
     };
 
@@ -179,13 +179,10 @@ mod tests {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data =
             WalletDb::for_path(data_file.path(), Network::TestNetwork, test_clock()).unwrap();
-        init_wallet_db_internal(
-            &mut db_data,
-            None,
-            &[v_transactions_net::MIGRATION_ID],
-            false,
-        )
-        .unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[v_transactions_net::MIGRATION_ID])
+            .unwrap();
 
         // Create an account in the wallet
         let usk0 = UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::ZERO)
@@ -255,7 +252,10 @@ mod tests {
         check_balance_delta(&mut db_data, 1);
 
         // Apply the current migration.
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[super::MIGRATION_ID])
+            .unwrap();
 
         // Now it should be correct.
         check_balance_delta(&mut db_data, 2);
