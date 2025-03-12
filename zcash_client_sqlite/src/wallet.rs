@@ -4040,9 +4040,12 @@ pub(crate) fn get_block_range(
     ))?;
 
     stmt.query_row(
+        // BETWEEN is inclusive on both ends. However, we are comparing commitment tree sizes
+        // to commitment tree positions, so we must add one to the start, and we do not subtract
+        // one from the end.
         named_params! {
             ":min_tree_size": u64::from(commitment_tree_address.position_range_start()) + 1,
-            ":max_tree_size": u64::from(commitment_tree_address.position_range_start()) + 1,
+            ":max_tree_size": u64::from(commitment_tree_address.position_range_end()),
         },
         |row| {
             let min_height = row
