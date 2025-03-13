@@ -180,6 +180,10 @@ impl NodeData {
 /// V2 node metadata.
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct V2 {
     /// The V1 node data retained in V2.
     pub v1: NodeData,

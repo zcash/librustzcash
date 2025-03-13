@@ -109,6 +109,10 @@ pub trait Version {
 /// Version 1 of the Zcash chain history tree.
 ///
 /// This version was used for the Heartwood and Canopy epochs.
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum V1 {}
 
 impl Version for V1 {
@@ -146,6 +150,10 @@ impl Version for V1 {
 /// Version 2 of the Zcash chain history tree.
 ///
 /// This version is used from the NU5 epoch.
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum V2 {}
 
 impl Version for V2 {
