@@ -38,6 +38,10 @@ impl std::fmt::Display for Error {
 /// Reference to the tree node.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum EntryLink {
     /// Reference to the stored (in the array representation) leaf/node.
     Stored(u32),
@@ -57,6 +61,10 @@ impl std::fmt::Display for EntryLink {
 /// MMR Node. It is leaf when `left`, `right` are `None` and node when they are not.
 #[repr(C)]
 #[derive(Debug)]
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum EntryKind {
     /// Leaf entry.
     Leaf,

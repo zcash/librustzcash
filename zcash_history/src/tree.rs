@@ -13,6 +13,25 @@ use crate::{Entry, EntryKind, EntryLink, Error, Version};
 /// Intended use of this `Tree` is to instantiate it based on partially loaded data (see example
 /// how to pick right nodes from the array representation of MMR Tree), perform several operations
 /// (append-s/delete-s) and then drop it.
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    serde(bound(
+        serialize = "V: serde::Serialize,
+                     V::NodeData: serde::Serialize,
+                     Entry<V>: serde::Serialize,
+                     std::collections::HashMap<u32, Entry<V>>: serde::Serialize,
+                     Vec<Entry<V>>: serde::Serialize",
+        deserialize = "V: serde::de::DeserializeOwned,
+                       V::NodeData: serde::de::DeserializeOwned,
+                       Entry<V>: serde::de::DeserializeOwned,
+                       std::collections::HashMap<u32, Entry<V>>: serde::de::DeserializeOwned,
+                       Vec<Entry<V>>: serde::de::DeserializeOwned"
+    ))
+)]
 pub struct Tree<V: Version> {
     stored: HashMap<u32, Entry<V>>,
 
