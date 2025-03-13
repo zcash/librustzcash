@@ -6302,8 +6302,10 @@ dependencies = [
  "assert_matches",
  "blake2b_simd",
  "byteorder",
+ "hex",
  "primitive-types",
  "proptest",
+ "serde",
 ]
 
 [[package]]

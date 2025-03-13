@@ -24,6 +24,10 @@ pub const MAX_NODE_DATA_SIZE: usize = 32 + // subtree commitment
 #[repr(C)]
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct NodeData {
     /// Consensus branch id, should be provided by deserializing node.
     pub consensus_branch_id: u32,
@@ -42,6 +46,10 @@ pub struct NodeData {
     /// End sapling tree root.
     pub end_sapling_root: [u8; 32],
     /// Part of tree total work.
+    #[cfg_attr(
+        feature = "remote_read_state_service",
+        serde(with = "crate::node_data::serde_u256")
+    )]
     pub subtree_total_work: U256,
     /// Start height.
     pub start_height: u64,
@@ -213,6 +221,45 @@ impl V2 {
         data.orchard_tx = NodeData::read_compact(r)?;
 
         Ok(data)
+    }
+}
+
+#[cfg(feature = "remote_read_state_service")]
+mod serde_u256 {
+    use primitive_types::U256;
+    use serde::de::Error;
+    use serde::{Deserializer, Serializer};
+
+    /// Serialize U256 as a 32-byte hex string.
+    pub fn serialize<S>(value: &U256, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Convert U256 to a 32-byte big-endian representation.
+        let mut bytes = [0u8; 32];
+        value.to_big_endian(&mut bytes);
+
+        // Encode bytes as hex string.
+        let hex = hex::encode(bytes);
+        serializer.serialize_str(&hex)
+    }
+
+    /// Deserialize a U256 from a 32-byte hex string.
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<U256, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Deserialize into a &str, then decode.
+        let s: &str = serde::Deserialize::deserialize(deserializer)?;
+        let bytes = hex::decode(s).map_err(D::Error::custom)?;
+
+        if bytes.len() != 32 {
+            return Err(D::Error::custom(
+                "Invalid U256 representation: expected 32 bytes",
+            ));
+        }
+
+        Ok(U256::from_big_endian(&bytes))
     }
 }
 
