@@ -13,20 +13,20 @@ use incrementalmerkletree::{Address, Hashable, Level, Position, Retention};
 use shardtree::{
     error::{QueryError, ShardTreeError},
     store::{Checkpoint, ShardStore, TreeState},
-    LocatedPrunableTree, LocatedTree, PrunableTree, RetentionFlags, ShardTree,
+    LocatedPrunableTree, LocatedTree, PrunableTree, RetentionFlags,
 };
 
 use zcash_client_backend::{
-    data_api::{chain::CommitmentTreeRoot, SAPLING_SHARD_HEIGHT},
+    data_api::chain::CommitmentTreeRoot,
     serialization::shardtree::{read_shard, write_shard},
 };
 use zcash_primitives::merkle_tree::HashSer;
 use zcash_protocol::{consensus::BlockHeight, ShieldedProtocol};
 
-use crate::{error::SqliteClientError, PRUNING_DEPTH, SAPLING_TABLES_PREFIX};
+use crate::{error::SqliteClientError, sapling_tree};
 
 #[cfg(feature = "orchard")]
-use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT};
+use crate::orchard_tree;
 
 /// Errors that can appear in SQLite-back [`ShardStore`] implementation operations.
 #[derive(Debug)]
@@ -1128,15 +1128,7 @@ pub(crate) fn check_witnesses(
 
     let mut scan_ranges = vec![];
     let mut sapling_incomplete = vec![];
-    let sapling_tree =
-        ShardTree::<_, { sapling::NOTE_COMMITMENT_TREE_DEPTH }, SAPLING_SHARD_HEIGHT>::new(
-            SqliteShardStore::<_, sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
-                conn,
-                SAPLING_TABLES_PREFIX,
-            )
-            .map_err(|e| ShardTreeError::Storage(Error::Query(e)))?,
-            PRUNING_DEPTH.try_into().unwrap(),
-        );
+    let sapling_tree = sapling_tree(conn)?;
     for m in unspent_sapling_note_meta.iter() {
         match sapling_tree.witness_at_checkpoint_depth(m.commitment_tree_position(), 0) {
             Ok(_) => {}
@@ -1159,11 +1151,7 @@ pub(crate) fn check_witnesses(
         let unspent_orchard_note_meta =
             super::orchard::select_unspent_note_meta(conn, chain_tip_height, wallet_birthday)?;
         let mut orchard_incomplete = vec![];
-        let orchard_tree = ShardTree::<_, {orchard::NOTE_COMMITMENT_TREE_DEPTH as u8}, ORCHARD_SHARD_HEIGHT>::new(
-        SqliteShardStore::<_, orchard::tree::MerkleHashOrchard, ORCHARD_SHARD_HEIGHT>::from_connection(conn, ORCHARD_TABLES_PREFIX)
-            .map_err(|e| ShardTreeError::Storage(Error::Query(e)))?,
-        PRUNING_DEPTH.try_into().unwrap(),
-    );
+        let orchard_tree = orchard_tree(conn)?;
         for m in unspent_orchard_note_meta.iter() {
             match orchard_tree.witness_at_checkpoint_depth(m.commitment_tree_position(), 0) {
                 Ok(_) => {}
