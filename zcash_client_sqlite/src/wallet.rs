@@ -88,7 +88,7 @@ use zcash_address::ZcashAddress;
 use zcash_client_backend::{
     data_api::{
         scanning::{ScanPriority, ScanRange},
-        Account as _, AccountBalance, AccountBirthday, AccountPurpose, AccountSource,
+        Account as _, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, AddressInfo,
         BlockMetadata, DecryptedTransaction, Progress, Ratio, SentTransaction,
         SentTransactionOutput, TransactionDataRequest, TransactionStatus, WalletSummary,
         Zip32Derivation, SAPLING_SHARD_HEIGHT,
@@ -761,6 +761,54 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
     Ok(Some((addr, diversifier_index)))
 }
 
+pub(crate) fn list_addresses<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    account_uuid: AccountUuid,
+) -> Result<Vec<AddressInfo>, SqliteClientError> {
+    let mut addrs = vec![];
+
+    let mut stmt_addrs = conn.prepare(
+        "SELECT address, diversifier_index_be, key_scope
+         FROM addresses
+         JOIN accounts ON accounts.id = addresses.account_id
+         WHERE accounts.uuid = :account_uuid
+         AND exposed_at_height IS NOT NULL
+         ORDER BY exposed_at_height ASC, diversifier_index_be ASC",
+    )?;
+
+    let mut rows = stmt_addrs.query(named_params![
+        ":account_uuid": account_uuid.0,
+    ])?;
+
+    while let Some(row) = rows.next()? {
+        let addr_str: String = row.get(0)?;
+        let di_vec: Vec<u8> = row.get(1)?;
+        let _scope = KeyScope::decode(row.get(2)?)?;
+
+        let addr = Address::decode(params, &addr_str).ok_or_else(|| {
+            SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
+        })?;
+        let diversifier_index = decode_diversifier_index_be(&di_vec)?;
+        // Sapling and Unified addresses always have external scope.
+        #[cfg(feature = "transparent-inputs")]
+        let transparent_scope =
+            matches!(addr, Address::Transparent(_) | Address::Tex(_)).then(|| _scope.into());
+
+        addrs.push(
+            AddressInfo::from_parts(
+                addr,
+                diversifier_index,
+                #[cfg(feature = "transparent-inputs")]
+                transparent_scope,
+            )
+            .expect("valid"),
+        );
+    }
+
+    Ok(addrs)
+}
+
 pub(crate) fn get_last_generated_address_matching<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -942,7 +990,7 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
     }?;
 
     #[cfg(not(feature = "transparent-inputs"))]
-    let transparent_child_index: Option<u32> = None;
+    let (transparent_child_index, cached_taddr): (Option<u32>, Option<String>) = (None, None);
 
     stmt.query_row(
         named_params![

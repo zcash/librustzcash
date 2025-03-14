@@ -69,7 +69,7 @@ use incrementalmerkletree::{frontier::Frontier, Retention};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 
 use zcash_keys::{
-    address::UnifiedAddress,
+    address::{Address, UnifiedAddress},
     keys::{
         UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey, UnifiedSpendingKey,
     },
@@ -97,14 +97,18 @@ use crate::{
 use {
     crate::wallet::TransparentAddressMetadata,
     std::ops::Range,
-    transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
+    transparent::{
+        address::TransparentAddress,
+        bundle::OutPoint,
+        keys::{NonHardenedChildIndex, TransparentKeyScope},
+    },
 };
 
 #[cfg(feature = "test-dependencies")]
 use ambassador::delegatable_trait;
 
 #[cfg(any(test, feature = "test-dependencies"))]
-use {zcash_keys::address::Address, zcash_protocol::consensus::NetworkUpgrade};
+use zcash_protocol::consensus::NetworkUpgrade;
 
 pub mod chain;
 pub mod error;
@@ -493,6 +497,53 @@ impl<A: Copy> Account for (A, UnifiedIncomingViewingKey) {
 
     fn uivk(&self) -> UnifiedIncomingViewingKey {
         self.1.clone()
+    }
+}
+
+/// Information about an address in the wallet.
+pub struct AddressInfo {
+    address: Address,
+    diversifier_index: DiversifierIndex,
+    #[cfg(feature = "transparent-inputs")]
+    transparent_key_scope: Option<TransparentKeyScope>,
+}
+
+impl AddressInfo {
+    /// Constructs an `AddressInfo` from its constituent parts.
+    pub fn from_parts(
+        address: Address,
+        diversifier_index: DiversifierIndex,
+        #[cfg(feature = "transparent-inputs")] transparent_key_scope: Option<TransparentKeyScope>,
+    ) -> Option<Self> {
+        // Only allow `transparent_key_scope` to be set for transparent addresses.
+        #[cfg(feature = "transparent-inputs")]
+        let valid = transparent_key_scope.is_none()
+            || matches!(address, Address::Transparent(_) | Address::Tex(_));
+        #[cfg(not(feature = "transparent-inputs"))]
+        let valid = true;
+
+        valid.then_some(Self {
+            address,
+            diversifier_index,
+            #[cfg(feature = "transparent-inputs")]
+            transparent_key_scope,
+        })
+    }
+
+    /// Returns the address this information is about.
+    pub fn address(&self) -> &Address {
+        &self.address
+    }
+
+    /// Returns the diversifier index the address was derived at.
+    pub fn diversifier_index(&self) -> DiversifierIndex {
+        self.diversifier_index
+    }
+
+    /// Returns the key scope if this is a transparent address.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent_key_scope(&self) -> Option<TransparentKeyScope> {
+        self.transparent_key_scope
     }
 }
 
@@ -1224,6 +1275,9 @@ pub trait WalletRead {
         &self,
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<Self::Account>, Self::Error>;
+
+    /// Returns information about every address tracked for this account.
+    fn list_addresses(&self, account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error>;
 
     /// Returns the most recently generated unified address for the specified account that conforms
     /// to the specified address filter, if the account identifier specified refers to a valid

@@ -8,6 +8,8 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
+- `zcash_client_backend::data_api`:
+  - `AddressInfo`
 - `zcash_client_backend::data_api::testing`:
   - `struct transparent::GapLimits`
   - `transparent::gap_limits` high-level test for gap limit handling
@@ -23,6 +25,7 @@ and this library adheres to Rust's notion of
     flag is active.
   - has removed method `get_current_address`. It has been replaced by
     added method `WalletRead::get_last_generated_address_matching`
+  - Has added method `list_addresses`.
 - `zcash_client_backend::data_api::WalletWrite`:
   - has added method `get_address_for_index`. Please note the WARNINGS section
     in the documentation for use of this method.

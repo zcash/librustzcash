@@ -54,9 +54,9 @@ use super::{
         propose_standard_transfer_to_address, propose_transfer,
     },
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
-    BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery, ScannedBlock,
-    SeedRelevance, SentTransaction, SpendableNotes, TransactionDataRequest, TransactionStatus,
-    WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
+    AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
+    ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes, TransactionDataRequest,
+    TransactionStatus, WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
     SAPLING_SHARD_HEIGHT,
 };
 use crate::{
@@ -2555,6 +2555,10 @@ impl WalletRead for MockWalletDb {
         _ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<Self::Account>, Self::Error> {
         Ok(None)
+    }
+
+    fn list_addresses(&self, _account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error> {
+        Ok(vec![])
     }
 
     fn get_last_generated_address_matching(
