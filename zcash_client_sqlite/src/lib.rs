@@ -56,10 +56,11 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, BlockMetadata,
-        DecryptedTransaction, InputSource, NoteFilter, NullifierQuery, ScannedBlock, SeedRelevance,
-        SentTransaction, SpendableNotes, TransactionDataRequest, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletWrite, Zip32Derivation, SAPLING_SHARD_HEIGHT,
+        Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
+        BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery, ScannedBlock,
+        SeedRelevance, SentTransaction, SpendableNotes, TransactionDataRequest,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
+        SAPLING_SHARD_HEIGHT,
     },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
@@ -687,6 +688,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> WalletRead
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<Self::Account>, Self::Error> {
         wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
+    }
+
+    fn list_addresses(&self, account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error> {
+        wallet::list_addresses(self.conn.borrow(), &self.params, account)
     }
 
     fn get_last_generated_address_matching(
