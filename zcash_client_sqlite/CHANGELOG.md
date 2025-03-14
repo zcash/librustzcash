@@ -11,6 +11,8 @@ and this library adheres to Rust's notion of
 - `zcash_client_sqlite::WalletDb::with_gap_limits`
 - `zcash_client_sqlite::GapLimits`
 - `zcash_client_sqlite::util`
+- `zcash_client_sqlite::wallet::init::WalletMigrator`
+- `zcash_client_sqlite::wallet::init::migrations`
 
 ### Changed
 - `zcash_client_sqlite::WalletDb` has an added `Clock` field and corresponding
