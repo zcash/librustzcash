@@ -39,6 +39,8 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `zcash_client_sqlite::WalletDb::from_connection`
+- `zcash_client_sqlite::WalletDb::check_witnesses`
+- `zcash_client_sqlite::WalletDb::queue_rescans`
 
 ### Changed
 - MSRV is now 1.81.0.

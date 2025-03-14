@@ -36,9 +36,10 @@ use incrementalmerkletree::{Marking, Position, Retention};
 use nonempty::NonEmpty;
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
-use shardtree::{error::ShardTreeError, ShardTree};
+use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use std::{
     borrow::{Borrow, BorrowMut},
+    cmp::{max, min},
     collections::HashMap,
     convert::AsRef,
     fmt,
@@ -86,15 +87,14 @@ use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore}
 use wallet::{
     commitment_tree::{self, put_shard_roots},
     common::spendable_notes_meta,
+    scanning::replace_queue_entries,
     upsert_address, SubtreeProgressEstimator,
 };
 
 #[cfg(feature = "orchard")]
 use {
-    incrementalmerkletree::frontier::Frontier,
-    shardtree::store::{Checkpoint, ShardStore},
-    std::collections::BTreeMap,
-    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
+    incrementalmerkletree::frontier::Frontier, shardtree::store::Checkpoint,
+    std::collections::BTreeMap, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -453,6 +453,47 @@ impl<C: BorrowMut<Connection>, P, CL> WalletDb<C, P, CL> {
         let result = f(&mut wdb)?;
         tx.commit()?;
         Ok(result)
+    }
+
+    /// Attempts to construct a witness for each note belonging to the wallet that is believed by
+    /// the wallet to currently be spendable, and returns a vector of the ranges that must be
+    /// rescanned in order to correct missing witness data.
+    ///
+    /// This method is intended for repairing wallets that broke due to bugs in `shardtree`.
+    pub fn check_witnesses(&mut self) -> Result<Vec<Range<BlockHeight>>, SqliteClientError> {
+        self.transactionally(|wdb| wallet::commitment_tree::check_witnesses(wdb.conn.0))
+    }
+
+    /// Updates the scan queue by inserting scan ranges for the given range of block heights, with
+    /// the specified scanning priority.
+    pub fn queue_rescans(
+        &mut self,
+        rescan_ranges: NonEmpty<Range<BlockHeight>>,
+        priority: ScanPriority,
+    ) -> Result<(), SqliteClientError> {
+        let query_range = rescan_ranges
+            .iter()
+            .fold(None, |acc: Option<Range<BlockHeight>>, scan_range| {
+                if let Some(range) = acc {
+                    Some(min(range.start, scan_range.start)..max(range.end, scan_range.end))
+                } else {
+                    Some(scan_range.clone())
+                }
+            })
+            .expect("rescan_ranges is nonempty");
+
+        self.transactionally::<_, _, SqliteClientError>(|wdb| {
+            replace_queue_entries(
+                wdb.conn.0,
+                &query_range,
+                rescan_ranges
+                    .into_iter()
+                    .map(|r| ScanRange::from_parts(r, priority)),
+                true,
+            )
+        })?;
+
+        Ok(())
     }
 }
 
@@ -1780,22 +1821,59 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> Wa
     }
 }
 
+pub(crate) type SaplingShardStore<C> = SqliteShardStore<C, sapling::Node, SAPLING_SHARD_HEIGHT>;
+pub(crate) type SaplingCommitmentTree<C> =
+    ShardTree<SaplingShardStore<C>, { sapling::NOTE_COMMITMENT_TREE_DEPTH }, SAPLING_SHARD_HEIGHT>;
+
+pub(crate) fn sapling_tree<C>(
+    conn: C,
+) -> Result<SaplingCommitmentTree<C>, ShardTreeError<commitment_tree::Error>>
+where
+    SaplingShardStore<C>: ShardStore<H = sapling::Node, CheckpointId = BlockHeight>,
+{
+    Ok(ShardTree::new(
+        SqliteShardStore::from_connection(conn, SAPLING_TABLES_PREFIX)
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?,
+        PRUNING_DEPTH.try_into().unwrap(),
+    ))
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) type OrchardShardStore<C> =
+    SqliteShardStore<C, orchard::tree::MerkleHashOrchard, ORCHARD_SHARD_HEIGHT>;
+
+#[cfg(feature = "orchard")]
+pub(crate) type OrchardCommitmentTree<C> = ShardTree<
+    OrchardShardStore<C>,
+    { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+    ORCHARD_SHARD_HEIGHT,
+>;
+
+#[cfg(feature = "orchard")]
+pub(crate) fn orchard_tree<C>(
+    conn: C,
+) -> Result<OrchardCommitmentTree<C>, ShardTreeError<commitment_tree::Error>>
+where
+    OrchardShardStore<C>:
+        ShardStore<H = orchard::tree::MerkleHashOrchard, CheckpointId = BlockHeight>,
+{
+    Ok(ShardTree::new(
+        SqliteShardStore::from_connection(conn, ORCHARD_TABLES_PREFIX)
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?,
+        PRUNING_DEPTH.try_into().unwrap(),
+    ))
+}
+
 impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL> WalletCommitmentTrees
     for WalletDb<C, P, CL>
 {
     type Error = commitment_tree::Error;
-    type SaplingShardStore<'a> =
-        SqliteShardStore<&'a rusqlite::Transaction<'a>, sapling::Node, SAPLING_SHARD_HEIGHT>;
+    type SaplingShardStore<'a> = SaplingShardStore<&'a rusqlite::Transaction<'a>>;
 
     fn with_sapling_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
-        for<'a> F: FnMut(
-            &'a mut ShardTree<
-                Self::SaplingShardStore<'a>,
-                { sapling::NOTE_COMMITMENT_TREE_DEPTH },
-                SAPLING_SHARD_HEIGHT,
-            >,
-        ) -> Result<A, E>,
+        for<'a> F:
+            FnMut(&'a mut SaplingCommitmentTree<&'a rusqlite::Transaction<'a>>) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>,
     {
         let tx = self
@@ -1803,10 +1881,8 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL> WalletCom
             .borrow_mut()
             .transaction()
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
-        let shard_store = SqliteShardStore::from_connection(&tx, SAPLING_TABLES_PREFIX)
-            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
         let result = {
-            let mut shardtree = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
+            let mut shardtree = sapling_tree(&tx)?;
             callback(&mut shardtree)?
         };
 
@@ -1846,13 +1922,8 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL> WalletCom
     #[cfg(feature = "orchard")]
     fn with_orchard_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
-        for<'a> F: FnMut(
-            &'a mut ShardTree<
-                Self::OrchardShardStore<'a>,
-                { ORCHARD_SHARD_HEIGHT * 2 },
-                ORCHARD_SHARD_HEIGHT,
-            >,
-        ) -> Result<A, E>,
+        for<'a> F:
+            FnMut(&'a mut OrchardCommitmentTree<&'a rusqlite::Transaction<'a>>) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>,
     {
         let tx = self
@@ -1860,10 +1931,8 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL> WalletCom
             .borrow_mut()
             .transaction()
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
-        let shard_store = SqliteShardStore::from_connection(&tx, ORCHARD_TABLES_PREFIX)
-            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
         let result = {
-            let mut shardtree = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
+            let mut shardtree = orchard_tree(&tx)?;
             callback(&mut shardtree)?
         };
 
@@ -1897,25 +1966,15 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL> WalletCom
 
 impl<P: consensus::Parameters, CL> WalletCommitmentTrees for WalletDb<SqlTransaction<'_>, P, CL> {
     type Error = commitment_tree::Error;
-    type SaplingShardStore<'a> =
-        SqliteShardStore<&'a rusqlite::Transaction<'a>, sapling::Node, SAPLING_SHARD_HEIGHT>;
+    type SaplingShardStore<'a> = crate::SaplingShardStore<&'a rusqlite::Transaction<'a>>;
 
     fn with_sapling_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
-        for<'a> F: FnMut(
-            &'a mut ShardTree<
-                Self::SaplingShardStore<'a>,
-                { sapling::NOTE_COMMITMENT_TREE_DEPTH },
-                SAPLING_SHARD_HEIGHT,
-            >,
-        ) -> Result<A, E>,
+        for<'a> F:
+            FnMut(&'a mut SaplingCommitmentTree<&'a rusqlite::Transaction<'a>>) -> Result<A, E>,
         E: From<ShardTreeError<commitment_tree::Error>>,
     {
-        let mut shardtree = ShardTree::new(
-            SqliteShardStore::from_connection(self.conn.0, SAPLING_TABLES_PREFIX)
-                .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?,
-            PRUNING_DEPTH.try_into().unwrap(),
-        );
+        let mut shardtree = sapling_tree(self.conn.0)?;
         let result = callback(&mut shardtree)?;
 
         Ok(result)
@@ -1935,29 +1994,16 @@ impl<P: consensus::Parameters, CL> WalletCommitmentTrees for WalletDb<SqlTransac
     }
 
     #[cfg(feature = "orchard")]
-    type OrchardShardStore<'a> = SqliteShardStore<
-        &'a rusqlite::Transaction<'a>,
-        orchard::tree::MerkleHashOrchard,
-        ORCHARD_SHARD_HEIGHT,
-    >;
+    type OrchardShardStore<'a> = crate::OrchardShardStore<&'a rusqlite::Transaction<'a>>;
 
     #[cfg(feature = "orchard")]
     fn with_orchard_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
-        for<'a> F: FnMut(
-            &'a mut ShardTree<
-                Self::OrchardShardStore<'a>,
-                { ORCHARD_SHARD_HEIGHT * 2 },
-                ORCHARD_SHARD_HEIGHT,
-            >,
-        ) -> Result<A, E>,
+        for<'a> F:
+            FnMut(&'a mut OrchardCommitmentTree<&'a rusqlite::Transaction<'a>>) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>,
     {
-        let mut shardtree = ShardTree::new(
-            SqliteShardStore::from_connection(self.conn.0, ORCHARD_TABLES_PREFIX)
-                .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?,
-            PRUNING_DEPTH.try_into().unwrap(),
-        );
+        let mut shardtree = orchard_tree(self.conn.0)?;
         let result = callback(&mut shardtree)?;
 
         Ok(result)

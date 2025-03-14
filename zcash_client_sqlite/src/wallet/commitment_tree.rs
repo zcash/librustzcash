@@ -11,7 +11,7 @@ use std::{
 
 use incrementalmerkletree::{Address, Hashable, Level, Position, Retention};
 use shardtree::{
-    error::ShardTreeError,
+    error::{QueryError, ShardTreeError},
     store::{Checkpoint, ShardStore, TreeState},
     LocatedPrunableTree, LocatedTree, PrunableTree, RetentionFlags,
 };
@@ -21,7 +21,12 @@ use zcash_client_backend::{
     serialization::shardtree::{read_shard, write_shard},
 };
 use zcash_primitives::merkle_tree::HashSer;
-use zcash_protocol::consensus::BlockHeight;
+use zcash_protocol::{consensus::BlockHeight, ShieldedProtocol};
+
+use crate::{error::SqliteClientError, sapling_tree};
+
+#[cfg(feature = "orchard")]
+use crate::orchard_tree;
 
 /// Errors that can appear in SQLite-back [`ShardStore`] implementation operations.
 #[derive(Debug)]
@@ -1110,6 +1115,62 @@ pub(crate) fn put_shard_roots<
     drop(put_roots);
 
     Ok(())
+}
+
+pub(crate) fn check_witnesses(
+    conn: &rusqlite::Transaction<'_>,
+) -> Result<Vec<Range<BlockHeight>>, SqliteClientError> {
+    let chain_tip_height =
+        super::chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
+    let wallet_birthday = super::wallet_birthday(conn)?.ok_or(SqliteClientError::AccountUnknown)?;
+    let unspent_sapling_note_meta =
+        super::sapling::select_unspent_note_meta(conn, chain_tip_height, wallet_birthday)?;
+
+    let mut scan_ranges = vec![];
+    let mut sapling_incomplete = vec![];
+    let sapling_tree = sapling_tree(conn)?;
+    for m in unspent_sapling_note_meta.iter() {
+        match sapling_tree.witness_at_checkpoint_depth(m.commitment_tree_position(), 0) {
+            Ok(_) => {}
+            Err(ShardTreeError::Query(QueryError::TreeIncomplete(mut addrs))) => {
+                sapling_incomplete.append(&mut addrs);
+            }
+            Err(other) => {
+                return Err(SqliteClientError::CommitmentTree(other));
+            }
+        }
+    }
+
+    for addr in sapling_incomplete {
+        let range = super::get_block_range(conn, ShieldedProtocol::Sapling, addr)?;
+        scan_ranges.extend(range.into_iter());
+    }
+
+    #[cfg(feature = "orchard")]
+    {
+        let unspent_orchard_note_meta =
+            super::orchard::select_unspent_note_meta(conn, chain_tip_height, wallet_birthday)?;
+        let mut orchard_incomplete = vec![];
+        let orchard_tree = orchard_tree(conn)?;
+        for m in unspent_orchard_note_meta.iter() {
+            match orchard_tree.witness_at_checkpoint_depth(m.commitment_tree_position(), 0) {
+                Ok(_) => {}
+                Err(ShardTreeError::Query(QueryError::TreeIncomplete(mut addrs))) => {
+                    orchard_incomplete.append(&mut addrs);
+                }
+                Err(other) => {
+                    return Err(SqliteClientError::CommitmentTree(other));
+                }
+            }
+        }
+
+        for addr in orchard_incomplete {
+            let range = super::get_block_range(conn, ShieldedProtocol::Orchard, addr)?;
+            scan_ranges.extend(range.into_iter());
+        }
+    }
+
+    Ok(scan_ranges)
 }
 
 #[cfg(test)]

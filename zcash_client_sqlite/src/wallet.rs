@@ -69,7 +69,7 @@ use std::{
     convert::TryFrom,
     io::{self, Cursor},
     num::NonZeroU32,
-    ops::RangeInclusive,
+    ops::{Range, RangeInclusive},
     time::SystemTime,
 };
 
@@ -4070,6 +4070,57 @@ pub(crate) fn prune_nullifier_map(
     stmt_delete_locators.execute(named_params![":block_height": u32::from(block_height)])?;
 
     Ok(())
+}
+
+pub(crate) fn get_block_range(
+    conn: &rusqlite::Connection,
+    protocol: ShieldedProtocol,
+    commitment_tree_address: incrementalmerkletree::Address,
+) -> Result<Option<Range<BlockHeight>>, SqliteClientError> {
+    let prefix = match protocol {
+        ShieldedProtocol::Sapling => "sapling",
+        ShieldedProtocol::Orchard => "orchard",
+    };
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT MIN(height), MAX(height), MAX({prefix}_commitment_tree_size)
+         FROM blocks
+         WHERE {prefix}_commitment_tree_size BETWEEN :min_tree_size AND :max_tree_size"
+    ))?;
+
+    stmt.query_row(
+        // BETWEEN is inclusive on both ends. However, we are comparing commitment tree sizes
+        // to commitment tree positions, so we must add one to the start, and we do not subtract
+        // one from the end.
+        named_params! {
+            ":min_tree_size": u64::from(commitment_tree_address.position_range_start()) + 1,
+            ":max_tree_size": u64::from(commitment_tree_address.position_range_end()),
+        },
+        |row| {
+            // The first block to be scanned is known to contain the start of the address range in
+            // question because the tree size we compared against is measured as of the end of the
+            // block.
+            let min_height = row.get::<_, Option<u32>>(0)?.map(BlockHeight::from_u32);
+            let max_height_inclusive = row.get::<_, Option<u32>>(1)?.map(BlockHeight::from_u32);
+            let end_offset = row.get::<_, Option<u64>>(2)?.map(|max_height_tree_size| {
+                // If the tree size at the end of the max-height block is less than the
+                // end-exclusive maximum position of the address range, this means that the end of
+                // the subtree referred to by that address is somewhere in the next block, so we
+                // need to rescan an extra block to ensure that we have observed all of the note
+                // commitments that aggregate up to that address.
+                if max_height_tree_size < u64::from(commitment_tree_address.position_range_end()) {
+                    1
+                } else {
+                    0
+                }
+            });
+
+            Ok(min_height
+                .zip(max_height_inclusive)
+                .zip(end_offset)
+                .map(|((min, max_inclusive), offset)| min..(max_inclusive + offset + 1)))
+        },
+    )
+    .map_err(SqliteClientError::from)
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
