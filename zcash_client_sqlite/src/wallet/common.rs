@@ -276,6 +276,10 @@ pub(crate) fn select_unspent_note_meta(
     wallet_birthday: BlockHeight,
 ) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
     let (table_prefix, index_col, _) = per_protocol_names(protocol);
+    // This query is effectively the same as the internal `eligible` subquery
+    // used in `select_spendable_notes`.
+    //
+    // TODO: Deduplicate this in the future by introducing a view?
     let mut stmt = conn.prepare_cached(&format!("
         SELECT {table_prefix}_received_notes.id AS id, txid, {index_col},
                commitment_tree_position, value
