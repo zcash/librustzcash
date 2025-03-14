@@ -457,12 +457,10 @@ impl<C: BorrowMut<Connection>, P, CL> WalletDb<C, P, CL> {
     }
 
     /// Attempts to construct a witness for each note belonging to the wallet that is believed by
-    /// the wallet to currently be spendable, and returns a vector of .
+    /// the wallet to currently be spendable, and returns a vector of the ranges that must be
+    /// rescanned in order to correct missing witness data.
     ///
     /// This method is intended for repairing wallets that broke due to bugs in `shardtree`.
-    ///
-    /// Returns a vector of the ranges that must be rescanned in order to correct missing witness
-    /// data.
     pub fn check_witnesses(&mut self) -> Result<Vec<Range<BlockHeight>>, SqliteClientError> {
         self.transactionally(|wdb| wallet::commitment_tree::check_witnesses(wdb.conn.0))
     }

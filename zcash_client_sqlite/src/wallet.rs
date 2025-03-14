@@ -942,7 +942,7 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
     }?;
 
     #[cfg(not(feature = "transparent-inputs"))]
-    let transparent_child_index: Option<u32> = None;
+    let (transparent_child_index, cached_taddr): (Option<u32>, Option<String>) = (None, None);
 
     stmt.query_row(
         named_params![
@@ -4034,7 +4034,7 @@ pub(crate) fn get_block_range(
         ShieldedProtocol::Orchard => "orchard",
     };
     let mut stmt = conn.prepare_cached(&format!(
-        "SELECT MIN(height), MAX(height)
+        "SELECT MIN(height), MAX(height), MAX({prefix}_commitment_tree_size)
          FROM blocks
          WHERE {prefix}_commitment_tree_size BETWEEN :min_tree_size AND :max_tree_size"
     ))?;
@@ -4048,14 +4048,28 @@ pub(crate) fn get_block_range(
             ":max_tree_size": u64::from(commitment_tree_address.position_range_end()),
         },
         |row| {
-            let min_height = row
-                .get::<_, Option<u32>>(0)?
-                .map(|h| BlockHeight::from_u32(h.saturating_sub(1)));
-            let max_height = row
-                .get::<_, Option<u32>>(1)?
-                .map(|h| BlockHeight::from_u32(h.saturating_add(1)));
+            // The first block to be scanned is known to contain the start of the address range in
+            // question because the tree size we compared against is measured as of the end of the
+            // block.
+            let min_height = row.get::<_, Option<u32>>(0)?.map(BlockHeight::from_u32);
+            let max_height_inclusive = row.get::<_, Option<u32>>(1)?.map(BlockHeight::from_u32);
+            let end_offset = row.get::<_, Option<u64>>(2)?.map(|max_height_tree_size| {
+                // If the tree size at the end of the max-height block is less than the
+                // end-exclusive maximum position of the address range, this means that the end of
+                // the subtree referred to by that address is somewhere in the next block, so we
+                // need to rescan an extra block to ensure that we have observed all of the note
+                // commitments that aggregate up to that address.
+                if max_height_tree_size < u64::from(commitment_tree_address.position_range_end()) {
+                    1
+                } else {
+                    0
+                }
+            });
 
-            Ok(min_height.zip(max_height).map(|(min, max)| min..max))
+            Ok(min_height
+                .zip(max_height_inclusive)
+                .zip(end_offset)
+                .map(|((min, max_inclusive), offset)| min..(max_inclusive + offset + 1)))
         },
     )
     .map_err(SqliteClientError::from)
