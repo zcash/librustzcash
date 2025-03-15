@@ -160,6 +160,7 @@ impl RusqliteMigration for Migration {
 
 #[cfg(test)]
 mod tests {
+    use rand_chacha::ChaChaRng;
     use rusqlite::{self, params};
     use tempfile::NamedTempFile;
 
@@ -168,7 +169,7 @@ mod tests {
     use zip32::AccountId;
 
     use crate::{
-        testing::db::test_clock,
+        testing::db::{test_clock, test_rng},
         util::testing::FixedClock,
         wallet::init::{init_wallet_db_internal, migrations::v_transactions_net},
         WalletDb,
@@ -177,8 +178,13 @@ mod tests {
     #[test]
     fn v_transactions_note_uniqueness_migration() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data =
-            WalletDb::for_path(data_file.path(), Network::TestNetwork, test_clock()).unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
         init_wallet_db_internal(
             &mut db_data,
             None,
@@ -213,6 +219,7 @@ mod tests {
             rusqlite::Connection,
             Network,
             FixedClock,
+            ChaChaRng,
         >,
                                    expected_notes: i64| {
             let mut q = db_data

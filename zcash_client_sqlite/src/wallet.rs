@@ -2587,12 +2587,13 @@ pub(crate) fn get_max_height_hash(
     .optional()
 }
 
-pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters, CL>(
-    wdb: &mut WalletDb<SqlTransaction<'_>, P, CL>,
+pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
     sent_tx: &SentTransaction<AccountUuid>,
 ) -> Result<(), SqliteClientError> {
     let tx_ref = put_tx_data(
-        wdb.conn.0,
+        conn,
         sent_tx.tx(),
         Some(sent_tx.fee_amount()),
         Some(sent_tx.created()),
@@ -2612,7 +2613,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters, CL>(
     if let Some(bundle) = sent_tx.tx().sapling_bundle() {
         detectable_via_scanning = true;
         for spend in bundle.shielded_spends() {
-            sapling::mark_sapling_note_spent(wdb.conn.0, tx_ref, spend.nullifier())?;
+            sapling::mark_sapling_note_spent(conn, tx_ref, spend.nullifier())?;
         }
     }
     if let Some(_bundle) = sent_tx.tx().orchard_bundle() {
@@ -2620,7 +2621,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters, CL>(
         {
             detectable_via_scanning = true;
             for action in _bundle.actions() {
-                orchard::mark_orchard_note_spent(wdb.conn.0, tx_ref, action.nullifier())?;
+                orchard::mark_orchard_note_spent(conn, tx_ref, action.nullifier())?;
             }
         }
 
@@ -2630,17 +2631,11 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters, CL>(
 
     #[cfg(feature = "transparent-inputs")]
     for utxo_outpoint in sent_tx.utxos_spent() {
-        transparent::mark_transparent_utxo_spent(wdb.conn.0, tx_ref, utxo_outpoint)?;
+        transparent::mark_transparent_utxo_spent(conn, tx_ref, utxo_outpoint)?;
     }
 
     for output in sent_tx.outputs() {
-        insert_sent_output(
-            wdb.conn.0,
-            &wdb.params,
-            tx_ref,
-            *sent_tx.account_id(),
-            output,
-        )?;
+        insert_sent_output(conn, params, tx_ref, *sent_tx.account_id(), output)?;
 
         match output.recipient() {
             Recipient::External {
@@ -2657,8 +2652,8 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters, CL>(
             } => match note.as_ref() {
                 Note::Sapling(note) => {
                     sapling::put_received_note(
-                        wdb.conn.0,
-                        &wdb.params,
+                        conn,
+                        params,
                         &DecryptedOutput::new(
                             output.output_index(),
                             note.clone(),
@@ -2676,8 +2671,8 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters, CL>(
                 #[cfg(feature = "orchard")]
                 Note::Orchard(note) => {
                     orchard::put_received_note(
-                        wdb.conn.0,
-                        &wdb.params,
+                        conn,
+                        params,
                         &DecryptedOutput::new(
                             output.output_index(),
                             *note,
@@ -2701,15 +2696,11 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters, CL>(
             } => {
                 // First check to verify that creation of this output does not result in reuse of
                 // an ephemeral address.
-                transparent::check_ephemeral_address_reuse(
-                    wdb.conn.0,
-                    &wdb.params,
-                    ephemeral_address,
-                )?;
+                transparent::check_ephemeral_address_reuse(conn, params, ephemeral_address)?;
 
                 transparent::put_transparent_output(
-                    wdb.conn.0,
-                    &wdb.params,
+                    conn,
+                    &params,
                     outpoint,
                     &TxOut {
                         value: output.value(),
@@ -2727,7 +2718,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters, CL>(
     // at present for fully transparent transactions, because any transaction with a shielded
     // component will be detected via ordinary chain scanning and/or nullifier checking.
     if !detectable_via_scanning {
-        queue_tx_retrieval(wdb.conn.0, std::iter::once(sent_tx.tx().txid()), None)?;
+        queue_tx_retrieval(conn, std::iter::once(sent_tx.tx().txid()), None)?;
     }
 
     Ok(())
@@ -2930,6 +2921,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
             conn: SqlTransaction(conn),
             params: params.clone(),
             clock: (),
+            rng: (),
             #[cfg(feature = "transparent-inputs")]
             gap_limits: *gap_limits,
         };

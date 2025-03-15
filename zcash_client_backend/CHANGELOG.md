@@ -13,6 +13,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api::testing`:
   - `struct transparent::GapLimits`
   - `transparent::gap_limits` high-level test for gap limit handling
+- `zcash_client_backend::data_api::{TransactionStatusFilter, OutputStatusFilter}`
 
 ### Changed
 - `zcash_client_backend::data_api::WalletRead`:
@@ -38,6 +39,9 @@ and this library adheres to Rust's notion of
     `UnifiedAddressRequest` argument is now non-optional; use
     `UnifiedAddressRequest::AllAvailableKeys` to indicate that all available
     keys should be used to generate receivers instead of `None`.
+  - `TransactionDataRequest::SpendsFromAddress` has been renamed to
+    `TransactionDataRequest::TransactionsInvolvingAddress` and has added struct
+    fields `request_at`, `tx_status_filter`, and `output_status_filter`.
 
 ### Removed
 - `zcash_client_backend::data_api::GAP_LIMIT` gap limits are now configured

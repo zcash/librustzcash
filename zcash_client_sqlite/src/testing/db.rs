@@ -1,4 +1,6 @@
 use ambassador::Delegate;
+use rand::SeedableRng;
+use rand_chacha::ChaChaRng;
 use rusqlite::Connection;
 use std::num::NonZeroU32;
 use std::time::Duration;
@@ -34,10 +36,9 @@ use zcash_protocol::{
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
+use crate::wallet::init::init_wallet_db_internal;
 use crate::{
-    error::SqliteClientError,
-    util::testing::FixedClock,
-    wallet::init::{init_wallet_db, init_wallet_db_internal},
+    error::SqliteClientError, util::testing::FixedClock, wallet::init::testing::init_wallet_db,
     AccountUuid, WalletDb,
 };
 
@@ -56,6 +57,10 @@ pub(crate) fn test_clock() -> FixedClock {
     FixedClock::new(SystemTime::UNIX_EPOCH + TEST_EPOCH_SECONDS_OFFSET)
 }
 
+pub(crate) fn test_rng() -> ChaChaRng {
+    ChaChaRng::from_seed([0u8; 32])
+}
+
 #[allow(clippy::duplicated_attributes, reason = "False positive")]
 #[derive(Delegate)]
 #[delegate(InputSource, target = "wallet_db")]
@@ -64,13 +69,13 @@ pub(crate) fn test_clock() -> FixedClock {
 #[delegate(WalletWrite, target = "wallet_db")]
 #[delegate(WalletCommitmentTrees, target = "wallet_db")]
 pub(crate) struct TestDb {
-    wallet_db: WalletDb<Connection, LocalNetwork, FixedClock>,
+    wallet_db: WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng>,
     data_file: NamedTempFile,
 }
 
 impl TestDb {
     fn from_parts(
-        wallet_db: WalletDb<Connection, LocalNetwork, FixedClock>,
+        wallet_db: WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng>,
         data_file: NamedTempFile,
     ) -> Self {
         Self {
@@ -79,11 +84,13 @@ impl TestDb {
         }
     }
 
-    pub(crate) fn db(&self) -> &WalletDb<Connection, LocalNetwork, FixedClock> {
+    pub(crate) fn db(&self) -> &WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng> {
         &self.wallet_db
     }
 
-    pub(crate) fn db_mut(&mut self) -> &mut WalletDb<Connection, LocalNetwork, FixedClock> {
+    pub(crate) fn db_mut(
+        &mut self,
+    ) -> &mut WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng> {
         &mut self.wallet_db
     }
 
@@ -180,7 +187,8 @@ impl DataStoreFactory for TestDbFactory {
         #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
     ) -> Result<Self::DataStore, Self::Error> {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network, test_clock()).unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
         #[cfg(feature = "transparent-inputs")]
         {
             db_data = db_data.with_gap_limits(gap_limits.into());

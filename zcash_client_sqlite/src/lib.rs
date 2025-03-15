@@ -99,6 +99,7 @@ use {
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    crate::wallet::transparent::ephemeral::schedule_ephemeral_address_checks,
     ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     std::collections::BTreeSet,
     zcash_client_backend::wallet::TransparentAddressMetadata,
@@ -361,10 +362,11 @@ impl From<zcash_client_backend::data_api::testing::transparent::GapLimits> for G
 /// A wrapper for the SQLite connection to the wallet database, along with a capability to read the
 /// system from the clock. A `WalletDb` encapsulates the full set of capabilities that are required
 /// in order to implement the [`WalletRead`], [`WalletWrite`] and [`WalletCommitmentTrees`] traits.
-pub struct WalletDb<C, P, CL> {
+pub struct WalletDb<C, P, CL, R> {
     conn: C,
     params: P,
     clock: CL,
+    rng: R,
     #[cfg(feature = "transparent-inputs")]
     gap_limits: GapLimits,
 }
@@ -378,7 +380,7 @@ impl Borrow<rusqlite::Connection> for SqlTransaction<'_> {
     }
 }
 
-impl<P, CL> WalletDb<Connection, P, CL> {
+impl<P, CL, R> WalletDb<Connection, P, CL, R> {
     /// Construct a [`WalletDb`] instance that connects to the wallet database stored at the
     /// specified path.
     ///
@@ -386,10 +388,13 @@ impl<P, CL> WalletDb<Connection, P, CL> {
     /// - `path`: The path to the SQLite database used to store wallet data.
     /// - `params`: Parameters associated with the Zcash network that the wallet will connect to.
     /// - `clock`: The clock to use in the case that the backend needs access to the system time.
+    /// - `rng`: The random number generation capability to be exposed by the created `WalletDb`
+    ///   instance.
     pub fn for_path<F: AsRef<Path>>(
         path: F,
         params: P,
         clock: CL,
+        rng: R,
     ) -> Result<Self, rusqlite::Error> {
         Connection::open(path).and_then(move |conn| {
             rusqlite::vtab::array::load_module(&conn)?;
@@ -397,6 +402,7 @@ impl<P, CL> WalletDb<Connection, P, CL> {
                 conn,
                 params,
                 clock,
+                rng,
                 #[cfg(feature = "transparent-inputs")]
                 gap_limits: GapLimits::default(),
             })
@@ -405,7 +411,7 @@ impl<P, CL> WalletDb<Connection, P, CL> {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl<C, P, CL> WalletDb<C, P, CL> {
+impl<C, P, CL, R> WalletDb<C, P, CL, R> {
     /// Sets the gap limits to be used by the wallet in transparent address generation.
     pub fn with_gap_limits(mut self, gap_limits: GapLimits) -> Self {
         self.gap_limits = gap_limits;
@@ -413,7 +419,7 @@ impl<C, P, CL> WalletDb<C, P, CL> {
     }
 }
 
-impl<C: Borrow<rusqlite::Connection>, P, CL> WalletDb<C, P, CL> {
+impl<C: Borrow<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     /// Constructs a new wrapper around the given connection.
     ///
     /// This is provided for use cases such as connection pooling, where `conn` may be an
@@ -426,27 +432,31 @@ impl<C: Borrow<rusqlite::Connection>, P, CL> WalletDb<C, P, CL> {
     /// - `conn`: A connection to the wallet database.
     /// - `params`: Parameters associated with the Zcash network that the wallet will connect to.
     /// - `clock`: The clock to use in the case that the backend needs access to the system time.
-    pub fn from_connection(conn: C, params: P, clock: CL) -> Self {
+    /// - `rng`: The random number generation capability to be exposed by the created `WalletDb`
+    ///   instance.
+    pub fn from_connection(conn: C, params: P, clock: CL, rng: R) -> Self {
         WalletDb {
             conn,
             params,
             clock,
+            rng,
             #[cfg(feature = "transparent-inputs")]
             gap_limits: GapLimits::default(),
         }
     }
 }
 
-impl<C: BorrowMut<Connection>, P, CL> WalletDb<C, P, CL> {
+impl<C: BorrowMut<Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     pub fn transactionally<F, A, E: From<rusqlite::Error>>(&mut self, f: F) -> Result<A, E>
     where
-        F: FnOnce(&mut WalletDb<SqlTransaction<'_>, &P, &CL>) -> Result<A, E>,
+        F: FnOnce(&mut WalletDb<SqlTransaction<'_>, &P, &CL, &mut R>) -> Result<A, E>,
     {
         let tx = self.conn.borrow_mut().transaction()?;
         let mut wdb = WalletDb {
             conn: SqlTransaction(&tx),
             params: &self.params,
             clock: &self.clock,
+            rng: &mut self.rng,
             #[cfg(feature = "transparent-inputs")]
             gap_limits: self.gap_limits,
         };
@@ -497,8 +507,24 @@ impl<C: BorrowMut<Connection>, P, CL> WalletDb<C, P, CL> {
     }
 }
 
-impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> InputSource
-    for WalletDb<C, P, CL>
+#[cfg(feature = "transparent-inputs")]
+impl<C: BorrowMut<Connection>, P, CL: Clock, R: rand::RngCore> WalletDb<C, P, CL, R> {
+    /// For each ephemeral address in the wallet, ensure that the transaction data request queue
+    /// contains a request for the wallet to check for UTXOs belonging to that address at some time
+    /// during the next 24-hour period.
+    ///
+    /// We use randomized scheduling of ephemeral address checks to ensure that a
+    /// lightwalletd-compromising adversary cannot use temporal clustering to determine what
+    /// ephemeral addresses belong to a given wallet.
+    pub fn schedule_ephemeral_address_checks(&mut self) -> Result<(), SqliteClientError> {
+        self.borrow_mut().transactionally(|wdb| {
+            schedule_ephemeral_address_checks(wdb.conn.0, wdb.clock, &mut wdb.rng)
+        })
+    }
+}
+
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSource
+    for WalletDb<C, P, CL, R>
 {
     type Error = SqliteClientError;
     type NoteRef = ReceivedNoteId;
@@ -630,8 +656,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> InputSource
     }
 }
 
-impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> WalletRead
-    for WalletDb<C, P, CL>
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRead
+    for WalletDb<C, P, CL, R>
 {
     type Error = SqliteClientError;
     type AccountId = AccountUuid;
@@ -940,8 +966,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> WalletRead
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
-impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> WalletTest
-    for WalletDb<C, P, CL>
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTest
+    for WalletDb<C, P, CL, R>
 {
     fn get_tx_history(
         &self,
@@ -1078,8 +1104,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> WalletTest
     }
 }
 
-impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> WalletWrite
-    for WalletDb<C, P, CL>
+impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R> WalletWrite
+    for WalletDb<C, P, CL, R>
 {
     type UtxoRef = UtxoId;
 
@@ -1773,7 +1799,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> Wa
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             for sent_tx in transactions {
-                wallet::store_transaction_to_be_sent(wdb, sent_tx)?;
+                wallet::store_transaction_to_be_sent(wdb.conn.0, &wdb.params, sent_tx)?;
             }
             Ok(())
         })
@@ -1864,8 +1890,8 @@ where
     ))
 }
 
-impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL> WalletCommitmentTrees
-    for WalletDb<C, P, CL>
+impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletCommitmentTrees
+    for WalletDb<C, P, CL, R>
 {
     type Error = commitment_tree::Error;
     type SaplingShardStore<'a> = SaplingShardStore<&'a rusqlite::Transaction<'a>>;
@@ -1964,7 +1990,9 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL> WalletCom
     }
 }
 
-impl<P: consensus::Parameters, CL> WalletCommitmentTrees for WalletDb<SqlTransaction<'_>, P, CL> {
+impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
+    for WalletDb<SqlTransaction<'_>, P, CL, R>
+{
     type Error = commitment_tree::Error;
     type SaplingShardStore<'a> = crate::SaplingShardStore<&'a rusqlite::Transaction<'a>>;
 
@@ -2665,10 +2693,14 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn transparent_receivers() {
-        // Add an account to the wallet.
+        use std::collections::BTreeSet;
 
-        use crate::testing::BlockCache;
-        let st = TestBuilder::new()
+        use crate::{
+            testing::BlockCache, wallet::transparent::transaction_data_requests, GapLimits,
+        };
+        use zcash_client_backend::data_api::TransactionDataRequest;
+
+        let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -2676,6 +2708,8 @@ mod tests {
         let account = st.test_account().unwrap();
         let ufvk = account.usk().to_unified_full_viewing_key();
         let (taddr, _) = account.usk().default_transparent_address();
+        let birthday = account.birthday().height();
+        let account_id = account.id();
 
         let receivers = st
             .wallet()
@@ -2693,6 +2727,53 @@ mod tests {
 
         // The default t-addr should be in the set.
         assert!(receivers.contains_key(&taddr));
+
+        // The chain tip height must be known in order to query for data requests.
+        st.wallet_mut().update_chain_tip(birthday).unwrap();
+
+        // Transaction data requests should include a request for each ephemeral address
+        let ephemeral_addrs = st
+            .wallet()
+            .get_known_ephemeral_addresses(account_id, None)
+            .unwrap();
+
+        assert_eq!(
+            ephemeral_addrs.len(),
+            GapLimits::default().ephemeral() as usize
+        );
+
+        st.wallet_mut()
+            .db_mut()
+            .schedule_ephemeral_address_checks()
+            .unwrap();
+        let data_requests =
+            transaction_data_requests(st.wallet().conn(), &st.wallet().db().params).unwrap();
+
+        let base_time = st.wallet().db().clock.now();
+        let day = Duration::from_secs(60 * 60 * 24);
+        let mut check_times = BTreeSet::new();
+        for (addr, _) in ephemeral_addrs {
+            let has_valid_request = data_requests.iter().any(|req| match req {
+                TransactionDataRequest::TransactionsInvolvingAddress {
+                    address,
+                    request_at: Some(t),
+                    ..
+                } => {
+                    *address == addr && *t > base_time && {
+                        let t_delta = t.duration_since(base_time).unwrap();
+                        // This is an imprecise check; the objective of the randomized time
+                        // selection is that all ephemeral address checks be performed within a
+                        // day, and that their check times be distinct.
+                        let result = t_delta < day && !check_times.contains(t);
+                        check_times.insert(*t);
+                        result
+                    }
+                }
+                _ => false,
+            });
+
+            assert!(has_valid_request);
+        }
     }
 
     #[cfg(feature = "unstable")]

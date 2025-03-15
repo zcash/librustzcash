@@ -82,6 +82,7 @@ nonempty = { version = "0.11", default-features = false }
 # CSPRNG
 rand = { version = "0.8", default-features = false }
 rand_core = { version = "0.6", default-features = false }
+rand_distr = { version = "0.4", default-features = false }
 
 # Currency conversions
 rust_decimal = { version = "1.35", default-features = false, features = ["serde"] }

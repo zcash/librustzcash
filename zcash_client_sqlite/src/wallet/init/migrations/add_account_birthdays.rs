@@ -83,13 +83,18 @@ mod tests {
     use zip32::AccountId;
 
     use super::{DEPENDENCIES, MIGRATION_ID};
-    use crate::{wallet::init::init_wallet_db_internal, WalletDb};
+    use crate::{
+        testing::db::{test_clock, test_rng},
+        wallet::init::init_wallet_db_internal,
+        WalletDb,
+    };
 
     #[test]
     fn migrate() {
         let data_file = NamedTempFile::new().unwrap();
         let network = Network::TestNetwork;
-        let mut db_data = WalletDb::for_path(data_file.path(), network, ()).unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
 
         let seed_bytes = vec![0xab; 32];
         init_wallet_db_internal(
