@@ -324,8 +324,8 @@ mod tests {
         testing::db::{test_clock, test_rng},
         wallet::{
             init::{
+                init_wallet_db_internal,
                 migrations::{add_account_birthdays, shardtree_support, wallet_summaries},
-                testing::init_wallet_db_internal,
             },
             memo_repr,
             sapling::ReceivedSaplingOutput,

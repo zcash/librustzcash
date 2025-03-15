@@ -33,10 +33,7 @@ mod v_transactions_transparent_history;
 mod v_tx_outputs_use_legacy_false;
 mod wallet_summaries;
 
-use std::{
-    rc::Rc,
-    sync::{Arc, Mutex},
-};
+use std::{rc::Rc, sync::Mutex};
 
 use rand_core::RngCore;
 use rusqlite::{named_params, OptionalExtension};
@@ -102,7 +99,7 @@ pub(super) fn all_migrations<
     //                          fix_bad_change_flagging     v_transactions_additional_totals
     //                                                                     |
     //                                                       transparent_gap_limit_handling
-    let rng = Arc::new(Mutex::new(rng));
+    let rng = Rc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -313,7 +310,7 @@ mod tests {
 
     use crate::{
         testing::db::{test_clock, test_rng},
-        wallet::init::testing::init_wallet_db_internal,
+        wallet::init::init_wallet_db_internal,
         WalletDb,
     };
 

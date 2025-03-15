@@ -85,7 +85,7 @@ mod tests {
     use super::{DEPENDENCIES, MIGRATION_ID};
     use crate::{
         testing::db::{test_clock, test_rng},
-        wallet::init::testing::init_wallet_db_internal,
+        wallet::init::init_wallet_db_internal,
         WalletDb,
     };
 

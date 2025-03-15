@@ -23,7 +23,7 @@ and this library adheres to Rust's notion of
     - an `rng` field and corresponding type parameter. Tests that make use of
       `WalletDb` now use a `ChaChaRng` value initialized with the all-zeros
       seed for this field value.
-    - the following methods have been changed to accept an additional parameter
+    - the following methods have been changed to accept additional parameters
       as a result of these changes:
       - `WalletDb::for_path`
       - `WalletDb::from_connection`

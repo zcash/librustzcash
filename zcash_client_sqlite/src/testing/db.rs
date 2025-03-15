@@ -36,10 +36,9 @@ use zcash_protocol::{
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
+use crate::wallet::init::init_wallet_db_internal;
 use crate::{
-    error::SqliteClientError,
-    util::testing::FixedClock,
-    wallet::init::testing::{init_wallet_db, init_wallet_db_internal},
+    error::SqliteClientError, util::testing::FixedClock, wallet::init::testing::init_wallet_db,
     AccountUuid, WalletDb,
 };
 

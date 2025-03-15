@@ -325,8 +325,8 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 pub fn init_wallet_db<
     C: BorrowMut<rusqlite::Connection>,
     P: consensus::Parameters + 'static,
-    R: RngCore + Clone + 'static,
     CL: Clock + Clone + 'static,
+    R: RngCore + Clone + 'static,
 >(
     wdb: &mut WalletDb<C, P, CL, R>,
     seed: Option<SecretVec<u8>>,
@@ -337,8 +337,8 @@ pub fn init_wallet_db<
 pub(crate) fn init_wallet_db_internal<
     C: BorrowMut<rusqlite::Connection>,
     P: consensus::Parameters + 'static,
-    R: RngCore + Clone + 'static,
     CL: Clock + Clone + 'static,
+    R: RngCore + Clone + 'static,
 >(
     wdb: &mut WalletDb<C, P, CL, R>,
     seed: Option<SecretVec<u8>>,
@@ -484,20 +484,7 @@ pub(crate) mod testing {
         wdb: &mut WalletDb<rusqlite::Connection, P, CL, R>,
         seed: Option<SecretVec<u8>>,
     ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
-        init_wallet_db_internal(wdb, seed, &[], true)
-    }
-
-    pub(crate) fn init_wallet_db_internal<
-        P: consensus::Parameters + 'static,
-        CL: Clock + Clone + 'static,
-        R: RngCore + Clone + 'static,
-    >(
-        wdb: &mut WalletDb<rusqlite::Connection, P, CL, R>,
-        seed: Option<SecretVec<u8>>,
-        target_migrations: &[Uuid],
-        verify_seed_relevance: bool,
-    ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
-        super::init_wallet_db_internal(wdb, seed, target_migrations, verify_seed_relevance)
+        super::init_wallet_db_internal(wdb, seed, &[], true)
     }
 }
 

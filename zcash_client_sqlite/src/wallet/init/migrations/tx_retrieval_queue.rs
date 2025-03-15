@@ -235,7 +235,7 @@ mod tests {
 
     use crate::{
         testing::db::{test_clock, test_rng},
-        wallet::init::{migrations::tests::test_migrate, testing::init_wallet_db_internal},
+        wallet::init::{init_wallet_db_internal, migrations::tests::test_migrate},
         WalletDb,
     };
 

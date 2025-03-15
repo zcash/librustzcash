@@ -3,7 +3,8 @@
 
 use rand_core::RngCore;
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::rc::Rc;
+use std::sync::Mutex;
 use uuid::Uuid;
 
 use rusqlite::{named_params, Transaction};
@@ -42,7 +43,7 @@ const DEPENDENCIES: &[Uuid] = &[add_account_uuids::MIGRATION_ID];
 pub(super) struct Migration<P, C, R> {
     pub(super) params: P,
     pub(super) _clock: C,
-    pub(super) _rng: Arc<Mutex<R>>,
+    pub(super) _rng: Rc<Mutex<R>>,
 }
 
 impl<P, C, R> schemerz::Migration<Uuid> for Migration<P, C, R> {
@@ -80,7 +81,6 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
             ALTER TABLE addresses ADD COLUMN transparent_child_index INTEGER;
             ALTER TABLE addresses ADD COLUMN exposed_at_height INTEGER;
             ALTER TABLE addresses ADD COLUMN receiver_flags INTEGER;
-            ALTER TABLE addresses ADD COLUMN transparent_receiver_next_check_time INTEGER;
             "#
         ))?;
 

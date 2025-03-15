@@ -232,7 +232,7 @@ mod tests {
 
     use crate::{
         testing::db::{test_clock, test_rng},
-        wallet::init::{migrations::v_transactions_net, testing::init_wallet_db_internal},
+        wallet::init::{init_wallet_db_internal, migrations::v_transactions_net},
         WalletDb,
     };
 

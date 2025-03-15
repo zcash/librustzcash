@@ -388,6 +388,8 @@ impl<P, CL, R> WalletDb<Connection, P, CL, R> {
     /// - `path`: The path to the SQLite database used to store wallet data.
     /// - `params`: Parameters associated with the Zcash network that the wallet will connect to.
     /// - `clock`: The clock to use in the case that the backend needs access to the system time.
+    /// - `rng`: The random number generation capability to be exposed by the created `WalletDb`
+    ///   instance.
     pub fn for_path<F: AsRef<Path>>(
         path: F,
         params: P,
@@ -430,6 +432,8 @@ impl<C: Borrow<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     /// - `conn`: A connection to the wallet database.
     /// - `params`: Parameters associated with the Zcash network that the wallet will connect to.
     /// - `clock`: The clock to use in the case that the backend needs access to the system time.
+    /// - `rng`: The random number generation capability to be exposed by the created `WalletDb`
+    ///   instance.
     pub fn from_connection(conn: C, params: P, clock: CL, rng: R) -> Self {
         WalletDb {
             conn,
@@ -442,17 +446,17 @@ impl<C: Borrow<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     }
 }
 
-impl<C: BorrowMut<Connection>, P, CL, R: Clone> WalletDb<C, P, CL, R> {
+impl<C: BorrowMut<Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     pub fn transactionally<F, A, E: From<rusqlite::Error>>(&mut self, f: F) -> Result<A, E>
     where
-        F: FnOnce(&mut WalletDb<SqlTransaction<'_>, &P, &CL, R>) -> Result<A, E>,
+        F: FnOnce(&mut WalletDb<SqlTransaction<'_>, &P, &CL, &mut R>) -> Result<A, E>,
     {
         let tx = self.conn.borrow_mut().transaction()?;
         let mut wdb = WalletDb {
             conn: SqlTransaction(&tx),
             params: &self.params,
             clock: &self.clock,
-            rng: self.rng.clone(),
+            rng: &mut self.rng,
             #[cfg(feature = "transparent-inputs")]
             gap_limits: self.gap_limits,
         };
@@ -504,7 +508,14 @@ impl<C: BorrowMut<Connection>, P, CL, R: Clone> WalletDb<C, P, CL, R> {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl<C: BorrowMut<Connection>, P, CL: Clock, R: rand::RngCore + Clone> WalletDb<C, P, CL, R> {
+impl<C: BorrowMut<Connection>, P, CL: Clock, R: rand::RngCore> WalletDb<C, P, CL, R> {
+    /// For each ephemeral address in the wallet, ensure that the transaction data request queue
+    /// contains a request for the wallet to check for UTXOs belonging to that address at some time
+    /// during the next 24-hour period.
+    ///
+    /// We use randomized scheduling of ephemeral address checks to ensure that a
+    /// lightwalletd-compromising adversary cannot use temporal clustering to determine what
+    /// ephemeral addresses belong to a given wallet.
     pub fn schedule_ephemeral_address_checks(&mut self) -> Result<(), SqliteClientError> {
         self.borrow_mut().transactionally(|wdb| {
             schedule_ephemeral_address_checks(wdb.conn.0, wdb.clock, &mut wdb.rng)
@@ -1093,7 +1104,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
     }
 }
 
-impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R: Clone> WalletWrite
+impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R> WalletWrite
     for WalletDb<C, P, CL, R>
 {
     type UtxoRef = UtxoId;

@@ -38,7 +38,7 @@ use zcash_protocol::{
 };
 use zip32::Scope;
 
-use super::encoding::ReceiverFlags;
+use super::encoding::{decode_epoch_seconds, ReceiverFlags};
 use super::{
     account_birthday_internal, chain_tip_height,
     encoding::{decode_diversifier_index_be, encode_diversifier_index_be},
@@ -1022,10 +1022,15 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     )
 }
 
+/// An enumeration of the types of errors that can occur when scheduling an event to happen at a
+/// specific time.
 #[derive(Debug, Clone)]
 pub enum SchedulingError {
+    /// An error occurred in sampling a time offset using an exponential distribution.
     Distribution(rand_distr::ExpError),
+    /// The system attempted to generate an invalid timestamp.
     Time(SystemTimeError),
+    /// A generated duration was out of the range of valid integer values for durations.
     OutOfRange(TryFromIntError),
 }
 
@@ -1069,6 +1074,8 @@ impl From<TryFromIntError> for SchedulingError {
     }
 }
 
+/// Sample a random timestamp from an exponential distribution such that the expected value of the
+/// generated timestamp is `check_interval_seconds` after the provided `from_event` time.
 pub(crate) fn next_check_time<R: RngCore, D: DerefMut<Target = R>>(
     mut rng: D,
     from_event: SystemTime,
@@ -1123,8 +1130,13 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
         )
     })?;
 
-    // Perform ephemeral address checks only for addresses that do not have an unexpired
-    // transaction associated with them in the database.
+    // Since we don't want to interpret funds that are temporarily held by an ephemeral address in
+    // the course of creating ZIP 320 transaction pair as belonging to the wallet, we will perform
+    // ephemeral address checks only for addresses that do not have an unexpired transaction
+    // associated with them in the database. If, for some reason, the second transaction in a ZIP
+    // 320 pair fails to be mined after the first transaction in the pair succeeded, we will begin
+    // including the associated ephemeral address in the set to be checked for funds only after
+    // the transaction that spends from it has expired.
     let mut ephemeral_check_stmt = conn.prepare_cached(
         "SELECT
             cached_transparent_receiver_address,
@@ -1136,7 +1148,7 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
             FROM transparent_received_outputs tro
             JOIN transactions t ON t.id_tx = tro.transaction_id
             WHERE tro.address_id = addresses.id
-            AND t.expiry_height >= :chain_tip_height
+            AND t.expiry_height > :chain_tip_height
          )",
     )?;
 
@@ -1149,12 +1161,7 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
             let address = TransparentAddress::decode(params, &row.get::<_, String>(0)?)?;
             let request_at = row
                 .get::<_, Option<i64>>(1)?
-                .map(|t| {
-                    let timestamp = u64::try_from(t).map_err(|_| {
-                        SqliteClientError::CorruptedData(format!("Invalid timestamp: {}", t))
-                    })?;
-                    Ok::<_, SqliteClientError>(SystemTime::UNIX_EPOCH + Duration::new(timestamp, 0))
-                })
+                .map(decode_epoch_seconds)
                 .transpose()?;
 
             Ok::<TransactionDataRequest, SqliteClientError>(

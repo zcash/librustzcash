@@ -101,8 +101,7 @@ mod tests {
     use crate::{
         testing::db::{test_clock, test_rng},
         wallet::init::{
-            migrations::addresses_table,
-            testing::{init_wallet_db, init_wallet_db_internal},
+            init_wallet_db_internal, migrations::addresses_table, testing::init_wallet_db,
         },
         WalletDb, UA_ORCHARD, UA_TRANSPARENT,
     };
