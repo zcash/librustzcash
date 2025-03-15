@@ -321,6 +321,7 @@ mod tests {
 
     use crate::{
         error::SqliteClientError,
+        testing::db::{test_clock, test_rng},
         wallet::{
             init::{
                 init_wallet_db_internal,
@@ -337,8 +338,8 @@ mod tests {
     const EXTERNAL_VALUE: u64 = 10;
     const INTERNAL_VALUE: u64 = 5;
 
-    fn prepare_wallet_state<P: Parameters, CL>(
-        db_data: &mut WalletDb<Connection, P, CL>,
+    fn prepare_wallet_state<P: Parameters, CL, R>(
+        db_data: &mut WalletDb<Connection, P, CL, R>,
     ) -> (UnifiedFullViewingKey, BlockHeight, BuildResult) {
         // Create an account in the wallet
         let usk0 =
@@ -527,7 +528,8 @@ mod tests {
 
         // Create wallet upgraded to just before the current migration.
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), params, ()).unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), params, test_clock(), test_rng()).unwrap();
         init_wallet_db_internal(
             &mut db_data,
             None,
@@ -626,7 +628,8 @@ mod tests {
 
         // Create wallet upgraded to just before the current migration.
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), params, ()).unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), params, test_clock(), test_rng()).unwrap();
         init_wallet_db_internal(
             &mut db_data,
             None,

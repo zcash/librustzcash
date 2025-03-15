@@ -17,6 +17,7 @@ use crate::{wallet::commitment_tree, AccountUuid};
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    crate::wallet::transparent::SchedulingError,
     ::transparent::{address::TransparentAddress, keys::TransparentKeyScope},
     zcash_keys::encoding::TransparentCodecError,
 };
@@ -138,6 +139,10 @@ pub enum SqliteClientError {
     /// linkability. The returned value contains the string encoding of the address and the txid(s)
     /// of the transactions in which it is known to have been used.
     AddressReuse(String, NonEmpty<TxId>),
+
+    /// The wallet encountered an error when attempting to schedule wallet operations.
+    #[cfg(feature = "transparent-inputs")]
+    Scheduling(SchedulingError),
 }
 
 impl error::Error for SqliteClientError {
@@ -214,6 +219,10 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::AddressReuse(address_str, txids) => {
                 write!(f, "The address {address_str} previously used in txid(s) {:?} would be reused.", txids)
             }
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::Scheduling(err) => {
+                write!(f, "The wallet was unable to schedule an event: {}", err)
+            }
         }
     }
 }
@@ -276,5 +285,12 @@ impl From<BalanceError> for SqliteClientError {
 impl From<AddressGenerationError> for SqliteClientError {
     fn from(e: AddressGenerationError) -> Self {
         SqliteClientError::AddressGeneration(e)
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl From<SchedulingError> for SqliteClientError {
+    fn from(value: SchedulingError) -> Self {
+        SqliteClientError::Scheduling(value)
     }
 }
