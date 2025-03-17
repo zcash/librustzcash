@@ -334,7 +334,7 @@ impl Authorization for Unauthorized {
     type OrchardAuth = orchard::builder::InProgress<Unproven, orchard::builder::Unauthorized>;
 
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    type IssueAuth = orchard::issuance::Unauthorized;
+    type IssueAuth = orchard::issuance::AwaitingNullifier;
 
     #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth = tze::builder::Unauthorized;

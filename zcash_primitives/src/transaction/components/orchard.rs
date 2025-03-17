@@ -11,12 +11,14 @@ use nonempty::NonEmpty;
 use orchard::{
     bundle::{Authorization, Authorized, Flags},
     domain::OrchardDomainCommon,
-    note::{AssetBase, ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
-    orchard_flavor::{OrchardVanilla, OrchardZSA},
+    note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
+    orchard_flavor::OrchardVanilla,
     primitives::redpallas::{self, SigType, Signature, SpendAuth, VerificationKey},
-    value::{NoteValue, ValueCommitment},
+    value::ValueCommitment,
     Action, Anchor, Bundle,
 };
+#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+use orchard::{note::AssetBase, orchard_flavor::OrchardZSA, value::NoteValue};
 use zcash_encoding::{Array, CompactSize, Vector};
 use zcash_note_encryption::note_bytes::NoteBytes;
 
@@ -132,7 +134,7 @@ pub fn read_orchard_zsa_bundle<R: Read>(
 
     let value_balance = Transaction::read_amount(&mut reader)?;
 
-    let burn = Vector::read(&mut reader, |r| read_burn(r))?;
+    let burn = read_burn(&mut reader)?;
 
     let binding_signature = read_signature::<_, redpallas::Binding>(&mut reader)?;
 
@@ -149,8 +151,14 @@ pub fn read_orchard_zsa_bundle<R: Read>(
 }
 
 #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-fn read_burn<R: Read>(reader: &mut R) -> io::Result<(AssetBase, NoteValue)> {
+fn read_burn_item<R: Read>(reader: &mut R) -> io::Result<(AssetBase, NoteValue)> {
     Ok((read_asset(reader)?, read_note_value(reader)?))
+}
+
+/// Reads burn for OrchardZSA
+#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+pub fn read_burn<R: Read>(mut reader: &mut R) -> io::Result<Vec<(AssetBase, NoteValue)>> {
+    Vector::read(&mut reader, read_burn_item)
 }
 
 pub fn read_value_commitment<R: Read>(mut reader: R) -> io::Result<ValueCommitment> {
@@ -277,20 +285,15 @@ fn read_note_value<R: Read>(mut reader: R) -> io::Result<NoteValue> {
     Ok(NoteValue::from_bytes(bytes))
 }
 
-pub trait WriteBurn<W: Write> {
-    fn write_burn(writer: &mut W, burn: &[(AssetBase, NoteValue)]) -> io::Result<()>;
-}
-
-// Write burn for OrchardZSA
-impl<W: Write> WriteBurn<W> for OrchardZSA {
-    fn write_burn(writer: &mut W, burn: &[(AssetBase, NoteValue)]) -> io::Result<()> {
-        Vector::write(writer, burn, |w, (asset, amount)| {
-            w.write_all(&asset.to_bytes())?;
-            w.write_all(&amount.to_bytes())?;
-            Ok(())
-        })?;
+/// Writes burn for OrchardZSA
+#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+pub fn write_burn<W: Write>(writer: &mut W, burn: &[(AssetBase, NoteValue)]) -> io::Result<()> {
+    Vector::write(writer, burn, |w, (asset, amount)| {
+        w.write_all(&asset.to_bytes())?;
+        w.write_all(&amount.to_bytes())?;
         Ok(())
-    }
+    })?;
+    Ok(())
 }
 
 /// Writes an [`orchard::Bundle`] in the appropriate transaction format.
@@ -372,7 +375,7 @@ pub fn write_orchard_zsa_bundle<W: Write>(
 
     writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
 
-    OrchardZSA::write_burn(&mut writer, bundle.burn())?;
+    write_burn(&mut writer, bundle.burn())?;
 
     writer.write_all(&<[u8; 64]>::from(
         bundle.authorization().binding_signature(),

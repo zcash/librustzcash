@@ -59,10 +59,13 @@ use orchard::{
     issuance,
     issuance::{IssueBundle, IssueInfo},
     keys::{IssuanceAuthorizingKey, IssuanceValidatingKey},
+    note::Nullifier,
     orchard_flavor::OrchardZSA,
 };
 #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
 use rand_core::OsRng;
+#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+use std::io;
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
@@ -329,7 +332,7 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     sapling_builder: Option<sapling::builder::Builder>,
     orchard_builder: Option<orchard::builder::Builder>,
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
-    issuance_builder: Option<IssueBundle<issuance::Unauthorized>>,
+    issuance_builder: Option<IssueBundle<issuance::AwaitingNullifier>>,
     // TODO: In the future, instead of taking the spending keys as arguments when calling
     // `add_sapling_spend` or `add_orchard_spend`, we will build an unauthorized, unproven
     // transaction, and then the caller will be responsible for using the spending keys or their
@@ -972,6 +975,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
         let issue_bundle = unauthed_tx
             .issue_bundle
+            .map(|b| b.update_rho(first_nullifier(&orchard_bundle)))
             .map(|b| b.prepare(*shielded_sig_commitment.as_ref()))
             .map(|b| b.sign(self.issuance_isk.as_ref().unwrap()))
             .map(|b| b.unwrap());
@@ -1015,6 +1019,16 @@ where
         .create_proof(proving_key, &mut rng)
         .and_then(|b| b.apply_signatures(&mut rng, *shielded_sig_commitment, orchard_saks))
         .map_err(Error::OrchardBuild)
+}
+
+/// This function returns the first nullifier from the first transfer action in the Orchard bundle.
+/// It can only be called on ZSA bundle, will panic in case of invalid input e.g. Vanilla or empty bundle.
+#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+fn first_nullifier(orchard_bundle: &Option<OrchardBundle<Authorized>>) -> &Nullifier {
+    match orchard_bundle {
+        Some(OrchardBundle::OrchardZSA(b)) => b.actions().first().nullifier(),
+        _ => panic!("first_nullifier called on non-ZSA bundle, this should never happen"),
+    }
 }
 
 #[cfg(zcash_unstable = "zfuture")]
@@ -1647,11 +1661,11 @@ mod tests {
         let asset_desc: Vec<u8> = "asset_desc".into();
 
         builder
-            .init_issuance_bundle::<FeeError>(iak, asset_desc.clone(), None, false)
+            .init_issuance_bundle::<FeeError>(iak, asset_desc.clone(), None, true)
             .unwrap();
 
         builder
-            .add_recipient::<FeeError>(&asset_desc, address, NoteValue::from_raw(42), true)
+            .add_recipient::<FeeError>(&asset_desc, address, NoteValue::from_raw(42), false)
             .unwrap();
 
         let binding = builder.mock_build_no_fee(OsRng).unwrap().into_transaction();
