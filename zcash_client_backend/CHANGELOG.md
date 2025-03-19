@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.18.0] - 2025-03-19
+
 ### Added
 - `zcash_client_backend::data_api`:
   - `AddressInfo`
@@ -16,6 +18,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api::{TransactionStatusFilter, OutputStatusFilter}`
 
 ### Changed
+- Updated to `zcash_keys 0.8`
 - `zcash_client_backend::data_api::WalletRead`:
   - `get_transparent_receivers` now takes additional `include_change` and
     `include_ephemeral` arguments.
