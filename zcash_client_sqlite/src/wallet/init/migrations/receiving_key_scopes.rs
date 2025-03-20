@@ -549,7 +549,8 @@ mod tests {
         // Replicate its relevant innards here.
         let d_tx = decrypt_transaction(
             &params,
-            height,
+            Some(height),
+            None,
             tx,
             &[(account_id, ufvk0)].into_iter().collect(),
         );

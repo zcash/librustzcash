@@ -7,7 +7,7 @@ use zcash_primitives::{
     transaction::components::sapling::zip212_enforcement, transaction::Transaction,
 };
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, NetworkUpgrade},
     memo::MemoBytes,
     value::Zatoshis,
 };
@@ -103,13 +103,36 @@ impl<A> DecryptedOutput<orchard::note::Note, A> {
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the set of
 /// [`UnifiedFullViewingKey`]s.
+///
+/// # Parameters
+/// - `params`: The network parameters corresponding to the network the transaction
+///   was created for.
+/// - `mined_height`: The height at which the transaction was mined, or `None` for
+///   unmined transactions.
+/// - `chain_tip_height`: The current chain tip height, if known. This parameter
+///   will be unused if `mined_height.is_some()`.
+/// - `tx`: The transaction to decrypt.
+/// - `ufvks`: The [`UnifiedFullViewingKey`]s to use in trial decryption, keyed
+///   by the identifiers for the wallet accounts they correspond to.
 pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
     params: &P,
-    height: BlockHeight,
+    mined_height: Option<BlockHeight>,
+    chain_tip_height: Option<BlockHeight>,
     tx: &'a Transaction,
     ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
 ) -> DecryptedTransaction<'a, AccountId> {
-    let zip212_enforcement = zip212_enforcement(params, height);
+    let zip212_enforcement = zip212_enforcement(
+        params,
+        // Height is block height for mined transactions, and the "mempool height" (chain height + 1)
+        // for mempool transactions. We fall back to Sapling activation if we have no other
+        // information.
+        mined_height.unwrap_or_else(|| {
+            chain_tip_height
+                .map(|max_height| max_height + 1) // "mempool height"
+                .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
+                .expect("Sapling activation height must be known.")
+        }),
+    );
     let sapling_bundle = tx.sapling_bundle();
     let sapling_outputs = sapling_bundle
         .iter()
@@ -217,7 +240,7 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
         .collect();
 
     DecryptedTransaction::new(
-        Some(height),
+        mined_height,
         tx,
         sapling_outputs,
         #[cfg(feature = "orchard")]
