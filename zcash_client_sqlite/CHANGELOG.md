@@ -11,15 +11,23 @@ and this library adheres to Rust's notion of
 - `zcash_client_sqlite::WalletDb::with_gap_limits`
 - `zcash_client_sqlite::GapLimits`
 - `zcash_client_sqlite::util`
+- `zcash_client_sqlite::schedule_ephemeral_address_checks` has been added under
+  the `transparent-inputs` feature flag.
+- `zcash_client_sqlite::wallet::transparent::SchedulingError`
 
 ### Changed
-- `zcash_client_sqlite::WalletDb` has an added `Clock` field and corresponding
-  type parameter. Tests that make use of a `WalletDb` instance now use a
-  `zcash_client_sqlite::util::FixedClock` for their clock instance, and the
-  following methods have been changed to accept an additional parameter as a
-  result:
-  - `WalletDb::for_path`
-  - `WalletDb::from_connection`
+- `zcash_client_sqlite::WalletDb` has added fields and type parameters:
+    - a `clock` field and corresponding type parameter. Tests that make use of
+      `WalletDb` now use a `zcash_client_sqlite::util::FixedClock` for this
+      field value.
+    - an `rng` field and corresponding type parameter. Tests that make use of
+      `WalletDb` now use a `ChaChaRng` value initialized with the all-zeros
+      seed for this field value.
+    - the following methods have been changed to accept additional parameters
+      as a result of these changes:
+      - `WalletDb::for_path`
+      - `WalletDb::from_connection`
+      - `wallet::init::init_wallet_db` has additional type constraints
 - `zcash_client_sqlite::WalletDb::get_address_for_index` now returns some of
   its failure modes via `Err(SqliteClientError::AddressGeneration)` instead of
   `Ok(None)`.
@@ -31,6 +39,7 @@ and this library adheres to Rust's notion of
     to the transparent address index, it also contains the key scope
     involved when the error was encountered.
   - A new `DiversifierIndexReuse` variant has been added.
+  - A new `Scheduling` variant has been added.
 - Each row returned from the `v_received_outputs` view now exposes an
   internal identifier for the address that received that output. This should
   be ignored by external consumers of this view.
@@ -39,6 +48,8 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `zcash_client_sqlite::WalletDb::from_connection`
+- `zcash_client_sqlite::WalletDb::check_witnesses`
+- `zcash_client_sqlite::WalletDb::queue_rescans`
 
 ### Changed
 - MSRV is now 1.81.0.

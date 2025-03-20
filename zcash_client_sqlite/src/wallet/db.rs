@@ -101,6 +101,9 @@ pub(super) const INDEX_HD_ACCOUNT: &str =
 ///     cases, this is what user-generated addresses will be assigned.
 /// - `receiver_flags`: A set of bitflags that describes which receiver types are included in
 ///   `address`. See the documentation of [`ReceiverFlags`] for details.
+/// - `transparent_receiver_next_check_time`: The Unix epoch time at which a client should next
+///   check to determine whether any new UTXOs have been received by the cached transparent receiver
+///   address. At present, this will ordinarily be populated only for ZIP 320 ephemeral addresses.
 ///
 /// [`ReceiverFlags`]: crate::wallet::encoding::ReceiverFlags
 pub(super) const TABLE_ADDRESSES: &str = r#"
@@ -114,6 +117,7 @@ CREATE TABLE "addresses" (
     cached_transparent_receiver_address TEXT,
     exposed_at_height INTEGER,
     receiver_flags INTEGER NOT NULL,
+    transparent_receiver_next_check_time INTEGER,
     FOREIGN KEY (account_id) REFERENCES accounts(id),
     CONSTRAINT diversification UNIQUE (account_id, key_scope, diversifier_index_be),
     CONSTRAINT transparent_index_consistency CHECK (

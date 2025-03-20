@@ -1,5 +1,6 @@
 //! Functions common to Sapling and Orchard support in the wallet.
 
+use incrementalmerkletree::Position;
 use rusqlite::{named_params, types::Value, Connection, Row};
 use std::{num::NonZeroU64, rc::Rc};
 
@@ -234,6 +235,102 @@ where
     notes
         .filter_map(|r| r.transpose())
         .collect::<Result<_, _>>()
+}
+
+#[allow(dead_code)]
+pub(crate) struct UnspentNoteMeta {
+    note_id: ReceivedNoteId,
+    txid: TxId,
+    output_index: u32,
+    commitment_tree_position: Position,
+    value: Zatoshis,
+}
+
+#[allow(dead_code)]
+impl UnspentNoteMeta {
+    pub(crate) fn note_id(&self) -> ReceivedNoteId {
+        self.note_id
+    }
+
+    pub(crate) fn txid(&self) -> TxId {
+        self.txid
+    }
+
+    pub(crate) fn output_index(&self) -> u32 {
+        self.output_index
+    }
+
+    pub(crate) fn commitment_tree_position(&self) -> Position {
+        self.commitment_tree_position
+    }
+
+    pub(crate) fn value(&self) -> Zatoshis {
+        self.value
+    }
+}
+
+pub(crate) fn select_unspent_note_meta(
+    conn: &rusqlite::Connection,
+    protocol: ShieldedProtocol,
+    chain_tip_height: BlockHeight,
+    wallet_birthday: BlockHeight,
+) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
+    let (table_prefix, index_col, _) = per_protocol_names(protocol);
+    // This query is effectively the same as the internal `eligible` subquery
+    // used in `select_spendable_notes`.
+    //
+    // TODO: Deduplicate this in the future by introducing a view?
+    let mut stmt = conn.prepare_cached(&format!("
+        SELECT {table_prefix}_received_notes.id AS id, txid, {index_col},
+               commitment_tree_position, value
+        FROM {table_prefix}_received_notes
+        INNER JOIN transactions
+           ON transactions.id_tx = {table_prefix}_received_notes.tx
+        WHERE value > 5000 -- FIXME #1316, allow selection of dust inputs
+        AND recipient_key_scope IS NOT NULL
+        AND nf IS NOT NULL
+        AND commitment_tree_position IS NOT NULL
+        AND {table_prefix}_received_notes.id NOT IN (
+          SELECT {table_prefix}_received_note_id
+          FROM {table_prefix}_received_note_spends
+          JOIN transactions stx ON stx.id_tx = transaction_id
+          WHERE stx.block IS NOT NULL -- the spending tx is mined
+          OR stx.expiry_height IS NULL -- the spending tx will not expire
+          OR stx.expiry_height > :anchor_height -- the spending tx is unexpired
+        )
+        AND NOT EXISTS (
+           SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges unscanned
+           -- select all the unscanned ranges involving the shard containing this note
+           WHERE {table_prefix}_received_notes.commitment_tree_position >= unscanned.start_position
+           AND {table_prefix}_received_notes.commitment_tree_position < unscanned.end_position_exclusive
+           -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
+           AND unscanned.block_range_start <= :anchor_height
+           -- exclude unscanned ranges that end below the wallet birthday
+           AND unscanned.block_range_end > :wallet_birthday
+        )
+    "))?;
+
+    let res = stmt
+        .query_and_then::<_, SqliteClientError, _, _>(
+            named_params![
+                ":anchor_height": u32::from(chain_tip_height),
+                ":wallet_birthday": u32::from(wallet_birthday),
+            ],
+            |row| {
+                Ok(UnspentNoteMeta {
+                    note_id: row.get("id").map(|id| ReceivedNoteId(protocol, id))?,
+                    txid: row.get("txid").map(TxId::from_bytes)?,
+                    output_index: row.get(index_col)?,
+                    commitment_tree_position: row
+                        .get::<_, u64>("commitment_tree_position")
+                        .map(Position::from)?,
+                    value: Zatoshis::from_nonnegative_i64(row.get("value")?)?,
+                })
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(res)
 }
 
 pub(crate) fn spendable_notes_meta(

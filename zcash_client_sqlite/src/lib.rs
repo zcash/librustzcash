@@ -36,9 +36,10 @@ use incrementalmerkletree::{Marking, Position, Retention};
 use nonempty::NonEmpty;
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
-use shardtree::{error::ShardTreeError, ShardTree};
+use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use std::{
     borrow::{Borrow, BorrowMut},
+    cmp::{max, min},
     collections::HashMap,
     convert::AsRef,
     fmt,
@@ -56,10 +57,11 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, BlockMetadata,
-        DecryptedTransaction, InputSource, NoteFilter, NullifierQuery, ScannedBlock, SeedRelevance,
-        SentTransaction, SpendableNotes, TransactionDataRequest, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletWrite, Zip32Derivation, SAPLING_SHARD_HEIGHT,
+        Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
+        BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery, ScannedBlock,
+        SeedRelevance, SentTransaction, SpendableNotes, TransactionDataRequest,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
+        SAPLING_SHARD_HEIGHT,
     },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
@@ -85,19 +87,19 @@ use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore}
 use wallet::{
     commitment_tree::{self, put_shard_roots},
     common::spendable_notes_meta,
+    scanning::replace_queue_entries,
     upsert_address, SubtreeProgressEstimator,
 };
 
 #[cfg(feature = "orchard")]
 use {
-    incrementalmerkletree::frontier::Frontier,
-    shardtree::store::{Checkpoint, ShardStore},
-    std::collections::BTreeMap,
-    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
+    incrementalmerkletree::frontier::Frontier, shardtree::store::Checkpoint,
+    std::collections::BTreeMap, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
 };
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    crate::wallet::transparent::ephemeral::schedule_ephemeral_address_checks,
     ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     std::collections::BTreeSet,
     zcash_client_backend::wallet::TransparentAddressMetadata,
@@ -360,10 +362,11 @@ impl From<zcash_client_backend::data_api::testing::transparent::GapLimits> for G
 /// A wrapper for the SQLite connection to the wallet database, along with a capability to read the
 /// system from the clock. A `WalletDb` encapsulates the full set of capabilities that are required
 /// in order to implement the [`WalletRead`], [`WalletWrite`] and [`WalletCommitmentTrees`] traits.
-pub struct WalletDb<C, P, CL> {
+pub struct WalletDb<C, P, CL, R> {
     conn: C,
     params: P,
     clock: CL,
+    rng: R,
     #[cfg(feature = "transparent-inputs")]
     gap_limits: GapLimits,
 }
@@ -377,7 +380,7 @@ impl Borrow<rusqlite::Connection> for SqlTransaction<'_> {
     }
 }
 
-impl<P, CL> WalletDb<Connection, P, CL> {
+impl<P, CL, R> WalletDb<Connection, P, CL, R> {
     /// Construct a [`WalletDb`] instance that connects to the wallet database stored at the
     /// specified path.
     ///
@@ -385,10 +388,13 @@ impl<P, CL> WalletDb<Connection, P, CL> {
     /// - `path`: The path to the SQLite database used to store wallet data.
     /// - `params`: Parameters associated with the Zcash network that the wallet will connect to.
     /// - `clock`: The clock to use in the case that the backend needs access to the system time.
+    /// - `rng`: The random number generation capability to be exposed by the created `WalletDb`
+    ///   instance.
     pub fn for_path<F: AsRef<Path>>(
         path: F,
         params: P,
         clock: CL,
+        rng: R,
     ) -> Result<Self, rusqlite::Error> {
         Connection::open(path).and_then(move |conn| {
             rusqlite::vtab::array::load_module(&conn)?;
@@ -396,6 +402,7 @@ impl<P, CL> WalletDb<Connection, P, CL> {
                 conn,
                 params,
                 clock,
+                rng,
                 #[cfg(feature = "transparent-inputs")]
                 gap_limits: GapLimits::default(),
             })
@@ -404,7 +411,7 @@ impl<P, CL> WalletDb<Connection, P, CL> {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl<C, P, CL> WalletDb<C, P, CL> {
+impl<C, P, CL, R> WalletDb<C, P, CL, R> {
     /// Sets the gap limits to be used by the wallet in transparent address generation.
     pub fn with_gap_limits(mut self, gap_limits: GapLimits) -> Self {
         self.gap_limits = gap_limits;
@@ -412,7 +419,7 @@ impl<C, P, CL> WalletDb<C, P, CL> {
     }
 }
 
-impl<C: Borrow<rusqlite::Connection>, P, CL> WalletDb<C, P, CL> {
+impl<C: Borrow<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     /// Constructs a new wrapper around the given connection.
     ///
     /// This is provided for use cases such as connection pooling, where `conn` may be an
@@ -425,27 +432,31 @@ impl<C: Borrow<rusqlite::Connection>, P, CL> WalletDb<C, P, CL> {
     /// - `conn`: A connection to the wallet database.
     /// - `params`: Parameters associated with the Zcash network that the wallet will connect to.
     /// - `clock`: The clock to use in the case that the backend needs access to the system time.
-    pub fn from_connection(conn: C, params: P, clock: CL) -> Self {
+    /// - `rng`: The random number generation capability to be exposed by the created `WalletDb`
+    ///   instance.
+    pub fn from_connection(conn: C, params: P, clock: CL, rng: R) -> Self {
         WalletDb {
             conn,
             params,
             clock,
+            rng,
             #[cfg(feature = "transparent-inputs")]
             gap_limits: GapLimits::default(),
         }
     }
 }
 
-impl<C: BorrowMut<Connection>, P, CL> WalletDb<C, P, CL> {
+impl<C: BorrowMut<Connection>, P, CL, R> WalletDb<C, P, CL, R> {
     pub fn transactionally<F, A, E: From<rusqlite::Error>>(&mut self, f: F) -> Result<A, E>
     where
-        F: FnOnce(&mut WalletDb<SqlTransaction<'_>, &P, &CL>) -> Result<A, E>,
+        F: FnOnce(&mut WalletDb<SqlTransaction<'_>, &P, &CL, &mut R>) -> Result<A, E>,
     {
         let tx = self.conn.borrow_mut().transaction()?;
         let mut wdb = WalletDb {
             conn: SqlTransaction(&tx),
             params: &self.params,
             clock: &self.clock,
+            rng: &mut self.rng,
             #[cfg(feature = "transparent-inputs")]
             gap_limits: self.gap_limits,
         };
@@ -453,10 +464,67 @@ impl<C: BorrowMut<Connection>, P, CL> WalletDb<C, P, CL> {
         tx.commit()?;
         Ok(result)
     }
+
+    /// Attempts to construct a witness for each note belonging to the wallet that is believed by
+    /// the wallet to currently be spendable, and returns a vector of the ranges that must be
+    /// rescanned in order to correct missing witness data.
+    ///
+    /// This method is intended for repairing wallets that broke due to bugs in `shardtree`.
+    pub fn check_witnesses(&mut self) -> Result<Vec<Range<BlockHeight>>, SqliteClientError> {
+        self.transactionally(|wdb| wallet::commitment_tree::check_witnesses(wdb.conn.0))
+    }
+
+    /// Updates the scan queue by inserting scan ranges for the given range of block heights, with
+    /// the specified scanning priority.
+    pub fn queue_rescans(
+        &mut self,
+        rescan_ranges: NonEmpty<Range<BlockHeight>>,
+        priority: ScanPriority,
+    ) -> Result<(), SqliteClientError> {
+        let query_range = rescan_ranges
+            .iter()
+            .fold(None, |acc: Option<Range<BlockHeight>>, scan_range| {
+                if let Some(range) = acc {
+                    Some(min(range.start, scan_range.start)..max(range.end, scan_range.end))
+                } else {
+                    Some(scan_range.clone())
+                }
+            })
+            .expect("rescan_ranges is nonempty");
+
+        self.transactionally::<_, _, SqliteClientError>(|wdb| {
+            replace_queue_entries(
+                wdb.conn.0,
+                &query_range,
+                rescan_ranges
+                    .into_iter()
+                    .map(|r| ScanRange::from_parts(r, priority)),
+                true,
+            )
+        })?;
+
+        Ok(())
+    }
 }
 
-impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> InputSource
-    for WalletDb<C, P, CL>
+#[cfg(feature = "transparent-inputs")]
+impl<C: BorrowMut<Connection>, P, CL: Clock, R: rand::RngCore> WalletDb<C, P, CL, R> {
+    /// For each ephemeral address in the wallet, ensure that the transaction data request queue
+    /// contains a request for the wallet to check for UTXOs belonging to that address at some time
+    /// during the next 24-hour period.
+    ///
+    /// We use randomized scheduling of ephemeral address checks to ensure that a
+    /// lightwalletd-compromising adversary cannot use temporal clustering to determine what
+    /// ephemeral addresses belong to a given wallet.
+    pub fn schedule_ephemeral_address_checks(&mut self) -> Result<(), SqliteClientError> {
+        self.borrow_mut().transactionally(|wdb| {
+            schedule_ephemeral_address_checks(wdb.conn.0, wdb.clock, &mut wdb.rng)
+        })
+    }
+}
+
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSource
+    for WalletDb<C, P, CL, R>
 {
     type Error = SqliteClientError;
     type NoteRef = ReceivedNoteId;
@@ -588,8 +656,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> InputSource
     }
 }
 
-impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> WalletRead
-    for WalletDb<C, P, CL>
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRead
+    for WalletDb<C, P, CL, R>
 {
     type Error = SqliteClientError;
     type AccountId = AccountUuid;
@@ -687,6 +755,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> WalletRead
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<Self::Account>, Self::Error> {
         wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
+    }
+
+    fn list_addresses(&self, account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error> {
+        wallet::list_addresses(self.conn.borrow(), &self.params, account)
     }
 
     fn get_last_generated_address_matching(
@@ -894,8 +966,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> WalletRead
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
-impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> WalletTest
-    for WalletDb<C, P, CL>
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTest
+    for WalletDb<C, P, CL, R>
 {
     fn get_tx_history(
         &self,
@@ -1032,8 +1104,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL> WalletTest
     }
 }
 
-impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> WalletWrite
-    for WalletDb<C, P, CL>
+impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R> WalletWrite
+    for WalletDb<C, P, CL, R>
 {
     type UtxoRef = UtxoId;
 
@@ -1727,7 +1799,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> Wa
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             for sent_tx in transactions {
-                wallet::store_transaction_to_be_sent(wdb, sent_tx)?;
+                wallet::store_transaction_to_be_sent(wdb.conn.0, &wdb.params, sent_tx)?;
             }
             Ok(())
         })
@@ -1775,22 +1847,59 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock> Wa
     }
 }
 
-impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL> WalletCommitmentTrees
-    for WalletDb<C, P, CL>
+pub(crate) type SaplingShardStore<C> = SqliteShardStore<C, sapling::Node, SAPLING_SHARD_HEIGHT>;
+pub(crate) type SaplingCommitmentTree<C> =
+    ShardTree<SaplingShardStore<C>, { sapling::NOTE_COMMITMENT_TREE_DEPTH }, SAPLING_SHARD_HEIGHT>;
+
+pub(crate) fn sapling_tree<C>(
+    conn: C,
+) -> Result<SaplingCommitmentTree<C>, ShardTreeError<commitment_tree::Error>>
+where
+    SaplingShardStore<C>: ShardStore<H = sapling::Node, CheckpointId = BlockHeight>,
+{
+    Ok(ShardTree::new(
+        SqliteShardStore::from_connection(conn, SAPLING_TABLES_PREFIX)
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?,
+        PRUNING_DEPTH.try_into().unwrap(),
+    ))
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) type OrchardShardStore<C> =
+    SqliteShardStore<C, orchard::tree::MerkleHashOrchard, ORCHARD_SHARD_HEIGHT>;
+
+#[cfg(feature = "orchard")]
+pub(crate) type OrchardCommitmentTree<C> = ShardTree<
+    OrchardShardStore<C>,
+    { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+    ORCHARD_SHARD_HEIGHT,
+>;
+
+#[cfg(feature = "orchard")]
+pub(crate) fn orchard_tree<C>(
+    conn: C,
+) -> Result<OrchardCommitmentTree<C>, ShardTreeError<commitment_tree::Error>>
+where
+    OrchardShardStore<C>:
+        ShardStore<H = orchard::tree::MerkleHashOrchard, CheckpointId = BlockHeight>,
+{
+    Ok(ShardTree::new(
+        SqliteShardStore::from_connection(conn, ORCHARD_TABLES_PREFIX)
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?,
+        PRUNING_DEPTH.try_into().unwrap(),
+    ))
+}
+
+impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletCommitmentTrees
+    for WalletDb<C, P, CL, R>
 {
     type Error = commitment_tree::Error;
-    type SaplingShardStore<'a> =
-        SqliteShardStore<&'a rusqlite::Transaction<'a>, sapling::Node, SAPLING_SHARD_HEIGHT>;
+    type SaplingShardStore<'a> = SaplingShardStore<&'a rusqlite::Transaction<'a>>;
 
     fn with_sapling_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
-        for<'a> F: FnMut(
-            &'a mut ShardTree<
-                Self::SaplingShardStore<'a>,
-                { sapling::NOTE_COMMITMENT_TREE_DEPTH },
-                SAPLING_SHARD_HEIGHT,
-            >,
-        ) -> Result<A, E>,
+        for<'a> F:
+            FnMut(&'a mut SaplingCommitmentTree<&'a rusqlite::Transaction<'a>>) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>,
     {
         let tx = self
@@ -1798,10 +1907,8 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL> WalletCom
             .borrow_mut()
             .transaction()
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
-        let shard_store = SqliteShardStore::from_connection(&tx, SAPLING_TABLES_PREFIX)
-            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
         let result = {
-            let mut shardtree = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
+            let mut shardtree = sapling_tree(&tx)?;
             callback(&mut shardtree)?
         };
 
@@ -1841,13 +1948,8 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL> WalletCom
     #[cfg(feature = "orchard")]
     fn with_orchard_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
-        for<'a> F: FnMut(
-            &'a mut ShardTree<
-                Self::OrchardShardStore<'a>,
-                { ORCHARD_SHARD_HEIGHT * 2 },
-                ORCHARD_SHARD_HEIGHT,
-            >,
-        ) -> Result<A, E>,
+        for<'a> F:
+            FnMut(&'a mut OrchardCommitmentTree<&'a rusqlite::Transaction<'a>>) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>,
     {
         let tx = self
@@ -1855,10 +1957,8 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL> WalletCom
             .borrow_mut()
             .transaction()
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
-        let shard_store = SqliteShardStore::from_connection(&tx, ORCHARD_TABLES_PREFIX)
-            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
         let result = {
-            let mut shardtree = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
+            let mut shardtree = orchard_tree(&tx)?;
             callback(&mut shardtree)?
         };
 
@@ -1890,27 +1990,19 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL> WalletCom
     }
 }
 
-impl<P: consensus::Parameters, CL> WalletCommitmentTrees for WalletDb<SqlTransaction<'_>, P, CL> {
+impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
+    for WalletDb<SqlTransaction<'_>, P, CL, R>
+{
     type Error = commitment_tree::Error;
-    type SaplingShardStore<'a> =
-        SqliteShardStore<&'a rusqlite::Transaction<'a>, sapling::Node, SAPLING_SHARD_HEIGHT>;
+    type SaplingShardStore<'a> = crate::SaplingShardStore<&'a rusqlite::Transaction<'a>>;
 
     fn with_sapling_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
-        for<'a> F: FnMut(
-            &'a mut ShardTree<
-                Self::SaplingShardStore<'a>,
-                { sapling::NOTE_COMMITMENT_TREE_DEPTH },
-                SAPLING_SHARD_HEIGHT,
-            >,
-        ) -> Result<A, E>,
+        for<'a> F:
+            FnMut(&'a mut SaplingCommitmentTree<&'a rusqlite::Transaction<'a>>) -> Result<A, E>,
         E: From<ShardTreeError<commitment_tree::Error>>,
     {
-        let mut shardtree = ShardTree::new(
-            SqliteShardStore::from_connection(self.conn.0, SAPLING_TABLES_PREFIX)
-                .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?,
-            PRUNING_DEPTH.try_into().unwrap(),
-        );
+        let mut shardtree = sapling_tree(self.conn.0)?;
         let result = callback(&mut shardtree)?;
 
         Ok(result)
@@ -1930,29 +2022,16 @@ impl<P: consensus::Parameters, CL> WalletCommitmentTrees for WalletDb<SqlTransac
     }
 
     #[cfg(feature = "orchard")]
-    type OrchardShardStore<'a> = SqliteShardStore<
-        &'a rusqlite::Transaction<'a>,
-        orchard::tree::MerkleHashOrchard,
-        ORCHARD_SHARD_HEIGHT,
-    >;
+    type OrchardShardStore<'a> = crate::OrchardShardStore<&'a rusqlite::Transaction<'a>>;
 
     #[cfg(feature = "orchard")]
     fn with_orchard_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
-        for<'a> F: FnMut(
-            &'a mut ShardTree<
-                Self::OrchardShardStore<'a>,
-                { ORCHARD_SHARD_HEIGHT * 2 },
-                ORCHARD_SHARD_HEIGHT,
-            >,
-        ) -> Result<A, E>,
+        for<'a> F:
+            FnMut(&'a mut OrchardCommitmentTree<&'a rusqlite::Transaction<'a>>) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>,
     {
-        let mut shardtree = ShardTree::new(
-            SqliteShardStore::from_connection(self.conn.0, ORCHARD_TABLES_PREFIX)
-                .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?,
-            PRUNING_DEPTH.try_into().unwrap(),
-        );
+        let mut shardtree = orchard_tree(self.conn.0)?;
         let result = callback(&mut shardtree)?;
 
         Ok(result)
@@ -2614,10 +2693,14 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn transparent_receivers() {
-        // Add an account to the wallet.
+        use std::collections::BTreeSet;
 
-        use crate::testing::BlockCache;
-        let st = TestBuilder::new()
+        use crate::{
+            testing::BlockCache, wallet::transparent::transaction_data_requests, GapLimits,
+        };
+        use zcash_client_backend::data_api::TransactionDataRequest;
+
+        let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -2625,6 +2708,8 @@ mod tests {
         let account = st.test_account().unwrap();
         let ufvk = account.usk().to_unified_full_viewing_key();
         let (taddr, _) = account.usk().default_transparent_address();
+        let birthday = account.birthday().height();
+        let account_id = account.id();
 
         let receivers = st
             .wallet()
@@ -2642,6 +2727,53 @@ mod tests {
 
         // The default t-addr should be in the set.
         assert!(receivers.contains_key(&taddr));
+
+        // The chain tip height must be known in order to query for data requests.
+        st.wallet_mut().update_chain_tip(birthday).unwrap();
+
+        // Transaction data requests should include a request for each ephemeral address
+        let ephemeral_addrs = st
+            .wallet()
+            .get_known_ephemeral_addresses(account_id, None)
+            .unwrap();
+
+        assert_eq!(
+            ephemeral_addrs.len(),
+            GapLimits::default().ephemeral() as usize
+        );
+
+        st.wallet_mut()
+            .db_mut()
+            .schedule_ephemeral_address_checks()
+            .unwrap();
+        let data_requests =
+            transaction_data_requests(st.wallet().conn(), &st.wallet().db().params).unwrap();
+
+        let base_time = st.wallet().db().clock.now();
+        let day = Duration::from_secs(60 * 60 * 24);
+        let mut check_times = BTreeSet::new();
+        for (addr, _) in ephemeral_addrs {
+            let has_valid_request = data_requests.iter().any(|req| match req {
+                TransactionDataRequest::TransactionsInvolvingAddress {
+                    address,
+                    request_at: Some(t),
+                    ..
+                } => {
+                    *address == addr && *t > base_time && {
+                        let t_delta = t.duration_since(base_time).unwrap();
+                        // This is an imprecise check; the objective of the randomized time
+                        // selection is that all ephemeral address checks be performed within a
+                        // day, and that their check times be distinct.
+                        let result = t_delta < day && !check_times.contains(t);
+                        check_times.insert(*t);
+                        result
+                    }
+                }
+                _ => false,
+            });
+
+            assert!(has_valid_request);
+        }
     }
 
     #[cfg(feature = "unstable")]
