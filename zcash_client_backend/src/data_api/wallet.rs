@@ -71,7 +71,7 @@ use zcash_primitives::transaction::{
     Transaction, TxId,
 };
 use zcash_protocol::{
-    consensus::{self, BlockHeight, NetworkUpgrade},
+    consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::Zatoshis,
     PoolType, ShieldedProtocol,
@@ -182,17 +182,13 @@ where
     // Fetch the UnifiedFullViewingKeys we are tracking
     let ufvks = data.get_unified_full_viewing_keys()?;
 
-    // Height is block height for mined transactions, and the "mempool height" (chain height + 1)
-    // for mempool transactions.
-    let height = mined_height.map(Ok).unwrap_or_else(|| {
-        Ok(data
-            .get_tx_height(tx.txid())?
-            .or(data.chain_height()?.map(|max_height| max_height + 1))
-            .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
-            .expect("Sapling activation height must be known."))
-    })?;
-
-    data.store_decrypted_tx(decrypt_transaction(params, height, tx, &ufvks))?;
+    data.store_decrypted_tx(decrypt_transaction(
+        params,
+        mined_height.map_or_else(|| data.get_tx_height(tx.txid()), |h| Ok(Some(h)))?,
+        data.chain_height()?,
+        tx,
+        &ufvks,
+    ))?;
 
     Ok(())
 }
