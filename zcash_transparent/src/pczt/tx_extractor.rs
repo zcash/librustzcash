@@ -1,8 +1,8 @@
 use alloc::vec::Vec;
 use zcash_protocol::value::Zatoshis;
+use zcash_script::{opcode::PushValue, script};
 
 use crate::{
-    address::Script,
     bundle::{Authorization, EffectsOnly, OutPoint, TxIn, TxOut},
     sighash::TransparentAuthorizingContext,
 };
@@ -57,7 +57,7 @@ impl super::Bundle {
 
                 Ok(TxIn {
                     prevout,
-                    script_sig: script_sig(input)?,
+                    script_sig: script_sig(&input)?,
                     sequence: input.sequence.unwrap_or(u32::MAX),
                 })
             })
@@ -111,7 +111,7 @@ fn effects_only(bundle: &super::Bundle) -> EffectsOnly {
 pub struct Unbound(EffectsOnly);
 
 impl Authorization for Unbound {
-    type ScriptSig = Script;
+    type ScriptSig = script::Sig<PushValue>;
 }
 
 impl TransparentAuthorizingContext for Unbound {
@@ -119,7 +119,7 @@ impl TransparentAuthorizingContext for Unbound {
         self.0.input_amounts()
     }
 
-    fn input_scriptpubkeys(&self) -> Vec<Script> {
+    fn input_scriptpubkeys(&self) -> Vec<script::PubKey> {
         self.0.input_scriptpubkeys()
     }
 }

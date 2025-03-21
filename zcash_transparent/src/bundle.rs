@@ -8,9 +8,13 @@ use zcash_protocol::{
     value::{BalanceError, ZatBalance as Amount, Zatoshis as NonNegativeAmount},
     TxId,
 };
+use zcash_script::{opcode::Opcode, script};
 
 use crate::{
-    address::{Script, TransparentAddress},
+    address::{
+        read_script_pubkey, read_script_sig, write_script_pubkey, write_script_sig,
+        TransparentAddress,
+    },
     sighash::TransparentAuthorizingContext,
 };
 
@@ -34,7 +38,7 @@ impl TransparentAuthorizingContext for EffectsOnly {
         self.inputs.iter().map(|input| input.value).collect()
     }
 
-    fn input_scriptpubkeys(&self) -> Vec<Script> {
+    fn input_scriptpubkeys(&self) -> Vec<script::PubKey> {
         self.inputs
             .iter()
             .map(|input| input.script_pubkey.clone())
@@ -46,7 +50,7 @@ impl TransparentAuthorizingContext for EffectsOnly {
 pub struct Authorized;
 
 impl Authorization for Authorized {
-    type ScriptSig = Script;
+    type ScriptSig = script::Sig<Opcode>;
 }
 
 pub trait MapAuth<A: Authorization, B: Authorization> {
@@ -202,7 +206,7 @@ pub struct TxIn<A: Authorization> {
 impl TxIn<Authorized> {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let prevout = OutPoint::read(&mut reader)?;
-        let script_sig = Script::read(&mut reader)?;
+        let script_sig = read_script_sig(&mut reader)?;
         let sequence = {
             let mut sequence = [0; 4];
             reader.read_exact(&mut sequence)?;
@@ -218,7 +222,7 @@ impl TxIn<Authorized> {
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.prevout.write(&mut writer)?;
-        self.script_sig.write(&mut writer)?;
+        write_script_sig(&self.script_sig, &mut writer)?;
         writer.write_all(&self.sequence.to_le_bytes())
     }
 }
@@ -226,7 +230,7 @@ impl TxIn<Authorized> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TxOut {
     pub value: NonNegativeAmount,
-    pub script_pubkey: Script,
+    pub script_pubkey: script::PubKey,
 }
 
 impl TxOut {
@@ -237,7 +241,7 @@ impl TxOut {
             NonNegativeAmount::from_nonnegative_i64_le_bytes(tmp)
         }
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
-        let script_pubkey = Script::read(&mut reader)?;
+        let script_pubkey = read_script_pubkey(&mut reader)?;
 
         Ok(TxOut {
             value,
@@ -247,12 +251,12 @@ impl TxOut {
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.value.to_i64_le_bytes())?;
-        self.script_pubkey.write(&mut writer)
+        write_script_pubkey(&self.script_pubkey, &mut writer)
     }
 
     /// Returns the address to which the TxOut was sent, if this is a valid P2SH or P2PKH output.
     pub fn recipient_address(&self) -> Option<TransparentAddress> {
-        self.script_pubkey.address()
+        TransparentAddress::from_script_pubkey(&self.script_pubkey)
     }
 }
 
@@ -262,13 +266,15 @@ pub mod testing {
     use proptest::prelude::*;
     use proptest::sample::select;
     use zcash_protocol::value::testing::arb_zatoshis;
-
-    use crate::address::Script;
+    use zcash_script::{
+        opcode::Opcode,
+        script::{self, Parsable},
+    };
 
     use super::{Authorized, Bundle, OutPoint, TxIn, TxOut};
 
     pub const VALID_OPCODES: [u8; 8] = [
-        0x00, // OP_FALSE,
+        0x00, // OP_0,
         0x51, // OP_1,
         0x52, // OP_2,
         0x53, // OP_3,
@@ -285,15 +291,21 @@ pub mod testing {
     }
 
     prop_compose! {
-        pub fn arb_script()(v in vec(select(&VALID_OPCODES[..]), 1..256)) -> Script {
-            Script(v)
+        pub fn arb_script_sig()(v in vec(select(&VALID_OPCODES[..]), 1..256)) -> script::Sig<Opcode> {
+            script::Sig::from_bytes(&v).expect("valid script_sig").0
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_script_pubkey()(v in vec(select(&VALID_OPCODES[..]), 1..256)) -> script::PubKey {
+            script::PubKey::from_bytes(&v).expect("valid script_pubkey").0
         }
     }
 
     prop_compose! {
         pub fn arb_txin()(
             prevout in arb_outpoint(),
-            script_sig in arb_script(),
+            script_sig in arb_script_sig(),
             sequence in any::<u32>()
         ) -> TxIn<Authorized> {
             TxIn { prevout, script_sig, sequence }
@@ -301,7 +313,7 @@ pub mod testing {
     }
 
     prop_compose! {
-        pub fn arb_txout()(value in arb_zatoshis(), script_pubkey in arb_script()) -> TxOut {
+        pub fn arb_txout()(value in arb_zatoshis(), script_pubkey in arb_script_pubkey()) -> TxOut {
             TxOut { value, script_pubkey }
         }
     }

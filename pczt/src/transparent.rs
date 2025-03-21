@@ -14,6 +14,8 @@ use getset::Getters;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
+use zcash_script::{opcode::PushValue, script};
+
 /// PCZT fields that are specific to producing the transaction's transparent bundle (if
 /// any).
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
@@ -64,19 +66,19 @@ pub struct Input {
     /// A satisfying witness for the `script_pubkey` of the input being spent.
     ///
     /// This is set by the Spend Finalizer.
-    pub(crate) script_sig: Option<Vec<u8>>,
+    pub(crate) script_sig: Option<script::Sig<PushValue>>,
 
     // These are required by the Transaction Extractor, to derive the shielded sighash
     // needed for computing the binding signatures.
     #[getset(get = "pub")]
     pub(crate) value: u64,
     #[getset(get = "pub")]
-    pub(crate) script_pubkey: Vec<u8>,
+    pub(crate) script_pubkey: script::PubKey,
 
     /// The script required to spend this output, if it is P2SH.
     ///
     /// Set to `None` if this is a P2PKH output.
-    pub(crate) redeem_script: Option<Vec<u8>>,
+    pub(crate) redeem_script: Option<script::PubKey>,
 
     /// A map from a pubkey to a signature created by it.
     ///
