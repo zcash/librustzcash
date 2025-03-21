@@ -183,6 +183,12 @@ Any of the following are helpful:
 
 As this project evolves, so do the coding guidelines. Remember to check this document for changes.
 
+#### Draft Pull Requests
+
+We recommend opening a draft pull request early in your process. This includes a template which can help you cover all of the bases in your process, and it lets others know your intention (and to potentially provide early feedback/questions before you spend too much time on a misaligned goal).
+
+You can also review the pull request template locally in `.github/pull_request_template.md`.
+
 #### Local Automated Checks
 
 Please ensure these processes succeed without errors on your machine before submitting a PR:
