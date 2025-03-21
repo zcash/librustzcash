@@ -1,6 +1,26 @@
 
 # cargo-vet imports lock
 
+[[unpublished.zcash_client_backend]]
+version = "0.18.0"
+audited_as = "0.17.0"
+
+[[unpublished.zcash_client_sqlite]]
+version = "0.16.0"
+audited_as = "0.15.0"
+
+[[unpublished.zcash_keys]]
+version = "0.8.0"
+audited_as = "0.7.0"
+
+[[unpublished.zcash_protocol]]
+version = "0.5.1"
+audited_as = "0.5.0"
+
+[[unpublished.zcash_transparent]]
+version = "0.2.1"
+audited_as = "0.2.0"
+
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
