@@ -235,7 +235,7 @@ mod tests {
 
     use crate::{
         testing::db::{test_clock, test_rng},
-        wallet::init::{init_wallet_db_internal, migrations::tests::test_migrate},
+        wallet::init::{migrations::tests::test_migrate, WalletMigrator},
         WalletDb,
     };
 
@@ -260,13 +260,11 @@ mod tests {
         let seed_bytes = vec![0xab; 32];
 
         // Migrate to database state just prior to this migration.
-        init_wallet_db_internal(
-            &mut db_data,
-            Some(Secret::new(seed_bytes.clone())),
-            DEPENDENCIES,
-            false,
-        )
-        .unwrap();
+        WalletMigrator::new()
+            .with_seed(Secret::new(seed_bytes.clone()))
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, DEPENDENCIES)
+            .unwrap();
 
         // Add transactions to the wallet that exercise the data migration.
         let add_tx_to_wallet = |tx: TransactionData<Authorized>| {
@@ -305,12 +303,10 @@ mod tests {
         ));
 
         // Check that we can apply this migration.
-        init_wallet_db_internal(
-            &mut db_data,
-            Some(Secret::new(seed_bytes)),
-            &[MIGRATION_ID],
-            false,
-        )
-        .unwrap();
+        WalletMigrator::new()
+            .with_seed(Secret::new(seed_bytes))
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[MIGRATION_ID])
+            .unwrap();
     }
 }

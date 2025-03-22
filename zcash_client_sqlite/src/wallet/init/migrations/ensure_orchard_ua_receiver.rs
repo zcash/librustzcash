@@ -100,9 +100,7 @@ mod tests {
 
     use crate::{
         testing::db::{test_clock, test_rng},
-        wallet::init::{
-            init_wallet_db_internal, migrations::addresses_table, testing::init_wallet_db,
-        },
+        wallet::init::{migrations::addresses_table, WalletMigrator},
         WalletDb, UA_ORCHARD, UA_TRANSPARENT,
     };
 
@@ -128,12 +126,10 @@ mod tests {
         .to_unified_full_viewing_key();
 
         assert_matches!(
-            init_wallet_db_internal(
-                &mut db_data,
-                Some(SecretVec::new(seed.clone())),
-                &[addresses_table::MIGRATION_ID],
-                false
-            ),
+            WalletMigrator::new()
+                .with_seed(SecretVec::new(seed.clone()))
+                .ignore_seed_relevance()
+                .init_or_migrate_to(&mut db_data, &[addresses_table::MIGRATION_ID]),
             Ok(_)
         );
 
@@ -187,7 +183,9 @@ mod tests {
         }
 
         assert_matches!(
-            init_wallet_db(&mut db_data, Some(SecretVec::new(seed))),
+            WalletMigrator::new()
+                .with_seed(SecretVec::new(seed))
+                .init_or_migrate(&mut db_data),
             Ok(_)
         );
 

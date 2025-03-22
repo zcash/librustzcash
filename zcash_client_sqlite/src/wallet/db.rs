@@ -1,6 +1,6 @@
 //! Documentation about the wallet database structure.
 //!
-//! The database structure is managed by [`crate::wallet::init::init_wallet_db`], which
+//! The database structure is managed by [`crate::wallet::init::WalletMigrator`], which
 //! applies migrations (defined in `crate::wallet::init::migrations`) that produce the
 //! current structure.
 //!
