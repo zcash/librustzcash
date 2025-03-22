@@ -18,9 +18,14 @@ primitive-types = { version = "0.12", default-features = false }
 byteorder.workspace = true
 blake2b_simd.workspace = true
 proptest = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+hex = { workspace = true, optional = true }
 
 [features]
 test-dependencies = ["dep:proptest"]
+
+# Serde Serialisation and Deserialisation required for remote use of the Zebra's [`ReadStateService`].
+remote_read_state_service = ["dep:serde", "dep:hex"]
 
 [lib]
 bench = false
