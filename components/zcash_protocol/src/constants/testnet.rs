@@ -10,7 +10,7 @@ pub const COIN_TYPE: u32 = 1;
 /// Defined in [ZIP 32].
 ///
 /// [`ExtendedSpendingKey`]: https://docs.rs/sapling-crypto/latest/sapling_crypto/zip32/struct.ExtendedSpendingKey.html
-/// [ZIP 32]: https://github.com/zcash/zips/blob/master/zip-0032.rst
+/// [ZIP 32]: https://github.com/zcash/zips/blob/main/zips/zip-0032.rst
 pub const HRP_SAPLING_EXTENDED_SPENDING_KEY: &str = "secret-extended-key-test";
 
 /// The HRP for a Bech32-encoded testnet Sapling [`ExtendedFullViewingKey`].
@@ -18,7 +18,7 @@ pub const HRP_SAPLING_EXTENDED_SPENDING_KEY: &str = "secret-extended-key-test";
 /// Defined in [ZIP 32].
 ///
 /// [`ExtendedFullViewingKey`]: https://docs.rs/sapling-crypto/latest/sapling_crypto/zip32/struct.ExtendedFullViewingKey.html
-/// [ZIP 32]: https://github.com/zcash/zips/blob/master/zip-0032.rst
+/// [ZIP 32]: https://github.com/zcash/zips/blob/main/zips/zip-0032.rst
 pub const HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY: &str = "zxviewtestsapling";
 
 /// The HRP for a Bech32-encoded testnet Sapling [`PaymentAddress`].
@@ -26,7 +26,7 @@ pub const HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY: &str = "zxviewtestsapling";
 /// Defined in section 5.6.4 of the [Zcash Protocol Specification].
 ///
 /// [`PaymentAddress`]: https://docs.rs/sapling-crypto/latest/sapling_crypto/struct.PaymentAddress.html
-/// [Zcash Protocol Specification]: https://github.com/zcash/zips/blob/master/protocol/protocol.pdf
+/// [Zcash Protocol Specification]: https://github.com/zcash/zips/blob/main/rendered/protocol/protocol.pdf
 pub const HRP_SAPLING_PAYMENT_ADDRESS: &str = "ztestsapling";
 
 /// The prefix for a Base58Check-encoded testnet Sprout address.

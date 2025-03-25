@@ -10,7 +10,7 @@ pub struct TransparentOvkTestVector {
 pub fn transparent_ovk() -> Vec<TransparentOvkTestVector> {
     use TransparentOvkTestVector as TestVector;
 
-    // From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/zip_0316.py
+    // From https://github.com/zcash/zcash-test-vectors/blob/master/zcash_test_vectors/transparent/zip_0316.py
     vec![
         TestVector {
             c: [
@@ -247,7 +247,7 @@ pub struct Bip32TestVector {
 pub fn bip_32() -> Vec<Bip32TestVector> {
     use Bip32TestVector as TestVector;
 
-    // From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/bip_0032.py
+    // From https://github.com/zcash/zcash-test-vectors/blob/master/zcash_test_vectors/transparent/bip_0032.py
     vec![
         TestVector {
             c: [

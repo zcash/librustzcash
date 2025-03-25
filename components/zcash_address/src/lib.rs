@@ -180,7 +180,7 @@ impl ZcashAddress {
     /// Encodes this Zcash address in its canonical string representation.
     ///
     /// This provides the encoded string representation of the address as defined by the
-    /// [Zcash protocol specification](https://zips.z.cash/protocol.pdf) and/or
+    /// [Zcash protocol specification](https://zips.z.cash/protocol/protocol.pdf) and/or
     /// [ZIP 316](https://zips.z.cash/zip-0316). The [`Display` implementation] can also
     /// be used to produce this encoding using [`address.to_string()`].
     ///
