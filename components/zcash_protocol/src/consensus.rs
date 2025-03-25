@@ -138,7 +138,7 @@ pub trait NetworkConstants: Clone {
     ///
     /// Defined in [ZIP 32].
     ///
-    /// [ZIP 32]: https://github.com/zcash/zips/blob/master/zip-0032.rst
+    /// [ZIP 32]: https://github.com/zcash/zips/blob/main/zips/zip-0032.rst
     fn hrp_sapling_extended_spending_key(&self) -> &'static str;
 
     /// Returns the human-readable prefix for Bech32-encoded Sapling extended full
@@ -154,7 +154,7 @@ pub trait NetworkConstants: Clone {
     ///
     /// Defined in section 5.6.4 of the [Zcash Protocol Specification].
     ///
-    /// [Zcash Protocol Specification]: https://github.com/zcash/zips/blob/master/protocol/protocol.pdf
+    /// [Zcash Protocol Specification]: https://github.com/zcash/zips/blob/main/rendered/protocol/protocol.pdf
     fn hrp_sapling_payment_address(&self) -> &'static str;
 
     /// Returns the human-readable prefix for Base58Check-encoded Sprout
