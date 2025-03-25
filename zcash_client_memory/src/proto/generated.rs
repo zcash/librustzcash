@@ -467,28 +467,28 @@ pub struct Account {
     #[prost(bytes = "vec", optional, tag = "3")]
     pub seed_fingerprint: ::core::option::Option<::prost::alloc::vec::Vec<u8>>,
     /// HD index to derive account from seed
-    #[prost(uint32, optional, tag = "5")]
+    #[prost(uint32, optional, tag = "4")]
     pub account_index: ::core::option::Option<u32>,
     /// spending or view-only
-    #[prost(enumeration = "AccountPurpose", optional, tag = "6")]
+    #[prost(enumeration = "AccountPurpose", optional, tag = "5")]
     pub purpose: ::core::option::Option<i32>,
     /// the viewing key for this account
-    #[prost(string, tag = "7")]
+    #[prost(string, tag = "6")]
     pub viewing_key: ::prost::alloc::string::String,
     /// the block height at which this account was created
-    #[prost(message, optional, tag = "8")]
+    #[prost(message, optional, tag = "7")]
     pub birthday: ::core::option::Option<AccountBirthday>,
     /// account addresses
-    #[prost(message, repeated, tag = "9")]
+    #[prost(message, repeated, tag = "8")]
     pub addresses: ::prost::alloc::vec::Vec<Address>,
     /// map from index to encoded unified address
-    #[prost(message, repeated, tag = "10")]
+    #[prost(message, repeated, tag = "9")]
     pub ephemeral_addresses: ::prost::alloc::vec::Vec<EphemeralAddressRecord>,
     /// human readable name for the account
-    #[prost(string, tag = "11")]
+    #[prost(string, tag = "10")]
     pub account_name: ::prost::alloc::string::String,
     /// key source metadata
-    #[prost(string, optional, tag = "12")]
+    #[prost(string, optional, tag = "11")]
     pub key_source: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]

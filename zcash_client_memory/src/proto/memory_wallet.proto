@@ -62,17 +62,17 @@ message Account {
   AccountKind kind = 2; // derived or imported
 
   optional bytes seed_fingerprint = 3;
-  optional uint32 account_index = 5; // HD index to derive account from seed
+  optional uint32 account_index = 4; // HD index to derive account from seed
 
-  optional AccountPurpose purpose = 6; // spending or view-only
+  optional AccountPurpose purpose = 5; // spending or view-only
 
-  string viewing_key = 7; // the viewing key for this account
-  AccountBirthday birthday = 8; // the block height at which this account was created
-  repeated Address addresses = 9; // account addresses
+  string viewing_key = 6; // the viewing key for this account
+  AccountBirthday birthday = 7; // the block height at which this account was created
+  repeated Address addresses = 8; // account addresses
 
-  repeated EphemeralAddressRecord ephemeral_addresses = 10; // map from index to encoded unified address
-  string account_name = 11; // human readable name for the account
-  optional string key_source = 12; // key source metadata
+  repeated EphemeralAddressRecord ephemeral_addresses = 9; // map from index to encoded unified address
+  string account_name = 10; // human readable name for the account
+  optional string key_source = 11; // key source metadata
 }
 
 enum AccountKind {

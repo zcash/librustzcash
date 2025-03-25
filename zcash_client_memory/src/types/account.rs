@@ -583,13 +583,23 @@ mod serialization {
                     AccountSource::Derived { ref derivation, .. } => {
                         Some(derivation.seed_fingerprint().to_bytes().to_vec())
                     }
-                    AccountSource::Imported { .. } => None,
+                    AccountSource::Imported { ref purpose, .. } => match purpose {
+                        AccountPurpose::Spending { derivation } => derivation
+                            .as_ref()
+                            .map(|d| d.seed_fingerprint().to_bytes().to_vec()),
+                        AccountPurpose::ViewOnly => None,
+                    },
                 },
                 account_index: match acc.kind {
                     AccountSource::Derived { ref derivation, .. } => {
                         Some(derivation.account_index().into())
                     }
-                    AccountSource::Imported { .. } => None,
+                    AccountSource::Imported { ref purpose, .. } => match purpose {
+                        AccountPurpose::Spending { derivation } => {
+                            derivation.as_ref().map(|d| d.account_index().into())
+                        }
+                        AccountPurpose::ViewOnly => None,
+                    },
                 },
                 purpose: match acc.kind {
                     AccountSource::Derived { .. } => None,
@@ -649,7 +659,17 @@ mod serialization {
                     },
                     1 => AccountSource::Imported {
                         purpose: match read_optional!(acc, purpose)? {
-                            0 => AccountPurpose::Spending { derivation: None },
+                            0 => AccountPurpose::Spending {
+                                derivation: match acc.seed_fingerprint.as_ref() {
+                                    Some(seed_fingerprint) => Some(Zip32Derivation::new(
+                                        SeedFingerprint::from_bytes(
+                                            seed_fingerprint.as_slice().try_into()?,
+                                        ),
+                                        read_optional!(acc, account_index)?.try_into()?,
+                                    )),
+                                    None => None,
+                                },
+                            },
                             1 => AccountPurpose::ViewOnly,
                             _ => unreachable!(),
                         },
