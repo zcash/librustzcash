@@ -155,7 +155,7 @@ pub mod zip_0143 {
     }
 
     pub fn make_test_vectors() -> Vec<Test0143Vector> {
-        // From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/zip_0143.py
+        // From https://github.com/zcash/zcash-test-vectors/blob/master/zcash_test_vectors/zip_0143.py
         vec![
             Test0143Vector {
                 tx: vec![
@@ -1969,7 +1969,7 @@ pub mod zip_0243 {
         pub sighash: [u8; 32],
     }
     pub fn make_test_vectors() -> Vec<Test0243Vector> {
-        // From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/zip_0243.py
+        // From https://github.com/zcash/zcash-test-vectors/blob/master/zcash_test_vectors/zip_0243.py
         vec![
             Test0243Vector {
                 tx: vec![
@@ -5707,7 +5707,7 @@ pub mod zip_0244 {
         pub sighash_single_anyone: Option<[u8; 32]>,
     }
 
-    // From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/zip_0244.py
+    // From https://github.com/zcash/zcash-test-vectors/blob/master/zcash_test_vectors/zip_0244.py
     pub fn make_test_vectors() -> Vec<TestVector> {
         vec![
             TestVector {
