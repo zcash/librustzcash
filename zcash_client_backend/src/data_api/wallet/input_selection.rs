@@ -7,10 +7,12 @@ use std::{
     fmt::{self, Debug, Display},
 };
 
+use ::sapling::builder::BundleType;
 use ::transparent::bundle::TxOut;
 use nonempty::NonEmpty;
 use zcash_address::ConversionError;
 use zcash_keys::address::{Address, UnifiedAddress};
+use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     value::{BalanceError, Zatoshis},
@@ -192,6 +194,52 @@ pub trait InputSelector {
             Self::Error,
             ChangeT::Error,
             <Self::InputSource as InputSource>::NoteRef,
+        >,
+    >
+    where
+        ParamsT: consensus::Parameters,
+        ChangeT: ChangeStrategy<MetaSource = Self::InputSource>;
+}
+
+pub trait SendMaxSelector {
+    /// The type of errors that may be generated in input selection
+    type Error;
+    /// The type of data source that the input selector expects to access to obtain input
+    /// from the source pool. This associated type permits input selectors that may use specialized
+    /// knowledge of the internals of a particular backing data store, if the generic API of
+    /// [`InputSource`] does not provide sufficiently fine-grained operations for a
+    /// particular backing store to optimally perform input selection.
+    type InputSource: InputSource;
+
+    /// Performs input selection and returns a proposal for the construction of a transaction 
+    /// that sends the maximum amount possible from a given account to the specified recipient
+    /// ignoring notes that are below MARGINAL_FEE amount. This transaction will use all the
+    /// funds available minus the resulting fees that will vary according to ZIP-317 specifications.
+    /// 
+    ///
+    /// Implementations should return the maximum possible number of economically useful inputs
+    /// required to supply at least the requested value, choosing only inputs received at the
+    /// specified source addresses. If insufficient funds are available to satisfy the required
+    /// outputs for the shielding request, this operation must fail and return
+    /// [`InputSelectorError::InsufficientFunds`].
+    fn propose_send_max<ParamsT, ChangeT>(
+        &self,
+        params: &ParamsT,
+        wallet_db: &Self::InputSource,
+        change_strategy: &ChangeT,
+        recipient: Address,
+        source_account: <Self::InputSource as InputSource>::AccountId,
+        spend_pool: ShieldedProtocol,
+        anchor_height: BlockHeight,
+        target_height: BlockHeight,
+        min_confirmations: u32,
+    ) -> Result<
+        Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
+        InputSelectorError<
+            <Self::InputSource as InputSource>::Error,
+            Self::Error,
+            ChangeT::Error,
+            Infallible,
         >,
     >
     where
@@ -861,5 +909,106 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                 required: shielding_threshold,
             })
         }
+    }
+}
+
+impl<DbT: InputSource> SendMaxSelector for GreedyInputSelector<DbT> {
+    type Error = GreedyInputSelectorError;
+    type InputSource = DbT;
+    
+    fn propose_send_max<ParamsT, ChangeT>(
+        &self,
+        params: &ParamsT,
+        wallet_db: &Self::InputSource,
+        change_strategy: &ChangeT,
+        recipient: Address,
+        source_account: <Self::InputSource as InputSource>::AccountId,
+        spend_pool: ShieldedProtocol,
+        anchor_height: BlockHeight,
+        target_height: BlockHeight,
+        min_confirmations: u32,
+    ) -> Result<
+        Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
+        InputSelectorError<
+            <Self::InputSource as InputSource>::Error,
+            Self::Error,
+            ChangeT::Error,
+            Infallible,
+        >,
+    >
+    where
+        ParamsT: consensus::Parameters,
+        ChangeT: ChangeStrategy<MetaSource = Self::InputSource> {
+
+
+        let spendable_notes = wallet_db.select_spendable_notes(source_account, MARGINAL_FEE, &vec![spend_pool], anchor_height, &vec![])
+            .map_err(InputSelectorError::DataSource)?;
+       
+        
+
+            #[cfg(feature = "orchard")]
+            let orchard_inputs = if use_orchard {
+                shielded_inputs
+                    .orchard()
+                    .iter()
+                    .map(|i| (*i.internal_note_id(), i.note().value()))
+                    .collect()
+            } else {
+                vec![]
+            };
+        let wallet_meta = change_strategy
+            .fetch_wallet_meta(wallet_db, source_account, &[])
+            .map_err(InputSelectorError::DataSource)?;
+        
+        let balance = match spend_pool {
+            ShieldedProtocol::Sapling => {
+                let sapling_value = spendable_notes.sapling_value()
+                    .map_err(ProposalError::PaymentPoolsMismatch)?;
+                let sapling_inputs = spendable_notes
+                    .sapling()
+                    .iter()
+                    .map(|i| (*i.internal_note_id(), i.note().value()))
+                    .collect();
+                change_strategy.compute_balance(
+                    params,
+                    target_height,
+                    &[],
+                    &[] as &[TxOut],
+                    &sapling::EmptyBundleView,
+                    #[cfg(feature = "orchard")]
+                    &orchard_fees::EmptyBundleView,
+                    None,
+                    &wallet_meta,
+                )
+            },
+            #[cfg(feature = "orchard")]
+            ShieldedProtocol::Orchard => {
+                change_strategy.compute_balance(
+                    params,
+                    target_height,
+                    &[],
+                    &[] as &[TxOut],
+                    &sapling::EmptyBundleView,
+                    #[cfg(feature = "orchard")]
+                    &orchard_fees::EmptyBundleView,
+                    None,
+                    &wallet_meta,
+                )
+            }
+        }
+        .map_err(|other| InputSelectorError::Change(other))?;
+        
+
+        Proposal::single_step(
+            TransactionRequest::empty(),
+                BTreeMap::new(),
+            vec![], 
+            spendable_notes,
+            balance, 
+  (*change_strategy.fee_rule()).clone(), 
+            target_height,
+            false
+        )
+        .map_err(InputSelectorError::Proposal)
     }
 }
