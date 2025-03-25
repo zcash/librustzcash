@@ -103,6 +103,9 @@ pub struct LightdInfo {
     /// example: "/MagicBean:4.1.1/"
     #[prost(string, tag = "14")]
     pub zcashd_subversion: ::prost::alloc::string::String,
+    /// Zcash donation UA address
+    #[prost(string, tag = "15")]
+    pub donation_address: ::prost::alloc::string::String,
 }
 /// TransparentAddressBlockFilter restricts the results to the given address
 /// or block range.
