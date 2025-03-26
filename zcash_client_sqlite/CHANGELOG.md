@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Fixed
+- This release fixes a migration error that could cause some wallets
+  to crash on startup due to an attempt to derive a unified address with
+  a Sapling receiver at an index for which no Sapling receiver can exist.
+
 ## [0.16.0] - 2025-03-19
 
 ### Added
