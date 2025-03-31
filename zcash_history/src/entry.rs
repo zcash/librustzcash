@@ -1,6 +1,4 @@
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-
-use crate::{EntryKind, EntryLink, Error, Version, MAX_NODE_DATA_SIZE};
+use crate::{Error, Version, MAX_NODE_DATA_SIZE};
 
 /// Max serialized length of entry data.
 pub const MAX_ENTRY_SIZE: usize = MAX_NODE_DATA_SIZE + 9;
@@ -14,20 +12,20 @@ pub const MAX_ENTRY_SIZE: usize = MAX_NODE_DATA_SIZE + 9;
 #[cfg_attr(
     feature = "remote_read_state_service",
     serde(bound(
-        serialize = "V::NodeData: serde::Serialize",
-        deserialize = "V::NodeData: serde::de::DeserializeOwned"
+        serialize = "V::NodeData: serde::Serialize, V::EntryKind: serde::Serialize",
+        deserialize = "V::NodeData: serde::de::DeserializeOwned, V::EntryKind: serde::de::DeserializeOwned"
     ))
 )]
 pub struct Entry<V: Version> {
-    pub(crate) kind: EntryKind,
+    pub(crate) kind: V::EntryKind,
     pub(crate) data: V::NodeData,
 }
 
 impl<V: Version> Entry<V> {
     /// New entry of type node.
-    pub fn new(data: V::NodeData, left: EntryLink, right: EntryLink) -> Self {
+    pub fn new(data: V::NodeData, left: V::EntryLink, right: V::EntryLink) -> Self {
         Entry {
-            kind: EntryKind::Node(left, right),
+            kind: V::make_node(left, right),
             data,
         }
     }
@@ -35,7 +33,7 @@ impl<V: Version> Entry<V> {
     /// Creates a new leaf.
     pub fn new_leaf(data: V::NodeData) -> Self {
         Entry {
-            kind: EntryKind::Leaf,
+            kind: V::make_leaf(),
             data,
         }
     }
@@ -52,62 +50,36 @@ impl<V: Version> Entry<V> {
 
     /// Is this node a leaf.
     pub fn leaf(&self) -> bool {
-        matches!(self.kind, EntryKind::Leaf)
+        V::is_leaf(&self.kind)
     }
 
-    /// Left child
-    pub fn left(&self) -> Result<EntryLink, Error> {
-        match self.kind {
-            EntryKind::Leaf => Err(Error::node_expected()),
-            EntryKind::Node(left, _) => Ok(left),
+    /// Left child.
+    pub fn left(&self) -> Result<V::EntryLink, Error> {
+        match V::get_left(&self.kind) {
+            Some(link) => Ok(link),
+            None => Err(Error::node_expected()),
         }
     }
 
     /// Right child.
-    pub fn right(&self) -> Result<EntryLink, Error> {
-        match self.kind {
-            EntryKind::Leaf => Err(Error::node_expected()),
-            EntryKind::Node(_, right) => Ok(right),
+    pub fn right(&self) -> Result<V::EntryLink, Error> {
+        match V::get_right(&self.kind) {
+            Some(link) => Ok(link),
+            None => Err(Error::node_expected()),
         }
     }
 
     /// Read from byte representation.
     pub fn read<R: std::io::Read>(consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
-        let kind = {
-            match r.read_u8()? {
-                0 => {
-                    let left = r.read_u32::<LittleEndian>()?;
-                    let right = r.read_u32::<LittleEndian>()?;
-                    EntryKind::Node(EntryLink::Stored(left), EntryLink::Stored(right))
-                }
-                1 => EntryKind::Leaf,
-                _ => return Err(std::io::Error::from(std::io::ErrorKind::InvalidData)),
-            }
-        };
-
+        let kind = V::read_entry_kind(r)?;
         let data = V::read(consensus_branch_id, r)?;
-
         Ok(Entry { kind, data })
     }
 
     /// Write to byte representation.
     pub fn write<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
-        match self.kind {
-            EntryKind::Node(EntryLink::Stored(left), EntryLink::Stored(right)) => {
-                w.write_u8(0)?;
-                w.write_u32::<LittleEndian>(left)?;
-                w.write_u32::<LittleEndian>(right)?;
-            }
-            EntryKind::Leaf => {
-                w.write_u8(1)?;
-            }
-            _ => {
-                return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
-            }
-        }
-
+        V::write_entry_kind(&self.kind, w)?;
         V::write(&self.data, w)?;
-
         Ok(())
     }
 
@@ -118,11 +90,11 @@ impl<V: Version> Entry<V> {
     }
 }
 
-impl<V: Version> std::fmt::Display for Entry<V> {
+impl<V: Version> std::fmt::Display for Entry<V>
+where
+    V::EntryKind: std::fmt::Display,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            EntryKind::Node(l, r) => write!(f, "node({}, {}, ..)", l, r),
-            EntryKind::Leaf => write!(f, "leaf(..)"),
-        }
+        write!(f, "Entry(kind: {}, ...)", self.kind)
     }
 }

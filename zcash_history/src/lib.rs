@@ -58,6 +58,39 @@ impl std::fmt::Display for EntryLink {
     }
 }
 
+impl EntryLink {
+    /// Writes an EntryLink to the provided writer.
+    pub fn write<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        match *self {
+            EntryLink::Stored(v) => {
+                w.write_u8(0)?; // Tag 0 for Stored.
+                w.write_u32::<LittleEndian>(v)?;
+            }
+            EntryLink::Generated(v) => {
+                w.write_u8(1)?; // Tag 1 for Generated.
+                w.write_u32::<LittleEndian>(v)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Reads an EntryLink from the provided reader.
+    pub fn read<R: std::io::Read>(r: &mut R) -> std::io::Result<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        let tag = r.read_u8()?;
+        let v = r.read_u32::<LittleEndian>()?;
+        match tag {
+            0 => Ok(EntryLink::Stored(v)),
+            1 => Ok(EntryLink::Generated(v)),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid entry link tag",
+            )),
+        }
+    }
+}
+
 /// MMR Node. It is leaf when `left`, `right` are `None` and node when they are not.
 #[repr(C)]
 #[derive(Debug)]
@@ -70,6 +103,51 @@ pub enum EntryKind {
     Leaf,
     /// Node entry with children links.
     Node(EntryLink, EntryLink),
+}
+
+impl std::fmt::Display for EntryKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EntryKind::Leaf => write!(f, "leaf"),
+            EntryKind::Node(left, right) => write!(f, "node({}, {})", left, right),
+        }
+    }
+}
+
+impl EntryKind {
+    /// Writes an EntryKind to the provided writer.
+    pub fn write<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
+        use byteorder::WriteBytesExt;
+        match self {
+            EntryKind::Node(left, right) => {
+                w.write_u8(0)?; // Tag 0 for Node.
+                left.write(w)?; // Use the EntryLink write method.
+                right.write(w)?;
+            }
+            EntryKind::Leaf => {
+                w.write_u8(1)?; // Tag 1 for Leaf.
+            }
+        }
+        Ok(())
+    }
+
+    /// Reads an EntryKind from the provided reader.
+    pub fn read<R: std::io::Read>(r: &mut R) -> std::io::Result<Self> {
+        use byteorder::ReadBytesExt;
+        let tag = r.read_u8()?;
+        match tag {
+            0 => {
+                let left = EntryLink::read(r)?; // **CHANGE:** Use the EntryLink read method.
+                let right = EntryLink::read(r)?;
+                Ok(EntryKind::Node(left, right))
+            }
+            1 => Ok(EntryKind::Leaf),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid entry kind tag",
+            )),
+        }
+    }
 }
 
 impl Error {

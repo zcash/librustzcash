@@ -24,12 +24,14 @@ use crate::{Entry, EntryKind, EntryLink, Error, Version};
                      V::NodeData: serde::Serialize,
                      Entry<V>: serde::Serialize,
                      std::collections::HashMap<u32, Entry<V>>: serde::Serialize,
-                     Vec<Entry<V>>: serde::Serialize",
+                     Vec<Entry<V>>: serde::Serialize,
+                     V::EntryLink: serde::Serialize",
         deserialize = "V: serde::de::DeserializeOwned,
                        V::NodeData: serde::de::DeserializeOwned,
                        Entry<V>: serde::de::DeserializeOwned,
                        std::collections::HashMap<u32, Entry<V>>: serde::de::DeserializeOwned,
-                       Vec<Entry<V>>: serde::de::DeserializeOwned"
+                       Vec<Entry<V>>: serde::de::DeserializeOwned,
+                       V::EntryLink: serde::de::DeserializeOwned",
     ))
 )]
 pub struct Tree<V: Version> {
@@ -41,36 +43,41 @@ pub struct Tree<V: Version> {
     // number of persistent(!) tree entries
     stored_count: u32,
 
-    root: EntryLink,
+    root: V::EntryLink,
 }
 
-impl<V: Version> Tree<V> {
+impl<V> Tree<V>
+where
+    V: Version,
+    V::EntryLink: Into<EntryLink> + From<EntryLink> + Copy,
+    V::EntryKind: From<EntryKind>,
+{
     /// Resolve link originated from this tree
-    pub fn resolve_link(&self, link: EntryLink) -> Result<IndexedNode<V>, Error> {
-        match link {
+    pub fn resolve_link(&self, link: V::EntryLink) -> Result<IndexedNode<V>, Error> {
+        match link.into() {
             EntryLink::Generated(index) => self.generated.get(index as usize),
             EntryLink::Stored(index) => self.stored.get(&index),
         }
         .map(|node| IndexedNode { node, link })
-        .ok_or(Error::ExpectedInMemory(link))
+        .ok_or(Error::ExpectedInMemory(link.into()))
     }
 
-    fn push(&mut self, data: Entry<V>) -> EntryLink {
+    fn push(&mut self, data: Entry<V>) -> V::EntryLink {
         let idx = self.stored_count;
         self.stored_count += 1;
         self.stored.insert(idx, data);
-        EntryLink::Stored(idx)
+        V::make_generated(idx)
     }
 
-    fn push_generated(&mut self, data: Entry<V>) -> EntryLink {
+    fn push_generated(&mut self, data: Entry<V>) -> V::EntryLink {
         self.generated.push(data);
-        EntryLink::Generated(self.generated.len() as u32 - 1)
+        V::make_generated(self.generated.len() as u32 - 1)
     }
 
     /// Populate tree with plain list of the leaves/nodes. For now, only for tests,
     /// since this `Tree` structure is for partially loaded tree (but it might change)
     #[cfg(test)]
-    pub fn populate(loaded: Vec<Entry<V>>, root: EntryLink) -> Self {
+    pub fn populate(loaded: Vec<Entry<V>>, root: V::EntryLink) -> Self {
         let mut result = Tree::invalid();
         result.stored_count = loaded.len() as u32;
         for (idx, item) in loaded.into_iter().enumerate() {
@@ -84,7 +91,7 @@ impl<V: Version> Tree<V> {
     // Empty tree with invalid root
     fn invalid() -> Self {
         Tree {
-            root: EntryLink::Generated(0),
+            root: V::make_generated(0),
             generated: Default::default(),
             stored: Default::default(),
             stored_count: 0,
@@ -109,7 +116,7 @@ impl<V: Version> Tree<V> {
 
         result.stored_count = length;
 
-        let mut root = EntryLink::Stored(peaks[0].0);
+        let mut root = V::make_stored(peaks[0].0);
         for (gen, (idx, node)) in peaks.into_iter().enumerate() {
             result.stored.insert(idx, node);
             if gen != 0 {
@@ -118,7 +125,7 @@ impl<V: Version> Tree<V> {
                         .resolve_link(root)
                         .expect("Inserted before, cannot fail; qed"),
                     result
-                        .resolve_link(EntryLink::Stored(idx))
+                        .resolve_link(V::make_stored(idx))
                         .expect("Inserted before, cannot fail; qed"),
                 );
                 root = result.push_generated(next_generated);
@@ -134,7 +141,7 @@ impl<V: Version> Tree<V> {
         result
     }
 
-    fn get_peaks(&self, root: EntryLink, target: &mut Vec<EntryLink>) -> Result<(), Error> {
+    fn get_peaks(&self, root: V::EntryLink, target: &mut Vec<V::EntryLink>) -> Result<(), Error> {
         let (left_child_link, right_child_link) = {
             let root = self.resolve_link(root)?;
             if root.node.complete() {
@@ -154,7 +161,7 @@ impl<V: Version> Tree<V> {
     /// Returns links to actual nodes that has to be persisted as the result of the append.
     /// If completed without error, at least one link to the appended
     /// node (with metadata provided in `new_leaf`) will be returned.
-    pub fn append_leaf(&mut self, new_leaf: V::NodeData) -> Result<Vec<EntryLink>, Error> {
+    pub fn append_leaf(&mut self, new_leaf: V::NodeData) -> Result<Vec<V::EntryLink>, Error> {
         let root = self.root;
         let new_leaf_link = self.push(Entry::new_leaf(new_leaf));
         let mut appended = vec![new_leaf_link];
@@ -209,7 +216,7 @@ impl<V: Version> Tree<V> {
     }
 
     #[cfg(test)]
-    fn for_children<F: Fn(EntryLink, EntryLink)>(&self, node: EntryLink, f: F) {
+    fn for_children<F: Fn(V::EntryLink, V::EntryLink)>(&self, node: V::EntryLink, f: F) {
         let (left, right) = {
             let link = self
                 .resolve_link(node)
@@ -252,7 +259,9 @@ impl<V: Version> Tree<V> {
 
         loop {
             let left_link = self.resolve_link(subtree_root_link)?.node;
-            if let EntryKind::Node(left, right) = left_link.kind {
+            if let (Some(left), Some(right)) =
+                (V::get_left(&left_link.kind), V::get_right(&left_link.kind))
+            {
                 peaks.push(left);
                 subtree_root_link = right;
                 truncated += 1;
@@ -288,7 +297,7 @@ impl<V: Version> Tree<V> {
     }
 
     /// Link to the root node
-    pub fn root(&self) -> EntryLink {
+    pub fn root(&self) -> V::EntryLink {
         self.root
     }
 
@@ -307,16 +316,21 @@ impl<V: Version> Tree<V> {
 #[derive(Debug)]
 pub struct IndexedNode<'a, V: Version> {
     node: &'a Entry<V>,
-    link: EntryLink,
+    link: V::EntryLink,
 }
 
-impl<V: Version> IndexedNode<'_, V> {
-    fn left(&self) -> Result<EntryLink, Error> {
-        self.node.left().map_err(|e| e.augment(self.link))
+impl<V> IndexedNode<'_, V>
+where
+    V: Version,
+    V::EntryLink: Into<EntryLink> + From<EntryLink> + Copy,
+    V::EntryKind: From<EntryKind>,
+{
+    fn left(&self) -> Result<V::EntryLink, Error> {
+        self.node.left().map_err(|e| e.augment(self.link.into()))
     }
 
-    fn right(&self) -> Result<EntryLink, Error> {
-        self.node.right().map_err(|e| e.augment(self.link))
+    fn right(&self) -> Result<V::EntryLink, Error> {
+        self.node.right().map_err(|e| e.augment(self.link.into()))
     }
 
     /// Reference to the entry struct.
@@ -330,14 +344,14 @@ impl<V: Version> IndexedNode<'_, V> {
     }
 
     /// Actual link by what this node was resolved.
-    pub fn link(&self) -> EntryLink {
+    pub fn link(&self) -> V::EntryLink {
         self.link
     }
 }
 
 fn combine_nodes<'a, V: Version>(left: IndexedNode<'a, V>, right: IndexedNode<'a, V>) -> Entry<V> {
     Entry {
-        kind: EntryKind::Node(left.link, right.link),
+        kind: V::make_node(left.link, right.link),
         data: V::combine(&left.node.data, &right.node.data),
     }
 }
