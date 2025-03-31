@@ -51,18 +51,15 @@ where
     V: Version,
     V::EntryLink: Into<EntryLink> + From<EntryLink> + Copy,
     V::EntryKind: From<EntryKind>,
-    EntryLink: From<<V as Version>::EntryLink>,
 {
     /// Resolve link originated from this tree
     pub fn resolve_link(&self, link: V::EntryLink) -> Result<IndexedNode<V>, Error> {
-        match <EntryLink as From<V::EntryLink>>::from(link) {
+        match EntryLink::from(link.into()) {
             EntryLink::Generated(index) => self.generated.get(index as usize),
             EntryLink::Stored(index) => self.stored.get(&index),
         }
         .map(|node| IndexedNode { node, link })
-        .ok_or(Error::ExpectedInMemory(
-            <EntryLink as From<V::EntryLink>>::from(link),
-        ))
+        .ok_or(Error::ExpectedInMemory(EntryLink::from(link.into())))
     }
 
     fn push(&mut self, data: Entry<V>) -> V::EntryLink {
@@ -327,18 +324,17 @@ where
     V: Version,
     V::EntryLink: Into<EntryLink> + From<EntryLink> + Copy,
     V::EntryKind: From<EntryKind>,
-    EntryLink: From<<V as Version>::EntryLink>,
 {
     fn left(&self) -> Result<V::EntryLink, Error> {
         self.node
             .left()
-            .map_err(|e| e.augment(<EntryLink as From<V::EntryLink>>::from(self.link)))
+            .map_err(|e| e.augment(EntryLink::from(self.link.into())))
     }
 
     fn right(&self) -> Result<V::EntryLink, Error> {
         self.node
             .right()
-            .map_err(|e| e.augment(<EntryLink as From<V::EntryLink>>::from(self.link)))
+            .map_err(|e| e.augment(EntryLink::from(self.link.into())))
     }
 
     /// Reference to the entry struct.
