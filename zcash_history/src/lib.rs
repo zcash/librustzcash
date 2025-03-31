@@ -121,7 +121,7 @@ impl EntryKind {
         match self {
             EntryKind::Node(left, right) => {
                 w.write_u8(0)?; // Tag 0 for Node.
-                left.write(w)?; // Use the EntryLink write method.
+                left.write(w)?;
                 right.write(w)?;
             }
             EntryKind::Leaf => {
@@ -137,7 +137,7 @@ impl EntryKind {
         let tag = r.read_u8()?;
         match tag {
             0 => {
-                let left = EntryLink::read(r)?; // **CHANGE:** Use the EntryLink read method.
+                let left = EntryLink::read(r)?;
                 let right = EntryLink::read(r)?;
                 Ok(EntryKind::Node(left, right))
             }
