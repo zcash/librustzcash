@@ -6,11 +6,11 @@ pub const MAX_ENTRY_SIZE: usize = MAX_NODE_DATA_SIZE + 9;
 /// MMR Entry.
 #[derive(Debug)]
 #[cfg_attr(
-    feature = "remote_read_state_service",
+    feature = "serde_serialization",
     derive(serde::Serialize, serde::Deserialize)
 )]
 #[cfg_attr(
-    feature = "remote_read_state_service",
+    feature = "serde_serialization",
     serde(bound(
         serialize = "V::NodeData: serde::Serialize, V::EntryKind: serde::Serialize",
         deserialize = "V::NodeData: serde::de::DeserializeOwned, V::EntryKind: serde::de::DeserializeOwned"

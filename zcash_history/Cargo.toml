@@ -25,7 +25,7 @@ hex = { workspace = true, optional = true }
 test-dependencies = ["dep:proptest"]
 
 # Serde Serialisation and Deserialisation required for remote use of the Zebra's [`ReadStateService`].
-remote_read_state_service = ["dep:serde", "dep:hex"]
+serde_serialization = ["dep:serde", "dep:hex"]
 
 [lib]
 bench = false

@@ -39,7 +39,7 @@ impl std::fmt::Display for Error {
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(
-    feature = "remote_read_state_service",
+    feature = "serde_serialization",
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub enum EntryLink {
@@ -95,7 +95,7 @@ impl EntryLink {
 #[repr(C)]
 #[derive(Debug)]
 #[cfg_attr(
-    feature = "remote_read_state_service",
+    feature = "serde_serialization",
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub enum EntryKind {

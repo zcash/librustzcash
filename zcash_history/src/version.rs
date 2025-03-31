@@ -143,7 +143,7 @@ pub trait Version {
 ///
 /// This version was used for the Heartwood and Canopy epochs.
 #[cfg_attr(
-    feature = "remote_read_state_service",
+    feature = "serde_serialization",
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub enum V1 {}
@@ -230,7 +230,7 @@ impl Version for V1 {
 ///
 /// This version is used from the NU5 epoch.
 #[cfg_attr(
-    feature = "remote_read_state_service",
+    feature = "serde_serialization",
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub enum V2 {}

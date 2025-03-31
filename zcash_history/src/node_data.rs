@@ -25,7 +25,7 @@ pub const MAX_NODE_DATA_SIZE: usize = 32 + // subtree commitment
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[cfg_attr(
-    feature = "remote_read_state_service",
+    feature = "serde_serialization",
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub struct NodeData {
@@ -47,7 +47,7 @@ pub struct NodeData {
     pub end_sapling_root: [u8; 32],
     /// Part of tree total work.
     #[cfg_attr(
-        feature = "remote_read_state_service",
+        feature = "serde_serialization",
         serde(with = "crate::node_data::serde_u256")
     )]
     pub subtree_total_work: U256,
@@ -181,7 +181,7 @@ impl NodeData {
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[cfg_attr(
-    feature = "remote_read_state_service",
+    feature = "serde_serialization",
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub struct V2 {
@@ -228,7 +228,7 @@ impl V2 {
     }
 }
 
-#[cfg(feature = "remote_read_state_service")]
+#[cfg(feature = "serde_serialization")]
 mod serde_u256 {
     use primitive_types::U256;
     use serde::de::Error;

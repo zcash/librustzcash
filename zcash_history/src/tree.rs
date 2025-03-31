@@ -14,11 +14,11 @@ use crate::{Entry, EntryKind, EntryLink, Error, Version};
 /// how to pick right nodes from the array representation of MMR Tree), perform several operations
 /// (append-s/delete-s) and then drop it.
 #[cfg_attr(
-    feature = "remote_read_state_service",
+    feature = "serde_serialization",
     derive(serde::Serialize, serde::Deserialize)
 )]
 #[cfg_attr(
-    feature = "remote_read_state_service",
+    feature = "serde_serialization",
     serde(bound(
         serialize = "V: serde::Serialize,
                      V::NodeData: serde::Serialize,
