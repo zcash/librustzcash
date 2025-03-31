@@ -416,7 +416,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                     let di = ivk
                         .diversifier_index(&ivk.address(diversifier))
                         .expect("roundtrip");
-                    let ua = uivk.address(di, UnifiedAddressRequest::AllAvailableKeys)?;
+                    let ua = uivk.address(di, UnifiedAddressRequest::ALLOW_ALL)?;
                     let address_id = wallet::upsert_address(
                         conn,
                         &self.params,
@@ -480,7 +480,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                                 .expect("previously generated an address"),
                         )
                         .expect("roundtrip");
-                    let ua = uivk.address(di, UnifiedAddressRequest::AllAvailableKeys)?;
+                    let ua = uivk.address(di, UnifiedAddressRequest::ALLOW_ALL)?;
                     let address_id = wallet::upsert_address(
                         conn,
                         &self.params,

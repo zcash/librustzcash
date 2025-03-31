@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.8.0] - 2025-03-19
+
 ### Added
 - `zcash_keys::keys::UnifiedIncomingViewingKey::{has_sapling, has_orchard,
   has_transparent, receiver_requirements, to_receiver_requirements}`

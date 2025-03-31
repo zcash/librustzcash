@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.2.1] - 2025-03-19
+
 ### Added
 - `zcash_transparent::keys::NonHardenedChildIndex::saturating_sub`
 - `zcash_transparent::keys::NonHardenedChildIndex::saturating_add`

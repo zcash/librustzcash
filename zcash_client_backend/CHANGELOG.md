@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.18.0] - 2025-03-19
+
 ### Added
 - `zcash_client_backend::data_api`:
   - `AddressInfo`
@@ -16,6 +18,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api::{TransactionStatusFilter, OutputStatusFilter}`
 
 ### Changed
+- Updated to `zcash_keys 0.8`
 - `zcash_client_backend::data_api::WalletRead`:
   - `get_transparent_receivers` now takes additional `include_change` and
     `include_ephemeral` arguments.
@@ -42,11 +45,20 @@ and this library adheres to Rust's notion of
   - `TransactionDataRequest::SpendsFromAddress` has been renamed to
     `TransactionDataRequest::TransactionsInvolvingAddress` and has added struct
     fields `request_at`, `tx_status_filter`, and `output_status_filter`.
+- Arguments to `zcash_client_backend::decrypt::decrypt_transaction` have changed.
+  It now takes separate `mined_height` and `chain_tip_height` parameters; this
+  fixes https://github.com/zcash/librustzcash/issues/1746 as described in the
+  `Fixed` section below.
 
 ### Removed
 - `zcash_client_backend::data_api::GAP_LIMIT` gap limits are now configured
   based upon the key scope that they're associated with; there is no longer a
   globally applicable gap limit.
+
+### Fixed
+- This release fixes https://github.com/zcash/librustzcash/issues/1746, which
+  made it possible for `zcash_client_backend::decrypt_and_store_transaction`
+  to incorrectly set a `mined_height` value for a mempool transaction.
 
 ## [0.17.0] - 2025-02-21
 

@@ -7,6 +7,15 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.16.1] - 2025-03-26
+
+### Fixed
+- This release fixes a migration error that could cause some wallets
+  to crash on startup due to an attempt to derive a unified address with
+  a Sapling receiver at an index for which no Sapling receiver can exist.
+
+## [0.16.0] - 2025-03-19
+
 ### Added
 - `zcash_client_sqlite::WalletDb::with_gap_limits`
 - `zcash_client_sqlite::GapLimits`
@@ -16,6 +25,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_sqlite::wallet::transparent::SchedulingError`
 
 ### Changed
+- Updated to `zcash_keys 0.8`, `zcash_client_backend 0.18`
 - `zcash_client_sqlite::WalletDb` has added fields and type parameters:
     - a `clock` field and corresponding type parameter. Tests that make use of
       `WalletDb` now use a `zcash_client_sqlite::util::FixedClock` for this

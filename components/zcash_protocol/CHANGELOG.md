@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.5.1] - 2025-03-19
+### Added
+- `impl<P: zcash_protocol::consensus::Parameters> zcash::consensus::Parameters for &P`
+
+
 ## [0.5.0] - 2025-02-21
 ### Added
 - `zcash_protocol::memo::MemoBytes::into_bytes`

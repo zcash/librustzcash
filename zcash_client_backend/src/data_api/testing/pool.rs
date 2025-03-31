@@ -266,7 +266,7 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
     let ufvks = [(account.id(), account.usk().to_unified_full_viewing_key())]
         .into_iter()
         .collect();
-    let d_tx = decrypt_transaction(st.network(), h + 1, &tx, &ufvks);
+    let d_tx = decrypt_transaction(st.network(), None, Some(h), &tx, &ufvks);
     assert_eq!(T::decrypted_pool_outputs_count(&d_tx), 2);
 
     let mut found_tx_change_memo = false;
@@ -424,7 +424,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
     let ufvks = [(account.id(), account.usk().to_unified_full_viewing_key())]
         .into_iter()
         .collect();
-    let d_tx = decrypt_transaction(st.network(), h + 1, &tx, &ufvks);
+    let d_tx = decrypt_transaction(st.network(), None, Some(h), &tx, &ufvks);
     assert_eq!(T::decrypted_pool_outputs_count(&d_tx), 3);
 
     let mut found_tx_change_memo = false;
