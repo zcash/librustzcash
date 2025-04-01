@@ -18,6 +18,17 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "1.0.82 -> 1.0.83"
 
+[[audits.arti-client]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+notes = """
+No `unsafe` changes. The introduction of a path resolver affects filesystem
+access but is driven by API changes in dependencies; nothing looks untoward in
+the changes to this crate (though the various macros make some of it harder to
+reason about).
+"""
+
 [[audits.async-trait]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
@@ -107,6 +118,26 @@ delta = "0.20.9 -> 0.20.10"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.20.9 -> 0.20.10"
+
+[[audits.directories]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "5.0.1 -> 6.0.0"
+
+[[audits.dirs]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "5.0.1 -> 6.0.0"
+
+[[audits.dirs-sys]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.4.1 -> 0.5.0"
+notes = """
+One change to an `unsafe` block, adapting to an API change in `windows_sys`
+(`Win32::Foundation::HANDLE` changed from `isize` to `*mut c_void`). I confirmed
+that the Windows documentation permits an argument of `std::ptr::null_mut()`.
+"""
 
 [[audits.either]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -434,15 +465,37 @@ criteria = "safe-to-run"
 delta = "0.4.1 -> 0.5.1"
 notes = "Uses of unsafe look plausible."
 
+[[audits.redox_users]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.4.5 -> 0.5.0"
+notes = """
+Changes `Config` from using scheme prefixes (with a default of `file:`) to root
+FS prefixes (with a default of `/`). The behaviour of `Config::scheme` changed
+correspondingly but without being renamed. The effect on the rest of the crate
+is that the passwd, shadow, and group files now default to UNIX-style paths
+(`/etc/passwd`) instead of scheme syntax (`file:etc/passwd`).
+"""
+
 [[audits.regex-automata]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.4.6 -> 0.4.7"
 
+[[audits.regex-automata]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.4.7 -> 0.4.9"
+
 [[audits.regex-syntax]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.8.3 -> 0.8.4"
+
+[[audits.retry-error]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.6.0 -> 0.6.3"
 
 [[audits.rgb]]
 who = "Kris Nuttycombe <kris@nutty.land>"
@@ -513,6 +566,11 @@ delta = "1.0.16 -> 1.0.17"
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-run"
 delta = "1.0.17 -> 1.0.18"
+
+[[audits.safelog]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.4.0 -> 0.4.5"
 
 [[audits.secp256k1]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -651,6 +709,76 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.12.1 -> 0.12.3"
 notes = "Changes to generated code make sense and don't result in anything unexpected."
+
+[[audits.tor-async-utils]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+notes = """
+Some macro complexity but it appears to only be used for defining error types;
+no changes to `unsafe` code or powerful imports.
+"""
+
+[[audits.tor-bytes]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tor-cert]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+notes = """
+No new `unsafe` APIs, but does add a new API that could be used to violate crate
+semantics; it is gated as an experimental feature and follows the Tor crate
+naming convention of using a `dangerously_*` method prefix.
+"""
+
+[[audits.tor-checkable]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tor-consdiff]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tor-dirclient]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tor-dirmgr]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tor-error]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tor-log-ratelim]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tor-persist]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+notes = "No new `unsafe` code, and three new `#![forbid(unsafe_code)]` annotations."
+
+[[audits.tor-protover]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
+
+[[audits.tor-relay-selection]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.23.0 -> 0.28.0"
 
 [[audits.utf8parse]]
 who = "Jack Grigg <jack@electriccoin.co>"

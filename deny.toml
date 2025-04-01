@@ -47,7 +47,6 @@ exceptions = [
     { name = "rustls-webpki", allow = ["ISC"] },
     { name = "secp256k1", allow = ["CC0-1.0"] },
     { name = "secp256k1-sys", allow = ["CC0-1.0"] },
-    { name = "simple_asn1", allow = ["ISC"] },
     { name = "slotmap", allow = ["Zlib"] },
     { name = "subtle", allow = ["BSD-3-Clause"] },
     { name = "tinystr", allow = ["Unicode-3.0"] },
