@@ -13,12 +13,12 @@ use rusqlite::types::Value;
 use rusqlite::OptionalExtension;
 use rusqlite::{named_params, Connection, Row};
 
-use ::transparent::{
+use transparent::keys::NonHardenedChildRange;
+use transparent::{
     address::{Script, TransparentAddress},
     bundle::{OutPoint, TxOut},
     keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
-use transparent::keys::NonHardenedChildRange;
 use zcash_address::unified::{Ivk, Typecode, Uivk};
 use zcash_client_backend::{
     data_api::{
@@ -105,10 +105,11 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
 
     // Get all addresses with the provided scopes.
     let mut addr_query = conn.prepare(
-        "SELECT address, diversifier_index_be, key_scope
+        "SELECT cached_transparent_receiver_address, transparent_child_index, key_scope
          FROM addresses
          JOIN accounts ON accounts.id = addresses.account_id
          WHERE accounts.uuid = :account_uuid
+         AND cached_transparent_receiver_address IS NOT NULL
          AND key_scope IN rarray(:scopes_ptr)",
     )?;
 
@@ -120,28 +121,26 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     ])?;
 
     while let Some(row) = rows.next()? {
-        let ua_str: String = row.get(0)?;
-        let di_vec: Vec<u8> = row.get(1)?;
+        let addr_str: String = row.get(0)?;
+        let address_index: u32 = row.get(1)?;
+        let address_index = NonHardenedChildIndex::from_index(address_index).ok_or(
+            SqliteClientError::CorruptedData(format!(
+                "{} is not a valid transparent child index",
+                address_index
+            )),
+        )?;
         let scope = KeyScope::decode(row.get(2)?)?;
 
-        let taddr = Address::decode(params, &ua_str)
+        let taddr = Address::decode(params, &addr_str)
             .ok_or_else(|| {
                 SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
             })?
             .to_transparent_address();
 
         if let Some(taddr) = taddr {
-            let address_index = address_index_from_diversifier_index_be(&di_vec)?;
             let metadata = TransparentAddressMetadata::new(scope.into(), address_index);
             ret.insert(taddr, Some(metadata));
         }
-    }
-
-    if let Some((taddr, address_index)) =
-        get_legacy_transparent_address(params, conn, account_uuid)?
-    {
-        let metadata = TransparentAddressMetadata::new(KeyScope::EXTERNAL.into(), address_index);
-        ret.insert(taddr, Some(metadata));
     }
 
     Ok(ret)
@@ -151,7 +150,7 @@ pub(crate) fn uivk_legacy_transparent_address<P: consensus::Parameters>(
     params: &P,
     uivk_str: &str,
 ) -> Result<Option<(TransparentAddress, NonHardenedChildIndex)>, SqliteClientError> {
-    use ::transparent::keys::ExternalIvk;
+    use transparent::keys::ExternalIvk;
     use zcash_address::unified::{Container as _, Encoding as _};
 
     let (network, uivk) = Uivk::decode(uivk_str)
