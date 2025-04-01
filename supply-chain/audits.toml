@@ -48,6 +48,15 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-run"
 delta = "1.15.0 -> 1.16.0"
 
+[[audits.bytes]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "1.6.0 -> 1.6.1"
+notes = """
+New `unsafe` function is a code-duplicate of an existing `unsafe` function, but
+using the correct `Shared` type for `BytesMut` in order to fix a bug.
+"""
+
 [[audits.cc]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
@@ -153,6 +162,11 @@ delta = "0.3.29 -> 0.3.30"
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "0.3.29 -> 0.3.30"
+
+[[audits.futures-task]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.3.29 -> 0.3.26"
 
 [[audits.getset]]
 who = "Jack Grigg <jack@electriccoin.co>"

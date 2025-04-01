@@ -242,7 +242,7 @@ version = "0.1.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.cc]]
-version = "1.1.30"
+version = "1.2.17"
 criteria = "safe-to-deploy"
 
 [[exemptions.chacha20]]
@@ -521,16 +521,8 @@ criteria = "safe-to-deploy"
 version = "2.0.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.futures-macro]]
-version = "0.3.21"
-criteria = "safe-to-deploy"
-
 [[exemptions.futures-rustls]]
 version = "0.26.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.futures-sink]]
-version = "0.3.29"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-task]]
@@ -538,7 +530,7 @@ version = "0.3.29"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-util]]
-version = "0.3.21"
+version = "0.3.27"
 criteria = "safe-to-deploy"
 
 [[exemptions.generic-array]]
@@ -579,10 +571,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.hashbrown]]
 version = "0.14.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.hashbrown]]
-version = "0.15.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.hashlink]]
@@ -1026,7 +1014,7 @@ version = "0.16.12"
 criteria = "safe-to-deploy"
 
 [[exemptions.ring]]
-version = "0.17.8"
+version = "0.17.14"
 criteria = "safe-to-deploy"
 
 [[exemptions.ripemd]]
