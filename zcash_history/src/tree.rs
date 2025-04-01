@@ -49,17 +49,18 @@ pub struct Tree<V: Version> {
 impl<V> Tree<V>
 where
     V: Version,
-    V::EntryLink: Into<EntryLink> + From<EntryLink> + Copy,
+    V::EntryLink: From<EntryLink> + Copy,
     V::EntryKind: From<EntryKind>,
+    EntryLink: From<V::EntryLink>,
 {
     /// Resolve link originated from this tree
     pub fn resolve_link(&self, link: V::EntryLink) -> Result<IndexedNode<V>, Error> {
-        match EntryLink::from(link.into()) {
+        match EntryLink::from(link) {
             EntryLink::Generated(index) => self.generated.get(index as usize),
             EntryLink::Stored(index) => self.stored.get(&index),
         }
         .map(|node| IndexedNode { node, link })
-        .ok_or(Error::ExpectedInMemory(EntryLink::from(link.into())))
+        .ok_or(Error::ExpectedInMemory(EntryLink::from(link)))
     }
 
     fn push(&mut self, data: Entry<V>) -> V::EntryLink {
@@ -322,19 +323,20 @@ pub struct IndexedNode<'a, V: Version> {
 impl<V> IndexedNode<'_, V>
 where
     V: Version,
-    V::EntryLink: Into<EntryLink> + From<EntryLink> + Copy,
+    V::EntryLink: From<EntryLink> + Copy,
     V::EntryKind: From<EntryKind>,
+    EntryLink: From<V::EntryLink>,
 {
     fn left(&self) -> Result<V::EntryLink, Error> {
         self.node
             .left()
-            .map_err(|e| e.augment(EntryLink::from(self.link.into())))
+            .map_err(|e| e.augment(EntryLink::from(self.link)))
     }
 
     fn right(&self) -> Result<V::EntryLink, Error> {
         self.node
             .right()
-            .map_err(|e| e.augment(EntryLink::from(self.link.into())))
+            .map_err(|e| e.augment(EntryLink::from(self.link)))
     }
 
     /// Reference to the entry struct.
