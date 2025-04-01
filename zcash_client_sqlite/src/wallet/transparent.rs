@@ -1,4 +1,5 @@
 //! Functions for transparent input support in the wallet.
+use core::ops::Range;
 use std::collections::{HashMap, HashSet};
 use std::num::TryFromIntError;
 use std::ops::DerefMut;
@@ -17,6 +18,7 @@ use ::transparent::{
     bundle::{OutPoint, TxOut},
     keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
+use transparent::keys::NonHardenedChildRange;
 use zcash_address::unified::{Ivk, Typecode, Uivk};
 use zcash_client_backend::{
     data_api::{
@@ -25,6 +27,7 @@ use zcash_client_backend::{
     },
     wallet::{TransparentAddressMetadata, WalletTransparentOutput},
 };
+use zcash_keys::keys::UnifiedIncomingViewingKey;
 use zcash_keys::{
     address::Address,
     encoding::AddressCodec,
@@ -36,7 +39,7 @@ use zcash_protocol::{
     value::{ZatBalance, Zatoshis},
     TxId,
 };
-use zip32::Scope;
+use zip32::{DiversifierIndex, Scope};
 
 use super::encoding::{decode_epoch_seconds, ReceiverFlags};
 use super::{
@@ -401,6 +404,133 @@ pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
     Ok(addresses_to_reserve)
 }
 
+pub(crate) fn generate_external_address(
+    uivk: &UnifiedIncomingViewingKey,
+    ua_request: UnifiedAddressRequest,
+    index: NonHardenedChildIndex,
+) -> Result<(Address, TransparentAddress), AddressGenerationError> {
+    let ua = uivk.address(index.into(), ua_request);
+    let transparent_address = uivk
+        .transparent()
+        .as_ref()
+        .ok_or(AddressGenerationError::KeyNotAvailable(Typecode::P2pkh))?
+        .derive_address(index)
+        .map_err(|_| {
+            AddressGenerationError::InvalidTransparentChildIndex(DiversifierIndex::from(index))
+        })?;
+    Ok((
+        ua.map_or_else(
+            |e| {
+                if matches!(e, AddressGenerationError::ShieldedReceiverRequired) {
+                    // fall back to the transparent-only address
+                    Ok(Address::from(transparent_address))
+                } else {
+                    // other address generation errors are allowed to propagate
+                    Err(e)
+                }
+            },
+            |addr| Ok(Address::from(addr)),
+        )?,
+        transparent_address,
+    ))
+}
+
+/// Generates addresses to fill the specified non-hardened child index range.
+///
+/// The provided [`UnifiedAddressRequest`] is used to pre-generate unified addresses that correspond
+/// to each transparent address index in question; such unified addresses need not internally
+/// contain a transparent receiver, and may be overwritten when these addresses are exposed via the
+/// [`WalletWrite::get_next_available_address`] or [`WalletWrite::get_address_for_index`] methods.
+/// If no request is provided, each address so generated will contain a receiver for each possible
+/// pool: i.e., a recevier for each data item in the account's UFVK or UIVK where the transparent
+/// child index is valid.
+///
+/// [`WalletWrite::get_next_available_address`]: zcash_client_backend::data_api::WalletWrite::get_next_available_address
+/// [`WalletWrite::get_address_for_index`]: zcash_client_backend::data_api::WalletWrite::get_address_for_index
+pub(crate) fn generate_address_range<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_id: AccountRef,
+    key_scope: KeyScope,
+    request: UnifiedAddressRequest,
+    range_to_store: Range<NonHardenedChildIndex>,
+    require_key: bool,
+) -> Result<(), SqliteClientError> {
+    let account = get_account_internal(conn, params, account_id)?
+        .ok_or_else(|| SqliteClientError::AccountUnknown)?;
+
+    if !account.uivk().has_transparent() {
+        if require_key {
+            return Err(SqliteClientError::AddressGeneration(
+                AddressGenerationError::KeyNotAvailable(Typecode::P2pkh),
+            ));
+        } else {
+            return Ok(());
+        }
+    }
+
+    let gen_addrs = |key_scope: KeyScope, index: NonHardenedChildIndex| {
+        Ok::<_, SqliteClientError>(match key_scope {
+            KeyScope::Zip32(zip32::Scope::External) => {
+                generate_external_address(&account.uivk(), request, index)?
+            }
+            KeyScope::Zip32(zip32::Scope::Internal) => {
+                let internal_address = account
+                    .ufvk()
+                    .and_then(|k| k.transparent())
+                    .expect("presence of transparent key was checked above.")
+                    .derive_internal_ivk()?
+                    .derive_address(index)?;
+                (Address::from(internal_address), internal_address)
+            }
+            KeyScope::Ephemeral => {
+                let ephemeral_address = account
+                    .ufvk()
+                    .and_then(|k| k.transparent())
+                    .expect("presence of transparent key was checked above.")
+                    .derive_ephemeral_ivk()?
+                    .derive_ephemeral_address(index)?;
+                (Address::from(ephemeral_address), ephemeral_address)
+            }
+        })
+    };
+
+    // exposed_at_height is initially NULL
+    let mut stmt_insert_address = conn.prepare_cached(
+        "INSERT INTO addresses (
+            account_id, diversifier_index_be, key_scope, address,
+            transparent_child_index, cached_transparent_receiver_address,
+            receiver_flags
+         )
+         VALUES (
+            :account_id, :diversifier_index_be, :key_scope, :address,
+            :transparent_child_index, :transparent_address,
+            :receiver_flags
+         )
+         ON CONFLICT (account_id, diversifier_index_be, key_scope) DO NOTHING",
+    )?;
+
+    for transparent_child_index in NonHardenedChildRange::from(range_to_store) {
+        let (address, transparent_address) = gen_addrs(key_scope, transparent_child_index)?;
+        let zcash_address = address.to_zcash_address(params);
+        let receiver_flags: ReceiverFlags = zcash_address
+            .clone()
+            .convert::<ReceiverFlags>()
+            .expect("address is valid");
+
+        stmt_insert_address.execute(named_params![
+            ":account_id": account_id.0,
+            ":diversifier_index_be": encode_diversifier_index_be(transparent_child_index.into()),
+            ":key_scope": key_scope.encode(),
+            ":address": zcash_address.encode(),
+            ":transparent_child_index": transparent_child_index.index(),
+            ":transparent_address": transparent_address.encode(params),
+            ":receiver_flags": receiver_flags.bits()
+        ])?;
+    }
+    Ok(())
+}
+
 /// Extend the range of preallocated addresses in an account to ensure that a full `gap_limit` of
 /// transparent addresses is available from the first gap in existing indices of addresses at which
 /// a received transaction has been observed on the chain, for each key scope.
@@ -424,72 +554,6 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
     request: UnifiedAddressRequest,
     require_key: bool,
 ) -> Result<(), SqliteClientError> {
-    let account = get_account_internal(conn, params, account_id)?
-        .ok_or_else(|| SqliteClientError::AccountUnknown)?;
-
-    if !account.uivk().has_transparent() {
-        if require_key {
-            return Err(SqliteClientError::AddressGeneration(
-                AddressGenerationError::KeyNotAvailable(Typecode::P2pkh),
-            ));
-        } else {
-            return Ok(());
-        }
-    }
-
-    let gen_addrs = |key_scope: KeyScope, index: NonHardenedChildIndex| {
-        Ok::<_, SqliteClientError>(match key_scope {
-            KeyScope::Zip32(zip32::Scope::External) => {
-                let ua = account.uivk().address(index.into(), request);
-                let transparent_address = account
-                    .uivk()
-                    .transparent()
-                    .as_ref()
-                    .expect("presence of transparent key was checked above.")
-                    .derive_address(index)?;
-                (
-                    ua.map_or_else(
-                        |e| {
-                            if matches!(e, AddressGenerationError::ShieldedReceiverRequired) {
-                                // fall back to the transparent-only address
-                                Ok(Address::from(transparent_address).to_zcash_address(params))
-                            } else {
-                                // other address generation errors are allowed to propagate
-                                Err(e)
-                            }
-                        },
-                        |addr| Ok(Address::from(addr).to_zcash_address(params)),
-                    )?,
-                    transparent_address,
-                )
-            }
-            KeyScope::Zip32(zip32::Scope::Internal) => {
-                let internal_address = account
-                    .ufvk()
-                    .and_then(|k| k.transparent())
-                    .expect("presence of transparent key was checked above.")
-                    .derive_internal_ivk()?
-                    .derive_address(index)?;
-                (
-                    Address::from(internal_address).to_zcash_address(params),
-                    internal_address,
-                )
-            }
-            KeyScope::Ephemeral => {
-                let ephemeral_address = account
-                    .ufvk()
-                    .and_then(|k| k.transparent())
-                    .expect("presence of transparent key was checked above.")
-                    .derive_ephemeral_ivk()?
-                    .derive_ephemeral_address(index)?;
-                (
-                    Address::from(ephemeral_address).to_zcash_address(params),
-                    ephemeral_address,
-                )
-            }
-        })
-    };
-
     let gap_limit = match key_scope {
         KeyScope::Zip32(zip32::Scope::External) => gap_limits.external(),
         KeyScope::Zip32(zip32::Scope::Internal) => gap_limits.internal(),
@@ -497,45 +561,15 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
     };
 
     if let Some(gap_start) = find_gap_start(conn, account_id, key_scope, gap_limit)? {
-        let range_to_store = gap_start.index()..gap_start.saturating_add(gap_limit).index();
-        if range_to_store.is_empty() {
-            return Ok(());
-        }
-        // exposed_at_height is initially NULL
-        let mut stmt_insert_address = conn.prepare_cached(
-            "INSERT INTO addresses (
-                account_id, diversifier_index_be, key_scope, address,
-                transparent_child_index, cached_transparent_receiver_address,
-                receiver_flags
-             )
-             VALUES (
-                :account_id, :diversifier_index_be, :key_scope, :address,
-                :transparent_child_index, :transparent_address,
-                :receiver_flags
-             )
-             ON CONFLICT (account_id, diversifier_index_be, key_scope) DO NOTHING",
+        generate_address_range(
+            conn,
+            params,
+            account_id,
+            key_scope,
+            request,
+            gap_start..gap_start.saturating_add(gap_limit),
+            require_key,
         )?;
-
-        for raw_index in range_to_store {
-            let transparent_child_index = NonHardenedChildIndex::from_index(raw_index)
-                .expect("restricted to valid range above");
-            let (zcash_address, transparent_address) =
-                gen_addrs(key_scope, transparent_child_index)?;
-            let receiver_flags: ReceiverFlags = zcash_address
-                .clone()
-                .convert::<ReceiverFlags>()
-                .expect("address is valid");
-
-            stmt_insert_address.execute(named_params![
-                ":account_id": account_id.0,
-                ":diversifier_index_be": encode_diversifier_index_be(transparent_child_index.into()),
-                ":key_scope": key_scope.encode(),
-                ":address": zcash_address.encode(),
-                ":transparent_child_index": raw_index,
-                ":transparent_address": transparent_address.encode(params),
-                ":receiver_flags": receiver_flags.bits()
-            ])?;
-        }
     }
 
     Ok(())

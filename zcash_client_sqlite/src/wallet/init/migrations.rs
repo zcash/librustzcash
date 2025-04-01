@@ -3,6 +3,7 @@ mod add_account_uuids;
 mod add_transaction_views;
 mod add_utxo_account;
 mod addresses_table;
+mod ensure_default_transparent_address;
 mod ensure_orchard_ua_receiver;
 mod ephemeral_addresses;
 mod fix_bad_change_flagging;
@@ -99,6 +100,8 @@ pub(super) fn all_migrations<
     //                          fix_bad_change_flagging     v_transactions_additional_totals
     //                                                                     |
     //                                                       transparent_gap_limit_handling
+    //                                                                     |
+    //                                                     ensure_default_transparent_address
     let rng = Rc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
@@ -168,6 +171,9 @@ pub(super) fn all_migrations<
             params: params.clone(),
             _clock: clock.clone(),
             _rng: rng.clone(),
+        }),
+        Box::new(ensure_default_transparent_address::Migration {
+            params: params.clone(),
         }),
     ]
 }
