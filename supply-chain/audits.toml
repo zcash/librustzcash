@@ -139,6 +139,11 @@ One change to an `unsafe` block, adapting to an API change in `windows_sys`
 that the Windows documentation permits an argument of `std::ptr::null_mut()`.
 """
 
+[[audits.dynosaur]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.1.1 -> 0.2.0"
+
 [[audits.either]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
