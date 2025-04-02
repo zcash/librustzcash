@@ -101,9 +101,9 @@ pub(super) fn insert_initial_transparent_addrs<P: consensus::Parameters>(
             .transpose()?
             .and_then(|di| NonHardenedChildIndex::try_from(di).ok());
 
-        // Ensure that there is an address for each possible external address index prior
-        // to the default UA for the account. We guarantee addresses up to the gap limit,
-        // but not beyond.
+        // Ensure that there is an address for each possible external address index prior to the
+        // default UA for the account. If the default address has a diversifier index greater than
+        // the gap limit, we generate transparent addresses up to that index but not beyond.
         let start = NonHardenedChildIndex::const_from_index(0);
         let end = std::cmp::min(
             min_transparent_idx
@@ -338,7 +338,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                                 .ok()
                                 .and_then(NonHardenedChildIndex::from_index)
                                 .ok_or(WalletMigrationError::CorruptedData(
-                                    "ephermeral address indices must be in the range of `u31`"
+                                    "ephemeral address indices must be in the range of `u31`"
                                         .to_owned(),
                                 ))?
                                 .index(),

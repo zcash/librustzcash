@@ -30,7 +30,7 @@ impl<P> schemerz::Migration<Uuid> for Migration<P> {
     }
 
     fn description(&self) -> &'static str {
-        "Add support for general transparent gap limit handling, unifying the `addresses` and `ephemeral_addresses` tables."
+        "Ensures the existence of transparent addresses in the range 0..<default_address_idx>"
     }
 }
 

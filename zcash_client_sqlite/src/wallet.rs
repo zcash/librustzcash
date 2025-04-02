@@ -611,7 +611,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         false,
     )?;
 
-    // Pre-generate transparent addresses prior to the index of the default address.
+    // Pre-generate external transparent addresses prior to the index of the default address.
     #[cfg(feature = "transparent-inputs")]
     if let Ok(default_addr_idx) = NonHardenedChildIndex::try_from(d_idx) {
         transparent::generate_address_range(
