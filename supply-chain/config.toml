@@ -977,10 +977,6 @@ criteria = "safe-to-run"
 version = "0.7.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.rand]]
-version = "0.8.5"
-criteria = "safe-to-deploy"
-
 [[exemptions.reddsa]]
 version = "0.5.1"
 criteria = "safe-to-deploy"
@@ -1519,10 +1515,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.winapi-x86_64-pc-windows-gnu]]
 version = "0.4.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows-core]]
-version = "0.52.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.winnow]]

@@ -6231,7 +6231,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_sqlite"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "ambassador",
  "assert_matches",
@@ -6456,7 +6456,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_transparent"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "bip32",
  "blake2b_simd",

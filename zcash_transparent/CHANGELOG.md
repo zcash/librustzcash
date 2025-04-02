@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.2.2] - 2025-04-02
+
 ### Added
 - `zcash_transparent::keys::NonHardenedChildRange`
 - `zcash_transparent::keys::NonHardenedChildIter`

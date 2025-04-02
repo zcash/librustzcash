@@ -1,25 +1,13 @@
 
 # cargo-vet imports lock
 
-[[unpublished.zcash_client_backend]]
-version = "0.18.0"
-audited_as = "0.17.0"
-
 [[unpublished.zcash_client_sqlite]]
-version = "0.16.0"
-audited_as = "0.15.0"
-
-[[unpublished.zcash_keys]]
-version = "0.8.0"
-audited_as = "0.7.0"
-
-[[unpublished.zcash_protocol]]
-version = "0.5.1"
-audited_as = "0.5.0"
+version = "0.16.2"
+audited_as = "0.16.1"
 
 [[unpublished.zcash_transparent]]
-version = "0.2.1"
-audited_as = "0.2.0"
+version = "0.2.2"
+audited_as = "0.2.1"
 
 [[publisher.bumpalo]]
 version = "3.16.0"
@@ -308,18 +296,18 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_backend]]
-version = "0.17.0"
-when = "2025-02-21"
+version = "0.18.0"
+when = "2025-03-21"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_sqlite]]
-version = "0.15.0"
-when = "2025-02-21"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
+version = "0.16.1"
+when = "2025-03-27"
+user-id = 6289
+user-login = "str4d"
+user-name = "Jack Grigg"
 
 [[publisher.zcash_encoding]]
 version = "0.3.0"
@@ -343,8 +331,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_keys]]
-version = "0.7.0"
-when = "2025-02-21"
+version = "0.8.0"
+when = "2025-03-21"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -364,8 +352,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_protocol]]
-version = "0.5.0"
-when = "2025-02-21"
+version = "0.5.1"
+when = "2025-03-21"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -378,8 +366,8 @@ user-login = "daira"
 user-name = "Daira-Emma Hopwood"
 
 [[publisher.zcash_transparent]]
-version = "0.2.0"
-when = "2025-02-21"
+version = "0.2.1"
+when = "2025-03-21"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -1365,6 +1353,15 @@ criteria = "safe-to-deploy"
 delta = "1.0.35 -> 1.0.36"
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
+[[audits.google.audits.rand]]
+who = "Lukasz Anforowicz <lukasza@chromium.org>"
+criteria = "safe-to-deploy"
+version = "0.8.5"
+notes = """
+For more detailed unsafe review notes please see https://crrev.com/c/6362797
+"""
+aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+
 [[audits.google.audits.ring]]
 who = "Laura Peskin <pesk@google.com>"
 criteria = "safe-to-deploy"
@@ -1631,6 +1628,13 @@ who = "George Burgess IV <gbiv@google.com>"
 criteria = "safe-to-deploy"
 version = "1.0.2"
 aggregated-from = "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
+
+[[audits.google.audits.windows-core]]
+who = "Manish Goregaokar <manishearth@google.com>"
+criteria = "safe-to-deploy"
+version = "0.52.0"
+notes = "Implements Windows system APIs"
+aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
 [[audits.isrg.audits.aes]]
 who = "Tim Geoghegan <timg@divviup.org>"
