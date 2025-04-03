@@ -40,7 +40,7 @@ struct MyOptions {
         help = "The index of the diversified address to generate (default 0). Some indices don't have a corresponding address.",
         parse(try_from_str = "parse_diversifier_index")
     )]
-    diversifier_index: DiversifierIndex,
+    diversifier_index: Option<DiversifierIndex>,
 }
 
 fn main() {
@@ -53,6 +53,8 @@ fn main() {
         return;
     };
 
+    let diversifier_index = opts.diversifier_index.unwrap_or_else(|| DiversifierIndex::new());
+    
     let (diversifier_index, address) = extfvk.find_address(opts.diversifier_index).unwrap();
     println!(
         "# Diversifier index: {}",
