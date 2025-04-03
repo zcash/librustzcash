@@ -270,8 +270,8 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// or `Err(schemerz::MigratorError::Adapter(WalletMigrationError::SeedNotRelevant))`.
 ///
 /// We do not check whether the seed is relevant to any imported account, because that
-/// would require brute-forcing the ZIP 32 account index space. Consequentially, imported
-/// accounts are not migrated.
+/// would require brute-forcing the ZIP 32 account index space. Consequentially, seed-requiring
+/// migrations cannot be applied to imported accounts.
 ///
 /// It is safe to use a wallet database previously created without the ability to create
 /// transparent spends with a build that enables transparent spends (via use of the
@@ -366,8 +366,8 @@ pub fn init_wallet_db<
 /// or `Err(schemerz::MigratorError::Adapter(WalletMigrationError::SeedNotRelevant))`.
 ///
 /// We do not check whether the seed is relevant to any imported account, because that
-/// would require brute-forcing the ZIP 32 account index space. Consequentially, imported
-/// accounts are not migrated.
+/// would require brute-forcing the ZIP 32 account index space. Consequentially, seed-requiring
+/// migrations cannot be applied to imported accounts.
 ///
 /// It is safe to use a wallet database previously created without the ability to create
 /// transparent spends with a build that enables transparent spends (via use of the
@@ -465,7 +465,9 @@ impl WalletMigrator {
     /// between the `zcash_client_sqlite` tables, but they will never take into account
     /// external tables. In particular, this means that you **MUST NOT**:
     /// - Modify the structure or contents of any internal table.
-    /// - Create foreign keys in your tables pointing to internal tables.
+    /// - Assume that internal IDs will exist indefinitely (instead have a backup plan for
+    ///   recovering your data relationships if a new internal migration affects your
+    ///   foreign keys).
     ///
     /// The `zcash_client_sqlite` schema does not have any common prefix it uses for
     /// tables, indexes, or views. However, we promise to not use the prefix `ext_` for
