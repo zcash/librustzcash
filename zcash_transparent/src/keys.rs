@@ -95,6 +95,14 @@ impl NonHardenedChildIndex {
         }
     }
 
+    /// Constructs a [`NonHardenedChildIndex`] from a ZIP 32 child index.
+    ///
+    /// Panics: if the hardened bit is set.
+    pub const fn const_from_index(i: u32) -> Self {
+        assert!(i <= Self::MAX.0);
+        NonHardenedChildIndex(i)
+    }
+
     /// Returns the index as a 32-bit integer.
     pub const fn index(&self) -> u32 {
         self.0
@@ -154,6 +162,46 @@ impl TryFrom<DiversifierIndex> for NonHardenedChildIndex {
 impl From<NonHardenedChildIndex> for DiversifierIndex {
     fn from(value: NonHardenedChildIndex) -> Self {
         DiversifierIndex::from(value.0)
+    }
+}
+
+/// An end-exclusive iterator over a range of non-hardened child indexes.
+pub struct NonHardenedChildIter {
+    next: Option<NonHardenedChildIndex>,
+    end: NonHardenedChildIndex,
+}
+
+impl Iterator for NonHardenedChildIter {
+    type Item = NonHardenedChildIndex;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let cur = self.next;
+        self.next = self
+            .next
+            .and_then(|i| i.next())
+            .filter(|succ| succ < &self.end);
+        cur
+    }
+}
+
+/// An end-exclusive range of non-hardened child indexes.
+pub struct NonHardenedChildRange(core::ops::Range<NonHardenedChildIndex>);
+
+impl From<core::ops::Range<NonHardenedChildIndex>> for NonHardenedChildRange {
+    fn from(value: core::ops::Range<NonHardenedChildIndex>) -> Self {
+        Self(value)
+    }
+}
+
+impl IntoIterator for NonHardenedChildRange {
+    type Item = NonHardenedChildIndex;
+    type IntoIter = NonHardenedChildIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        NonHardenedChildIter {
+            next: Some(self.0.start),
+            end: self.0.end,
+        }
     }
 }
 

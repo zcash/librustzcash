@@ -7,6 +7,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.2.2] - 2025-04-02
+
+### Added
+- `zcash_transparent::keys::NonHardenedChildRange`
+- `zcash_transparent::keys::NonHardenedChildIter`
+- `zcash_transparent::keys::NonHardenedChildIndex::const_from_index`
+
 ## [0.2.1] - 2025-03-19
 
 ### Added

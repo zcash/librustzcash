@@ -26,7 +26,7 @@ use {
     crate::{
         wallet::{
             encoding::{decode_diversifier_index_be, encode_diversifier_index_be, epoch_seconds},
-            transparent::{generate_gap_addresses, next_check_time},
+            transparent::{generate_address_range, generate_gap_addresses, next_check_time},
         },
         GapLimits,
     },
@@ -58,6 +58,77 @@ impl<P, C, R> schemerz::Migration<Uuid> for Migration<P, C, R> {
     fn description(&self) -> &'static str {
         "Add support for general transparent gap limit handling, unifying the `addresses` and `ephemeral_addresses` tables."
     }
+}
+
+// For each account, ensure that all diversifier indexes prior to that for the default
+// address have corresponding cached transparent addresses.
+#[cfg(feature = "transparent-inputs")]
+pub(super) fn insert_initial_transparent_addrs<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+) -> Result<(), WalletMigrationError> {
+    let mut min_addr_diversifiers = conn.prepare(
+        r#"
+        SELECT accounts.id AS account_id,
+               MIN(addresses.transparent_child_index) AS transparent_child_index,
+               MIN(addresses.diversifier_index_be) AS diversifier_index_be
+        FROM accounts
+        LEFT OUTER JOIN addresses
+            ON accounts.id = addresses.account_id
+            AND addresses.key_scope = :key_scope_external
+        GROUP BY accounts.id
+        "#,
+    )?;
+
+    let mut min_addr_rows = min_addr_diversifiers.query(named_params![
+        ":key_scope_external": KeyScope::EXTERNAL.encode()
+    ])?;
+    while let Some(row) = min_addr_rows.next()? {
+        let account_id = AccountRef(row.get::<_, u32>("account_id")?);
+
+        let min_transparent_idx = row
+            .get::<_, Option<u32>>("transparent_child_index")?
+            .map(|i| {
+                NonHardenedChildIndex::from_index(i).ok_or(WalletMigrationError::CorruptedData(
+                    format!("{} is not a valid transparent child index.", i),
+                ))
+            })
+            .transpose()?;
+
+        let min_diversifier_idx = row
+            .get::<_, Option<Vec<u8>>>("diversifier_index_be")?
+            .map(|b| decode_diversifier_index_be(&b[..]))
+            .transpose()?
+            .and_then(|di| NonHardenedChildIndex::try_from(di).ok());
+
+        // Ensure that there is an address for each possible external address index prior to the
+        // default UA for the account. If the default address has a diversifier index greater than
+        // the gap limit, we generate transparent addresses up to that index but not beyond.
+        let start = NonHardenedChildIndex::const_from_index(0);
+        let end = std::cmp::min(
+            min_transparent_idx
+                .or(min_diversifier_idx)
+                // guarantee that we have an entry at index 0; this address will have previously
+                // been provided explicitly as one of the wallet's addresses in response to a call
+                // to `get_transparent_receivers, even if we have no other addresses generated
+                // (which shouldn't ordinarily be the case anyway)
+                .unwrap_or(NonHardenedChildIndex::const_from_index(1)),
+            NonHardenedChildIndex::from_index(GapLimits::default().external())
+                .expect("default external gap limit fits in non-hardened child index space."),
+        );
+
+        generate_address_range(
+            conn,
+            params,
+            account_id,
+            KeyScope::EXTERNAL,
+            UnifiedAddressRequest::ALLOW_ALL,
+            start..end,
+            false,
+        )?;
+    }
+
+    Ok(())
 }
 
 impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migration<P, C, R> {
@@ -267,7 +338,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                                 .ok()
                                 .and_then(NonHardenedChildIndex::from_index)
                                 .ok_or(WalletMigrationError::CorruptedData(
-                                    "ephermeral address indices must be in the range of `u31`"
+                                    "ephemeral address indices must be in the range of `u31`"
                                         .to_owned(),
                                 ))?
                                 .index(),
@@ -351,6 +422,9 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
             PRAGMA legacy_alter_table = OFF;
             "#,
         )?;
+
+        #[cfg(feature = "transparent-inputs")]
+        insert_initial_transparent_addrs(conn, &self.params)?;
 
         // Add foreign key references from the *_received_{notes|outputs} tables to the addresses
         // table to make it possible to identify which address was involved. These foreign key
