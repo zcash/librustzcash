@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/received_notes_nullable_nf.rs`."><title>received_notes_nullable_nf.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-916cea96.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.88.0-nightly (e2014e876 2025-04-01)" data-channel="nightly" data-search-js="search-e7298875.js" data-settings-js="settings-d72f25bb.js" ><script src="../../../../../static.files/storage-82c7156e.js"></script><script defer src="../../../../../static.files/src-script-63605ae7.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-fb8c74a8.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>received_notes_nullable_nf.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! A migration that renames the `received_notes` table to `sapling_received_notes`
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/received_notes_nullable_nf.rs`."><title>received_notes_nullable_nf.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-916cea96.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.88.0-nightly (d5b4c2e4f 2025-04-02)" data-channel="nightly" data-search-js="search-f7877310.js" data-settings-js="settings-d72f25bb.js" ><script src="../../../../../static.files/storage-4e99c027.js"></script><script defer src="../../../../../static.files/src-script-63605ae7.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-fb8c74a8.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>received_notes_nullable_nf.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! A migration that renames the `received_notes` table to `sapling_received_notes`
 <a href=#2 id=2 data-nosnippet>2</a>//! and makes the `nf` column nullable. This allows change notes to be added to the
 <a href=#3 id=3 data-nosnippet>3</a>//! table prior to being mined.
 <a href=#4 id=4 data-nosnippet>4</a></span><span class="kw">use </span>std::collections::HashSet;
@@ -232,7 +232,7 @@
 <a href=#232 id=232 data-nosnippet>232</a>
 <a href=#233 id=233 data-nosnippet>233</a>    <span class="kw">use crate</span>::{
 <a href=#234 id=234 data-nosnippet>234</a>        testing::db::{test_clock, test_rng},
-<a href=#235 id=235 data-nosnippet>235</a>        wallet::init::{init_wallet_db_internal, migrations::v_transactions_net},
+<a href=#235 id=235 data-nosnippet>235</a>        wallet::init::{migrations::v_transactions_net, WalletMigrator},
 <a href=#236 id=236 data-nosnippet>236</a>        WalletDb,
 <a href=#237 id=237 data-nosnippet>237</a>    };
 <a href=#238 id=238 data-nosnippet>238</a>
@@ -246,38 +246,38 @@
 <a href=#246 id=246 data-nosnippet>246</a>            test_rng(),
 <a href=#247 id=247 data-nosnippet>247</a>        )
 <a href=#248 id=248 data-nosnippet>248</a>        .unwrap();
-<a href=#249 id=249 data-nosnippet>249</a>        init_wallet_db_internal(
-<a href=#250 id=250 data-nosnippet>250</a>            <span class="kw-2">&amp;mut </span>db_data,
-<a href=#251 id=251 data-nosnippet>251</a>            <span class="prelude-val">None</span>,
-<a href=#252 id=252 data-nosnippet>252</a>            <span class="kw-2">&amp;</span>[v_transactions_net::MIGRATION_ID],
-<a href=#253 id=253 data-nosnippet>253</a>            <span class="bool-val">false</span>,
-<a href=#254 id=254 data-nosnippet>254</a>        )
-<a href=#255 id=255 data-nosnippet>255</a>        .unwrap();
-<a href=#256 id=256 data-nosnippet>256</a>
-<a href=#257 id=257 data-nosnippet>257</a>        <span class="comment">// Create an account in the wallet
-<a href=#258 id=258 data-nosnippet>258</a>        </span><span class="kw">let </span>usk0 = UnifiedSpendingKey::from_seed(<span class="kw-2">&amp;</span>db_data.params, <span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>][..], AccountId::ZERO)
-<a href=#259 id=259 data-nosnippet>259</a>            .unwrap();
-<a href=#260 id=260 data-nosnippet>260</a>        <span class="kw">let </span>ufvk0 = usk0.to_unified_full_viewing_key();
-<a href=#261 id=261 data-nosnippet>261</a>        db_data
-<a href=#262 id=262 data-nosnippet>262</a>            .conn
-<a href=#263 id=263 data-nosnippet>263</a>            .execute(
-<a href=#264 id=264 data-nosnippet>264</a>                <span class="string">"INSERT INTO accounts (account, ufvk) VALUES (0, ?)"</span>,
-<a href=#265 id=265 data-nosnippet>265</a>                <span class="macro">params!</span>[ufvk0.encode(<span class="kw-2">&amp;</span>db_data.params)],
-<a href=#266 id=266 data-nosnippet>266</a>            )
-<a href=#267 id=267 data-nosnippet>267</a>            .unwrap();
-<a href=#268 id=268 data-nosnippet>268</a>
-<a href=#269 id=269 data-nosnippet>269</a>        <span class="comment">// Tx 0 contains two received notes of 2 and 5 zatoshis that are controlled by account 0.
-<a href=#270 id=270 data-nosnippet>270</a>        </span>db_data.conn.execute_batch(
-<a href=#271 id=271 data-nosnippet>271</a>            <span class="string">"INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'00');
-<a href=#272 id=272 data-nosnippet>272</a>            INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, 'tx0');
-<a href=#273 id=273 data-nosnippet>273</a>
-<a href=#274 id=274 data-nosnippet>274</a>            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
-<a href=#275 id=275 data-nosnippet>275</a>            VALUES (0, 0, 0, '', 2, '', 'nf_a', false);
-<a href=#276 id=276 data-nosnippet>276</a>            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
-<a href=#277 id=277 data-nosnippet>277</a>            VALUES (0, 3, 0, '', 5, '', 'nf_b', false);"</span>).unwrap();
-<a href=#278 id=278 data-nosnippet>278</a>
-<a href=#279 id=279 data-nosnippet>279</a>        <span class="comment">// Apply the current migration
-<a href=#280 id=280 data-nosnippet>280</a>        </span>init_wallet_db_internal(<span class="kw-2">&amp;mut </span>db_data, <span class="prelude-val">None</span>, <span class="kw-2">&amp;</span>[<span class="kw">super</span>::MIGRATION_ID], <span class="bool-val">false</span>).unwrap();
+<a href=#249 id=249 data-nosnippet>249</a>        WalletMigrator::new()
+<a href=#250 id=250 data-nosnippet>250</a>            .ignore_seed_relevance()
+<a href=#251 id=251 data-nosnippet>251</a>            .init_or_migrate_to(<span class="kw-2">&amp;mut </span>db_data, <span class="kw-2">&amp;</span>[v_transactions_net::MIGRATION_ID])
+<a href=#252 id=252 data-nosnippet>252</a>            .unwrap();
+<a href=#253 id=253 data-nosnippet>253</a>
+<a href=#254 id=254 data-nosnippet>254</a>        <span class="comment">// Create an account in the wallet
+<a href=#255 id=255 data-nosnippet>255</a>        </span><span class="kw">let </span>usk0 = UnifiedSpendingKey::from_seed(<span class="kw-2">&amp;</span>db_data.params, <span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>][..], AccountId::ZERO)
+<a href=#256 id=256 data-nosnippet>256</a>            .unwrap();
+<a href=#257 id=257 data-nosnippet>257</a>        <span class="kw">let </span>ufvk0 = usk0.to_unified_full_viewing_key();
+<a href=#258 id=258 data-nosnippet>258</a>        db_data
+<a href=#259 id=259 data-nosnippet>259</a>            .conn
+<a href=#260 id=260 data-nosnippet>260</a>            .execute(
+<a href=#261 id=261 data-nosnippet>261</a>                <span class="string">"INSERT INTO accounts (account, ufvk) VALUES (0, ?)"</span>,
+<a href=#262 id=262 data-nosnippet>262</a>                <span class="macro">params!</span>[ufvk0.encode(<span class="kw-2">&amp;</span>db_data.params)],
+<a href=#263 id=263 data-nosnippet>263</a>            )
+<a href=#264 id=264 data-nosnippet>264</a>            .unwrap();
+<a href=#265 id=265 data-nosnippet>265</a>
+<a href=#266 id=266 data-nosnippet>266</a>        <span class="comment">// Tx 0 contains two received notes of 2 and 5 zatoshis that are controlled by account 0.
+<a href=#267 id=267 data-nosnippet>267</a>        </span>db_data.conn.execute_batch(
+<a href=#268 id=268 data-nosnippet>268</a>            <span class="string">"INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'00');
+<a href=#269 id=269 data-nosnippet>269</a>            INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, 'tx0');
+<a href=#270 id=270 data-nosnippet>270</a>
+<a href=#271 id=271 data-nosnippet>271</a>            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
+<a href=#272 id=272 data-nosnippet>272</a>            VALUES (0, 0, 0, '', 2, '', 'nf_a', false);
+<a href=#273 id=273 data-nosnippet>273</a>            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
+<a href=#274 id=274 data-nosnippet>274</a>            VALUES (0, 3, 0, '', 5, '', 'nf_b', false);"</span>).unwrap();
+<a href=#275 id=275 data-nosnippet>275</a>
+<a href=#276 id=276 data-nosnippet>276</a>        <span class="comment">// Apply the current migration
+<a href=#277 id=277 data-nosnippet>277</a>        </span>WalletMigrator::new()
+<a href=#278 id=278 data-nosnippet>278</a>            .ignore_seed_relevance()
+<a href=#279 id=279 data-nosnippet>279</a>            .init_or_migrate_to(<span class="kw-2">&amp;mut </span>db_data, <span class="kw-2">&amp;</span>[<span class="kw">super</span>::MIGRATION_ID])
+<a href=#280 id=280 data-nosnippet>280</a>            .unwrap();
 <a href=#281 id=281 data-nosnippet>281</a>
 <a href=#282 id=282 data-nosnippet>282</a>        {
 <a href=#283 id=283 data-nosnippet>283</a>            <span class="kw">let </span><span class="kw-2">mut </span>q = db_data

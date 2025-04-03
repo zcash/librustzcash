@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/v_transactions_note_uniqueness.rs`."><title>v_transactions_note_uniqueness.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-916cea96.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.88.0-nightly (e2014e876 2025-04-01)" data-channel="nightly" data-search-js="search-e7298875.js" data-settings-js="settings-d72f25bb.js" ><script src="../../../../../static.files/storage-82c7156e.js"></script><script defer src="../../../../../static.files/src-script-63605ae7.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-fb8c74a8.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>v_transactions_note_uniqueness.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! This migration fixes a bug in `v_transactions` where distinct but otherwise identical notes
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/v_transactions_note_uniqueness.rs`."><title>v_transactions_note_uniqueness.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-916cea96.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.88.0-nightly (d5b4c2e4f 2025-04-02)" data-channel="nightly" data-search-js="search-f7877310.js" data-settings-js="settings-d72f25bb.js" ><script src="../../../../../static.files/storage-4e99c027.js"></script><script defer src="../../../../../static.files/src-script-63605ae7.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-fb8c74a8.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>v_transactions_note_uniqueness.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! This migration fixes a bug in `v_transactions` where distinct but otherwise identical notes
 <a href=#2 id=2 data-nosnippet>2</a>//! were being incorrectly deduplicated.
 <a href=#3 id=3 data-nosnippet>3</a>
 <a href=#4 id=4 data-nosnippet>4</a></span><span class="kw">use </span>std::collections::HashSet;
@@ -171,7 +171,7 @@
 <a href=#171 id=171 data-nosnippet>171</a>    <span class="kw">use crate</span>::{
 <a href=#172 id=172 data-nosnippet>172</a>        testing::db::{test_clock, test_rng},
 <a href=#173 id=173 data-nosnippet>173</a>        util::testing::FixedClock,
-<a href=#174 id=174 data-nosnippet>174</a>        wallet::init::{init_wallet_db_internal, migrations::v_transactions_net},
+<a href=#174 id=174 data-nosnippet>174</a>        wallet::init::{migrations::v_transactions_net, WalletMigrator},
 <a href=#175 id=175 data-nosnippet>175</a>        WalletDb,
 <a href=#176 id=176 data-nosnippet>176</a>    };
 <a href=#177 id=177 data-nosnippet>177</a>
@@ -185,84 +185,84 @@
 <a href=#185 id=185 data-nosnippet>185</a>            test_rng(),
 <a href=#186 id=186 data-nosnippet>186</a>        )
 <a href=#187 id=187 data-nosnippet>187</a>        .unwrap();
-<a href=#188 id=188 data-nosnippet>188</a>        init_wallet_db_internal(
-<a href=#189 id=189 data-nosnippet>189</a>            <span class="kw-2">&amp;mut </span>db_data,
-<a href=#190 id=190 data-nosnippet>190</a>            <span class="prelude-val">None</span>,
-<a href=#191 id=191 data-nosnippet>191</a>            <span class="kw-2">&amp;</span>[v_transactions_net::MIGRATION_ID],
-<a href=#192 id=192 data-nosnippet>192</a>            <span class="bool-val">false</span>,
-<a href=#193 id=193 data-nosnippet>193</a>        )
-<a href=#194 id=194 data-nosnippet>194</a>        .unwrap();
-<a href=#195 id=195 data-nosnippet>195</a>
-<a href=#196 id=196 data-nosnippet>196</a>        <span class="comment">// Create an account in the wallet
-<a href=#197 id=197 data-nosnippet>197</a>        </span><span class="kw">let </span>usk0 = UnifiedSpendingKey::from_seed(<span class="kw-2">&amp;</span>db_data.params, <span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>][..], AccountId::ZERO)
-<a href=#198 id=198 data-nosnippet>198</a>            .unwrap();
-<a href=#199 id=199 data-nosnippet>199</a>        <span class="kw">let </span>ufvk0 = usk0.to_unified_full_viewing_key();
-<a href=#200 id=200 data-nosnippet>200</a>        db_data
-<a href=#201 id=201 data-nosnippet>201</a>            .conn
-<a href=#202 id=202 data-nosnippet>202</a>            .execute(
-<a href=#203 id=203 data-nosnippet>203</a>                <span class="string">"INSERT INTO accounts (account, ufvk) VALUES (0, ?)"</span>,
-<a href=#204 id=204 data-nosnippet>204</a>                <span class="macro">params!</span>[ufvk0.encode(<span class="kw-2">&amp;</span>db_data.params)],
-<a href=#205 id=205 data-nosnippet>205</a>            )
-<a href=#206 id=206 data-nosnippet>206</a>            .unwrap();
-<a href=#207 id=207 data-nosnippet>207</a>
-<a href=#208 id=208 data-nosnippet>208</a>        <span class="comment">// Tx 0 contains two received notes, both of 2 zatoshis, that are controlled by account 0.
-<a href=#209 id=209 data-nosnippet>209</a>        </span>db_data.conn.execute_batch(
-<a href=#210 id=210 data-nosnippet>210</a>            <span class="string">"INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'00');
-<a href=#211 id=211 data-nosnippet>211</a>            INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, 'tx0');
-<a href=#212 id=212 data-nosnippet>212</a>
-<a href=#213 id=213 data-nosnippet>213</a>            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
-<a href=#214 id=214 data-nosnippet>214</a>            VALUES (0, 0, 0, '', 2, '', 'nf_a', false);
-<a href=#215 id=215 data-nosnippet>215</a>            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
-<a href=#216 id=216 data-nosnippet>216</a>            VALUES (0, 3, 0, '', 2, '', 'nf_b', false);"</span>).unwrap();
-<a href=#217 id=217 data-nosnippet>217</a>
-<a href=#218 id=218 data-nosnippet>218</a>        <span class="kw">let </span>check_balance_delta = |db_data: <span class="kw-2">&amp;mut </span>WalletDb&lt;
-<a href=#219 id=219 data-nosnippet>219</a>            rusqlite::Connection,
-<a href=#220 id=220 data-nosnippet>220</a>            Network,
-<a href=#221 id=221 data-nosnippet>221</a>            FixedClock,
-<a href=#222 id=222 data-nosnippet>222</a>            ChaChaRng,
-<a href=#223 id=223 data-nosnippet>223</a>        &gt;,
-<a href=#224 id=224 data-nosnippet>224</a>                                   expected_notes: i64| {
-<a href=#225 id=225 data-nosnippet>225</a>            <span class="kw">let </span><span class="kw-2">mut </span>q = db_data
-<a href=#226 id=226 data-nosnippet>226</a>                .conn
-<a href=#227 id=227 data-nosnippet>227</a>                .prepare(
-<a href=#228 id=228 data-nosnippet>228</a>                    <span class="string">"SELECT account_id, account_balance_delta, has_change, memo_count, sent_note_count, received_note_count
-<a href=#229 id=229 data-nosnippet>229</a>                    FROM v_transactions"</span>,
-<a href=#230 id=230 data-nosnippet>230</a>                )
-<a href=#231 id=231 data-nosnippet>231</a>                .unwrap();
-<a href=#232 id=232 data-nosnippet>232</a>            <span class="kw">let </span><span class="kw-2">mut </span>rows = q.query([]).unwrap();
-<a href=#233 id=233 data-nosnippet>233</a>            <span class="kw">let </span><span class="kw-2">mut </span>row_count = <span class="number">0</span>;
-<a href=#234 id=234 data-nosnippet>234</a>            <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next().unwrap() {
-<a href=#235 id=235 data-nosnippet>235</a>                row_count += <span class="number">1</span>;
-<a href=#236 id=236 data-nosnippet>236</a>                <span class="kw">let </span>account: i64 = row.get(<span class="number">0</span>).unwrap();
-<a href=#237 id=237 data-nosnippet>237</a>                <span class="kw">let </span>account_balance_delta: i64 = row.get(<span class="number">1</span>).unwrap();
-<a href=#238 id=238 data-nosnippet>238</a>                <span class="kw">let </span>has_change: bool = row.get(<span class="number">2</span>).unwrap();
-<a href=#239 id=239 data-nosnippet>239</a>                <span class="kw">let </span>memo_count: i64 = row.get(<span class="number">3</span>).unwrap();
-<a href=#240 id=240 data-nosnippet>240</a>                <span class="kw">let </span>sent_note_count: i64 = row.get(<span class="number">4</span>).unwrap();
-<a href=#241 id=241 data-nosnippet>241</a>                <span class="kw">let </span>received_note_count: i64 = row.get(<span class="number">5</span>).unwrap();
-<a href=#242 id=242 data-nosnippet>242</a>                <span class="kw">match </span>account {
-<a href=#243 id=243 data-nosnippet>243</a>                    <span class="number">0 </span>=&gt; {
-<a href=#244 id=244 data-nosnippet>244</a>                        <span class="macro">assert_eq!</span>(account_balance_delta, <span class="number">2 </span>* expected_notes);
-<a href=#245 id=245 data-nosnippet>245</a>                        <span class="macro">assert!</span>(!has_change);
-<a href=#246 id=246 data-nosnippet>246</a>                        <span class="macro">assert_eq!</span>(memo_count, <span class="number">0</span>);
-<a href=#247 id=247 data-nosnippet>247</a>                        <span class="macro">assert_eq!</span>(sent_note_count, <span class="number">0</span>);
-<a href=#248 id=248 data-nosnippet>248</a>                        <span class="macro">assert_eq!</span>(received_note_count, expected_notes);
-<a href=#249 id=249 data-nosnippet>249</a>                    }
-<a href=#250 id=250 data-nosnippet>250</a>                    other =&gt; {
-<a href=#251 id=251 data-nosnippet>251</a>                        <span class="macro">panic!</span>(
-<a href=#252 id=252 data-nosnippet>252</a>                            <span class="string">"Account {:?} is not expected to exist in the wallet."</span>,
-<a href=#253 id=253 data-nosnippet>253</a>                            other
-<a href=#254 id=254 data-nosnippet>254</a>                        );
-<a href=#255 id=255 data-nosnippet>255</a>                    }
-<a href=#256 id=256 data-nosnippet>256</a>                }
-<a href=#257 id=257 data-nosnippet>257</a>            }
-<a href=#258 id=258 data-nosnippet>258</a>            <span class="macro">assert_eq!</span>(row_count, <span class="number">1</span>);
-<a href=#259 id=259 data-nosnippet>259</a>        };
+<a href=#188 id=188 data-nosnippet>188</a>        WalletMigrator::new()
+<a href=#189 id=189 data-nosnippet>189</a>            .ignore_seed_relevance()
+<a href=#190 id=190 data-nosnippet>190</a>            .init_or_migrate_to(<span class="kw-2">&amp;mut </span>db_data, <span class="kw-2">&amp;</span>[v_transactions_net::MIGRATION_ID])
+<a href=#191 id=191 data-nosnippet>191</a>            .unwrap();
+<a href=#192 id=192 data-nosnippet>192</a>
+<a href=#193 id=193 data-nosnippet>193</a>        <span class="comment">// Create an account in the wallet
+<a href=#194 id=194 data-nosnippet>194</a>        </span><span class="kw">let </span>usk0 = UnifiedSpendingKey::from_seed(<span class="kw-2">&amp;</span>db_data.params, <span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>][..], AccountId::ZERO)
+<a href=#195 id=195 data-nosnippet>195</a>            .unwrap();
+<a href=#196 id=196 data-nosnippet>196</a>        <span class="kw">let </span>ufvk0 = usk0.to_unified_full_viewing_key();
+<a href=#197 id=197 data-nosnippet>197</a>        db_data
+<a href=#198 id=198 data-nosnippet>198</a>            .conn
+<a href=#199 id=199 data-nosnippet>199</a>            .execute(
+<a href=#200 id=200 data-nosnippet>200</a>                <span class="string">"INSERT INTO accounts (account, ufvk) VALUES (0, ?)"</span>,
+<a href=#201 id=201 data-nosnippet>201</a>                <span class="macro">params!</span>[ufvk0.encode(<span class="kw-2">&amp;</span>db_data.params)],
+<a href=#202 id=202 data-nosnippet>202</a>            )
+<a href=#203 id=203 data-nosnippet>203</a>            .unwrap();
+<a href=#204 id=204 data-nosnippet>204</a>
+<a href=#205 id=205 data-nosnippet>205</a>        <span class="comment">// Tx 0 contains two received notes, both of 2 zatoshis, that are controlled by account 0.
+<a href=#206 id=206 data-nosnippet>206</a>        </span>db_data.conn.execute_batch(
+<a href=#207 id=207 data-nosnippet>207</a>            <span class="string">"INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'00');
+<a href=#208 id=208 data-nosnippet>208</a>            INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, 'tx0');
+<a href=#209 id=209 data-nosnippet>209</a>
+<a href=#210 id=210 data-nosnippet>210</a>            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
+<a href=#211 id=211 data-nosnippet>211</a>            VALUES (0, 0, 0, '', 2, '', 'nf_a', false);
+<a href=#212 id=212 data-nosnippet>212</a>            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
+<a href=#213 id=213 data-nosnippet>213</a>            VALUES (0, 3, 0, '', 2, '', 'nf_b', false);"</span>).unwrap();
+<a href=#214 id=214 data-nosnippet>214</a>
+<a href=#215 id=215 data-nosnippet>215</a>        <span class="kw">let </span>check_balance_delta = |db_data: <span class="kw-2">&amp;mut </span>WalletDb&lt;
+<a href=#216 id=216 data-nosnippet>216</a>            rusqlite::Connection,
+<a href=#217 id=217 data-nosnippet>217</a>            Network,
+<a href=#218 id=218 data-nosnippet>218</a>            FixedClock,
+<a href=#219 id=219 data-nosnippet>219</a>            ChaChaRng,
+<a href=#220 id=220 data-nosnippet>220</a>        &gt;,
+<a href=#221 id=221 data-nosnippet>221</a>                                   expected_notes: i64| {
+<a href=#222 id=222 data-nosnippet>222</a>            <span class="kw">let </span><span class="kw-2">mut </span>q = db_data
+<a href=#223 id=223 data-nosnippet>223</a>                .conn
+<a href=#224 id=224 data-nosnippet>224</a>                .prepare(
+<a href=#225 id=225 data-nosnippet>225</a>                    <span class="string">"SELECT account_id, account_balance_delta, has_change, memo_count, sent_note_count, received_note_count
+<a href=#226 id=226 data-nosnippet>226</a>                    FROM v_transactions"</span>,
+<a href=#227 id=227 data-nosnippet>227</a>                )
+<a href=#228 id=228 data-nosnippet>228</a>                .unwrap();
+<a href=#229 id=229 data-nosnippet>229</a>            <span class="kw">let </span><span class="kw-2">mut </span>rows = q.query([]).unwrap();
+<a href=#230 id=230 data-nosnippet>230</a>            <span class="kw">let </span><span class="kw-2">mut </span>row_count = <span class="number">0</span>;
+<a href=#231 id=231 data-nosnippet>231</a>            <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next().unwrap() {
+<a href=#232 id=232 data-nosnippet>232</a>                row_count += <span class="number">1</span>;
+<a href=#233 id=233 data-nosnippet>233</a>                <span class="kw">let </span>account: i64 = row.get(<span class="number">0</span>).unwrap();
+<a href=#234 id=234 data-nosnippet>234</a>                <span class="kw">let </span>account_balance_delta: i64 = row.get(<span class="number">1</span>).unwrap();
+<a href=#235 id=235 data-nosnippet>235</a>                <span class="kw">let </span>has_change: bool = row.get(<span class="number">2</span>).unwrap();
+<a href=#236 id=236 data-nosnippet>236</a>                <span class="kw">let </span>memo_count: i64 = row.get(<span class="number">3</span>).unwrap();
+<a href=#237 id=237 data-nosnippet>237</a>                <span class="kw">let </span>sent_note_count: i64 = row.get(<span class="number">4</span>).unwrap();
+<a href=#238 id=238 data-nosnippet>238</a>                <span class="kw">let </span>received_note_count: i64 = row.get(<span class="number">5</span>).unwrap();
+<a href=#239 id=239 data-nosnippet>239</a>                <span class="kw">match </span>account {
+<a href=#240 id=240 data-nosnippet>240</a>                    <span class="number">0 </span>=&gt; {
+<a href=#241 id=241 data-nosnippet>241</a>                        <span class="macro">assert_eq!</span>(account_balance_delta, <span class="number">2 </span>* expected_notes);
+<a href=#242 id=242 data-nosnippet>242</a>                        <span class="macro">assert!</span>(!has_change);
+<a href=#243 id=243 data-nosnippet>243</a>                        <span class="macro">assert_eq!</span>(memo_count, <span class="number">0</span>);
+<a href=#244 id=244 data-nosnippet>244</a>                        <span class="macro">assert_eq!</span>(sent_note_count, <span class="number">0</span>);
+<a href=#245 id=245 data-nosnippet>245</a>                        <span class="macro">assert_eq!</span>(received_note_count, expected_notes);
+<a href=#246 id=246 data-nosnippet>246</a>                    }
+<a href=#247 id=247 data-nosnippet>247</a>                    other =&gt; {
+<a href=#248 id=248 data-nosnippet>248</a>                        <span class="macro">panic!</span>(
+<a href=#249 id=249 data-nosnippet>249</a>                            <span class="string">"Account {:?} is not expected to exist in the wallet."</span>,
+<a href=#250 id=250 data-nosnippet>250</a>                            other
+<a href=#251 id=251 data-nosnippet>251</a>                        );
+<a href=#252 id=252 data-nosnippet>252</a>                    }
+<a href=#253 id=253 data-nosnippet>253</a>                }
+<a href=#254 id=254 data-nosnippet>254</a>            }
+<a href=#255 id=255 data-nosnippet>255</a>            <span class="macro">assert_eq!</span>(row_count, <span class="number">1</span>);
+<a href=#256 id=256 data-nosnippet>256</a>        };
+<a href=#257 id=257 data-nosnippet>257</a>
+<a href=#258 id=258 data-nosnippet>258</a>        <span class="comment">// Check for the bug (#1020).
+<a href=#259 id=259 data-nosnippet>259</a>        </span>check_balance_delta(<span class="kw-2">&amp;mut </span>db_data, <span class="number">1</span>);
 <a href=#260 id=260 data-nosnippet>260</a>
-<a href=#261 id=261 data-nosnippet>261</a>        <span class="comment">// Check for the bug (#1020).
-<a href=#262 id=262 data-nosnippet>262</a>        </span>check_balance_delta(<span class="kw-2">&amp;mut </span>db_data, <span class="number">1</span>);
-<a href=#263 id=263 data-nosnippet>263</a>
-<a href=#264 id=264 data-nosnippet>264</a>        <span class="comment">// Apply the current migration.
-<a href=#265 id=265 data-nosnippet>265</a>        </span>init_wallet_db_internal(<span class="kw-2">&amp;mut </span>db_data, <span class="prelude-val">None</span>, <span class="kw-2">&amp;</span>[<span class="kw">super</span>::MIGRATION_ID], <span class="bool-val">false</span>).unwrap();
+<a href=#261 id=261 data-nosnippet>261</a>        <span class="comment">// Apply the current migration.
+<a href=#262 id=262 data-nosnippet>262</a>        </span>WalletMigrator::new()
+<a href=#263 id=263 data-nosnippet>263</a>            .ignore_seed_relevance()
+<a href=#264 id=264 data-nosnippet>264</a>            .init_or_migrate_to(<span class="kw-2">&amp;mut </span>db_data, <span class="kw-2">&amp;</span>[<span class="kw">super</span>::MIGRATION_ID])
+<a href=#265 id=265 data-nosnippet>265</a>            .unwrap();
 <a href=#266 id=266 data-nosnippet>266</a>
 <a href=#267 id=267 data-nosnippet>267</a>        <span class="comment">// Now it should be correct.
 <a href=#268 id=268 data-nosnippet>268</a>        </span>check_balance_delta(<span class="kw-2">&amp;mut </span>db_data, <span class="number">2</span>);
