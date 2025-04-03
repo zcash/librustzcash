@@ -7,6 +7,14 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.16.2] - 2025-04-02
+
+### Fixed
+- This release fixes a migration error that could cause some wallets
+  to crash on startup due to an attempt to associate a received transparent
+  output with an address that does not exist in the wallet's `addresses`
+  table.
+
 ## [0.16.1] - 2025-03-26
 
 ### Fixed
