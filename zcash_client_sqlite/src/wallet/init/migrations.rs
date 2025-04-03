@@ -173,7 +173,7 @@ pub(super) fn all_migrations<
             _rng: rng.clone(),
         }),
         Box::new(ensure_default_transparent_address::Migration {
-            params: params.clone(),
+            _params: params.clone(),
         }),
     ]
 }
