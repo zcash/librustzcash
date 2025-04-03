@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["pubkey_to_address"],"struct":["AccountPrivKey","AccountPubKey","EphemeralIvk","ExternalIvk","ExternalOvk","InternalIvk","InternalOvk","NonHardenedChildIndex","TransparentKeyScope"],"trait":["IncomingViewingKey"]};
+window.SIDEBAR_ITEMS = {"fn":["pubkey_to_address"],"struct":["AccountPrivKey","AccountPubKey","EphemeralIvk","ExternalIvk","ExternalOvk","InternalIvk","InternalOvk","NonHardenedChildIndex","NonHardenedChildIter","NonHardenedChildRange","TransparentKeyScope"],"trait":["IncomingViewingKey"]};
