@@ -132,7 +132,7 @@ webpki-roots = { workspace = true, optional = true }
 
 [build-dependencies]
 tonic-build = { workspace = true, features = ["prost"] }
-which = "6"
+which = "7"
 
 [dev-dependencies]
 ambassador.workspace = true

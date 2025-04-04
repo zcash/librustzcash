@@ -477,6 +477,10 @@ criteria = "safe-to-deploy"
 version = "3.1.15"
 criteria = "safe-to-deploy"
 
+[[exemptions.env_home]]
+version = "0.1.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.event-listener]]
 version = "5.3.1"
 criteria = "safe-to-deploy"
@@ -1514,7 +1518,7 @@ version = "0.26.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.which]]
-version = "4.4.2"
+version = "7.0.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.winapi]]
