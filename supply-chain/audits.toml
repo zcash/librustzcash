@@ -678,6 +678,15 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "0.1.14 -> 0.1.15"
 
+[[audits.tokio-stream]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.1.15 -> 0.1.17"
+notes = """
+No new `unsafe` code or powerful imports. The new async polling logic added as
+`StreamMap::poll_next_many` looks plausible.
+"""
+
 [[audits.tokio-util]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
@@ -714,6 +723,12 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.12.1 -> 0.12.3"
 notes = "Changes to generated code make sense and don't result in anything unexpected."
+
+[[audits.tonic-build]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.12.3 -> 0.13.0"
+notes = "Changes to generated code look sensible (adapting to `tonic` API changes)."
 
 [[audits.tor-async-utils]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -784,6 +799,16 @@ delta = "0.23.0 -> 0.28.0"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.23.0 -> 0.28.0"
+
+[[audits.tower-layer]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.3.2 -> 0.3.3"
+
+[[audits.tower-service]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.3.2 -> 0.3.3"
 
 [[audits.utf8parse]]
 who = "Jack Grigg <jack@electriccoin.co>"

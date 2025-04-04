@@ -110,7 +110,7 @@ serde_json = "1"
 hyper = "1"
 http-body-util = "0.1"
 hyper-util = { version = "0.1.1", features = ["tokio"] }
-tokio-rustls = "0.24"
+tokio-rustls = { version = "0.26", default-features = false }
 webpki-roots = "0.25"
 
 # Logging and metrics
@@ -127,8 +127,8 @@ rayon = "1.5"
 
 # Protobuf and gRPC
 prost = "0.13"
-tonic = { version = "0.12", default-features = false }
-tonic-build = { version = "0.12.3", default-features = false }
+tonic = { version = "0.13", default-features = false }
+tonic-build = { version = "0.13", default-features = false }
 
 # Secret management
 secrecy = "0.8"
@@ -165,7 +165,7 @@ dynosaur = "0.2"
 fs-mistrust = "0.9"
 tokio = "1"
 tor-rtcompat = "0.28"
-tower = "0.4"
+tower = "0.5"
 trait-variant = "0.1"
 
 # ZIP 32

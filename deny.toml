@@ -38,7 +38,6 @@ exceptions = [
     { name = "ed25519-dalek", allow = ["BSD-3-Clause"] },
     { name = "inotify", allow = ["ISC"] },
     { name = "inotify-sys", allow = ["ISC"] },
-    { name = "matchit", allow = ["BSD-3-Clause"] },
     { name = "minreq", allow = ["ISC"] },
     { name = "notify", allow = ["CC0-1.0"] },
     { name = "option-ext", allow = ["MPL-2.0"] },

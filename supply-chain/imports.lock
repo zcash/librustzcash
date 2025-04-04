@@ -778,12 +778,6 @@ without `unsafe`. Skimming the crate everything looks reasonable and what one
 would expect from idiomatic safe collections in Rust.
 """
 
-[[audits.bytecode-alliance.audits.tokio-rustls]]
-who = "Pat Hickey <phickey@fastly.com>"
-criteria = "safe-to-deploy"
-version = "0.24.0"
-notes = "no unsafe, no build, no ambient capabilities"
-
 [[audits.bytecode-alliance.audits.tracing-subscriber]]
 who = "Pat Hickey <phickey@fastly.com>"
 criteria = "safe-to-deploy"
@@ -920,34 +914,6 @@ criteria = "safe-to-run"
 delta = "1.0.7 -> 1.0.8"
 notes = "Only Cargo.toml changes in the 1.0.7 => 1.0.8 delta."
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
-
-[[audits.google.audits.async-stream]]
-who = "Tyler Mandry <tmandry@google.com>"
-criteria = "safe-to-deploy"
-version = "0.3.4"
-notes = "Reviewed on https://fxrev.dev/761470"
-aggregated-from = "https://fuchsia.googlesource.com/fuchsia/+/refs/heads/main/third_party/rust_crates/supply-chain/audits.toml?format=TEXT"
-
-[[audits.google.audits.async-stream]]
-who = "David Koloski <dkoloski@google.com>"
-criteria = "safe-to-deploy"
-delta = "0.3.4 -> 0.3.5"
-notes = "Reviewed on https://fxrev.dev/906795"
-aggregated-from = "https://fuchsia.googlesource.com/fuchsia/+/refs/heads/main/third_party/rust_crates/supply-chain/audits.toml?format=TEXT"
-
-[[audits.google.audits.async-stream-impl]]
-who = "Tyler Mandry <tmandry@google.com>"
-criteria = "safe-to-deploy"
-version = "0.3.4"
-notes = "Reviewed on https://fxrev.dev/761470"
-aggregated-from = "https://fuchsia.googlesource.com/fuchsia/+/refs/heads/main/third_party/rust_crates/supply-chain/audits.toml?format=TEXT"
-
-[[audits.google.audits.async-stream-impl]]
-who = "David Koloski <dkoloski@google.com>"
-criteria = "safe-to-deploy"
-delta = "0.3.4 -> 0.3.5"
-notes = "Reviewed on https://fxrev.dev/906795"
-aggregated-from = "https://fuchsia.googlesource.com/fuchsia/+/refs/heads/main/third_party/rust_crates/supply-chain/audits.toml?format=TEXT"
 
 [[audits.google.audits.autocfg]]
 who = "Lukasz Anforowicz <lukasza@chromium.org>"
@@ -2855,16 +2821,6 @@ criteria = "safe-to-deploy"
 delta = "0.5.0 -> 0.5.1"
 aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
-[[audits.zcash.audits.bytes]]
-who = "Daira-Emma Hopwood <daira@jacaranda.org>"
-criteria = "safe-to-deploy"
-delta = "1.5.0 -> 1.6.0"
-notes = """
-There is significant use of `unsafe` code, but safety requirements are well documented
-and appear correct as far as I can see.
-"""
-aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
-
 [[audits.zcash.audits.constant_time_eq]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -3342,12 +3298,6 @@ aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/suppl
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.3.10 -> 0.3.11"
-aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
-
-[[audits.zcash.audits.socket2]]
-who = "Daira-Emma Hopwood <daira@jacaranda.org>"
-criteria = "safe-to-deploy"
-delta = "0.5.5 -> 0.5.6"
 aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
 [[audits.zcash.audits.syn]]
