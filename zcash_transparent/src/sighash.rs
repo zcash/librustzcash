@@ -69,7 +69,6 @@ pub struct SignableInput<'a> {
     pub(crate) value: Zatoshis,
 }
 
-#[cfg(feature = "test-dependencies")]
 impl<'a> SignableInput<'a> {
     /// Constructs a signable input from its parts.
     pub fn from_parts(

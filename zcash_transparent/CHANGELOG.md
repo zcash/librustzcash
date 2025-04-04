@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.2.3] - 2025-04-04
+
+### Added
+- `zcash_transparent::sighash::SignableInput::from_parts`
+
 ## [0.2.2] - 2025-04-02
 
 ### Added
