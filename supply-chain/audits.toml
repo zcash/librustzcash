@@ -388,6 +388,15 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "0.3.29 -> 0.3.30"
 
+[[audits.pprof]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-run"
+delta = "0.13.0 -> 0.14.0"
+notes = """
+I did not audit the correctness of the new `unsafe` block (initializing an
+`aligned_vec::AVec`), but the changes therein don't affect `safe-to-run`.
+"""
+
 [[audits.prettyplease]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"

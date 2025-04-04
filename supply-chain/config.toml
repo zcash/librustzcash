@@ -93,6 +93,10 @@ criteria = "safe-to-deploy"
 version = "1.1.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.aligned-vec]]
+version = "0.6.4"
+criteria = "safe-to-run"
+
 [[exemptions.amplify]]
 version = "4.6.0"
 criteria = "safe-to-deploy"
@@ -480,6 +484,14 @@ criteria = "safe-to-deploy"
 [[exemptions.env_home]]
 version = "0.1.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.equator]]
+version = "0.4.2"
+criteria = "safe-to-run"
+
+[[exemptions.equator-macro]]
+version = "0.4.2"
+criteria = "safe-to-run"
 
 [[exemptions.event-listener]]
 version = "5.3.1"
