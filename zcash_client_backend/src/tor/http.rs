@@ -14,7 +14,7 @@ use hyper_util::rt::TokioIo;
 use serde::de::DeserializeOwned;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::{
-    rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore, ServerName},
+    rustls::{pki_types::ServerName, ClientConfig, RootCertStore},
     TlsConnector,
 };
 use tor_rtcompat::PreferredRuntime;
@@ -61,20 +61,14 @@ impl Client {
             // when used over Tor circuits. We use Rustls instead.
             //
             // https://gitlab.torproject.org/tpo/core/arti/-/issues/715
-            let mut root_store = RootCertStore::empty();
-            root_store.add_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.iter().map(|root| {
-                OwnedTrustAnchor::from_subject_spki_name_constraints(
-                    root.subject,
-                    root.spki,
-                    root.name_constraints,
-                )
-            }));
+            let root_store = RootCertStore {
+                roots: webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect(),
+            };
             let config = ClientConfig::builder()
-                .with_safe_defaults()
                 .with_root_certificates(root_store)
                 .with_no_client_auth();
             let connector = TlsConnector::from(Arc::new(config));
-            let dnsname = ServerName::try_from(host.as_str()).expect("Already checked");
+            let dnsname = ServerName::try_from(host).expect("Already checked");
             let stream = connector
                 .connect(dnsname, stream)
                 .await

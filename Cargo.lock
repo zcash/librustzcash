@@ -6321,7 +6321,7 @@ dependencies = [
  "tower",
  "tracing",
  "trait-variant",
- "webpki-roots 0.25.4",
+ "webpki-roots 0.26.3",
  "which",
  "zcash_address",
  "zcash_encoding",
