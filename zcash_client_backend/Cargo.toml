@@ -90,9 +90,6 @@ jubjub = { workspace = true, optional = true }
 rand_chacha = { workspace = true, optional = true }
 zcash_proofs = { workspace = true, optional = true }
 
-# - ZIP 321
-nom = "7"
-
 # - Tor
 # -- Exposed error types: `arti_client::Error`, `arti_client::config::ConfigBuildError`,
 #    `hyper::Error`, `hyper::http::Error`, `serde_json::Error`. We could avoid this with

@@ -6293,7 +6293,6 @@ dependencies = [
  "incrementalmerkletree",
  "jubjub",
  "memuse",
- "nom",
  "nonempty",
  "orchard",
  "pasta_curves",
