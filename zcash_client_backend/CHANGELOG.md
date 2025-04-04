@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`.
+
 ## [0.18.0] - 2025-03-19
 
 ### Added

@@ -109,7 +109,7 @@ orchard = { workspace = true, features = ["test-dependencies"] }
 zcash_protocol = { workspace = true, features = ["test-dependencies"] }
 
 [target.'cfg(unix)'.dev-dependencies]
-pprof = { version = "0.13", features = ["criterion", "flamegraph"] }
+pprof = { version = "0.14", features = ["criterion", "flamegraph"] }
 
 [features]
 default = ["multicore", "std", "circuits"]

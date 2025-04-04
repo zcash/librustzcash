@@ -15,7 +15,7 @@ use futures_util::TryStreamExt;
 use shardtree::error::ShardTreeError;
 use subtle::ConditionallySelectable;
 use tonic::{
-    body::BoxBody,
+    body::Body as TonicBody,
     client::GrpcService,
     codegen::{Body, Bytes, StdError},
 };
@@ -61,7 +61,7 @@ pub async fn run<P, ChT, CaT, DbT>(
 ) -> Result<(), Error<CaT::Error, <DbT as WalletRead>::Error, <DbT as WalletCommitmentTrees>::Error>>
 where
     P: Parameters + Send + 'static,
-    ChT: GrpcService<BoxBody>,
+    ChT: GrpcService<TonicBody>,
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
@@ -90,7 +90,7 @@ async fn running<P, ChT, CaT, DbT, TrErr>(
 ) -> Result<bool, Error<CaT::Error, <DbT as WalletRead>::Error, TrErr>>
 where
     P: Parameters + Send + 'static,
-    ChT: GrpcService<BoxBody>,
+    ChT: GrpcService<TonicBody>,
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
@@ -224,7 +224,7 @@ async fn update_subtree_roots<ChT, DbT, CaErr, DbErr>(
     db_data: &mut DbT,
 ) -> Result<(), Error<CaErr, DbErr, <DbT as WalletCommitmentTrees>::Error>>
 where
-    ChT: GrpcService<BoxBody>,
+    ChT: GrpcService<TonicBody>,
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
@@ -286,7 +286,7 @@ async fn update_chain_tip<ChT, DbT, CaErr, TrErr>(
     db_data: &mut DbT,
 ) -> Result<(), Error<CaErr, <DbT as WalletRead>::Error, TrErr>>
 where
-    ChT: GrpcService<BoxBody>,
+    ChT: GrpcService<TonicBody>,
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
@@ -315,7 +315,7 @@ async fn download_blocks<ChT, CaT, DbErr, TrErr>(
     scan_range: &ScanRange,
 ) -> Result<(), Error<CaT::Error, DbErr, TrErr>>
 where
-    ChT: GrpcService<BoxBody>,
+    ChT: GrpcService<TonicBody>,
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
@@ -351,7 +351,7 @@ async fn download_chain_state<ChT, CaErr, DbErr, TrErr>(
     block_height: BlockHeight,
 ) -> Result<ChainState, Error<CaErr, DbErr, TrErr>>
 where
-    ChT: GrpcService<BoxBody>,
+    ChT: GrpcService<TonicBody>,
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
@@ -479,7 +479,7 @@ async fn refresh_utxos<P, ChT, DbT, CaErr, TrErr>(
 ) -> Result<(), Error<CaErr, <DbT as WalletRead>::Error, TrErr>>
 where
     P: Parameters + Send + 'static,
-    ChT: GrpcService<BoxBody>,
+    ChT: GrpcService<TonicBody>,
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
