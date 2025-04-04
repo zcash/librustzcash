@@ -1195,7 +1195,7 @@ mod tests {
             db::{test_clock, test_rng},
             pool::ShieldedPoolPersistence,
         },
-        wallet::init::testing::init_wallet_db,
+        wallet::init::WalletMigrator,
         WalletDb,
     };
 
@@ -1212,7 +1212,7 @@ mod tests {
         .unwrap();
         data_file.keep().unwrap();
 
-        init_wallet_db(&mut db_data, None).unwrap();
+        WalletMigrator::new().init_or_migrate(&mut db_data).unwrap();
         let store =
             SqliteShardStore::<_, String, 3>::from_connection(db_data.conn, T::TABLES_PREFIX)
                 .unwrap();
@@ -1316,7 +1316,7 @@ mod tests {
         .unwrap();
         data_file.keep().unwrap();
 
-        init_wallet_db(&mut db_data, None).unwrap();
+        WalletMigrator::new().init_or_migrate(&mut db_data).unwrap();
         let tx = db_data.conn.transaction().unwrap();
         let store =
             SqliteShardStore::<_, String, 3>::from_connection(&tx, T::TABLES_PREFIX).unwrap();

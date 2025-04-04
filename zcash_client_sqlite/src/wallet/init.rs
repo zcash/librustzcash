@@ -7,7 +7,7 @@ use std::rc::Rc;
 use rand_core::RngCore;
 use regex::Regex;
 use schemerz::{Migrator, MigratorError};
-use schemerz_rusqlite::RusqliteAdapter;
+use schemerz_rusqlite::{RusqliteAdapter, RusqliteMigration};
 use secrecy::SecretVec;
 use shardtree::error::ShardTreeError;
 use uuid::Uuid;
@@ -21,7 +21,7 @@ use self::migrations::verify_network_compatibility;
 use super::commitment_tree;
 use crate::{error::SqliteClientError, util::Clock, WalletDb};
 
-mod migrations;
+pub mod migrations;
 
 const SQLITE_MAJOR_VERSION: u32 = 3;
 const MIN_SQLITE_MINOR_VERSION: u32 = 35;
@@ -270,8 +270,8 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// or `Err(schemerz::MigratorError::Adapter(WalletMigrationError::SeedNotRelevant))`.
 ///
 /// We do not check whether the seed is relevant to any imported account, because that
-/// would require brute-forcing the ZIP 32 account index space. Consequentially, imported
-/// accounts are not migrated.
+/// would require brute-forcing the ZIP 32 account index space. Consequentially, seed-requiring
+/// migrations cannot be applied to imported accounts.
 ///
 /// It is safe to use a wallet database previously created without the ability to create
 /// transparent spends with a build that enables transparent spends (via use of the
@@ -331,10 +331,218 @@ pub fn init_wallet_db<
     wdb: &mut WalletDb<C, P, CL, R>,
     seed: Option<SecretVec<u8>>,
 ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
-    init_wallet_db_internal(wdb, seed, &[], true)
+    if let Some(seed) = seed {
+        WalletMigrator::new().with_seed(seed)
+    } else {
+        WalletMigrator::new()
+    }
+    .init_or_migrate(wdb)
 }
 
-pub(crate) fn init_wallet_db_internal<
+/// A migrator that sets up the internal structure of the wallet database.
+///
+/// This procedure will automatically perform migration operations to update the wallet
+/// database to the database structure required by the current version of this library,
+/// and should be invoked at least once any time a client program upgrades to a new
+/// version of this library. The operation of this procedure is idempotent, so it is safe
+/// (though not required) to invoke this operation every time the wallet is opened.
+///
+/// In order to correctly apply migrations to accounts derived from a seed, sometimes the
+/// seed is required. The migrator should first be used without calling [`Self::with_seed`];
+/// if a pending migration requires the seed, [`Self::init_or_migrate`] returns
+/// `Err(schemerz::MigratorError::Migration { error: WalletMigrationError::SeedRequired, .. })`.
+/// The caller can then call [`Self::with_seed`] and then re-call [`Self::init_or_migrate`]
+/// with the necessary seed.
+///
+/// > Note that currently only one seed can be provided; as such, wallets containing
+/// > accounts derived from several different seeds are unsupported, and will result in an
+/// > error. Support for multi-seed wallets is being tracked in [zcash/librustzcash#1284].
+///
+/// When a seed is provided, it is checked against the database for _relevance_: if any
+/// account in the wallet for which [`Account::source`] is [`AccountSource::Derived`] can
+/// be derived from the given seed, the seed is relevant to the wallet. If the given seed
+/// is not relevant, [`Self::init_or_migrate`] returns
+/// `Err(schemerz::MigratorError::Migration { error: WalletMigrationError::SeedNotRelevant, .. })`
+/// or `Err(schemerz::MigratorError::Adapter(WalletMigrationError::SeedNotRelevant))`.
+///
+/// We do not check whether the seed is relevant to any imported account, because that
+/// would require brute-forcing the ZIP 32 account index space. Consequentially, seed-requiring
+/// migrations cannot be applied to imported accounts.
+///
+/// It is safe to use a wallet database previously created without the ability to create
+/// transparent spends with a build that enables transparent spends (via use of the
+/// `transparent-inputs` feature flag.) The reverse is unsafe, as wallet balance
+/// calculations would ignore the transparent UTXOs already controlled by the wallet.
+///
+/// [zcash/librustzcash#1284]: https://github.com/zcash/librustzcash/issues/1284
+/// [`Account::source`]: zcash_client_backend::data_api::Account::source
+/// [`AccountSource::Derived`]: zcash_client_backend::data_api::AccountSource::Derived
+///
+/// # Examples
+///
+/// ```
+/// # use std::error::Error;
+/// # use secrecy::SecretVec;
+/// # use tempfile::NamedTempFile;
+/// use rand_core::OsRng;
+/// use zcash_protocol::consensus::Network;
+/// use zcash_client_sqlite::{
+///     WalletDb,
+///     util::SystemClock,
+///     wallet::init::{WalletMigrationError, WalletMigrator},
+/// };
+///
+/// # fn main() -> Result<(), Box<dyn Error>> {
+/// # let data_file = NamedTempFile::new().unwrap();
+/// # let get_data_db_path = || data_file.path();
+/// # let load_seed = || -> Result<_, String> { Ok(SecretVec::new(vec![])) };
+/// let mut db = WalletDb::for_path(get_data_db_path(), Network::TestNetwork, SystemClock, OsRng)?;
+/// match WalletMigrator::new().init_or_migrate(&mut db) {
+///     Err(e)
+///         if matches!(
+///             e.source().and_then(|e| e.downcast_ref()),
+///             Some(&WalletMigrationError::SeedRequired)
+///         ) =>
+///     {
+///         let seed = load_seed()?;
+///         WalletMigrator::new()
+///             .with_seed(seed)
+///             .init_or_migrate(&mut db)
+///     }
+///     res => res,
+/// }?;
+/// # Ok(())
+/// # }
+/// ```
+pub struct WalletMigrator {
+    seed: Option<SecretVec<u8>>,
+    verify_seed_relevance: bool,
+    external_migrations: Option<Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>>>,
+}
+
+impl Default for WalletMigrator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WalletMigrator {
+    /// Constructs a new wallet migrator.
+    pub fn new() -> Self {
+        Self {
+            seed: None,
+            verify_seed_relevance: true,
+            external_migrations: None,
+        }
+    }
+
+    /// Sets the seed for the migrator to use.
+    pub fn with_seed(mut self, seed: SecretVec<u8>) -> Self {
+        self.seed = Some(seed);
+        self
+    }
+
+    /// API for internal test usage only.
+    #[cfg(test)]
+    pub(crate) fn ignore_seed_relevance(mut self) -> Self {
+        self.verify_seed_relevance = false;
+        self
+    }
+
+    /// Sets the external migration graph to apply alongside the internal migrations.
+    ///
+    /// From a data management perspective, it can be useful to store additional data
+    /// alongside the `zcash_client_sqlite` wallet database. This method enables you to
+    /// provide an external [`schemerz`] migration graph that the migrator will apply to
+    /// the wallet database.
+    ///
+    /// # WARNING
+    ///
+    /// **DO NOT** depend on or modify internal details of the `zcash_client_sqlite`
+    /// schema!
+    ///
+    /// The internal migrations are written to take into account internal relationships
+    /// between the `zcash_client_sqlite` tables, but they will never take into account
+    /// external tables. In particular, this means that you **MUST NOT**:
+    /// - Modify the structure or contents of any internal table.
+    /// - Assume that internal IDs will exist indefinitely (instead have a backup plan for
+    ///   recovering your data relationships if a new internal migration affects your
+    ///   foreign keys).
+    ///
+    /// The `zcash_client_sqlite` schema does not have any common prefix it uses for
+    /// tables, indexes, or views. However, we promise to not use the prefix `ext_` for
+    /// any internal names. Schema created by external migrations **MUST** use name
+    /// prefixing with a prefix that is unlikely to collide with either the internal names
+    /// or other potential external schemas (e.g. `ext_myappname_*`).
+    ///
+    /// # Integration
+    ///
+    /// In order to enable anchoring your external migrations correctly with respect to
+    /// this library's internal migrations, we provide constants in the [`migrations`]
+    /// module (for each release that adds a migration) which you can include within your
+    /// [`schemerz::Migration::dependencies`] set.
+    ///
+    /// Each migration runs inside a database transaction, which has the following
+    /// implications:
+    /// - `PRAGMA foreign_keys` has no effect inside a transaction, so the migrator
+    ///   handles foreign key enforcement itself:
+    ///   - `PRAGMA foreign_keys = OFF` is set before running any migrations.
+    ///   - `PRAGMA foreign_keys = ON` is set after all migrations are successful.
+    /// - `PRAGMA legacy_alter_table` should only be used in cases where its effect is
+    ///   explicitly intended, so the migrator does not use it globally. If you want to
+    ///   rename tables without breaking foreign key relationships, you need to do so
+    ///   yourself inside individual migrations:
+    ///   ```sql
+    ///   PRAGMA legacy_alter_table = ON;
+    ///   DROP TABLE table_name;
+    ///   ALTER TABLE table_name_new RENAME TO table_name;
+    ///   PRAGMA legacy_alter_table = OFF;
+    ///   ```
+    pub fn with_external_migrations(
+        mut self,
+        migrations: Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>>,
+    ) -> Self {
+        self.external_migrations = Some(migrations);
+        self
+    }
+
+    /// Sets up the internal structure of the given wallet database to be compatible with
+    /// this library version.
+    pub fn init_or_migrate<
+        C: BorrowMut<rusqlite::Connection>,
+        P: consensus::Parameters + 'static,
+        CL: Clock + Clone + 'static,
+        R: RngCore + Clone + 'static,
+    >(
+        self,
+        wdb: &mut WalletDb<C, P, CL, R>,
+    ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
+        self.init_or_migrate_to(wdb, &[])
+    }
+
+    /// Sets up the internal structure of the given wallet database to be compatible with
+    /// this library version.
+    pub(crate) fn init_or_migrate_to<
+        C: BorrowMut<rusqlite::Connection>,
+        P: consensus::Parameters + 'static,
+        CL: Clock + Clone + 'static,
+        R: RngCore + Clone + 'static,
+    >(
+        self,
+        wdb: &mut WalletDb<C, P, CL, R>,
+        target_migrations: &[Uuid],
+    ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
+        init_wallet_db_internal(
+            wdb,
+            self.seed,
+            self.external_migrations,
+            target_migrations,
+            self.verify_seed_relevance,
+        )
+    }
+}
+
+fn init_wallet_db_internal<
     C: BorrowMut<rusqlite::Connection>,
     P: consensus::Parameters + 'static,
     CL: Clock + Clone + 'static,
@@ -342,6 +550,7 @@ pub(crate) fn init_wallet_db_internal<
 >(
     wdb: &mut WalletDb<C, P, CL, R>,
     seed: Option<SecretVec<u8>>,
+    external_migrations: Option<Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>>>,
     target_migrations: &[Uuid],
     verify_seed_relevance: bool,
 ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
@@ -392,6 +601,9 @@ pub(crate) fn init_wallet_db_internal<
             .into_iter(),
         )
         .expect("Wallet migration registration should have been successful.");
+    if let Some(migrations) = external_migrations {
+        migrator.register_multiple(migrations.into_iter())?;
+    }
     if target_migrations.is_empty() {
         migrator.up(None)?;
     } else {
@@ -484,7 +696,7 @@ pub(crate) mod testing {
         wdb: &mut WalletDb<rusqlite::Connection, P, CL, R>,
         seed: Option<SecretVec<u8>>,
     ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
-        super::init_wallet_db_internal(wdb, seed, &[], true)
+        super::init_wallet_db_internal(wdb, seed, None, &[], true)
     }
 }
 
@@ -649,6 +861,25 @@ mod tests {
                 re.replace_all(&expected_views[expected_idx], " ").trim(),
             );
             expected_idx += 1;
+        }
+    }
+
+    #[test]
+    fn external_schema_prefix_unused() {
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let mut names_query = st
+            .wallet()
+            .db()
+            .conn
+            .prepare("SELECT tbl_name FROM sqlite_schema")
+            .unwrap();
+        let mut rows = names_query.query([]).unwrap();
+        while let Some(row) = rows.next().unwrap() {
+            let name: String = row.get(0).unwrap();
+            assert!(!name.starts_with("ext_"));
         }
     }
 

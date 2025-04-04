@@ -110,8 +110,8 @@ serde_json = "1"
 hyper = "1"
 http-body-util = "0.1"
 hyper-util = { version = "0.1.1", features = ["tokio"] }
-tokio-rustls = "0.24"
-webpki-roots = "0.25"
+tokio-rustls = { version = "0.26", default-features = false }
+webpki-roots = "0.26"
 
 # Logging and metrics
 memuse = { version = "0.2.2", default-features = false }
@@ -127,8 +127,8 @@ rayon = "1.5"
 
 # Protobuf and gRPC
 prost = "0.13"
-tonic = { version = "0.12", default-features = false }
-tonic-build = { version = "0.12.3", default-features = false }
+tonic = { version = "0.13", default-features = false }
+tonic-build = { version = "0.13", default-features = false }
 
 # Secret management
 secrecy = "0.8"
@@ -160,12 +160,12 @@ incrementalmerkletree-testing = "0.3"
 # Tor
 # - `arti-client` depends on `rusqlite`, and a version mismatch there causes a compilation
 #   failure due to incompatible `libsqlite3-sys` versions.
-arti-client = { version = "0.23", default-features = false, features = ["compression", "rustls", "tokio"] }
-dynosaur = "0.1.1"
-fs-mistrust = "0.8"
+arti-client = { version = "0.28", default-features = false, features = ["compression", "rustls", "tokio"] }
+dynosaur = "0.2"
+fs-mistrust = "0.9"
 tokio = "1"
-tor-rtcompat = "0.23"
-tower = "0.4"
+tor-rtcompat = "0.28"
+tower = "0.5"
 trait-variant = "0.1"
 
 # ZIP 32

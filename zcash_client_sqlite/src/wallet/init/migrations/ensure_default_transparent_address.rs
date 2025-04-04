@@ -17,7 +17,7 @@ pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x702cf97b_8395_4edc_b584_
 const DEPENDENCIES: &[Uuid] = &[transparent_gap_limit_handling::MIGRATION_ID];
 
 pub(super) struct Migration<P> {
-    pub(super) params: P,
+    pub(super) _params: P,
 }
 
 impl<P> schemerz::Migration<Uuid> for Migration<P> {
@@ -37,9 +37,9 @@ impl<P> schemerz::Migration<Uuid> for Migration<P> {
 impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
-    fn up(&self, conn: &Transaction) -> Result<(), WalletMigrationError> {
+    fn up(&self, _conn: &Transaction) -> Result<(), WalletMigrationError> {
         #[cfg(feature = "transparent-inputs")]
-        transparent_gap_limit_handling::insert_initial_transparent_addrs(conn, &self.params)?;
+        transparent_gap_limit_handling::insert_initial_transparent_addrs(_conn, &self._params)?;
 
         Ok(())
     }
