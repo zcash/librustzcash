@@ -197,7 +197,6 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::UnsupportedPoolType(pool) => WalletMigrationError::CorruptedData(
             format!("Wallet DB contains unsupported pool type {}", pool),
         ),
-        SqliteClientError::BalanceError(e) => WalletMigrationError::BalanceError(e),
         SqliteClientError::TableNotEmpty => unreachable!("wallet already initialized"),
         SqliteClientError::BlockConflict(_)
         | SqliteClientError::NonSequentialBlocks
@@ -241,6 +240,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::Scheduling(e) => {
             WalletMigrationError::Other(SqliteClientError::Scheduling(e))
         }
+        SqliteClientError::BalanceError(e) => WalletMigrationError::BalanceError(e),
     }
 }
 
@@ -330,7 +330,7 @@ pub fn init_wallet_db<
 >(
     wdb: &mut WalletDb<C, P, CL, R>,
     seed: Option<SecretVec<u8>>,
-) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
+) -> Result<(), Box<MigratorError<Uuid, WalletMigrationError>>> {
     if let Some(seed) = seed {
         WalletMigrator::new().with_seed(seed)
     } else {
@@ -516,7 +516,7 @@ impl WalletMigrator {
     >(
         self,
         wdb: &mut WalletDb<C, P, CL, R>,
-    ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
+    ) -> Result<(), Box<MigratorError<Uuid, WalletMigrationError>>> {
         self.init_or_migrate_to(wdb, &[])
     }
 
@@ -531,7 +531,7 @@ impl WalletMigrator {
         self,
         wdb: &mut WalletDb<C, P, CL, R>,
         target_migrations: &[Uuid],
-    ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
+    ) -> Result<(), Box<MigratorError<Uuid, WalletMigrationError>>> {
         init_wallet_db_internal(
             wdb,
             self.seed,
@@ -553,10 +553,10 @@ fn init_wallet_db_internal<
     external_migrations: Option<Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>>>,
     target_migrations: &[Uuid],
     verify_seed_relevance: bool,
-) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
+) -> Result<(), Box<MigratorError<Uuid, WalletMigrationError>>> {
     let seed = seed.map(Rc::new);
 
-    verify_sqlite_version_compatibility(wdb.conn.borrow()).map_err(MigratorError::Adapter)?;
+    verify_sqlite_version_compatibility(wdb.conn.borrow()).map_err(|e| Box::new(MigratorError::Adapter(e)))?;
 
     // Turn off foreign key enforcement, to ensure that table replacement does not break foreign
     // key references in table definitions.
@@ -566,7 +566,7 @@ fn init_wallet_db_internal<
     wdb.conn
         .borrow()
         .execute_batch("PRAGMA foreign_keys = OFF;")
-        .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
+        .map_err(|e| Box::new(MigratorError::Adapter(WalletMigrationError::from(e))))?;
 
     // Temporarily take ownership of the connection in a wrapper to perform the initial migration
     // table setup. This extra adapter creation could be omitted if `RusqliteAdapter` provided an
@@ -584,7 +584,7 @@ fn init_wallet_db_internal<
     // Now that we are certain that the migrations table exists, verify that if the database
     // already contains account data, any stored UFVKs correspond to the same network that the
     // migrations are being run for.
-    verify_network_compatibility(wdb.conn.borrow(), &wdb.params).map_err(MigratorError::Adapter)?;
+    verify_network_compatibility(wdb.conn.borrow(), &wdb.params).map_err(|e| Box::new(MigratorError::Adapter(e)))?;
 
     // Now create the adapter that we're actually going to use to perform the migrations, and
     // proceed.
@@ -614,7 +614,7 @@ fn init_wallet_db_internal<
     wdb.conn
         .borrow()
         .execute("PRAGMA foreign_keys = ON", [])
-        .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
+        .map_err(|e| Box::new(MigratorError::Adapter(WalletMigrationError::from(e))))?;
 
     // Now that the migration succeeded, check whether the seed is relevant to the wallet.
     // We can only check this if we have migrated as far as `full_account_ids::MIGRATION_ID`,
@@ -623,18 +623,20 @@ fn init_wallet_db_internal<
     // based upon which migrations they're asking to apply.
     if verify_seed_relevance {
         if let Some(seed) = seed {
-            match wdb
+            let relevance = wdb
                 .seed_relevance_to_derived_accounts(&seed)
-                .map_err(sqlite_client_error_to_wallet_migration_error)?
-            {
-                SeedRelevance::Relevant { .. } => (),
+                .map_err(sqlite_client_error_to_wallet_migration_error);
+                
+            match relevance {
+                Ok(SeedRelevance::Relevant { .. }) => (),
                 // Every seed is relevant to a wallet with no accounts; this is most likely a
                 // new wallet database being initialized for the first time.
-                SeedRelevance::NoAccounts => (),
+                Ok(SeedRelevance::NoAccounts) => (),
                 // No seed is relevant to a wallet that only has imported accounts.
-                SeedRelevance::NotRelevant | SeedRelevance::NoDerivedAccounts => {
-                    return Err(WalletMigrationError::SeedNotRelevant.into())
+                Ok(SeedRelevance::NotRelevant) | Ok(SeedRelevance::NoDerivedAccounts) => {
+                    return Err(Box::new(MigratorError::Adapter(WalletMigrationError::SeedNotRelevant)))
                 }
+                Err(e) => return Err(Box::new(MigratorError::Adapter(e))),
             }
         }
     }
@@ -695,7 +697,7 @@ pub(crate) mod testing {
     >(
         wdb: &mut WalletDb<rusqlite::Connection, P, CL, R>,
         seed: Option<SecretVec<u8>>,
-    ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
+    ) -> Result<(), Box<MigratorError<Uuid, WalletMigrationError>>> {
         super::init_wallet_db_internal(wdb, seed, None, &[], true)
     }
 }
@@ -1371,6 +1373,7 @@ mod tests {
     fn account_produces_expected_ua_sequence() {
         use zcash_client_backend::data_api::{AccountBirthday, AccountSource, WalletRead};
         use zcash_primitives::block::BlockHash;
+        use schemerz::MigratorError;
 
         let network = Network::MainNetwork;
         let data_file = NamedTempFile::new().unwrap();
@@ -1414,9 +1417,10 @@ mod tests {
         );
         assert_matches!(
             init_wallet_db(&mut db_data, Some(Secret::new(other_seed.to_vec()))),
-            Err(schemerz::MigratorError::Adapter(
-                WalletMigrationError::SeedNotRelevant
-            ))
+            Err(ref e) if matches!(
+                **e,
+                MigratorError::Adapter(WalletMigrationError::SeedNotRelevant)
+            )
         );
 
         for tv in &test_vectors::UNIFIED[..3] {
