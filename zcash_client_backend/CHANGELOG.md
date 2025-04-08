@@ -7,6 +7,17 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::proto::service`:
+  - `LightdInfo.donation_address` field.
+  - Helper methods for parsing `LightdInfo` fields:
+    - `LightdInfo::chain_name`
+    - `LightdInfo::sapling_activation_height`
+    - `LightdInfo::consensus_branch_id`
+    - `LightdInfo::block_height`
+    - `LightdInfo::estimated_height`
+    - `LightdInfo::donation_address`
+
 ### Changed
 - Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`.
 

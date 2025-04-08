@@ -8,6 +8,7 @@ use std::{
     fmt::{self, Display},
     io,
 };
+use zcash_address::unified::{self, Encoding};
 
 use sapling::{self, note::ExtractedNoteCommitment, Node};
 use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
@@ -17,7 +18,7 @@ use zcash_primitives::{
     transaction::TxId,
 };
 use zcash_protocol::{
-    consensus::BlockHeight,
+    consensus::{self, BlockHeight, NetworkType},
     memo::{self, MemoBytes},
     value::Zatoshis,
     PoolType, ShieldedProtocol,
@@ -257,6 +258,85 @@ impl<SpendAuth> From<&orchard::Action<SpendAuth>> for compact_formats::CompactOr
             cmx: action.cmx().to_bytes().to_vec(),
             ephemeral_key: action.encrypted_note().epk_bytes.to_vec(),
             ciphertext: action.encrypted_note().enc_ciphertext[..COMPACT_NOTE_SIZE].to_vec(),
+        }
+    }
+}
+
+impl service::LightdInfo {
+    /// Returns the network type for the chain this server is following, or `None` if it
+    /// is not recognised.
+    pub fn chain_name(&self) -> Option<NetworkType> {
+        match self.chain_name.as_str() {
+            "main" => Some(NetworkType::Main),
+            "test" => Some(NetworkType::Test),
+            "regtest" => Some(NetworkType::Regtest),
+            _ => None,
+        }
+    }
+
+    /// Returns the Sapling activation height for the chain this server is following.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if `LightdInfo.sapling_activation_height` is not
+    /// representable within a `u32`.
+    pub fn sapling_activation_height(&self) -> BlockHeight {
+        self.sapling_activation_height
+            .try_into()
+            .expect("lightwalletd should provide in-range heights")
+    }
+
+    /// Returns the current consensus branch ID for the chain tip of the chain this server
+    /// is following, or `None` if it is not recognised.
+    pub fn consensus_branch_id(&self) -> Option<consensus::BranchId> {
+        u32::from_str_radix(&self.consensus_branch_id, 16)
+            .ok()?
+            .try_into()
+            .ok()
+    }
+
+    /// Returns the chain tip height reported by the full node backing this server.
+    ///
+    /// If the full node is still syncing, this may not be the network's chain tip; in
+    /// this case, [`Self::estimated_height`] will report a larger height.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if `LightdInfo.block_height` is not representable within
+    /// a `u32`.
+    pub fn block_height(&self) -> BlockHeight {
+        self.block_height
+            .try_into()
+            .expect("lightwalletd should provide in-range heights")
+    }
+
+    /// Returns the estimated chain tip height for the chain this server is following.
+    ///
+    /// If the full node backing this server is fully synced, this is always equal to
+    /// [`Self::block_height`].
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if `LightdInfo.estimated_height` is not representable
+    /// within a `u32`.
+    pub fn estimated_height(&self) -> BlockHeight {
+        self.estimated_height
+            .try_into()
+            .expect("lightwalletd should provide in-range heights")
+    }
+
+    /// Returns the donation address for this server.
+    ///
+    /// Returns `None` if:
+    /// - no donation address was provided.
+    /// - the provided donation address is not a valid [`unified::Address`].
+    /// - the provided donation address is for a different chain.
+    pub fn donation_address(&self) -> Option<unified::Address> {
+        if self.donation_address.is_empty() {
+            None
+        } else {
+            let (network_type, address) = unified::Address::decode(&self.donation_address).ok()?;
+            (Some(network_type) == self.chain_name()).then_some(address)
         }
     }
 }
