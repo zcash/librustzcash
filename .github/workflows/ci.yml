@@ -40,6 +40,7 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
+          all-pools: false
           extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
         with:
@@ -99,6 +100,7 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
+          all-pools: false
           extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
         with:
@@ -150,6 +152,7 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
+          all-pools: false
           extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
         with:
@@ -205,6 +208,7 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
+          all-pools: false
           extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
         with:
