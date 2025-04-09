@@ -105,12 +105,10 @@ pub(super) fn all_migrations<
     //                                            support_legacy_sqlite
     //                                               /              \
     //                         fix_broken_commitment_trees         add_account_uuids
-    //                                     |                               |
-    //                          fix_bad_change_flagging     v_transactions_additional_totals
-    //                                                                     |
-    //                                                       transparent_gap_limit_handling
-    //                                                                     |
-    //                                                     ensure_default_transparent_address
+    //                             /                                /             \
+    //          fix_bad_change_flagging      transparent_gap_limit_handling    v_transactions_additional_totals
+    //                                                     |
+    //                                     ensure_default_transparent_address
     let rng = Rc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
@@ -267,9 +265,19 @@ pub const V_0_15_0: &[Uuid] = &[
     v_transactions_additional_totals::MIGRATION_ID,
 ];
 
-const V_0_16_0: &[Uuid] = &[transparent_gap_limit_handling::MIGRATION_ID];
+/// Leaf migrations in the 0.16.0 release.
+const V_0_16_0: &[Uuid] = &[
+    fix_bad_change_flagging::MIGRATION_ID,
+    v_transactions_additional_totals::MIGRATION_ID,
+    transparent_gap_limit_handling::MIGRATION_ID,
+];
 
-const V_0_16_2: &[Uuid] = &[ensure_default_transparent_address::MIGRATION_ID];
+/// Leaf migrations in the 0.16.2 release.
+const V_0_16_2: &[Uuid] = &[
+    fix_bad_change_flagging::MIGRATION_ID,
+    v_transactions_additional_totals::MIGRATION_ID,
+    ensure_default_transparent_address::MIGRATION_ID,
+];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
