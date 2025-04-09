@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-de575e9a.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.88.0-nightly (e643f59f6 2025-04-07)" data-channel="nightly" data-search-js="search-f7877310.js" data-settings-js="settings-5514c975.js" ><script src="../../static.files/storage-4e99c027.js"></script><script defer src="../../static.files/src-script-63605ae7.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-7ef8a74a.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! *An SQLite-based Zcash light client.*
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-de575e9a.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.88.0-nightly (d4f880f8c 2025-04-08)" data-channel="nightly" data-search-js="search-f7877310.js" data-settings-js="settings-5514c975.js" ><script src="../../static.files/storage-4e99c027.js"></script><script defer src="../../static.files/src-script-63605ae7.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-7ef8a74a.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! *An SQLite-based Zcash light client.*
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! `zcash_client_sqlite` contains complete SQLite-based implementations of the [`WalletRead`],
 <a href=#4 id=4 data-nosnippet>4</a>//! [`WalletWrite`], and [`BlockSource`] traits from the [`zcash_client_backend`] crate. In
@@ -2420,411 +2420,417 @@
 <a href=#2420 id=2420 data-nosnippet>2420</a>            .wallet()
 <a href=#2421 id=2421 data-nosnippet>2421</a>            .get_last_generated_address_matching(account.id(), shielded_only_request)
 <a href=#2422 id=2422 data-nosnippet>2422</a>            .unwrap();
-<a href=#2423 id=2423 data-nosnippet>2423</a>        <span class="macro">assert!</span>(cur_shielded_only.is_none());
-<a href=#2424 id=2424 data-nosnippet>2424</a>
-<a href=#2425 id=2425 data-nosnippet>2425</a>        <span class="kw">let </span>di_lower = st
-<a href=#2426 id=2426 data-nosnippet>2426</a>            .wallet()
-<a href=#2427 id=2427 data-nosnippet>2427</a>            .db()
-<a href=#2428 id=2428 data-nosnippet>2428</a>            .clock
-<a href=#2429 id=2429 data-nosnippet>2429</a>            .now()
-<a href=#2430 id=2430 data-nosnippet>2430</a>            .duration_since(SystemTime::UNIX_EPOCH)
-<a href=#2431 id=2431 data-nosnippet>2431</a>            .expect(<span class="string">"current time is valid"</span>)
-<a href=#2432 id=2432 data-nosnippet>2432</a>            .as_secs()
-<a href=#2433 id=2433 data-nosnippet>2433</a>            .saturating_add(MIN_SHIELDED_DIVERSIFIER_OFFSET);
-<a href=#2434 id=2434 data-nosnippet>2434</a>
-<a href=#2435 id=2435 data-nosnippet>2435</a>        <span class="kw">let </span>(shielded_only, di) = st
-<a href=#2436 id=2436 data-nosnippet>2436</a>            .wallet_mut()
-<a href=#2437 id=2437 data-nosnippet>2437</a>            .get_next_available_address(account.id(), shielded_only_request)
-<a href=#2438 id=2438 data-nosnippet>2438</a>            .unwrap()
-<a href=#2439 id=2439 data-nosnippet>2439</a>            .expect(<span class="string">"generated a shielded-only address"</span>);
+<a href=#2423 id=2423 data-nosnippet>2423</a>        <span class="comment">// If transparent support is disabled, then the previous "transparent-including"
+<a href=#2424 id=2424 data-nosnippet>2424</a>        // addresses were actually shielded-only, so we do have a current address.
+<a href=#2425 id=2425 data-nosnippet>2425</a>        </span><span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
+<a href=#2426 id=2426 data-nosnippet>2426</a>        </span><span class="macro">assert_eq!</span>(cur_shielded_only, addr2);
+<a href=#2427 id=2427 data-nosnippet>2427</a>        <span class="comment">// If transparent support is enabled, this works as expected.
+<a href=#2428 id=2428 data-nosnippet>2428</a>        </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#2429 id=2429 data-nosnippet>2429</a>        </span><span class="macro">assert!</span>(cur_shielded_only.is_none());
+<a href=#2430 id=2430 data-nosnippet>2430</a>
+<a href=#2431 id=2431 data-nosnippet>2431</a>        <span class="kw">let </span>di_lower = st
+<a href=#2432 id=2432 data-nosnippet>2432</a>            .wallet()
+<a href=#2433 id=2433 data-nosnippet>2433</a>            .db()
+<a href=#2434 id=2434 data-nosnippet>2434</a>            .clock
+<a href=#2435 id=2435 data-nosnippet>2435</a>            .now()
+<a href=#2436 id=2436 data-nosnippet>2436</a>            .duration_since(SystemTime::UNIX_EPOCH)
+<a href=#2437 id=2437 data-nosnippet>2437</a>            .expect(<span class="string">"current time is valid"</span>)
+<a href=#2438 id=2438 data-nosnippet>2438</a>            .as_secs()
+<a href=#2439 id=2439 data-nosnippet>2439</a>            .saturating_add(MIN_SHIELDED_DIVERSIFIER_OFFSET);
 <a href=#2440 id=2440 data-nosnippet>2440</a>
-<a href=#2441 id=2441 data-nosnippet>2441</a>        <span class="comment">// since not every Sapling diversifier index is valid, the resulting index will be bounded
-<a href=#2442 id=2442 data-nosnippet>2442</a>        // by the current time, but may not be equal to it
-<a href=#2443 id=2443 data-nosnippet>2443</a>        </span><span class="macro">assert!</span>(u128::from(di) &gt;= u128::from(di_lower));
-<a href=#2444 id=2444 data-nosnippet>2444</a>
-<a href=#2445 id=2445 data-nosnippet>2445</a>        <span class="kw">let </span>cur_shielded_only = st
-<a href=#2446 id=2446 data-nosnippet>2446</a>            .wallet()
-<a href=#2447 id=2447 data-nosnippet>2447</a>            .get_last_generated_address_matching(account.id(), shielded_only_request)
-<a href=#2448 id=2448 data-nosnippet>2448</a>            .unwrap()
-<a href=#2449 id=2449 data-nosnippet>2449</a>            .expect(<span class="string">"retrieved the last-generated shielded-only address"</span>);
-<a href=#2450 id=2450 data-nosnippet>2450</a>        <span class="macro">assert_eq!</span>(cur_shielded_only, shielded_only);
-<a href=#2451 id=2451 data-nosnippet>2451</a>
-<a href=#2452 id=2452 data-nosnippet>2452</a>        <span class="comment">// This gives around a 2^{-32} probability of `di` and `di_2` colliding, which is
-<a href=#2453 id=2453 data-nosnippet>2453</a>        // low enough for unit tests.
-<a href=#2454 id=2454 data-nosnippet>2454</a>        </span><span class="kw">let </span>collision_offset = <span class="number">32</span>;
-<a href=#2455 id=2455 data-nosnippet>2455</a>
-<a href=#2456 id=2456 data-nosnippet>2456</a>        st.wallet_mut()
-<a href=#2457 id=2457 data-nosnippet>2457</a>            .db_mut()
-<a href=#2458 id=2458 data-nosnippet>2458</a>            .clock
-<a href=#2459 id=2459 data-nosnippet>2459</a>            .tick(Duration::from_secs(collision_offset));
-<a href=#2460 id=2460 data-nosnippet>2460</a>
-<a href=#2461 id=2461 data-nosnippet>2461</a>        <span class="kw">let </span>(shielded_only_2, di_2) = st
-<a href=#2462 id=2462 data-nosnippet>2462</a>            .wallet_mut()
-<a href=#2463 id=2463 data-nosnippet>2463</a>            .get_next_available_address(account.id(), shielded_only_request)
-<a href=#2464 id=2464 data-nosnippet>2464</a>            .unwrap()
-<a href=#2465 id=2465 data-nosnippet>2465</a>            .expect(<span class="string">"generated a shielded-only address"</span>);
-<a href=#2466 id=2466 data-nosnippet>2466</a>        <span class="macro">assert_ne!</span>(shielded_only_2, shielded_only);
-<a href=#2467 id=2467 data-nosnippet>2467</a>        <span class="macro">assert!</span>(u128::from(di_2) &gt;= u128::from(di_lower) + u128::from(collision_offset));
-<a href=#2468 id=2468 data-nosnippet>2468</a>    }
-<a href=#2469 id=2469 data-nosnippet>2469</a>
-<a href=#2470 id=2470 data-nosnippet>2470</a>    <span class="attr">#[test]
-<a href=#2471 id=2471 data-nosnippet>2471</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>import_account_hd_0() {
-<a href=#2472 id=2472 data-nosnippet>2472</a>        <span class="kw">let </span>st = TestBuilder::new()
-<a href=#2473 id=2473 data-nosnippet>2473</a>            .with_data_store_factory(TestDbFactory::default())
-<a href=#2474 id=2474 data-nosnippet>2474</a>            .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
-<a href=#2475 id=2475 data-nosnippet>2475</a>            .set_account_index(zip32::AccountId::ZERO)
-<a href=#2476 id=2476 data-nosnippet>2476</a>            .build();
-<a href=#2477 id=2477 data-nosnippet>2477</a>        <span class="macro">assert_matches!</span>(
-<a href=#2478 id=2478 data-nosnippet>2478</a>            st.test_account().unwrap().account().source(),
-<a href=#2479 id=2479 data-nosnippet>2479</a>            AccountSource::Derived { derivation, .. } <span class="kw">if </span>derivation.account_index() == zip32::AccountId::ZERO);
-<a href=#2480 id=2480 data-nosnippet>2480</a>    }
-<a href=#2481 id=2481 data-nosnippet>2481</a>
-<a href=#2482 id=2482 data-nosnippet>2482</a>    <span class="attr">#[test]
-<a href=#2483 id=2483 data-nosnippet>2483</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>import_account_hd_1_then_2() {
-<a href=#2484 id=2484 data-nosnippet>2484</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
-<a href=#2485 id=2485 data-nosnippet>2485</a>            .with_data_store_factory(TestDbFactory::default())
-<a href=#2486 id=2486 data-nosnippet>2486</a>            .build();
+<a href=#2441 id=2441 data-nosnippet>2441</a>        <span class="kw">let </span>(shielded_only, di) = st
+<a href=#2442 id=2442 data-nosnippet>2442</a>            .wallet_mut()
+<a href=#2443 id=2443 data-nosnippet>2443</a>            .get_next_available_address(account.id(), shielded_only_request)
+<a href=#2444 id=2444 data-nosnippet>2444</a>            .unwrap()
+<a href=#2445 id=2445 data-nosnippet>2445</a>            .expect(<span class="string">"generated a shielded-only address"</span>);
+<a href=#2446 id=2446 data-nosnippet>2446</a>
+<a href=#2447 id=2447 data-nosnippet>2447</a>        <span class="comment">// since not every Sapling diversifier index is valid, the resulting index will be bounded
+<a href=#2448 id=2448 data-nosnippet>2448</a>        // by the current time, but may not be equal to it
+<a href=#2449 id=2449 data-nosnippet>2449</a>        </span><span class="macro">assert!</span>(u128::from(di) &gt;= u128::from(di_lower));
+<a href=#2450 id=2450 data-nosnippet>2450</a>
+<a href=#2451 id=2451 data-nosnippet>2451</a>        <span class="kw">let </span>cur_shielded_only = st
+<a href=#2452 id=2452 data-nosnippet>2452</a>            .wallet()
+<a href=#2453 id=2453 data-nosnippet>2453</a>            .get_last_generated_address_matching(account.id(), shielded_only_request)
+<a href=#2454 id=2454 data-nosnippet>2454</a>            .unwrap()
+<a href=#2455 id=2455 data-nosnippet>2455</a>            .expect(<span class="string">"retrieved the last-generated shielded-only address"</span>);
+<a href=#2456 id=2456 data-nosnippet>2456</a>        <span class="macro">assert_eq!</span>(cur_shielded_only, shielded_only);
+<a href=#2457 id=2457 data-nosnippet>2457</a>
+<a href=#2458 id=2458 data-nosnippet>2458</a>        <span class="comment">// This gives around a 2^{-32} probability of `di` and `di_2` colliding, which is
+<a href=#2459 id=2459 data-nosnippet>2459</a>        // low enough for unit tests.
+<a href=#2460 id=2460 data-nosnippet>2460</a>        </span><span class="kw">let </span>collision_offset = <span class="number">32</span>;
+<a href=#2461 id=2461 data-nosnippet>2461</a>
+<a href=#2462 id=2462 data-nosnippet>2462</a>        st.wallet_mut()
+<a href=#2463 id=2463 data-nosnippet>2463</a>            .db_mut()
+<a href=#2464 id=2464 data-nosnippet>2464</a>            .clock
+<a href=#2465 id=2465 data-nosnippet>2465</a>            .tick(Duration::from_secs(collision_offset));
+<a href=#2466 id=2466 data-nosnippet>2466</a>
+<a href=#2467 id=2467 data-nosnippet>2467</a>        <span class="kw">let </span>(shielded_only_2, di_2) = st
+<a href=#2468 id=2468 data-nosnippet>2468</a>            .wallet_mut()
+<a href=#2469 id=2469 data-nosnippet>2469</a>            .get_next_available_address(account.id(), shielded_only_request)
+<a href=#2470 id=2470 data-nosnippet>2470</a>            .unwrap()
+<a href=#2471 id=2471 data-nosnippet>2471</a>            .expect(<span class="string">"generated a shielded-only address"</span>);
+<a href=#2472 id=2472 data-nosnippet>2472</a>        <span class="macro">assert_ne!</span>(shielded_only_2, shielded_only);
+<a href=#2473 id=2473 data-nosnippet>2473</a>        <span class="macro">assert!</span>(u128::from(di_2) &gt;= u128::from(di_lower) + u128::from(collision_offset));
+<a href=#2474 id=2474 data-nosnippet>2474</a>    }
+<a href=#2475 id=2475 data-nosnippet>2475</a>
+<a href=#2476 id=2476 data-nosnippet>2476</a>    <span class="attr">#[test]
+<a href=#2477 id=2477 data-nosnippet>2477</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>import_account_hd_0() {
+<a href=#2478 id=2478 data-nosnippet>2478</a>        <span class="kw">let </span>st = TestBuilder::new()
+<a href=#2479 id=2479 data-nosnippet>2479</a>            .with_data_store_factory(TestDbFactory::default())
+<a href=#2480 id=2480 data-nosnippet>2480</a>            .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
+<a href=#2481 id=2481 data-nosnippet>2481</a>            .set_account_index(zip32::AccountId::ZERO)
+<a href=#2482 id=2482 data-nosnippet>2482</a>            .build();
+<a href=#2483 id=2483 data-nosnippet>2483</a>        <span class="macro">assert_matches!</span>(
+<a href=#2484 id=2484 data-nosnippet>2484</a>            st.test_account().unwrap().account().source(),
+<a href=#2485 id=2485 data-nosnippet>2485</a>            AccountSource::Derived { derivation, .. } <span class="kw">if </span>derivation.account_index() == zip32::AccountId::ZERO);
+<a href=#2486 id=2486 data-nosnippet>2486</a>    }
 <a href=#2487 id=2487 data-nosnippet>2487</a>
-<a href=#2488 id=2488 data-nosnippet>2488</a>        <span class="kw">let </span>birthday = AccountBirthday::from_parts(
-<a href=#2489 id=2489 data-nosnippet>2489</a>            ChainState::empty(st.network().sapling.unwrap() - <span class="number">1</span>, BlockHash([<span class="number">0</span>; <span class="number">32</span>])),
-<a href=#2490 id=2490 data-nosnippet>2490</a>            <span class="prelude-val">None</span>,
-<a href=#2491 id=2491 data-nosnippet>2491</a>        );
-<a href=#2492 id=2492 data-nosnippet>2492</a>
-<a href=#2493 id=2493 data-nosnippet>2493</a>        <span class="kw">let </span>seed = Secret::new(<span class="macro">vec!</span>[<span class="number">0u8</span>; <span class="number">32</span>]);
-<a href=#2494 id=2494 data-nosnippet>2494</a>        <span class="kw">let </span>zip32_index_1 = zip32::AccountId::ZERO.next().unwrap();
-<a href=#2495 id=2495 data-nosnippet>2495</a>
-<a href=#2496 id=2496 data-nosnippet>2496</a>        <span class="kw">let </span>first = st
-<a href=#2497 id=2497 data-nosnippet>2497</a>            .wallet_mut()
-<a href=#2498 id=2498 data-nosnippet>2498</a>            .import_account_hd(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, zip32_index_1, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>)
-<a href=#2499 id=2499 data-nosnippet>2499</a>            .unwrap();
-<a href=#2500 id=2500 data-nosnippet>2500</a>        <span class="macro">assert_matches!</span>(
-<a href=#2501 id=2501 data-nosnippet>2501</a>            first.<span class="number">0</span>.source(),
-<a href=#2502 id=2502 data-nosnippet>2502</a>            AccountSource::Derived { derivation, .. } <span class="kw">if </span>derivation.account_index() == zip32_index_1);
-<a href=#2503 id=2503 data-nosnippet>2503</a>
-<a href=#2504 id=2504 data-nosnippet>2504</a>        <span class="kw">let </span>zip32_index_2 = zip32_index_1.next().unwrap();
-<a href=#2505 id=2505 data-nosnippet>2505</a>        <span class="kw">let </span>second = st
-<a href=#2506 id=2506 data-nosnippet>2506</a>            .wallet_mut()
-<a href=#2507 id=2507 data-nosnippet>2507</a>            .import_account_hd(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, zip32_index_2, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>)
-<a href=#2508 id=2508 data-nosnippet>2508</a>            .unwrap();
-<a href=#2509 id=2509 data-nosnippet>2509</a>        <span class="macro">assert_matches!</span>(
-<a href=#2510 id=2510 data-nosnippet>2510</a>            second.<span class="number">0</span>.source(),
-<a href=#2511 id=2511 data-nosnippet>2511</a>            AccountSource::Derived { derivation, .. } <span class="kw">if </span>derivation.account_index() == zip32_index_2);
-<a href=#2512 id=2512 data-nosnippet>2512</a>    }
-<a href=#2513 id=2513 data-nosnippet>2513</a>
-<a href=#2514 id=2514 data-nosnippet>2514</a>    <span class="kw">fn </span>check_collisions&lt;C, DbT: WalletTest + WalletWrite, P: consensus::Parameters&gt;(
-<a href=#2515 id=2515 data-nosnippet>2515</a>        st: <span class="kw-2">&amp;mut </span>TestState&lt;C, DbT, P&gt;,
-<a href=#2516 id=2516 data-nosnippet>2516</a>        ufvk: <span class="kw-2">&amp;</span>UnifiedFullViewingKey,
-<a href=#2517 id=2517 data-nosnippet>2517</a>        birthday: <span class="kw-2">&amp;</span>AccountBirthday,
-<a href=#2518 id=2518 data-nosnippet>2518</a>        is_account_collision: <span class="kw">impl </span>Fn(<span class="kw-2">&amp;</span>&lt;DbT <span class="kw">as </span>WalletRead&gt;::Error) -&gt; bool,
-<a href=#2519 id=2519 data-nosnippet>2519</a>    ) <span class="kw">where
-<a href=#2520 id=2520 data-nosnippet>2520</a>        </span>DbT::Account: core::fmt::Debug,
-<a href=#2521 id=2521 data-nosnippet>2521</a>    {
-<a href=#2522 id=2522 data-nosnippet>2522</a>        <span class="macro">assert_matches!</span>(
-<a href=#2523 id=2523 data-nosnippet>2523</a>            st.wallet_mut()
-<a href=#2524 id=2524 data-nosnippet>2524</a>                .import_account_ufvk(<span class="string">""</span>, ufvk, birthday, AccountPurpose::Spending { derivation: <span class="prelude-val">None </span>}, <span class="prelude-val">None</span>),
-<a href=#2525 id=2525 data-nosnippet>2525</a>            <span class="prelude-val">Err</span>(e) <span class="kw">if </span>is_account_collision(<span class="kw-2">&amp;</span>e)
-<a href=#2526 id=2526 data-nosnippet>2526</a>        );
-<a href=#2527 id=2527 data-nosnippet>2527</a>
-<a href=#2528 id=2528 data-nosnippet>2528</a>        <span class="comment">// Remove the transparent component so that we don't have a match on the full UFVK.
-<a href=#2529 id=2529 data-nosnippet>2529</a>        // That should still produce an AccountCollision error.
-<a href=#2530 id=2530 data-nosnippet>2530</a>        </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#2531 id=2531 data-nosnippet>2531</a>        </span>{
-<a href=#2532 id=2532 data-nosnippet>2532</a>            <span class="macro">assert!</span>(ufvk.transparent().is_some());
-<a href=#2533 id=2533 data-nosnippet>2533</a>            <span class="kw">let </span>subset_ufvk = UnifiedFullViewingKey::new(
-<a href=#2534 id=2534 data-nosnippet>2534</a>                <span class="prelude-val">None</span>,
-<a href=#2535 id=2535 data-nosnippet>2535</a>                ufvk.sapling().cloned(),
-<a href=#2536 id=2536 data-nosnippet>2536</a>                <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#2537 id=2537 data-nosnippet>2537</a>                </span>ufvk.orchard().cloned(),
-<a href=#2538 id=2538 data-nosnippet>2538</a>            )
-<a href=#2539 id=2539 data-nosnippet>2539</a>            .unwrap();
-<a href=#2540 id=2540 data-nosnippet>2540</a>            <span class="macro">assert_matches!</span>(
-<a href=#2541 id=2541 data-nosnippet>2541</a>                st.wallet_mut().import_account_ufvk(
-<a href=#2542 id=2542 data-nosnippet>2542</a>                    <span class="string">""</span>,
-<a href=#2543 id=2543 data-nosnippet>2543</a>                    <span class="kw-2">&amp;</span>subset_ufvk,
-<a href=#2544 id=2544 data-nosnippet>2544</a>                    birthday,
-<a href=#2545 id=2545 data-nosnippet>2545</a>                    AccountPurpose::Spending { derivation: <span class="prelude-val">None </span>},
-<a href=#2546 id=2546 data-nosnippet>2546</a>                    <span class="prelude-val">None</span>,
-<a href=#2547 id=2547 data-nosnippet>2547</a>                ),
-<a href=#2548 id=2548 data-nosnippet>2548</a>                <span class="prelude-val">Err</span>(e) <span class="kw">if </span>is_account_collision(<span class="kw-2">&amp;</span>e)
-<a href=#2549 id=2549 data-nosnippet>2549</a>            );
-<a href=#2550 id=2550 data-nosnippet>2550</a>        }
-<a href=#2551 id=2551 data-nosnippet>2551</a>
-<a href=#2552 id=2552 data-nosnippet>2552</a>        <span class="comment">// Remove the Orchard component so that we don't have a match on the full UFVK.
-<a href=#2553 id=2553 data-nosnippet>2553</a>        // That should still produce an AccountCollision error.
-<a href=#2554 id=2554 data-nosnippet>2554</a>        </span><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#2555 id=2555 data-nosnippet>2555</a>        </span>{
-<a href=#2556 id=2556 data-nosnippet>2556</a>            <span class="macro">assert!</span>(ufvk.orchard().is_some());
-<a href=#2557 id=2557 data-nosnippet>2557</a>            <span class="kw">let </span>subset_ufvk = UnifiedFullViewingKey::new(
-<a href=#2558 id=2558 data-nosnippet>2558</a>                <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#2559 id=2559 data-nosnippet>2559</a>                </span>ufvk.transparent().cloned(),
-<a href=#2560 id=2560 data-nosnippet>2560</a>                ufvk.sapling().cloned(),
-<a href=#2561 id=2561 data-nosnippet>2561</a>                <span class="prelude-val">None</span>,
-<a href=#2562 id=2562 data-nosnippet>2562</a>            )
-<a href=#2563 id=2563 data-nosnippet>2563</a>            .unwrap();
-<a href=#2564 id=2564 data-nosnippet>2564</a>            <span class="macro">assert_matches!</span>(
-<a href=#2565 id=2565 data-nosnippet>2565</a>                st.wallet_mut().import_account_ufvk(
-<a href=#2566 id=2566 data-nosnippet>2566</a>                    <span class="string">""</span>,
-<a href=#2567 id=2567 data-nosnippet>2567</a>                    <span class="kw-2">&amp;</span>subset_ufvk,
-<a href=#2568 id=2568 data-nosnippet>2568</a>                    birthday,
-<a href=#2569 id=2569 data-nosnippet>2569</a>                    AccountPurpose::Spending { derivation: <span class="prelude-val">None </span>},
-<a href=#2570 id=2570 data-nosnippet>2570</a>                    <span class="prelude-val">None</span>,
-<a href=#2571 id=2571 data-nosnippet>2571</a>                ),
-<a href=#2572 id=2572 data-nosnippet>2572</a>                <span class="prelude-val">Err</span>(e) <span class="kw">if </span>is_account_collision(<span class="kw-2">&amp;</span>e)
-<a href=#2573 id=2573 data-nosnippet>2573</a>            );
-<a href=#2574 id=2574 data-nosnippet>2574</a>        }
-<a href=#2575 id=2575 data-nosnippet>2575</a>    }
-<a href=#2576 id=2576 data-nosnippet>2576</a>
-<a href=#2577 id=2577 data-nosnippet>2577</a>    <span class="attr">#[test]
-<a href=#2578 id=2578 data-nosnippet>2578</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>import_account_hd_1_then_conflicts() {
-<a href=#2579 id=2579 data-nosnippet>2579</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
-<a href=#2580 id=2580 data-nosnippet>2580</a>            .with_data_store_factory(TestDbFactory::default())
-<a href=#2581 id=2581 data-nosnippet>2581</a>            .build();
+<a href=#2488 id=2488 data-nosnippet>2488</a>    <span class="attr">#[test]
+<a href=#2489 id=2489 data-nosnippet>2489</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>import_account_hd_1_then_2() {
+<a href=#2490 id=2490 data-nosnippet>2490</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
+<a href=#2491 id=2491 data-nosnippet>2491</a>            .with_data_store_factory(TestDbFactory::default())
+<a href=#2492 id=2492 data-nosnippet>2492</a>            .build();
+<a href=#2493 id=2493 data-nosnippet>2493</a>
+<a href=#2494 id=2494 data-nosnippet>2494</a>        <span class="kw">let </span>birthday = AccountBirthday::from_parts(
+<a href=#2495 id=2495 data-nosnippet>2495</a>            ChainState::empty(st.network().sapling.unwrap() - <span class="number">1</span>, BlockHash([<span class="number">0</span>; <span class="number">32</span>])),
+<a href=#2496 id=2496 data-nosnippet>2496</a>            <span class="prelude-val">None</span>,
+<a href=#2497 id=2497 data-nosnippet>2497</a>        );
+<a href=#2498 id=2498 data-nosnippet>2498</a>
+<a href=#2499 id=2499 data-nosnippet>2499</a>        <span class="kw">let </span>seed = Secret::new(<span class="macro">vec!</span>[<span class="number">0u8</span>; <span class="number">32</span>]);
+<a href=#2500 id=2500 data-nosnippet>2500</a>        <span class="kw">let </span>zip32_index_1 = zip32::AccountId::ZERO.next().unwrap();
+<a href=#2501 id=2501 data-nosnippet>2501</a>
+<a href=#2502 id=2502 data-nosnippet>2502</a>        <span class="kw">let </span>first = st
+<a href=#2503 id=2503 data-nosnippet>2503</a>            .wallet_mut()
+<a href=#2504 id=2504 data-nosnippet>2504</a>            .import_account_hd(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, zip32_index_1, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>)
+<a href=#2505 id=2505 data-nosnippet>2505</a>            .unwrap();
+<a href=#2506 id=2506 data-nosnippet>2506</a>        <span class="macro">assert_matches!</span>(
+<a href=#2507 id=2507 data-nosnippet>2507</a>            first.<span class="number">0</span>.source(),
+<a href=#2508 id=2508 data-nosnippet>2508</a>            AccountSource::Derived { derivation, .. } <span class="kw">if </span>derivation.account_index() == zip32_index_1);
+<a href=#2509 id=2509 data-nosnippet>2509</a>
+<a href=#2510 id=2510 data-nosnippet>2510</a>        <span class="kw">let </span>zip32_index_2 = zip32_index_1.next().unwrap();
+<a href=#2511 id=2511 data-nosnippet>2511</a>        <span class="kw">let </span>second = st
+<a href=#2512 id=2512 data-nosnippet>2512</a>            .wallet_mut()
+<a href=#2513 id=2513 data-nosnippet>2513</a>            .import_account_hd(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, zip32_index_2, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>)
+<a href=#2514 id=2514 data-nosnippet>2514</a>            .unwrap();
+<a href=#2515 id=2515 data-nosnippet>2515</a>        <span class="macro">assert_matches!</span>(
+<a href=#2516 id=2516 data-nosnippet>2516</a>            second.<span class="number">0</span>.source(),
+<a href=#2517 id=2517 data-nosnippet>2517</a>            AccountSource::Derived { derivation, .. } <span class="kw">if </span>derivation.account_index() == zip32_index_2);
+<a href=#2518 id=2518 data-nosnippet>2518</a>    }
+<a href=#2519 id=2519 data-nosnippet>2519</a>
+<a href=#2520 id=2520 data-nosnippet>2520</a>    <span class="kw">fn </span>check_collisions&lt;C, DbT: WalletTest + WalletWrite, P: consensus::Parameters&gt;(
+<a href=#2521 id=2521 data-nosnippet>2521</a>        st: <span class="kw-2">&amp;mut </span>TestState&lt;C, DbT, P&gt;,
+<a href=#2522 id=2522 data-nosnippet>2522</a>        ufvk: <span class="kw-2">&amp;</span>UnifiedFullViewingKey,
+<a href=#2523 id=2523 data-nosnippet>2523</a>        birthday: <span class="kw-2">&amp;</span>AccountBirthday,
+<a href=#2524 id=2524 data-nosnippet>2524</a>        is_account_collision: <span class="kw">impl </span>Fn(<span class="kw-2">&amp;</span>&lt;DbT <span class="kw">as </span>WalletRead&gt;::Error) -&gt; bool,
+<a href=#2525 id=2525 data-nosnippet>2525</a>    ) <span class="kw">where
+<a href=#2526 id=2526 data-nosnippet>2526</a>        </span>DbT::Account: core::fmt::Debug,
+<a href=#2527 id=2527 data-nosnippet>2527</a>    {
+<a href=#2528 id=2528 data-nosnippet>2528</a>        <span class="macro">assert_matches!</span>(
+<a href=#2529 id=2529 data-nosnippet>2529</a>            st.wallet_mut()
+<a href=#2530 id=2530 data-nosnippet>2530</a>                .import_account_ufvk(<span class="string">""</span>, ufvk, birthday, AccountPurpose::Spending { derivation: <span class="prelude-val">None </span>}, <span class="prelude-val">None</span>),
+<a href=#2531 id=2531 data-nosnippet>2531</a>            <span class="prelude-val">Err</span>(e) <span class="kw">if </span>is_account_collision(<span class="kw-2">&amp;</span>e)
+<a href=#2532 id=2532 data-nosnippet>2532</a>        );
+<a href=#2533 id=2533 data-nosnippet>2533</a>
+<a href=#2534 id=2534 data-nosnippet>2534</a>        <span class="comment">// Remove the transparent component so that we don't have a match on the full UFVK.
+<a href=#2535 id=2535 data-nosnippet>2535</a>        // That should still produce an AccountCollision error.
+<a href=#2536 id=2536 data-nosnippet>2536</a>        </span><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#2537 id=2537 data-nosnippet>2537</a>        </span>{
+<a href=#2538 id=2538 data-nosnippet>2538</a>            <span class="macro">assert!</span>(ufvk.transparent().is_some());
+<a href=#2539 id=2539 data-nosnippet>2539</a>            <span class="kw">let </span>subset_ufvk = UnifiedFullViewingKey::new(
+<a href=#2540 id=2540 data-nosnippet>2540</a>                <span class="prelude-val">None</span>,
+<a href=#2541 id=2541 data-nosnippet>2541</a>                ufvk.sapling().cloned(),
+<a href=#2542 id=2542 data-nosnippet>2542</a>                <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#2543 id=2543 data-nosnippet>2543</a>                </span>ufvk.orchard().cloned(),
+<a href=#2544 id=2544 data-nosnippet>2544</a>            )
+<a href=#2545 id=2545 data-nosnippet>2545</a>            .unwrap();
+<a href=#2546 id=2546 data-nosnippet>2546</a>            <span class="macro">assert_matches!</span>(
+<a href=#2547 id=2547 data-nosnippet>2547</a>                st.wallet_mut().import_account_ufvk(
+<a href=#2548 id=2548 data-nosnippet>2548</a>                    <span class="string">""</span>,
+<a href=#2549 id=2549 data-nosnippet>2549</a>                    <span class="kw-2">&amp;</span>subset_ufvk,
+<a href=#2550 id=2550 data-nosnippet>2550</a>                    birthday,
+<a href=#2551 id=2551 data-nosnippet>2551</a>                    AccountPurpose::Spending { derivation: <span class="prelude-val">None </span>},
+<a href=#2552 id=2552 data-nosnippet>2552</a>                    <span class="prelude-val">None</span>,
+<a href=#2553 id=2553 data-nosnippet>2553</a>                ),
+<a href=#2554 id=2554 data-nosnippet>2554</a>                <span class="prelude-val">Err</span>(e) <span class="kw">if </span>is_account_collision(<span class="kw-2">&amp;</span>e)
+<a href=#2555 id=2555 data-nosnippet>2555</a>            );
+<a href=#2556 id=2556 data-nosnippet>2556</a>        }
+<a href=#2557 id=2557 data-nosnippet>2557</a>
+<a href=#2558 id=2558 data-nosnippet>2558</a>        <span class="comment">// Remove the Orchard component so that we don't have a match on the full UFVK.
+<a href=#2559 id=2559 data-nosnippet>2559</a>        // That should still produce an AccountCollision error.
+<a href=#2560 id=2560 data-nosnippet>2560</a>        </span><span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#2561 id=2561 data-nosnippet>2561</a>        </span>{
+<a href=#2562 id=2562 data-nosnippet>2562</a>            <span class="macro">assert!</span>(ufvk.orchard().is_some());
+<a href=#2563 id=2563 data-nosnippet>2563</a>            <span class="kw">let </span>subset_ufvk = UnifiedFullViewingKey::new(
+<a href=#2564 id=2564 data-nosnippet>2564</a>                <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#2565 id=2565 data-nosnippet>2565</a>                </span>ufvk.transparent().cloned(),
+<a href=#2566 id=2566 data-nosnippet>2566</a>                ufvk.sapling().cloned(),
+<a href=#2567 id=2567 data-nosnippet>2567</a>                <span class="prelude-val">None</span>,
+<a href=#2568 id=2568 data-nosnippet>2568</a>            )
+<a href=#2569 id=2569 data-nosnippet>2569</a>            .unwrap();
+<a href=#2570 id=2570 data-nosnippet>2570</a>            <span class="macro">assert_matches!</span>(
+<a href=#2571 id=2571 data-nosnippet>2571</a>                st.wallet_mut().import_account_ufvk(
+<a href=#2572 id=2572 data-nosnippet>2572</a>                    <span class="string">""</span>,
+<a href=#2573 id=2573 data-nosnippet>2573</a>                    <span class="kw-2">&amp;</span>subset_ufvk,
+<a href=#2574 id=2574 data-nosnippet>2574</a>                    birthday,
+<a href=#2575 id=2575 data-nosnippet>2575</a>                    AccountPurpose::Spending { derivation: <span class="prelude-val">None </span>},
+<a href=#2576 id=2576 data-nosnippet>2576</a>                    <span class="prelude-val">None</span>,
+<a href=#2577 id=2577 data-nosnippet>2577</a>                ),
+<a href=#2578 id=2578 data-nosnippet>2578</a>                <span class="prelude-val">Err</span>(e) <span class="kw">if </span>is_account_collision(<span class="kw-2">&amp;</span>e)
+<a href=#2579 id=2579 data-nosnippet>2579</a>            );
+<a href=#2580 id=2580 data-nosnippet>2580</a>        }
+<a href=#2581 id=2581 data-nosnippet>2581</a>    }
 <a href=#2582 id=2582 data-nosnippet>2582</a>
-<a href=#2583 id=2583 data-nosnippet>2583</a>        <span class="kw">let </span>birthday = AccountBirthday::from_parts(
-<a href=#2584 id=2584 data-nosnippet>2584</a>            ChainState::empty(st.network().sapling.unwrap() - <span class="number">1</span>, BlockHash([<span class="number">0</span>; <span class="number">32</span>])),
-<a href=#2585 id=2585 data-nosnippet>2585</a>            <span class="prelude-val">None</span>,
-<a href=#2586 id=2586 data-nosnippet>2586</a>        );
-<a href=#2587 id=2587 data-nosnippet>2587</a>
-<a href=#2588 id=2588 data-nosnippet>2588</a>        <span class="kw">let </span>seed = Secret::new(<span class="macro">vec!</span>[<span class="number">0u8</span>; <span class="number">32</span>]);
-<a href=#2589 id=2589 data-nosnippet>2589</a>        <span class="kw">let </span>zip32_index_1 = zip32::AccountId::ZERO.next().unwrap();
-<a href=#2590 id=2590 data-nosnippet>2590</a>
-<a href=#2591 id=2591 data-nosnippet>2591</a>        <span class="kw">let </span>(first_account, <span class="kw">_</span>) = st
-<a href=#2592 id=2592 data-nosnippet>2592</a>            .wallet_mut()
-<a href=#2593 id=2593 data-nosnippet>2593</a>            .import_account_hd(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, zip32_index_1, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>)
-<a href=#2594 id=2594 data-nosnippet>2594</a>            .unwrap();
-<a href=#2595 id=2595 data-nosnippet>2595</a>        <span class="kw">let </span>ufvk = first_account.ufvk().unwrap();
+<a href=#2583 id=2583 data-nosnippet>2583</a>    <span class="attr">#[test]
+<a href=#2584 id=2584 data-nosnippet>2584</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>import_account_hd_1_then_conflicts() {
+<a href=#2585 id=2585 data-nosnippet>2585</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
+<a href=#2586 id=2586 data-nosnippet>2586</a>            .with_data_store_factory(TestDbFactory::default())
+<a href=#2587 id=2587 data-nosnippet>2587</a>            .build();
+<a href=#2588 id=2588 data-nosnippet>2588</a>
+<a href=#2589 id=2589 data-nosnippet>2589</a>        <span class="kw">let </span>birthday = AccountBirthday::from_parts(
+<a href=#2590 id=2590 data-nosnippet>2590</a>            ChainState::empty(st.network().sapling.unwrap() - <span class="number">1</span>, BlockHash([<span class="number">0</span>; <span class="number">32</span>])),
+<a href=#2591 id=2591 data-nosnippet>2591</a>            <span class="prelude-val">None</span>,
+<a href=#2592 id=2592 data-nosnippet>2592</a>        );
+<a href=#2593 id=2593 data-nosnippet>2593</a>
+<a href=#2594 id=2594 data-nosnippet>2594</a>        <span class="kw">let </span>seed = Secret::new(<span class="macro">vec!</span>[<span class="number">0u8</span>; <span class="number">32</span>]);
+<a href=#2595 id=2595 data-nosnippet>2595</a>        <span class="kw">let </span>zip32_index_1 = zip32::AccountId::ZERO.next().unwrap();
 <a href=#2596 id=2596 data-nosnippet>2596</a>
-<a href=#2597 id=2597 data-nosnippet>2597</a>        <span class="macro">assert_matches!</span>(
-<a href=#2598 id=2598 data-nosnippet>2598</a>            st.wallet_mut().import_account_hd(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, zip32_index_1, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>),
-<a href=#2599 id=2599 data-nosnippet>2599</a>            <span class="prelude-val">Err</span>(SqliteClientError::AccountCollision(id)) <span class="kw">if </span>id == first_account.id());
-<a href=#2600 id=2600 data-nosnippet>2600</a>
-<a href=#2601 id=2601 data-nosnippet>2601</a>        check_collisions(
-<a href=#2602 id=2602 data-nosnippet>2602</a>            <span class="kw-2">&amp;mut </span>st,
-<a href=#2603 id=2603 data-nosnippet>2603</a>            ufvk,
-<a href=#2604 id=2604 data-nosnippet>2604</a>            <span class="kw-2">&amp;</span>birthday,
-<a href=#2605 id=2605 data-nosnippet>2605</a>            |e| <span class="macro">matches!</span>(e, SqliteClientError::AccountCollision(id) <span class="kw">if </span><span class="kw-2">*</span>id == first_account.id()),
-<a href=#2606 id=2606 data-nosnippet>2606</a>        );
-<a href=#2607 id=2607 data-nosnippet>2607</a>    }
-<a href=#2608 id=2608 data-nosnippet>2608</a>
-<a href=#2609 id=2609 data-nosnippet>2609</a>    <span class="attr">#[test]
-<a href=#2610 id=2610 data-nosnippet>2610</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>import_account_ufvk_then_conflicts() {
-<a href=#2611 id=2611 data-nosnippet>2611</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
-<a href=#2612 id=2612 data-nosnippet>2612</a>            .with_data_store_factory(TestDbFactory::default())
-<a href=#2613 id=2613 data-nosnippet>2613</a>            .build();
+<a href=#2597 id=2597 data-nosnippet>2597</a>        <span class="kw">let </span>(first_account, <span class="kw">_</span>) = st
+<a href=#2598 id=2598 data-nosnippet>2598</a>            .wallet_mut()
+<a href=#2599 id=2599 data-nosnippet>2599</a>            .import_account_hd(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, zip32_index_1, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>)
+<a href=#2600 id=2600 data-nosnippet>2600</a>            .unwrap();
+<a href=#2601 id=2601 data-nosnippet>2601</a>        <span class="kw">let </span>ufvk = first_account.ufvk().unwrap();
+<a href=#2602 id=2602 data-nosnippet>2602</a>
+<a href=#2603 id=2603 data-nosnippet>2603</a>        <span class="macro">assert_matches!</span>(
+<a href=#2604 id=2604 data-nosnippet>2604</a>            st.wallet_mut().import_account_hd(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, zip32_index_1, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>),
+<a href=#2605 id=2605 data-nosnippet>2605</a>            <span class="prelude-val">Err</span>(SqliteClientError::AccountCollision(id)) <span class="kw">if </span>id == first_account.id());
+<a href=#2606 id=2606 data-nosnippet>2606</a>
+<a href=#2607 id=2607 data-nosnippet>2607</a>        check_collisions(
+<a href=#2608 id=2608 data-nosnippet>2608</a>            <span class="kw-2">&amp;mut </span>st,
+<a href=#2609 id=2609 data-nosnippet>2609</a>            ufvk,
+<a href=#2610 id=2610 data-nosnippet>2610</a>            <span class="kw-2">&amp;</span>birthday,
+<a href=#2611 id=2611 data-nosnippet>2611</a>            |e| <span class="macro">matches!</span>(e, SqliteClientError::AccountCollision(id) <span class="kw">if </span><span class="kw-2">*</span>id == first_account.id()),
+<a href=#2612 id=2612 data-nosnippet>2612</a>        );
+<a href=#2613 id=2613 data-nosnippet>2613</a>    }
 <a href=#2614 id=2614 data-nosnippet>2614</a>
-<a href=#2615 id=2615 data-nosnippet>2615</a>        <span class="kw">let </span>birthday = AccountBirthday::from_parts(
-<a href=#2616 id=2616 data-nosnippet>2616</a>            ChainState::empty(st.network().sapling.unwrap() - <span class="number">1</span>, BlockHash([<span class="number">0</span>; <span class="number">32</span>])),
-<a href=#2617 id=2617 data-nosnippet>2617</a>            <span class="prelude-val">None</span>,
-<a href=#2618 id=2618 data-nosnippet>2618</a>        );
-<a href=#2619 id=2619 data-nosnippet>2619</a>
-<a href=#2620 id=2620 data-nosnippet>2620</a>        <span class="kw">let </span>seed = Secret::new(<span class="macro">vec!</span>[<span class="number">0u8</span>; <span class="number">32</span>]);
-<a href=#2621 id=2621 data-nosnippet>2621</a>        <span class="kw">let </span>zip32_index_0 = zip32::AccountId::ZERO;
-<a href=#2622 id=2622 data-nosnippet>2622</a>        <span class="kw">let </span>usk = UnifiedSpendingKey::from_seed(st.network(), seed.expose_secret(), zip32_index_0)
-<a href=#2623 id=2623 data-nosnippet>2623</a>            .unwrap();
-<a href=#2624 id=2624 data-nosnippet>2624</a>        <span class="kw">let </span>ufvk = usk.to_unified_full_viewing_key();
+<a href=#2615 id=2615 data-nosnippet>2615</a>    <span class="attr">#[test]
+<a href=#2616 id=2616 data-nosnippet>2616</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>import_account_ufvk_then_conflicts() {
+<a href=#2617 id=2617 data-nosnippet>2617</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
+<a href=#2618 id=2618 data-nosnippet>2618</a>            .with_data_store_factory(TestDbFactory::default())
+<a href=#2619 id=2619 data-nosnippet>2619</a>            .build();
+<a href=#2620 id=2620 data-nosnippet>2620</a>
+<a href=#2621 id=2621 data-nosnippet>2621</a>        <span class="kw">let </span>birthday = AccountBirthday::from_parts(
+<a href=#2622 id=2622 data-nosnippet>2622</a>            ChainState::empty(st.network().sapling.unwrap() - <span class="number">1</span>, BlockHash([<span class="number">0</span>; <span class="number">32</span>])),
+<a href=#2623 id=2623 data-nosnippet>2623</a>            <span class="prelude-val">None</span>,
+<a href=#2624 id=2624 data-nosnippet>2624</a>        );
 <a href=#2625 id=2625 data-nosnippet>2625</a>
-<a href=#2626 id=2626 data-nosnippet>2626</a>        <span class="kw">let </span>account = st
-<a href=#2627 id=2627 data-nosnippet>2627</a>            .wallet_mut()
-<a href=#2628 id=2628 data-nosnippet>2628</a>            .import_account_ufvk(
-<a href=#2629 id=2629 data-nosnippet>2629</a>                <span class="string">""</span>,
-<a href=#2630 id=2630 data-nosnippet>2630</a>                <span class="kw-2">&amp;</span>ufvk,
-<a href=#2631 id=2631 data-nosnippet>2631</a>                <span class="kw-2">&amp;</span>birthday,
-<a href=#2632 id=2632 data-nosnippet>2632</a>                AccountPurpose::Spending { derivation: <span class="prelude-val">None </span>},
-<a href=#2633 id=2633 data-nosnippet>2633</a>                <span class="prelude-val">None</span>,
-<a href=#2634 id=2634 data-nosnippet>2634</a>            )
-<a href=#2635 id=2635 data-nosnippet>2635</a>            .unwrap();
-<a href=#2636 id=2636 data-nosnippet>2636</a>        <span class="macro">assert_eq!</span>(
-<a href=#2637 id=2637 data-nosnippet>2637</a>            ufvk.encode(st.network()),
-<a href=#2638 id=2638 data-nosnippet>2638</a>            account.ufvk().unwrap().encode(st.network())
-<a href=#2639 id=2639 data-nosnippet>2639</a>        );
-<a href=#2640 id=2640 data-nosnippet>2640</a>
-<a href=#2641 id=2641 data-nosnippet>2641</a>        <span class="macro">assert_matches!</span>(
-<a href=#2642 id=2642 data-nosnippet>2642</a>            account.source(),
-<a href=#2643 id=2643 data-nosnippet>2643</a>            AccountSource::Imported {
-<a href=#2644 id=2644 data-nosnippet>2644</a>                purpose: AccountPurpose::Spending { .. },
-<a href=#2645 id=2645 data-nosnippet>2645</a>                ..
-<a href=#2646 id=2646 data-nosnippet>2646</a>            }
-<a href=#2647 id=2647 data-nosnippet>2647</a>        );
-<a href=#2648 id=2648 data-nosnippet>2648</a>
-<a href=#2649 id=2649 data-nosnippet>2649</a>        <span class="macro">assert_matches!</span>(
-<a href=#2650 id=2650 data-nosnippet>2650</a>            st.wallet_mut().import_account_hd(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, zip32_index_0, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>),
-<a href=#2651 id=2651 data-nosnippet>2651</a>            <span class="prelude-val">Err</span>(SqliteClientError::AccountCollision(id)) <span class="kw">if </span>id == account.id());
-<a href=#2652 id=2652 data-nosnippet>2652</a>
-<a href=#2653 id=2653 data-nosnippet>2653</a>        check_collisions(
-<a href=#2654 id=2654 data-nosnippet>2654</a>            <span class="kw-2">&amp;mut </span>st,
-<a href=#2655 id=2655 data-nosnippet>2655</a>            <span class="kw-2">&amp;</span>ufvk,
-<a href=#2656 id=2656 data-nosnippet>2656</a>            <span class="kw-2">&amp;</span>birthday,
-<a href=#2657 id=2657 data-nosnippet>2657</a>            |e| <span class="macro">matches!</span>(e, SqliteClientError::AccountCollision(id) <span class="kw">if </span><span class="kw-2">*</span>id == account.id()),
-<a href=#2658 id=2658 data-nosnippet>2658</a>        );
-<a href=#2659 id=2659 data-nosnippet>2659</a>    }
-<a href=#2660 id=2660 data-nosnippet>2660</a>
-<a href=#2661 id=2661 data-nosnippet>2661</a>    <span class="attr">#[test]
-<a href=#2662 id=2662 data-nosnippet>2662</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>create_account_then_conflicts() {
-<a href=#2663 id=2663 data-nosnippet>2663</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
-<a href=#2664 id=2664 data-nosnippet>2664</a>            .with_data_store_factory(TestDbFactory::default())
-<a href=#2665 id=2665 data-nosnippet>2665</a>            .build();
+<a href=#2626 id=2626 data-nosnippet>2626</a>        <span class="kw">let </span>seed = Secret::new(<span class="macro">vec!</span>[<span class="number">0u8</span>; <span class="number">32</span>]);
+<a href=#2627 id=2627 data-nosnippet>2627</a>        <span class="kw">let </span>zip32_index_0 = zip32::AccountId::ZERO;
+<a href=#2628 id=2628 data-nosnippet>2628</a>        <span class="kw">let </span>usk = UnifiedSpendingKey::from_seed(st.network(), seed.expose_secret(), zip32_index_0)
+<a href=#2629 id=2629 data-nosnippet>2629</a>            .unwrap();
+<a href=#2630 id=2630 data-nosnippet>2630</a>        <span class="kw">let </span>ufvk = usk.to_unified_full_viewing_key();
+<a href=#2631 id=2631 data-nosnippet>2631</a>
+<a href=#2632 id=2632 data-nosnippet>2632</a>        <span class="kw">let </span>account = st
+<a href=#2633 id=2633 data-nosnippet>2633</a>            .wallet_mut()
+<a href=#2634 id=2634 data-nosnippet>2634</a>            .import_account_ufvk(
+<a href=#2635 id=2635 data-nosnippet>2635</a>                <span class="string">""</span>,
+<a href=#2636 id=2636 data-nosnippet>2636</a>                <span class="kw-2">&amp;</span>ufvk,
+<a href=#2637 id=2637 data-nosnippet>2637</a>                <span class="kw-2">&amp;</span>birthday,
+<a href=#2638 id=2638 data-nosnippet>2638</a>                AccountPurpose::Spending { derivation: <span class="prelude-val">None </span>},
+<a href=#2639 id=2639 data-nosnippet>2639</a>                <span class="prelude-val">None</span>,
+<a href=#2640 id=2640 data-nosnippet>2640</a>            )
+<a href=#2641 id=2641 data-nosnippet>2641</a>            .unwrap();
+<a href=#2642 id=2642 data-nosnippet>2642</a>        <span class="macro">assert_eq!</span>(
+<a href=#2643 id=2643 data-nosnippet>2643</a>            ufvk.encode(st.network()),
+<a href=#2644 id=2644 data-nosnippet>2644</a>            account.ufvk().unwrap().encode(st.network())
+<a href=#2645 id=2645 data-nosnippet>2645</a>        );
+<a href=#2646 id=2646 data-nosnippet>2646</a>
+<a href=#2647 id=2647 data-nosnippet>2647</a>        <span class="macro">assert_matches!</span>(
+<a href=#2648 id=2648 data-nosnippet>2648</a>            account.source(),
+<a href=#2649 id=2649 data-nosnippet>2649</a>            AccountSource::Imported {
+<a href=#2650 id=2650 data-nosnippet>2650</a>                purpose: AccountPurpose::Spending { .. },
+<a href=#2651 id=2651 data-nosnippet>2651</a>                ..
+<a href=#2652 id=2652 data-nosnippet>2652</a>            }
+<a href=#2653 id=2653 data-nosnippet>2653</a>        );
+<a href=#2654 id=2654 data-nosnippet>2654</a>
+<a href=#2655 id=2655 data-nosnippet>2655</a>        <span class="macro">assert_matches!</span>(
+<a href=#2656 id=2656 data-nosnippet>2656</a>            st.wallet_mut().import_account_hd(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, zip32_index_0, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>),
+<a href=#2657 id=2657 data-nosnippet>2657</a>            <span class="prelude-val">Err</span>(SqliteClientError::AccountCollision(id)) <span class="kw">if </span>id == account.id());
+<a href=#2658 id=2658 data-nosnippet>2658</a>
+<a href=#2659 id=2659 data-nosnippet>2659</a>        check_collisions(
+<a href=#2660 id=2660 data-nosnippet>2660</a>            <span class="kw-2">&amp;mut </span>st,
+<a href=#2661 id=2661 data-nosnippet>2661</a>            <span class="kw-2">&amp;</span>ufvk,
+<a href=#2662 id=2662 data-nosnippet>2662</a>            <span class="kw-2">&amp;</span>birthday,
+<a href=#2663 id=2663 data-nosnippet>2663</a>            |e| <span class="macro">matches!</span>(e, SqliteClientError::AccountCollision(id) <span class="kw">if </span><span class="kw-2">*</span>id == account.id()),
+<a href=#2664 id=2664 data-nosnippet>2664</a>        );
+<a href=#2665 id=2665 data-nosnippet>2665</a>    }
 <a href=#2666 id=2666 data-nosnippet>2666</a>
-<a href=#2667 id=2667 data-nosnippet>2667</a>        <span class="kw">let </span>birthday = AccountBirthday::from_parts(
-<a href=#2668 id=2668 data-nosnippet>2668</a>            ChainState::empty(st.network().sapling.unwrap() - <span class="number">1</span>, BlockHash([<span class="number">0</span>; <span class="number">32</span>])),
-<a href=#2669 id=2669 data-nosnippet>2669</a>            <span class="prelude-val">None</span>,
-<a href=#2670 id=2670 data-nosnippet>2670</a>        );
-<a href=#2671 id=2671 data-nosnippet>2671</a>
-<a href=#2672 id=2672 data-nosnippet>2672</a>        <span class="kw">let </span>seed = Secret::new(<span class="macro">vec!</span>[<span class="number">0u8</span>; <span class="number">32</span>]);
-<a href=#2673 id=2673 data-nosnippet>2673</a>        <span class="kw">let </span>zip32_index_0 = zip32::AccountId::ZERO;
-<a href=#2674 id=2674 data-nosnippet>2674</a>        <span class="kw">let </span>seed_based = st
-<a href=#2675 id=2675 data-nosnippet>2675</a>            .wallet_mut()
-<a href=#2676 id=2676 data-nosnippet>2676</a>            .create_account(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>)
-<a href=#2677 id=2677 data-nosnippet>2677</a>            .unwrap();
-<a href=#2678 id=2678 data-nosnippet>2678</a>        <span class="kw">let </span>seed_based_account = st.wallet().get_account(seed_based.<span class="number">0</span>).unwrap().unwrap();
-<a href=#2679 id=2679 data-nosnippet>2679</a>        <span class="kw">let </span>ufvk = seed_based_account.ufvk().unwrap();
-<a href=#2680 id=2680 data-nosnippet>2680</a>
-<a href=#2681 id=2681 data-nosnippet>2681</a>        <span class="macro">assert_matches!</span>(
-<a href=#2682 id=2682 data-nosnippet>2682</a>            st.wallet_mut().import_account_hd(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, zip32_index_0, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>),
-<a href=#2683 id=2683 data-nosnippet>2683</a>            <span class="prelude-val">Err</span>(SqliteClientError::AccountCollision(id)) <span class="kw">if </span>id == seed_based.<span class="number">0</span>);
-<a href=#2684 id=2684 data-nosnippet>2684</a>
-<a href=#2685 id=2685 data-nosnippet>2685</a>        check_collisions(
-<a href=#2686 id=2686 data-nosnippet>2686</a>            <span class="kw-2">&amp;mut </span>st,
-<a href=#2687 id=2687 data-nosnippet>2687</a>            ufvk,
-<a href=#2688 id=2688 data-nosnippet>2688</a>            <span class="kw-2">&amp;</span>birthday,
-<a href=#2689 id=2689 data-nosnippet>2689</a>            |e| <span class="macro">matches!</span>(e, SqliteClientError::AccountCollision(id) <span class="kw">if </span><span class="kw-2">*</span>id == seed_based.<span class="number">0</span>),
-<a href=#2690 id=2690 data-nosnippet>2690</a>        );
-<a href=#2691 id=2691 data-nosnippet>2691</a>    }
-<a href=#2692 id=2692 data-nosnippet>2692</a>
-<a href=#2693 id=2693 data-nosnippet>2693</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#2694 id=2694 data-nosnippet>2694</a>    #[test]
-<a href=#2695 id=2695 data-nosnippet>2695</a>    </span><span class="kw">fn </span>transparent_receivers() {
-<a href=#2696 id=2696 data-nosnippet>2696</a>        <span class="kw">use </span>std::collections::BTreeSet;
-<a href=#2697 id=2697 data-nosnippet>2697</a>
-<a href=#2698 id=2698 data-nosnippet>2698</a>        <span class="kw">use crate</span>::{
-<a href=#2699 id=2699 data-nosnippet>2699</a>            testing::BlockCache, wallet::transparent::transaction_data_requests, GapLimits,
-<a href=#2700 id=2700 data-nosnippet>2700</a>        };
-<a href=#2701 id=2701 data-nosnippet>2701</a>        <span class="kw">use </span>zcash_client_backend::data_api::TransactionDataRequest;
-<a href=#2702 id=2702 data-nosnippet>2702</a>
-<a href=#2703 id=2703 data-nosnippet>2703</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
-<a href=#2704 id=2704 data-nosnippet>2704</a>            .with_data_store_factory(TestDbFactory::default())
-<a href=#2705 id=2705 data-nosnippet>2705</a>            .with_block_cache(BlockCache::new())
-<a href=#2706 id=2706 data-nosnippet>2706</a>            .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
-<a href=#2707 id=2707 data-nosnippet>2707</a>            .build();
-<a href=#2708 id=2708 data-nosnippet>2708</a>        <span class="kw">let </span>account = st.test_account().unwrap();
-<a href=#2709 id=2709 data-nosnippet>2709</a>        <span class="kw">let </span>ufvk = account.usk().to_unified_full_viewing_key();
-<a href=#2710 id=2710 data-nosnippet>2710</a>        <span class="kw">let </span>(taddr, <span class="kw">_</span>) = account.usk().default_transparent_address();
-<a href=#2711 id=2711 data-nosnippet>2711</a>        <span class="kw">let </span>birthday = account.birthday().height();
-<a href=#2712 id=2712 data-nosnippet>2712</a>        <span class="kw">let </span>account_id = account.id();
-<a href=#2713 id=2713 data-nosnippet>2713</a>
-<a href=#2714 id=2714 data-nosnippet>2714</a>        <span class="kw">let </span>receivers = st
-<a href=#2715 id=2715 data-nosnippet>2715</a>            .wallet()
-<a href=#2716 id=2716 data-nosnippet>2716</a>            .get_transparent_receivers(account.id(), <span class="bool-val">false</span>)
-<a href=#2717 id=2717 data-nosnippet>2717</a>            .unwrap();
-<a href=#2718 id=2718 data-nosnippet>2718</a>
-<a href=#2719 id=2719 data-nosnippet>2719</a>        <span class="comment">// The receiver for the default UA should be in the set.
-<a href=#2720 id=2720 data-nosnippet>2720</a>        </span><span class="macro">assert!</span>(receivers.contains_key(
-<a href=#2721 id=2721 data-nosnippet>2721</a>            ufvk.default_address(UnifiedAddressRequest::AllAvailableKeys)
-<a href=#2722 id=2722 data-nosnippet>2722</a>                .expect(<span class="string">"A valid default address exists for the UFVK"</span>)
-<a href=#2723 id=2723 data-nosnippet>2723</a>                .<span class="number">0
-<a href=#2724 id=2724 data-nosnippet>2724</a>                </span>.transparent()
-<a href=#2725 id=2725 data-nosnippet>2725</a>                .unwrap()
-<a href=#2726 id=2726 data-nosnippet>2726</a>        ));
-<a href=#2727 id=2727 data-nosnippet>2727</a>
-<a href=#2728 id=2728 data-nosnippet>2728</a>        <span class="comment">// The default t-addr should be in the set.
-<a href=#2729 id=2729 data-nosnippet>2729</a>        </span><span class="macro">assert!</span>(receivers.contains_key(<span class="kw-2">&amp;</span>taddr));
-<a href=#2730 id=2730 data-nosnippet>2730</a>
-<a href=#2731 id=2731 data-nosnippet>2731</a>        <span class="comment">// The chain tip height must be known in order to query for data requests.
-<a href=#2732 id=2732 data-nosnippet>2732</a>        </span>st.wallet_mut().update_chain_tip(birthday).unwrap();
+<a href=#2667 id=2667 data-nosnippet>2667</a>    <span class="attr">#[test]
+<a href=#2668 id=2668 data-nosnippet>2668</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>create_account_then_conflicts() {
+<a href=#2669 id=2669 data-nosnippet>2669</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
+<a href=#2670 id=2670 data-nosnippet>2670</a>            .with_data_store_factory(TestDbFactory::default())
+<a href=#2671 id=2671 data-nosnippet>2671</a>            .build();
+<a href=#2672 id=2672 data-nosnippet>2672</a>
+<a href=#2673 id=2673 data-nosnippet>2673</a>        <span class="kw">let </span>birthday = AccountBirthday::from_parts(
+<a href=#2674 id=2674 data-nosnippet>2674</a>            ChainState::empty(st.network().sapling.unwrap() - <span class="number">1</span>, BlockHash([<span class="number">0</span>; <span class="number">32</span>])),
+<a href=#2675 id=2675 data-nosnippet>2675</a>            <span class="prelude-val">None</span>,
+<a href=#2676 id=2676 data-nosnippet>2676</a>        );
+<a href=#2677 id=2677 data-nosnippet>2677</a>
+<a href=#2678 id=2678 data-nosnippet>2678</a>        <span class="kw">let </span>seed = Secret::new(<span class="macro">vec!</span>[<span class="number">0u8</span>; <span class="number">32</span>]);
+<a href=#2679 id=2679 data-nosnippet>2679</a>        <span class="kw">let </span>zip32_index_0 = zip32::AccountId::ZERO;
+<a href=#2680 id=2680 data-nosnippet>2680</a>        <span class="kw">let </span>seed_based = st
+<a href=#2681 id=2681 data-nosnippet>2681</a>            .wallet_mut()
+<a href=#2682 id=2682 data-nosnippet>2682</a>            .create_account(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>)
+<a href=#2683 id=2683 data-nosnippet>2683</a>            .unwrap();
+<a href=#2684 id=2684 data-nosnippet>2684</a>        <span class="kw">let </span>seed_based_account = st.wallet().get_account(seed_based.<span class="number">0</span>).unwrap().unwrap();
+<a href=#2685 id=2685 data-nosnippet>2685</a>        <span class="kw">let </span>ufvk = seed_based_account.ufvk().unwrap();
+<a href=#2686 id=2686 data-nosnippet>2686</a>
+<a href=#2687 id=2687 data-nosnippet>2687</a>        <span class="macro">assert_matches!</span>(
+<a href=#2688 id=2688 data-nosnippet>2688</a>            st.wallet_mut().import_account_hd(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, zip32_index_0, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>),
+<a href=#2689 id=2689 data-nosnippet>2689</a>            <span class="prelude-val">Err</span>(SqliteClientError::AccountCollision(id)) <span class="kw">if </span>id == seed_based.<span class="number">0</span>);
+<a href=#2690 id=2690 data-nosnippet>2690</a>
+<a href=#2691 id=2691 data-nosnippet>2691</a>        check_collisions(
+<a href=#2692 id=2692 data-nosnippet>2692</a>            <span class="kw-2">&amp;mut </span>st,
+<a href=#2693 id=2693 data-nosnippet>2693</a>            ufvk,
+<a href=#2694 id=2694 data-nosnippet>2694</a>            <span class="kw-2">&amp;</span>birthday,
+<a href=#2695 id=2695 data-nosnippet>2695</a>            |e| <span class="macro">matches!</span>(e, SqliteClientError::AccountCollision(id) <span class="kw">if </span><span class="kw-2">*</span>id == seed_based.<span class="number">0</span>),
+<a href=#2696 id=2696 data-nosnippet>2696</a>        );
+<a href=#2697 id=2697 data-nosnippet>2697</a>    }
+<a href=#2698 id=2698 data-nosnippet>2698</a>
+<a href=#2699 id=2699 data-nosnippet>2699</a>    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#2700 id=2700 data-nosnippet>2700</a>    #[test]
+<a href=#2701 id=2701 data-nosnippet>2701</a>    </span><span class="kw">fn </span>transparent_receivers() {
+<a href=#2702 id=2702 data-nosnippet>2702</a>        <span class="kw">use </span>std::collections::BTreeSet;
+<a href=#2703 id=2703 data-nosnippet>2703</a>
+<a href=#2704 id=2704 data-nosnippet>2704</a>        <span class="kw">use crate</span>::{
+<a href=#2705 id=2705 data-nosnippet>2705</a>            testing::BlockCache, wallet::transparent::transaction_data_requests, GapLimits,
+<a href=#2706 id=2706 data-nosnippet>2706</a>        };
+<a href=#2707 id=2707 data-nosnippet>2707</a>        <span class="kw">use </span>zcash_client_backend::data_api::TransactionDataRequest;
+<a href=#2708 id=2708 data-nosnippet>2708</a>
+<a href=#2709 id=2709 data-nosnippet>2709</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
+<a href=#2710 id=2710 data-nosnippet>2710</a>            .with_data_store_factory(TestDbFactory::default())
+<a href=#2711 id=2711 data-nosnippet>2711</a>            .with_block_cache(BlockCache::new())
+<a href=#2712 id=2712 data-nosnippet>2712</a>            .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
+<a href=#2713 id=2713 data-nosnippet>2713</a>            .build();
+<a href=#2714 id=2714 data-nosnippet>2714</a>        <span class="kw">let </span>account = st.test_account().unwrap();
+<a href=#2715 id=2715 data-nosnippet>2715</a>        <span class="kw">let </span>ufvk = account.usk().to_unified_full_viewing_key();
+<a href=#2716 id=2716 data-nosnippet>2716</a>        <span class="kw">let </span>(taddr, <span class="kw">_</span>) = account.usk().default_transparent_address();
+<a href=#2717 id=2717 data-nosnippet>2717</a>        <span class="kw">let </span>birthday = account.birthday().height();
+<a href=#2718 id=2718 data-nosnippet>2718</a>        <span class="kw">let </span>account_id = account.id();
+<a href=#2719 id=2719 data-nosnippet>2719</a>
+<a href=#2720 id=2720 data-nosnippet>2720</a>        <span class="kw">let </span>receivers = st
+<a href=#2721 id=2721 data-nosnippet>2721</a>            .wallet()
+<a href=#2722 id=2722 data-nosnippet>2722</a>            .get_transparent_receivers(account.id(), <span class="bool-val">false</span>)
+<a href=#2723 id=2723 data-nosnippet>2723</a>            .unwrap();
+<a href=#2724 id=2724 data-nosnippet>2724</a>
+<a href=#2725 id=2725 data-nosnippet>2725</a>        <span class="comment">// The receiver for the default UA should be in the set.
+<a href=#2726 id=2726 data-nosnippet>2726</a>        </span><span class="macro">assert!</span>(receivers.contains_key(
+<a href=#2727 id=2727 data-nosnippet>2727</a>            ufvk.default_address(UnifiedAddressRequest::AllAvailableKeys)
+<a href=#2728 id=2728 data-nosnippet>2728</a>                .expect(<span class="string">"A valid default address exists for the UFVK"</span>)
+<a href=#2729 id=2729 data-nosnippet>2729</a>                .<span class="number">0
+<a href=#2730 id=2730 data-nosnippet>2730</a>                </span>.transparent()
+<a href=#2731 id=2731 data-nosnippet>2731</a>                .unwrap()
+<a href=#2732 id=2732 data-nosnippet>2732</a>        ));
 <a href=#2733 id=2733 data-nosnippet>2733</a>
-<a href=#2734 id=2734 data-nosnippet>2734</a>        <span class="comment">// Transaction data requests should include a request for each ephemeral address
-<a href=#2735 id=2735 data-nosnippet>2735</a>        </span><span class="kw">let </span>ephemeral_addrs = st
-<a href=#2736 id=2736 data-nosnippet>2736</a>            .wallet()
-<a href=#2737 id=2737 data-nosnippet>2737</a>            .get_known_ephemeral_addresses(account_id, <span class="prelude-val">None</span>)
-<a href=#2738 id=2738 data-nosnippet>2738</a>            .unwrap();
+<a href=#2734 id=2734 data-nosnippet>2734</a>        <span class="comment">// The default t-addr should be in the set.
+<a href=#2735 id=2735 data-nosnippet>2735</a>        </span><span class="macro">assert!</span>(receivers.contains_key(<span class="kw-2">&amp;</span>taddr));
+<a href=#2736 id=2736 data-nosnippet>2736</a>
+<a href=#2737 id=2737 data-nosnippet>2737</a>        <span class="comment">// The chain tip height must be known in order to query for data requests.
+<a href=#2738 id=2738 data-nosnippet>2738</a>        </span>st.wallet_mut().update_chain_tip(birthday).unwrap();
 <a href=#2739 id=2739 data-nosnippet>2739</a>
-<a href=#2740 id=2740 data-nosnippet>2740</a>        <span class="macro">assert_eq!</span>(
-<a href=#2741 id=2741 data-nosnippet>2741</a>            ephemeral_addrs.len(),
-<a href=#2742 id=2742 data-nosnippet>2742</a>            GapLimits::default().ephemeral() <span class="kw">as </span>usize
-<a href=#2743 id=2743 data-nosnippet>2743</a>        );
-<a href=#2744 id=2744 data-nosnippet>2744</a>
-<a href=#2745 id=2745 data-nosnippet>2745</a>        st.wallet_mut()
-<a href=#2746 id=2746 data-nosnippet>2746</a>            .db_mut()
-<a href=#2747 id=2747 data-nosnippet>2747</a>            .schedule_ephemeral_address_checks()
-<a href=#2748 id=2748 data-nosnippet>2748</a>            .unwrap();
-<a href=#2749 id=2749 data-nosnippet>2749</a>        <span class="kw">let </span>data_requests =
-<a href=#2750 id=2750 data-nosnippet>2750</a>            transaction_data_requests(st.wallet().conn(), <span class="kw-2">&amp;</span>st.wallet().db().params).unwrap();
-<a href=#2751 id=2751 data-nosnippet>2751</a>
-<a href=#2752 id=2752 data-nosnippet>2752</a>        <span class="kw">let </span>base_time = st.wallet().db().clock.now();
-<a href=#2753 id=2753 data-nosnippet>2753</a>        <span class="kw">let </span>day = Duration::from_secs(<span class="number">60 </span>* <span class="number">60 </span>* <span class="number">24</span>);
-<a href=#2754 id=2754 data-nosnippet>2754</a>        <span class="kw">let </span><span class="kw-2">mut </span>check_times = BTreeSet::new();
-<a href=#2755 id=2755 data-nosnippet>2755</a>        <span class="kw">for </span>(addr, <span class="kw">_</span>) <span class="kw">in </span>ephemeral_addrs {
-<a href=#2756 id=2756 data-nosnippet>2756</a>            <span class="kw">let </span>has_valid_request = data_requests.iter().any(|req| <span class="kw">match </span>req {
-<a href=#2757 id=2757 data-nosnippet>2757</a>                TransactionDataRequest::TransactionsInvolvingAddress {
-<a href=#2758 id=2758 data-nosnippet>2758</a>                    address,
-<a href=#2759 id=2759 data-nosnippet>2759</a>                    request_at: <span class="prelude-val">Some</span>(t),
-<a href=#2760 id=2760 data-nosnippet>2760</a>                    ..
-<a href=#2761 id=2761 data-nosnippet>2761</a>                } =&gt; {
-<a href=#2762 id=2762 data-nosnippet>2762</a>                    <span class="kw-2">*</span>address == addr &amp;&amp; <span class="kw-2">*</span>t &gt; base_time &amp;&amp; {
-<a href=#2763 id=2763 data-nosnippet>2763</a>                        <span class="kw">let </span>t_delta = t.duration_since(base_time).unwrap();
-<a href=#2764 id=2764 data-nosnippet>2764</a>                        <span class="comment">// This is an imprecise check; the objective of the randomized time
-<a href=#2765 id=2765 data-nosnippet>2765</a>                        // selection is that all ephemeral address checks be performed within a
-<a href=#2766 id=2766 data-nosnippet>2766</a>                        // day, and that their check times be distinct.
-<a href=#2767 id=2767 data-nosnippet>2767</a>                        </span><span class="kw">let </span>result = t_delta &lt; day &amp;&amp; !check_times.contains(t);
-<a href=#2768 id=2768 data-nosnippet>2768</a>                        check_times.insert(<span class="kw-2">*</span>t);
-<a href=#2769 id=2769 data-nosnippet>2769</a>                        result
-<a href=#2770 id=2770 data-nosnippet>2770</a>                    }
-<a href=#2771 id=2771 data-nosnippet>2771</a>                }
-<a href=#2772 id=2772 data-nosnippet>2772</a>                <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
-<a href=#2773 id=2773 data-nosnippet>2773</a>            });
-<a href=#2774 id=2774 data-nosnippet>2774</a>
-<a href=#2775 id=2775 data-nosnippet>2775</a>            <span class="macro">assert!</span>(has_valid_request);
-<a href=#2776 id=2776 data-nosnippet>2776</a>        }
-<a href=#2777 id=2777 data-nosnippet>2777</a>    }
-<a href=#2778 id=2778 data-nosnippet>2778</a>
-<a href=#2779 id=2779 data-nosnippet>2779</a>    <span class="attr">#[cfg(feature = <span class="string">"unstable"</span>)]
-<a href=#2780 id=2780 data-nosnippet>2780</a>    #[test]
-<a href=#2781 id=2781 data-nosnippet>2781</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>fsblockdb_api() {
-<a href=#2782 id=2782 data-nosnippet>2782</a>        <span class="kw">use </span>zcash_client_backend::data_api::testing::AddressType;
-<a href=#2783 id=2783 data-nosnippet>2783</a>        <span class="kw">use </span>zcash_protocol::{consensus::NetworkConstants, value::Zatoshis};
+<a href=#2740 id=2740 data-nosnippet>2740</a>        <span class="comment">// Transaction data requests should include a request for each ephemeral address
+<a href=#2741 id=2741 data-nosnippet>2741</a>        </span><span class="kw">let </span>ephemeral_addrs = st
+<a href=#2742 id=2742 data-nosnippet>2742</a>            .wallet()
+<a href=#2743 id=2743 data-nosnippet>2743</a>            .get_known_ephemeral_addresses(account_id, <span class="prelude-val">None</span>)
+<a href=#2744 id=2744 data-nosnippet>2744</a>            .unwrap();
+<a href=#2745 id=2745 data-nosnippet>2745</a>
+<a href=#2746 id=2746 data-nosnippet>2746</a>        <span class="macro">assert_eq!</span>(
+<a href=#2747 id=2747 data-nosnippet>2747</a>            ephemeral_addrs.len(),
+<a href=#2748 id=2748 data-nosnippet>2748</a>            GapLimits::default().ephemeral() <span class="kw">as </span>usize
+<a href=#2749 id=2749 data-nosnippet>2749</a>        );
+<a href=#2750 id=2750 data-nosnippet>2750</a>
+<a href=#2751 id=2751 data-nosnippet>2751</a>        st.wallet_mut()
+<a href=#2752 id=2752 data-nosnippet>2752</a>            .db_mut()
+<a href=#2753 id=2753 data-nosnippet>2753</a>            .schedule_ephemeral_address_checks()
+<a href=#2754 id=2754 data-nosnippet>2754</a>            .unwrap();
+<a href=#2755 id=2755 data-nosnippet>2755</a>        <span class="kw">let </span>data_requests =
+<a href=#2756 id=2756 data-nosnippet>2756</a>            transaction_data_requests(st.wallet().conn(), <span class="kw-2">&amp;</span>st.wallet().db().params).unwrap();
+<a href=#2757 id=2757 data-nosnippet>2757</a>
+<a href=#2758 id=2758 data-nosnippet>2758</a>        <span class="kw">let </span>base_time = st.wallet().db().clock.now();
+<a href=#2759 id=2759 data-nosnippet>2759</a>        <span class="kw">let </span>day = Duration::from_secs(<span class="number">60 </span>* <span class="number">60 </span>* <span class="number">24</span>);
+<a href=#2760 id=2760 data-nosnippet>2760</a>        <span class="kw">let </span><span class="kw-2">mut </span>check_times = BTreeSet::new();
+<a href=#2761 id=2761 data-nosnippet>2761</a>        <span class="kw">for </span>(addr, <span class="kw">_</span>) <span class="kw">in </span>ephemeral_addrs {
+<a href=#2762 id=2762 data-nosnippet>2762</a>            <span class="kw">let </span>has_valid_request = data_requests.iter().any(|req| <span class="kw">match </span>req {
+<a href=#2763 id=2763 data-nosnippet>2763</a>                TransactionDataRequest::TransactionsInvolvingAddress {
+<a href=#2764 id=2764 data-nosnippet>2764</a>                    address,
+<a href=#2765 id=2765 data-nosnippet>2765</a>                    request_at: <span class="prelude-val">Some</span>(t),
+<a href=#2766 id=2766 data-nosnippet>2766</a>                    ..
+<a href=#2767 id=2767 data-nosnippet>2767</a>                } =&gt; {
+<a href=#2768 id=2768 data-nosnippet>2768</a>                    <span class="kw-2">*</span>address == addr &amp;&amp; <span class="kw-2">*</span>t &gt; base_time &amp;&amp; {
+<a href=#2769 id=2769 data-nosnippet>2769</a>                        <span class="kw">let </span>t_delta = t.duration_since(base_time).unwrap();
+<a href=#2770 id=2770 data-nosnippet>2770</a>                        <span class="comment">// This is an imprecise check; the objective of the randomized time
+<a href=#2771 id=2771 data-nosnippet>2771</a>                        // selection is that all ephemeral address checks be performed within a
+<a href=#2772 id=2772 data-nosnippet>2772</a>                        // day, and that their check times be distinct.
+<a href=#2773 id=2773 data-nosnippet>2773</a>                        </span><span class="kw">let </span>result = t_delta &lt; day &amp;&amp; !check_times.contains(t);
+<a href=#2774 id=2774 data-nosnippet>2774</a>                        check_times.insert(<span class="kw-2">*</span>t);
+<a href=#2775 id=2775 data-nosnippet>2775</a>                        result
+<a href=#2776 id=2776 data-nosnippet>2776</a>                    }
+<a href=#2777 id=2777 data-nosnippet>2777</a>                }
+<a href=#2778 id=2778 data-nosnippet>2778</a>                <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+<a href=#2779 id=2779 data-nosnippet>2779</a>            });
+<a href=#2780 id=2780 data-nosnippet>2780</a>
+<a href=#2781 id=2781 data-nosnippet>2781</a>            <span class="macro">assert!</span>(has_valid_request);
+<a href=#2782 id=2782 data-nosnippet>2782</a>        }
+<a href=#2783 id=2783 data-nosnippet>2783</a>    }
 <a href=#2784 id=2784 data-nosnippet>2784</a>
-<a href=#2785 id=2785 data-nosnippet>2785</a>        <span class="kw">use </span><span class="kw">crate</span>::testing::FsBlockCache;
-<a href=#2786 id=2786 data-nosnippet>2786</a>
-<a href=#2787 id=2787 data-nosnippet>2787</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
-<a href=#2788 id=2788 data-nosnippet>2788</a>            .with_data_store_factory(TestDbFactory::default())
-<a href=#2789 id=2789 data-nosnippet>2789</a>            .with_block_cache(FsBlockCache::new())
-<a href=#2790 id=2790 data-nosnippet>2790</a>            .build();
-<a href=#2791 id=2791 data-nosnippet>2791</a>
-<a href=#2792 id=2792 data-nosnippet>2792</a>        <span class="comment">// The BlockMeta DB starts off empty.
-<a href=#2793 id=2793 data-nosnippet>2793</a>        </span><span class="macro">assert_eq!</span>(st.cache().get_max_cached_height().unwrap(), <span class="prelude-val">None</span>);
-<a href=#2794 id=2794 data-nosnippet>2794</a>
-<a href=#2795 id=2795 data-nosnippet>2795</a>        <span class="comment">// Generate some fake CompactBlocks.
-<a href=#2796 id=2796 data-nosnippet>2796</a>        </span><span class="kw">let </span>seed = [<span class="number">0u8</span>; <span class="number">32</span>];
-<a href=#2797 id=2797 data-nosnippet>2797</a>        <span class="kw">let </span>hd_account_index = zip32::AccountId::ZERO;
-<a href=#2798 id=2798 data-nosnippet>2798</a>        <span class="kw">let </span>extsk = sapling::spending_key(<span class="kw-2">&amp;</span>seed, st.network().coin_type(), hd_account_index);
-<a href=#2799 id=2799 data-nosnippet>2799</a>        <span class="kw">let </span>dfvk = extsk.to_diversifiable_full_viewing_key();
-<a href=#2800 id=2800 data-nosnippet>2800</a>        <span class="kw">let </span>(h1, meta1, <span class="kw">_</span>) = st.generate_next_block(
-<a href=#2801 id=2801 data-nosnippet>2801</a>            <span class="kw-2">&amp;</span>dfvk,
-<a href=#2802 id=2802 data-nosnippet>2802</a>            AddressType::DefaultExternal,
-<a href=#2803 id=2803 data-nosnippet>2803</a>            Zatoshis::const_from_u64(<span class="number">5</span>),
-<a href=#2804 id=2804 data-nosnippet>2804</a>        );
-<a href=#2805 id=2805 data-nosnippet>2805</a>        <span class="kw">let </span>(h2, meta2, <span class="kw">_</span>) = st.generate_next_block(
-<a href=#2806 id=2806 data-nosnippet>2806</a>            <span class="kw-2">&amp;</span>dfvk,
-<a href=#2807 id=2807 data-nosnippet>2807</a>            AddressType::DefaultExternal,
-<a href=#2808 id=2808 data-nosnippet>2808</a>            Zatoshis::const_from_u64(<span class="number">10</span>),
-<a href=#2809 id=2809 data-nosnippet>2809</a>        );
-<a href=#2810 id=2810 data-nosnippet>2810</a>
-<a href=#2811 id=2811 data-nosnippet>2811</a>        <span class="comment">// The BlockMeta DB is not updated until we do so explicitly.
-<a href=#2812 id=2812 data-nosnippet>2812</a>        </span><span class="macro">assert_eq!</span>(st.cache().get_max_cached_height().unwrap(), <span class="prelude-val">None</span>);
-<a href=#2813 id=2813 data-nosnippet>2813</a>
-<a href=#2814 id=2814 data-nosnippet>2814</a>        <span class="comment">// Inform the BlockMeta DB about the newly-persisted CompactBlocks.
-<a href=#2815 id=2815 data-nosnippet>2815</a>        </span>st.cache().write_block_metadata(<span class="kw-2">&amp;</span>[meta1, meta2]).unwrap();
+<a href=#2785 id=2785 data-nosnippet>2785</a>    <span class="attr">#[cfg(feature = <span class="string">"unstable"</span>)]
+<a href=#2786 id=2786 data-nosnippet>2786</a>    #[test]
+<a href=#2787 id=2787 data-nosnippet>2787</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>fsblockdb_api() {
+<a href=#2788 id=2788 data-nosnippet>2788</a>        <span class="kw">use </span>zcash_client_backend::data_api::testing::AddressType;
+<a href=#2789 id=2789 data-nosnippet>2789</a>        <span class="kw">use </span>zcash_protocol::{consensus::NetworkConstants, value::Zatoshis};
+<a href=#2790 id=2790 data-nosnippet>2790</a>
+<a href=#2791 id=2791 data-nosnippet>2791</a>        <span class="kw">use </span><span class="kw">crate</span>::testing::FsBlockCache;
+<a href=#2792 id=2792 data-nosnippet>2792</a>
+<a href=#2793 id=2793 data-nosnippet>2793</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
+<a href=#2794 id=2794 data-nosnippet>2794</a>            .with_data_store_factory(TestDbFactory::default())
+<a href=#2795 id=2795 data-nosnippet>2795</a>            .with_block_cache(FsBlockCache::new())
+<a href=#2796 id=2796 data-nosnippet>2796</a>            .build();
+<a href=#2797 id=2797 data-nosnippet>2797</a>
+<a href=#2798 id=2798 data-nosnippet>2798</a>        <span class="comment">// The BlockMeta DB starts off empty.
+<a href=#2799 id=2799 data-nosnippet>2799</a>        </span><span class="macro">assert_eq!</span>(st.cache().get_max_cached_height().unwrap(), <span class="prelude-val">None</span>);
+<a href=#2800 id=2800 data-nosnippet>2800</a>
+<a href=#2801 id=2801 data-nosnippet>2801</a>        <span class="comment">// Generate some fake CompactBlocks.
+<a href=#2802 id=2802 data-nosnippet>2802</a>        </span><span class="kw">let </span>seed = [<span class="number">0u8</span>; <span class="number">32</span>];
+<a href=#2803 id=2803 data-nosnippet>2803</a>        <span class="kw">let </span>hd_account_index = zip32::AccountId::ZERO;
+<a href=#2804 id=2804 data-nosnippet>2804</a>        <span class="kw">let </span>extsk = sapling::spending_key(<span class="kw-2">&amp;</span>seed, st.network().coin_type(), hd_account_index);
+<a href=#2805 id=2805 data-nosnippet>2805</a>        <span class="kw">let </span>dfvk = extsk.to_diversifiable_full_viewing_key();
+<a href=#2806 id=2806 data-nosnippet>2806</a>        <span class="kw">let </span>(h1, meta1, <span class="kw">_</span>) = st.generate_next_block(
+<a href=#2807 id=2807 data-nosnippet>2807</a>            <span class="kw-2">&amp;</span>dfvk,
+<a href=#2808 id=2808 data-nosnippet>2808</a>            AddressType::DefaultExternal,
+<a href=#2809 id=2809 data-nosnippet>2809</a>            Zatoshis::const_from_u64(<span class="number">5</span>),
+<a href=#2810 id=2810 data-nosnippet>2810</a>        );
+<a href=#2811 id=2811 data-nosnippet>2811</a>        <span class="kw">let </span>(h2, meta2, <span class="kw">_</span>) = st.generate_next_block(
+<a href=#2812 id=2812 data-nosnippet>2812</a>            <span class="kw-2">&amp;</span>dfvk,
+<a href=#2813 id=2813 data-nosnippet>2813</a>            AddressType::DefaultExternal,
+<a href=#2814 id=2814 data-nosnippet>2814</a>            Zatoshis::const_from_u64(<span class="number">10</span>),
+<a href=#2815 id=2815 data-nosnippet>2815</a>        );
 <a href=#2816 id=2816 data-nosnippet>2816</a>
-<a href=#2817 id=2817 data-nosnippet>2817</a>        <span class="comment">// The BlockMeta DB now sees blocks up to height 2.
-<a href=#2818 id=2818 data-nosnippet>2818</a>        </span><span class="macro">assert_eq!</span>(st.cache().get_max_cached_height().unwrap(), <span class="prelude-val">Some</span>(h2),);
-<a href=#2819 id=2819 data-nosnippet>2819</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h1).unwrap(), <span class="prelude-val">Some</span>(meta1));
-<a href=#2820 id=2820 data-nosnippet>2820</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h2).unwrap(), <span class="prelude-val">Some</span>(meta2));
-<a href=#2821 id=2821 data-nosnippet>2821</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h2 + <span class="number">1</span>).unwrap(), <span class="prelude-val">None</span>);
+<a href=#2817 id=2817 data-nosnippet>2817</a>        <span class="comment">// The BlockMeta DB is not updated until we do so explicitly.
+<a href=#2818 id=2818 data-nosnippet>2818</a>        </span><span class="macro">assert_eq!</span>(st.cache().get_max_cached_height().unwrap(), <span class="prelude-val">None</span>);
+<a href=#2819 id=2819 data-nosnippet>2819</a>
+<a href=#2820 id=2820 data-nosnippet>2820</a>        <span class="comment">// Inform the BlockMeta DB about the newly-persisted CompactBlocks.
+<a href=#2821 id=2821 data-nosnippet>2821</a>        </span>st.cache().write_block_metadata(<span class="kw-2">&amp;</span>[meta1, meta2]).unwrap();
 <a href=#2822 id=2822 data-nosnippet>2822</a>
-<a href=#2823 id=2823 data-nosnippet>2823</a>        <span class="comment">// Rewinding to height 1 should cause the metadata for height 2 to be deleted.
-<a href=#2824 id=2824 data-nosnippet>2824</a>        </span>st.cache().truncate_to_height(h1).unwrap();
-<a href=#2825 id=2825 data-nosnippet>2825</a>        <span class="macro">assert_eq!</span>(st.cache().get_max_cached_height().unwrap(), <span class="prelude-val">Some</span>(h1));
-<a href=#2826 id=2826 data-nosnippet>2826</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h1).unwrap(), <span class="prelude-val">Some</span>(meta1));
-<a href=#2827 id=2827 data-nosnippet>2827</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h2).unwrap(), <span class="prelude-val">None</span>);
-<a href=#2828 id=2828 data-nosnippet>2828</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h2 + <span class="number">1</span>).unwrap(), <span class="prelude-val">None</span>);
-<a href=#2829 id=2829 data-nosnippet>2829</a>    }
-<a href=#2830 id=2830 data-nosnippet>2830</a>}</code></pre></div></section></main></body></html>
+<a href=#2823 id=2823 data-nosnippet>2823</a>        <span class="comment">// The BlockMeta DB now sees blocks up to height 2.
+<a href=#2824 id=2824 data-nosnippet>2824</a>        </span><span class="macro">assert_eq!</span>(st.cache().get_max_cached_height().unwrap(), <span class="prelude-val">Some</span>(h2),);
+<a href=#2825 id=2825 data-nosnippet>2825</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h1).unwrap(), <span class="prelude-val">Some</span>(meta1));
+<a href=#2826 id=2826 data-nosnippet>2826</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h2).unwrap(), <span class="prelude-val">Some</span>(meta2));
+<a href=#2827 id=2827 data-nosnippet>2827</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h2 + <span class="number">1</span>).unwrap(), <span class="prelude-val">None</span>);
+<a href=#2828 id=2828 data-nosnippet>2828</a>
+<a href=#2829 id=2829 data-nosnippet>2829</a>        <span class="comment">// Rewinding to height 1 should cause the metadata for height 2 to be deleted.
+<a href=#2830 id=2830 data-nosnippet>2830</a>        </span>st.cache().truncate_to_height(h1).unwrap();
+<a href=#2831 id=2831 data-nosnippet>2831</a>        <span class="macro">assert_eq!</span>(st.cache().get_max_cached_height().unwrap(), <span class="prelude-val">Some</span>(h1));
+<a href=#2832 id=2832 data-nosnippet>2832</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h1).unwrap(), <span class="prelude-val">Some</span>(meta1));
+<a href=#2833 id=2833 data-nosnippet>2833</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h2).unwrap(), <span class="prelude-val">None</span>);
+<a href=#2834 id=2834 data-nosnippet>2834</a>        <span class="macro">assert_eq!</span>(st.cache().find_block(h2 + <span class="number">1</span>).unwrap(), <span class="prelude-val">None</span>);
+<a href=#2835 id=2835 data-nosnippet>2835</a>    }
+<a href=#2836 id=2836 data-nosnippet>2836</a>}</code></pre></div></section></main></body></html>

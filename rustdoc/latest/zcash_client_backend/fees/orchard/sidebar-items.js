@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["EmptyBundleView"],"trait":["BundleView","InputView","OutputView"]};

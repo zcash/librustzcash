@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["GlobalUpdater","Updater"]};
+window.SIDEBAR_ITEMS = {"enum":["OrchardError"],"struct":["GlobalUpdater","Updater"]};

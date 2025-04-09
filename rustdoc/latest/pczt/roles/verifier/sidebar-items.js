@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["Verifier"]};
+window.SIDEBAR_ITEMS = {"enum":["OrchardError"],"struct":["Verifier"]};
