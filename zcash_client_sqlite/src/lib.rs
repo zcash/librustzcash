@@ -2420,6 +2420,12 @@ mod tests {
             .wallet()
             .get_last_generated_address_matching(account.id(), shielded_only_request)
             .unwrap();
+        // If transparent support is disabled, then the previous "transparent-including"
+        // addresses were actually shielded-only, so we do have a current address.
+        #[cfg(not(feature = "transparent-inputs"))]
+        assert_eq!(cur_shielded_only, addr2);
+        // If transparent support is enabled, this works as expected.
+        #[cfg(feature = "transparent-inputs")]
         assert!(cur_shielded_only.is_none());
 
         let di_lower = st
