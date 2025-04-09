@@ -43,7 +43,6 @@ runs:
         lightwalletd-tonic
         sync
         temporary-zcashd
-        transparent-inputs
         unstable
         unstable-serialization
         unstable-spanning-tree

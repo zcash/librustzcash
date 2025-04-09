@@ -15,18 +15,24 @@ jobs:
         target:
           - Linux
         state:
-          - no-Orchard
+          - transparent
+          - Sapling-only
           - Orchard
+          - all-pools
           - NU7
 
         include:
           - target: Linux
             os: ubuntu-latest-8cores
 
+          - state: transparent
+            extra_flags: transparent-inputs
           - state: Orchard
             extra_flags: orchard
+          - state: all-pools
+            extra_flags: orchard transparent-inputs
           - state: NU7
-            extra_flags: orchard
+            extra_flags: orchard transparent-inputs
             rustflags: '--cfg zcash_unstable="nu7"'
 
     env:
@@ -69,8 +75,10 @@ jobs:
           - macOS
           - Windows
         state:
-          - no-Orchard
+          - transparent
+          - Sapling-only
           - Orchard
+          - all-pools
           - NU7
 
         include:
@@ -79,10 +87,14 @@ jobs:
           - target: Windows
             os: windows-latest-8cores
 
+          - state: transparent
+            extra_flags: transparent-inputs
           - state: Orchard
             extra_flags: orchard
+          - state: all-pools
+            extra_flags: orchard transparent-inputs
           - state: NU7
-            extra_flags: orchard
+            extra_flags: orchard transparent-inputs
             rustflags: '--cfg zcash_unstable="nu7"'
 
         exclude:
@@ -128,17 +140,24 @@ jobs:
         target:
           - Linux
         state:
+          - transparent
+          - Sapling-only
           - Orchard
+          - all-pools
           - NU7
 
         include:
           - target: Linux
             os: ubuntu-latest-8cores
 
+          - state: transparent
+            extra_flags: transparent-inputs
           - state: Orchard
             extra_flags: orchard
+          - state: all-pools
+            extra_flags: orchard transparent-inputs
           - state: NU7
-            extra_flags: orchard
+            extra_flags: orchard transparent-inputs
             rustflags: '--cfg zcash_unstable="nu7"'
 
     env:
@@ -208,7 +227,6 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          all-pools: false
           extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
         with:
