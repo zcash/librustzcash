@@ -15,6 +15,7 @@ workspace.
 ### Added
 - `zcash_client_sqlite::wallet::init::WalletMigrator`
 - `zcash_client_sqlite::wallet::init::migrations`
+- `zcash_client_sqlite::WalletDb::params`
 
 ### Changed
 - Migrated to `zcash_address 0.8`, `zip321 0.4`, `zcash_transparent 0.3`,
