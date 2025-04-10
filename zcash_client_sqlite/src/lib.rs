@@ -380,6 +380,12 @@ impl Borrow<rusqlite::Connection> for SqlTransaction<'_> {
     }
 }
 
+impl<C, P, CL, R> WalletDb<C, P, CL, R> {
+    pub fn params(&self) -> &P {
+        &self.params
+    }
+}
+
 impl<P, CL, R> WalletDb<Connection, P, CL, R> {
     /// Construct a [`WalletDb`] instance that connects to the wallet database stored at the
     /// specified path.
