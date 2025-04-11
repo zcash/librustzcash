@@ -15,6 +15,7 @@ workspace.
 ### Added
 - `zcash_client_backend::data_api::TransactionsInvolvingAddress`
 - `zcash_client_backend::data_api::TransactionDataRequest::transactions_involving_address`
+- `zcash_client_backend::data_api::AccountBirthday::from_parts`
 
 ### Changed
 - `zcash_client_backend::data_api`:
