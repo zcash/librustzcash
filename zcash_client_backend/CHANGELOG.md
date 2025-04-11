@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::AccountBirthday::from_parts`
+
 ## [0.19.0] - 2025-05-30
 
 ### Added
