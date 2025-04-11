@@ -9,6 +9,11 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::keys::zcashd`, a module containing utilities that are useful
+  for interacting with key data from legacy zcashd wallets, has been added
+  under a newly-added `zcashd-compat` feature flag.
+
 ## [0.9.0] - PLANNED
 
 ### Added
