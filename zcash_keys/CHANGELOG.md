@@ -9,6 +9,9 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_keys::keys::transparent` under a new `transparent-key-encoding`
   feature flag.
+- `zcash_keys::keys::zcashd`, a module containing utilities that are useful
+  for interacting with key data from legacy zcashd wallets, has been added
+  under a newly-added `zcashd-compat` feature flag.
 
 ### Changed
 - Migrated to `zcash_address 0.8`.

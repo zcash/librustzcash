@@ -34,6 +34,7 @@ rand_core.workspace = true
 bech32.workspace = true
 bs58.workspace = true
 core2.workspace = true
+regex.workspace = true
 
 # - Transparent protocols
 bip32 = { workspace = true, optional = true }
@@ -68,16 +69,20 @@ byteorder = { workspace = true, optional = true }
 # - Digests
 blake2b_simd = { workspace = true }
 
+# - Zcashd compatibility
+bip0039 = { workspace = true, optional = true }
+
 [dev-dependencies]
+assert_matches.workspace = true
 hex.workspace = true
 jubjub.workspace = true
 proptest.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
 rand_core.workspace = true
+secp256k1 = { workspace = true, features = ["rand"] }
 orchard = { workspace = true, features = ["circuit"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
-rand_chacha.workspace = true
-rand.workspace = true
-secp256k1 = { workspace = true, features = ["rand"] }
 
 [features]
 default = ["std"]
@@ -115,6 +120,9 @@ unstable-frost = ["orchard"]
 
 ## Exposes unstable APIs. Their behaviour may change at any time.
 unstable = ["dep:byteorder"]
+
+## Exposes APIs that are useful for interacting with legacy zcashd key material
+zcashd-compat = ["dep:bip0039"]
 
 [badges]
 maintenance = { status = "actively-developed" }
