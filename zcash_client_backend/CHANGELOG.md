@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::AccountBirthday::from_parts`
+
 ### Changed
 - Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`.
 
