@@ -558,7 +558,7 @@ fn init_wallet_db_internal<
 ) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
     let seed = seed.map(Rc::new);
 
-    verify_sqlite_version_compatibility(wdb.conn.borrow()).map_err(MigratorError::Adapter)?;
+    dbg!(verify_sqlite_version_compatibility(wdb.conn.borrow()).map_err(MigratorError::Adapter))?;
 
     // Turn off foreign key enforcement, to ensure that table replacement does not break foreign
     // key references in table definitions.
@@ -586,7 +586,8 @@ fn init_wallet_db_internal<
     // Now that we are certain that the migrations table exists, verify that if the database
     // already contains account data, any stored UFVKs correspond to the same network that the
     // migrations are being run for.
-    verify_network_compatibility(wdb.conn.borrow(), &wdb.params).map_err(MigratorError::Adapter)?;
+    dbg!(verify_network_compatibility(wdb.conn.borrow(), &wdb.params)
+        .map_err(MigratorError::Adapter))?;
 
     // Now create the adapter that we're actually going to use to perform the migrations, and
     // proceed.
