@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- A `zcashd-compat` feature flag has been added in service of being able to
+  import data from the zcashd `wallet.dat` format. For additional information
+  refer to the `zcash_client_backend-0.20.0` release notes.
+
+### Changed
+- Migrated to `zcash_client_backend-0.20.0`
+
 ## [0.17.0] - PLANNED
 
 ### Added

@@ -106,6 +106,9 @@ use {
     },
 };
 
+#[cfg(feature = "zcashd-compat")]
+use zcash_keys::keys::zcashd;
+
 #[cfg(feature = "test-dependencies")]
 use ambassador::delegatable_trait;
 
@@ -352,14 +355,22 @@ impl AccountBalance {
 pub struct Zip32Derivation {
     seed_fingerprint: SeedFingerprint,
     account_index: zip32::AccountId,
+    #[cfg(feature = "zcashd-compat")]
+    legacy_address_index: Option<zcashd::LegacyAddressIndex>,
 }
 
 impl Zip32Derivation {
     /// Constructs new derivation metadata from its constituent parts.
-    pub fn new(seed_fingerprint: SeedFingerprint, account_index: zip32::AccountId) -> Self {
+    pub fn new(
+        seed_fingerprint: SeedFingerprint,
+        account_index: zip32::AccountId,
+        #[cfg(feature = "zcashd-compat")] legacy_address_index: Option<zcashd::LegacyAddressIndex>,
+    ) -> Self {
         Self {
             seed_fingerprint,
             account_index,
+            #[cfg(feature = "zcashd-compat")]
+            legacy_address_index,
         }
     }
 
@@ -371,6 +382,11 @@ impl Zip32Derivation {
     /// Returns the account-level index in the ZIP 32 derivation path.
     pub fn account_index(&self) -> zip32::AccountId {
         self.account_index
+    }
+
+    #[cfg(feature = "zcashd-compat")]
+    pub fn legacy_address_index(&self) -> Option<zcashd::LegacyAddressIndex> {
+        self.legacy_address_index
     }
 }
 
@@ -1362,8 +1378,7 @@ pub trait WalletRead {
     /// [`zip32::AccountId`], if any.
     fn get_derived_account(
         &self,
-        seed: &SeedFingerprint,
-        account_id: zip32::AccountId,
+        derivation: &Zip32Derivation,
     ) -> Result<Option<Self::Account>, Self::Error>;
 
     /// Verifies that the given seed corresponds to the viewing key for the specified account.

@@ -684,10 +684,16 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
 
     fn get_derived_account(
         &self,
-        seed: &SeedFingerprint,
-        account_id: zip32::AccountId,
+        derivation: &Zip32Derivation,
     ) -> Result<Option<Self::Account>, Self::Error> {
-        wallet::get_derived_account(self.conn.borrow(), &self.params, seed, account_id)
+        wallet::get_derived_account(
+            self.conn.borrow(),
+            &self.params,
+            derivation.seed_fingerprint(),
+            derivation.account_index(),
+            #[cfg(feature = "zcashd-compat")]
+            derivation.legacy_address_index(),
+        )
     }
 
     fn validate_seed(
@@ -1155,7 +1161,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 &wdb.params,
                 account_name,
                 &AccountSource::Derived {
-                    derivation: Zip32Derivation::new(seed_fingerprint, zip32_account_index),
+                    derivation: Zip32Derivation::new(
+                        seed_fingerprint,
+                        zip32_account_index,
+                        #[cfg(feature = "zcashd-compat")]
+                        None,
+                    ),
                     key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
@@ -1194,7 +1205,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 &wdb.params,
                 account_name,
                 &AccountSource::Derived {
-                    derivation: Zip32Derivation::new(seed_fingerprint, account_index),
+                    derivation: Zip32Derivation::new(
+                        seed_fingerprint,
+                        account_index,
+                        #[cfg(feature = "zcashd-compat")]
+                        None,
+                    ),
                     key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
