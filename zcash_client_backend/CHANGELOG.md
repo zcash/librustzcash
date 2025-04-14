@@ -21,6 +21,10 @@ and this library adheres to Rust's notion of
   - `Client::set_dormant`
   - `DormantMode`
 - `zcash_client_backend::data_api::AccountBirthday::from_parts`
+- A `zcashd-compat` feature flag has been added in service of being able to
+  import data from the zcashd `wallet.dat` format. The following additions
+  are guarded by this feature flag:
+  - `zcash_client_backend::data_api::Zip32Derivation::legacy_address_index`
 
 ### Changed
 - `zcash_client_backend::data_api`:
@@ -37,6 +41,9 @@ and this library adheres to Rust's notion of
   - The exchanges in `http::cryptex::exchanges` will now retry queries once on
     failure, and will use isolated circuits for the retry if the error looks
     like a blocked Tor exit node.
+- `zcash_client_backend::data_api::Zip32Derivation::new` arguments have changed
+  when the `zcashd-compat` feature is enabled; in this circumstance, `new` takes
+  an additional `legacy_address_index` argument.
 
 ## [0.18.0] - 2025-03-19
 

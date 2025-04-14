@@ -27,7 +27,7 @@ use zcash_client_backend::{
     },
     wallet::{TransparentAddressMetadata, WalletTransparentOutput},
 };
-use zcash_keys::keys::UnifiedIncomingViewingKey;
+use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedIncomingViewingKey};
 use zcash_keys::{
     address::Address,
     encoding::AddressCodec,
@@ -458,7 +458,31 @@ pub(crate) fn generate_address_range<P: consensus::Parameters>(
     let account = get_account_internal(conn, params, account_id)?
         .ok_or_else(|| SqliteClientError::AccountUnknown)?;
 
-    if !account.uivk().has_transparent() {
+    generate_address_range_internal(
+        conn,
+        params,
+        account_id,
+        &account.uivk(),
+        account.ufvk(),
+        key_scope,
+        request,
+        range_to_store,
+        require_key,
+    )
+}
+
+pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_id: AccountRef,
+    account_uivk: &UnifiedIncomingViewingKey,
+    account_ufvk: Option<&UnifiedFullViewingKey>,
+    key_scope: KeyScope,
+    request: UnifiedAddressRequest,
+    range_to_store: Range<NonHardenedChildIndex>,
+    require_key: bool,
+) -> Result<(), SqliteClientError> {
+    if !account_uivk.has_transparent() {
         if require_key {
             return Err(SqliteClientError::AddressGeneration(
                 AddressGenerationError::KeyNotAvailable(Typecode::P2pkh),
@@ -471,11 +495,10 @@ pub(crate) fn generate_address_range<P: consensus::Parameters>(
     let gen_addrs = |key_scope: KeyScope, index: NonHardenedChildIndex| {
         Ok::<_, SqliteClientError>(match key_scope {
             KeyScope::Zip32(zip32::Scope::External) => {
-                generate_external_address(&account.uivk(), request, index)?
+                generate_external_address(account_uivk, request, index)?
             }
             KeyScope::Zip32(zip32::Scope::Internal) => {
-                let internal_address = account
-                    .ufvk()
+                let internal_address = account_ufvk
                     .and_then(|k| k.transparent())
                     .expect("presence of transparent key was checked above.")
                     .derive_internal_ivk()?
@@ -483,8 +506,7 @@ pub(crate) fn generate_address_range<P: consensus::Parameters>(
                 (Address::from(internal_address), internal_address)
             }
             KeyScope::Ephemeral => {
-                let ephemeral_address = account
-                    .ufvk()
+                let ephemeral_address = account_ufvk
                     .and_then(|k| k.transparent())
                     .expect("presence of transparent key was checked above.")
                     .derive_ephemeral_ivk()?
