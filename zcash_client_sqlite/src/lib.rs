@@ -224,7 +224,7 @@ impl AccountUuid {
 /// This is an ephemeral value for efficiently and generically working with accounts in a
 /// [`WalletDb`]. To reference accounts in external contexts, use [`AccountUuid`].
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
-pub(crate) struct AccountRef(u32);
+pub(crate) struct AccountRef(i64);
 
 /// This implementation is retained under `#[cfg(test)]` for pre-AccountUuid testing.
 #[cfg(test)]
@@ -377,6 +377,12 @@ pub struct SqlTransaction<'conn>(pub(crate) &'conn rusqlite::Transaction<'conn>)
 impl Borrow<rusqlite::Connection> for SqlTransaction<'_> {
     fn borrow(&self) -> &rusqlite::Connection {
         self.0
+    }
+}
+
+impl<C, P, CL, R> WalletDb<C, P, CL, R> {
+    pub fn params(&self) -> &P {
+        &self.params
     }
 }
 
@@ -1145,7 +1151,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 &wdb.params,
                 account_name,
                 &AccountSource::Derived {
-                    derivation: Zip32Derivation::new(seed_fingerprint, zip32_account_index),
+                    derivation: Zip32Derivation::new(
+                        seed_fingerprint,
+                        zip32_account_index,
+                        #[cfg(feature = "zcashd-compat")]
+                        None,
+                    ),
                     key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
@@ -1184,7 +1195,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 &wdb.params,
                 account_name,
                 &AccountSource::Derived {
-                    derivation: Zip32Derivation::new(seed_fingerprint, account_index),
+                    derivation: Zip32Derivation::new(
+                        seed_fingerprint,
+                        account_index,
+                        #[cfg(feature = "zcashd-compat")]
+                        None,
+                    ),
                     key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
