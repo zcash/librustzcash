@@ -9,6 +9,34 @@ represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
 ## [Unreleased]
+### Added
+- `zcash_client_backend::fees`:
+  - `impl sapling::OutputView for Zatoshis`
+  - `impl orchard::OutputView for Zatoshis`
+- `zcash_client_backend::data_api::wallet`:
+  - `propose_send_max_transfer`: Selects transaction inputs, computes fees, and
+    constructs a proposal for a transaction (or series of them) that would spend all
+    the available funds from the given spend pools.
+  - `input_selection::propose_send_max`: Performs input selection and returns
+    a proposal for the construction of a transaction that sends the maximum
+    amount possible from a given account to the specified recipient ignoring
+    notes that are below MARGINAL_FEE amount.
+  - `zcash_client_sqlite::error::SqliteClientError`:
+    - An `IneligibleNotes` variant has been added. It is produced when
+      `spendable_notes` is called with `TargetValue::MaxSpendable`
+      and there are funds that haven't been confirmed and all spendable notes
+      can't be selected.
+
+### Changed
+- `zcash_client_backend::data_api`:
+  - `TargetValue` has a new `MaxSpendable` variant.
+  - `select_spendable_notes`: parameter `target_value` now is a `TargetValue`.
+    Existing calls to this function that used `Zatoshis` now use
+    `TargetValue::AtLeast(Zatoshis)`
+  - `zcash_client_backend::fees::ChangeStrategy`: Associated error type of this trait
+    has to be of `FeeRule` kind as well.
+  - `zcash_client_backend::proposal::ProposalError` has added variant:
+    - `Zip321(Zip321Error)`
 
 ## [0.20.0] - PLANNED
 

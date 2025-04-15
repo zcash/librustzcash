@@ -36,6 +36,30 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn send_max_single_step_proposed_transfer<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_single_step_proposed_transfer::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn send_max_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_multi_step_max_amount_proposed_transfer::<
+        T,
+        _,
+    >(
+        TestDbFactory::default(),
+        BlockCache::new(),
+        |e, _, expected_bad_index| {
+            matches!(
+                e,
+                crate::error::SqliteClientError::ReachedGapLimit(_, bad_index)
+                if bad_index == &expected_bad_index)
+        },
+    )
+}
+
 pub(crate) fn send_with_multiple_change_outputs<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_with_multiple_change_outputs::<T>(
         TestDbFactory::default(),

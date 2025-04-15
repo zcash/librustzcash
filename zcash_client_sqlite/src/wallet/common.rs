@@ -13,7 +13,7 @@ use zcash_client_backend::{
     },
     wallet::ReceivedNote,
 };
-use zcash_primitives::transaction::TxId;
+use zcash_primitives::transaction::{fees::zip317, TxId};
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     value::{BalanceError, Zatoshis},
@@ -22,7 +22,10 @@ use zcash_protocol::{
 
 use crate::{
     error::SqliteClientError,
-    wallet::{get_anchor_height, pool_code, scanning::priority_code},
+    wallet::{
+        get_anchor_height, pool_code,
+        scanning::{parse_priority_code, priority_code},
+    },
     AccountUuid, ReceivedNoteId, SAPLING_TABLES_PREFIX,
 };
 
@@ -182,7 +185,18 @@ where
 {
     match get_anchor_height(conn, target_height, confirmations_policy.trusted())? {
         Some(anchor_height) => match target_value {
-            TargetValue::AtLeast(zats) => select_minimum_spendable_notes(
+            TargetValue::MaxSpendable => select_all_spendable_notes(
+                conn,
+                params,
+                account,
+                target_height,
+                anchor_height,
+                confirmations_policy,
+                exclude,
+                protocol,
+                to_spendable_note,
+            ),
+            TargetValue::AtLeast(zats) => select_spendable_notes_matching_value(
                 conn,
                 params,
                 account,
@@ -199,8 +213,169 @@ where
     }
 }
 
+/// Selects all the spendable notes with value greater than [`zip317::MARGINAL_FEE`] and for the
+/// specified shielded protocols from a given account, excepting any explicitly excluded note
+/// identifiers.
+///
+/// Implementation details:
+///
+/// - Notes with individual value *below* the ``MARGINAL_FEE`` will be ignored
+/// - Note spendability is determined using the `anchor_height`
+/// - The `to_spendable_note` function is expected to return `Ok(None)` in the case that spending
+///   key details cannot be determined.
 #[allow(clippy::too_many_arguments)]
-fn select_minimum_spendable_notes<P: consensus::Parameters, F, Note>(
+fn select_all_spendable_notes<P: consensus::Parameters, F, Note>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    target_height: TargetHeight,
+    anchor_height: BlockHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    protocol: ShieldedProtocol,
+    to_spendable_note: F,
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
+where
+    F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+{
+    let TableConstants {
+        table_prefix,
+        output_index_col,
+        note_reconstruction_cols,
+        ..
+    } = table_constants::<SqliteClientError>(protocol)?;
+
+    // Select all unspent notes belonging to the given account, ignoring dust notes; if any notes
+    // are unspendable because they are not yet mined or the shard that contains the note is
+    // not fully scanned, we will return an error.
+    let mut stmt_select_notes = conn.prepare_cached(&format!(
+        "SELECT
+             rn.id AS id, t.txid, rn.{output_index_col},
+             rn.diversifier, rn.value, {note_reconstruction_cols}, rn.commitment_tree_position,
+             accounts.ufvk as ufvk, rn.recipient_key_scope,
+             t.block AS mined_height,
+             scan_state.max_priority,
+             MAX(tt.block) AS max_shielding_input_height
+         FROM {table_prefix}_received_notes rn
+         INNER JOIN accounts ON accounts.id = rn.account_id
+         INNER JOIN transactions t ON t.id_tx = rn.tx
+         LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
+            ON rn.commitment_tree_position >= scan_state.start_position
+            AND rn.commitment_tree_position < scan_state.end_position_exclusive
+         LEFT OUTER JOIN transparent_received_output_spends ros
+            ON ros.transaction_id = t.id_tx
+         LEFT OUTER JOIN transparent_received_outputs tro
+            ON tro.id = ros.transparent_received_output_id
+            AND tro.account_id = accounts.id
+         LEFT OUTER JOIN transactions tt
+            ON tt.id_tx = tro.transaction_id
+         WHERE accounts.uuid = :account_uuid
+         AND rn.value > :min_value
+         AND accounts.ufvk IS NOT NULL
+         AND recipient_key_scope IS NOT NULL
+         AND nf IS NOT NULL
+         AND (
+            t.block IS NOT NULL -- the receiving tx is mined
+            OR t.expiry_height IS NULL -- the receiving tx will not expire
+            OR t.expiry_height >= :target_height -- the receiving tx is unexpired
+         )
+         AND rn.id NOT IN rarray(:exclude)
+         AND rn.id NOT IN (
+           SELECT {table_prefix}_received_note_id
+           FROM {table_prefix}_received_note_spends rns
+           JOIN transactions stx ON stx.id_tx = rns.transaction_id
+           WHERE stx.block IS NOT NULL -- the spending tx is mined
+           OR stx.expiry_height IS NULL -- the spending tx will not expire
+           OR stx.expiry_height >= :target_height -- the spending tx is unexpired
+         )
+         GROUP BY
+            rn.id, t.txid, rn.{output_index_col},
+            rn.diversifier, rn.value, {note_reconstruction_cols}, rn.commitment_tree_position,
+            ufvk, rn.recipient_key_scope, 
+            t.block, scan_state.max_priority"
+    ))?;
+
+    let excluded: Vec<Value> = exclude
+        .iter()
+        .filter_map(|ReceivedNoteId(p, n)| {
+            if *p == protocol {
+                Some(Value::from(*n))
+            } else {
+                None
+            }
+        })
+        .collect();
+    let excluded_ptr = Rc::new(excluded);
+
+    let row_results = stmt_select_notes.query_and_then(
+        named_params![
+            ":account_uuid": account.0,
+            ":target_height": &u32::from(target_height),
+            ":exclude": &excluded_ptr,
+            ":min_value": u64::from(zip317::MARGINAL_FEE)
+        ],
+        |row| -> Result<_, SqliteClientError> {
+            let result_note = to_spendable_note(params, row)?;
+            let max_priority_raw = row.get::<_, Option<i64>>("max_priority")?;
+            let shard_scan_priority = max_priority_raw
+                .map(|code| {
+                    parse_priority_code(code).ok_or_else(|| {
+                        SqliteClientError::CorruptedData(format!(
+                            "Priority code {code} not recognized."
+                        ))
+                    })
+                })
+                .transpose()?;
+
+            Ok((result_note, shard_scan_priority))
+        },
+    )?;
+
+    let trusted_height = target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
+    let untrusted_height =
+        target_height.saturating_sub(u32::from(confirmations_policy.untrusted()));
+
+    row_results
+        .map(|t| match t? {
+            (Some(note), Some(shard_priority))
+                if shard_priority <= ScanPriority::Scanned
+                    && note.mined_height().iter().any(|h| h <= &anchor_height) =>
+            {
+                let received_height = note
+                    .mined_height()
+                    .expect("mined height checked to be non-null");
+
+                let has_confirmations = match note.spending_key_scope() {
+                    Scope::Internal => {
+                        // The note was has at least `trusted` confirmations.
+                        received_height <= trusted_height &&
+                        // And, if the note was the output of a shielding transaction, its
+                        // have at least `untrusted` confirmations
+                        note.max_shielding_input_height().iter().all(|h| h <= &untrusted_height)
+                    }
+                    Scope::External => received_height <= untrusted_height,
+                };
+
+                if has_confirmations {
+                    Ok(note)
+                } else {
+                    Err(SqliteClientError::IneligibleNotes)
+                }
+            }
+            _ => Err(SqliteClientError::IneligibleNotes),
+        })
+        .collect::<Result<_, _>>()
+}
+
+/// Selects the set of spendable notes whose sum will be equal or greater that the
+/// specified ``target_value`` in Zatoshis from the specified shielded protocols excluding
+/// the ones present in the ``exclude`` slice.
+///
+/// - Implementation details
+///   - Notes with individual value *below* the ``MARGINAL_FEE`` will be ignored
+///   - Note spendability is determined using the `anchor_height`
+#[allow(clippy::too_many_arguments)]
+fn select_spendable_notes_matching_value<P: consensus::Parameters, F, Note>(
     conn: &Connection,
     params: &P,
     account: AccountUuid,
@@ -262,8 +437,7 @@ where
              LEFT OUTER JOIN transactions tt
                 ON tt.id_tx = tro.transaction_id
              WHERE accounts.uuid = :account_uuid
-             -- FIXME #1316, allow selection of dust inputs
-             AND rn.value > 5000
+             AND rn.value > :min_value
              AND accounts.ufvk IS NOT NULL
              AND recipient_key_scope IS NOT NULL
              AND nf IS NOT NULL
@@ -318,9 +492,10 @@ where
             ":target_height": &u32::from(target_height),
             ":target_value": &u64::from(target_value),
             ":exclude": &excluded_ptr,
-            ":scanned_priority": priority_code(&ScanPriority::Scanned)
+            ":scanned_priority": priority_code(&ScanPriority::Scanned),
+            ":min_value": u64::from(zip317::MARGINAL_FEE)
         ],
-        |r| -> Result<_, SqliteClientError> { to_spendable_note(params, r) },
+        |r| to_spendable_note(params, r),
     )?;
 
     let trusted_height = target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
@@ -336,7 +511,7 @@ where
                         .mined_height()
                         .expect("mined height checked to be non-null");
 
-                    let is_spendable = match note.spending_key_scope() {
+                    let has_confirmations = match note.spending_key_scope() {
                         Scope::Internal => {
                             // The note was has at least `trusted` confirmations.
                             received_height <= trusted_height &&
@@ -347,7 +522,7 @@ where
                         Scope::External => received_height <= untrusted_height,
                     };
 
-                    is_spendable.then_some(note)
+                    has_confirmations.then_some(note)
                 })
                 .transpose()
         })

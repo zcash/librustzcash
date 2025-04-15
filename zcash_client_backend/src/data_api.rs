@@ -157,6 +157,7 @@ pub enum NullifierQuery {
 #[derive(Debug, Clone, Copy)]
 pub enum TargetValue {
     AtLeast(Zatoshis),
+    MaxSpendable,
 }
 
 /// Balance information for a value within a single pool in an account.
@@ -824,6 +825,7 @@ impl<NoteRef> NoteRetention<NoteRef> for SimpleNoteRetention {
 }
 
 /// Spendable shielded outputs controlled by the wallet.
+#[derive(Debug)]
 pub struct SpendableNotes<NoteRef> {
     sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
     #[cfg(feature = "orchard")]

@@ -8,7 +8,7 @@ use std::{
 use nonempty::NonEmpty;
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{consensus::BlockHeight, value::Zatoshis, PoolType, ShieldedProtocol};
-use zip321::TransactionRequest;
+use zip321::{TransactionRequest, Zip321Error};
 
 use crate::{
     data_api::wallet::TargetHeight,
@@ -49,6 +49,8 @@ pub enum ProposalError {
     PaymentPoolsMismatch,
     /// The proposal tried to spend a change output. Mark the `ChangeValue` as ephemeral if this is intended.
     SpendsChange(StepOutput),
+    /// The proposal results in an invalid payment request according to ZIP-321.
+    Zip321(Zip321Error),
     /// A proposal step created an ephemeral output that was not spent in any later step.
     #[cfg(feature = "transparent-inputs")]
     EphemeralOutputLeftUnspent(StepOutput),
@@ -106,6 +108,10 @@ impl Display for ProposalError {
             ProposalError::SpendsChange(r) => write!(
                 f,
                 "The proposal attempts to spends the change output created at step {r:?}.",
+            ),
+            ProposalError::Zip321(r) => write!(
+                f,
+                "The proposal results in an invalid payment {r:?}.",
             ),
             #[cfg(feature = "transparent-inputs")]
             ProposalError::EphemeralOutputLeftUnspent(r) => write!(

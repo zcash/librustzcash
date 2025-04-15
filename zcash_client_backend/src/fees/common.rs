@@ -52,7 +52,7 @@ pub(crate) fn calculate_net_flows<NoteRefT: Clone, F: FeeRule, E>(
     transparent_outputs: &[impl transparent::OutputView],
     sapling: &impl sapling_fees::BundleView<NoteRefT>,
     #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
-    ephemeral_balance: Option<&EphemeralBalance>,
+    ephemeral_balance: Option<EphemeralBalance>,
 ) -> Result<NetFlows, ChangeError<E, NoteRefT>>
 where
     E: From<F::Error> + From<BalanceError>,
@@ -210,7 +210,7 @@ pub(crate) fn single_pool_output_balance<P: consensus::Parameters, NoteRefT: Clo
     sapling: &impl sapling_fees::BundleView<NoteRefT>,
     #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
     change_memo: Option<&MemoBytes>,
-    ephemeral_balance: Option<&EphemeralBalance>,
+    ephemeral_balance: Option<EphemeralBalance>,
 ) -> Result<TransactionBalance, ChangeError<E, NoteRefT>>
 where
     E: From<F::Error> + From<BalanceError>,
@@ -579,7 +579,7 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
     marginal_fee: Zatoshis,
     grace_actions: usize,
     possible_change: &[OutputManifest],
-    ephemeral_balance: Option<&EphemeralBalance>,
+    ephemeral_balance: Option<EphemeralBalance>,
 ) -> Result<(), ChangeError<E, NoteRefT>> {
     let mut t_dust: Vec<_> = transparent_inputs
         .iter()
