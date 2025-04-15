@@ -78,7 +78,7 @@ use zcash_primitives::{block::BlockHash, transaction::Transaction};
 use zcash_protocol::{
     consensus::BlockHeight,
     memo::{Memo, MemoBytes},
-    value::{BalanceError, Zatoshis},
+    value::{BalanceError, TargetValue, Zatoshis},
     ShieldedProtocol, TxId,
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
@@ -763,6 +763,27 @@ pub struct SpendableNotes<NoteRef> {
     orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
 }
 
+impl<R> SpendableNotes<R> {
+    pub fn total(&self) -> Zatoshis {
+        let total = self.sapling.iter().fold(Zatoshis::ZERO, |acc, n| {
+            (acc + Zatoshis::try_from(n.note().value().inner())
+                .expect("Note MUST have an in range value"))
+            .expect("Balance cannot overflow MAX_MONEY")
+        });
+
+        #[cfg(feature = "orchard")]
+        let total = (total
+            + self.orchard.iter().fold(Zatoshis::ZERO, |acc, n| {
+                (acc + Zatoshis::try_from(n.note().value().inner())
+                    .expect("Note MUST have an in range value"))
+                .expect("Balance cannot overflow MAX_MONEY")
+            }))
+        .expect("Balance cannot overflow MAX_MONEY");
+
+        total
+    }
+}
+
 /// A type describing the mined-ness of transactions that should be returned in response to a
 /// [`TransactionDataRequest`].
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1221,6 +1242,7 @@ pub trait InputSource {
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
+
 
     /// Returns metadata describing the structure of the wallet for the specified account.
     ///

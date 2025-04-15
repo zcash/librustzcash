@@ -11,7 +11,7 @@ use zcash_client_backend::{
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
     consensus::{self, BlockHeight},
-    value::{BalanceError, Zatoshis},
+    value::{BalanceError, TargetValue, Zatoshis},
     PoolType, ShieldedProtocol,
 };
 
@@ -129,6 +129,15 @@ where
     F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
     match target_value {
+        TargetValue::MaxSpendable => select_maximum_spendable_notes(
+            conn,
+            params,
+            account,
+            anchor_height,
+            exclude,
+            protocol,
+            to_spendable_note,
+        ),
         TargetValue::AtLeast(zats) => select_minimum_spendable_notes(
             conn,
             params,
@@ -142,6 +151,126 @@ where
     }
 }
 
+/// selects all the spendable notes available above ``MARGINAL_FEE`` amount from a given account
+/// and specified shielded protocols excluding the ones in the exclude slice.
+///
+/// - Implementation details:
+///   - Notes with individual value *below* the ``MARGINAL_FEE`` will be ignored
+///   - Note spendability is determined using the `anchor_height`
+#[allow(clippy::too_many_arguments)]
+fn select_maximum_spendable_notes<P: consensus::Parameters, F, Note>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    anchor_height: BlockHeight,
+    exclude: &[ReceivedNoteId],
+    protocol: ShieldedProtocol,
+    to_spendable_note: F,
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
+where
+    F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+{
+    let birthday_height = match wallet_birthday(conn)? {
+        Some(birthday) => birthday,
+        None => {
+            // the wallet birthday can only be unknown if there are no accounts in the wallet; in
+            // such a case, the wallet has no notes to spend.
+            return Ok(vec![]);
+        }
+    };
+
+    let (table_prefix, index_col, note_reconstruction_cols) = per_protocol_names(protocol);
+    if unscanned_tip_exists(conn, anchor_height, table_prefix)? {
+        return Ok(vec![]);
+    }
+
+    // The goal of this SQL statement is to select all the spendable notes above the
+    // MARGINAL_FEE (5000 zats).
+    // 1) Use a window function to create a view of all notes, ordered from oldest to
+    //    newest
+    //
+    // 2) Select all unspent notes in the desired account.
+    let mut stmt_select_notes = conn.prepare_cached(
+        &format!(
+            "WITH eligible AS (
+                 SELECT
+                     {table_prefix}_received_notes.id AS id, txid, {index_col},
+                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
+                     accounts.ufvk as ufvk, recipient_key_scope
+                 FROM {table_prefix}_received_notes
+                 INNER JOIN accounts
+                    ON accounts.id = {table_prefix}_received_notes.account_id
+                 INNER JOIN transactions
+                    ON transactions.id_tx = {table_prefix}_received_notes.tx
+                 WHERE accounts.uuid = :account_uuid
+                 AND {table_prefix}_received_notes.account_id = accounts.id
+                 AND value > 5000 -- FIXME #1316, allow selection of dust inputs
+                 AND accounts.ufvk IS NOT NULL
+                 AND recipient_key_scope IS NOT NULL
+                 AND nf IS NOT NULL
+                 AND commitment_tree_position IS NOT NULL
+                 AND transactions.block <= :anchor_height
+                 AND {table_prefix}_received_notes.id NOT IN rarray(:exclude)
+                 AND {table_prefix}_received_notes.id NOT IN (
+                   SELECT {table_prefix}_received_note_id
+                   FROM {table_prefix}_received_note_spends
+                   JOIN transactions stx ON stx.id_tx = transaction_id
+                   WHERE stx.block IS NOT NULL -- the spending tx is mined
+                   OR stx.expiry_height IS NULL -- the spending tx will not expire
+                   OR stx.expiry_height > :anchor_height -- the spending tx is unexpired
+                 )
+                 AND NOT EXISTS (
+                    SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges unscanned
+                    -- select all the unscanned ranges involving the shard containing this note
+                    WHERE {table_prefix}_received_notes.commitment_tree_position >= unscanned.start_position
+                    AND {table_prefix}_received_notes.commitment_tree_position < unscanned.end_position_exclusive
+                    -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
+                    AND unscanned.block_range_start <= :anchor_height
+                    -- exclude unscanned ranges that end below the wallet birthday
+                    AND unscanned.block_range_end > :wallet_birthday
+                 )
+             )
+             SELECT id, txid, {index_col},
+                    diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
+                    ufvk, recipient_key_scope
+             FROM eligible",
+        )
+    )?;
+
+    let excluded: Vec<Value> = exclude
+        .iter()
+        .filter_map(|ReceivedNoteId(p, n)| {
+            if *p == protocol {
+                Some(Value::from(*n))
+            } else {
+                None
+            }
+        })
+        .collect();
+    let excluded_ptr = Rc::new(excluded);
+
+    let notes = stmt_select_notes.query_and_then(
+        named_params![
+            ":account_uuid": account.0,
+            ":anchor_height": &u32::from(anchor_height),
+            ":exclude": &excluded_ptr,
+            ":wallet_birthday": u32::from(birthday_height)
+        ],
+        |r| to_spendable_note(params, r),
+    )?;
+
+    notes
+        .filter_map(|r| r.transpose())
+        .collect::<Result<_, _>>()
+}
+
+/// Selects the minimum set of spendable notes whose sum will be equal or greater that the
+/// specified ``target_value`` in Zatoshis from the specified shielded protocols excluding
+/// the ones present in the ``exclude`` slice.
+///
+/// - Implementation details
+///   - Notes with individual value *below* the ``MARGINAL_FEE`` will be ignored
+///   - Note spendability is determined using the `anchor_height`
 #[allow(clippy::too_many_arguments)]
 fn select_minimum_spendable_notes<P: consensus::Parameters, F, Note>(
     conn: &Connection,
