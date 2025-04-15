@@ -235,6 +235,17 @@ impl Mul<usize> for ZatBalance {
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
 pub struct Zatoshis(u64);
 
+
+/// Represents an intent of representing spendable value to reach a certain targeted
+/// amount. `MaxSpendable` refers to the intent of referring all the spendable
+/// value, whereas `MinValue(Zatoshis)` would refer to the an amount of `Zatoshis`
+/// that can cover at minimum the given zatoshis
+#[derive(Debug, Clone, Copy)]
+pub enum TargetValue {
+    MaxSpendable,
+    MinValue(Zatoshis)
+} 
+
 /// A struct that provides both the quotient and remainder of a division operation.
 pub struct QuotRem<A> {
     quotient: A,

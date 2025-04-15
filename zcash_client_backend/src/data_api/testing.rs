@@ -38,7 +38,7 @@ use zcash_protocol::{
     consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters as _},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
-    value::{ZatBalance, Zatoshis},
+    value::{TargetValue, ZatBalance, Zatoshis},
     ShieldedProtocol,
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
@@ -51,7 +51,7 @@ use super::{
     wallet::{
         create_proposed_transactions,
         input_selection::{GreedyInputSelector, InputSelector},
-        propose_standard_transfer_to_address, propose_transfer,
+        propose_send_max_transfer, propose_standard_transfer_to_address, propose_transfer,
     },
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
     AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
@@ -996,6 +996,38 @@ where
             input_selector,
             change_strategy,
             request,
+            min_confirmations,
+        )
+    }
+
+    /// Invokes [`propose_transfer`] with the given arguments.
+    #[allow(clippy::type_complexity)]
+    pub fn propose_send_max_transfer<InputsT, ChangeT>(
+        &mut self,
+        spend_from_account: <DbT as InputSource>::AccountId,
+        input_selector: &InputsT,
+        change_strategy: &ChangeT,
+        to: Address,
+        memo: Option<MemoBytes>,
+        min_confirmations: NonZeroU32,
+    ) -> Result<
+        Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
+        super::wallet::ProposeTransferErrT<DbT, Infallible, InputsT, ChangeT>,
+    >
+    where
+        InputsT: InputSelector<InputSource = DbT>,
+        ChangeT: ChangeStrategy<MetaSource = DbT>,
+    {
+        let network = self.network().clone();
+        propose_send_max_transfer::<_, _, _, _, Infallible>(
+            self.wallet_mut(),
+            &network,
+            spend_from_account,
+            &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard],
+            input_selector,
+            change_strategy,
+            &to,
+            memo,
             min_confirmations,
         )
     }

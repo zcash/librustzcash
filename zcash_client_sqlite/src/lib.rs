@@ -78,9 +78,13 @@ use zcash_primitives::{
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::Memo,
-    value::Zatoshis,
+    value::{TargetValue, Zatoshis},
     ShieldedProtocol,
 };
+
+#[cfg(any(test, feature = "test-dependencies"))]
+use zcash_protocol::value::Zatoshis;
+
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
