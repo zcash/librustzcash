@@ -80,6 +80,7 @@ use zcash_protocol::{
     memo::Memo,
     ShieldedProtocol,
 };
+
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};

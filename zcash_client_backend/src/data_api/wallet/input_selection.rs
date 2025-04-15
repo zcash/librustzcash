@@ -1,6 +1,6 @@
 //! Types related to the process of selecting inputs to be spent given a transaction request.
-
 use core::marker::PhantomData;
+use nonempty::NonEmpty;
 use std::{
     collections::BTreeMap,
     error,
@@ -8,12 +8,16 @@ use std::{
 };
 
 use ::transparent::bundle::TxOut;
-use nonempty::NonEmpty;
 use zcash_address::ConversionError;
 use zcash_keys::address::{Address, UnifiedAddress};
-use zcash_primitives::transaction::fees::FeeRule;
+use zcash_primitives::transaction::fees::{
+    transparent::InputSize,
+    zip317::{P2PKH_STANDARD_INPUT_SIZE, P2PKH_STANDARD_OUTPUT_SIZE},
+    FeeRule,
+};
 use zcash_protocol::{
     consensus::{self, BlockHeight},
+    memo::MemoBytes,
     value::{BalanceError, Zatoshis},
     PoolType, ShieldedProtocol,
 };
@@ -21,7 +25,7 @@ use zip321::TransactionRequest;
 
 use crate::{
     data_api::{InputSource, SimpleNoteRetention, SpendableNotes, TargetValue},
-    fees::{sapling, ChangeError, ChangeStrategy, TransactionBalance},
+    fees::{sapling, ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
 };
@@ -29,7 +33,7 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        fees::EphemeralBalance,
+        fees::ChangeValue,
         proposal::{Step, StepOutput, StepOutputIndex},
     },
     ::transparent::{address::TransparentAddress, bundle::OutPoint},
@@ -538,10 +542,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 .map_err(InputSelectorError::DataSource)?;
 
             #[cfg(not(feature = "transparent-inputs"))]
-            let ephemeral_balance = None;
+            let ephemeral_output_value = None;
 
             #[cfg(feature = "transparent-inputs")]
-            let (ephemeral_balance, tr1_balance_opt) = {
+            let (ephemeral_output_value, tr1_balance_opt) = {
                 if tr1_transparent_outputs.is_empty() {
                     (None, None)
                 } else {
@@ -561,7 +565,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             &sapling::EmptyBundleView,
                             #[cfg(feature = "orchard")]
                             &orchard_fees::EmptyBundleView,
-                            Some(&EphemeralBalance::Input(Zatoshis::ZERO)),
+                            Some(EphemeralBalance::Input(Zatoshis::ZERO)),
                             &wallet_meta,
                         ) {
                         Err(ChangeError::InsufficientFunds { required, .. }) => required,
@@ -582,15 +586,12 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         &sapling::EmptyBundleView,
                         #[cfg(feature = "orchard")]
                         &orchard_fees::EmptyBundleView,
-                        Some(&EphemeralBalance::Input(tr1_required_input_value)),
+                        Some(EphemeralBalance::Input(tr1_required_input_value)),
                         &wallet_meta,
                     )?;
                     assert_eq!(tr1_balance.total(), tr1_balance.fee_required());
 
-                    (
-                        Some(EphemeralBalance::Output(tr1_required_input_value)),
-                        Some(tr1_balance),
-                    )
+                    (Some(tr1_required_input_value), Some(tr1_balance))
                 }
             };
 
@@ -612,7 +613,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     &orchard_inputs[..],
                     &orchard_outputs[..],
                 ),
-                ephemeral_balance.as_ref(),
+                ephemeral_output_value.map(EphemeralBalance::Output),
                 &wallet_meta,
             );
 
@@ -636,14 +637,14 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         transaction_request,
                         payment_pools,
                         #[cfg(feature = "transparent-inputs")]
-                        ephemeral_balance
-                            .zip(tr1_balance_opt)
-                            .map(|(balance, tr1_balance)| EphemeralStepConfig {
-                                balance,
+                        ephemeral_output_value.zip(tr1_balance_opt).map(
+                            |(ephemeral_output_value, tr1_balance)| EphemeralStepConfig {
+                                ephemeral_output_value,
                                 tr1_balance,
-                                tr1_payment_pools,
                                 tr1_payments,
-                            }),
+                                tr1_payment_pools,
+                            },
+                        ),
                     )
                     .map_err(InputSelectorError::Proposal);
                 }
@@ -693,12 +694,220 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
     }
 }
 
+pub(crate) fn propose_send_max<ParamsT, InputSourceT, FeeRuleT>(
+    params: &ParamsT,
+    wallet_db: &InputSourceT,
+    fee_rule: &FeeRuleT,
+    source_account: InputSourceT::AccountId,
+    spend_pools: &[ShieldedProtocol],
+    anchor_height: BlockHeight,
+    target_height: BlockHeight,
+    recipient: &Address,
+    memo: Option<MemoBytes>,
+) -> Result<
+    Proposal<FeeRuleT, InputSourceT::NoteRef>,
+    InputSelectorError<InputSourceT::Error, BalanceError, FeeRuleT::Error, InputSourceT::NoteRef>,
+>
+where
+    ParamsT: consensus::Parameters,
+    InputSourceT: InputSource,
+    FeeRuleT: FeeRule + Clone,
+{
+    let spendable_notes = wallet_db
+        .select_spendable_notes(
+            source_account,
+            TargetValue::MaxSpendable,
+            spend_pools,
+            anchor_height,
+            &[],
+        )
+        .map_err(InputSelectorError::DataSource)?;
+
+    let input_total = spendable_notes
+        .total_value()
+        .map_err(InputSelectorError::Selection)?;
+
+    let mut payment_pools = BTreeMap::new();
+
+    let sapling_output_count = {
+        // we require a sapling output if the recipient has a Sapling receiver but not an Orchard
+        // receiver.
+        let requested_sapling_outputs: usize = if recipient.can_receive_as(PoolType::SAPLING)
+            && !recipient.can_receive_as(PoolType::ORCHARD)
+        {
+            payment_pools.insert(0, PoolType::SAPLING);
+            1
+        } else {
+            0
+        };
+
+        ::sapling::builder::BundleType::DEFAULT
+            .num_outputs(spendable_notes.sapling.len(), requested_sapling_outputs)
+            .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?
+    };
+
+    let use_sapling = !spendable_notes.sapling().is_empty() || sapling_output_count > 0;
+
+    #[cfg(feature = "orchard")]
+    let orchard_action_count = {
+        let requested_orchard_actions: usize = if recipient.can_receive_as(PoolType::ORCHARD) {
+            payment_pools.insert(0, PoolType::ORCHARD);
+            1
+        } else {
+            0
+        };
+        orchard::builder::BundleType::DEFAULT
+            .num_actions(spendable_notes.orchard.len(), requested_orchard_actions)
+            .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?
+    };
+    #[cfg(not(feature = "orchard"))]
+    let orchard_action_count: usize = 0;
+
+    #[cfg(feature = "orchard")]
+    let use_orchard = orchard_action_count > 0;
+
+    let (tr0_fee, tr1_fee) = match recipient {
+        Address::Sapling(_) => fee_rule
+            .fee_required(
+                params,
+                target_height,
+                [],
+                [],
+                spendable_notes.sapling().len(),
+                sapling_output_count,
+                orchard_action_count,
+            )
+            .map(|fee| (fee, None)),
+        Address::Transparent(_) => fee_rule
+            .fee_required(
+                params,
+                target_height,
+                [],
+                [P2PKH_STANDARD_OUTPUT_SIZE],
+                spendable_notes.sapling().len(),
+                sapling_output_count,
+                orchard_action_count,
+            )
+            .map(|fee| (fee, None)),
+        Address::Unified(addr) => fee_rule
+            .fee_required(
+                params,
+                target_height,
+                [],
+                if addr.has_transparent() && !(addr.has_sapling() || addr.has_orchard()) {
+                    vec![P2PKH_STANDARD_OUTPUT_SIZE]
+                } else {
+                    vec![]
+                },
+                spendable_notes.sapling().len(),
+                sapling_output_count,
+                orchard_action_count,
+            )
+            .map(|fee| (fee, None)),
+        Address::Tex(_) => fee_rule
+            .fee_required(
+                params,
+                target_height,
+                [],
+                [P2PKH_STANDARD_OUTPUT_SIZE],
+                spendable_notes.sapling().len(),
+                sapling_output_count,
+                orchard_action_count,
+            )
+            .and_then(|tr0_fee| {
+                let tr1_fee = fee_rule.fee_required(
+                    params,
+                    target_height,
+                    [InputSize::Known(P2PKH_STANDARD_INPUT_SIZE)],
+                    [P2PKH_STANDARD_OUTPUT_SIZE],
+                    0,
+                    0,
+                    0,
+                )?;
+
+                Ok((tr0_fee, Some(tr1_fee)))
+            }),
+    }
+    .map_err(|fee_error| InputSelectorError::Change(ChangeError::StrategyError(fee_error)))?;
+
+    let fee_required = (tr0_fee + tr1_fee.unwrap_or(Zatoshis::ZERO))
+        .expect("fee value addition does not overflow");
+
+    let amount = (input_total - fee_required).ok_or(InputSelectorError::InsufficientFunds {
+        available: input_total,
+        required: fee_required,
+    })?;
+
+    #[cfg(feature = "transparent-inputs")]
+    let ephemeral_output_value =
+        tr1_fee.map(|_| (amount - tr0_fee).expect("insufficient funds already checked"));
+
+    #[cfg(feature = "transparent-inputs")]
+    let tr0_change = ephemeral_output_value
+        .into_iter()
+        .map(ChangeValue::ephemeral_transparent)
+        .collect();
+    #[cfg(not(feature = "transparent-inputs"))]
+    let tr0_change = vec![];
+
+    // The transaction produces no change, unless this is a transaction to a TEX address; in this
+    // case, the first transaction produces a single ephemeral change output.
+    let tr0_balance = TransactionBalance::new(tr0_change, tr0_fee)
+        .expect("the sum of an single-element vector of fee values cannot overflow");
+
+    let payment = zip321::Payment::new(
+        recipient.to_zcash_address(params),
+        amount,
+        memo,
+        None,
+        None,
+        vec![],
+    )
+    .ok_or_else(|| {
+        InputSelectorError::Proposal(ProposalError::Zip321(zip321::Zip321Error::TransparentMemo(
+            0,
+        )))
+    })?;
+
+    let transaction_request =
+        TransactionRequest::new(vec![payment.clone()]).map_err(|payment_error| {
+            InputSelectorError::Proposal(ProposalError::Zip321(payment_error))
+        })?;
+
+    let shielded_inputs = NonEmpty::from_vec(spendable_notes.into_vec(&SimpleNoteRetention {
+        sapling: use_sapling,
+        #[cfg(feature = "orchard")]
+        orchard: use_orchard,
+    }))
+    .map(|notes| ShieldedInputs::from_parts(anchor_height, notes));
+
+    build_proposal(
+        fee_rule,
+        tr0_balance,
+        target_height,
+        shielded_inputs,
+        transaction_request,
+        payment_pools,
+        #[cfg(feature = "transparent-inputs")]
+        ephemeral_output_value
+            .zip(tr1_fee)
+            .map(|(ephemeral_output_value, tr1_fee)| EphemeralStepConfig {
+                ephemeral_output_value,
+                tr1_balance: TransactionBalance::new(vec![], tr1_fee)
+                    .expect("the sum of an empty vector of fee values cannot overflow"),
+                tr1_payments: vec![payment],
+                tr1_payment_pools: BTreeMap::from_iter([(0, PoolType::Transparent)]),
+            }),
+    )
+    .map_err(InputSelectorError::Proposal)
+}
+
 #[cfg(feature = "transparent-inputs")]
 struct EphemeralStepConfig {
-    balance: EphemeralBalance,
+    ephemeral_output_value: Zatoshis,
     tr1_balance: TransactionBalance,
-    tr1_payment_pools: BTreeMap<usize, PoolType>,
     tr1_payments: Vec<Payment>,
+    tr1_payment_pools: BTreeMap<usize, PoolType>,
 }
 
 fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
@@ -726,13 +935,12 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
             .filter(|(_, c)| c.is_ephemeral())
             .collect::<Vec<_>>();
 
-        let ephemeral_value = ephemeral_step
-            .balance
-            .ephemeral_output_amount()
-            .expect("ephemeral output balance exists");
-
         let ephemeral_output_index = match &ephemeral_outputs[..] {
-            [(i, change_value)] if change_value.value() == ephemeral_value => Ok(*i),
+            [(i, change_value)]
+                if change_value.value() == ephemeral_step.ephemeral_output_value =>
+            {
+                Ok(*i)
+            }
             _ => Err(ProposalError::EphemeralOutputsInvalid),
         }?;
 
@@ -779,7 +987,7 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
             target_height,
             NonEmpty::from_vec(steps).expect("steps is known to be nonempty"),
         );
-    } 
+    }
 
     Proposal::single_step(
         transaction_request,

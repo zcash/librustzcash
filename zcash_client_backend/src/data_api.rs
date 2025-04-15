@@ -156,6 +156,7 @@ pub enum NullifierQuery {
 #[derive(Debug, Clone, Copy)]
 pub enum TargetValue {
     AtLeast(Zatoshis),
+    MaxSpendable,
 }
 
 /// Balance information for a value within a single pool in an account.
