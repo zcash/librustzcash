@@ -8,7 +8,7 @@ use orchard::{
 use rusqlite::{named_params, types::Value, Connection, Row};
 
 use zcash_client_backend::{
-    data_api::{Account as _, NullifierQuery},
+    data_api::{Account as _, NullifierQuery, TargetValue},
     wallet::{ReceivedNote, WalletOrchardOutput},
     DecryptedOutput, TransferType,
 };
@@ -17,7 +17,6 @@ use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    value::Zatoshis,
     ShieldedProtocol,
 };
 use zip32::Scope;
@@ -217,7 +216,7 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
     account: AccountUuid,
-    target_value: Zatoshis,
+    target_value: TargetValue,
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {

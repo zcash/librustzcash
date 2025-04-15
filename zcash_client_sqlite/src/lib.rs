@@ -59,7 +59,7 @@ use zcash_client_backend::{
         scanning::{ScanPriority, ScanRange},
         Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
         BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery, ScannedBlock,
-        SeedRelevance, SentTransaction, SpendableNotes, TransactionDataRequest,
+        SeedRelevance, SentTransaction, SpendableNotes, TargetValue, TransactionDataRequest,
         WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
         SAPLING_SHARD_HEIGHT,
     },
@@ -563,7 +563,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     fn select_spendable_notes(
         &self,
         account: Self::AccountId,
-        target_value: Zatoshis,
+        target_value: TargetValue,
         sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],

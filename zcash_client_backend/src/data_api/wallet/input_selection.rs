@@ -19,7 +19,7 @@ use zcash_protocol::{
 use zip321::TransactionRequest;
 
 use crate::{
-    data_api::{InputSource, SimpleNoteRetention, SpendableNotes},
+    data_api::{InputSource, SimpleNoteRetention, SpendableNotes, TargetValue},
     fees::{sapling, ChangeError, ChangeStrategy},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
@@ -749,7 +749,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             shielded_inputs = wallet_db
                 .select_spendable_notes(
                     account,
-                    amount_required,
+                    TargetValue::AtLeast(amount_required),
                     selectable_pools,
                     anchor_height,
                     &exclude,

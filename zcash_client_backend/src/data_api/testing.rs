@@ -60,6 +60,7 @@ use super::{
     SAPLING_SHARD_HEIGHT,
 };
 use crate::{
+    data_api::TargetValue,
     fees::{
         standard::{self, SingleOutputChangeStrategy},
         ChangeStrategy, DustOutputPolicy, StandardFeeRule,
@@ -2495,7 +2496,7 @@ impl InputSource for MockWalletDb {
     fn select_spendable_notes(
         &self,
         _account: Self::AccountId,
-        _target_value: Zatoshis,
+        _target_value: TargetValue,
         _sources: &[ShieldedProtocol],
         _anchor_height: BlockHeight,
         _exclude: &[Self::NoteRef],
