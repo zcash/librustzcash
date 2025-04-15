@@ -78,8 +78,10 @@ use zcash_primitives::{
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::Memo,
+    value::Zatoshis,
     ShieldedProtocol,
 };
+
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
@@ -103,7 +105,6 @@ use {
     std::collections::BTreeSet,
     zcash_client_backend::wallet::TransparentAddressMetadata,
     zcash_keys::encoding::AddressCodec,
-    zcash_protocol::value::Zatoshis,
 };
 
 #[cfg(feature = "multicore")]
