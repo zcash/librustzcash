@@ -24,7 +24,7 @@ use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade, Parameters},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
-    value::Zatoshis,
+    value::{TargetValue, Zatoshis},
     ShieldedProtocol,
 };
 use zip32::Scope;
@@ -147,7 +147,7 @@ pub trait ShieldedPoolTester {
     fn select_spendable_notes<Cache, DbT: InputSource + WalletTest, P>(
         st: &TestState<Cache, DbT, P>,
         account: <DbT as InputSource>::AccountId,
-        target_value: Zatoshis,
+        target_value: TargetValue,
         anchor_height: BlockHeight,
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error>;
@@ -1928,7 +1928,7 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
     let spendable = T::select_spendable_notes(
         &st,
         account_id,
-        Zatoshis::const_from_u64(300000),
+        TargetValue::MinValue(Zatoshis::const_from_u64(300000)),
         received_tx_height + 10,
         &[],
     )
@@ -1943,7 +1943,7 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
     let spendable = T::select_spendable_notes(
         &st,
         account_id,
-        Zatoshis::const_from_u64(300000),
+        TargetValue::MinValue(Zatoshis::const_from_u64(300000)),
         received_tx_height + 10,
         &[],
     )
@@ -1997,7 +1997,7 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
     let spendable = T::select_spendable_notes(
         &st,
         account.id(),
-        Zatoshis::const_from_u64(300000),
+        TargetValue::MinValue(Zatoshis::const_from_u64(300000)),
         account.birthday().height() + 5,
         &[],
     )

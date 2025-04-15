@@ -11,7 +11,7 @@ use zcash_client_backend::{
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
     consensus::{self, BlockHeight},
-    value::{BalanceError, Zatoshis},
+    value::{BalanceError, TargetValue, Zatoshis},
     PoolType, ShieldedProtocol,
 };
 
@@ -116,6 +116,34 @@ where
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    target_value: TargetValue,
+    anchor_height: BlockHeight,
+    exclude: &[ReceivedNoteId],
+    protocol: ShieldedProtocol,
+    to_spendable_note: F,
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
+where
+    F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+{
+    match target_value {
+        TargetValue::MinValue(zats) => select_minimum_spendable_notes(
+            conn,
+            params,
+            account,
+            zats,
+            anchor_height,
+            exclude,
+            protocol,
+            to_spendable_note,
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn select_minimum_spendable_notes<P: consensus::Parameters, F, Note>(
     conn: &Connection,
     params: &P,
     account: AccountUuid,

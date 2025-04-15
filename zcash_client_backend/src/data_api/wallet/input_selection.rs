@@ -13,7 +13,7 @@ use zcash_address::ConversionError;
 use zcash_keys::address::{Address, UnifiedAddress};
 use zcash_protocol::{
     consensus::{self, BlockHeight},
-    value::{BalanceError, Zatoshis},
+    value::{BalanceError, TargetValue, Zatoshis},
     PoolType, ShieldedProtocol,
 };
 use zip321::TransactionRequest;
@@ -749,7 +749,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             shielded_inputs = wallet_db
                 .select_spendable_notes(
                     account,
-                    amount_required,
+                    TargetValue::MinValue(amount_required),
                     selectable_pools,
                     anchor_height,
                     &exclude,

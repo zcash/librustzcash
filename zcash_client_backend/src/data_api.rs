@@ -78,7 +78,7 @@ use zcash_primitives::{block::BlockHash, transaction::Transaction};
 use zcash_protocol::{
     consensus::BlockHeight,
     memo::{Memo, MemoBytes},
-    value::{BalanceError, Zatoshis},
+    value::{BalanceError, TargetValue, Zatoshis},
     ShieldedProtocol, TxId,
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
@@ -1201,7 +1201,7 @@ pub trait InputSource {
     fn select_spendable_notes(
         &self,
         account: Self::AccountId,
-        target_value: Zatoshis,
+        target_value: TargetValue,
         sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],

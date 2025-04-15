@@ -17,7 +17,7 @@ use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    value::Zatoshis,
+    value::TargetValue,
     ShieldedProtocol,
 };
 
@@ -107,7 +107,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
     fn select_spendable_notes<Cache, DbT: InputSource + WalletTest, P>(
         st: &TestState<Cache, DbT, P>,
         account: <DbT as InputSource>::AccountId,
-        target_value: Zatoshis,
+        target_value: TargetValue,
         anchor_height: BlockHeight,
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error> {
