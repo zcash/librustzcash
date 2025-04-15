@@ -62,7 +62,7 @@ impl Client {
             //
             // https://gitlab.torproject.org/tpo/core/arti/-/issues/715
             let root_store = RootCertStore {
-                roots: webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect(),
+                roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
             };
             let config = ClientConfig::builder()
                 .with_root_certificates(root_store)
