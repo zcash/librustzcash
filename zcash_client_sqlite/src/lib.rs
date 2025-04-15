@@ -224,7 +224,7 @@ impl AccountUuid {
 /// This is an ephemeral value for efficiently and generically working with accounts in a
 /// [`WalletDb`]. To reference accounts in external contexts, use [`AccountUuid`].
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
-pub(crate) struct AccountRef(u32);
+pub(crate) struct AccountRef(i64);
 
 /// This implementation is retained under `#[cfg(test)]` for pre-AccountUuid testing.
 #[cfg(test)]

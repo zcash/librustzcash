@@ -84,7 +84,7 @@ pub(super) fn insert_initial_transparent_addrs<P: consensus::Parameters>(
         ":key_scope_external": KeyScope::EXTERNAL.encode()
     ])?;
     while let Some(row) = min_addr_rows.next()? {
-        let account_id = AccountRef(row.get::<_, u32>("account_id")?);
+        let account_id = AccountRef(row.get("account_id")?);
 
         let min_transparent_idx = row
             .get::<_, Option<u32>>("transparent_child_index")?
@@ -716,7 +716,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                 generate_gap_addresses(
                     conn,
                     &self.params,
-                    AccountRef(account_id.try_into().unwrap()),
+                    AccountRef(account_id),
                     key_scope,
                     &GapLimits::default(),
                     UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
