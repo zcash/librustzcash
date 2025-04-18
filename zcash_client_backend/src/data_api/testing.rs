@@ -38,7 +38,7 @@ use zcash_protocol::{
     consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters as _},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
-    value::{ZatBalance, Zatoshis},
+    value::{TargetValue, ZatBalance, Zatoshis},
     ShieldedProtocol,
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
@@ -2493,7 +2493,7 @@ impl InputSource for MockWalletDb {
     fn select_spendable_notes(
         &self,
         _account: Self::AccountId,
-        _target_value: Zatoshis,
+        _target_value: TargetValue,
         _sources: &[ShieldedProtocol],
         _anchor_height: BlockHeight,
         _exclude: &[Self::NoteRef],

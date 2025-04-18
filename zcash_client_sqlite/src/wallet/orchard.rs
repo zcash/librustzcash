@@ -17,7 +17,7 @@ use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    value::Zatoshis,
+    value::TargetValue,
     ShieldedProtocol,
 };
 use zip32::Scope;
@@ -217,7 +217,7 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
     account: AccountUuid,
-    target_value: Zatoshis,
+    target_value: TargetValue,
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {

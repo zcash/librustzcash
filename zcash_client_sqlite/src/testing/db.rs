@@ -12,7 +12,6 @@ use tempfile::NamedTempFile;
 use rusqlite::{self};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, ShardTree};
-
 use zcash_client_backend::{
     data_api::{
         chain::{ChainState, CommitmentTreeRoot},
@@ -31,7 +30,10 @@ use zcash_primitives::{
     transaction::{Transaction, TxId},
 };
 use zcash_protocol::{
-    consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo, value::Zatoshis,
+    consensus::BlockHeight,
+    local_consensus::LocalNetwork,
+    memo::Memo,
+    value::{TargetValue, Zatoshis},
     ShieldedProtocol,
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
