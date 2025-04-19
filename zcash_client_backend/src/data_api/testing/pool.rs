@@ -818,7 +818,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     let txid = build_result.transaction().txid();
 
     // Now, store the transaction, pretending it has been mined (we will actually mine the block
-    // next). This will cause the the gap start to move & a new `gap_limits.ephemeral()` of
+    // next). This will cause the gap start to move & a new `gap_limits.ephemeral()` of
     // addresses to be created.
     let target_height = st.latest_cached_block().unwrap().height() + 1;
     st.wallet_mut()
