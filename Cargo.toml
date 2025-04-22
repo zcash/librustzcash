@@ -127,4 +127,4 @@ codegen-units = 1
 [patch.crates-io]
 zcash_note_encryption = { version = "0.4", git = "https://github.com/QED-it/zcash_note_encryption", branch = "zsa1" }
 sapling = { package = "sapling-crypto", version = "0.1.3", git = "https://github.com/QED-it/sapling-crypto", branch = "zsa1" }
-orchard = { version = "0.8.0", git = "https://github.com/QED-it/orchard", rev = "e88e2614bdc56119d5e0c9cb5f30fb4cc5c92dc7" }
+orchard = { version = "0.8.0", git = "https://github.com/QED-it/orchard", rev = "190a50c31c1db7d329905bef04326445c2d87801" }

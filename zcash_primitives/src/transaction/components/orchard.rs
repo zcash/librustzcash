@@ -116,7 +116,6 @@ pub fn read_orchard_zsa_bundle<R: Read>(
     }
     let flags = read_flags(&mut reader)?;
     let anchor = read_anchor(&mut reader)?;
-    let proof_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
     let timelimit = reader.read_u32::<LittleEndian>()?;
     if timelimit != 0 {
         return Err(io::Error::new(
@@ -124,6 +123,8 @@ pub fn read_orchard_zsa_bundle<R: Read>(
             "Timelimit field must be set to zero".to_owned(),
         ));
     }
+    let burn = read_burn(&mut reader)?;
+    let proof_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
     let actions = NonEmpty::from_vec(
         actions_without_auth
             .into_iter()
@@ -133,8 +134,6 @@ pub fn read_orchard_zsa_bundle<R: Read>(
     .expect("A nonzero number of actions was read from the transaction data.");
 
     let value_balance = Transaction::read_amount(&mut reader)?;
-
-    let burn = read_burn(&mut reader)?;
 
     let binding_signature = read_signature::<_, redpallas::Binding>(&mut reader)?;
 
@@ -358,14 +357,17 @@ pub fn write_orchard_zsa_bundle<W: Write>(
 
     writer.write_all(&[bundle.flags().to_byte()])?;
     writer.write_all(&bundle.anchor().to_bytes())?;
+
+    // Timelimit must be zero for NU7
+    writer.write_u32::<LittleEndian>(0)?;
+
+    write_burn(&mut writer, bundle.burn())?;
+
     Vector::write(
         &mut writer,
         bundle.authorization().proof().as_ref(),
         |w, b| w.write_u8(*b),
     )?;
-
-    // Timelimit must be zero for NU7
-    writer.write_u32::<LittleEndian>(0)?;
 
     Array::write(
         &mut writer,
@@ -374,8 +376,6 @@ pub fn write_orchard_zsa_bundle<W: Write>(
     )?;
 
     writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
-
-    write_burn(&mut writer, bundle.burn())?;
 
     writer.write_all(&<[u8; 64]>::from(
         bundle.authorization().binding_signature(),
