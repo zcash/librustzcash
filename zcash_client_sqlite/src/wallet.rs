@@ -1531,6 +1531,11 @@ fn subtree_scan_progress<P: consensus::Parameters>(
         FROM blocks
         WHERE height <= :start_height",
     ))?;
+    let mut stmt_start_tree_size_at = conn.prepare_cached(&format!(
+        "SELECT {table_prefix}_commitment_tree_size - {output_count_col}
+        FROM blocks
+        WHERE height = :start_height",
+    ))?;
     let mut stmt_end_tree_size_at = conn.prepare_cached(&format!(
         "SELECT {table_prefix}_commitment_tree_size
         FROM blocks
@@ -1573,9 +1578,9 @@ fn subtree_scan_progress<P: consensus::Parameters>(
 
         Ok(scan.map(|scan| Progress::new(scan, recover)))
     } else {
-        // In case we didn't have information about the tree size at the recover-until
-        // height, get the tree size from a nearby subtree. It's fine for this to be
-        // approximate; it just shifts the boundary between scan and recover progress.
+        // In case we didn't have information about the tree size at the birthday height,
+        // get the tree size from a nearby subtree. It's fine for this to be approximate;
+        // it just alters the magnitude of recovery progress a bit.
         let mut get_tree_size_near = |as_of: BlockHeight| {
             let size_from_blocks = stmt_start_tree_size
                 .query_row(named_params![":start_height": u32::from(as_of)], |row| {
@@ -1632,28 +1637,6 @@ fn subtree_scan_progress<P: consensus::Parameters>(
             None => get_tree_size_near(birthday_height)?,
         };
 
-        // Get the note commitment tree size as of the start of the recover-until height.
-        // The outer option indicates whether or not we have recover-until height information;
-        // the inner option indicates whether or not we were able to obtain a tree size given
-        // the recover-until height.
-        let recover_until_size: Option<Option<u64>> = recover_until_height
-            // Find a tree size near to the recover-until height
-            .map(get_tree_size_near)
-            .transpose()?;
-
-        // Count the total outputs scanned so far on the birthday side of the recover-until height.
-        let recovered_count = recover_until_height
-            .map(|end_height| {
-                stmt_scanned_count_until.query_row(
-                    named_params! {
-                        ":start_height": u32::from(birthday_height),
-                        ":end_height": u32::from(end_height),
-                    },
-                    |row| row.get::<_, Option<u64>>(0),
-                )
-            })
-            .transpose()?;
-
         // If we've scanned the block at the chain tip, we know how many notes are currently in the
         // tree.
         let tip_tree_size = match stmt_end_tree_size_at
@@ -1673,6 +1656,65 @@ fn subtree_scan_progress<P: consensus::Parameters>(
                 chain_tip_height,
             )?,
         };
+
+        // Get the note commitment tree size as of the start of the recover-until height.
+        // The outer option indicates whether or not we have recover-until height information;
+        // the inner option indicates whether or not we were able to obtain a tree size given
+        // the recover-until height.
+        let recover_until_size: Option<Option<u64>> =
+            recover_until_height
+                .map(|h| {
+                    let size_from_blocks = stmt_start_tree_size_at
+                        .query_row(named_params![":start_height": u32::from(h)], |row| {
+                            row.get::<_, Option<u64>>(0)
+                        })
+                        .optional()?
+                        .flatten();
+
+                    match size_from_blocks {
+                        // We know the tree size as of the start of the recover-until height.
+                        Some(size) => Ok::<_, SqliteClientError>(Some(size)),
+
+                        // If the recover-until height is equal to the chain tip height,
+                        // then this is almost certainly a newly-recovered wallet, and all
+                        // progress can count as recovery progress. Approximate the size
+                        // of the tree at the start of the block as equal to the size of
+                        // the tree at the end of the block; the scan progress will show
+                        // as 0/0 which is fine.
+                        None if h == chain_tip_height => Ok(tip_tree_size),
+
+                        // Linearly extrapolate a tree size between the nearest two bounds
+                        // we have.
+                        // TODO: Use a closer lower bound if available.
+                        None => Ok(birthday_size.zip(tip_tree_size).and_then(
+                            |(lower_size, upper_size)| {
+                                let total_notes = upper_size - lower_size;
+                                let total_range = u64::from(chain_tip_height - birthday_height);
+                                let recovery_range = u64::from(h - birthday_height);
+
+                                (total_notes * recovery_range).checked_div(total_range).map(
+                                    |extrapolated_recovery_notes| {
+                                        lower_size + extrapolated_recovery_notes
+                                    },
+                                )
+                            },
+                        )),
+                    }
+                })
+                .transpose()?;
+
+        // Count the total outputs scanned so far on the birthday side of the recover-until height.
+        let recovered_count = recover_until_height
+            .map(|end_height| {
+                stmt_scanned_count_until.query_row(
+                    named_params! {
+                        ":start_height": u32::from(birthday_height),
+                        ":end_height": u32::from(end_height),
+                    },
+                    |row| row.get::<_, Option<u64>>(0),
+                )
+            })
+            .transpose()?;
 
         let recover = recovered_count
             .zip(recover_until_size)
