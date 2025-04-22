@@ -1632,6 +1632,26 @@ fn subtree_scan_progress<P: consensus::Parameters>(
             None => get_tree_size_near(birthday_height)?,
         };
 
+        // If we've scanned the block at the chain tip, we know how many notes are currently in the
+        // tree.
+        let tip_tree_size = match stmt_end_tree_size_at
+            .query_row(
+                named_params! {":height": u32::from(chain_tip_height)},
+                |row| row.get::<_, Option<u64>>(0),
+            )
+            .optional()?
+            .flatten()
+        {
+            Some(tree_size) => Some(tree_size),
+            None => estimate_tree_size(
+                conn,
+                params,
+                shielded_protocol,
+                pool_activation_height,
+                chain_tip_height,
+            )?,
+        };
+
         // Get the note commitment tree size as of the start of the recover-until height.
         // The outer option indicates whether or not we have recover-until height information;
         // the inner option indicates whether or not we were able to obtain a tree size given
@@ -1653,26 +1673,6 @@ fn subtree_scan_progress<P: consensus::Parameters>(
                 )
             })
             .transpose()?;
-
-        // If we've scanned the block at the chain tip, we know how many notes are currently in the
-        // tree.
-        let tip_tree_size = match stmt_end_tree_size_at
-            .query_row(
-                named_params! {":height": u32::from(chain_tip_height)},
-                |row| row.get::<_, Option<u64>>(0),
-            )
-            .optional()?
-            .flatten()
-        {
-            Some(tree_size) => Some(tree_size),
-            None => estimate_tree_size(
-                conn,
-                params,
-                shielded_protocol,
-                pool_activation_height,
-                chain_tip_height,
-            )?,
-        };
 
         let recover = recovered_count
             .zip(recover_until_size)
