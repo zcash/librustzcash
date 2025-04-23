@@ -260,7 +260,7 @@ pub(crate) fn pczt_to_tx_data(
     orchard: &orchard::pczt::Bundle,
 ) -> Result<TransactionData<EffectsOnly>, Error> {
     let version = match (global.tx_version, global.version_group_id) {
-        (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::Zip225),
+        (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
         (version, version_group_id) => Err(Error::Global(GlobalError::UnsupportedTxVersion {
             version,
             version_group_id,

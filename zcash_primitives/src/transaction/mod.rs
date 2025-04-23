@@ -41,8 +41,8 @@ use ::sapling::builder as sapling_builder;
 use self::components::tze::{self, TzeIn, TzeOut};
 
 use zcash_protocol::constants::{
-    OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID, SAPLING_TX_VERSION,
-    SAPLING_VERSION_GROUP_ID, V5_TX_VERSION, V5_VERSION_GROUP_ID,
+    V3_TX_VERSION, V3_VERSION_GROUP_ID, V4_TX_VERSION, V4_VERSION_GROUP_ID, V5_TX_VERSION,
+    V5_VERSION_GROUP_ID,
 };
 
 #[cfg(zcash_unstable = "nu7")]
@@ -62,12 +62,30 @@ pub use zcash_protocol::TxId;
 /// previous version, then only the new version would be added to this enum.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TxVersion {
+    /// Transaction versions allowed prior to Overwinter activation. The argument MUST be
+    /// in the range `1..=0x7FFFFFFF`. Only versions 1 and 2 are defined; `3..=0x7FFFFFFF`
+    /// was allowed by consensus but considered equivalent to 2. This is specified in
+    /// [§ 7.1 Transaction Encoding and Consensus](https://zips.z.cash/protocol/protocol.pdf#txnencoding).
     Sprout(u32),
-    Overwinter,
-    Sapling,
-    Zip225,
+    /// Transaction version 3, which was introduced by the Overwinter network upgrade
+    /// and allowed until Sapling activation. It is specified in
+    /// [§ 7.1 Transaction Encoding and Consensus](https://zips.z.cash/protocol/protocol.pdf#txnencoding).
+    V3,
+    /// Transaction version 4, which was introduced by the Sapling network upgrade.
+    /// It is specified in [§ 7.1 Transaction Encoding and Consensus](https://zips.z.cash/protocol/protocol.pdf#txnencoding).
+    V4,
+    /// Transaction version 5, which was introduced by the NU5 network upgrade.
+    /// It is specified in [§ 7.1 Transaction Encoding and Consensus](https://zips.z.cash/protocol/protocol.pdf#txnencoding)
+    /// and [ZIP 225](https://zips.z.cash/zip-0225).
+    V5,
+    /// Transaction version 6, specified in [ZIP 230](https://zips.z.cash/zip-0230).
     #[cfg(zcash_unstable = "nu7")]
-    Zip230,
+    V6,
+    /// This version is used exclusively for in-development transaction
+    /// serialization, and will never be active under the consensus rules.
+    /// When new consensus transaction versions are added, all call sites
+    /// using this constant should be inspected, and uses should be
+    /// removed as appropriate in favor of the new transaction version.
     #[cfg(zcash_unstable = "zfuture")]
     ZFuture,
 }
@@ -80,11 +98,11 @@ impl TxVersion {
 
         if overwintered {
             match (version, reader.read_u32_le()?) {
-                (OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID) => Ok(TxVersion::Overwinter),
-                (SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID) => Ok(TxVersion::Sapling),
-                (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::Zip225),
+                (V3_TX_VERSION, V3_VERSION_GROUP_ID) => Ok(TxVersion::V3),
+                (V4_TX_VERSION, V4_VERSION_GROUP_ID) => Ok(TxVersion::V4),
+                (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
                 #[cfg(zcash_unstable = "nu7")]
-                (V6_TX_VERSION, V6_VERSION_GROUP_ID) => Ok(TxVersion::Zip230),
+                (V6_TX_VERSION, V6_VERSION_GROUP_ID) => Ok(TxVersion::V6),
                 #[cfg(zcash_unstable = "zfuture")]
                 (ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID) => Ok(TxVersion::ZFuture),
                 _ => Err(io::Error::new(
@@ -112,11 +130,11 @@ impl TxVersion {
         overwintered
             | match self {
                 TxVersion::Sprout(v) => *v,
-                TxVersion::Overwinter => OVERWINTER_TX_VERSION,
-                TxVersion::Sapling => SAPLING_TX_VERSION,
-                TxVersion::Zip225 => V5_TX_VERSION,
+                TxVersion::V3 => V3_TX_VERSION,
+                TxVersion::V4 => V4_TX_VERSION,
+                TxVersion::V5 => V5_TX_VERSION,
                 #[cfg(zcash_unstable = "nu7")]
-                TxVersion::Zip230 => V6_TX_VERSION,
+                TxVersion::V6 => V6_TX_VERSION,
                 #[cfg(zcash_unstable = "zfuture")]
                 TxVersion::ZFuture => ZFUTURE_TX_VERSION,
             }
@@ -125,11 +143,11 @@ impl TxVersion {
     pub fn version_group_id(&self) -> u32 {
         match self {
             TxVersion::Sprout(_) => 0,
-            TxVersion::Overwinter => OVERWINTER_VERSION_GROUP_ID,
-            TxVersion::Sapling => SAPLING_VERSION_GROUP_ID,
-            TxVersion::Zip225 => V5_VERSION_GROUP_ID,
+            TxVersion::V3 => V3_VERSION_GROUP_ID,
+            TxVersion::V4 => V4_VERSION_GROUP_ID,
+            TxVersion::V5 => V5_VERSION_GROUP_ID,
             #[cfg(zcash_unstable = "nu7")]
-            TxVersion::Zip230 => V6_VERSION_GROUP_ID,
+            TxVersion::V6 => V6_VERSION_GROUP_ID,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => ZFUTURE_VERSION_GROUP_ID,
         }
@@ -147,10 +165,10 @@ impl TxVersion {
     pub fn has_sprout(&self) -> bool {
         match self {
             TxVersion::Sprout(v) => *v >= 2u32,
-            TxVersion::Overwinter | TxVersion::Sapling => true,
-            TxVersion::Zip225 => false,
+            TxVersion::V3 | TxVersion::V4 => true,
+            TxVersion::V5 => false,
             #[cfg(zcash_unstable = "nu7")]
-            TxVersion::Zip230 => false,
+            TxVersion::V6 => false,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => false,
         }
@@ -163,11 +181,11 @@ impl TxVersion {
     /// Returns `true` if this transaction version supports the Sapling protocol.
     pub fn has_sapling(&self) -> bool {
         match self {
-            TxVersion::Sprout(_) | TxVersion::Overwinter => false,
-            TxVersion::Sapling => true,
-            TxVersion::Zip225 => true,
+            TxVersion::Sprout(_) | TxVersion::V3 => false,
+            TxVersion::V4 => true,
+            TxVersion::V5 => true,
             #[cfg(zcash_unstable = "nu7")]
-            TxVersion::Zip230 => true,
+            TxVersion::V6 => true,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
         }
@@ -176,10 +194,10 @@ impl TxVersion {
     /// Returns `true` if this transaction version supports the Orchard protocol.
     pub fn has_orchard(&self) -> bool {
         match self {
-            TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => false,
-            TxVersion::Zip225 => true,
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => false,
+            TxVersion::V5 => true,
             #[cfg(zcash_unstable = "nu7")]
-            TxVersion::Zip230 => true,
+            TxVersion::V6 => true,
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => true,
         }
@@ -194,14 +212,14 @@ impl TxVersion {
     pub fn suggested_for_branch(consensus_branch_id: BranchId) -> Self {
         match consensus_branch_id {
             BranchId::Sprout => TxVersion::Sprout(2),
-            BranchId::Overwinter => TxVersion::Overwinter,
+            BranchId::Overwinter => TxVersion::V3,
             BranchId::Sapling | BranchId::Blossom | BranchId::Heartwood | BranchId::Canopy => {
-                TxVersion::Sapling
+                TxVersion::V4
             }
-            BranchId::Nu5 => TxVersion::Zip225,
-            BranchId::Nu6 => TxVersion::Zip225,
+            BranchId::Nu5 => TxVersion::V5,
+            BranchId::Nu6 => TxVersion::V5,
             #[cfg(zcash_unstable = "nu7")]
-            BranchId::Nu7 => TxVersion::Zip230,
+            BranchId::Nu7 => TxVersion::V6,
             #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => TxVersion::ZFuture,
         }
@@ -553,12 +571,10 @@ impl TransactionData<Authorized> {
 impl Transaction {
     fn from_data(data: TransactionData<Authorized>) -> io::Result<Self> {
         match data.version {
-            TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => {
-                Self::from_data_v4(data)
-            }
-            TxVersion::Zip225 => Ok(Self::from_data_v5(data)),
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => Self::from_data_v4(data),
+            TxVersion::V5 => Ok(Self::from_data_v5(data)),
             #[cfg(zcash_unstable = "nu7")]
-            TxVersion::Zip230 => todo!(),
+            TxVersion::V6 => todo!(),
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => Ok(Self::from_data_v5(data)),
         }
@@ -598,12 +614,12 @@ impl Transaction {
 
         let version = TxVersion::read(&mut reader)?;
         match version {
-            TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => {
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
                 Self::read_v4(reader, version, consensus_branch_id)
             }
-            TxVersion::Zip225 => Self::read_v5(reader.into_base_reader(), version),
+            TxVersion::V5 => Self::read_v5(reader.into_base_reader(), version),
             #[cfg(zcash_unstable = "nu7")]
-            TxVersion::Zip230 => todo!(),
+            TxVersion::V6 => todo!(),
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => Self::read_v5(reader.into_base_reader(), version),
         }
@@ -783,12 +799,10 @@ impl Transaction {
 
     pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
         match self.version {
-            TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => {
-                self.write_v4(writer)
-            }
-            TxVersion::Zip225 => self.write_v5(writer),
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => self.write_v4(writer),
+            TxVersion::V5 => self.write_v5(writer),
             #[cfg(zcash_unstable = "nu7")]
-            TxVersion::Zip230 => todo!(),
+            TxVersion::V6 => todo!(),
             #[cfg(zcash_unstable = "zfuture")]
             TxVersion::ZFuture => self.write_v5(writer),
         }
@@ -1002,14 +1016,14 @@ pub mod testing {
     pub fn arb_tx_version(branch_id: BranchId) -> impl Strategy<Value = TxVersion> {
         match branch_id {
             BranchId::Sprout => (1..=2u32).prop_map(TxVersion::Sprout).boxed(),
-            BranchId::Overwinter => Just(TxVersion::Overwinter).boxed(),
+            BranchId::Overwinter => Just(TxVersion::V3).boxed(),
             BranchId::Sapling | BranchId::Blossom | BranchId::Heartwood | BranchId::Canopy => {
-                Just(TxVersion::Sapling).boxed()
+                Just(TxVersion::V4).boxed()
             }
-            BranchId::Nu5 => Just(TxVersion::Zip225).boxed(),
-            BranchId::Nu6 => Just(TxVersion::Zip225).boxed(),
+            BranchId::Nu5 => Just(TxVersion::V5).boxed(),
+            BranchId::Nu6 => Just(TxVersion::V5).boxed(),
             #[cfg(zcash_unstable = "nu7")]
-            BranchId::Nu7 => Just(TxVersion::Zip230).boxed(),
+            BranchId::Nu7 => Just(TxVersion::V6).boxed(),
             #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => Just(TxVersion::ZFuture).boxed(),
         }

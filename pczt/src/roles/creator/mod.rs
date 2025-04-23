@@ -110,7 +110,7 @@ impl Creator {
         parts: zcash_primitives::transaction::builder::PcztParts<P>,
     ) -> Option<Pczt> {
         use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_SINGLE};
-        use zcash_protocol::{consensus::NetworkConstants, constants::SAPLING_TX_VERSION};
+        use zcash_protocol::{consensus::NetworkConstants, constants::V4_TX_VERSION};
 
         use crate::common::FLAG_HAS_SIGHASH_SINGLE;
 
@@ -119,11 +119,11 @@ impl Creator {
 
         let tx_version = match parts.version {
             zcash_primitives::transaction::TxVersion::Sprout(_)
-            | zcash_primitives::transaction::TxVersion::Overwinter => None,
-            zcash_primitives::transaction::TxVersion::Sapling => Some(SAPLING_TX_VERSION),
-            zcash_primitives::transaction::TxVersion::Zip225 => Some(V5_TX_VERSION),
+            | zcash_primitives::transaction::TxVersion::V3 => None,
+            zcash_primitives::transaction::TxVersion::V4 => Some(V4_TX_VERSION),
+            zcash_primitives::transaction::TxVersion::V5 => Some(V5_TX_VERSION),
             #[cfg(zcash_unstable = "nu7")]
-            zcash_primitives::transaction::TxVersion::Zip230 => Some(V6_TX_VERSION),
+            zcash_primitives::transaction::TxVersion::V6 => Some(V6_TX_VERSION),
             #[cfg(zcash_unstable = "zfuture")]
             zcash_primitives::transaction::TxVersion::ZFuture => None,
         }?;
