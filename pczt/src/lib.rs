@@ -39,11 +39,6 @@ pub mod transparent;
 const MAGIC_BYTES: &[u8] = b"PCZT";
 const PCZT_VERSION_1: u32 = 1;
 
-#[cfg(feature = "zcp-builder")]
-const SAPLING_TX_VERSION: u32 = 4;
-const V5_TX_VERSION: u32 = 5;
-const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
-
 /// A partially-created Zcash transaction.
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
 pub struct Pczt {

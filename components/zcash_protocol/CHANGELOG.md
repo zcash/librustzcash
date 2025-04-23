@@ -7,10 +7,18 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::constants::`
+  - `V3_TX_VERSION`
+  - `V3_VERSION_GROUP_ID`
+  - `V4_TX_VERSION`
+  - `V4_VERSION_GROUP_ID`
+  - `V5_TX_VERSION`
+  - `V5_VERSION_GROUP_ID`
+
 ## [0.5.1] - 2025-03-19
 ### Added
 - `impl<P: zcash_protocol::consensus::Parameters> zcash::consensus::Parameters for &P`
-
 
 ## [0.5.0] - 2025-02-21
 ### Added

@@ -13,8 +13,9 @@ use crate::{
         FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE,
     },
-    Pczt, V5_TX_VERSION, V5_VERSION_GROUP_ID,
+    Pczt,
 };
+use zcash_protocol::constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID};
 
 use super::signer::pczt_to_tx_data;
 
