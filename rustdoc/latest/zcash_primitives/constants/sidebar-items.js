@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["mainnet","regtest","testnet"]};
+window.SIDEBAR_ITEMS = {"constant":["V3_TX_VERSION","V3_VERSION_GROUP_ID","V4_TX_VERSION","V4_VERSION_GROUP_ID","V5_TX_VERSION","V5_VERSION_GROUP_ID"],"mod":["mainnet","regtest","testnet"]};
