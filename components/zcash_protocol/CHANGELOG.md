@@ -9,10 +9,10 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `zcash_protocol::constants::`
-  - `OVERWINTER_TX_VERSION`
-  - `OVERWINTER_VERSION_GROUP_ID`
-  - `SAPLING_TX_VERSION`
-  - `SAPLING_VERSION_GROUP_ID`
+  - `V3_TX_VERSION`
+  - `V3_VERSION_GROUP_ID`
+  - `V4_TX_VERSION`
+  - `V4_VERSION_GROUP_ID`
   - `V5_TX_VERSION`
   - `V5_VERSION_GROUP_ID`
 

@@ -420,7 +420,7 @@ mod tests {
 
         // create a UTXO to spend
         let tx = TransactionData::from_parts(
-            TxVersion::Sapling,
+            TxVersion::V4,
             BranchId::Canopy,
             0,
             BlockHeight::from(3),

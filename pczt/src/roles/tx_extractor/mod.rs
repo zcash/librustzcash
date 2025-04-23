@@ -81,7 +81,7 @@ impl<'a> TransactionExtractor<'a> {
         } = self;
 
         let version = match (pczt.global.tx_version, pczt.global.version_group_id) {
-            (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::Zip225),
+            (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
             (version, version_group_id) => Err(Error::Global(GlobalError::UnsupportedTxVersion {
                 version,
                 version_group_id,

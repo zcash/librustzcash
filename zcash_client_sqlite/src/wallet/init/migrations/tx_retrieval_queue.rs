@@ -281,7 +281,7 @@ mod tests {
                 .unwrap();
         };
         add_tx_to_wallet(TransactionData::from_parts(
-            TxVersion::Zip225,
+            TxVersion::V5,
             BranchId::Nu5,
             0,
             12345678.into(),
