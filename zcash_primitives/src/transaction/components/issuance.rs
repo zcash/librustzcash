@@ -49,7 +49,13 @@ fn read_authorization<R: Read>(mut reader: R) -> io::Result<Signed> {
 }
 
 fn read_action<R: Read>(mut reader: R) -> io::Result<IssueAction> {
-    let asset_descr_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
+    let mut asset_desc_hash = [0u8; 32];
+    reader.read_exact(&mut asset_desc_hash).map_err(|_| {
+        Error::new(
+            ErrorKind::InvalidData,
+            "Invalid Asset Description Hash in IssueAction",
+        )
+    })?;
     let notes = Vector::read(&mut reader, |r| read_note(r))?;
     let finalize = match reader.read_u8()? {
         0 => false,
@@ -61,7 +67,7 @@ fn read_action<R: Read>(mut reader: R) -> io::Result<IssueAction> {
             ))
         }
     };
-    Ok(IssueAction::from_parts(asset_descr_bytes, notes, finalize))
+    Ok(IssueAction::from_parts(asset_desc_hash, notes, finalize))
 }
 
 pub fn read_note<R: Read>(mut reader: R) -> io::Result<Note> {
@@ -128,7 +134,7 @@ pub fn write_v6_bundle<W: Write>(
 }
 
 fn write_action<W: Write>(mut writer: &mut W, action: &IssueAction) -> io::Result<()> {
-    Vector::write(&mut writer, action.asset_desc(), |w, b| w.write_u8(*b))?;
+    writer.write_all(action.asset_desc_hash())?;
     Vector::write(&mut writer, action.notes(), write_note)?;
     writer.write_u8(action.is_finalized() as u8)?;
     Ok(())
