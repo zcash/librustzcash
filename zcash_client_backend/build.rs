@@ -72,6 +72,18 @@ fn build() -> io::Result<()> {
             ".cash.z.wallet.sdk.rpc.CompactOrchardAction",
             "crate::proto::compact_formats::CompactOrchardAction",
         )
+        .extern_path(
+            ".cash.z.wallet.sdk.rpc.OutPoint",
+            "crate::proto::compact_formats::OutPoint",
+        )
+        .extern_path(
+            ".cash.z.wallet.sdk.rpc.CompactTxIn",
+            "crate::proto::compact_formats::CompactTxIn",
+        )
+        .extern_path(
+            ".cash.z.wallet.sdk.rpc.TxOut",
+            "crate::proto::compact_formats::TxOut",
+        )
         .compile_protos(&[SERVICE_PROTO], &["proto/"])?;
 
     // Build the proposal types.

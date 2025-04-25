@@ -10,6 +10,16 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::proto::compact_formats`:
+  - `OutPoint`
+  - `CompactTxIn`
+  - `TxOut`
+  - `CompactTx::{vin, vout}`
+- `zcash_client_backend::proto::service`:
+  - `PoolType`
+  - `BlockRange::pool_types`
+
 ## [0.20.0] - PLANNED
 
 ### Added
