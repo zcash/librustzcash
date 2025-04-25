@@ -6,7 +6,7 @@
 // For workspace compilation reasons, we have this crate in the workspace and just leave
 // it empty if `zfuture` is not enabled.
 
-#[cfg(zcash_unstable = "tze")]
+#[cfg(zcash_unstable = "zfuture")]
 pub mod consensus;
-#[cfg(zcash_unstable = "tze")]
+#[cfg(zcash_unstable = "zfuture")]
 pub mod transparent;

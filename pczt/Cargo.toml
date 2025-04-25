@@ -66,6 +66,7 @@ zip32.workspace = true
 [features]
 default = ["std"]
 std = ["document-features"]
+zip-233 = ["zcash_primitives/zip-233"]
 
 ## Enables functionality that requires Orchard protocol types.
 orchard = [

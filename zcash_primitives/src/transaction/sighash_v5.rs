@@ -23,7 +23,7 @@ use crate::{
     },
 };
 
-#[cfg(zcash_unstable = "tze")]
+#[cfg(zcash_unstable = "zfuture")]
 use {
     crate::{
         encoding::WriteBytesExt,
@@ -36,7 +36,7 @@ const ZCASH_TRANSPARENT_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash___TxInHa
 const ZCASH_TRANSPARENT_AMOUNTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxTrAmountsHash";
 const ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxTrScriptsHash";
 
-#[cfg(zcash_unstable = "tze")]
+#[cfg(zcash_unstable = "zfuture")]
 const ZCASH_TZE_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash__TzeInHash";
 
 fn hasher(personal: &[u8; 16]) -> StateWrite {
@@ -141,7 +141,7 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
     }
 }
 
-#[cfg(zcash_unstable = "tze")]
+#[cfg(zcash_unstable = "zfuture")]
 fn tze_input_sigdigests<A: tze::Authorization>(
     bundle: &tze::Bundle<A>,
     input: &SignableInput<'_>,
@@ -198,7 +198,7 @@ pub fn v5_signature_hash<
         ),
         txid_parts.sapling_digest,
         txid_parts.orchard_digest,
-        #[cfg(zcash_unstable = "tze")]
+        #[cfg(zcash_unstable = "zfuture")]
         tx.tze_bundle
             .as_ref()
             .zip(txid_parts.tze_digests.as_ref())

@@ -300,8 +300,7 @@ mod tests {
             None,
             None,
             None,
-            None,
-            #[cfg(zcash_unstable = "tze")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
             None,
         ));
 
