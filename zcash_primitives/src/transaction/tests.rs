@@ -21,8 +21,9 @@ use super::{
 
 #[cfg(zcash_unstable = "zfuture")]
 use super::components::tze;
-#[cfg(not(zcash_unstable = "tze"))]
-use super::sighash::{SIGHASH_ALL, SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE};
+
+#[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+use crate::transaction::TxVersion;
 
 #[test]
 fn tx_read_write() {
@@ -56,7 +57,8 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
         tx.orchard_bundle.as_ref().map(|v| *v.value_balance()),
         txo.orchard_bundle.as_ref().map(|v| *v.value_balance())
     );
-    if tx.version == TxVersion::Zip230 {
+    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+    if tx.version == TxVersion::V6 {
         prop_assert_eq!(tx.zip233_amount, txo.zip233_amount);
     }
     Ok(())
@@ -123,6 +125,7 @@ proptest! {
     }
 }
 
+#[cfg(zcash_unstable = "nu7")]
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]
@@ -221,7 +224,6 @@ impl Authorization for TestUnauthorized {
     type TzeAuth = tze::Authorized;
 }
 
-#[cfg(not(zcash_unstable = "tze"))]
 #[test]
 fn zip_0244() {
     fn to_test_txdata(
@@ -278,7 +280,7 @@ fn zip_0244() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
             txdata.zip233_amount,
         );
         #[cfg(zcash_unstable = "zfuture")]
@@ -291,7 +293,7 @@ fn zip_0244() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
-            #[cfg(feature = "zip-233")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
             txdata.zip233_amount,
             txdata.tze_bundle().cloned(),
         );
@@ -380,7 +382,11 @@ fn zip_0244() {
     }
 }
 
-#[cfg(all(feature = "zip-233", not(zcash_unstable = "zfuture")))]
+#[cfg(all(
+    feature = "zip-233",
+    zcash_unstable = "nu7",
+    not(zcash_unstable = "zfuture")
+))]
 #[test]
 fn zip_0233() {
     fn to_test_txdata(
@@ -396,7 +402,7 @@ fn zip_0233() {
         let input_amounts = tv
             .amounts
             .iter()
-            .map(|amount| NonNegativeAmount::from_nonnegative_i64(*amount).unwrap())
+            .map(|amount| Zatoshis::from_nonnegative_i64(*amount).unwrap())
             .collect();
         let input_scriptpubkeys = tv
             .script_pubkeys

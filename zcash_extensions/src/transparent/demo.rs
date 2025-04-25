@@ -513,7 +513,6 @@ mod tests {
                 NetworkUpgrade::Canopy => Some(BlockHeight::from_u32(1_028_500)),
                 NetworkUpgrade::Nu5 => Some(BlockHeight::from_u32(1_200_000)),
                 NetworkUpgrade::Nu6 => Some(BlockHeight::from_u32(1_300_000)),
-                NetworkUpgrade::Nu7 => Some(BlockHeight::from_u32(1_350_000)),
                 NetworkUpgrade::ZFuture => Some(BlockHeight::from_u32(1_400_000)),
             }
         }
@@ -672,7 +671,7 @@ mod tests {
             precondition: tze::Precondition::from(0, &Precondition::open(hash_1)),
         };
 
-        let tx_a = TransactionData::from_parts(
+        let tx_a = TransactionData::from_parts_zfuture(
             TxVersion::ZFuture,
             BranchId::ZFuture,
             0,
@@ -681,6 +680,7 @@ mod tests {
             None,
             None,
             None,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
             None,
             Some(Bundle {
                 vin: vec![],
@@ -704,7 +704,7 @@ mod tests {
             precondition: tze::Precondition::from(0, &Precondition::close(hash_2)),
         };
 
-        let tx_b = TransactionData::from_parts(
+        let tx_b = TransactionData::from_parts_zfuture(
             TxVersion::ZFuture,
             BranchId::ZFuture,
             0,
@@ -713,6 +713,7 @@ mod tests {
             None,
             None,
             None,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
             None,
             Some(Bundle {
                 vin: vec![in_b],
@@ -732,7 +733,7 @@ mod tests {
             witness: tze::Witness::from(0, &Witness::close(preimage_2)),
         };
 
-        let tx_c = TransactionData::from_parts(
+        let tx_c = TransactionData::from_parts_zfuture(
             TxVersion::ZFuture,
             BranchId::ZFuture,
             0,
@@ -741,6 +742,7 @@ mod tests {
             None,
             None,
             None,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
             None,
             Some(Bundle {
                 vin: vec![in_c],
