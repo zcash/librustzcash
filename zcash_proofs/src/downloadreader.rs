@@ -62,7 +62,7 @@ impl io::Read for ResponseLazyReader {
                                 let error = format!("download response failed: {:?}", error);
 
                                 *self = Complete(Err(error.clone()));
-                                return Err(io::Error::new(io::ErrorKind::Other, error));
+                                return Err(io::Error::other(error));
                             }
                         }
                     }
@@ -75,7 +75,7 @@ impl io::Read for ResponseLazyReader {
                         // Return a zero-byte read for download success and EOF.
                         Ok(()) => Ok(0),
                         // Keep returning the download error,
-                        Err(error) => Err(io::Error::new(io::ErrorKind::Other, error.clone())),
+                        Err(error) => Err(io::Error::other(error.clone())),
                     };
                 }
             }
