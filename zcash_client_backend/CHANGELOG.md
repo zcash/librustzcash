@@ -7,6 +7,16 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::proto::compact_formats`:
+  - `OutPoint`
+  - `CompactTxIn`
+  - `TxOut`
+  - `CompactTx::{vin, vout}`
+- `zcash_client_backend::proto::service`:
+  - `PoolType`
+  - `BlockRange::pool_types`
+
 ### Changed
 - Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`.
 
