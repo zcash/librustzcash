@@ -13,6 +13,8 @@ use crate::{
     sighash::{SignableInput, TransparentAuthorizingContext},
 };
 
+use crate::address::OpCode;
+
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
@@ -28,6 +30,7 @@ pub enum Error {
     InvalidAmount,
     /// A bundle could not be built because a required signing keys was missing.
     MissingSigningKey,
+    InvalidOpReturn,
 }
 
 impl fmt::Display for Error {
@@ -36,6 +39,7 @@ impl fmt::Display for Error {
             Error::InvalidAddress => write!(f, "Invalid address"),
             Error::InvalidAmount => write!(f, "Invalid amount"),
             Error::MissingSigningKey => write!(f, "Missing signing key"),
+            Error::InvalidOpReturn => write!(f, "Invalid op_return"),
         }
     }
 }
@@ -275,6 +279,28 @@ impl TransparentBuilder {
 
             Some(pczt::Bundle { inputs, outputs })
         }
+    }
+
+    /// Adds a zero-value OP_RETURN output containing the given data.
+    pub fn add_op_return_output(&mut self, data: &[u8]) -> Result<(), Error> {
+        // Check 80 bytes limit.
+        const MAX_OP_RETURN_RELAY_BYTES: usize = 80;
+        if data.len() > MAX_OP_RETURN_RELAY_BYTES {
+            // Use the appropriate error variant from the builder's Error enum
+            // InvalidOpReturn might need to be added if it doesn't exist.
+            return Err(Error::InvalidOpReturn);
+        }
+
+        // Construct the OP_RETURN script using the Shl (<<) operators
+        let script = Script::default() // Start with an empty script
+                     << OpCode::Return  // Append the OP_RETURN opcode
+                     << data;           // Append the data push opcode(s) and the data itself
+
+        self.vout.push(TxOut {
+             value: Zatoshis::ZERO,
+             script_pubkey: script,
+        });
+        Ok(())
     }
 }
 
