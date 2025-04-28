@@ -404,4 +404,55 @@ impl Bundle<Unauthorized> {
             authorization: Authorized,
         })
     }
+    
+    pub fn apply_external_signatures(
+        self,
+        #[cfg(feature = "transparent-inputs")] signatures: Vec<secp256k1::ecdsa::Signature>,
+    ) -> Bundle<Authorized> {
+        #[cfg(feature = "transparent-inputs")]
+        let script_sigs = { 
+            // Check that the number of signatures matches the number of inputs
+            assert_eq!(
+                self.authorization.inputs.len(),
+                signatures.len(),
+                "Number of signatures must match number of inputs"
+            );
+
+            // Compute the scriptSigs
+            self
+            .authorization
+            .inputs
+            .iter()
+            .zip(signatures)
+            .map(|(info, signature)| { // For each (input info, signature) pair...
+                // Serialize the provided signature to DER format
+                let mut sig_bytes: Vec<u8> = signature.serialize_der().to_vec();
+                // Append the SIGHASH_ALL byte (0x01)
+                sig_bytes.push(SIGHASH_ALL);
+
+                // Construct the P2PKH scriptSig: <DER sig + SIGHASH byte> <compressed pubkey>
+                // Assumes P2PKH inputs. Needs info.pubkey which comes from TransparentInputInfo.
+                Script::default() << &sig_bytes[..] << &info.pubkey.serialize()[..]
+            })
+        };
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        let script_sigs = std::iter::empty::<Script>();
+
+        // Construct the new authorized Bundle
+        Bundle {
+            vin: self
+                .vin // Take the original vin (which has empty script_sig fields)
+                .iter()
+                .zip(script_sigs) // Pair the old TxIn with the newly computed scriptSig
+                .map(|(txin, sig)| TxIn {
+                    prevout: txin.prevout.clone(),
+                    script_sig: sig, // Assign the computed scriptSig
+                    sequence: txin.sequence,
+                })
+                .collect(),
+            vout: self.vout, // Keep the original vout
+            authorization: Authorized,
+        }
+    }
 }
