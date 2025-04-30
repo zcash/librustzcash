@@ -410,7 +410,10 @@ jobs:
         uses: ./.github/actions/prepare
       - uses: dtolnay/rust-toolchain@beta
         id: toolchain
+        with:
+          components: clippy
       - run: rustup override set "${TOOLCHAIN}"
+        shell: sh
         env:
           TOOLCHAIN: ${{steps.toolchain.outputs.name}}
       - name: Run Clippy (beta)

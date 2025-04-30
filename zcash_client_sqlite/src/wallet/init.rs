@@ -61,13 +61,13 @@ pub enum WalletMigrationError {
     BalanceError(BalanceError),
 
     /// Wrapper for commitment tree invariant violations
-    CommitmentTree(ShardTreeError<commitment_tree::Error>),
+    CommitmentTree(Box<ShardTreeError<commitment_tree::Error>>),
 
     /// Reverting the specified migration is not supported.
     CannotRevert(Uuid),
 
     /// Some other unexpected violation of database business rules occurred
-    Other(SqliteClientError),
+    Other(Box<SqliteClientError>),
 }
 
 impl From<rusqlite::Error> for WalletMigrationError {
@@ -84,7 +84,7 @@ impl From<BalanceError> for WalletMigrationError {
 
 impl From<ShardTreeError<commitment_tree::Error>> for WalletMigrationError {
     fn from(e: ShardTreeError<commitment_tree::Error>) -> Self {
-        WalletMigrationError::CommitmentTree(e)
+        WalletMigrationError::CommitmentTree(Box::new(e))
     }
 }
 
@@ -99,12 +99,14 @@ impl From<SqliteClientError> for WalletMigrationError {
         match value {
             SqliteClientError::CorruptedData(err) => WalletMigrationError::CorruptedData(err),
             SqliteClientError::DbError(err) => WalletMigrationError::DbError(err),
-            SqliteClientError::CommitmentTree(err) => WalletMigrationError::CommitmentTree(err),
+            SqliteClientError::CommitmentTree(err) => {
+                WalletMigrationError::CommitmentTree(Box::new(err))
+            }
             SqliteClientError::BalanceError(err) => WalletMigrationError::BalanceError(err),
             SqliteClientError::AddressGeneration(err) => {
                 WalletMigrationError::AddressGeneration(err)
             }
-            other => WalletMigrationError::Other(other),
+            other => WalletMigrationError::Other(Box::new(other)),
         }
     }
 }
@@ -193,7 +195,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::InvalidMemo(e) => WalletMigrationError::CorruptedData(e.to_string()),
         SqliteClientError::AddressGeneration(e) => WalletMigrationError::AddressGeneration(e),
         SqliteClientError::BadAccountData(e) => WalletMigrationError::CorruptedData(e),
-        SqliteClientError::CommitmentTree(e) => WalletMigrationError::CommitmentTree(e),
+        SqliteClientError::CommitmentTree(e) => WalletMigrationError::CommitmentTree(Box::new(e)),
         SqliteClientError::UnsupportedPoolType(pool) => WalletMigrationError::CorruptedData(
             format!("Wallet DB contains unsupported pool type {}", pool),
         ),
@@ -239,7 +241,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         }
         #[cfg(feature = "transparent-inputs")]
         SqliteClientError::Scheduling(e) => {
-            WalletMigrationError::Other(SqliteClientError::Scheduling(e))
+            WalletMigrationError::Other(Box::new(SqliteClientError::Scheduling(e)))
         }
     }
 }
