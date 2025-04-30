@@ -2178,6 +2178,353 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     reservation_should_fail(&mut st, 1, gap_limits.ephemeral() * 2);
 }
 
+/// Tests spending all funds within the given shielded pool in a single transaction.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Checks that the wallet balances are correct.
+/// - Constructs a request to spend all of that balance to an external address in the
+///   same pool.
+/// - Builds the transaction.
+/// - Checks that the transaction was stored, and that the outputs are decryptable and
+///   have the expected details.
+pub fn spend_all_funds_single_step_proposed_transfer<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let dfvk = T::test_account_fvk(&st);
+
+    // Add funds to the wallet in a single note
+    let value = Zatoshis::const_from_u64(60000);
+    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    st.scan_cached_blocks(h, 1);
+
+    // Spendable balance matches total balance
+    assert_eq!(st.get_total_balance(account.id()), value);
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        value
+    );
+
+    assert_eq!(
+        st.wallet()
+            .block_max_scanned()
+            .unwrap()
+            .unwrap()
+            .block_height(),
+        h
+    );
+
+    let spend_amount = Zatoshis::const_from_u64(50000);
+    let to_extsk = T::sk(&[0xf5; 32]);
+    let to: Address = T::sk_default_address(&to_extsk);
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        spend_amount,
+    )])
+    .unwrap();
+
+    let fee_rule = StandardFeeRule::Zip317;
+
+    let change_memo = "Test change memo".parse::<Memo>().unwrap();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        fee_rule,
+        Some(change_memo.clone().into()),
+        T::SHIELDED_PROTOCOL,
+        DustOutputPolicy::default(),
+    );
+    let input_selector = GreedyInputSelector::new();
+
+    let proposal = st
+        .propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap();
+
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+        account.usk(),
+        OvkPolicy::Sender,
+        &proposal,
+    );
+    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+
+    let sent_tx_id = create_proposed_result.unwrap()[0];
+
+    // Verify that the sent transaction was stored and that we can decrypt the memos
+    let tx = st
+        .wallet()
+        .get_transaction(sent_tx_id)
+        .unwrap()
+        .expect("Created transaction was stored.");
+    let ufvks = [(account.id(), account.usk().to_unified_full_viewing_key())]
+        .into_iter()
+        .collect();
+    let d_tx = decrypt_transaction(st.network(), None, Some(h), &tx, &ufvks);
+    assert_eq!(T::decrypted_pool_outputs_count(&d_tx), 2);
+
+    let mut found_tx_change_memo = false;
+    let mut found_tx_empty_memo = false;
+    T::with_decrypted_pool_memos(&d_tx, |memo| {
+        if Memo::try_from(memo).unwrap() == change_memo {
+            found_tx_change_memo = true
+        }
+        if Memo::try_from(memo).unwrap() == Memo::Empty {
+            found_tx_empty_memo = true
+        }
+    });
+    assert!(found_tx_change_memo);
+    assert!(found_tx_empty_memo);
+
+    // Verify that the stored sent notes match what we're expecting
+    let sent_note_ids = st
+        .wallet()
+        .get_sent_note_ids(&sent_tx_id, T::SHIELDED_PROTOCOL)
+        .unwrap();
+    assert_eq!(sent_note_ids.len(), 2);
+
+    // The sent memo should be the empty memo for the sent output, and the
+    // change output's memo should be as specified.
+    let mut found_sent_change_memo = false;
+    let mut found_sent_empty_memo = false;
+    for sent_note_id in sent_note_ids {
+        match st
+            .wallet()
+            .get_memo(sent_note_id)
+            .expect("Note id is valid")
+            .as_ref()
+        {
+            Some(m) if m == &change_memo => {
+                found_sent_change_memo = true;
+            }
+            Some(m) if m == &Memo::Empty => {
+                found_sent_empty_memo = true;
+            }
+            Some(other) => panic!("Unexpected memo value: {:?}", other),
+            None => panic!("Memo should not be stored as NULL"),
+        }
+    }
+    assert!(found_sent_change_memo);
+    assert!(found_sent_empty_memo);
+
+    // Check that querying for a nonexistent sent note returns None
+    assert_matches!(
+        st.wallet()
+            .get_memo(NoteId::new(sent_tx_id, T::SHIELDED_PROTOCOL, 12345)),
+        Ok(None)
+    );
+
+    let tx_history = st.wallet().get_tx_history().unwrap();
+    assert_eq!(tx_history.len(), 2);
+    {
+        let tx_0 = &tx_history[0];
+        assert_eq!(tx_0.total_spent(), Zatoshis::const_from_u64(0));
+        assert_eq!(tx_0.total_received(), Zatoshis::const_from_u64(60000));
+    }
+
+    {
+        let tx_1 = &tx_history[1];
+        assert_eq!(tx_1.total_spent(), Zatoshis::const_from_u64(60000));
+        assert_eq!(tx_1.total_received(), Zatoshis::ZERO);
+    }
+
+    let network = *st.network();
+    assert_matches!(
+        decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, None),
+        Ok(_)
+    );
+}
+/// Test attempts to sweep a wallet into a TEX address
+///
+/// 1. funds wallet with 100000 Zatoshis
+/// 2. sets that spend amount will be 75000 Zatoshi
+/// 3. proposes a transaction to a TEX address spending 75000 Zatoshi
+/// 4. attempts to perform the proposal
+/// 5. proposes the transaction
+/// 6. "mines" the transaction.
+/// 7. checks that all funds have been spent by the two involved transactions
+///
+/// Desired effects:
+/// - all funds are spent
+/// - Fees are the least possible: in this case 15000 for tr0 and 10000 Zats for tr1
+#[cfg(feature = "transparent-inputs")]
+pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
+    ds_factory: DSF,
+    cache: impl TestCache,
+) where
+    DSF: DataStoreFactory,
+    <DSF as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    use crate::data_api::{testing::transparent::GapLimits, OutputOfSentTx};
+
+    let gap_limits = GapLimits::new(10, 5, 3);
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .with_gap_limits(gap_limits)
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+    let (default_addr, _) = account.usk().default_transparent_address();
+    let dfvk = T::test_account_fvk(&st);
+
+    let value = Zatoshis::const_from_u64(100000);
+    let transfer_amount = Zatoshis::const_from_u64(75000);
+
+    // Add funds to the wallet.
+    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    st.scan_cached_blocks(h, 1);
+
+    assert_eq!(
+        st.wallet()
+            .block_max_scanned()
+            .unwrap()
+            .unwrap()
+            .block_height(),
+        h
+    );
+
+    let initial_balance = value;
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        initial_balance
+    );
+
+    let expected_step0_fee = (zip317::MARGINAL_FEE * 3u64).unwrap();
+    let expected_step1_fee = zip317::MINIMUM_FEE;
+    let expected_ephemeral = (transfer_amount + expected_step1_fee).unwrap();
+    let expected_step0_change =
+        (initial_balance - expected_ephemeral - expected_step0_fee).expect("sufficient funds");
+    assert!(expected_step0_change.is_zero());
+
+    let total_sent = (expected_step0_fee + expected_step1_fee + transfer_amount).unwrap();
+
+    // Generate a ZIP 320 proposal, sending to the wallet's default transparent address
+    // expressed as a TEX address.
+    let tex_addr = match default_addr {
+        TransparentAddress::PublicKeyHash(data) => Address::Tex(data),
+        _ => unreachable!(),
+    };
+
+    let change_memo: Option<MemoBytes> = None;
+    // We use `st.propose_standard_transfer` here in order to also test round-trip
+    // serialization of the proposal.
+    let proposal = st
+        .propose_standard_transfer::<Infallible>(
+            account_id,
+            StandardFeeRule::Zip317,
+            ConfirmationsPolicy::MIN,
+            &tex_addr,
+            transfer_amount,
+            None,
+            change_memo.clone(),
+            T::SHIELDED_PROTOCOL,
+        )
+        .unwrap();
+
+    let steps: Vec<_> = proposal.steps().iter().cloned().collect();
+    assert_eq!(steps.len(), 2);
+
+    assert_eq!(steps[0].balance().fee_required(), expected_step0_fee);
+    assert_eq!(steps[1].balance().fee_required(), expected_step1_fee);
+    assert_eq!(
+        steps[0].balance().proposed_change(),
+        [
+            ChangeValue::shielded(T::SHIELDED_PROTOCOL, expected_step0_change, change_memo),
+            ChangeValue::ephemeral_transparent(expected_ephemeral),
+        ]
+    );
+    assert_eq!(steps[1].balance().proposed_change(), []);
+
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+        account.usk(),
+        OvkPolicy::Sender,
+        &proposal,
+    );
+    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 2);
+    let txids = create_proposed_result.unwrap();
+
+    // Mine the created transactions.
+    for txid in txids.iter() {
+        let (h, _) = st.generate_next_block_including(*txid);
+        st.scan_cached_blocks(h, 1);
+    }
+
+    // Check that there are sent outputs with the correct values.
+    let confirmed_sent: Vec<Vec<_>> = txids
+        .iter()
+        .map(|sent_txid| st.wallet().get_sent_outputs(sent_txid).unwrap())
+        .collect();
+
+    // Verify that a status request has been generated for the second transaction of
+    // the ZIP 320 pair.
+    let tx_data_requests = st.wallet().transaction_data_requests().unwrap();
+    assert!(tx_data_requests.contains(&TransactionDataRequest::GetStatus(*txids.last())));
+
+    assert!(expected_step0_change < expected_ephemeral);
+    assert_eq!(confirmed_sent.len(), 2);
+    assert_eq!(confirmed_sent[0].len(), 2);
+    assert_eq!(confirmed_sent[0][0].value, expected_step0_change);
+    let OutputOfSentTx {
+        value: ephemeral_v,
+        external_recipient: to_addr,
+        ephemeral_address: _,
+    } = confirmed_sent[0][1].clone();
+    assert_eq!(ephemeral_v, expected_ephemeral);
+    assert!(to_addr.is_some());
+
+    assert_eq!(confirmed_sent[1].len(), 1);
+    assert_matches!(
+            &confirmed_sent[1][0],
+            OutputOfSentTx { value: sent_v, external_recipient: sent_to_addr, ephemeral_address: None }
+            if sent_v == &transfer_amount && sent_to_addr == &Some(tex_addr));
+
+    // Check that the transaction history matches what we expect.
+    let tx_history = st.wallet().get_tx_history().unwrap();
+
+    let tx_0 = tx_history
+        .iter()
+        .find(|tx| tx.txid() == *txids.first())
+        .unwrap();
+    let tx_1 = tx_history
+        .iter()
+        .find(|tx| tx.txid() == *txids.last())
+        .unwrap();
+
+    assert_eq!(tx_0.account_id(), &account_id);
+    assert!(!tx_0.expired_unmined());
+    assert_eq!(tx_0.has_change(), expected_step0_change.is_zero());
+    assert!(!tx_0.is_shielding());
+    assert_eq!(
+        tx_0.account_value_delta(),
+        -ZatBalance::from(expected_step0_fee),
+    );
+
+    assert_eq!(tx_1.account_id(), &account_id);
+    assert!(!tx_1.expired_unmined());
+    assert!(!tx_1.has_change());
+    assert!(!tx_0.is_shielding());
+    assert_eq!(
+        tx_1.account_value_delta(),
+        -ZatBalance::from(expected_ephemeral),
+    );
+
+    let ending_balance = st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN);
+    assert_eq!(initial_balance - total_sent, ending_balance.into());
+}
+
 #[cfg(feature = "transparent-inputs")]
 pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTester, DSF>(
     ds_factory: DSF,
