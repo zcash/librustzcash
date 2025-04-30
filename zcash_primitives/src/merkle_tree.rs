@@ -137,7 +137,6 @@ pub fn write_nonempty_frontier_v1<H: HashSer, W: Write>(
     Ok(())
 }
 
-#[allow(clippy::redundant_closure)]
 pub fn read_nonempty_frontier_v1<H: HashSer + Clone, R: Read>(
     mut reader: R,
 ) -> io::Result<NonEmptyFrontier<H>> {
@@ -169,7 +168,6 @@ pub fn write_frontier_v1<H: HashSer, W: Write>(
     Optional::write(writer, frontier.value(), write_nonempty_frontier_v1)
 }
 
-#[allow(clippy::redundant_closure)]
 pub fn read_frontier_v1<H: HashSer + Clone, R: Read>(reader: R) -> io::Result<Frontier<H, 32>> {
     match Optional::read(reader, read_nonempty_frontier_v1)? {
         None => Ok(Frontier::empty()),
@@ -211,7 +209,6 @@ pub fn write_commitment_tree<Node: HashSer, W: Write, const DEPTH: u8>(
 }
 
 /// Reads an `IncrementalWitness` from its serialized form.
-#[allow(clippy::redundant_closure)]
 pub fn read_incremental_witness<Node: HashSer, R: Read, const DEPTH: u8>(
     mut reader: R,
 ) -> io::Result<IncrementalWitness<Node, DEPTH>> {

@@ -11,6 +11,11 @@ and this library adheres to Rust's notion of
 - `zcash_client_sqlite::wallet::init::WalletMigrator`
 - `zcash_client_sqlite::wallet::init::migrations`
 
+### Changed
+- `zcash_client_sqlite::wallet::init::WalletMigrationError::`
+  - Variants `WalletMigrationError::CommitmentTree` and 
+    `WalletMigrationError::Other` now `Box` their contents.
+
 ## [0.16.2] - 2025-04-02
 
 ### Fixed
