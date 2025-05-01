@@ -224,7 +224,7 @@
 <a href=#224 id=224 data-nosnippet>224</a>/// This is an ephemeral value for efficiently and generically working with accounts in a
 <a href=#225 id=225 data-nosnippet>225</a>/// [`WalletDb`]. To reference accounts in external contexts, use [`AccountUuid`].
 <a href=#226 id=226 data-nosnippet>226</a></span><span class="attr">#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
-<a href=#227 id=227 data-nosnippet>227</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>AccountRef(u32);
+<a href=#227 id=227 data-nosnippet>227</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>AccountRef(i64);
 <a href=#228 id=228 data-nosnippet>228</a>
 <a href=#229 id=229 data-nosnippet>229</a><span class="doccomment">/// This implementation is retained under `#[cfg(test)]` for pre-AccountUuid testing.
 <a href=#230 id=230 data-nosnippet>230</a></span><span class="attr">#[cfg(test)]
