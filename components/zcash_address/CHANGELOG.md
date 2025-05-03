@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_address::AddressType`
+
 ## [0.7.0] - 2025-02-21
 ### Added
 - `zcash_address::unified::Item` to expose the opaque typed encoding of unified

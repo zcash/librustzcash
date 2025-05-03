@@ -315,6 +315,28 @@ impl ZcashAddress {
             _ => false,
         }
     }
+
+    /// Returns the type of Zcash address this value was parsed from.
+    pub fn address_type(&self) -> AddressType {
+        match self.kind {
+            AddressKind::Sprout(_) => AddressType::Sprout,
+            AddressKind::Sapling(_) => AddressType::Sapling,
+            AddressKind::Unified(_) => AddressType::Unified,
+            AddressKind::P2pkh(_) => AddressType::P2pkh,
+            AddressKind::P2sh(_) => AddressType::P2sh,
+            AddressKind::Tex(_) => AddressType::Tex,
+        }
+    }
+}
+
+/// The enumeration of address types that are representable as a [`ZcashAddress`].
+pub enum AddressType {
+    Sprout,
+    Sapling,
+    Unified,
+    P2pkh,
+    P2sh,
+    Tex,
 }
 
 #[cfg(feature = "test-dependencies")]
