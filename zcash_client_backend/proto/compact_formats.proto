@@ -55,6 +55,32 @@ message CompactTx {
     repeated CompactSaplingSpend spends = 4;
     repeated CompactSaplingOutput outputs = 5;
     repeated CompactOrchardAction actions = 6;
+    repeated CompactTxIn vin = 7;
+    repeated TxOut vout = 8;
+}
+
+// The unique identifier for a transparent transaction output.
+message OutPoint {
+    // The txid of the transaction that generated this output.
+    bytes txid = 1;
+    // The index of the output in the `vout` array of the transaction.
+    uint32 index = 2;
+}
+
+// A compact representation of a transparent UTXO being spent.
+message CompactTxIn {
+    OutPoint prevout = 1;
+}
+
+// A transparent output being created by the transaction.
+//
+// This contains identical data to the `TxOut` type in the transaction itself, and
+// thus it is not "compact."
+message TxOut {
+    // The value of the output, in Zatoshis.
+    uint32 value = 1;
+    // The script pubkey that must be satisfied in order to spend this output.
+    bytes scriptPubKey = 2;
 }
 
 // A compact representation of a [Sapling Spend](https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus).
