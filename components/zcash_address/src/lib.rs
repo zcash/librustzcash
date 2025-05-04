@@ -210,7 +210,7 @@ impl ZcashAddress {
     /// ```
     /// use zcash_address::ZcashAddress;
     ///
-    /// let encoded = "zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly";
+    /// let encoded = "zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9slya";
     /// let addr = ZcashAddress::try_from_encoded(&encoded);
     /// assert_eq!(encoded.parse(), addr);
     /// ```
