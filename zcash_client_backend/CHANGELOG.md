@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::tor`:
+  - `Client::set_dormant`
+  - `DormantMode`
+
 ### Changed
 - Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`.
 - `zcash_client_backend::tor`:

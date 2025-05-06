@@ -11,6 +11,10 @@ mod grpc;
 
 pub mod http;
 
+// Re-exported as this is currently the only `arti_client` type users would need to use
+// our minimal client API.
+pub use arti_client::DormantMode;
+
 /// A Tor client that exposes capabilities designed for Zcash wallets.
 #[derive(Clone)]
 pub struct Client {
@@ -80,6 +84,17 @@ impl Client {
         Self {
             inner: self.inner.isolated_client(),
         }
+    }
+
+    /// Changes the client's current dormant mode, putting background tasks to sleep or
+    /// waking them up as appropriate.
+    ///
+    /// This can be used to conserve CPU usage if you aren’t planning on using the client
+    /// for a while, especially on mobile platforms.
+    ///
+    /// See the [`DormantMode`] documentation for more details.
+    pub fn set_dormant(&self, mode: DormantMode) {
+        self.inner.set_dormant(mode);
     }
 }
 
