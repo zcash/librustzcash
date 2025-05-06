@@ -21,6 +21,8 @@ impl Client {
         &self,
         endpoint: Uri,
     ) -> Result<CompactTxStreamerClient<Channel>, Error> {
+        self.ensure_bootstrapped().await?;
+
         let is_https = http::url_is_https(&endpoint)?;
 
         let channel = Endpoint::from(endpoint);

@@ -140,6 +140,8 @@ impl Client {
         &self,
         exchanges: &Exchanges,
     ) -> Result<Decimal, Error> {
+        self.ensure_bootstrapped().await?;
+
         // Fetch the data in parallel.
         let res = join!(
             exchanges.trusted.query_zec_to_usd(self),

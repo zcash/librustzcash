@@ -64,6 +64,24 @@ impl Client {
         Ok(Self { inner })
     }
 
+    /// Ensures the Tor client is bootstrapped.
+    ///
+    /// This should be called first inside every public method that makes network requests
+    /// using the Tor client.
+    ///
+    /// `Client` ensures it cannot be constructed in an un-bootstrapped state, but Tor
+    /// clients can become less bootstrapped over time (for example if it loses its
+    /// internet connectivity, or if its directory information expires before it's able to
+    /// replace it).
+    async fn ensure_bootstrapped(&self) -> Result<(), Error> {
+        if !self.inner.bootstrap_status().ready_for_traffic() {
+            debug!("Re-bootstrapping Tor");
+            self.inner.bootstrap().await?;
+            debug!("Tor re-bootstrapped");
+        }
+        Ok(())
+    }
+
     /// Returns a new isolated `tor::Client` handle.
     ///
     /// The two `tor::Client`s will share internal state and configuration, but their
