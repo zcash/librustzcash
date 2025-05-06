@@ -14,7 +14,12 @@ mod gemini;
 mod ku_coin;
 mod mexc;
 
+/// Maximum number of retries for exchange queries implemented in this crate.
+const RETRY_LIMIT: u8 = 1;
+
 /// Exchanges for which we know how to query data over Tor.
+///
+/// Queries to these exchanges will be retried a single time on error.
 pub mod exchanges {
     pub use super::binance::Binance;
     pub use super::coinbase::Coinbase;

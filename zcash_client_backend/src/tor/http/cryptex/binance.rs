@@ -1,7 +1,7 @@
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
-use super::{Exchange, ExchangeData};
+use super::{Exchange, ExchangeData, RETRY_LIMIT};
 use crate::tor::{Client, Error};
 
 /// Querier for the Binance exchange.
@@ -52,6 +52,7 @@ impl Exchange for Binance {
                 "https://api.binance.com/api/v3/ticker/24hr?symbol=ZECUSDT"
                     .parse()
                     .unwrap(),
+                RETRY_LIMIT,
             )
             .await?;
         let data = res.into_body();

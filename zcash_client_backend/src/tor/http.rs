@@ -43,13 +43,65 @@ pub(super) fn parse_url(url: &Uri) -> Result<(bool, String, u16), Error> {
 }
 
 impl Client {
+    /// Makes an HTTP GET request over Tor.
+    ///
+    /// On error, retries will be attempted as follows:
+    /// - A successful request that resulted in a client error (HTTP 400-499) will cause a
+    ///   retry with an isolated client.
+    /// - All other errors will cause a retry with the same client.
     #[tracing::instrument(skip(self, h, f))]
     async fn get<T, F: Future<Output = Result<T, Error>>>(
         &self,
         url: Uri,
-        h: impl FnOnce(Builder) -> Builder,
+        h: impl Fn(Builder) -> Builder,
         f: impl FnOnce(Incoming) -> F,
+        retry_limit: u8,
     ) -> Result<Response<T>, Error> {
+        let mut retries_remaining = retry_limit;
+        let mut client = None;
+
+        let (parts, body) = loop {
+            match client
+                .as_ref()
+                .unwrap_or(self)
+                .get_once(url.clone(), &h)
+                .await
+            {
+                Ok(response) => break Ok(response),
+
+                Err(e) => match retries_remaining.checked_sub(1) {
+                    Some(retries) => {
+                        debug!("Retrying due to error: {e}");
+                        retries_remaining = retries;
+
+                        // A common failure with HTTP requests over Tor is a particular
+                        // exit node being blocked by the server. `Client::get` isn't used
+                        // for anything that requires a persistent Tor client identity
+                        // across queries, so we retry once with an isolated client in
+                        // order to use new circuits that have a decent chance of using a
+                        // different exit node. The isolation is not for privacy; the
+                        // server can trivially link the two requests together via timing.
+                        if let Error::Http(HttpError::Unsuccessful(status)) = e {
+                            if status.is_client_error() {
+                                debug!("Switching to isolated Tor circuit after getting {status}");
+                                client = Some(self.isolated_client());
+                            }
+                        }
+                    }
+                    None => break Err(e),
+                },
+            }
+        }?
+        .into_parts();
+
+        Ok(Response::from_parts(parts, f(body).await?))
+    }
+
+    async fn get_once(
+        &self,
+        url: Uri,
+        h: impl FnOnce(Builder) -> Builder,
+    ) -> Result<Response<Incoming>, Error> {
         let (is_https, host, port) = parse_url(&url)?;
 
         // Connect to the server.
@@ -73,13 +125,23 @@ impl Client {
                 .connect(dnsname, stream)
                 .await
                 .map_err(HttpError::Tls)?;
-            make_http_request(stream, url, h, f).await
+            make_http_request(stream, url, h).await
         } else {
-            make_http_request(stream, url, h, f).await
+            make_http_request(stream, url, h).await
         }
     }
 
-    async fn get_json<T: DeserializeOwned>(&self, url: Uri) -> Result<Response<T>, Error> {
+    /// Makes an HTTP GET request over Tor, parsing the response as JSON.
+    ///
+    /// On error, retries will be attempted as follows:
+    /// - A successful request that resulted in a client error (HTTP 400-499) will cause a
+    ///   retry with an isolated client.
+    /// - All other errors will cause a retry with the same client.
+    async fn get_json<T: DeserializeOwned>(
+        &self,
+        url: Uri,
+        retry_limit: u8,
+    ) -> Result<Response<T>, Error> {
         self.get(
             url,
             |builder| builder.header(hyper::header::ACCEPT, "application/json"),
@@ -93,17 +155,17 @@ impl Client {
                 )
                 .map_err(HttpError::from)?)
             },
+            retry_limit,
         )
         .await
     }
 }
 
-async fn make_http_request<T, F: Future<Output = Result<T, Error>>>(
+async fn make_http_request(
     stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
     url: Uri,
     h: impl FnOnce(Builder) -> Builder,
-    f: impl FnOnce(Incoming) -> F,
-) -> Result<Response<T>, Error> {
+) -> Result<Response<Incoming>, Error> {
     debug!("Making request");
     let (mut sender, connection) = conn::http1::handshake(TokioIo::new(stream))
         .await
@@ -126,17 +188,13 @@ async fn make_http_request<T, F: Future<Output = Result<T, Error>>>(
         .uri(url))
     .body(Empty::<Bytes>::new())
     .map_err(HttpError::from)?;
-    let (parts, body) = sender
-        .send_request(req)
-        .await
-        .map_err(HttpError::from)?
-        .into_parts();
-    debug!("Response status code: {}", parts.status);
+    let response = sender.send_request(req).await.map_err(HttpError::from)?;
+    debug!("Response status code: {}", response.status());
 
-    if parts.status.is_success() {
-        Ok(Response::from_parts(parts, f(body).await?))
+    if response.status().is_success() {
+        Ok(response)
     } else {
-        Err(Error::Http(HttpError::Unsuccessful(parts.status)))
+        Err(Error::Http(HttpError::Unsuccessful(response.status())))
     }
 }
 

@@ -9,6 +9,10 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`.
+- `zcash_client_backend::tor`:
+  - The exchanges in `http::cryptex::exchanges` will now retry queries once on
+    failure, and will use isolated circuits for the retry if the error looks
+    like a blocked Tor exit node.
 
 ## [0.18.0] - 2025-03-19
 

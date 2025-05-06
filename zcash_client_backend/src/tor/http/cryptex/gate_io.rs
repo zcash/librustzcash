@@ -2,7 +2,7 @@ use hyper::StatusCode;
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
-use super::{Exchange, ExchangeData};
+use super::{Exchange, ExchangeData, RETRY_LIMIT};
 use crate::tor::{Client, Error};
 
 /// Querier for the Gate.io exchange.
@@ -40,6 +40,7 @@ impl Exchange for GateIo {
                 "https://api.gateio.ws/api/v4/spot/tickers?currency_pair=ZEC_USDT"
                     .parse()
                     .unwrap(),
+                RETRY_LIMIT,
             )
             .await?;
         let data = res.into_body().into_iter().next().ok_or(Error::Http(
