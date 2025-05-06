@@ -1,4 +1,5 @@
 use std::{
+    error::Error as _,
     fmt,
     future::Future,
     pin::Pin,
@@ -86,7 +87,15 @@ pub enum GrpcError {
 impl fmt::Display for GrpcError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            GrpcError::Tonic(e) => write!(f, "Hyper error: {}", e),
+            GrpcError::Tonic(e) => {
+                if let Some(source) = e.source() {
+                    // Tonic doesn't include the source error in its `Display` impl;
+                    // add it manually for the benefit of our downstreams.
+                    write!(f, "Tonic error: {e}: {source}")
+                } else {
+                    write!(f, "Tonic error: {e}")
+                }
+            }
         }
     }
 }
