@@ -842,7 +842,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             )
             .map_err(InputSelectorError::DataSource)?;
 
-        let input_total = spendable_notes.total()?;
+        let input_total = spendable_notes.total();
 
         #[cfg(feature = "orchard")]
         let (spends_sapling, spends_orchard) = (
