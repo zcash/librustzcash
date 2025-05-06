@@ -129,7 +129,7 @@ where
     F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
     match target_value {
-        TargetValue::MaxSpendable => select_maximum_spendable_notes(
+        TargetValue::MaxSpendable => select_all_spendable_notes(
             conn,
             params,
             account,
@@ -138,7 +138,7 @@ where
             protocol,
             to_spendable_note,
         ),
-        TargetValue::AtLeast(zats) => select_minimum_spendable_notes(
+        TargetValue::AtLeast(zats) => select_spendable_notes_matching_value(
             conn,
             params,
             account,
@@ -158,7 +158,7 @@ where
 ///   - Notes with individual value *below* the ``MARGINAL_FEE`` will be ignored
 ///   - Note spendability is determined using the `anchor_height`
 #[allow(clippy::too_many_arguments)]
-fn select_maximum_spendable_notes<P: consensus::Parameters, F, Note>(
+fn select_all_spendable_notes<P: consensus::Parameters, F, Note>(
     conn: &Connection,
     params: &P,
     account: AccountUuid,
@@ -264,7 +264,7 @@ where
         .collect::<Result<_, _>>()
 }
 
-/// Selects the minimum set of spendable notes whose sum will be equal or greater that the
+/// Selects the set of spendable notes whose sum will be equal or greater that the
 /// specified ``target_value`` in Zatoshis from the specified shielded protocols excluding
 /// the ones present in the ``exclude`` slice.
 ///
@@ -272,7 +272,7 @@ where
 ///   - Notes with individual value *below* the ``MARGINAL_FEE`` will be ignored
 ///   - Note spendability is determined using the `anchor_height`
 #[allow(clippy::too_many_arguments)]
-fn select_minimum_spendable_notes<P: consensus::Parameters, F, Note>(
+fn select_spendable_notes_matching_value<P: consensus::Parameters, F, Note>(
     conn: &Connection,
     params: &P,
     account: AccountUuid,
