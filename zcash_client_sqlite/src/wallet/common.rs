@@ -186,7 +186,7 @@ where
 
     // The goal of this SQL statement is to select all the spendable notes above the
     // MARGINAL_FEE (5000 zats).
-    // 1) Use a window function to create a view of all notes, ordered from oldest to
+    // 1)  Create a view of all notes, ordered from oldest to
     //    newest
     //
     // 2) Select all unspent notes in the desired account.

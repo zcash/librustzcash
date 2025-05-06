@@ -508,8 +508,6 @@ pub fn send_max_single_step_proposed_transfer<T: ShieldedPoolTester>(
     );
 }
 
-// FIXME: Add a test that checks that Send Max to TEX address works as intended.
-
 /// This test attempts to send the max spendable funds to a TEX address recipient
 /// checks that the transactions were stred and that the amounts involved are correct
 #[cfg(feature = "transparent-inputs")]

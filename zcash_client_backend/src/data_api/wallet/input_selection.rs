@@ -206,14 +206,8 @@ pub trait InputSelector {
     /// Performs input selection and returns a proposal for the construction of a transaction
     /// that sends the maximum amount possible from a given account to the specified recipient
     /// ignoring notes that are below MARGINAL_FEE amount. This transaction will use all the
-    /// funds available minus the resulting fees that will vary according to ZIP-317 specifications.
-    ///
-    ///
-    /// Implementations should return the maximum possible number of economically useful inputs
-    /// required to supply at least the requested value, choosing only inputs received at the
-    /// specified source addresses. If insufficient funds are available to satisfy the required
-    /// outputs for the shielding request, this operation must fail and return
-    /// [`InputSelectorError::InsufficientFunds`].
+    /// funds available minus the resulting fees that will vary depending on the `change_strategy`
+    /// used.
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
     fn propose_send_max<ParamsT, ChangeT>(
