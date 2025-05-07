@@ -113,10 +113,6 @@ criteria = "safe-to-deploy"
 version = "2.0.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.android-tzdata]]
-version = "0.1.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.arrayvec]]
 version = "0.7.4"
 criteria = "safe-to-deploy"
