@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.6.3, 0.7.1] - 2025-05-07
+### Added
+- `zcash_address::Converter`
+- `zcash_address::ZcashAddress::convert_with`
+
 ## [0.7.0] - 2025-02-21
 ### Added
 - `zcash_address::unified::Item` to expose the opaque typed encoding of unified
