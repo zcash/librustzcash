@@ -6134,7 +6134,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_address"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "assert_matches",
  "bech32",
