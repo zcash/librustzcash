@@ -67,7 +67,6 @@ use incrementalmerkletree::{frontier::Frontier, Retention};
 use nonempty::NonEmpty;
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-use zcash_keys::address::Address;
 use zip32::fingerprint::SeedFingerprint;
 
 use self::{
@@ -107,7 +106,7 @@ use {
 use ambassador::delegatable_trait;
 
 #[cfg(any(test, feature = "test-dependencies"))]
-use zcash_primitives::consensus::NetworkUpgrade;
+use {zcash_keys::address::Address, zcash_primitives::consensus::NetworkUpgrade};
 
 pub mod chain;
 pub mod error;
