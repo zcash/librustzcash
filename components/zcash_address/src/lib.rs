@@ -62,7 +62,7 @@
 //! use std::ffi::{CStr, c_char, c_void};
 //! use std::ptr;
 //!
-//! use zcash_address::{ConversionError, ZcashAddress};
+//! use zcash_address::{ConversionError, TryFromAddress, ZcashAddress};
 //! use zcash_protocol::consensus::NetworkType;
 //!
 //! // Functions that return a pointer to a heap-allocated address of the given kind in
@@ -78,6 +78,7 @@
 //!     type Error = &'static str;
 //!
 //!     fn try_from_sapling(
+//!         _net: NetworkType,
 //!         data: [u8; 43],
 //!     ) -> Result<Self, ConversionError<Self::Error>> {
 //!         let parsed = unsafe { addr_from_sapling(data[..].as_ptr()) };
@@ -89,6 +90,7 @@
 //!     }
 //!
 //!     fn try_from_transparent_p2pkh(
+//!         _net: NetworkType,
 //!         data: [u8; 20],
 //!     ) -> Result<Self, ConversionError<Self::Error>> {
 //!         let parsed = unsafe { addr_from_transparent_p2pkh(data[..].as_ptr()) };
@@ -145,8 +147,7 @@ mod kind;
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod test_vectors;
 
-use convert::Converter;
-pub use convert::{ConversionError, ToAddress, TryFromAddress, UnsupportedAddress};
+pub use convert::{ConversionError, Converter, ToAddress, TryFromAddress, UnsupportedAddress};
 pub use encoding::ParseError;
 pub use kind::unified;
 use kind::unified::Receiver;
@@ -242,11 +243,10 @@ impl ZcashAddress {
 
     /// Converts this address into another type, if it matches the expected network.
     ///
-    /// `convert_if_network` can convert into any type that implements the
-    /// [`TryFromRawAddress`] trait. This enables `ZcashAddress` to be used as a common
-    /// parsing and serialization interface for Zcash addresses, while delegating
-    /// operations on those addresses (such as constructing transactions) to downstream
-    /// crates.
+    /// `convert_if_network` can convert into any type that implements the [`TryFromAddress`]
+    /// trait. This enables `ZcashAddress` to be used as a common parsing and serialization
+    /// interface for Zcash addresses, while delegating operations on those addresses (such as
+    /// constructing transactions) to downstream crates.
     ///
     /// If you want to get the encoded string for this address, use the [`encode`]
     /// method or the [`Display` implementation] via [`address.to_string()`] instead.
