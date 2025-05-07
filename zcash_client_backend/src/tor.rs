@@ -11,6 +11,10 @@ mod grpc;
 
 pub mod http;
 
+// Re-exported as this is currently the only `arti_client` type users would need to use
+// our minimal client API.
+pub use arti_client::DormantMode;
+
 /// A Tor client that exposes capabilities designed for Zcash wallets.
 #[derive(Clone)]
 pub struct Client {
@@ -60,6 +64,24 @@ impl Client {
         Ok(Self { inner })
     }
 
+    /// Ensures the Tor client is bootstrapped.
+    ///
+    /// This should be called first inside every public method that makes network requests
+    /// using the Tor client.
+    ///
+    /// `Client` ensures it cannot be constructed in an un-bootstrapped state, but Tor
+    /// clients can become less bootstrapped over time (for example if it loses its
+    /// internet connectivity, or if its directory information expires before it's able to
+    /// replace it).
+    async fn ensure_bootstrapped(&self) -> Result<(), Error> {
+        if !self.inner.bootstrap_status().ready_for_traffic() {
+            debug!("Re-bootstrapping Tor");
+            self.inner.bootstrap().await?;
+            debug!("Tor re-bootstrapped");
+        }
+        Ok(())
+    }
+
     /// Returns a new isolated `tor::Client` handle.
     ///
     /// The two `tor::Client`s will share internal state and configuration, but their
@@ -80,6 +102,17 @@ impl Client {
         Self {
             inner: self.inner.isolated_client(),
         }
+    }
+
+    /// Changes the client's current dormant mode, putting background tasks to sleep or
+    /// waking them up as appropriate.
+    ///
+    /// This can be used to conserve CPU usage if you aren’t planning on using the client
+    /// for a while, especially on mobile platforms.
+    ///
+    /// See the [`DormantMode`] documentation for more details.
+    pub fn set_dormant(&self, mode: DormantMode) {
+        self.inner.set_dormant(mode);
     }
 }
 

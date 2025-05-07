@@ -1,7 +1,7 @@
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
-use super::{Exchange, ExchangeData};
+use super::{Exchange, ExchangeData, RETRY_LIMIT};
 use crate::tor::{Client, Error};
 
 /// Querier for the Coinbase exchange.
@@ -40,6 +40,7 @@ impl Exchange for Coinbase {
                 "https://api.exchange.coinbase.com/products/ZEC-USD/ticker"
                     .parse()
                     .unwrap(),
+                RETRY_LIMIT,
             )
             .await?;
         let data = res.into_body();

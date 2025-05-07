@@ -91,11 +91,13 @@ rand_chacha = { workspace = true, optional = true }
 zcash_proofs = { workspace = true, optional = true }
 
 # - Tor
+# -- Exposed types: `arti_client::DormantMode`, `fs_mistrust::MistrustBuilder`.
 # -- Exposed error types: `arti_client::Error`, `arti_client::config::ConfigBuildError`,
 #    `hyper::Error`, `hyper::http::Error`, `serde_json::Error`. We could avoid this with
 #    changes to error handling.
 arti-client = { workspace = true, optional = true }
 dynosaur = { workspace = true, optional = true }
+fs-mistrust = { workspace = true, optional = true }
 hyper = { workspace = true, optional = true, features = ["client", "http1"] }
 serde_json = { workspace = true, optional = true }
 trait-variant = { workspace = true, optional = true }
@@ -117,7 +119,6 @@ crossbeam-channel.workspace = true
 rayon.workspace = true
 
 # - Tor
-fs-mistrust = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true, features = ["fs"] }
 tor-rtcompat = { workspace = true, optional = true }
 tower = { workspace = true, optional = true }

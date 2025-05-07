@@ -7,8 +7,20 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::tor`:
+  - `Client::set_dormant`
+  - `DormantMode`
+
 ### Changed
 - Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`.
+- `zcash_client_backend::tor`:
+  - `Client::{connect_to_lightwalletd, get_latest_zec_to_usd_rate}` now ensure
+    that the inner Tor client is ready for traffic, and re-bootstrap it if
+    necessary.
+  - The exchanges in `http::cryptex::exchanges` will now retry queries once on
+    failure, and will use isolated circuits for the retry if the error looks
+    like a blocked Tor exit node.
 
 ## [0.18.0] - 2025-03-19
 

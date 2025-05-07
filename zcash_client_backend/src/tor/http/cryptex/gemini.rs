@@ -1,7 +1,7 @@
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
-use super::{Exchange, ExchangeData};
+use super::{Exchange, ExchangeData, RETRY_LIMIT};
 use crate::tor::{Client, Error};
 
 /// Querier for the Gemini exchange.
@@ -34,7 +34,10 @@ impl Exchange for Gemini {
         // API documentation:
         // https://docs.gemini.com/rest-api/#ticker-v2
         let res = client
-            .get_json::<GeminiData>("https://api.gemini.com/v2/ticker/zecusd".parse().unwrap())
+            .get_json::<GeminiData>(
+                "https://api.gemini.com/v2/ticker/zecusd".parse().unwrap(),
+                RETRY_LIMIT,
+            )
             .await?;
         let data = res.into_body();
         Ok(ExchangeData {
