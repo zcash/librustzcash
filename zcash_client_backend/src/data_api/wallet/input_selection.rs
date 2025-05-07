@@ -953,7 +953,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
 
         let transaction_request =
             TransactionRequest::new(vec![payment]).map_err(|payment_error| {
-                InputSelectorError::Proposal(ProposalError::ResultingPaymentInvalid(payment_error))
+                InputSelectorError::Proposal(ProposalError::Zip321(payment_error))
             })?;
 
         self.propose_transaction(
