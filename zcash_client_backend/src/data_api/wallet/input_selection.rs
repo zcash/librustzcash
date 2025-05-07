@@ -845,19 +845,11 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         #[cfg(not(feature = "orchard"))]
         let (spends_sapling, spends_orchard) = (!spendable_notes.sapling().is_empty(), false);
 
-        let requested_sapling_outputs: usize = if spends_sapling {
-            2
-        } else {
-            0
-        };
+        let requested_sapling_outputs: usize = if spends_sapling { 2 } else { 0 };
 
-        let requested_orchard_actions: usize = if spends_orchard {
-            2
-        } else {
-            0
-        }; 
+        let requested_orchard_actions: usize = if spends_orchard { 2 } else { 0 };
         let sapling_output_count = ::sapling::builder::BundleType::DEFAULT
-            .num_outputs(spendable_notes.sapling.len(),requested_sapling_outputs)
+            .num_outputs(spendable_notes.sapling.len(), requested_sapling_outputs)
             .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?;
 
         let orchard_output_count = orchard::builder::BundleType::DEFAULT
@@ -949,7 +941,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             InputSelectorError::Change(ChangeError::StrategyError(ChangeT::Error::from(fee_error)))
         })?;
 
-        let amount = (input_total - fee_required).ok_or(BalanceError::Underflow)?;
+        let amount = (input_total - fee_required).ok_or(InputSelectorError::InsufficientFunds {
+            available: input_total,
+            required: fee_required,
+        })?;
 
         let payment = match zip321::Payment::new(recipient, amount, memo, None, None, vec![]) {
             Some(p) => Ok(p),
