@@ -286,6 +286,99 @@ impl<T: TryFromRawAddress> TryFromAddress for (Network, T) {
     }
 }
 
+/// A trait for converter types that can project from a [`ZcashAddress`] into another type.
+///
+/// [`ZcashAddress`]: crate::ZcashAddress
+///
+/// # Examples
+///
+/// ```
+/// use zcash_address::{ConversionError, Network, Converter, UnsupportedAddress, ZcashAddress};
+///
+/// struct KeyFinder { }
+///
+/// impl KeyFinder {
+///     fn find_sapling_extfvk(&self, data: [u8; 43]) -> Option<[u8; 73]> {
+///         todo!()
+///     }
+/// }
+///
+/// // Makes it possible to use a KeyFinder to find the Sapling extfvk that corresponds
+/// // to a given ZcashAddress.
+/// impl Converter<Option<[u8; 73]>> for KeyFinder {
+///     type Error = &'static str;
+///
+///     fn convert_sapling(
+///         &self,
+///         net: Network,
+///         data: [u8; 43],
+///     ) -> Result<Option<[u8; 73]>, ConversionError<Self::Error>> {
+///         Ok(self.find_sapling_extfvk(data))
+///     }
+/// }
+/// ```
+pub trait Converter<T> {
+    /// Conversion errors for the user type (e.g. failing to parse the data passed to
+    /// [`Self::convert_sapling`] as a valid Sapling address).
+    type Error;
+
+    fn convert_sprout(
+        &self,
+        net: Network,
+        data: [u8; 64],
+    ) -> Result<T, ConversionError<Self::Error>> {
+        let _ = (net, data);
+        Err(ConversionError::Unsupported(UnsupportedAddress("Sprout")))
+    }
+
+    fn convert_sapling(
+        &self,
+        net: Network,
+        data: [u8; 43],
+    ) -> Result<T, ConversionError<Self::Error>> {
+        let _ = (net, data);
+        Err(ConversionError::Unsupported(UnsupportedAddress("Sapling")))
+    }
+
+    fn convert_unified(
+        &self,
+        net: Network,
+        data: unified::Address,
+    ) -> Result<T, ConversionError<Self::Error>> {
+        let _ = (net, data);
+        Err(ConversionError::Unsupported(UnsupportedAddress("Unified")))
+    }
+
+    fn convert_transparent_p2pkh(
+        &self,
+        net: Network,
+        data: [u8; 20],
+    ) -> Result<T, ConversionError<Self::Error>> {
+        let _ = (net, data);
+        Err(ConversionError::Unsupported(UnsupportedAddress(
+            "transparent P2PKH",
+        )))
+    }
+
+    fn convert_transparent_p2sh(
+        &self,
+        net: Network,
+        data: [u8; 20],
+    ) -> Result<T, ConversionError<Self::Error>> {
+        let _ = (net, data);
+        Err(ConversionError::Unsupported(UnsupportedAddress(
+            "transparent P2SH",
+        )))
+    }
+
+    fn convert_tex(&self, net: Network, data: [u8; 20]) -> Result<T, ConversionError<Self::Error>> {
+        let _ = (net, data);
+        Err(ConversionError::Unsupported(UnsupportedAddress(
+            "transparent-source restricted P2PKH",
+        )))
+    }
+}
+
 /// A helper trait for converting another type into a [`ZcashAddress`].
 ///
 /// This trait is sealed and cannot be implemented for types outside this crate. Its

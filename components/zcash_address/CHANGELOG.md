@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.6.3] - 2025-05-07
+### Added
+- `zcash_address::Converter`
+- `zcash_address::ZcashAddress::convert_with`
+
 ## [0.6.2] - 2024-12-13
 ### Fixed
 - Migrated to `f4jumble 0.1.1` to fix `no-std` support.
