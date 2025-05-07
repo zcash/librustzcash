@@ -7,6 +7,16 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- A blanket impl of `zcash_address::convert::TryFromAddress` for `(NetworkType, T)`
+  has been added to replace the similar impl that had previously been provided
+  bounded by `TryFromRawAddress`.
+
+### Removed
+- `zcash_address::convert::TryFromRawAddress` has been removed. All of its
+  functions can be served by `TryFromAddress` impls, and its presence adds
+  complexity and some pitfalls to the API.
+
 ## [0.6.3, 0.7.1] - 2025-05-07
 ### Added
 - `zcash_address::Converter`
