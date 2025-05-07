@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.6.3] - 2025-05-07
 ### Added
 - `zcash_address::Converter`
 - `zcash_address::ZcashAddress::convert_with`
