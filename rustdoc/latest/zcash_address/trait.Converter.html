@@ -1,0 +1,87 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="A trait for converter types that can project from a `ZcashAddress` into another type."><title>Converter in zcash_address - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-1a91846b.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="zcash_address" data-themes="" data-resource-suffix="" data-rustdoc-version="1.88.0-nightly (27d6200a7 2025-05-06)" data-channel="nightly" data-search-js="search-f7877310.js" data-settings-js="settings-5514c975.js" ><script src="../static.files/storage-4e99c027.js"></script><script defer src="sidebar-items.js"></script><script defer src="../static.files/main-7ef8a74a.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc trait"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button></nav><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../zcash_address/index.html">zcash_<wbr>address</a><span class="version">0.7.1</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Converter</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#examples" title="Examples">Examples</a></li></ul><h3><a href="#required-associated-types">Required Associated Types</a></h3><ul class="block"><li><a href="#associatedtype.Error" title="Error">Error</a></li></ul><h3><a href="#provided-methods">Provided Methods</a></h3><ul class="block"><li><a href="#method.convert_sapling" title="convert_sapling">convert_sapling</a></li><li><a href="#method.convert_sprout" title="convert_sprout">convert_sprout</a></li><li><a href="#method.convert_tex" title="convert_tex">convert_tex</a></li><li><a href="#method.convert_transparent_p2pkh" title="convert_transparent_p2pkh">convert_transparent_p2pkh</a></li><li><a href="#method.convert_transparent_p2sh" title="convert_transparent_p2sh">convert_transparent_p2sh</a></li><li><a href="#method.convert_unified" title="convert_unified">convert_unified</a></li></ul><h3><a href="#implementors">Implementors</a></h3></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="index.html">In crate zcash_<wbr>address</a></h2></div></div></nav><div class="sidebar-resizer"></div><main><div class="width-limiter"><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="index.html">zcash_address</a></div><h1>Trait <span class="trait">Converter</span><button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/zcash_address/convert.rs.html#340-404">Source</a> </span></div><pre class="rust item-decl"><code>pub trait Converter&lt;T&gt; {
+    type <a href="#associatedtype.Error" class="associatedtype">Error</a>;
+
+    // Provided methods
+    fn <a href="#method.convert_sprout" class="fn">convert_sprout</a>(
+        &amp;self,
+        net: NetworkType,
+        data: [<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.array.html">64</a>],
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="enum" href="enum.ConversionError.html" title="enum zcash_address::ConversionError">ConversionError</a>&lt;Self::<a class="associatedtype" href="trait.Converter.html#associatedtype.Error" title="type zcash_address::Converter::Error">Error</a>&gt;&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.convert_sapling" class="fn">convert_sapling</a>(
+        &amp;self,
+        net: NetworkType,
+        data: [<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.array.html">43</a>],
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="enum" href="enum.ConversionError.html" title="enum zcash_address::ConversionError">ConversionError</a>&lt;Self::<a class="associatedtype" href="trait.Converter.html#associatedtype.Error" title="type zcash_address::Converter::Error">Error</a>&gt;&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.convert_unified" class="fn">convert_unified</a>(
+        &amp;self,
+        net: NetworkType,
+        data: <a class="struct" href="unified/struct.Address.html" title="struct zcash_address::unified::Address">Address</a>,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="enum" href="enum.ConversionError.html" title="enum zcash_address::ConversionError">ConversionError</a>&lt;Self::<a class="associatedtype" href="trait.Converter.html#associatedtype.Error" title="type zcash_address::Converter::Error">Error</a>&gt;&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.convert_transparent_p2pkh" class="fn">convert_transparent_p2pkh</a>(
+        &amp;self,
+        net: NetworkType,
+        data: [<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.array.html">20</a>],
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="enum" href="enum.ConversionError.html" title="enum zcash_address::ConversionError">ConversionError</a>&lt;Self::<a class="associatedtype" href="trait.Converter.html#associatedtype.Error" title="type zcash_address::Converter::Error">Error</a>&gt;&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.convert_transparent_p2sh" class="fn">convert_transparent_p2sh</a>(
+        &amp;self,
+        net: NetworkType,
+        data: [<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.array.html">20</a>],
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="enum" href="enum.ConversionError.html" title="enum zcash_address::ConversionError">ConversionError</a>&lt;Self::<a class="associatedtype" href="trait.Converter.html#associatedtype.Error" title="type zcash_address::Converter::Error">Error</a>&gt;&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.convert_tex" class="fn">convert_tex</a>(
+        &amp;self,
+        net: NetworkType,
+        data: [<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.array.html">20</a>],
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="enum" href="enum.ConversionError.html" title="enum zcash_address::ConversionError">ConversionError</a>&lt;Self::<a class="associatedtype" href="trait.Converter.html#associatedtype.Error" title="type zcash_address::Converter::Error">Error</a>&gt;&gt; { ... }
+}</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>A trait for converter types that can project from a <a href="struct.ZcashAddress.html" title="struct zcash_address::ZcashAddress"><code>ZcashAddress</code></a> into another type.</p>
+<h2 id="examples"><a class="doc-anchor" href="#examples">§</a>Examples</h2>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>zcash_address::{ConversionError, Converter, UnsupportedAddress, ZcashAddress};
+<span class="kw">use </span>zcash_protocol::consensus::NetworkType;
+
+<span class="kw">struct </span>KeyFinder { }
+
+<span class="kw">impl </span>KeyFinder {
+    <span class="kw">fn </span>find_sapling_extfvk(<span class="kw-2">&amp;</span><span class="self">self</span>, data: [u8; <span class="number">43</span>]) -&gt; <span class="prelude-ty">Option</span>&lt;[u8; <span class="number">73</span>]&gt; {
+        <span class="macro">todo!</span>()
+    }
+}
+
+<span class="comment">// Makes it possible to use a KeyFinder to find the Sapling extfvk that corresponds
+// to a given ZcashAddress.
+</span><span class="kw">impl </span>Converter&lt;<span class="prelude-ty">Option</span>&lt;[u8; <span class="number">73</span>]&gt;&gt; <span class="kw">for </span>KeyFinder {
+    <span class="kw">type </span>Error = <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str;
+
+    <span class="kw">fn </span>convert_sapling(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        net: NetworkType,
+        data: [u8; <span class="number">43</span>],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;[u8; <span class="number">73</span>]&gt;, ConversionError&lt;<span class="self">Self</span>::Error&gt;&gt; {
+        <span class="prelude-val">Ok</span>(<span class="self">self</span>.find_sapling_extfvk(data))
+    }
+}</code></pre></div>
+</div></details><h2 id="required-associated-types" class="section-header">Required Associated Types<a href="#required-associated-types" class="anchor">§</a></h2><div class="methods"><details class="toggle" open><summary><section id="associatedtype.Error" class="method"><a class="src rightside" href="../src/zcash_address/convert.rs.html#343">Source</a><h4 class="code-header">type <a href="#associatedtype.Error" class="associatedtype">Error</a></h4></section></summary><div class="docblock"><p>Conversion errors for the user type (e.g. failing to parse the data passed to
+<a href="trait.Converter.html#method.convert_sapling"><code>Self::convert_sapling</code></a> as a valid Sapling address).</p>
+</div></details></div><h2 id="provided-methods" class="section-header">Provided Methods<a href="#provided-methods" class="anchor">§</a></h2><div class="methods"><section id="method.convert_sprout" class="method"><a class="src rightside" href="../src/zcash_address/convert.rs.html#345-352">Source</a><h4 class="code-header">fn <a href="#method.convert_sprout" class="fn">convert_sprout</a>(
+    &amp;self,
+    net: NetworkType,
+    data: [<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.array.html">64</a>],
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="enum" href="enum.ConversionError.html" title="enum zcash_address::ConversionError">ConversionError</a>&lt;Self::<a class="associatedtype" href="trait.Converter.html#associatedtype.Error" title="type zcash_address::Converter::Error">Error</a>&gt;&gt;</h4></section><section id="method.convert_sapling" class="method"><a class="src rightside" href="../src/zcash_address/convert.rs.html#354-361">Source</a><h4 class="code-header">fn <a href="#method.convert_sapling" class="fn">convert_sapling</a>(
+    &amp;self,
+    net: NetworkType,
+    data: [<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.array.html">43</a>],
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="enum" href="enum.ConversionError.html" title="enum zcash_address::ConversionError">ConversionError</a>&lt;Self::<a class="associatedtype" href="trait.Converter.html#associatedtype.Error" title="type zcash_address::Converter::Error">Error</a>&gt;&gt;</h4></section><section id="method.convert_unified" class="method"><a class="src rightside" href="../src/zcash_address/convert.rs.html#363-370">Source</a><h4 class="code-header">fn <a href="#method.convert_unified" class="fn">convert_unified</a>(
+    &amp;self,
+    net: NetworkType,
+    data: <a class="struct" href="unified/struct.Address.html" title="struct zcash_address::unified::Address">Address</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="enum" href="enum.ConversionError.html" title="enum zcash_address::ConversionError">ConversionError</a>&lt;Self::<a class="associatedtype" href="trait.Converter.html#associatedtype.Error" title="type zcash_address::Converter::Error">Error</a>&gt;&gt;</h4></section><section id="method.convert_transparent_p2pkh" class="method"><a class="src rightside" href="../src/zcash_address/convert.rs.html#372-381">Source</a><h4 class="code-header">fn <a href="#method.convert_transparent_p2pkh" class="fn">convert_transparent_p2pkh</a>(
+    &amp;self,
+    net: NetworkType,
+    data: [<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.array.html">20</a>],
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="enum" href="enum.ConversionError.html" title="enum zcash_address::ConversionError">ConversionError</a>&lt;Self::<a class="associatedtype" href="trait.Converter.html#associatedtype.Error" title="type zcash_address::Converter::Error">Error</a>&gt;&gt;</h4></section><section id="method.convert_transparent_p2sh" class="method"><a class="src rightside" href="../src/zcash_address/convert.rs.html#383-392">Source</a><h4 class="code-header">fn <a href="#method.convert_transparent_p2sh" class="fn">convert_transparent_p2sh</a>(
+    &amp;self,
+    net: NetworkType,
+    data: [<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.array.html">20</a>],
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="enum" href="enum.ConversionError.html" title="enum zcash_address::ConversionError">ConversionError</a>&lt;Self::<a class="associatedtype" href="trait.Converter.html#associatedtype.Error" title="type zcash_address::Converter::Error">Error</a>&gt;&gt;</h4></section><section id="method.convert_tex" class="method"><a class="src rightside" href="../src/zcash_address/convert.rs.html#394-403">Source</a><h4 class="code-header">fn <a href="#method.convert_tex" class="fn">convert_tex</a>(
+    &amp;self,
+    net: NetworkType,
+    data: [<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.array.html">20</a>],
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="enum" href="enum.ConversionError.html" title="enum zcash_address::ConversionError">ConversionError</a>&lt;Self::<a class="associatedtype" href="trait.Converter.html#associatedtype.Error" title="type zcash_address::Converter::Error">Error</a>&gt;&gt;</h4></section></div><h2 id="implementors" class="section-header">Implementors<a href="#implementors" class="anchor">§</a></h2><div id="implementors-list"></div><script src="../trait.impl/zcash_address/convert/trait.Converter.js" async></script></section></div></main></body></html>
