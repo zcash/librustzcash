@@ -946,12 +946,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             required: fee_required,
         })?;
 
-        let payment = match zip321::Payment::new(recipient, amount, memo, None, None, vec![]) {
-            Some(p) => Ok(p),
-            None => Err(InputSelectorError::Proposal(
-                ProposalError::SendsMemoToTransparentRecipient,
-            )),
-        }?;
+        let payment = zip321::Payment::new(recipient, amount, memo, None, None, vec![])
+            .ok_or_else(|| {
+                InputSelectorError::Proposal(ProposalError::SendsMemoToTransparentRecipient)
+            })?;
 
         let transaction_request =
             TransactionRequest::new(vec![payment]).map_err(|payment_error| {
