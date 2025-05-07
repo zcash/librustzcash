@@ -63,9 +63,10 @@ impl SealedItem for Receiver {
 ///
 /// ```
 /// # use core::convert::Infallible;
+/// # use zcash_protocol::consensus::NetworkType;
 /// use zcash_address::{
 ///     unified::{self, Container, Encoding},
-///     ConversionError, TryFromRawAddress, ZcashAddress,
+///     ConversionError, TryFromAddress, ZcashAddress,
 /// };
 ///
 /// # #[cfg(not(feature = "std"))]
@@ -80,12 +81,15 @@ impl SealedItem for Receiver {
 ///
 /// // Or we can parse via `ZcashAddress` (which you should do):
 /// struct MyUnifiedAddress(unified::Address);
-/// impl TryFromRawAddress for MyUnifiedAddress {
+/// impl TryFromAddress for MyUnifiedAddress {
 ///     // In this example we aren't checking the validity of the
 ///     // inner Unified Address, but your code should do so!
 ///     type Error = Infallible;
 ///
-///     fn try_from_raw_unified(ua: unified::Address) -> Result<Self, ConversionError<Self::Error>> {
+///     fn try_from_unified(
+///         _net: NetworkType,
+///         ua: unified::Address
+///     ) -> Result<Self, ConversionError<Self::Error>> {
 ///         Ok(MyUnifiedAddress(ua))
 ///     }
 /// }

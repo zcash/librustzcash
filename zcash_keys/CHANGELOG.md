@@ -7,7 +7,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Changed
-- Updated to `zcash_address 0.8.0`
+- Migrated to `zcash_address 0.8`.
 
 ## [0.8.0] - 2025-03-19
 
