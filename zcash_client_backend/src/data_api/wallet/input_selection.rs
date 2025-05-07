@@ -1,5 +1,4 @@
 //! Types related to the process of selecting inputs to be spent given a transaction request.
-
 use ::transparent::bundle::TxOut;
 use core::marker::PhantomData;
 use nonempty::NonEmpty;
@@ -840,12 +839,30 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
 
         #[cfg(feature = "orchard")]
         let (spends_sapling, spends_orchard) = (
-            spendable_notes.sapling().len(),
-            spendable_notes.orchard().len(),
+            !spendable_notes.sapling().is_empty(),
+            !spendable_notes.orchard().is_empty(),
         );
         #[cfg(not(feature = "orchard"))]
-        let (spends_sapling, spends_orchard) = (spendable_notes.sapling().len(), 0 as usize);
+        let (spends_sapling, spends_orchard) = (!spendable_notes.sapling().is_empty(), false);
 
+        let requested_sapling_outputs: usize = if spends_sapling {
+            2
+        } else {
+            0
+        };
+
+        let requested_orchard_actions: usize = if spends_orchard {
+            2
+        } else {
+            0
+        }; 
+        let sapling_output_count = ::sapling::builder::BundleType::DEFAULT
+            .num_outputs(spendable_notes.sapling.len(),requested_sapling_outputs)
+            .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?;
+
+        let orchard_output_count = orchard::builder::BundleType::DEFAULT
+            .num_actions(spendable_notes.orchard.len(), requested_orchard_actions)
+            .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?;
         let fee_required = match recipient
             .clone()
             .convert_if_network(params.network_type())?
@@ -856,8 +873,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 [],
                 [],
                 spendable_notes.sapling().len(),
-                1,
-                spends_orchard,
+                sapling_output_count,
+                orchard_output_count,
             ),
             Address::Transparent(_) => change_strategy.fee_rule().fee_required(
                 params,
@@ -865,8 +882,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 [],
                 [P2PKH_STANDARD_OUTPUT_SIZE],
                 spendable_notes.sapling().len(),
-                0,
-                spends_orchard,
+                sapling_output_count,
+                orchard_output_count,
             ),
             Address::Unified(addr) => {
                 if cfg!(feature = "orchard") && addr.has_orchard() {
@@ -875,9 +892,9 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         target_height,
                         [],
                         [],
-                        spends_sapling,
-                        0,
-                        std::cmp::max(spends_orchard, 1),
+                        spendable_notes.sapling().len(),
+                        sapling_output_count,
+                        orchard_output_count,
                     )
                 } else if addr.has_sapling() {
                     change_strategy.fee_rule().fee_required(
@@ -885,9 +902,9 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         target_height,
                         [],
                         [],
-                        spends_sapling,
-                        1,
-                        spends_orchard,
+                        spendable_notes.sapling().len(),
+                        sapling_output_count,
+                        orchard_output_count,
                     )
                 } else if addr.has_transparent() {
                     change_strategy.fee_rule().fee_required(
@@ -895,9 +912,9 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         target_height,
                         [],
                         [P2PKH_STANDARD_OUTPUT_SIZE],
-                        spends_sapling,
-                        0,
-                        spends_orchard,
+                        spendable_notes.sapling().len(),
+                        sapling_output_count,
+                        orchard_output_count,
                     )
                 } else {
                     unreachable!()
@@ -911,15 +928,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     [],
                     [P2PKH_STANDARD_OUTPUT_SIZE],
                     spendable_notes.sapling().len(),
-                    match spends_sapling > 0 && spends_orchard == 0 {
-                        true => 2,
-                        false => 0,
-                    },
-                    if spends_orchard > 0 {
-                        std::cmp::max(spends_orchard, 2)
-                    } else {
-                        0
-                    },
+                    sapling_output_count,
+                    orchard_output_count,
                 )
                 .and_then(|t0_fee| {
                     let t1_fee = change_strategy.fee_rule().fee_required(
