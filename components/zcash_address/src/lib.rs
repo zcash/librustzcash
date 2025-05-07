@@ -147,7 +147,7 @@ mod kind;
 pub mod test_vectors;
 
 pub use convert::{
-    ConversionError, ToAddress, TryFromAddress, TryFromRawAddress, UnsupportedAddress,
+    ConversionError, Converter, ToAddress, TryFromAddress, TryFromRawAddress, UnsupportedAddress,
 };
 pub use encoding::ParseError;
 pub use kind::unified;
@@ -279,6 +279,25 @@ impl ZcashAddress {
                 expected: net,
                 actual: self.net,
             }),
+        }
+    }
+
+    /// Converts this address into another type using the specified converter.
+    ///
+    /// `convert` can convert into any type `T` for which an implementation of the [`Converter<T>`]
+    /// trait exists. This enables conversion of [`ZcashAddress`] values into other types to rely
+    /// on additional context.
+    pub fn convert_with<T, C: Converter<T>>(
+        self,
+        converter: C,
+    ) -> Result<T, ConversionError<C::Error>> {
+        match self.kind {
+            AddressKind::Sprout(data) => converter.convert_sprout(self.net, data),
+            AddressKind::Sapling(data) => converter.convert_sapling(self.net, data),
+            AddressKind::Unified(data) => converter.convert_unified(self.net, data),
+            AddressKind::P2pkh(data) => converter.convert_transparent_p2pkh(self.net, data),
+            AddressKind::P2sh(data) => converter.convert_transparent_p2sh(self.net, data),
+            AddressKind::Tex(data) => converter.convert_tex(self.net, data),
         }
     }
 
