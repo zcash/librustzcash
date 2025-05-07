@@ -8,6 +8,7 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `zcash_keys::Address::to_transparent_address`
+- `zcash_keys::Address::to_sapling_address`
 
 ## [0.4.0] - 2024-10-04
 
