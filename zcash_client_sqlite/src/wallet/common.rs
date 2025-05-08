@@ -11,7 +11,7 @@ use zcash_client_backend::{
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
     consensus::{self, BlockHeight},
-    value::{BalanceError, TargetValue, Zatoshis},
+    value::{BalanceError, Zatoshis},
     PoolType, ShieldedProtocol,
 };
 
@@ -179,10 +179,10 @@ where
         }
     };
 
-    /// TODO: Revisit this check when changes to allow different accounts in the
-    /// wallet to have different spendability based upon the state of the note
-    /// commitment tree
-    /// see: https://github.com/zcash/librustzcash/issues/1796
+    // TODO: Revisit this check when changes to allow different accounts in the
+    // wallet to have different spendability based upon the state of the note
+    // commitment tree
+    // see: https://github.com/zcash/librustzcash/issues/1796
     let (table_prefix, index_col, note_reconstruction_cols) = per_protocol_names(protocol);
     if unscanned_tip_exists(conn, anchor_height, table_prefix)? {
         return Ok(vec![]);
@@ -298,10 +298,10 @@ where
         }
     };
 
-    /// TODO: Revisit this check when changes to allow different accounts in the
-    /// wallet to have different spendability based upon the state of the note
-    /// commitment tree
-    /// see: https://github.com/zcash/librustzcash/issues/1796
+    // TODO: Revisit this check when changes to allow different accounts in the
+    // wallet to have different spendability based upon the state of the note
+    // commitment tree
+    // see: https://github.com/zcash/librustzcash/issues/1796
     let (table_prefix, index_col, note_reconstruction_cols) = per_protocol_names(protocol);
     if unscanned_tip_exists(conn, anchor_height, table_prefix)? {
         return Ok(vec![]);

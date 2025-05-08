@@ -78,12 +78,9 @@ use zcash_primitives::{
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::Memo,
-    value::{TargetValue, Zatoshis},
+    value::Zatoshis,
     ShieldedProtocol,
 };
-
-#[cfg(any(test, feature = "test-dependencies"))]
-use zcash_protocol::value::Zatoshis;
 
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
