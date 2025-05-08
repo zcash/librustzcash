@@ -78,7 +78,7 @@ use zcash_primitives::{block::BlockHash, transaction::Transaction};
 use zcash_protocol::{
     consensus::BlockHeight,
     memo::{Memo, MemoBytes},
-    value::{BalanceError, TargetValue, Zatoshis},
+    value::{BalanceError, Zatoshis},
     ShieldedProtocol, TxId,
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
@@ -152,6 +152,7 @@ pub enum NullifierQuery {
 #[derive(Debug, Clone, Copy)]
 pub enum TargetValue {
     AtLeast(Zatoshis),
+    MaxSpendable,
 }
 
 /// Balance information for a value within a single pool in an account.

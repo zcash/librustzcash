@@ -24,7 +24,7 @@ use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade, Parameters},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
-    value::{TargetValue, Zatoshis},
+    value::Zatoshis,
     ShieldedProtocol,
 };
 use zip32::Scope;

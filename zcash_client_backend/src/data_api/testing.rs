@@ -38,7 +38,7 @@ use zcash_protocol::{
     consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters as _},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
-    value::{TargetValue, ZatBalance, Zatoshis},
+    value::{ZatBalance, Zatoshis},
     ShieldedProtocol,
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
