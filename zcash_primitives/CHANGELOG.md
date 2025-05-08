@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Fixed
+- Migrated to `orchard 0.10.2` to fix a missing feature dependency.
+
 ## [0.19.0] - 2024-10-02
 
 ### Changed
