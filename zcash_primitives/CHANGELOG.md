@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.19.1, 0.20.1] - 2025-05-09
+
+### Fixed
+- Migrated to `orchard 0.10.2` to fix a missing feature dependency.
+
 ## [0.20.0] - 2024-11-14
 
 ### Added
@@ -40,11 +45,6 @@ and this library adheres to Rust's notion of
     ZIP 317 fee, use `zip317::FeeRule::standard()`. To preserve the current
     behaviour, use `fixed::FeeRule::non_standard(zip317::MINIMUM_FEE)`,
     but note that this is likely to result in transactions that cannot be mined.
-
-## [0.19.1] - 2025-05-08
-
-### Fixed
-- Migrated to `orchard 0.10.2` to fix a missing feature dependency.
 
 ## [0.19.0] - 2024-10-02
 
