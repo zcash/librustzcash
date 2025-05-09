@@ -182,10 +182,12 @@ jobs:
           path: crates
       # We use a synthetic crate to ensure no dev-dependencies are enabled, which can
       # be incompatible with some of these targets.
+      - name: Copy Rust toolchain into the root for use in synthetic crate setup
+        run: cp crates/rust-toolchain.toml .
       - name: Create synthetic crate for testing
         run: cargo init --lib ci-build
-      - name: Copy Rust version into synthetic crate
-        run: cp crates/rust-toolchain.toml ci-build/
+      - name: Move Rust toolchain file into synthetic crate
+        run: mv rust-toolchain.toml ci-build/
       - name: Copy patch directives into synthetic crate
         run: |
           echo "[patch.crates-io]" >> ./ci-build/Cargo.toml
