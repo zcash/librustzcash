@@ -424,6 +424,30 @@ impl Address {
             },
         }
     }
+
+    /// Returns the transparent address corresponding to this address, if it is a transparent
+    /// address, a Unified address with a transparent receiver, or ZIP 320 (TEX) address.
+    pub fn to_transparent_address(&self) -> Option<TransparentAddress> {
+        match self {
+            #[cfg(feature = "sapling")]
+            Address::Sapling(_) => None,
+            Address::Transparent(addr) => Some(*addr),
+            Address::Unified(ua) => ua.transparent().copied(),
+            Address::Tex(addr_bytes) => Some(TransparentAddress::PublicKeyHash(*addr_bytes)),
+        }
+    }
+
+    /// Returns the Sapling address corresponding to this address, if it is a ZIP 32-encoded
+    /// Sapling address, or a Unified address with a Sapling receiver.
+    #[cfg(feature = "sapling")]
+    pub fn to_sapling_address(&self) -> Option<PaymentAddress> {
+        match self {
+            Address::Sapling(addr) => Some(*addr),
+            Address::Transparent(_) => None,
+            Address::Unified(ua) => ua.sapling().copied(),
+            Address::Tex(_) => None,
+        }
+    }
 }
 
 #[cfg(all(
