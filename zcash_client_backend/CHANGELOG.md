@@ -13,8 +13,8 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api::wallet`:
   - `SpendableNotes::total`: returns the sum of all spendable notes in `Zatoshis`
   - `propose_send_max_transfer`: Selects transaction inputs, computes fees, and 
-  constructs a proposal for a transaction (or series of them) that would spend all
-  the available funds from the given spend pools.
+    constructs a proposal for a transaction (or series of them) that would spend all
+    the available funds from the given spend pools.
   - `input_selection::propose_send_max`: Performs input selection and returns 
     a proposal for the construction of a transaction that sends the maximum 
     amount possible from a given account to the specified recipient ignoring
