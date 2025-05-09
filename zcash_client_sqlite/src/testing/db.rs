@@ -12,13 +12,12 @@ use tempfile::NamedTempFile;
 use rusqlite::{self};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, ShardTree};
-
 use zcash_client_backend::{
     data_api::{
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
         testing::{DataStoreFactory, Reset, TestState},
-        *,
+        TargetValue, *,
     },
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
 };

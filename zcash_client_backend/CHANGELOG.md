@@ -13,6 +13,12 @@ and this library adheres to Rust's notion of
   - `DormantMode`
 
 ### Changed
+- `zcash_client_backend::data_api`:
+  - `TargetValue`: An intent of representing spendable value to reach a certain 
+    targeted amount.
+  - `select_spendable_notes`: parameter `target_value` now is a `TargetValue`. 
+    Existing calls to this function that used `Zatoshis` now use 
+    `TargetValue::AtLeast(Zatoshis)`
 - Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`.
 - `zcash_client_backend::tor`:
   - `Client::{connect_to_lightwalletd, get_latest_zec_to_usd_rate}` now ensure

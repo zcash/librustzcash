@@ -8,7 +8,7 @@ use rusqlite::{named_params, types::Value, Connection, Row};
 
 use sapling::{self, Diversifier, Nullifier, Rseed};
 use zcash_client_backend::{
-    data_api::{Account, NullifierQuery},
+    data_api::{Account, NullifierQuery, TargetValue},
     wallet::{ReceivedNote, WalletSaplingOutput},
     DecryptedOutput, TransferType,
 };
@@ -16,7 +16,6 @@ use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    value::Zatoshis,
     ShieldedProtocol, TxId,
 };
 use zip32::Scope;
@@ -226,7 +225,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
     account: AccountUuid,
-    target_value: Zatoshis,
+    target_value: TargetValue,
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {

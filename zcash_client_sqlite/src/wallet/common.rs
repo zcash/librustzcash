@@ -5,7 +5,7 @@ use rusqlite::{named_params, types::Value, Connection, Row};
 use std::{num::NonZeroU64, rc::Rc};
 
 use zcash_client_backend::{
-    data_api::{NoteFilter, PoolMeta},
+    data_api::{NoteFilter, PoolMeta, TargetValue},
     wallet::ReceivedNote,
 };
 use zcash_primitives::transaction::TxId;
@@ -116,6 +116,34 @@ where
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    target_value: TargetValue,
+    anchor_height: BlockHeight,
+    exclude: &[ReceivedNoteId],
+    protocol: ShieldedProtocol,
+    to_spendable_note: F,
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
+where
+    F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+{
+    match target_value {
+        TargetValue::AtLeast(zats) => select_minimum_spendable_notes(
+            conn,
+            params,
+            account,
+            zats,
+            anchor_height,
+            exclude,
+            protocol,
+            to_spendable_note,
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn select_minimum_spendable_notes<P: consensus::Parameters, F, Note>(
     conn: &Connection,
     params: &P,
     account: AccountUuid,

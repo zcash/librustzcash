@@ -11,7 +11,6 @@ use zcash_primitives::transaction::{components::sapling::zip212_enforcement, Tra
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    value::Zatoshis,
     ShieldedProtocol,
 };
 use zip32::Scope;
@@ -19,7 +18,8 @@ use zip32::Scope;
 use crate::{
     data_api::{
         chain::{CommitmentTreeRoot, ScanSummary},
-        DecryptedTransaction, InputSource, WalletCommitmentTrees, WalletSummary, WalletTest,
+        DecryptedTransaction, InputSource, TargetValue, WalletCommitmentTrees, WalletSummary,
+        WalletTest,
     },
     wallet::{Note, ReceivedNote},
 };
@@ -91,7 +91,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
     fn select_spendable_notes<Cache, DbT: InputSource + WalletTest, P>(
         st: &TestState<Cache, DbT, P>,
         account: <DbT as InputSource>::AccountId,
-        target_value: Zatoshis,
+        target_value: TargetValue,
         anchor_height: BlockHeight,
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error> {

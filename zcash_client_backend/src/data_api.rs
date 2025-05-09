@@ -139,6 +139,21 @@ pub enum NullifierQuery {
     All,
 }
 
+/// An intent of representing spendable value to reach a certain targeted
+/// amount.  `AtLeast(Zatoshis)` refers to the amount of `Zatoshis` that can cover
+/// at minimum the given zatoshis that is conformed by the sum of spendable notes.
+///
+/// Discussion: why not just use ``Zatoshis``?
+///
+/// the `Zatoshis` value isn't enough to explain intent when seeking to match a
+/// given a given amount. Is the value expressed in `Zatoshis` the ceiling value
+/// or the minimum value of a given spend intent? How would you express that the
+/// value spend intent is "as much as possible" without knowing the value upfront?
+#[derive(Debug, Clone, Copy)]
+pub enum TargetValue {
+    AtLeast(Zatoshis),
+}
+
 /// Balance information for a value within a single pool in an account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Balance {
@@ -1201,7 +1216,7 @@ pub trait InputSource {
     fn select_spendable_notes(
         &self,
         account: Self::AccountId,
-        target_value: Zatoshis,
+        target_value: TargetValue,
         sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
