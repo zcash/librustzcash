@@ -12,6 +12,12 @@ and this library adheres to Rust's notion of
 - Migrated to `zcash_primitives 0.20.0`
 - MSRV is now 1.77.0.
 
+## [0.4.1] - 2025-05-07
+
+### Added
+- `zcash_keys::Address::to_transparent_address`
+- `zcash_keys::Address::to_sapling_address`
+
 ## [0.4.0] - 2024-10-04
 
 ### Added
