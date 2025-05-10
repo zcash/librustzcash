@@ -1147,6 +1147,8 @@ mod tests {
                 None,
                 None,
                 None,
+                #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+                None,
             )
             .freeze()
             .unwrap();

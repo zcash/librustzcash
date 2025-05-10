@@ -108,6 +108,8 @@ impl<'a> TransactionExtractor<'a> {
             None,
             sapling_bundle,
             orchard_bundle,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            None,
         );
 
         // The commitment being signed is shared across all shielded inputs.
