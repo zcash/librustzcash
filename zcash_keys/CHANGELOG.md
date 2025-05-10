@@ -6,10 +6,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
-## [0.4.1, 0.5.1, 0.6.1, 0.7.1, 0.8.1] - 2025-05-07
+## [0.4.1, 0.5.1, 0.6.1, 0.7.1, 0.8.1] - 2025-05-09
 
 ### Added
-- `zcash_keys::Address::to_transparent_address`
 - `zcash_keys::Address::to_sapling_address`
 
 ## [0.8.0] - 2025-03-19
@@ -62,6 +61,11 @@ and this library adheres to Rust's notion of
 - `zcash_keys::keys::UnifiedAddressRequest::all` (use
   `UnifiedAddressRequest::ALLOW_ALL` or
   `UnifiedFullViewingKey::to_address_request` instead)
+
+## [0.4.1, 0.5.1, 0.6.1] - 2025-05-09
+
+### Added
+- `zcash_keys::Address::to_transparent_address`
 
 ## [0.6.0] - 2024-12-16
 
