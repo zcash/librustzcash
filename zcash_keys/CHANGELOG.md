@@ -29,6 +29,12 @@ and this library adheres to Rust's notion of
 - `UnifiedAddressRequest::intersect`: a replacement for this method is now
   provided with the newly-added `ReceiverRequirements` type.
 
+## [0.4.1, 0.5.1, 0.6.1, 0.7.1] - 2025-05-07
+
+### Added
+- `zcash_keys::Address::to_transparent_address`
+- `zcash_keys::Address::to_sapling_address`
+
 ## [0.7.0] - 2025-02-21
 
 ### Added
