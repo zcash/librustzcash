@@ -6,6 +6,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::keys::zcashd`, a module containing utilities that are useful
+  for interacting with key data from legacy zcashd wallets, has been added
+  under a newly-added `zcashd-compat` feature flag.
+
 ## [0.8.0] - 2025-03-19
 
 ### Added

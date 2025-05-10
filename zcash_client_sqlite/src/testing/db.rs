@@ -196,9 +196,11 @@ impl DataStoreFactory for TestDbFactory {
         if let Some(migrations) = &self.target_migrations {
             migrator
                 .init_or_migrate_to(&mut db_data, migrations)
-                .unwrap();
+                .expect("wallet migration succeeds for test setup with target migrations");
         } else {
-            migrator.init_or_migrate(&mut db_data).unwrap();
+            migrator
+                .init_or_migrate(&mut db_data)
+                .expect("wallet migration succeeds for test setup with default migrations");
         }
         Ok(TestDb::from_parts(db_data, data_file))
     }

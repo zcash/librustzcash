@@ -380,6 +380,12 @@ impl Borrow<rusqlite::Connection> for SqlTransaction<'_> {
     }
 }
 
+impl<C, P, CL, R> WalletDb<C, P, CL, R> {
+    pub fn params(&self) -> &P {
+        &self.params
+    }
+}
+
 impl<P, CL, R> WalletDb<Connection, P, CL, R> {
     /// Construct a [`WalletDb`] instance that connects to the wallet database stored at the
     /// specified path.
@@ -1145,7 +1151,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 &wdb.params,
                 account_name,
                 &AccountSource::Derived {
-                    derivation: Zip32Derivation::new(seed_fingerprint, zip32_account_index),
+                    derivation: Zip32Derivation::new(
+                        seed_fingerprint,
+                        zip32_account_index,
+                        #[cfg(feature = "zcashd-compat")]
+                        None,
+                    ),
                     key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
@@ -1184,7 +1195,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 &wdb.params,
                 account_name,
                 &AccountSource::Derived {
-                    derivation: Zip32Derivation::new(seed_fingerprint, account_index),
+                    derivation: Zip32Derivation::new(
+                        seed_fingerprint,
+                        account_index,
+                        #[cfg(feature = "zcashd-compat")]
+                        None,
+                    ),
                     key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),

@@ -19,6 +19,30 @@ use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
 use crate::wallet::scanning::priority_code;
 
 /// Stores information about the accounts that the wallet is tracking.
+///
+/// ### Columns
+/// - `name`: The human-readable name of the account.
+/// - `uuid`: A unique identifier for the account specific to this instantiation of the wallet.
+/// - `account_kind`: 0 for accounts derived from an HD seed, 1 for accounts corresponding to
+///   imported viewing keys.
+/// - `key_source`: A string identifier or other metadata describing the source of the seed.
+///   This is treated as opaque metadata by the wallet backend; it is provided for use by
+///   applications which need to track additional identifying information for an account.
+/// - `hd_seed_fingerprint`: The [ZIP 32 seed fingerprint].
+/// - `hd_account_index`: The [ZIP 32 account index].
+///   The account index may be determined for Sapling `ExtendedFullViewingKey` values,
+///   because we have the child index and the depth of the derivation path. If the value of the
+///   depth is 3 and the hardened bit set, it's likely that the `i` field of the encoding is the HD
+///   account index. If the depth is 4 and the hardened bit of the `i` field is set, then it's
+///   likely that this is a key used for derivation of zcashd post-v4.7.0 legacy Sapling addreses.
+/// - `zcashd_legacy_address_index`: In the event that this account corresponds to a distinct pool
+///   of funds associated with a Sapling address derived using zcashd's `z_getnewaddress` method
+///   after to the zcashd v4.7.0 upgrade, this will be the `address_index` element of the 
+///   `m/32/coin_type'/0x7FFFFFFF'/address_index'` derivation path as defined in [1].
+///
+/// [ZIP 32 seed fingerprint]: https://zips.z.cash/zip-0032#seed-fingerprints
+/// [ZIP 32 account index]: https://zips.z.cash/zip-0032#key-path-levels
+/// [1]: https://zips.z.cash/zip-0032#sapling-key-path
 pub(super) const TABLE_ACCOUNTS: &str = r#"
 CREATE TABLE "accounts" (
     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -38,6 +62,8 @@ CREATE TABLE "accounts" (
     birthday_orchard_tree_size INTEGER,
     recover_until_height INTEGER,
     has_spend_key INTEGER NOT NULL DEFAULT 1,
+    zcashd_legacy_address_index INTEGER,
+    sapling_extended_full_viewing_key BLOB,
     CHECK (
       (
         account_kind = 0
@@ -50,6 +76,10 @@ CREATE TABLE "accounts" (
         account_kind = 1
         AND (hd_seed_fingerprint IS NULL) = (hd_account_index IS NULL)
       )
+    ),
+    CHECK (
+      zcashd_legacy_address_index IS NULL
+      OR hd_account_index = 0x7FFFFFFF
     )
 )"#;
 pub(super) const INDEX_ACCOUNTS_UUID: &str =
