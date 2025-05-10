@@ -13,6 +13,8 @@ use crate::{
     sighash::{SignableInput, TransparentAuthorizingContext},
 };
 
+use crate::address::OpCode;
+
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
@@ -28,6 +30,7 @@ pub enum Error {
     InvalidAmount,
     /// A bundle could not be built because a required signing keys was missing.
     MissingSigningKey,
+    InvalidOpReturn,
 }
 
 impl fmt::Display for Error {
@@ -36,6 +39,7 @@ impl fmt::Display for Error {
             Error::InvalidAddress => write!(f, "Invalid address"),
             Error::InvalidAmount => write!(f, "Invalid amount"),
             Error::MissingSigningKey => write!(f, "Missing signing key"),
+            Error::InvalidOpReturn => write!(f, "Invalid op_return"),
         }
     }
 }
@@ -276,6 +280,28 @@ impl TransparentBuilder {
             Some(pczt::Bundle { inputs, outputs })
         }
     }
+
+    /// Adds a zero-value OP_RETURN output containing the given data.
+    pub fn add_op_return_output(&mut self, data: &[u8]) -> Result<(), Error> {
+        // Check 80 bytes limit.
+        const MAX_OP_RETURN_RELAY_BYTES: usize = 80;
+        if data.len() > MAX_OP_RETURN_RELAY_BYTES {
+            // Use the appropriate error variant from the builder's Error enum
+            // InvalidOpReturn might need to be added if it doesn't exist.
+            return Err(Error::InvalidOpReturn);
+        }
+
+        // Construct the OP_RETURN script using the Shl (<<) operators
+        let script = Script::default() // Start with an empty script
+                     << OpCode::Return  // Append the OP_RETURN opcode
+                     << data;           // Append the data push opcode(s) and the data itself
+
+        self.vout.push(TxOut {
+             value: Zatoshis::ZERO,
+             script_pubkey: script,
+        });
+        Ok(())
+    }
 }
 
 impl TxIn<Unauthorized> {
@@ -377,5 +403,56 @@ impl Bundle<Unauthorized> {
             vout: self.vout,
             authorization: Authorized,
         })
+    }
+    
+    pub fn apply_external_signatures(
+        self,
+        #[cfg(feature = "transparent-inputs")] signatures: Vec<secp256k1::ecdsa::Signature>,
+    ) -> Bundle<Authorized> {
+        #[cfg(feature = "transparent-inputs")]
+        let script_sigs = { 
+            // Check that the number of signatures matches the number of inputs
+            assert_eq!(
+                self.authorization.inputs.len(),
+                signatures.len(),
+                "Number of signatures must match number of inputs"
+            );
+
+            // Compute the scriptSigs
+            self
+            .authorization
+            .inputs
+            .iter()
+            .zip(signatures)
+            .map(|(info, signature)| { // For each (input info, signature) pair...
+                // Serialize the provided signature to DER format
+                let mut sig_bytes: Vec<u8> = signature.serialize_der().to_vec();
+                // Append the SIGHASH_ALL byte (0x01)
+                sig_bytes.push(SIGHASH_ALL);
+
+                // Construct the P2PKH scriptSig: <DER sig + SIGHASH byte> <compressed pubkey>
+                // Assumes P2PKH inputs. Needs info.pubkey which comes from TransparentInputInfo.
+                Script::default() << &sig_bytes[..] << &info.pubkey.serialize()[..]
+            })
+        };
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        let script_sigs = std::iter::empty::<Script>();
+
+        // Construct the new authorized Bundle
+        Bundle {
+            vin: self
+                .vin // Take the original vin (which has empty script_sig fields)
+                .iter()
+                .zip(script_sigs) // Pair the old TxIn with the newly computed scriptSig
+                .map(|(txin, sig)| TxIn {
+                    prevout: txin.prevout.clone(),
+                    script_sig: sig, // Assign the computed scriptSig
+                    sequence: txin.sequence,
+                })
+                .collect(),
+            vout: self.vout, // Keep the original vout
+            authorization: Authorized,
+        }
     }
 }
