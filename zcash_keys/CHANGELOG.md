@@ -6,6 +6,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.4.1, 0.5.1, 0.6.1, 0.7.1, 0.8.1] - 2025-05-07
+
+### Added
+- `zcash_keys::Address::to_transparent_address`
+- `zcash_keys::Address::to_sapling_address`
+
 ## [0.8.0] - 2025-03-19
 
 ### Added
