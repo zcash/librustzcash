@@ -82,6 +82,11 @@ and this library adheres to Rust's notion of
   - `SignableInput::Transparent` is now a wrapper around
     `zcash_transparent::sighash::SignableInput`.
 
+## [0.19.1, 0.20.1] - 2025-05-09
+
+### Fixed
+- Migrated to `orchard 0.10.2` to fix a missing feature dependency.
+
 ## [0.20.0] - 2024-11-14
 
 ### Added
