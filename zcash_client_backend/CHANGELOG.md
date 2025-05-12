@@ -26,6 +26,9 @@ workspace.
       `spendable_notes` is called with `TargetValue::MaxSpendable`
       and there are funds that haven't been confirmed and all spendable notes
       can't be selected.
+- `zcash_client_backend::tor`:
+  - `Client::set_dormant`
+  - `DormantMode`
 
 ### Changed
 - `zcash_client_backend::data_api`:
