@@ -323,8 +323,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_keys]]
-version = "0.8.0"
-when = "2025-03-21"
+version = "0.8.1"
+when = "2025-05-10"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
