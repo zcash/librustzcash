@@ -514,6 +514,17 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "transparent-inputs")]
+    fn fails_to_send_max_to_transparent_with_memo() {
+        testing::pool::fails_to_send_max_to_transparent_with_memo::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn send_max_proposal_fails_when_unconfirmed_funds_present() {
+        testing::pool::send_max_proposal_fails_when_unconfirmed_funds_present::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
     fn send_max_multi_step_proposed_transfer() {
         testing::pool::send_max_multi_step_proposed_transfer::<SaplingPoolTester>()
     }

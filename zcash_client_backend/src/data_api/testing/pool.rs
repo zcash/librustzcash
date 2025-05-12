@@ -80,6 +80,7 @@ use {
     },
     zcash_proofs::prover::LocalTxProver,
     zcash_protocol::{value::ZatBalance, TxId},
+    zip321::Zip321Error,
 };
 
 #[cfg(feature = "orchard")]
@@ -611,6 +612,151 @@ pub fn send_max_single_step_proposed_transfer<T: ShieldedPoolTester>(
     );
 }
 
+/// Tests that sending all the spendable funds within the given shielded pool in a
+/// single transaction to a transparent address with a memo fails.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Checks that the wallet balances are correct.
+/// - Tries to propose a send max transaction to a T-address with a memo
+/// - Fails gracefully with Zip321Error.
+#[cfg(feature = "transparent-inputs")]
+pub fn fails_to_send_max_to_transparent_with_memo<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let dfvk = T::test_account_fvk(&st);
+
+    // Add funds to the wallet in a single note
+    let value = Zatoshis::const_from_u64(60000);
+    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    st.scan_cached_blocks(h, 1);
+
+    // Spendable balance matches total balance
+    assert_eq!(st.get_total_balance(account.id()), value);
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        value
+    );
+
+    assert_eq!(
+        st.wallet()
+            .block_max_scanned()
+            .unwrap()
+            .unwrap()
+            .block_height(),
+        h
+    );
+
+    let account = st.test_account().cloned().unwrap();
+    let (default_addr, _) = account.usk().default_transparent_address();
+
+    let to: Address = Address::Transparent(default_addr);
+
+    let fee_rule = StandardFeeRule::Zip317;
+
+    let send_max_memo = "Test Send Max memo".parse::<Memo>().unwrap();
+
+    assert_matches!(
+        st.propose_send_max_transfer(
+            account.id(),
+            &fee_rule,
+            to,
+            Some(MemoBytes::from(send_max_memo.clone())),
+            ConfirmationsPolicy::MIN
+        ),
+        Err(data_api::error::Error::Proposal(ProposalError::Zip321(
+            Zip321Error::TransparentMemo(0)
+        )))
+    );
+}
+
+/// Tests that attempting to send all the spendable funds within the given shielded pool in a
+/// single transaction fail if there are funds that are not yet confirmed.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Checks that the wallet balances are correct.
+/// - Mine empty blocks
+/// - Add more funds
+/// - Attempts to construct a request to spend the whole balance to an external address in the
+///   same pool.
+/// - catches failure
+/// - verifies the failure is the one expected
+pub fn send_max_proposal_fails_when_unconfirmed_funds_present<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let dfvk = T::test_account_fvk(&st);
+
+    // Add funds to the wallet in a single note
+    let value = Zatoshis::const_from_u64(60000);
+
+    let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+
+    st.generate_empty_block();
+    st.generate_empty_block();
+    let later_on_value = Zatoshis::const_from_u64(123456);
+    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, later_on_value);
+    st.scan_cached_blocks(h1, 4);
+
+    assert_eq!(
+        st.wallet()
+            .block_max_scanned()
+            .unwrap()
+            .unwrap()
+            .block_height(),
+        h
+    );
+
+    // Spendable balance doesn't match total balance
+    let total_balance = st.get_total_balance(account.id());
+    let spendable_balance = st.get_spendable_balance(
+        account.id(),
+        ConfirmationsPolicy::new_symmetrical_unchecked(
+            2,
+            #[cfg(feature = "transparent-inputs")]
+            true,
+        ),
+    );
+    assert_ne!(total_balance, spendable_balance);
+
+    let to_extsk = T::sk(&[0xf5; 32]);
+    let to: Address = T::sk_default_address(&to_extsk);
+
+    let fee_rule = StandardFeeRule::Zip317;
+
+    let send_max_memo = "Test Send Max memo".parse::<Memo>().unwrap();
+
+    assert_matches!(
+        st.propose_send_max_transfer(
+            account.id(),
+            &fee_rule,
+            to,
+            Some(MemoBytes::from(send_max_memo.clone())),
+            ConfirmationsPolicy::new_symmetrical_unchecked(
+                2,
+                #[cfg(feature = "transparent-inputs")]
+                true
+            )
+        ),
+        Err(data_api::error::Error::DataSource(_))
+    );
+}
 /// This test attempts to send the max spendable funds to a TEX address recipient
 /// checks that the transactions were stred and that the amounts involved are correct
 #[cfg(feature = "transparent-inputs")]
