@@ -852,9 +852,14 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             .num_outputs(spendable_notes.sapling.len(), requested_sapling_outputs)
             .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?;
 
+        #[cfg(feature = "orchard")]
         let orchard_output_count = orchard::builder::BundleType::DEFAULT
             .num_actions(spendable_notes.orchard.len(), requested_orchard_actions)
             .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?;
+        
+        #[cfg(not(feature = "orchard"))]
+        let orchard_output_count: usize = requested_orchard_actions;
+        
         let fee_required = match recipient
             .clone()
             .convert_if_network(params.network_type())?
