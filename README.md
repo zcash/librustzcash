@@ -99,6 +99,8 @@ graph TB
 
 ### Crates
 
+[librustzcash: a Rust Crates Walkthrough w/ nuttycom](https://free2z.cash/uploadz/public/ZcashTutorial/librustzcash-a-rust-crates.mp4)
+
 #### Zcash Protocol
 
 * `zcash_protocol`: Constants & common types
