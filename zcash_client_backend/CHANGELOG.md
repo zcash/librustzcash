@@ -24,6 +24,10 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::tor`:
   - `Client::set_dormant`
   - `DormantMode`
+- `zcash_client_sqlite::error::SqliteClientError`:
+  - `IneligibleNotes`: used `spendable_notes` is called with `TargetValue::MaxSpensable` 
+    and there are funds that haven't been confirmed and all spendable notes can't
+    be selected.
 
 ### Changed
 - `zcash_client_backend::data_api`:

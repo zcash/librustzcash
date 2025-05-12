@@ -485,6 +485,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn send_max_proposal_fails_when_unconfirmed_funds_present() {
+        testing::pool::send_max_proposal_fails_when_unconfirmed_funds_present::<OrchardPoolTester>()
+    }
+
+    #[test]
     #[cfg(feature = "transparent-inputs")]
     fn send_max_multi_step_proposed_transfer() {
         testing::pool::send_max_multi_step_proposed_transfer::<OrchardPoolTester>()
