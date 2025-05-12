@@ -293,12 +293,12 @@ impl TransparentBuilder {
 
         // Construct the OP_RETURN script using the Shl (<<) operators
         let script = Script::default() // Start with an empty script
-                     << OpCode::Return  // Append the OP_RETURN opcode
-                     << data;           // Append the data push opcode(s) and the data itself
+                    << OpCode::Return // Append the OP_RETURN opcode
+                    << data; // Append the data push opcode(s) and the data itself
 
         self.vout.push(TxOut {
-             value: Zatoshis::ZERO,
-             script_pubkey: script,
+            value: Zatoshis::ZERO,
+            script_pubkey: script,
         });
         Ok(())
     }
@@ -404,13 +404,13 @@ impl Bundle<Unauthorized> {
             authorization: Authorized,
         })
     }
-    
+
     pub fn apply_external_signatures(
         self,
         #[cfg(feature = "transparent-inputs")] signatures: Vec<secp256k1::ecdsa::Signature>,
     ) -> Bundle<Authorized> {
         #[cfg(feature = "transparent-inputs")]
-        let script_sigs = { 
+        let script_sigs = {
             // Check that the number of signatures matches the number of inputs
             assert_eq!(
                 self.authorization.inputs.len(),
@@ -419,25 +419,25 @@ impl Bundle<Unauthorized> {
             );
 
             // Compute the scriptSigs
-            self
-            .authorization
-            .inputs
-            .iter()
-            .zip(signatures)
-            .map(|(info, signature)| { // For each (input info, signature) pair...
-                // Serialize the provided signature to DER format
-                let mut sig_bytes: Vec<u8> = signature.serialize_der().to_vec();
-                // Append the SIGHASH_ALL byte (0x01)
-                sig_bytes.push(SIGHASH_ALL);
+            self.authorization
+                .inputs
+                .iter()
+                .zip(signatures)
+                .map(|(info, signature)| {
+                    // For each (input info, signature) pair...
+                    // Serialize the provided signature to DER format
+                    let mut sig_bytes: Vec<u8> = signature.serialize_der().to_vec();
+                    // Append the SIGHASH_ALL byte (0x01)
+                    sig_bytes.push(SIGHASH_ALL);
 
-                // Construct the P2PKH scriptSig: <DER sig + SIGHASH byte> <compressed pubkey>
-                // Assumes P2PKH inputs. Needs info.pubkey which comes from TransparentInputInfo.
-                Script::default() << &sig_bytes[..] << &info.pubkey.serialize()[..]
-            })
+                    // Construct the P2PKH scriptSig: <DER sig + SIGHASH byte> <compressed pubkey>
+                    // Assumes P2PKH inputs. Needs info.pubkey which comes from TransparentInputInfo.
+                    Script::default() << &sig_bytes[..] << &info.pubkey.serialize()[..]
+                })
         };
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let script_sigs = std::iter::empty::<Script>();
+        let script_sigs = core::iter::empty::<Script>();
 
         // Construct the new authorized Bundle
         Bundle {

@@ -522,14 +522,11 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
     }
 
     /// Adds a transparent OP_RETURN output with the given data payload.
-    pub fn add_transparent_op_return<FE>(
-        &mut self, 
-        data: &[u8]
-    ) -> Result<(), Error<FE>> {
+    pub fn add_transparent_op_return<FE>(&mut self, data: &[u8]) -> Result<(), Error<FE>> {
         self.transparent_builder
-           .add_op_return_output(data)
-           .map_err(Error::TransparentBuild)
-   }
+            .add_op_return_output(data)
+            .map_err(Error::TransparentBuild)
+    }
 
     /// Returns the sum of the transparent, Sapling, Orchard, and TZE value balances.
     fn value_balance(&self) -> Result<ZatBalance, BalanceError> {
