@@ -140,7 +140,7 @@ pub enum SqliteClientError {
     /// of the transactions in which it is known to have been used.
     AddressReuse(String, NonEmpty<TxId>),
 
-    /// The wallet found one or more notes that given a certain context would be 
+    /// The wallet found one or more notes that given a certain context would be
     /// ineligible and shouldn't be considered in the involved db operation.
     IneligibleNotes,
     /// The wallet encountered an error when attempting to schedule wallet operations.

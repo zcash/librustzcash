@@ -537,7 +537,7 @@ pub fn send_max_proposal_fails_when_unconfirmed_funds_present<T: ShieldedPoolTes
     let value = Zatoshis::const_from_u64(60000);
 
     let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-    
+
     st.generate_empty_block();
     st.generate_empty_block();
     let later_on_value = Zatoshis::const_from_u64(123456);
@@ -574,8 +574,7 @@ pub fn send_max_proposal_fails_when_unconfirmed_funds_present<T: ShieldedPoolTes
     let input_selector = GreedyInputSelector::new();
 
     assert_matches!(
-        st
-        .propose_send_max_transfer(
+        st.propose_send_max_transfer(
             account.id(),
             &input_selector,
             &change_strategy,
