@@ -11,8 +11,8 @@ workspace.
 ## [Unreleased]
 ### Added
 - `zcash_client_backend::fees`:
-  - `sapling::OutputView`: trait implemented of `Zatoshis`
-  - `orchard::OutputView`: trait implemented of `Zatoshis`
+  - `impl sapling::OutputView for Zatoshis`
+  - `impl orchard::OutputView for Zatoshis`
 - `zcash_client_backend::data_api::wallet`:
   - `propose_send_max_transfer`: Selects transaction inputs, computes fees, and
     constructs a proposal for a transaction (or series of them) that would spend all

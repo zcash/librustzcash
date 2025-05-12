@@ -48,8 +48,6 @@ pub enum ProposalError {
     PaymentPoolsMismatch,
     /// The proposal tried to spend a change output. Mark the `ChangeValue` as ephemeral if this is intended.
     SpendsChange(StepOutput),
-    /// The proposal attempts to send a memo to a transparent recipient.
-    SendsMemoToTransparentRecipient,
     /// The proposal results in an invalid payment request according to ZIP-321.
     Zip321(Zip321Error),
     /// A proposal step created an ephemeral output that was not spent in any later step.
@@ -109,10 +107,6 @@ impl Display for ProposalError {
             ProposalError::SpendsChange(r) => write!(
                 f,
                 "The proposal attempts to spends the change output created at step {r:?}.",
-            ),
-            ProposalError::SendsMemoToTransparentRecipient => write!(
-                f,
-                "The proposal attempts to send a shielded memo to a transparent recipient"
             ),
             ProposalError::Zip321(r) => write!(
                 f,

@@ -1008,8 +1008,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         &self,
         txid: &TxId,
     ) -> Result<Vec<OutputOfSentTx>, <Self as WalletRead>::Error> {
-        use zcash_protocol::value::Zatoshis;
-
         let mut stmt_sent = self.conn.borrow().prepare(
             "SELECT value, to_address,
                     a.cached_transparent_receiver_address, a.transparent_child_index

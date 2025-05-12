@@ -849,7 +849,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?
         };
         #[cfg(not(feature = "orchard"))]
-        let orchard_action_count: usize = 0;
+        let orchard_action_count: usize = requested_orchard_actions;
 
         let fee_required = match recipient
             .clone()
@@ -922,7 +922,9 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
 
         let payment = zip321::Payment::new(recipient, amount, memo, None, None, vec![])
             .ok_or_else(|| {
-                InputSelectorError::Proposal(ProposalError::SendsMemoToTransparentRecipient)
+                InputSelectorError::Proposal(ProposalError::Zip321(
+                    zip321::Zip321Error::TransparentMemo(0),
+                ))
             })?;
 
         let transaction_request =

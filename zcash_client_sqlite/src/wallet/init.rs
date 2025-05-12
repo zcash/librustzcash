@@ -228,6 +228,9 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
                 u128::from(i)
             ))
         }
+        SqliteClientError::IneligibleNotes => {
+            unreachable!("there are no ineligible notes in migrations")
+        }
         SqliteClientError::AddressReuse(_, _) => {
             unreachable!("we don't create transactions in migrations")
         }
