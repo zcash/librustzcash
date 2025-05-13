@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_transaction::builder::Builder::add_transparent_null_data_output`
+
 ### Changed
 - Variants of `zcash_primitives::transaction::TxVersion` have changed. They
   now represent explicit transaction versions, in order to avoid accidental

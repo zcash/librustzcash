@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_transparent::builder::TransparentBuilder::add_null_data_output`
+- `zcash_transparent::bundle::Bundle<Unauthorized>::apply_external_signatures`
+
 ## [0.2.3] - 2025-04-04
 
 ### Added
