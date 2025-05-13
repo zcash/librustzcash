@@ -309,7 +309,7 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     sapling_builder: Option<sapling::builder::Builder>,
     orchard_builder: Option<orchard::builder::Builder>,
     #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-    zip233_amount: Option<Zatoshis>,
+    zip233_amount: Zatoshis,
     #[cfg(zcash_unstable = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(zcash_unstable = "zfuture"))]
@@ -394,7 +394,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             sapling_builder,
             orchard_builder,
             #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            zip233_amount: None,
+            zip233_amount: Zatoshis::ZERO,
             #[cfg(zcash_unstable = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
@@ -545,10 +545,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
                 },
             )?,
             #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            -self
-                .zip233_amount
-                .map(Into::into)
-                .unwrap_or(ZatBalance::zero()),
+            -<Zatoshis as Into<ZatBalance>>::into(self.zip233_amount),
             #[cfg(zcash_unstable = "zfuture")]
             self.tze_builder.value_balance()?,
         ];
@@ -654,7 +651,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
     }
 
     #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-    pub fn set_zip233_amount(&mut self, zip233_amount: Option<Zatoshis>) {
+    pub fn set_zip233_amount(&mut self, zip233_amount: Zatoshis) {
         self.zip233_amount = zip233_amount;
     }
 
@@ -1131,7 +1128,7 @@ mod tests {
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder: None,
             #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            zip233_amount: None,
+            zip233_amount: Zatoshis::ZERO,
             #[cfg(zcash_unstable = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
@@ -1306,7 +1303,7 @@ mod tests {
                 orchard_anchor: Some(orchard::Anchor::empty_tree()),
             };
             let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
-            builder.set_zip233_amount(Some(Zatoshis::const_from_u64(50000)));
+            builder.set_zip233_amount(Zatoshis::const_from_u64(50000));
 
             assert_matches!(
                 builder.mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng),
@@ -1389,7 +1386,7 @@ mod tests {
                     Zatoshis::const_from_u64(5000),
                 )
                 .unwrap();
-            builder.set_zip233_amount(Some(Zatoshis::const_from_u64(10000)));
+            builder.set_zip233_amount(Zatoshis::const_from_u64(10000));
             assert_matches!(
                 builder.mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected == ZatBalance::const_from_i64(1)
@@ -1489,7 +1486,7 @@ mod tests {
                     Zatoshis::const_from_u64(5000),
                 )
                 .unwrap();
-            builder.set_zip233_amount(Some(Zatoshis::const_from_u64(10000)));
+            builder.set_zip233_amount(Zatoshis::const_from_u64(10000));
             let res = builder
                 .mock_build(&TransparentSigningSet::new(), extsks, &[], OsRng)
                 .unwrap();

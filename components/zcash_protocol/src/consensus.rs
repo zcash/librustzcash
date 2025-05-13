@@ -641,7 +641,7 @@ impl TryFrom<u32> for BranchId {
             0xc2d6_d0b4 => Ok(BranchId::Nu5),
             0xc8e7_1055 => Ok(BranchId::Nu6),
             #[cfg(zcash_unstable = "nu7")]
-            0x77190ad8 => Ok(BranchId::Nu7),
+            0xffff_ffff => Ok(BranchId::Nu7),
             #[cfg(zcash_unstable = "zfuture")]
             0xffff_ffff => Ok(BranchId::ZFuture),
             _ => Err("Unknown consensus branch ID"),
@@ -661,7 +661,7 @@ impl From<BranchId> for u32 {
             BranchId::Nu5 => 0xc2d6_d0b4,
             BranchId::Nu6 => 0xc8e7_1055,
             #[cfg(zcash_unstable = "nu7")]
-            BranchId::Nu7 => 0x7719_0ad8,
+            BranchId::Nu7 => 0xffff_ffff,
             #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => 0xffff_ffff,
         }
@@ -873,9 +873,7 @@ mod tests {
             BranchId::for_height(&MAIN_NETWORK, BlockHeight(2_726_400)),
             BranchId::Nu6,
         );
-        #[cfg(zcash_unstable = "nu7")]
         assert_eq!(
-            //TODO: Nu7 block height is not specified yet, update this when it is.
             BranchId::for_height(&MAIN_NETWORK, BlockHeight(5_000_000)),
             BranchId::Nu6,
         );

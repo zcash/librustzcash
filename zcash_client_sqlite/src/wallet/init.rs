@@ -741,6 +741,9 @@ mod tests {
         zip32::DiversifierIndex,
     };
 
+    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+    use zcash_protocol::value::Zatoshis;
+
     pub(crate) fn describe_tables(conn: &Connection) -> Result<Vec<String>, rusqlite::Error> {
         let result = conn
             .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' ORDER BY tbl_name")?
@@ -1148,7 +1151,7 @@ mod tests {
                 None,
                 None,
                 #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-                None,
+                Zatoshis::ZERO,
             )
             .freeze()
             .unwrap();
