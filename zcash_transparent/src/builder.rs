@@ -286,8 +286,6 @@ impl TransparentBuilder {
         // Check 80 bytes limit.
         const MAX_OP_RETURN_RELAY_BYTES: usize = 80;
         if data.len() > MAX_OP_RETURN_RELAY_BYTES {
-            // Use the appropriate error variant from the builder's Error enum
-            // InvalidOpReturn might need to be added if it doesn't exist.
             return Err(Error::InvalidOpReturn);
         }
 
