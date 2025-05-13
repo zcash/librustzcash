@@ -16,8 +16,7 @@ use zcash_encoding::Vector;
 /// `Debug` impl for [`Script`] renders correctly for unexpected scripts.
 #[derive(Debug)]
 
-// Maya Protocol integration needs OpCode to be public for add_op_return_output implementation
-pub enum OpCode {
+pub(crate) enum OpCode {
     // push value
     Op0 = 0x00, // False
     PushData1 = 0x4c,
