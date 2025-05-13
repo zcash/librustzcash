@@ -521,10 +521,10 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         self.transparent_builder.add_output(to, value)
     }
 
-    /// Adds a transparent OP_RETURN output with the given data payload.
-    pub fn add_transparent_op_return<FE>(&mut self, data: &[u8]) -> Result<(), Error<FE>> {
+    /// Adds a transparent "null data" (OP_RETURN) output with the given data payload.
+    pub fn add_transparent_null_data_output<FE>(&mut self, data: &[u8]) -> Result<(), Error<FE>> {
         self.transparent_builder
-            .add_op_return_output(data)
+            .add_null_data_output(data)
             .map_err(Error::TransparentBuild)
     }
 

@@ -281,18 +281,15 @@ impl TransparentBuilder {
         }
     }
 
-    /// Adds a zero-value OP_RETURN output containing the given data.
-    pub fn add_op_return_output(&mut self, data: &[u8]) -> Result<(), Error> {
+    /// Adds a zero-value "null data" (OP_RETURN) output containing the given data.
+    pub fn add_null_data_output(&mut self, data: &[u8]) -> Result<(), Error> {
         // Check 80 bytes limit.
         const MAX_OP_RETURN_RELAY_BYTES: usize = 80;
         if data.len() > MAX_OP_RETURN_RELAY_BYTES {
             return Err(Error::InvalidOpReturn);
         }
 
-        // Construct the OP_RETURN script using the Shl (<<) operators
-        let script = Script::default() // Start with an empty script
-                    << OpCode::Return // Append the OP_RETURN opcode
-                    << data; // Append the data push opcode(s) and the data itself
+        let script = Script::default() << OpCode::Return << data;
 
         self.vout.push(TxOut {
             value: Zatoshis::ZERO,
