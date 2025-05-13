@@ -409,7 +409,6 @@ impl Bundle<Unauthorized> {
     ) -> Bundle<Authorized> {
         #[cfg(feature = "transparent-inputs")]
         let script_sigs = {
-            // Check that the number of signatures matches the number of inputs
             assert_eq!(
                 self.authorization.inputs.len(),
                 signatures.len(),
