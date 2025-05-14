@@ -5,8 +5,9 @@ use alloc::vec::Vec;
 use core::fmt;
 use core::ops::Shl;
 use core2::io::{self, Read, Write};
+use zcash_address::TryFromAddress;
+use zcash_protocol::consensus::NetworkType;
 
-use zcash_address::TryFromRawAddress;
 use zcash_encoding::Vector;
 
 /// Defined script opcodes.
@@ -408,16 +409,18 @@ impl TransparentAddress {
     }
 }
 
-impl TryFromRawAddress for TransparentAddress {
+impl TryFromAddress for TransparentAddress {
     type Error = ();
 
-    fn try_from_raw_transparent_p2pkh(
+    fn try_from_transparent_p2pkh(
+        _net: NetworkType,
         data: [u8; 20],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         Ok(TransparentAddress::PublicKeyHash(data))
     }
 
-    fn try_from_raw_transparent_p2sh(
+    fn try_from_transparent_p2sh(
+        _net: NetworkType,
         data: [u8; 20],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         Ok(TransparentAddress::ScriptHash(data))
