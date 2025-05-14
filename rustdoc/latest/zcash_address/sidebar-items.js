@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["ConversionError","ParseError"],"mod":["test_vectors","testing","unified"],"struct":["UnsupportedAddress","ZcashAddress"],"trait":["Converter","ToAddress","TryFromAddress","TryFromRawAddress"],"type":["Network"]};
+window.SIDEBAR_ITEMS = {"enum":["ConversionError","ParseError"],"mod":["test_vectors","testing","unified"],"struct":["UnsupportedAddress","ZcashAddress"],"trait":["Converter","ToAddress","TryFromAddress"],"type":["Network"]};
