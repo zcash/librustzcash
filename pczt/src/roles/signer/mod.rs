@@ -287,6 +287,8 @@ pub(crate) fn pczt_to_tx_data(
         None,
         sapling_bundle,
         orchard_bundle,
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+        None,
     ))
 }
 

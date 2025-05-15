@@ -680,6 +680,8 @@ mod tests {
             None,
             None,
             None,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            None,
             Some(Bundle {
                 vin: vec![],
                 vout: vec![out_a],
@@ -711,6 +713,8 @@ mod tests {
             None,
             None,
             None,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            None,
             Some(Bundle {
                 vin: vec![in_b],
                 vout: vec![out_b],
@@ -737,6 +741,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
             None,
             Some(Bundle {
                 vin: vec![in_c],
