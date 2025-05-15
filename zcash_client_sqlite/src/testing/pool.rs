@@ -43,6 +43,14 @@ pub(crate) fn send_max_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     )
 }
 
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn fails_to_send_max_to_transparent_with_memo<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fails_to_send_max_to_transparent_with_memo::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn send_max_proposal_fails_when_unconfirmed_funds_present<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_max_proposal_fails_when_unconfirmed_funds_present::<T>(
         TestDbFactory::default(),

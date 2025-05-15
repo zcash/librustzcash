@@ -856,10 +856,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         let orchard_output_count = orchard::builder::BundleType::DEFAULT
             .num_actions(spendable_notes.orchard.len(), requested_orchard_actions)
             .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?;
-        
+
         #[cfg(not(feature = "orchard"))]
         let orchard_output_count: usize = requested_orchard_actions;
-        
+
         let fee_required = match recipient
             .clone()
             .convert_if_network(params.network_type())?
@@ -953,7 +953,9 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
 
         let payment = zip321::Payment::new(recipient, amount, memo, None, None, vec![])
             .ok_or_else(|| {
-                InputSelectorError::Proposal(ProposalError::SendsMemoToTransparentRecipient)
+                InputSelectorError::Proposal(ProposalError::Zip321(
+                    zip321::Zip321Error::TransparentMemo(0),
+                ))
             })?;
 
         let transaction_request =
