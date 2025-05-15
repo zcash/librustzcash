@@ -41,6 +41,13 @@ pub const HRP_SAPLING_PAYMENT_ADDRESS: &str = "zregtestsapling";
 /// [sproutpaymentaddrencoding]: https://zips.z.cash/protocol/protocol.pdf#sproutpaymentaddrencoding
 pub const B58_SPROUT_ADDRESS_PREFIX: [u8; 2] = [0x16, 0xb6];
 
+/// The prefix for a Base58Check-encoded DER-encoded mainnet [`SecretKey`], as specified via the
+/// bitcoin-derived [`EncodeSecret`] format function.
+///
+/// [`SecretKey`]: https://docs.rs/secp256k1/latest/secp256k1/struct.SecretKey.html
+/// [`EncodeSecret`]: https://github.com/zcash/zcash/blob/1f1f7a385adc048154e7f25a3a0de76f3658ca09/src/key_io.cpp#L298
+pub const B58_SECRET_KEY_PREFIX: [u8; 1] = [0xef];
+
 /// The prefix for a Base58Check-encoded regtest transparent [`PublicKeyHash`].
 /// Same as the testnet prefix.
 ///

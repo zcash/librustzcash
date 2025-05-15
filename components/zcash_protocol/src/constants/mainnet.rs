@@ -36,14 +36,21 @@ pub const HRP_SAPLING_PAYMENT_ADDRESS: &str = "zs";
 /// [sproutpaymentaddrencoding]: https://zips.z.cash/protocol/protocol.pdf#sproutpaymentaddrencoding
 pub const B58_SPROUT_ADDRESS_PREFIX: [u8; 2] = [0x16, 0x9a];
 
+/// The prefix for a Base58Check-encoded DER-encoded mainnet [`SecretKey`], as specified via the
+/// bitcoin-derived [`EncodeSecret`] format function.
+///
+/// [`SecretKey`]: https://docs.rs/secp256k1/latest/secp256k1/struct.SecretKey.html
+/// [`EncodeSecret`]: https://github.com/zcash/zcash/blob/1f1f7a385adc048154e7f25a3a0de76f3658ca09/src/key_io.cpp#L298
+pub const B58_SECRET_KEY_PREFIX: [u8; 1] = [0x80];
+
 /// The prefix for a Base58Check-encoded mainnet [`PublicKeyHash`].
 ///
-/// [`PublicKeyHash`]: https://docs.rs/zcash_primitives/latest/zcash_primitives/legacy/enum.TransparentAddress.html
+/// [`PublicKeyHash`]: https://docs.rs/zcash_transparent/latest/address/enum.TransparentAddress.html
 pub const B58_PUBKEY_ADDRESS_PREFIX: [u8; 2] = [0x1c, 0xb8];
 
 /// The prefix for a Base58Check-encoded mainnet [`ScriptHash`].
 ///
-/// [`ScriptHash`]: https://docs.rs/zcash_primitives/latest/zcash_primitives/legacy/enum.TransparentAddress.html
+/// [`ScriptHash`]: https://docs.rs/zcash_transparent/latest/address/enum.TransparentAddress.html
 pub const B58_SCRIPT_ADDRESS_PREFIX: [u8; 2] = [0x1c, 0xbd];
 
 /// The HRP for a Bech32m-encoded mainnet [ZIP 320] TEX address.
