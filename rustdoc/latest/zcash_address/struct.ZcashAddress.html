@@ -20,7 +20,7 @@ part of that encoding is invalid.</p>
 <h5 id="examples"><a class="doc-anchor" href="#examples">§</a>Examples</h5>
 <div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>zcash_address::ZcashAddress;
 
-<span class="kw">let </span>encoded = <span class="string">"zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9sly"</span>;
+<span class="kw">let </span>encoded = <span class="string">"zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9slya"</span>;
 <span class="kw">let </span>addr = ZcashAddress::try_from_encoded(<span class="kw-2">&amp;</span>encoded);
 <span class="macro">assert_eq!</span>(encoded.parse(), addr);</code></pre></div>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.convert" class="method"><a class="src rightside" href="../src/zcash_address/lib.rs.html#233-242">Source</a><h4 class="code-header">pub fn <a href="#method.convert" class="fn">convert</a>&lt;T: <a class="trait" href="trait.TryFromAddress.html" title="trait zcash_address::TryFromAddress">TryFromAddress</a>&gt;(self) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="enum" href="enum.ConversionError.html" title="enum zcash_address::ConversionError">ConversionError</a>&lt;T::<a class="associatedtype" href="trait.TryFromAddress.html#associatedtype.Error" title="type zcash_address::TryFromAddress::Error">Error</a>&gt;&gt;</h4></section></summary><div class="docblock"><p>Converts this address into another type.</p>
