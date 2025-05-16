@@ -968,6 +968,8 @@ where
             usk,
             ovk_policy,
             &proposal,
+            #[cfg(feature = "transparent-inputs")]
+            &HashMap::new(),
         )
     }
 
@@ -1104,6 +1106,8 @@ where
             usk,
             ovk_policy,
             proposal,
+            #[cfg(feature = "transparent-inputs")]
+            &HashMap::new(),
         )
     }
 
@@ -1199,6 +1203,8 @@ where
             from_addrs,
             to_account,
             min_confirmations,
+            #[cfg(feature = "transparent-inputs")]
+            &HashMap::new(),
         )
     }
 
@@ -1699,13 +1705,16 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
             let (account, usk) = match self.account_index {
                 Some(index) => wallet_data
                     .import_account_hd("", &seed, index, &birthday, None)
-                    .unwrap(),
+                    .expect("test account import succeeds"),
                 None => {
                     let result = wallet_data
                         .create_account("", &seed, &birthday, None)
-                        .unwrap();
+                        .expect("test account creation succeeds");
                     (
-                        wallet_data.get_account(result.0).unwrap().unwrap(),
+                        wallet_data
+                            .get_account(result.0)
+                            .expect("retrieval of just-created account succeeds")
+                            .expect("an account was created"),
                         result.1,
                     )
                 }
@@ -2744,6 +2753,15 @@ impl WalletWrite for MockWalletDb {
         _purpose: AccountPurpose,
         _key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error> {
+        todo!()
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        _account: Self::AccountId,
+        _address: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
         todo!()
     }
 

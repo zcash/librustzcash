@@ -105,6 +105,9 @@ use {
     },
 };
 
+#[cfg(feature = "zcashd-compat")]
+use zcash_keys::keys::zcashd;
+
 #[cfg(feature = "test-dependencies")]
 use ambassador::delegatable_trait;
 
@@ -351,14 +354,22 @@ impl AccountBalance {
 pub struct Zip32Derivation {
     seed_fingerprint: SeedFingerprint,
     account_index: zip32::AccountId,
+    #[cfg(feature = "zcashd-compat")]
+    legacy_address_index: Option<zcashd::LegacyAddressIndex>,
 }
 
 impl Zip32Derivation {
     /// Constructs new derivation metadata from its constituent parts.
-    pub fn new(seed_fingerprint: SeedFingerprint, account_index: zip32::AccountId) -> Self {
+    pub fn new(
+        seed_fingerprint: SeedFingerprint,
+        account_index: zip32::AccountId,
+        #[cfg(feature = "zcashd-compat")] legacy_address_index: Option<zcashd::LegacyAddressIndex>,
+    ) -> Self {
         Self {
             seed_fingerprint,
             account_index,
+            #[cfg(feature = "zcashd-compat")]
+            legacy_address_index,
         }
     }
 
@@ -370,6 +381,11 @@ impl Zip32Derivation {
     /// Returns the account-level index in the ZIP 32 derivation path.
     pub fn account_index(&self) -> zip32::AccountId {
         self.account_index
+    }
+
+    #[cfg(feature = "zcashd-compat")]
+    pub fn legacy_address_index(&self) -> Option<zcashd::LegacyAddressIndex> {
+        self.legacy_address_index
     }
 }
 
@@ -2181,10 +2197,6 @@ impl AccountBirthday {
     ///   "recover until" height. The wallet is considered to be in "recovery mode" until there
     ///   exist no unscanned ranges between the wallet's birthday height and the provided
     ///   `recover_until` height, exclusive.
-    ///
-    /// This API is intended primarily to be used in testing contexts; under normal circumstances,
-    /// [`AccountBirthday::from_treestate`] should be used instead.
-    #[cfg(any(test, feature = "test-dependencies"))]
     pub fn from_parts(prior_chain_state: ChainState, recover_until: Option<BlockHeight>) -> Self {
         Self {
             prior_chain_state,
@@ -2485,6 +2497,19 @@ pub trait WalletWrite: WalletRead {
         purpose: AccountPurpose,
         key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error>;
+
+    /// Imports the given pubkey into the account without key derivation information, and adds the
+    /// associated transparent p2pkh address.
+    ///
+    /// The imported address will contribute to the balance of the account, but spending funds held
+    /// by this address requires the associated spending keys to be provided explicitly when
+    /// calling [`wallet::create_proposed_transaction`].
+    #[cfg(feature = "transparent-inputs")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        account: Self::AccountId,
+        address: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error>;
 
     /// Generates, persists, and marks as exposed the next available diversified address for the
     /// specified account, given the current addresses known to the wallet.

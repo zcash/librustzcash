@@ -78,7 +78,6 @@ use zcash_primitives::{
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::Memo,
-    value::Zatoshis,
     ShieldedProtocol,
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
@@ -104,6 +103,7 @@ use {
     std::collections::BTreeSet,
     zcash_client_backend::wallet::TransparentAddressMetadata,
     zcash_keys::encoding::AddressCodec,
+    zcash_protocol::value::Zatoshis,
 };
 
 #[cfg(feature = "multicore")]
@@ -377,6 +377,12 @@ pub struct SqlTransaction<'conn>(pub(crate) &'conn rusqlite::Transaction<'conn>)
 impl Borrow<rusqlite::Connection> for SqlTransaction<'_> {
     fn borrow(&self) -> &rusqlite::Connection {
         self.0
+    }
+}
+
+impl<C, P, CL, R> WalletDb<C, P, CL, R> {
+    pub fn params(&self) -> &P {
+        &self.params
     }
 }
 
@@ -1145,7 +1151,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 &wdb.params,
                 account_name,
                 &AccountSource::Derived {
-                    derivation: Zip32Derivation::new(seed_fingerprint, zip32_account_index),
+                    derivation: Zip32Derivation::new(
+                        seed_fingerprint,
+                        zip32_account_index,
+                        #[cfg(feature = "zcashd-compat")]
+                        None,
+                    ),
                     key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
@@ -1184,7 +1195,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 &wdb.params,
                 account_name,
                 &AccountSource::Derived {
-                    derivation: Zip32Derivation::new(seed_fingerprint, account_index),
+                    derivation: Zip32Derivation::new(
+                        seed_fingerprint,
+                        account_index,
+                        #[cfg(feature = "zcashd-compat")]
+                        None,
+                    ),
                     key_source: key_source.map(|s| s.to_owned()),
                 },
                 wallet::ViewingKey::Full(Box::new(ufvk)),
@@ -1220,6 +1236,15 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 &wdb.gap_limits,
             )
         })
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        _account: Self::AccountId,
+        _address: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
+        todo!()
     }
 
     fn get_next_available_address(
