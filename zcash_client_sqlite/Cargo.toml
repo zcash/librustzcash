@@ -64,6 +64,9 @@ static_assertions.workspace = true
 orchard = { workspace = true, optional = true }
 sapling.workspace = true
 
+# - Transparent protocol
+secp256k1 = { workspace = true, optional = true }
+
 # - Note commitment trees
 incrementalmerkletree.workspace = true
 shardtree = { workspace = true, features = ["legacy-api"] }
@@ -96,6 +99,7 @@ orchard = { workspace = true, features = ["test-dependencies"] }
 proptest.workspace = true
 rand_chacha.workspace = true
 rand_core.workspace = true
+secp256k1 = { workspace = true, features = ["rand"] }
 tempfile = "3.5.0"
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
 zcash_note_encryption.workspace = true
@@ -113,7 +117,7 @@ zip-233 = ["zcash_primitives/zip-233"]
 ## Enables multithreading support for creating proofs and building subtrees.
 multicore = ["maybe-rayon/threads", "zcash_primitives/multicore"]
 
-## Enables support for storing data related to the sending and receiving of 
+## Enables support for storing data related to the sending and receiving of
 ## Orchard funds.
 orchard = ["dep:orchard", "zcash_client_backend/orchard", "zcash_keys/orchard"]
 
@@ -128,9 +132,19 @@ test-dependencies = [
 ## Enables receiving transparent funds and sending to transparent recipients
 transparent-inputs = [
   "dep:bip32",
+  "dep:secp256k1",
   "transparent/transparent-inputs",
   "zcash_keys/transparent-inputs",
   "zcash_client_backend/transparent-inputs"
+]
+
+# Enables operations that permit arbitrary transparent pubkeys to be associated
+# with an account in the wallet. Applications that rely on this feature mut
+# maintain spending keys corresponding to all imported pubkeys for any account
+# from which it permits spending.
+transparent-key-import = [
+  "transparent-inputs",
+  "zcash_client_backend/transparent-key-import"
 ]
 
 ## Enables import from legacy zcashd wallet.dat wallets.

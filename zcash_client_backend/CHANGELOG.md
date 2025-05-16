@@ -16,12 +16,15 @@ workspace.
 - `zcash_client_backend::data_api`:
   - `AccountBalance::uneconomic_value`
   - `AccountBirthday::{from_parts, prior_chain_state}`
+  - `AddressSource`
+  - `AddressInfo::source` replaces `AddressInfo::diversifier_index`
   - `Balance::uneconomic_value`
   - `MaxSpendMode`
   - `ReceivedNotes` (replaces `SpendableNotes` globally)
   - `TransactionsInvolvingAddress`
   - `TransactionDataRequest::transactions_involving_address`
   - `wallet::ConfirmationsPolicy`
+  - `wallet::SpendingKeys`
   - `wallet::TargetHeight`
   - `wallet::propose_send_max_transfer`: Selects transaction inputs, computes fees, and
     constructs a proposal for a transaction (or series of them) that would spend all
@@ -47,6 +50,13 @@ workspace.
   - `zcash_client_backend::wallet::Recipient`
 - `impl Clone` for:
   - `zcash_client_backend::wallet::{WalletTx, WalletSpend, WalletOutput}`
+- A new `transparent-key-import` feature flag has been added, and introduces
+  functionality that allows arbitrary transparent pubkeys to be imported to
+  the wallet and associated with an account. These features are introduced
+  primarily in the interest of providing compatibility with legacy `zcashd`
+  wallets; users of these APIs must ensure that when importing keys to a
+  spending account that they control the spending key corresponding to each
+  imported pubkey.
 
 ### Changed
 - Migrated to `zcash_protocol 0.6.2`, `zcash_address 0.9`, `zip321 0.5`,
@@ -118,6 +128,31 @@ workspace.
   - `Proposal::min_target_height` now returns `TargetHeight` instead of `BlockHeight`
 - `zcash_client_backend::wallet::ReceivedNote::from_parts` takes an additional
   `mined_height` argument.
+  - `AddressInfo::from_parts` now takes an `AddressSource` value instead
+    of a `DiversifierIndex`.
+  - `WalletWrite` has added method `import_standalone_transparent_pubkey`
+    when the `transparent-key-import` feature flag is enabled.
+- The following `zcash_client_backend::data_api::wallet` methods have changed;
+  they now each take a `SpendingKeys` value instead of a `UnifiedSpendingKey`.
+  This permits the spending of funds controlled by standalone keys not
+  derived from the root spending authority of the account; this is useful in
+  cases where the account represents a "bucket of funds", such as in the case
+  of imported standalone spending keys or legacy `zcash` transparent keys
+  that were derived from system randomness.
+  - `create_proposed_transactions`
+  - `shield_transparent_funds`
+- `zcash_client_backend::wallet::TransparentAddressMetadata` is now an
+  enum instead of a struct. This change enables it to represent either
+  metadata for a derived address or a standalone secp256k1 pubkey. Call
+  sites that previously used `TransparentAddressMetadata` will now use
+  the `TransparentAddressMetadata::Derived` variant.
+- `zcash_client_backend::wallet::TransparentAddressMetadata::scope` now
+  returns `Option<TransparentKeyScope>` instead of `TransparentKeyScope`.
+- `zcash_client_backend::wallet::TransparentAddressMetadata::address_index`
+  now returns `Option<NonHardenedChildIndex>` instead of `NonHardenedChildIndex`.
+
+### Removed
+- `zcash_client_backend::data_api::AddressInfo::diversifier_index`
 
 ### Removed
 - `zcash_client_backend::data_api::SpendableNotes` (renamed to `ReceivedNotes`)

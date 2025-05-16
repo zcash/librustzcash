@@ -14,8 +14,9 @@
 //!
 //! * Viewing Keys: Wallets based upon this module are built around the capabilities of Zcash
 //!   [`UnifiedFullViewingKey`]s; the wallet backend provides no facilities for the storage
-//!   of spending keys, and spending keys must be provided by the caller in order to perform
-//!   transaction creation operations.
+//!   of spending keys, and spending keys must be provided by the caller (or delegated to external
+//!   devices via the provided [`pczt`] functionality) in order to perform transaction creation
+//!   operations.
 //! * Blockchain Scanning: A Zcash wallet must download and trial-decrypt each transaction on the
 //!   Zcash blockchain using one or more Viewing Keys in order to find new shielded transaction
 //!   outputs (generally termed "notes") belonging to the wallet. The primary entrypoint for this
@@ -26,7 +27,12 @@
 //!   used to process a range of blocks, the note commitment tree is updated with the note
 //!   commitments for the blocks in that range.
 //! * Transaction Construction: The [`wallet`] module provides functions for creating Zcash
-//!   transactions that spend funds belonging to the wallet.
+//!   transactions that spend funds belonging to the wallet. Input selection for transaction
+//!   construction is performed automatically. When spending funds received at transparent
+//!   addresses, the caller is required to explicitly specify the set of addresses from which to
+//!   spend funds, in order to prevent inadvertent commingling of funds received at different
+//!   addresses; allowing such commingling would enable chain observers to identify those
+//!   addresses as belonging to the same user.
 //!
 //! ## Core Traits
 //!
@@ -51,9 +57,10 @@
 //!
 //! [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
 //! [`scan_cached_blocks`]: crate::data_api::chain::scan_cached_blocks
-//! [`zcash_client_sqlite`]: https://crates.io/crates/zcash_client_sqlite
+//! [`zcash_client_sqlite`]: https://docs.rs/zcash_client_sqlite
 //! [`TransactionRequest`]: crate::zip321::TransactionRequest
 //! [`propose_shielding`]: crate::data_api::wallet::propose_shielding
+//! [`pczt`]: https://docs.rs/pczt
 
 use nonempty::NonEmpty;
 use secrecy::SecretVec;
@@ -145,7 +152,7 @@ pub enum NullifierQuery {
 }
 
 /// An intent of representing spendable value to reach a certain targeted
-/// amount.  
+/// amount.
 ///
 /// `AtLeast(Zatoshis)` refers to the amount of `Zatoshis` that can cover
 /// at minimum the given zatoshis that is conformed by the sum of spendable notes.
@@ -506,6 +513,21 @@ impl AccountSource {
 }
 
 /// A set of capabilities that a client account must provide.
+///
+/// An account represents a distinct set of viewing keys within the wallet; the keys for an account
+/// must not be shared with any other account in the wallet, and an application managing wallet
+/// accounts must ensure that it either maintains spending keys that can be used for spending _all_
+/// outputs detectable by the viewing keys of the account, or for none of them (i.e. the account is
+/// view-only.)
+///
+/// Balance information is available for any full-viewing-key based account; for an
+/// incoming-viewing-key only account balance cannot be determined because spends cannot be
+/// detected, and so balance-related APIs and APIs that rely upon spentness checks MUST be
+/// implemented to return errors if invoked for an IVK-only account.
+///
+/// For spending accounts in implementations that support the `transparent-key-import` feature,
+/// care must be taken to ensure that spending keys corresponding to every imported transparent
+/// address in an account are maintained by the application.
 pub trait Account {
     type AccountId: Copy;
 
@@ -599,50 +621,72 @@ impl<A: Copy> Account for (A, UnifiedIncomingViewingKey) {
     }
 }
 
+/// Source metadata for an address in the wallet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AddressSource {
+    /// The address was produced by HD derivation via a known path, with the given diversifier
+    /// index.
+    Derived {
+        diversifier_index: DiversifierIndex,
+        #[cfg(feature = "transparent-inputs")]
+        transparent_key_scope: Option<TransparentKeyScope>,
+    },
+    /// No derivation information is available; this is common for imported addresses.
+    #[cfg(feature = "transparent-key-import")]
+    Standalone,
+}
+
+impl AddressSource {
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent_key_scope(&self) -> Option<&TransparentKeyScope> {
+        match self {
+            AddressSource::Derived {
+                transparent_key_scope,
+                ..
+            } => transparent_key_scope.as_ref(),
+            #[cfg(feature = "transparent-key-import")]
+            AddressSource::Standalone => None,
+        }
+    }
+}
+
 /// Information about an address in the wallet.
 pub struct AddressInfo {
     address: Address,
-    diversifier_index: DiversifierIndex,
-    #[cfg(feature = "transparent-inputs")]
-    transparent_key_scope: Option<TransparentKeyScope>,
+    source: AddressSource,
 }
 
 impl AddressInfo {
     /// Constructs an `AddressInfo` from its constituent parts.
-    pub fn from_parts(
-        address: Address,
-        diversifier_index: DiversifierIndex,
-        #[cfg(feature = "transparent-inputs")] transparent_key_scope: Option<TransparentKeyScope>,
-    ) -> Option<Self> {
+    pub fn from_parts(address: Address, source: AddressSource) -> Option<Self> {
         // Only allow `transparent_key_scope` to be set for transparent addresses.
         #[cfg(feature = "transparent-inputs")]
-        let valid = transparent_key_scope.is_none()
+        let valid = source.transparent_key_scope().is_none()
             || matches!(address, Address::Transparent(_) | Address::Tex(_));
         #[cfg(not(feature = "transparent-inputs"))]
         let valid = true;
 
-        valid.then_some(Self {
-            address,
-            diversifier_index,
-            #[cfg(feature = "transparent-inputs")]
-            transparent_key_scope,
-        })
+        valid.then_some(Self { address, source })
     }
 
-    /// Returns the address this information is about.
+    /// Returns the address itself.
     pub fn address(&self) -> &Address {
         &self.address
     }
 
-    /// Returns the diversifier index the address was derived at.
-    pub fn diversifier_index(&self) -> DiversifierIndex {
-        self.diversifier_index
+    /// Returns the source metadata for the address.
+    pub fn source(&self) -> AddressSource {
+        self.source
     }
 
     /// Returns the key scope if this is a transparent address.
     #[cfg(feature = "transparent-inputs")]
-    pub fn transparent_key_scope(&self) -> Option<TransparentKeyScope> {
-        self.transparent_key_scope
+    #[deprecated(
+        since = "0.20.0",
+        note = "use AddressSource::transparent_key_scope instead"
+    )]
+    pub fn transparent_key_scope(&self) -> Option<&TransparentKeyScope> {
+        self.source.transparent_key_scope()
     }
 }
 
@@ -977,7 +1021,7 @@ pub struct TransactionsInvolvingAddress {
     /// returned.
     #[getset(get_copy = "pub")]
     block_range_start: BlockHeight,
-    /// Only transactions mined at heights less than this height should be returned.
+    /// If set, only transactions mined at heights less than this height should be returned.
     #[getset(get_copy = "pub")]
     block_range_end: Option<BlockHeight>,
     /// If a `request_at` time is set, the caller evaluating this request should attempt to
@@ -2505,14 +2549,22 @@ impl AccountBirthday {
 /// Note that an error will be returned on an FVK collision even if the UFVKs do not
 /// match exactly, e.g. if they have different subsets of components.
 ///
+/// An account is treated as having a single root of spending authority that spans the shielded and
+/// transparent rules for the purpose of balance, transaction listing, and so forth. However,
+/// transparent keys imported via [`WalletWrite::import_standalone_transparent_pubkey`] break this
+/// abstraction slightly, so wallets using this API need to be cautious to enforce the invariant
+/// that the wallet either maintains access to the keys required to spend **ALL** outputs received
+/// by the account, or that it **DOES NOT** offer any spending capability for the account, i.e. the
+/// account is treated as view-only for all user-facing operations.
+///
 /// A future change to this trait might introduce a method to "upgrade" an imported
 /// account with derivation information. See [zcash/librustzcash#1284] for details.
 ///
-/// Users of the `WalletWrite` trait should generally distinguish in their APIs and wallet
-/// UIs between creating a new account, and importing an account that previously existed.
-/// By convention, wallets should only allow a new account to be generated after confirmed
-/// funds have been received by the newest existing account; this allows automated account
-/// recovery to discover and recover all funds within a particular seed.
+/// Users of the `WalletWrite` trait should generally distinguish in their APIs and wallet UIs
+/// between creating a new account, and importing an account that previously existed. By
+/// convention, wallets should only allow a new account to be generated for a seed after confirmed
+/// funds have been received by the newest existing account for that seed; this allows automated
+/// account recovery to discover and recover all funds within a particular seed.
 ///
 /// # Creating a new wallet
 ///
@@ -2558,8 +2610,8 @@ pub trait WalletWrite: WalletRead {
     /// The type of identifiers used to look up transparent UTXOs.
     type UtxoRef;
 
-    /// Tells the wallet to track the next available account-level spend authority, given the
-    /// current set of [ZIP 316] account identifiers known to the wallet database.
+    /// Tells the wallet to track the next available account-level spend authority for the provided
+    /// seed value, given the current set of [ZIP 316] account identifiers known to the wallet database.
     ///
     /// The "next available account" is defined as the ZIP-32 account index immediately following
     /// the highest existing account index among all accounts in the wallet that share the given
@@ -2678,6 +2730,24 @@ pub trait WalletWrite: WalletRead {
         purpose: AccountPurpose,
         key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error>;
+
+    /// Imports the given pubkey into the account without key derivation information, and adds the
+    /// associated transparent p2pkh address.
+    ///
+    /// The imported address will contribute to the balance of the account (for UFVK-based
+    /// accounts), but spending funds held by this address requires the associated spending keys to
+    /// be provided explicitly when calling [`create_proposed_transactions`]. By extension, calls
+    /// to [`propose_shielding`] must only include addresses for which the spending application
+    /// holds or can obtain the spending keys.
+    ///
+    /// [`create_proposed_transactions`]: crate::data_api::wallet::create_proposed_transactions
+    /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        account: Self::AccountId,
+        pubkey: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error>;
 
     /// Generates, persists, and marks as exposed the next available diversified address for the
     /// specified account, given the current addresses known to the wallet.

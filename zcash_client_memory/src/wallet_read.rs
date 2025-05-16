@@ -645,10 +645,9 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
             .unwrap_or_else(|| Ok(vec![]))?
             .into_iter()
             .filter(|(_addr, meta)| {
-                index_range
-                    .as_ref()
-                    .map(|range| range.contains(&meta.address_index()))
-                    .unwrap_or(true)
+                index_range.as_ref().map_or(true, |range| {
+                    meta.address_index().is_some_and(|i| range.contains(&i))
+                })
             })
             .collect::<Vec<_>>())
     }

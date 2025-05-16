@@ -1242,6 +1242,15 @@ Instead derive the ufvk in the calling code and import it using `import_account_
     ) -> Result<(), Self::Error> {
         todo!()
     }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        _account: Self::AccountId,
+        _pubkey: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
 }
 
 #[cfg(feature = "transparent-inputs")]

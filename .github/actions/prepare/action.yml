@@ -26,7 +26,7 @@ runs:
   steps:
     - id: pools
       shell: bash
-      run: echo "features=orchard transparent-inputs transparent-key-encoding" >> $GITHUB_OUTPUT
+      run: echo "features=orchard transparent-inputs transparent-key-import transparent-key-encoding" >> $GITHUB_OUTPUT
       if: inputs.all-pools == 'true'
 
     - id: test

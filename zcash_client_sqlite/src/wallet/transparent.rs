@@ -14,7 +14,7 @@ use rusqlite::OptionalExtension;
 use rusqlite::{named_params, Connection, Row};
 use tracing::debug;
 
-use transparent::keys::NonHardenedChildRange;
+use transparent::keys::{NonHardenedChildRange, TransparentKeyScope};
 use transparent::{
     address::{Script, TransparentAddress},
     bundle::{OutPoint, TxOut},
@@ -45,6 +45,9 @@ use zcash_protocol::{
     TxId,
 };
 use zip32::{DiversifierIndex, Scope};
+
+#[cfg(feature = "transparent-key-import")]
+use bip32::{PublicKey, PublicKeyBytes};
 
 use super::encoding::{decode_epoch_seconds, ReceiverFlags};
 use super::{
@@ -89,15 +92,17 @@ pub(crate) fn detect_spending_accounts<'a>(
 /// Returns the `NonHardenedChildIndex` corresponding to a diversifier index
 /// given as bytes in big-endian order (the reverse of the usual order).
 fn address_index_from_diversifier_index_be(
-    diversifier_index_be: &[u8],
-) -> Result<NonHardenedChildIndex, SqliteClientError> {
-    let di = decode_diversifier_index_be(diversifier_index_be)?;
-
-    NonHardenedChildIndex::try_from(di).map_err(|_| {
-        SqliteClientError::CorruptedData(
-            "Unexpected hardened index for transparent address.".to_string(),
-        )
-    })
+    diversifier_index_be: Option<Vec<u8>>,
+) -> Result<Option<NonHardenedChildIndex>, SqliteClientError> {
+    decode_diversifier_index_be(diversifier_index_be)?
+        .map(|di| {
+            NonHardenedChildIndex::try_from(di).map_err(|_| {
+                SqliteClientError::CorruptedData(
+                    "Unexpected hardened index for transparent address.".to_string(),
+                )
+            })
+        })
+        .transpose()
 }
 
 pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
@@ -110,7 +115,11 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
 
     // Get all addresses with the provided scopes.
     let mut addr_query = conn.prepare(
-        "SELECT cached_transparent_receiver_address, transparent_child_index, key_scope
+        "SELECT
+            cached_transparent_receiver_address,
+            key_scope,
+            transparent_child_index,
+            imported_transparent_receiver_pubkey
          FROM addresses
          JOIN accounts ON accounts.id = addresses.account_id
          WHERE accounts.uuid = :account_uuid
@@ -127,13 +136,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
 
     while let Some(row) = rows.next()? {
         let addr_str: String = row.get(0)?;
-        let address_index: u32 = row.get(1)?;
-        let address_index = NonHardenedChildIndex::from_index(address_index).ok_or(
-            SqliteClientError::CorruptedData(format!(
-                "{address_index} is not a valid transparent child index"
-            )),
-        )?;
-        let scope = KeyScope::decode(row.get(2)?)?;
+        let key_scope = KeyScope::decode(row.get(1)?)?;
 
         let taddr = Address::decode(params, &addr_str)
             .ok_or_else(|| {
@@ -142,7 +145,53 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             .to_transparent_address();
 
         if let Some(taddr) = taddr {
-            let metadata = TransparentAddressMetadata::new(scope.into(), address_index);
+            let metadata = match key_scope {
+                #[cfg(feature = "transparent-key-import")]
+                KeyScope::Foreign => {
+                    let pubkey_bytes = row
+                        .get::<_, Option<Vec<u8>>>(3)?
+                        .ok_or_else(|| {
+                            SqliteClientError::CorruptedData(
+                            "Pubkey bytes must be present for all imported transparent addresses."
+                                .to_owned(),
+                        )
+                        })
+                        .and_then(|b| {
+                            <[u8; 33]>::try_from(&b[..]).map_err(|_| {
+                                SqliteClientError::CorruptedData(format!(
+                                    "Invalid public key byte length; must be 33 bytes, got {}.",
+                                    b.len()
+                                ))
+                            })
+                        })?;
+                    let pubkey = PublicKey::from_bytes(pubkey_bytes).map_err(|e| {
+                        SqliteClientError::CorruptedData(format!("Invalid public key: {}", e))
+                    })?;
+                    TransparentAddressMetadata::Standalone(pubkey)
+                }
+                derived => {
+                    let scope_opt = <Option<TransparentKeyScope>>::from(derived);
+                    let address_index_opt = row.get::<_, Option<u32>>(2)?;
+                    let (scope, address_index) =
+                        scope_opt.zip(address_index_opt).ok_or_else(|| {
+                            SqliteClientError::CorruptedData(
+                                "Derived addresses must have derivation metadata present."
+                                    .to_owned(),
+                            )
+                        })?;
+
+                    TransparentAddressMetadata::Derived {
+                        scope,
+                        address_index: NonHardenedChildIndex::from_index(address_index).ok_or(
+                            SqliteClientError::CorruptedData(format!(
+                                "{} is not a valid transparent child index",
+                                address_index
+                            )),
+                        )?,
+                    }
+                }
+            };
+
             ret.insert(taddr, Some(metadata));
         }
     }
@@ -339,7 +388,15 @@ pub(crate) fn select_addrs_to_reserve<P: consensus::Parameters>(
                     (
                         address_id,
                         a,
-                        TransparentAddressMetadata::new(key_scope.into(), i),
+                        match <Option<TransparentKeyScope>>::from(key_scope) {
+                            Some(scope) => TransparentAddressMetadata::Derived {
+                                scope,
+                                address_index: i,
+                            },
+                            None => {
+                                todo!("Use the standalone pubkey associated with the address")
+                            }
+                        },
                     )
                 }))
             },
@@ -382,7 +439,8 @@ pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
 
     if addresses_to_reserve.len() < n {
         return Err(SqliteClientError::ReachedGapLimit(
-            key_scope.into(),
+            <Option<TransparentKeyScope>>::from(key_scope)
+                .expect("reservation relies on key derivation"),
             gap_start.index() + gap_limit,
         ));
     }
@@ -518,6 +576,7 @@ pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
                     .derive_ephemeral_address(index)?;
                 (Address::from(ephemeral_address), ephemeral_address)
             }
+            KeyScope::Foreign => panic!("unable to derive using imported key"),
         })
     };
 
@@ -584,6 +643,7 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
         KeyScope::Zip32(zip32::Scope::External) => gap_limits.external(),
         KeyScope::Zip32(zip32::Scope::Internal) => gap_limits.internal(),
         KeyScope::Ephemeral => gap_limits.ephemeral(),
+        KeyScope::Foreign => panic!("unable to derive using imported key"),
     };
 
     if let Some(gap_start) = find_gap_start(conn, account_id, key_scope, gap_limit)? {
@@ -1417,19 +1477,47 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
     let address_str = address.encode(params);
     let addr_meta = conn
         .query_row(
-            "SELECT diversifier_index_be, key_scope
+            "SELECT diversifier_index_be, key_scope, imported_transparent_receiver_pubkey
              FROM addresses
              JOIN accounts ON addresses.account_id = accounts.id
              WHERE accounts.uuid = :account_uuid
              AND cached_transparent_receiver_address = :address",
             named_params![":account_uuid": account_uuid.0, ":address": &address_str],
             |row| {
-                let di_be: Vec<u8> = row.get(0)?;
-                let scope_code = row.get(1)?;
+                let scope_code = row.get("key_scope")?;
                 Ok(KeyScope::decode(scope_code).and_then(|key_scope| {
-                    address_index_from_diversifier_index_be(&di_be).map(|address_index| {
-                        TransparentAddressMetadata::new(key_scope.into(), address_index)
-                    })
+                    let address_index = address_index_from_diversifier_index_be(row.get("diversifier_index_be")?)?;
+                    match <Option<TransparentKeyScope>>::from(key_scope).zip(address_index) {
+                        Some((scope, address_index)) => {
+                            Ok(TransparentAddressMetadata::Derived {
+                                scope,
+                                address_index,
+                            })
+                        }
+                        None => {
+                            if let Some(_pubkey_bytes) = row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_pubkey")? {
+                                #[cfg(not(feature = "transparent-key-import"))]
+                                let addr_meta = Err(SqliteClientError::CorruptedData(
+                                    "standalone imported transparent addresses are not supported by this build of `zcash_client_sqlite`".to_string()
+                                ));
+
+                                #[cfg(feature = "transparent-key-import")]
+                                let addr_meta = {
+                                    let pubkey_bytes = PublicKeyBytes::try_from(_pubkey_bytes).map_err(|_| {
+                                        SqliteClientError::CorruptedData(
+                                            "imported_transparent_receiver_pubkey must be 33 bytes in length".to_string()
+                                        )
+                                    })?;
+                                    let pubkey = secp256k1::PublicKey::from_bytes(pubkey_bytes)?;
+                                    Ok(TransparentAddressMetadata::Standalone(pubkey))
+                                };
+
+                                addr_meta
+                            } else {
+                                Err(SqliteClientError::CorruptedData("imported_transparent_receiver_pubkey must be set for \"standalone\" transparent addresses".to_string()))
+                            }
+                        }
+                    }
                 }))
             },
         )

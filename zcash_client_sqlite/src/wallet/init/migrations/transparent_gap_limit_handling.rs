@@ -123,10 +123,7 @@ pub(super) fn insert_initial_transparent_addrs<P: consensus::Parameters>(
             })
             .transpose()?;
 
-        let min_diversifier_idx = row
-            .get::<_, Option<Vec<u8>>>("diversifier_index_be")?
-            .map(|b| decode_diversifier_index_be(&b[..]))
-            .transpose()?
+        let min_diversifier_idx = decode_diversifier_index_be(row.get("diversifier_index_be")?)?
             .and_then(|di| NonHardenedChildIndex::try_from(di).ok());
 
         // Ensure that there is an address for each possible external address index prior to the
@@ -212,7 +209,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                 let receiver_flags = address.convert::<ReceiverFlags>().map_err(|_| {
                     WalletMigrationError::CorruptedData("Unexpected address type".to_string())
                 })?;
-                let di_be: Vec<u8> = row.get("diversifier_index_be")?;
+                let di_be: Option<Vec<u8>> = row.get("diversifier_index_be")?;
                 let account_birthday: i64 = row.get("birthday_height")?;
 
                 let update_without_taddr = || {
@@ -226,7 +223,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                         "#,
                         named_params! {
                             ":account_id": account_id.0,
-                            ":diversifier_index_be": &di_be[..],
+                            ":diversifier_index_be": &di_be,
                             ":account_birthday": account_birthday,
                             ":receiver_flags": receiver_flags.bits(),
                         },
@@ -235,9 +232,9 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
 
                 #[cfg(feature = "transparent-inputs")]
                 {
-                    let diversifier_index = decode_diversifier_index_be(&di_be)?;
-                    let transparent_external = NonHardenedChildIndex::try_from(diversifier_index)
-                        .ok()
+                    let diversifier_index = decode_diversifier_index_be(di_be.clone())?;
+                    let transparent_external = diversifier_index
+                        .and_then(|di| NonHardenedChildIndex::try_from(di).ok())
                         .and_then(|idx| {
                             uivk.transparent()
                                 .as_ref()
@@ -264,7 +261,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                             "#,
                             named_params! {
                                 ":account_id": account_id.0,
-                                ":diversifier_index_be": &di_be[..],
+                                ":diversifier_index_be": di_be,
                                 ":transparent_child_index": idx.index(),
                                 ":t_addr": t_addr,
                                 ":account_birthday": account_birthday,
@@ -747,8 +744,10 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                 let gap_limit = match key_scope {
                     KeyScope::Zip32(zip32::Scope::External) => GapLimits::default().external(),
                     KeyScope::Zip32(zip32::Scope::Internal) => GapLimits::default().internal(),
-                    KeyScope::Ephemeral => {
-                        unreachable!("Ephemeral keys are omitted by the enclosing context.")
+                    KeyScope::Ephemeral | KeyScope::Foreign => {
+                        unreachable!(
+                            "Ephemeral and Foreign keys are omitted by the enclosing context."
+                        )
                     }
                 };
 

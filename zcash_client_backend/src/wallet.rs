@@ -624,13 +624,21 @@ impl OvkPolicy {
     }
 }
 
-/// Metadata related to the ZIP 32 derivation of a transparent address.
-/// This is implicitly scoped to an account.
+/// Source information for a transparent address.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg(feature = "transparent-inputs")]
-pub struct TransparentAddressMetadata {
-    scope: TransparentKeyScope,
-    address_index: NonHardenedChildIndex,
+pub enum TransparentAddressMetadata {
+    /// BIP 44 path derivation information for the address below account pubkey level, i.e. the
+    /// `change` and `index` elements of the path.
+    Derived {
+        scope: TransparentKeyScope,
+        address_index: NonHardenedChildIndex,
+    },
+    /// The address was derived from a secp256k1 public key for which derivation information is
+    /// unknown or for which the associated spending key was produced from system randomness.
+    /// This variant provides the public key directly.
+    #[cfg(feature = "transparent-key-import")]
+    Standalone(secp256k1::PublicKey),
 }
 
 #[cfg(feature = "transparent-inputs")]
@@ -638,17 +646,29 @@ impl TransparentAddressMetadata {
     /// Returns a `TransparentAddressMetadata` in the given scope for the
     /// given address index.
     pub fn new(scope: TransparentKeyScope, address_index: NonHardenedChildIndex) -> Self {
-        Self {
+        Self::Derived {
             scope,
             address_index,
         }
     }
 
-    pub fn scope(&self) -> TransparentKeyScope {
-        self.scope
+    /// Returns the [`TransparentKeyScope`] of the private key from which the address was derived,
+    /// if known. Returns `None` for standalone addresses in the wallet.
+    pub fn scope(&self) -> Option<TransparentKeyScope> {
+        match self {
+            TransparentAddressMetadata::Derived { scope, .. } => Some(*scope),
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressMetadata::Standalone(_) => None,
+        }
     }
 
-    pub fn address_index(&self) -> NonHardenedChildIndex {
-        self.address_index
+    /// Returns the BIP 44 [`NonHardenedChildIndex`] at which the address was derived, if known.
+    /// Returns `None` for standalone addresses in the wallet.
+    pub fn address_index(&self) -> Option<NonHardenedChildIndex> {
+        match self {
+            TransparentAddressMetadata::Derived { address_index, .. } => Some(*address_index),
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressMetadata::Standalone(_) => None,
+        }
     }
 }

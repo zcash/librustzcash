@@ -19,6 +19,8 @@ workspace.
 - Migrated to `zcash_protocol 0.6`, `zcash_address 0.9`, `zip321 0.5`,
   `zcash_transparent 0.4`, `zcash_primitives 0.24`, `zcash_proofs 0.24`,
   `zcash_client_backend 0.20`.
+- Added dependency `secp256k1` when the `transparent-inputs` feature flag
+  is enabled.
 - `zcash_client_sqlite::error::SqliteClientError`:
   - An `IneligibleNotes` variant has been added. It is produced when
     `spendable_notes` is called with `TargetValue::MaxSpendable`
