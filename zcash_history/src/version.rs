@@ -30,6 +30,9 @@ pub trait Version {
     /// The node data for this tree version.
     type NodeData: fmt::Debug;
 
+    /// Returns the node data.
+    fn node_data(data: &Self::NodeData) -> Self::NodeData;
+
     /// Returns the consensus branch ID for the given node data.
     fn consensus_branch_id(data: &Self::NodeData) -> u32;
 
@@ -114,6 +117,10 @@ pub enum V1 {}
 impl Version for V1 {
     type NodeData = NodeData;
 
+    fn node_data(data: &Self::NodeData) -> Self::NodeData {
+        data.clone()
+    }
+
     fn consensus_branch_id(data: &Self::NodeData) -> u32 {
         data.consensus_branch_id
     }
@@ -150,6 +157,10 @@ pub enum V2 {}
 
 impl Version for V2 {
     type NodeData = node_data::V2;
+
+    fn node_data(data: &Self::NodeData) -> Self::NodeData {
+        data.clone()
+    }
 
     fn consensus_branch_id(data: &Self::NodeData) -> u32 {
         data.v1.consensus_branch_id
