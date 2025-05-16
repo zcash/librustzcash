@@ -46,6 +46,10 @@ pub struct Key {
 }
 
 impl Key {
+    pub fn new(secret: SecretKey, compressed: bool) -> Self {
+        Self { secret, compressed }
+    }
+
     /// Decodes a base58-encoded secret key.
     ///
     /// This corresponds to https://github.com/zcash/zcash/blob/1f1f7a385adc048154e7f25a3a0de76f3658ca09/src/key_io.cpp#L282

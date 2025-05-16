@@ -2498,6 +2498,19 @@ pub trait WalletWrite: WalletRead {
         key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error>;
 
+    /// Imports the given pubkey into the account without key derivation information, and adds the
+    /// associated transparent p2pkh address.
+    ///
+    /// The imported address will contribute to the balance of the account, but spending funds held
+    /// by this address requires the associated spending keys to be provided explicitly when
+    /// calling [`wallet::create_proposed_transaction`].
+    #[cfg(feature = "transparent-inputs")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        account: Self::AccountId,
+        address: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error>;
+
     /// Generates, persists, and marks as exposed the next available diversified address for the
     /// specified account, given the current addresses known to the wallet.
     ///

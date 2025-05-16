@@ -11,7 +11,7 @@ use rusqlite::{named_params, Transaction};
 use schemerz_rusqlite::RusqliteMigration;
 
 use zcash_address::ZcashAddress;
-use zcash_keys::keys::{UnifiedAddressRequest, UnifiedIncomingViewingKey};
+use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey};
 use zcash_protocol::consensus::{self, BlockHeight};
 
 use super::add_account_uuids;
@@ -31,10 +31,7 @@ use {
         GapLimits,
     },
     ::transparent::keys::{IncomingViewingKey as _, NonHardenedChildIndex},
-    zcash_keys::{
-        encoding::AddressCodec as _,
-        keys::{ReceiverRequirement, UnifiedFullViewingKey},
-    },
+    zcash_keys::{encoding::AddressCodec as _, keys::ReceiverRequirement},
     zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA,
     zip32::DiversifierIndex,
 };
@@ -72,7 +69,6 @@ fn decode_uivk<P: consensus::Parameters>(
     })
 }
 
-#[cfg(feature = "transparent-inputs")]
 fn decode_ufvk<P: consensus::Parameters>(
     params: &P,
     ufvk_str: Option<String>,

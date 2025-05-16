@@ -460,8 +460,8 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             INSERT INTO accounts (
                 name,
                 uuid,
-                account_kind, hd_seed_fingerprint, hd_account_index, 
-                zcashd_legacy_address_index, 
+                account_kind, hd_seed_fingerprint, hd_account_index,
+                zcashd_legacy_address_index,
                 key_source,
                 ufvk, uivk,
                 orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
@@ -472,8 +472,8 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             VALUES (
                 :account_name,
                 :uuid,
-                :account_kind, :hd_seed_fingerprint, :hd_account_index, 
-                :zcashd_legacy_address_index, 
+                :account_kind, :hd_seed_fingerprint, :hd_account_index,
+                :zcashd_legacy_address_index,
                 :key_source,
                 :ufvk, :uivk,
                 :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
@@ -1235,7 +1235,7 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
 
     let mut stmt = conn.prepare(
         "SELECT id, name, uuid, account_kind,
-                hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source, 
+                hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
                 ufvk, uivk, has_spend_key, birthday_height
          FROM accounts
          WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache

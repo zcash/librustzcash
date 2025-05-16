@@ -13,7 +13,7 @@ use rusqlite::types::Value;
 use rusqlite::OptionalExtension;
 use rusqlite::{named_params, Connection, Row};
 
-use transparent::keys::NonHardenedChildRange;
+use transparent::keys::{NonHardenedChildRange, TransparentKeyScope};
 use transparent::{
     address::{Script, TransparentAddress},
     bundle::{OutPoint, TxOut},
@@ -138,7 +138,15 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             .to_transparent_address();
 
         if let Some(taddr) = taddr {
-            let metadata = TransparentAddressMetadata::new(scope.into(), address_index);
+            let metadata = match <Option<TransparentKeyScope>>::from(scope) {
+                Some(scope) => TransparentAddressMetadata::Derived {
+                    scope,
+                    address_index,
+                },
+                None => {
+                    todo!("Query for the standalone pubkey associated with the address")
+                }
+            };
             ret.insert(taddr, Some(metadata));
         }
     }
@@ -335,7 +343,15 @@ pub(crate) fn select_addrs_to_reserve<P: consensus::Parameters>(
                     (
                         address_id,
                         a,
-                        TransparentAddressMetadata::new(key_scope.into(), i),
+                        match <Option<TransparentKeyScope>>::from(key_scope) {
+                            Some(scope) => TransparentAddressMetadata::Derived {
+                                scope,
+                                address_index: i,
+                            },
+                            None => {
+                                todo!("Use the standalone pubkey associated with the address")
+                            }
+                        },
                     )
                 }))
             },
@@ -378,7 +394,8 @@ pub(crate) fn reserve_next_n_addresses<P: consensus::Parameters>(
 
     if addresses_to_reserve.len() < n {
         return Err(SqliteClientError::ReachedGapLimit(
-            key_scope.into(),
+            <Option<TransparentKeyScope>>::from(key_scope)
+                .expect("reservation relies on key derivation"),
             gap_start.index() + gap_limit,
         ));
     }
@@ -513,6 +530,7 @@ pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
                     .derive_ephemeral_address(index)?;
                 (Address::from(ephemeral_address), ephemeral_address)
             }
+            KeyScope::Foreign => panic!("unable to derive using imported key"),
         })
     };
 
@@ -579,6 +597,7 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
         KeyScope::Zip32(zip32::Scope::External) => gap_limits.external(),
         KeyScope::Zip32(zip32::Scope::Internal) => gap_limits.internal(),
         KeyScope::Ephemeral => gap_limits.ephemeral(),
+        KeyScope::Foreign => panic!("unable to derive using imported key"),
     };
 
     if let Some(gap_start) = find_gap_start(conn, account_id, key_scope, gap_limit)? {

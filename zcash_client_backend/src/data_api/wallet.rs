@@ -460,6 +460,10 @@ pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeEr
     usk: &UnifiedSpendingKey,
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, N>,
+    #[cfg(feature = "transparent-inputs")] standalone_spending_keys: &HashMap<
+        TransparentAddress,
+        secp256k1::SecretKey,
+    >,
 ) -> Result<NonEmpty<TxId>, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
@@ -492,6 +496,8 @@ where
             proposal.min_target_height(),
             &step_results,
             step,
+            #[cfg(feature = "transparent-inputs")]
+            standalone_spending_keys,
             #[cfg(feature = "transparent-inputs")]
             &mut unused_transparent_outputs,
         )?;
@@ -819,7 +825,7 @@ where
     let mut cache = HashMap::<TransparentAddress, TransparentAddressMetadata>::new();
 
     #[cfg(feature = "transparent-inputs")]
-    let mut metadata_from_address = |addr: TransparentAddress| -> Result<
+    let mut metadata_from_address = |addr: &TransparentAddress| -> Result<
         TransparentAddressMetadata,
         CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
     > {
@@ -837,8 +843,9 @@ where
                 let result = wallet_db
                     .get_transparent_address_metadata(account_id, &addr)
                     .map_err(InputSelectorError::DataSource)?
-                    .ok_or(Error::AddressNotRecognized(addr))?;
-                cache.insert(addr, result.clone());
+                    .ok_or(Error::AddressNotRecognized(*addr))?;
+
+                cache.insert(*addr, result.clone());
                 Ok(result)
             }
         }
@@ -847,32 +854,36 @@ where
     #[cfg(feature = "transparent-inputs")]
     let utxos_spent = {
         let mut utxos_spent: Vec<OutPoint> = vec![];
-        let add_transparent_input = |builder: &mut Builder<_, _>,
-                                     utxos_spent: &mut Vec<_>,
-                                     address_metadata: &TransparentAddressMetadata,
-                                     outpoint: OutPoint,
-                                     txout: TxOut|
-         -> Result<
-            (),
-            CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
-        > {
-            let pubkey = ufvk
-                .transparent()
-                .ok_or(Error::KeyNotAvailable(PoolType::Transparent))?
-                .derive_address_pubkey(address_metadata.scope(), address_metadata.address_index())
-                .expect("spending key derivation should not fail");
+        let mut add_transparent_input =
+            |builder: &mut Builder<_, _>,
+             utxos_spent: &mut Vec<_>,
+             recipient_address: &TransparentAddress,
+             outpoint: OutPoint,
+             txout: TxOut|
+             -> Result<(), CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>> {
+                let pubkey = match metadata_from_address(recipient_address)? {
+                    TransparentAddressMetadata::Derived {
+                        scope,
+                        address_index,
+                    } => ufvk
+                        .transparent()
+                        .ok_or(Error::KeyNotAvailable(PoolType::Transparent))?
+                        .derive_address_pubkey(scope, address_index)
+                        .expect("spending key derivation should not fail"),
+                    TransparentAddressMetadata::Standalone(pubkey) => pubkey,
+                };
 
-            utxos_spent.push(outpoint.clone());
-            builder.add_transparent_input(pubkey, outpoint, txout)?;
+                utxos_spent.push(outpoint.clone());
+                builder.add_transparent_input(pubkey, outpoint, txout)?;
 
-            Ok(())
-        };
+                Ok(())
+            };
 
         for utxo in proposal_step.transparent_inputs() {
             add_transparent_input(
                 &mut builder,
                 &mut utxos_spent,
-                &metadata_from_address(*utxo.recipient_address())?,
+                utxo.recipient_address(),
                 utxo.outpoint().clone(),
                 utxo.txout().clone(),
             )?;
@@ -883,8 +894,6 @@ where
             let (address, outpoint) = unused_transparent_outputs
                 .remove(input_ref)
                 .ok_or(Error::Proposal(ProposalError::ReferenceError(*input_ref)))?;
-
-            let address_metadata = metadata_from_address(address)?;
 
             let txout = &prior_step_results[input_ref.step_index()]
                 .1
@@ -897,7 +906,7 @@ where
             add_transparent_input(
                 &mut builder,
                 &mut utxos_spent,
-                &address_metadata,
+                &address,
                 outpoint,
                 txout.clone(),
             )?;
@@ -1209,6 +1218,10 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N
     min_target_height: BlockHeight,
     prior_step_results: &[(&Step<N>, StepResult<<DbT as WalletRead>::AccountId>)],
     proposal_step: &Step<N>,
+    #[cfg(feature = "transparent-inputs")] standalone_spending_keys: &HashMap<
+        TransparentAddress,
+        secp256k1::SecretKey,
+    >,
     #[cfg(feature = "transparent-inputs")] unused_transparent_outputs: &mut HashMap<
         StepOutput,
         (TransparentAddress, OutPoint),
@@ -1222,6 +1235,9 @@ where
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
+    #[cfg(feature = "transparent-inputs")]
+    let secp = secp256k1::Secp256k1::new();
+
     let build_state = build_proposed_transaction::<_, _, _, FeeRuleT, _, _>(
         wallet_db,
         params,
@@ -1239,12 +1255,19 @@ where
     #[cfg_attr(not(feature = "transparent-inputs"), allow(unused_mut))]
     let mut transparent_signing_set = TransparentSigningSet::new();
     #[cfg(feature = "transparent-inputs")]
-    for (_, address_metadata) in build_state.transparent_input_addresses {
-        transparent_signing_set.add_key(
-            usk.transparent()
-                .derive_secret_key(address_metadata.scope(), address_metadata.address_index())
+    for (address, address_metadata) in build_state.transparent_input_addresses {
+        transparent_signing_set.add_key(match address_metadata {
+            TransparentAddressMetadata::Derived {
+                scope,
+                address_index,
+            } => usk
+                .transparent()
+                .derive_secret_key(scope, address_index)
                 .expect("spending key derivation should not fail"),
-        );
+            TransparentAddressMetadata::Standalone(_) => *standalone_spending_keys
+                .get(&address)
+                .ok_or(Error::AddressNotRecognized(address))?,
+        });
     }
     let sapling_extsks = &[usk.sapling().clone(), usk.sapling().derive_internal()];
     #[cfg(feature = "orchard")]
@@ -1603,12 +1626,12 @@ where
                                     .address()
                                     .expect("we created this with a supported transparent address"),
                             )
-                            .map(|address_metadata| {
-                                (
-                                    index,
-                                    address_metadata.scope(),
-                                    address_metadata.address_index(),
-                                )
+                            .and_then(|address_metadata| match address_metadata {
+                                TransparentAddressMetadata::Derived {
+                                    scope,
+                                    address_index,
+                                } => Some((index, *scope, *address_index)),
+                                TransparentAddressMetadata::Standalone(_) => None,
                             })
                     })
                     .collect::<Vec<_>>();
@@ -2134,6 +2157,7 @@ pub fn shield_transparent_funds<DbT, ParamsT, InputsT, ChangeT>(
     from_addrs: &[TransparentAddress],
     to_account: <DbT as InputSource>::AccountId,
     min_confirmations: u32,
+    standalone_spending_keys: &HashMap<TransparentAddress, secp256k1::SecretKey>,
 ) -> Result<NonEmpty<TxId>, ShieldErrT<DbT, InputsT, ChangeT>>
 where
     ParamsT: consensus::Parameters,
@@ -2160,5 +2184,6 @@ where
         usk,
         OvkPolicy::Sender,
         &proposal,
+        standalone_spending_keys,
     )
 }

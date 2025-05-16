@@ -78,7 +78,6 @@ use zcash_primitives::{
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::Memo,
-    value::Zatoshis,
     ShieldedProtocol,
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
@@ -104,6 +103,7 @@ use {
     std::collections::BTreeSet,
     zcash_client_backend::wallet::TransparentAddressMetadata,
     zcash_keys::encoding::AddressCodec,
+    zcash_protocol::value::Zatoshis,
 };
 
 #[cfg(feature = "multicore")]
@@ -1236,6 +1236,15 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 &wdb.gap_limits,
             )
         })
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        _account: Self::AccountId,
+        _address: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
+        todo!()
     }
 
     fn get_next_available_address(

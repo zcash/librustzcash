@@ -968,6 +968,8 @@ where
             usk,
             ovk_policy,
             &proposal,
+            #[cfg(feature = "transparent-inputs")]
+            &HashMap::new(),
         )
     }
 
@@ -1104,6 +1106,8 @@ where
             usk,
             ovk_policy,
             proposal,
+            #[cfg(feature = "transparent-inputs")]
+            &HashMap::new(),
         )
     }
 
@@ -1199,6 +1203,8 @@ where
             from_addrs,
             to_account,
             min_confirmations,
+            #[cfg(feature = "transparent-inputs")]
+            &HashMap::new(),
         )
     }
 
@@ -2747,6 +2753,15 @@ impl WalletWrite for MockWalletDb {
         _purpose: AccountPurpose,
         _key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error> {
+        todo!()
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        _account: Self::AccountId,
+        _address: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
         todo!()
     }
 
