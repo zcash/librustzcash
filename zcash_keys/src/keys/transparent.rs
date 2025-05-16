@@ -6,7 +6,7 @@
 use core::array::TryFromSliceError;
 
 use bip32::{PrivateKey, PrivateKeyBytes};
-use secp256k1::{Secp256k1, SecretKey, Signing};
+use secp256k1::{PublicKey, Secp256k1, SecretKey, Signing};
 use secrecy::{ExposeSecret, SecretString, SecretVec, Zeroize};
 use zcash_protocol::consensus::NetworkConstants;
 
@@ -105,6 +105,18 @@ impl Key {
     /// Returns the value of the compressed flag.
     pub fn compressed(&self) -> bool {
         self.compressed
+    }
+
+    /// Derives the secp256k1 public key corresponding to the secret key.
+    pub fn pubkey(&self) -> PublicKey {
+        let secp = secp256k1::Secp256k1::new();
+        self.pubkey_internal(&secp)
+    }
+
+    /// Derives the secp256k1 public key corresponding to the secret key,
+    /// using the provided secp context.
+    pub fn pubkey_internal<C: Signing>(&self, secp: &Secp256k1<C>) -> PublicKey {
+        self.secret.public_key(secp)
     }
 
     /// Generates the "openssh-inspired" DER encoding of the secret key used by zcashd.
