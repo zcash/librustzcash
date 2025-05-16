@@ -12,7 +12,7 @@ use zip32::{AccountId, ChildIndex};
 // zcashd produced a mnemonic from the pre-BIP-39 seed by incrementing the first byte of the
 // pre-BIP-39 seed until we found a value that was usable as valid entropy for seed phrase
 // generation.
-pub fn derive_mnemonic(legacy_seed: SecretVec<u8>) -> Option<Mnemonic> {
+pub fn derive_mnemonic(legacy_seed: &SecretVec<u8>) -> Option<Mnemonic> {
     if legacy_seed.expose_secret().len() != 32 {
         return None;
     }

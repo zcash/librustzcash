@@ -116,6 +116,7 @@ pub(super) const INDEX_HD_ACCOUNT: &str =
 ///
 /// - `account_id`: the account whose IVK was used to derive this address.
 /// - `diversifier_index_be`: the diversifier index at which this address was derived.
+///   This may be null for imported standalone addresses.
 /// - `key_scope`: the key scope for which this address was derived.
 /// - `address`: The Unified, Sapling, or transparent address. For Unified and Sapling addresses,
 ///   only external-key scoped addresses should be stored in this table; for purely transparent
@@ -153,6 +154,11 @@ pub(super) const INDEX_HD_ACCOUNT: &str =
 /// - `transparent_receiver_next_check_time`: The Unix epoch time at which a client should next
 ///   check to determine whether any new UTXOs have been received by the cached transparent receiver
 ///   address. At present, this will ordinarily be populated only for ZIP 320 ephemeral addresses.
+//  - `cached_transparent_receiver_pubkey`: The 33-byte pubkey corresponding to the
+//    `cached_transparent_receiver_address` value, for imported transparent addresses that were not
+//    obtained via derivation from an HD seed associated with the account. In cases that
+//    `cached_transparent_receiver_address` is non-null, either this column or
+//    `transparent_child_index` must also be non-null.
 ///
 /// [`ReceiverFlags`]: crate::wallet::encoding::ReceiverFlags
 pub(super) const TABLE_ADDRESSES: &str = r#"
@@ -160,17 +166,25 @@ CREATE TABLE "addresses" (
     id INTEGER NOT NULL PRIMARY KEY,
     account_id INTEGER NOT NULL,
     key_scope INTEGER NOT NULL,
-    diversifier_index_be BLOB NOT NULL,
+    diversifier_index_be BLOB,
     address TEXT NOT NULL,
     transparent_child_index INTEGER,
     cached_transparent_receiver_address TEXT,
     exposed_at_height INTEGER,
     receiver_flags INTEGER NOT NULL,
     transparent_receiver_next_check_time INTEGER,
+    cached_transparent_receiver_pubkey BLOB,
     FOREIGN KEY (account_id) REFERENCES accounts(id),
     CONSTRAINT diversification UNIQUE (account_id, key_scope, diversifier_index_be),
+    CONSTRAINT transparent_pubkey_unique UNIQUE (cached_transparent_receiver_pubkey),
     CONSTRAINT transparent_index_consistency CHECK (
-        (transparent_child_index IS NOT NULL) == (cached_transparent_receiver_address IS NOT NULL)
+        (transparent_child_index IS NULL OR diversifier_index_be < x'0000000F00000000000000')
+        AND (cached_transparent_receiver_address IS NOT NULL) == (
+            transparent_child_index IS NOT NULL OR cached_transparent_receiver_pubkey IS NOT NULL
+        )
+    ),
+    CONSTRAINT foreign_or_diversified CHECK (
+        (diversifier_index_be IS NULL) == (key_scope = -1)
     )
 )"#;
 pub(super) const INDEX_ADDRESSES_ACCOUNTS: &str = r#"
@@ -180,6 +194,10 @@ CREATE INDEX idx_addresses_accounts ON addresses (
 pub(super) const INDEX_ADDRESSES_INDICES: &str = r#"
 CREATE INDEX idx_addresses_indices ON addresses (
     diversifier_index_be ASC
+)"#;
+pub(super) const INDEX_ADDRESSES_PUBKEYS: &str = r#"
+CREATE INDEX idx_addresses_pubkeys ON addresses (
+    cached_transparent_receiver_pubkey ASC
 )"#;
 pub(super) const INDEX_ADDRESSES_T_INDICES: &str = r#"
 CREATE INDEX idx_addresses_t_indices ON addresses (

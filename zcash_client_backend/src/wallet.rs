@@ -558,9 +558,12 @@ impl OvkPolicy {
 /// This is implicitly scoped to an account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg(feature = "transparent-inputs")]
-pub struct TransparentAddressMetadata {
-    scope: TransparentKeyScope,
-    address_index: NonHardenedChildIndex,
+pub enum TransparentAddressMetadata {
+    Derived {
+        scope: TransparentKeyScope,
+        address_index: NonHardenedChildIndex,
+    },
+    Standalone(secp256k1::PublicKey),
 }
 
 #[cfg(feature = "transparent-inputs")]
@@ -568,17 +571,23 @@ impl TransparentAddressMetadata {
     /// Returns a `TransparentAddressMetadata` in the given scope for the
     /// given address index.
     pub fn new(scope: TransparentKeyScope, address_index: NonHardenedChildIndex) -> Self {
-        Self {
+        Self::Derived {
             scope,
             address_index,
         }
     }
 
-    pub fn scope(&self) -> TransparentKeyScope {
-        self.scope
+    pub fn scope(&self) -> Option<TransparentKeyScope> {
+        match self {
+            TransparentAddressMetadata::Derived { scope, .. } => Some(*scope),
+            TransparentAddressMetadata::Standalone(_) => None,
+        }
     }
 
-    pub fn address_index(&self) -> NonHardenedChildIndex {
-        self.address_index
+    pub fn address_index(&self) -> Option<NonHardenedChildIndex> {
+        match self {
+            TransparentAddressMetadata::Derived { address_index, .. } => Some(*address_index),
+            TransparentAddressMetadata::Standalone(_) => None,
+        }
     }
 }

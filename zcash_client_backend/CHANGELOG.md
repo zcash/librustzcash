@@ -15,7 +15,11 @@ and this library adheres to Rust's notion of
   v4.7.0` migration to permit use of a mnemonic seed for wallet backup.
   The following additions are guarded by this feature flag:
   - `zcash_client_backend::data_api::Zip32Derivation::legacy_address_index`
-- `zcash_client_backend::data_api::AccountBirthday::from_parts`
+- `zcash_client_backend::data_api`:
+  - `AccountBirthday::from_parts`
+  - `AddressSource`
+  - `AddressInfo::source` replaces `AddressInfo::diversifier_index`
+  - `wallet::SpendingKeys`
 
 ### Changed
 - `zcash_client_backend::data_api`:
@@ -26,12 +30,33 @@ and this library adheres to Rust's notion of
   - `Zip32Derivation::new` arguments have changed when the `zcashd-compat`
     feature is enabled; in this circumstance, `new` takes an additional
     `legacy_address_index` argument.
+  - `AddressInfo::from_parts` now takes an `AddressSource` value instead
+    of a `DiversifierIndex`.
+  - `WalletWrite` has added method `import_standalone_transparent_pubkey`
+    when the `transparent-inputs` feature flag is enabled.
+- The following `zcash_client_backend::data_api::wallet` methods have changed;
+  they now each take a `SpendingKeys` value instead of a `UnifiedSpendingKey`.
+  This permits the spending of funds controlled by standalone keys not
+  derived from the root spending authority of the account; this is useful in
+  cases where the account represents a "bucket of funds", such as in the case
+  of imported standalone spending keys or legacy `zcash` transparent keys
+  that were derived from system randomness.
+  - `create_proposed_transactions`
+  - `shield_transparent_funds`
+- `zcash_client_backend::wallet::TransparentAddressMetadata` is now an
+  enum instead of a struct. This change enables it to represent either
+  metadata for a derived address or a standalone secp256k1 pubkey. Call
+  sites that previously used `TransparentAddressMetadata` will now use
+  the `TransparentAddressMetadata::Derived` variant.
+
+### Removed
+- `zcash_client_backend::data_api::AddressInfo::diversifier_index`
 
 ## [0.19.0] - 2025-05-30
 
 ### Added
 - `zcash_client_backend::data_api`:
-  - `TargetValue`: An intent of representing spendable value to reach a certain 
+  - `TargetValue`: An intent of representing spendable value to reach a certain
     targeted amount.
 - `zcash_client_backend::proto::service`:
   - `LightdInfo.donation_address` field.
@@ -51,12 +76,12 @@ and this library adheres to Rust's notion of
   - `DormantMode`
 
 ### Changed
-- Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`, `zcash_address 0.8`, 
-  `zip321 0.4`, `zcash_transparent 0.3`, `zcash_primitives 0.23`, 
+- Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`, `zcash_address 0.8`,
+  `zip321 0.4`, `zcash_transparent 0.3`, `zcash_primitives 0.23`,
   `zcash_proofs 0.23`, `zcash_keys 0.9`, `pczt 0.3`
 - `zcash_client_backend::data_api`:
-  - `select_spendable_notes`: parameter `target_value` now is a `TargetValue`. 
-    Existing calls to this function that used `Zatoshis` now use 
+  - `select_spendable_notes`: parameter `target_value` now is a `TargetValue`.
+    Existing calls to this function that used `Zatoshis` now use
     `TargetValue::AtLeast(Zatoshis)`
 - `zcash_client_backend::tor`:
   - `Client::{connect_to_lightwalletd, get_latest_zec_to_usd_rate}` now ensure

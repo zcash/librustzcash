@@ -439,6 +439,28 @@ struct StepResult<AccountId> {
     utxos_spent: Vec<OutPoint>,
 }
 
+pub struct SpendingKeys<'a> {
+    usk: &'a UnifiedSpendingKey,
+    #[cfg(feature = "transparent-inputs")]
+    standalone_transparent_keys: &'a HashMap<TransparentAddress, secp256k1::SecretKey>,
+}
+
+impl<'a> SpendingKeys<'a> {
+    pub fn new(
+        usk: &'a UnifiedSpendingKey,
+        #[cfg(feature = "transparent-inputs")] standalone_transparent_keys: &'a HashMap<
+            TransparentAddress,
+            secp256k1::SecretKey,
+        >,
+    ) -> Self {
+        Self {
+            usk,
+            #[cfg(feature = "transparent-inputs")]
+            standalone_transparent_keys,
+        }
+    }
+}
+
 /// Construct, prove, and sign a transaction or series of transactions using the inputs supplied by
 /// the given proposal, and persist it to the wallet database.
 ///
@@ -457,7 +479,7 @@ pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeEr
     params: &ParamsT,
     spend_prover: &impl SpendProver,
     output_prover: &impl OutputProver,
-    usk: &UnifiedSpendingKey,
+    spending_keys: &SpendingKeys,
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, N>,
 ) -> Result<NonEmpty<TxId>, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
@@ -473,7 +495,7 @@ where
     let mut unused_transparent_outputs = HashMap::new();
 
     let account_id = wallet_db
-        .get_account_for_ufvk(&usk.to_unified_full_viewing_key())
+        .get_account_for_ufvk(&spending_keys.usk.to_unified_full_viewing_key())
         .map_err(Error::DataSource)?
         .ok_or(Error::KeyNotRecognized)?
         .id();
@@ -485,7 +507,7 @@ where
             params,
             spend_prover,
             output_prover,
-            usk,
+            spending_keys,
             account_id,
             ovk_policy.clone(),
             proposal.fee_rule(),
@@ -819,11 +841,11 @@ where
     let mut cache = HashMap::<TransparentAddress, TransparentAddressMetadata>::new();
 
     #[cfg(feature = "transparent-inputs")]
-    let mut metadata_from_address = |addr: TransparentAddress| -> Result<
+    let mut metadata_from_address = |addr: &TransparentAddress| -> Result<
         TransparentAddressMetadata,
         CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
     > {
-        match cache.get(&addr) {
+        match cache.get(addr) {
             Some(result) => Ok(result.clone()),
             None => {
                 // `wallet_db.get_transparent_address_metadata` includes reserved ephemeral
@@ -835,10 +857,11 @@ where
                 // already detected by this wallet instance).
 
                 let result = wallet_db
-                    .get_transparent_address_metadata(account_id, &addr)
+                    .get_transparent_address_metadata(account_id, addr)
                     .map_err(InputSelectorError::DataSource)?
-                    .ok_or(Error::AddressNotRecognized(addr))?;
-                cache.insert(addr, result.clone());
+                    .ok_or(Error::AddressNotRecognized(*addr))?;
+
+                cache.insert(*addr, result.clone());
                 Ok(result)
             }
         }
@@ -847,32 +870,36 @@ where
     #[cfg(feature = "transparent-inputs")]
     let utxos_spent = {
         let mut utxos_spent: Vec<OutPoint> = vec![];
-        let add_transparent_input = |builder: &mut Builder<_, _>,
-                                     utxos_spent: &mut Vec<_>,
-                                     address_metadata: &TransparentAddressMetadata,
-                                     outpoint: OutPoint,
-                                     txout: TxOut|
-         -> Result<
-            (),
-            CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
-        > {
-            let pubkey = ufvk
-                .transparent()
-                .ok_or(Error::KeyNotAvailable(PoolType::Transparent))?
-                .derive_address_pubkey(address_metadata.scope(), address_metadata.address_index())
-                .expect("spending key derivation should not fail");
+        let mut add_transparent_input =
+            |builder: &mut Builder<_, _>,
+             utxos_spent: &mut Vec<_>,
+             recipient_address: &TransparentAddress,
+             outpoint: OutPoint,
+             txout: TxOut|
+             -> Result<(), CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>> {
+                let pubkey = match metadata_from_address(recipient_address)? {
+                    TransparentAddressMetadata::Derived {
+                        scope,
+                        address_index,
+                    } => ufvk
+                        .transparent()
+                        .ok_or(Error::KeyNotAvailable(PoolType::Transparent))?
+                        .derive_address_pubkey(scope, address_index)
+                        .expect("spending key derivation should not fail"),
+                    TransparentAddressMetadata::Standalone(pubkey) => pubkey,
+                };
 
-            utxos_spent.push(outpoint.clone());
-            builder.add_transparent_input(pubkey, outpoint, txout)?;
+                utxos_spent.push(outpoint.clone());
+                builder.add_transparent_input(pubkey, outpoint, txout)?;
 
-            Ok(())
-        };
+                Ok(())
+            };
 
         for utxo in proposal_step.transparent_inputs() {
             add_transparent_input(
                 &mut builder,
                 &mut utxos_spent,
-                &metadata_from_address(*utxo.recipient_address())?,
+                utxo.recipient_address(),
                 utxo.outpoint().clone(),
                 utxo.txout().clone(),
             )?;
@@ -883,8 +910,6 @@ where
             let (address, outpoint) = unused_transparent_outputs
                 .remove(input_ref)
                 .ok_or(Error::Proposal(ProposalError::ReferenceError(*input_ref)))?;
-
-            let address_metadata = metadata_from_address(address)?;
 
             let txout = &prior_step_results[input_ref.step_index()]
                 .1
@@ -897,7 +922,7 @@ where
             add_transparent_input(
                 &mut builder,
                 &mut utxos_spent,
-                &address_metadata,
+                &address,
                 outpoint,
                 txout.clone(),
             )?;
@@ -1202,7 +1227,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N
     params: &ParamsT,
     spend_prover: &impl SpendProver,
     output_prover: &impl OutputProver,
-    usk: &UnifiedSpendingKey,
+    spending_keys: &SpendingKeys,
     account_id: <DbT as WalletRead>::AccountId,
     ovk_policy: OvkPolicy,
     fee_rule: &FeeRuleT,
@@ -1225,7 +1250,7 @@ where
     let build_state = build_proposed_transaction::<_, _, _, FeeRuleT, _, _>(
         wallet_db,
         params,
-        &usk.to_unified_full_viewing_key(),
+        &spending_keys.usk.to_unified_full_viewing_key(),
         account_id,
         ovk_policy,
         min_target_height,
@@ -1239,16 +1264,28 @@ where
     #[cfg_attr(not(feature = "transparent-inputs"), allow(unused_mut))]
     let mut transparent_signing_set = TransparentSigningSet::new();
     #[cfg(feature = "transparent-inputs")]
-    for (_, address_metadata) in build_state.transparent_input_addresses {
-        transparent_signing_set.add_key(
-            usk.transparent()
-                .derive_secret_key(address_metadata.scope(), address_metadata.address_index())
+    for (address, address_metadata) in build_state.transparent_input_addresses {
+        transparent_signing_set.add_key(match address_metadata {
+            TransparentAddressMetadata::Derived {
+                scope,
+                address_index,
+            } => spending_keys
+                .usk
+                .transparent()
+                .derive_secret_key(scope, address_index)
                 .expect("spending key derivation should not fail"),
-        );
+            TransparentAddressMetadata::Standalone(_) => *spending_keys
+                .standalone_transparent_keys
+                .get(&address)
+                .ok_or(Error::AddressNotRecognized(address))?,
+        });
     }
-    let sapling_extsks = &[usk.sapling().clone(), usk.sapling().derive_internal()];
+    let sapling_extsks = &[
+        spending_keys.usk.sapling().clone(),
+        spending_keys.usk.sapling().derive_internal(),
+    ];
     #[cfg(feature = "orchard")]
-    let orchard_saks = &[usk.orchard().into()];
+    let orchard_saks = &[spending_keys.usk.orchard().into()];
     #[cfg(not(feature = "orchard"))]
     let orchard_saks = &[];
     let build_result = build_state.builder.build(
@@ -1262,7 +1299,7 @@ where
     )?;
 
     #[cfg(feature = "orchard")]
-    let orchard_fvk: orchard::keys::FullViewingKey = usk.orchard().into();
+    let orchard_fvk: orchard::keys::FullViewingKey = spending_keys.usk.orchard().into();
     #[cfg(feature = "orchard")]
     let orchard_internal_ivk = orchard_fvk.to_ivk(orchard::keys::Scope::Internal);
     #[cfg(feature = "orchard")]
@@ -1289,7 +1326,10 @@ where
         },
     );
 
-    let sapling_dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+    let sapling_dfvk = spending_keys
+        .usk
+        .sapling()
+        .to_diversifiable_full_viewing_key();
     let sapling_internal_ivk =
         PreparedIncomingViewingKey::new(&sapling_dfvk.to_ivk(Scope::Internal));
     let sapling_outputs = build_state.sapling_output_meta.into_iter().enumerate().map(
@@ -1603,12 +1643,12 @@ where
                                     .address()
                                     .expect("we created this with a supported transparent address"),
                             )
-                            .map(|address_metadata| {
-                                (
-                                    index,
-                                    address_metadata.scope(),
-                                    address_metadata.address_index(),
-                                )
+                            .and_then(|address_metadata| match address_metadata {
+                                TransparentAddressMetadata::Derived {
+                                    scope,
+                                    address_index,
+                                } => Some((index, *scope, *address_index)),
+                                TransparentAddressMetadata::Standalone(_) => None,
                             })
                     })
                     .collect::<Vec<_>>();
@@ -2130,7 +2170,7 @@ pub fn shield_transparent_funds<DbT, ParamsT, InputsT, ChangeT>(
     input_selector: &InputsT,
     change_strategy: &ChangeT,
     shielding_threshold: Zatoshis,
-    usk: &UnifiedSpendingKey,
+    spending_keys: &SpendingKeys,
     from_addrs: &[TransparentAddress],
     to_account: <DbT as InputSource>::AccountId,
     min_confirmations: u32,
@@ -2157,7 +2197,7 @@ where
         params,
         spend_prover,
         output_prover,
-        usk,
+        spending_keys,
         OvkPolicy::Sender,
         &proposal,
     )

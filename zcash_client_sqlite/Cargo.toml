@@ -64,6 +64,9 @@ static_assertions.workspace = true
 orchard = { workspace = true, optional = true }
 sapling.workspace = true
 
+# - Transparent protocol
+secp256k1 = { workspace = true, optional = true }
+
 # - Note commitment trees
 incrementalmerkletree.workspace = true
 shardtree = { workspace = true, features = ["legacy-api"] }
@@ -96,6 +99,7 @@ orchard = { workspace = true, features = ["test-dependencies"] }
 proptest.workspace = true
 rand_chacha.workspace = true
 rand_core.workspace = true
+secp256k1 = { workspace = true, features = ["rand"] }
 tempfile = "3.5.0"
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
 zcash_note_encryption.workspace = true
@@ -127,6 +131,7 @@ test-dependencies = [
 ## Enables receiving transparent funds and sending to transparent recipients
 transparent-inputs = [
   "dep:bip32",
+  "dep:secp256k1",
   "transparent/transparent-inputs",
   "zcash_keys/transparent-inputs",
   "zcash_client_backend/transparent-inputs"
