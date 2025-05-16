@@ -1322,6 +1322,17 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
         })
     }
 
+    #[cfg(feature = "transparent-inputs")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        account: Self::AccountId,
+        pubkey: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| {
+            wallet::import_standalone_transparent_pubkey(wdb.conn.0, wdb.params, account, pubkey)
+        })
+    }
+
     fn get_next_available_address(
         &mut self,
         account_uuid: Self::AccountId,

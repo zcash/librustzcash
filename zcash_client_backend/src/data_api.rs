@@ -599,10 +599,20 @@ impl<A: Copy> Account for (A, UnifiedIncomingViewingKey) {
     }
 }
 
+/// Source information about an address in the wallet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AddressSource {
+    /// The address was produced by HD derivation via a known path, with the given diversifier
+    /// index.
+    Derived { diversifier_index: DiversifierIndex },
+    /// The address was imported into the wallet, and no derivation information is available.
+    Imported,
+}
+
 /// Information about an address in the wallet.
 pub struct AddressInfo {
     address: Address,
-    diversifier_index: DiversifierIndex,
+    source: AddressSource,
     #[cfg(feature = "transparent-inputs")]
     transparent_key_scope: Option<TransparentKeyScope>,
 }
@@ -611,7 +621,7 @@ impl AddressInfo {
     /// Constructs an `AddressInfo` from its constituent parts.
     pub fn from_parts(
         address: Address,
-        diversifier_index: DiversifierIndex,
+        source: AddressSource,
         #[cfg(feature = "transparent-inputs")] transparent_key_scope: Option<TransparentKeyScope>,
     ) -> Option<Self> {
         // Only allow `transparent_key_scope` to be set for transparent addresses.
@@ -623,7 +633,7 @@ impl AddressInfo {
 
         valid.then_some(Self {
             address,
-            diversifier_index,
+            source,
             #[cfg(feature = "transparent-inputs")]
             transparent_key_scope,
         })
@@ -635,8 +645,8 @@ impl AddressInfo {
     }
 
     /// Returns the diversifier index the address was derived at.
-    pub fn diversifier_index(&self) -> DiversifierIndex {
-        self.diversifier_index
+    pub fn source(&self) -> AddressSource {
+        self.source
     }
 
     /// Returns the key scope if this is a transparent address.
@@ -2678,6 +2688,21 @@ pub trait WalletWrite: WalletRead {
         purpose: AccountPurpose,
         key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error>;
+
+    /// Imports the given pubkey into the account without key derivation information, and adds the
+    /// associated transparent p2pkh address.
+    ///
+    /// The imported address will contribute to the balance of the account, but spending funds held
+    /// by this address requires the associated spending keys to be provided explicitly when
+    /// calling [`create_proposed_transactions`].
+    ///
+    /// [`create_proposed_transactions`]: wallet::create_proposed_transactions
+    #[cfg(feature = "transparent-inputs")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        account: Self::AccountId,
+        pubkey: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error>;
 
     /// Generates, persists, and marks as exposed the next available diversified address for the
     /// specified account, given the current addresses known to the wallet.

@@ -10,6 +10,12 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api`:
+  - `AddressSource`
+  - `AddressInfo::source` replaces `AddressInfo::diversifier_index`
+  - `wallet::SpendingKeys`
+
 ## [0.20.0] - PLANNED
 
 ### Added
@@ -118,6 +124,27 @@ workspace.
   - `Proposal::min_target_height` now returns `TargetHeight` instead of `BlockHeight`
 - `zcash_client_backend::wallet::ReceivedNote::from_parts` takes an additional
   `mined_height` argument.
+  - `AddressInfo::from_parts` now takes an `AddressSource` value instead
+    of a `DiversifierIndex`.
+  - `WalletWrite` has added method `import_standalone_transparent_pubkey`
+    when the `transparent-inputs` feature flag is enabled.
+- The following `zcash_client_backend::data_api::wallet` methods have changed;
+  they now each take a `SpendingKeys` value instead of a `UnifiedSpendingKey`.
+  This permits the spending of funds controlled by standalone keys not
+  derived from the root spending authority of the account; this is useful in
+  cases where the account represents a "bucket of funds", such as in the case
+  of imported standalone spending keys or legacy `zcash` transparent keys
+  that were derived from system randomness.
+  - `create_proposed_transactions`
+  - `shield_transparent_funds`
+- `zcash_client_backend::wallet::TransparentAddressMetadata` is now an
+  enum instead of a struct. This change enables it to represent either
+  metadata for a derived address or a standalone secp256k1 pubkey. Call
+  sites that previously used `TransparentAddressMetadata` will now use
+  the `TransparentAddressMetadata::Derived` variant.
+
+### Removed
+- `zcash_client_backend::data_api::AddressInfo::diversifier_index`
 
 ### Removed
 - `zcash_client_backend::data_api::SpendableNotes` (renamed to `ReceivedNotes`)
