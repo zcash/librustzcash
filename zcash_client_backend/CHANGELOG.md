@@ -13,9 +13,13 @@ workspace.
 ## [0.20.0] - PLANNED
 
 ### Added
-- `zcash_client_backend::data_api::TransactionsInvolvingAddress`
-- `zcash_client_backend::data_api::TransactionDataRequest::transactions_involving_address`
-- `zcash_client_backend::data_api::AccountBirthday::from_parts`
+- `zcash_client_backend::data_api`:
+  - `AccountBirthday::from_parts`
+  - `AddressSource`
+  - `AddressInfo::source` replaces `AddressInfo::diversifier_index`
+  - `wallet::SpendingKeys`
+  - `TransactionsInvolvingAddress`
+  - `TransactionDataRequest::transactions_involving_address`
 - A `zcashd-compat` feature flag has been added in service of being able to
   import data from the zcashd `wallet.dat` format. It enables functionality
   needed in order to represent the nonstandard derivations for keys and
@@ -39,6 +43,27 @@ workspace.
   - `Zip32Derivation::new` arguments have changed when the `zcashd-compat`
     feature is enabled; in this circumstance, `new` takes an additional
     `legacy_address_index` argument.
+  - `AddressInfo::from_parts` now takes an `AddressSource` value instead
+    of a `DiversifierIndex`.
+  - `WalletWrite` has added method `import_standalone_transparent_pubkey`
+    when the `transparent-inputs` feature flag is enabled.
+- The following `zcash_client_backend::data_api::wallet` methods have changed;
+  they now each take a `SpendingKeys` value instead of a `UnifiedSpendingKey`.
+  This permits the spending of funds controlled by standalone keys not
+  derived from the root spending authority of the account; this is useful in
+  cases where the account represents a "bucket of funds", such as in the case
+  of imported standalone spending keys or legacy `zcash` transparent keys
+  that were derived from system randomness.
+  - `create_proposed_transactions`
+  - `shield_transparent_funds`
+- `zcash_client_backend::wallet::TransparentAddressMetadata` is now an
+  enum instead of a struct. This change enables it to represent either
+  metadata for a derived address or a standalone secp256k1 pubkey. Call
+  sites that previously used `TransparentAddressMetadata` will now use
+  the `TransparentAddressMetadata::Derived` variant.
+
+### Removed
+- `zcash_client_backend::data_api::AddressInfo::diversifier_index`
 
 ## [0.18.1, 0.19.1] - PLANNED
 
