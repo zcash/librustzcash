@@ -51,7 +51,7 @@ use super::{
     wallet::{
         create_proposed_transactions,
         input_selection::{GreedyInputSelector, InputSelector},
-        propose_standard_transfer_to_address, propose_transfer,
+        propose_standard_transfer_to_address, propose_transfer, SpendingKeys,
     },
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
     AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
@@ -965,7 +965,11 @@ where
             &network,
             &prover,
             &prover,
-            usk,
+            &SpendingKeys::new(
+                usk,
+                #[cfg(feature = "transparent-inputs")]
+                &HashMap::new(),
+            ),
             ovk_policy,
             &proposal,
         )
@@ -1101,7 +1105,11 @@ where
             &network,
             &prover,
             &prover,
-            usk,
+            &SpendingKeys::new(
+                usk,
+                #[cfg(feature = "transparent-inputs")]
+                &HashMap::new(),
+            ),
             ovk_policy,
             proposal,
         )
@@ -1195,7 +1203,11 @@ where
             input_selector,
             change_strategy,
             shielding_threshold,
-            usk,
+            &SpendingKeys::new(
+                usk,
+                #[cfg(feature = "transparent-inputs")]
+                &HashMap::new(),
+            ),
             from_addrs,
             to_account,
             min_confirmations,
@@ -2746,6 +2758,15 @@ impl WalletWrite for MockWalletDb {
         _purpose: AccountPurpose,
         _key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error> {
+        todo!()
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        _account: Self::AccountId,
+        _address: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
         todo!()
     }
 
