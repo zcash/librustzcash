@@ -546,7 +546,9 @@ pub mod compact_tx_streamer_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /// Return the txids corresponding to the given t-address within the given block range
+        /// Return RawTransactions that match the given transparent address filter.
+        ///
+        /// Note: This function is misnamed, it returns complete `RawTransaction` values, not TxIds.
         pub async fn get_taddress_txids(
             &mut self,
             request: impl tonic::IntoRequest<super::TransparentAddressBlockFilter>,
