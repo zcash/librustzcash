@@ -39,7 +39,7 @@ impl fmt::Display for Error {
             Error::InvalidAddress => write!(f, "Invalid address"),
             Error::InvalidAmount => write!(f, "Invalid amount"),
             Error::MissingSigningKey => write!(f, "Missing signing key"),
-            Error::InvalidOpReturn => write!(f, "Invalid op_return"),
+            Error::InvalidOpReturn => write!(f, "Invalid OP_RETURN"),
         }
     }
 }
