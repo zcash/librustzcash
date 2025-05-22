@@ -2,10 +2,11 @@
 
 use std::{fmt, future::Future, io, sync::Arc};
 
+use arti_client::TorClient;
 use futures_util::task::SpawnExt;
 use http_body_util::{BodyExt, Empty};
 use hyper::{
-    body::{Buf, Bytes, Incoming},
+    body::{Body, Buf, Bytes, Incoming},
     client::conn,
     http::{request::Builder, uri::Scheme},
     Request, Response, Uri,
@@ -57,15 +58,47 @@ impl Client {
         f: impl FnOnce(Incoming) -> F,
         retry_limit: u8,
     ) -> Result<Response<T>, Error> {
+        self.http_request(
+            url,
+            |builder| h(builder).method("GET"),
+            Empty::<Bytes>::new(),
+            f,
+            retry_limit,
+        )
+        .await
+    }
+
+    /// Makes an HTTP request over Tor.
+    ///
+    /// On error, retries will be attempted as follows:
+    /// - A successful request that resulted in a client error (HTTP 400-499) will cause a
+    ///   retry with an isolated client.
+    /// - All other errors will cause a retry with the same client.
+    async fn http_request<B, T, F>(
+        &self,
+        url: Uri,
+        h: impl Fn(Builder) -> Builder,
+        body: B,
+        f: impl FnOnce(Incoming) -> F,
+        retry_limit: u8,
+    ) -> Result<Response<T>, Error>
+    where
+        B: Body + Clone + Send + 'static,
+        B::Data: Send,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+        F: Future<Output = Result<T, Error>>,
+    {
         let mut retries_remaining = retry_limit;
         let mut client = None;
 
         let (parts, body) = loop {
-            match client
-                .as_ref()
-                .unwrap_or(self)
-                .get_once(url.clone(), &h)
-                .await
+            match one_http_request(
+                &client.as_ref().unwrap_or(self).inner,
+                url.clone(),
+                &h,
+                body.clone(),
+            )
+            .await
             {
                 Ok(response) => break Ok(response),
 
@@ -75,9 +108,9 @@ impl Client {
                         retries_remaining = retries;
 
                         // A common failure with HTTP requests over Tor is a particular
-                        // exit node being blocked by the server. `Client::get` isn't used
-                        // for anything that requires a persistent Tor client identity
-                        // across queries, so we retry once with an isolated client in
+                        // exit node being blocked by the server. `Client::http_request`
+                        // isn't used for anything that requires a persistent Tor client
+                        // identity across queries, so we retry with an isolated client in
                         // order to use new circuits that have a decent chance of using a
                         // different exit node. The isolation is not for privacy; the
                         // server can trivially link the two requests together via timing.
@@ -95,40 +128,6 @@ impl Client {
         .into_parts();
 
         Ok(Response::from_parts(parts, f(body).await?))
-    }
-
-    async fn get_once(
-        &self,
-        url: Uri,
-        h: impl FnOnce(Builder) -> Builder,
-    ) -> Result<Response<Incoming>, Error> {
-        let (is_https, host, port) = parse_url(&url)?;
-
-        // Connect to the server.
-        debug!("Connecting through Tor to {}:{}", host, port);
-        let stream = self.inner.connect((host.as_str(), port)).await?;
-
-        if is_https {
-            // On apple-darwin targets there's an issue with the native TLS implementation
-            // when used over Tor circuits. We use Rustls instead.
-            //
-            // https://gitlab.torproject.org/tpo/core/arti/-/issues/715
-            let root_store = RootCertStore {
-                roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-            };
-            let config = ClientConfig::builder()
-                .with_root_certificates(root_store)
-                .with_no_client_auth();
-            let connector = TlsConnector::from(Arc::new(config));
-            let dnsname = ServerName::try_from(host).expect("Already checked");
-            let stream = connector
-                .connect(dnsname, stream)
-                .await
-                .map_err(HttpError::Tls)?;
-            make_http_request(stream, url, h).await
-        } else {
-            make_http_request(stream, url, h).await
-        }
     }
 
     /// Makes an HTTP GET request over Tor, parsing the response as JSON.
@@ -161,11 +160,57 @@ impl Client {
     }
 }
 
-async fn make_http_request(
+async fn one_http_request<B>(
+    tor_client: &TorClient<PreferredRuntime>,
+    url: Uri,
+    h: impl FnOnce(Builder) -> Builder,
+    body: B,
+) -> Result<Response<Incoming>, Error>
+where
+    B: Body + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    let (is_https, host, port) = parse_url(&url)?;
+
+    // Connect to the server.
+    debug!("Connecting through Tor to {}:{}", host, port);
+    let stream = tor_client.connect((host.as_str(), port)).await?;
+
+    if is_https {
+        // On apple-darwin targets there's an issue with the native TLS implementation
+        // when used over Tor circuits. We use Rustls instead.
+        //
+        // https://gitlab.torproject.org/tpo/core/arti/-/issues/715
+        let root_store = RootCertStore {
+            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+        };
+        let config = ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+        let connector = TlsConnector::from(Arc::new(config));
+        let dnsname = ServerName::try_from(host).expect("Already checked");
+        let stream = connector
+            .connect(dnsname, stream)
+            .await
+            .map_err(HttpError::Tls)?;
+        make_http_request(stream, url, h, body).await
+    } else {
+        make_http_request(stream, url, h, body).await
+    }
+}
+
+async fn make_http_request<B>(
     stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
     url: Uri,
     h: impl FnOnce(Builder) -> Builder,
-) -> Result<Response<Incoming>, Error> {
+    body: B,
+) -> Result<Response<Incoming>, Error>
+where
+    B: Body + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     debug!("Making request");
     let (mut sender, connection) = conn::http1::handshake(TokioIo::new(stream))
         .await
@@ -180,14 +225,17 @@ async fn make_http_request(
         })
         .map_err(HttpError::from)?;
 
-    let req = h(Request::builder()
+    // Build the request. We let the caller make whatever request modifications they need,
+    // and then set the Host and URI afterwards so that they are guaranteed to match the
+    // circuit and TLS connection.
+    let req = h(Request::builder())
         .header(
             hyper::header::HOST,
             url.authority().expect("Already checked").as_str(),
         )
-        .uri(url))
-    .body(Empty::<Bytes>::new())
-    .map_err(HttpError::from)?;
+        .uri(url)
+        .body(body)
+        .map_err(HttpError::from)?;
     let response = sender.send_request(req).await.map_err(HttpError::from)?;
     debug!("Response status code: {}", response.status());
 
