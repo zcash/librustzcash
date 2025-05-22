@@ -300,6 +300,8 @@ mod tests {
             None,
             None,
             None,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            Zatoshis::ZERO,
         ));
 
         // Check that we can apply this migration.
