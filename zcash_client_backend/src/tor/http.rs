@@ -81,6 +81,50 @@ impl Client {
         .await
     }
 
+    /// Makes an HTTP POST request over Tor.
+    ///
+    /// The `request` closure can be used to modify or append HTTP request headers. You
+    /// must not call the following [`Builder`] methods within it:
+    /// - [`Builder::method`] (this is internally set to `POST`).
+    /// - [`Builder::uri`] (this is internally set to `url`).
+    /// - [`Builder::header`] with header name `"Host"` (this is internally set based on
+    ///   `url`).
+    ///
+    /// On error, retries will be attempted as follows:
+    /// - A successful request that resulted in a client error (HTTP 400-499) will cause a
+    ///   retry with an isolated client. The isolation is not for privacy (the server can
+    ///   trivially link the two requests together via timing), but to have a decent
+    ///   chance of using a different exit node (to avoid the common transient failure of
+    ///   a particular exit node being blocked by the server).
+    /// - All other errors will cause a retry with the same client.
+    ///
+    /// Set `retry_limit = 0` to disable this behaviour (e.g. if you require a persistent
+    /// Tor client identity across queries).
+    #[tracing::instrument(skip(self, request, body, parse_response))]
+    pub async fn http_post<B, T, F>(
+        &self,
+        url: Uri,
+        request: impl Fn(Builder) -> Builder,
+        body: B,
+        parse_response: impl FnOnce(Incoming) -> F,
+        retry_limit: u8,
+    ) -> Result<Response<T>, Error>
+    where
+        B: Body + Clone + Send + 'static,
+        B::Data: Send,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+        F: Future<Output = Result<T, Error>>,
+    {
+        self.http_request(
+            url,
+            |builder| request(builder).method("POST"),
+            body,
+            parse_response,
+            retry_limit,
+        )
+        .await
+    }
+
     /// Makes an HTTP request over Tor.
     ///
     /// On error, retries will be attempted as follows:
@@ -348,7 +392,10 @@ impl From<futures_util::task::SpawnError> for HttpError {
 
 #[cfg(all(test, live_network_tests))]
 mod live_network_tests {
-    use crate::tor::Client;
+    use http_body_util::BodyExt;
+    use hyper::body::Buf;
+
+    use crate::tor::{http::HttpError, Client};
 
     #[test]
     fn httpbin() {
@@ -383,6 +430,39 @@ mod live_network_tests {
                 .as_object()
                 .unwrap()
                 .is_empty());
+
+            // Test HTTP POST
+            let post_body = "Some body";
+            let post_response = client
+                .http_post(
+                    "https://httpbin.org/post".parse().unwrap(),
+                    |builder| builder.header(hyper::header::ACCEPT, "application/json"),
+                    http_body_util::Full::new(post_body.as_bytes()),
+                    |body| async {
+                        Ok(serde_json::from_reader::<_, serde_json::Value>(
+                            body.collect()
+                                .await
+                                .map_err(HttpError::from)?
+                                .aggregate()
+                                .reader(),
+                        )
+                        .map_err(HttpError::from)?)
+                    },
+                    3,
+                )
+                .await
+                .unwrap();
+            assert!(post_response
+                .body()
+                .get("args")
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .is_empty());
+            assert_eq!(
+                post_response.body().get("data").and_then(|v| v.as_str()),
+                Some(post_body),
+            );
         })
     }
 }

@@ -20,6 +20,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::tor`:
   - `Client::http_get`
   - `Client::http_get_json`
+  - `Client::http_post`
   - `Client::set_dormant`
   - `DormantMode`
 
