@@ -34,7 +34,7 @@ impl Exchange for Gemini {
         // API documentation:
         // https://docs.gemini.com/rest-api/#ticker-v2
         let res = client
-            .get_json::<GeminiData>(
+            .http_get_json::<GeminiData>(
                 "https://api.gemini.com/v2/ticker/zecusd".parse().unwrap(),
                 RETRY_LIMIT,
             )

@@ -50,7 +50,7 @@ impl Exchange for KuCoin {
         // API documentation:
         // https://www.kucoin.com/docs/rest/spot-trading/market-data/get-24hr-stats
         let res = client
-            .get_json::<KuCoinResponse>(
+            .http_get_json::<KuCoinResponse>(
                 "https://api.kucoin.com/api/v1/market/stats?symbol=ZEC-USDT"
                     .parse()
                     .unwrap(),

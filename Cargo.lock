@@ -6348,6 +6348,7 @@ dependencies = [
  "serde_json",
  "shardtree",
  "subtle",
+ "tempfile",
  "time",
  "time-core",
  "tokio",
