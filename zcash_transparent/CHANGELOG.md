@@ -11,6 +11,9 @@ and this library adheres to Rust's notion of
 - `zcash_transparent::builder::TransparentBuilder::add_null_data_output`
 - `zcash_transparent::bundle::Bundle<Unauthorized>::apply_external_signatures`
 
+### Changed
+- Added `NullDataTooLong` variant to public `Error` enum
+
 ## [0.3.0] - 2025-05-30
 
 ### Changed

@@ -30,7 +30,7 @@ pub enum Error {
     InvalidAmount,
     /// A bundle could not be built because a required signing keys was missing.
     MissingSigningKey,
-    InvalidOpReturn,
+    NullDataTooLong { actual: usize, limit: usize },
 }
 
 impl fmt::Display for Error {
@@ -39,7 +39,7 @@ impl fmt::Display for Error {
             Error::InvalidAddress => write!(f, "Invalid address"),
             Error::InvalidAmount => write!(f, "Invalid amount"),
             Error::MissingSigningKey => write!(f, "Missing signing key"),
-            Error::InvalidOpReturn => write!(f, "Invalid op_return"),
+            Error::NullDataTooLong { actual, limit } => write!(f, "provided null data is longer than the maximum supported length (actual: {}, limit: {})", actual, limit),
         }
     }
 }
@@ -286,7 +286,10 @@ impl TransparentBuilder {
         // Check 80 bytes limit.
         const MAX_OP_RETURN_RELAY_BYTES: usize = 80;
         if data.len() > MAX_OP_RETURN_RELAY_BYTES {
-            return Err(Error::InvalidOpReturn);
+            return Err(Error::NullDataTooLong{
+                actual: data.len(), 
+                limit: MAX_OP_RETURN_RELAY_BYTES
+            });
         }
 
         let script = Script::default() << OpCode::Return << data;
