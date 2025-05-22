@@ -48,7 +48,7 @@ impl Exchange for Binance {
         // API documentation:
         // https://binance-docs.github.io/apidocs/spot/en/#24hr-ticker-price-change-statistics
         let res = client
-            .get_json::<BinanceData>(
+            .http_get_json::<BinanceData>(
                 "https://api.binance.com/api/v3/ticker/24hr?symbol=ZECUSDT"
                     .parse()
                     .unwrap(),

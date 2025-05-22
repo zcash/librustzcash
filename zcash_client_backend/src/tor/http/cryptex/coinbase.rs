@@ -36,7 +36,7 @@ impl Exchange for Coinbase {
         // API documentation:
         // https://docs.cdp.coinbase.com/exchange/reference/exchangerestapi_getproductticker
         let res = client
-            .get_json::<CoinbaseData>(
+            .http_get_json::<CoinbaseData>(
                 "https://api.exchange.coinbase.com/products/ZEC-USD/ticker"
                     .parse()
                     .unwrap(),

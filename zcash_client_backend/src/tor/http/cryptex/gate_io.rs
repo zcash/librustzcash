@@ -36,7 +36,7 @@ impl Exchange for GateIo {
         // API documentation:
         // https://www.gate.io/docs/developers/apiv4/#retrieve-ticker-information
         let res = client
-            .get_json::<Vec<GateIoData>>(
+            .http_get_json::<Vec<GateIoData>>(
                 "https://api.gateio.ws/api/v4/spot/tickers?currency_pair=ZEC_USDT"
                     .parse()
                     .unwrap(),

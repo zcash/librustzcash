@@ -46,23 +46,36 @@ pub(super) fn parse_url(url: &Uri) -> Result<(bool, String, u16), Error> {
 impl Client {
     /// Makes an HTTP GET request over Tor.
     ///
+    /// The `request` closure can be used to modify or append HTTP request headers. You
+    /// must not call the following [`Builder`] methods within it:
+    /// - [`Builder::method`] (this is internally set to `GET`).
+    /// - [`Builder::uri`] (this is internally set to `url`).
+    /// - [`Builder::header`] with header name `"Host"` (this is internally set based on
+    ///   `url`).
+    ///
     /// On error, retries will be attempted as follows:
     /// - A successful request that resulted in a client error (HTTP 400-499) will cause a
-    ///   retry with an isolated client.
+    ///   retry with an isolated client. The isolation is not for privacy (the server can
+    ///   trivially link the two requests together via timing), but to have a decent
+    ///   chance of using a different exit node (to avoid the common transient failure of
+    ///   a particular exit node being blocked by the server).
     /// - All other errors will cause a retry with the same client.
-    #[tracing::instrument(skip(self, h, f))]
-    async fn get<T, F: Future<Output = Result<T, Error>>>(
+    ///
+    /// Set `retry_limit = 0` to disable this behaviour (e.g. if you require a persistent
+    /// Tor client identity across queries).
+    #[tracing::instrument(skip(self, request, parse_response))]
+    pub async fn http_get<T, F: Future<Output = Result<T, Error>>>(
         &self,
         url: Uri,
-        h: impl Fn(Builder) -> Builder,
-        f: impl FnOnce(Incoming) -> F,
+        request: impl Fn(Builder) -> Builder,
+        parse_response: impl FnOnce(Incoming) -> F,
         retry_limit: u8,
     ) -> Result<Response<T>, Error> {
         self.http_request(
             url,
-            |builder| h(builder).method("GET"),
+            |builder| request(builder).method("GET"),
             Empty::<Bytes>::new(),
-            f,
+            parse_response,
             retry_limit,
         )
         .await
@@ -72,14 +85,20 @@ impl Client {
     ///
     /// On error, retries will be attempted as follows:
     /// - A successful request that resulted in a client error (HTTP 400-499) will cause a
-    ///   retry with an isolated client.
+    ///   retry with an isolated client. The isolation is not for privacy (the server can
+    ///   trivially link the two requests together via timing), but to have a decent
+    ///   chance of using a different exit node (to avoid the common transient failure of
+    ///   a particular exit node being blocked by the server).
     /// - All other errors will cause a retry with the same client.
+    ///
+    /// Set `retry_limit = 0` to disable this behaviour (e.g. if you require a persistent
+    /// Tor client identity across queries).
     async fn http_request<B, T, F>(
         &self,
         url: Uri,
-        h: impl Fn(Builder) -> Builder,
+        request: impl Fn(Builder) -> Builder,
         body: B,
-        f: impl FnOnce(Incoming) -> F,
+        parse_response: impl FnOnce(Incoming) -> F,
         retry_limit: u8,
     ) -> Result<Response<T>, Error>
     where
@@ -95,7 +114,7 @@ impl Client {
             match one_http_request(
                 &client.as_ref().unwrap_or(self).inner,
                 url.clone(),
-                &h,
+                &request,
                 body.clone(),
             )
             .await
@@ -127,21 +146,30 @@ impl Client {
         }?
         .into_parts();
 
-        Ok(Response::from_parts(parts, f(body).await?))
+        Ok(Response::from_parts(parts, parse_response(body).await?))
     }
 
     /// Makes an HTTP GET request over Tor, parsing the response as JSON.
     ///
+    /// This is a simple wapper around [`Self::http_get`]. Use that method if you need
+    /// more control over the request headers or response parsing.
+    ///
     /// On error, retries will be attempted as follows:
     /// - A successful request that resulted in a client error (HTTP 400-499) will cause a
-    ///   retry with an isolated client.
+    ///   retry with an isolated client. The isolation is not for privacy (the server can
+    ///   trivially link the two requests together via timing), but to have a decent
+    ///   chance of using a different exit node (to avoid the common transient failure of
+    ///   a particular exit node being blocked by the server).
     /// - All other errors will cause a retry with the same client.
-    async fn get_json<T: DeserializeOwned>(
+    ///
+    /// Set `retry_limit = 0` to disable this behaviour (e.g. if you require a persistent
+    /// Tor client identity across queries).
+    pub async fn http_get_json<T: DeserializeOwned>(
         &self,
         url: Uri,
         retry_limit: u8,
     ) -> Result<Response<T>, Error> {
-        self.get(
+        self.http_get(
             url,
             |builder| builder.header(hyper::header::ACCEPT, "application/json"),
             |body| async {
@@ -163,7 +191,7 @@ impl Client {
 async fn one_http_request<B>(
     tor_client: &TorClient<PreferredRuntime>,
     url: Uri,
-    h: impl FnOnce(Builder) -> Builder,
+    request: impl FnOnce(Builder) -> Builder,
     body: B,
 ) -> Result<Response<Incoming>, Error>
 where
@@ -194,16 +222,16 @@ where
             .connect(dnsname, stream)
             .await
             .map_err(HttpError::Tls)?;
-        make_http_request(stream, url, h, body).await
+        make_http_request(stream, url, request, body).await
     } else {
-        make_http_request(stream, url, h, body).await
+        make_http_request(stream, url, request, body).await
     }
 }
 
 async fn make_http_request<B>(
     stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
     url: Uri,
-    h: impl FnOnce(Builder) -> Builder,
+    request: impl FnOnce(Builder) -> Builder,
     body: B,
 ) -> Result<Response<Incoming>, Error>
 where
@@ -228,7 +256,7 @@ where
     // Build the request. We let the caller make whatever request modifications they need,
     // and then set the Host and URI afterwards so that they are guaranteed to match the
     // circuit and TLS connection.
-    let req = h(Request::builder())
+    let req = request(Request::builder())
         .header(
             hyper::header::HOST,
             url.authority().expect("Already checked").as_str(),
@@ -315,5 +343,46 @@ impl From<serde_json::Error> for HttpError {
 impl From<futures_util::task::SpawnError> for HttpError {
     fn from(e: futures_util::task::SpawnError) -> Self {
         HttpError::Spawn(e)
+    }
+}
+
+#[cfg(all(test, live_network_tests))]
+mod live_network_tests {
+    use crate::tor::Client;
+
+    #[test]
+    fn httpbin() {
+        let tor_dir = tempfile::tempdir().unwrap();
+
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            // Start a new Tor client.
+            let client = Client::create(tor_dir.path(), |_| ()).await.unwrap();
+
+            // Test HTTP GET
+            let get_response = client
+                .http_get_json::<serde_json::Value>("https://httpbin.org/get".parse().unwrap(), 3)
+                .await
+                .unwrap();
+            assert_eq!(
+                get_response.body().get("url").and_then(|v| v.as_str()),
+                Some("https://httpbin.org/get"),
+            );
+            assert_eq!(
+                get_response
+                    .body()
+                    .get("headers")
+                    .and_then(|v| v.as_object())
+                    .and_then(|h| h.get("Host"))
+                    .and_then(|v| v.as_str()),
+                Some("httpbin.org"),
+            );
+            assert!(get_response
+                .body()
+                .get("args")
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .is_empty());
+        })
     }
 }

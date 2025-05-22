@@ -43,7 +43,7 @@ impl Exchange for Mexc {
         // API documentation:
         // https://mexcdevelop.github.io/apidocs/spot_v3_en/#24hr-ticker-price-change-statistics
         let res = client
-            .get_json::<MexcData>(
+            .http_get_json::<MexcData>(
                 "https://api.mexc.com/api/v3/ticker/24hr?symbol=ZECUSDT"
                     .parse()
                     .unwrap(),
