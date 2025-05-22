@@ -21,9 +21,9 @@ impl<V: Version> Entry<V> {
         }
     }
 
-    /// Returns the inner data associated with this node.
-    pub fn data(&self) -> V::NodeData {
-        V::node_data(&self.data)
+    /// Returns the data associated with this node.
+    pub fn data(&self) -> &V::NodeData {
+        &self.data
     }
 
     /// Creates a new leaf.
