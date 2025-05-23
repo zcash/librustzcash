@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Fixed
+- `TransactionDataRequest`s will no longer be generated for the null txid.
+
 ## [0.16.2] - 2025-04-02
 
 ### Fixed
