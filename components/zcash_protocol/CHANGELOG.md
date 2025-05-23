@@ -15,6 +15,10 @@ and this library adheres to Rust's notion of
   - `V4_VERSION_GROUP_ID`
   - `V5_TX_VERSION`
   - `V5_VERSION_GROUP_ID`
+  - `{mainnet, testnet, regtest}::B58_SECRET_KEY_PREFIX`
+
+### Changed
+- `zcash_protocol::consensus::NetworkConstants` has added method `b58_secret_key_prefix`.
 
 ## [0.5.1] - 2025-03-19
 ### Added

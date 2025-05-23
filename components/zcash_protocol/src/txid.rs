@@ -62,4 +62,8 @@ impl TxId {
         writer.write_all(&self.0)?;
         Ok(())
     }
+
+    pub fn is_coinbase(&self) -> bool {
+        self.0 == [0u8; 32]
+    }
 }

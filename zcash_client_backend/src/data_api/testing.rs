@@ -41,7 +41,7 @@ use zcash_protocol::{
     value::{ZatBalance, Zatoshis},
     ShieldedProtocol,
 };
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
+use zip32::DiversifierIndex;
 use zip321::Payment;
 
 use super::{
@@ -51,13 +51,13 @@ use super::{
     wallet::{
         create_proposed_transactions,
         input_selection::{GreedyInputSelector, InputSelector},
-        propose_standard_transfer_to_address, propose_transfer,
+        propose_standard_transfer_to_address, propose_transfer, SpendingKeys,
     },
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
     AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
     ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes, TransactionDataRequest,
     TransactionStatus, WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
-    SAPLING_SHARD_HEIGHT,
+    Zip32Derivation, SAPLING_SHARD_HEIGHT,
 };
 use crate::{
     data_api::TargetValue,
@@ -965,7 +965,11 @@ where
             &network,
             &prover,
             &prover,
-            usk,
+            &SpendingKeys::new(
+                usk,
+                #[cfg(feature = "transparent-inputs")]
+                &HashMap::new(),
+            ),
             ovk_policy,
             &proposal,
         )
@@ -1101,7 +1105,11 @@ where
             &network,
             &prover,
             &prover,
-            usk,
+            &SpendingKeys::new(
+                usk,
+                #[cfg(feature = "transparent-inputs")]
+                &HashMap::new(),
+            ),
             ovk_policy,
             proposal,
         )
@@ -1195,7 +1203,11 @@ where
             input_selector,
             change_strategy,
             shielding_threshold,
-            usk,
+            &SpendingKeys::new(
+                usk,
+                #[cfg(feature = "transparent-inputs")]
+                &HashMap::new(),
+            ),
             from_addrs,
             to_account,
             min_confirmations,
@@ -1699,13 +1711,16 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
             let (account, usk) = match self.account_index {
                 Some(index) => wallet_data
                     .import_account_hd("", &seed, index, &birthday, None)
-                    .unwrap(),
+                    .expect("test account import succeeds"),
                 None => {
                     let result = wallet_data
                         .create_account("", &seed, &birthday, None)
-                        .unwrap();
+                        .expect("test account creation succeeds");
                     (
-                        wallet_data.get_account(result.0).unwrap().unwrap(),
+                        wallet_data
+                            .get_account(result.0)
+                            .expect("retrieval of just-created account succeeds")
+                            .expect("an account was created"),
                         result.1,
                     )
                 }
@@ -2532,8 +2547,7 @@ impl WalletRead for MockWalletDb {
 
     fn get_derived_account(
         &self,
-        _seed: &SeedFingerprint,
-        _account_id: zip32::AccountId,
+        _derivation: &Zip32Derivation,
     ) -> Result<Option<Self::Account>, Self::Error> {
         Ok(None)
     }
@@ -2744,6 +2758,15 @@ impl WalletWrite for MockWalletDb {
         _purpose: AccountPurpose,
         _key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error> {
+        todo!()
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        _account: Self::AccountId,
+        _address: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
         todo!()
     }
 
