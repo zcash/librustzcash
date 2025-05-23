@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+  - `zcash_protocol::txid::TxId::is_null`
 
 ## [0.5.1] - 2025-03-19
 ### Added

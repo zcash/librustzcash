@@ -3642,7 +3642,10 @@ pub(crate) fn queue_transparent_input_retrieval<AccountId>(
         // queue the transparent inputs for enhancement
         queue_tx_retrieval(
             conn,
-            b.vin.iter().map(|txin| *txin.prevout.txid()),
+            b.vin
+                .iter()
+                .map(|txin| *txin.prevout.txid())
+                .filter(|txid| !txid.is_null()),
             Some(tx_ref),
         )?;
     }
