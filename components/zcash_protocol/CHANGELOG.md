@@ -8,6 +8,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Added
   - `{mainnet, testnet, regtest}::B58_SECRET_KEY_PREFIX`
+  - `zcash_protocol::txid::TxId::is_coinbase`
 
 ### Changed
 - `zcash_protocol::consensus::NetworkConstants` has added method `b58_secret_key_prefix`.
