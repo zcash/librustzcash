@@ -503,6 +503,10 @@ pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
     range_to_store: Range<NonHardenedChildIndex>,
     require_key: bool,
 ) -> Result<(), SqliteClientError> {
+    if key_scope == KeyScope::Foreign {
+        return Ok(());
+    }
+
     if !account_uivk.has_transparent() {
         if require_key {
             return Err(SqliteClientError::AddressGeneration(
@@ -534,7 +538,7 @@ pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
                     .derive_ephemeral_address(index)?;
                 (Address::from(ephemeral_address), ephemeral_address)
             }
-            KeyScope::Foreign => panic!("unable to derive using imported key"),
+            KeyScope::Foreign => unreachable!(),
         })
     };
 
@@ -601,7 +605,10 @@ pub(crate) fn generate_gap_addresses<P: consensus::Parameters>(
         KeyScope::Zip32(zip32::Scope::External) => gap_limits.external(),
         KeyScope::Zip32(zip32::Scope::Internal) => gap_limits.internal(),
         KeyScope::Ephemeral => gap_limits.ephemeral(),
-        KeyScope::Foreign => panic!("unable to derive using imported key"),
+        KeyScope::Foreign => {
+            // nothing to be done here
+            return Ok(());
+        }
     };
 
     if let Some(gap_start) = find_gap_start(conn, account_id, key_scope, gap_limit)? {
