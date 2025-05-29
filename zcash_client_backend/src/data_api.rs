@@ -2001,6 +2001,17 @@ impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
     pub fn orchard_outputs(&self) -> &[DecryptedOutput<orchard::note::Note, AccountId>] {
         &self.orchard_outputs
     }
+
+    /// Returns whether the transaction has decrypted outputs
+    pub fn has_decrypted_outputs(&self) -> bool {
+        let has_sapling = !self.sapling_outputs.is_empty();
+        #[cfg(feature = "orchard")]
+        let has_orchard = !self.orchard_outputs.is_empty();
+        #[cfg(not(feature = "orchard"))]
+        let has_orchard = false;
+
+        has_sapling || has_orchard
+    }
 }
 
 /// A transaction that was constructed and sent by the wallet.
