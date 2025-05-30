@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `zcash_primitives 0.23`.
+
 ## [0.22.0] - 2025-02-21
 
 ### Changed
