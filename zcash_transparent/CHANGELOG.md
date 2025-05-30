@@ -42,6 +42,7 @@ workspace.
   - `Bundle<Unauthorized>::prepare_transparent_signatures` to initialize the signing context.
   - `TransparentSignatureContext` struct for staged application of external signatures.
 - `zcash_transparent::bundle`:
+  - `Outpoint::null`
   - `TxIn::from_parts`
   - `TxIn::{prevout, script_sig, sequence}` accessor methods.
   - `TxOut::{value, script_pubkey}` accessor methods.
