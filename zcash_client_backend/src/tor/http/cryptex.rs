@@ -7,6 +7,8 @@ use tracing::{error, trace};
 
 use crate::tor::{Client, Error};
 
+use super::{HttpError, Retry};
+
 mod binance;
 mod coinbase;
 mod gate_io;
@@ -16,6 +18,33 @@ mod mexc;
 
 /// Maximum number of retries for exchange queries implemented in this crate.
 const RETRY_LIMIT: u8 = 1;
+
+/// A retry filter that attempts to avoid Tor exit node connection failures.
+///
+/// A common failure with HTTP requests over Tor is a particular exit node being blocked
+/// by the server. This may be due to other exit node activity causing some IP rate limit
+/// to be exceeded, for example.
+///
+/// If the HTTP request doesn't require a persistent Tor client identity across queries,
+/// we can retry with an isolated client in order to use new circuits that have a decent
+/// chance of using a different exit node. The isolation is not for privacy; the server
+/// can trivially link the two requests together via timing.
+///
+/// This filter attempts retries as follows:
+/// - A successful request that resulted in a client error (HTTP 400-499) will cause a
+///   retry with an isolated client.
+/// - All other errors will cause a retry with the same client.
+fn retry_filter(e: &Error) -> Option<Retry> {
+    Some(if let Error::Http(HttpError::Unsuccessful(status)) = e {
+        if status.is_client_error() {
+            Retry::Isolated
+        } else {
+            Retry::Same
+        }
+    } else {
+        Retry::Same
+    })
+}
 
 /// Exchanges for which we know how to query data over Tor.
 ///
