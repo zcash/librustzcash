@@ -210,8 +210,8 @@ pub enum BuildConfig {
         orchard_anchor: Option<orchard::Anchor>,
     },
     Coinbase {
-        miner_data: Option<Vec<u8>>,
-        sequence: Option<u32>,
+        miner_data: Vec<u8>,
+        sequence: u32,
     },
 }
 
@@ -690,10 +690,10 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
 
         let (miner_data, seq) = match self.build_config {
             BuildConfig::Coinbase {
-                miner_data: data,
+                miner_data,
                 sequence,
-            } => (data.unwrap_or_default(), sequence.unwrap_or_default()),
-            _ => (Vec::default(), u32::default()),
+            } => (miner_data, sequence),
+            _ => panic!("the build_coinbase method should not be called without a coinbase build config"),
         };
 
         let transparent_bundle =
