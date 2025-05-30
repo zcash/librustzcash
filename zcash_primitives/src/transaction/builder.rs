@@ -693,7 +693,9 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
                 miner_data,
                 sequence,
             } => (miner_data, sequence),
-            _ => panic!("the build_coinbase method should not be called without a coinbase build config"),
+            _ => panic!(
+                "the build_coinbase method should not be called without a coinbase build config"
+            ),
         };
 
         let transparent_bundle =
