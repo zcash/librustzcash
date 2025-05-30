@@ -5,12 +5,14 @@ use core::fmt::Debug;
 use core2::io::{self, Read, Write};
 
 use zcash_protocol::{
+    consensus::BlockHeight,
     value::{BalanceError, ZatBalance as Amount, Zatoshis as NonNegativeAmount},
     TxId,
 };
 
 use crate::{
     address::{Script, TransparentAddress},
+    builder,
     sighash::TransparentAuthorizingContext,
 };
 
@@ -225,6 +227,53 @@ impl TxIn<Authorized> {
         self.prevout.write(&mut writer)?;
         self.script_sig.write(&mut writer)?;
         writer.write_all(&self.sequence.to_le_bytes())
+    }
+}
+
+impl TxIn<builder::Coinbase> {
+    /// Constructs an input for a coinbase tx.
+    pub fn coinbase(height: BlockHeight, miner_data: &[u8], sequence: u32) -> Self {
+        // Coinbase data for the genesis block.
+        //
+        // Zcash uses the same coinbase data for Mainnet, Testnet, and Regtest.
+        pub const GENESIS_COINBASE: [u8; 77] = [
+            4, 255, 255, 7, 31, 1, 4, 69, 90, 99, 97, 115, 104, 48, 98, 57, 99, 52, 101, 101, 102,
+            56, 98, 55, 99, 99, 52, 49, 55, 101, 101, 53, 48, 48, 49, 101, 51, 53, 48, 48, 57, 56,
+            52, 98, 54, 102, 101, 97, 51, 53, 54, 56, 51, 97, 55, 99, 97, 99, 49, 52, 49, 97, 48,
+            52, 51, 99, 52, 50, 48, 54, 52, 56, 51, 53, 100, 51, 52,
+        ];
+
+        let h = u32::from(height);
+
+        let mut script_sig = match h {
+            0 => GENESIS_COINBASE.to_vec(),
+            1..=16 => vec![0x50 + (h as u8)],
+            17..=127 => {
+                vec![0x01, h as u8]
+            }
+            128..=32_767 => {
+                let b = h.to_le_bytes();
+                vec![0x02, b[0], b[1]]
+            }
+            32_768..=8_388_607 => {
+                vec![0x03, h as u8, (h >> 8) as u8, (h >> 16) as u8]
+            }
+            8_388_608..=u32::MAX => {
+                let b = h.to_le_bytes();
+                vec![0x04, b[0], b[1], b[2], b[3]]
+            }
+        };
+
+        // The genesis coinbase has no configurable miner data.
+        if height != BlockHeight::from(0) {
+            script_sig.extend(miner_data);
+        }
+
+        TxIn {
+            prevout: OutPoint::null(),
+            script_sig,
+            sequence,
+        }
     }
 }
 
