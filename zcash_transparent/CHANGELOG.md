@@ -41,6 +41,7 @@ workspace.
   - `builder`:
     - `Coinbase` marker type
     - `impl Authorization for Coinbase`
+    - `impl TransparentAuthorizingContext for Coinbase`
     - `TransparentBuilder::add_null_data_output`
     - `Bundle<Unauthorized>::prepare_transparent_signatures` to initialize the signing context.
     - `TransparentSignatureContext` struct for staged application of external signatures.

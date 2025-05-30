@@ -247,6 +247,16 @@ impl Authorization for Coinbase {
     type ScriptSig = Vec<u8>;
 }
 
+impl TransparentAuthorizingContext for Coinbase {
+    fn input_amounts(&self) -> Vec<Zatoshis> {
+        vec![]
+    }
+
+    fn input_scriptpubkeys(&self) -> Vec<Script> {
+        vec![]
+    }
+}
+
 impl TransparentBuilder {
     /// Constructs a new TransparentBuilder
     pub fn empty() -> Self {
