@@ -42,7 +42,14 @@ workspace.
 
 ### Added
 - `zcash_primitives::transaction`:
-  - `builder::Builder::add_transparent_null_data_output`
+  - `builder`:
+    - `Error::Coinbase` enum variant
+    - `impl<FE> From<coinbase::Error> for Error<FE>`
+    - `BuildConfig::Coinbase` enum variant now contains `miner_data: MinerData`
+      and `sequence: u32`.
+    - `BuildConfig::is_coinbase`
+    - `Builder::add_transparent_null_data_output`
+    - `Builder` now supports constructing coinbase transactions.
   - `Coinbase` marker type
   - `impl Authorization for Coinbase`
   - `tests::data` has been exposed under the `test-dependencies` feature to
