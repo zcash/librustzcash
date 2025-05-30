@@ -18,6 +18,13 @@ workspace.
 - `zcash_primitives::transaction`:
   - `Coinbase` marker type
   - `impl Authorization for Coinbase`
+  - `builder`:
+    - `Error::Coinbase` enum variant
+    - `impl<FE> From<coinbase::Error> for Error<FE>`
+    - `BuildConfig::is_coinbase`
+    - `BuildConfig::Coinbase` enum variant now contains `miner_data: MinerData`
+      and `sequence: u32`.
+    - `Builder` now supports constructing coinbase transactions.
 
 ## [0.24.0] - 2025-07-31
 
