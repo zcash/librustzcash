@@ -4,7 +4,10 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::fmt;
 
-use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
+use zcash_protocol::{
+    consensus::BlockHeight,
+    value::{BalanceError, ZatBalance, Zatoshis},
+};
 
 use crate::{
     address::{Script, TransparentAddress},
@@ -251,6 +254,20 @@ impl TransparentBuilder {
                     inputs: self.inputs,
                 },
             })
+        }
+    }
+
+    /// Builds a coinbase bundle.
+    pub fn build_coinbase(
+        self,
+        height: BlockHeight,
+        miner_data: &[u8],
+        sequence: u32,
+    ) -> Bundle<Coinbase> {
+        Bundle {
+            vin: vec![TxIn::coinbase(height, miner_data, sequence)],
+            vout: self.vout,
+            authorization: Coinbase,
         }
     }
 
