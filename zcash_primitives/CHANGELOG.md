@@ -15,6 +15,9 @@ workspace.
 - `zcash_primitives::transaction::tests::data` has been exposed under the
   `test-dependencies` feature to provide access to test vectors.
 - `zcash_primitives::transaction::builder::Builder::add_transparent_null_data_output`
+- `zcash_primitives::transaction`:
+  - `Coinbase` marker type
+  - `impl Authorization for Coinbase`
 
 ## [0.24.0] - 2025-07-31
 
