@@ -12,6 +12,13 @@ workspace.
 
 ### Added
 - `zcash_primitives::transaction`:
+  - `builder`:
+    - `Error::Coinbase` enum variant
+    - `impl<FE> From<coinbase::Error> for Error<FE>`
+    - `BuildConfig::Coinbase` enum variant now contains `miner_data: MinerData`
+      and `sequence: u32`.
+    - `BuildConfig::is_coinbase`
+    - `Builder` now supports constructing coinbase transactions.
   - `Coinbase` marker type
   - `impl Authorization for Coinbase`
 
@@ -25,6 +32,7 @@ workspace.
     - `zcash_primitives::memo`
     - `zcash_primitives::zip32`
     - `zcash_primitives::legacy`
+- `zcash_primitives::transaction::builder::BuildConfig` is not `Copy` anymore.
 
 ## [0.26.1] - 2025-10-18
 
