@@ -1044,15 +1044,7 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     params: &P,
     output: &WalletTransparentOutput,
 ) -> Result<(AccountRef, KeyScope, UtxoId), SqliteClientError> {
-    put_transparent_output(
-        conn,
-        params,
-        output.outpoint(),
-        output.txout(),
-        output.mined_height(),
-        output.recipient_address(),
-        true,
-    )
+    put_transparent_output(conn, params, output, true)
 }
 
 /// An enumeration of the types of errors that can occur when scheduling an event to happen at a
@@ -1319,13 +1311,10 @@ pub(crate) fn find_account_uuid_for_transparent_address<P: consensus::Parameters
 pub(crate) fn put_transparent_output<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    outpoint: &OutPoint,
-    txout: &TxOut,
-    output_height: Option<BlockHeight>,
-    address: &TransparentAddress,
+    output: &WalletTransparentOutput,
     known_unspent: bool,
 ) -> Result<(AccountRef, KeyScope, UtxoId), SqliteClientError> {
-    let addr_str = address.encode(params);
+    let addr_str = output.recipient_address().encode(params);
 
     // Unlike the shielded pools, we only can receive transparent outputs on addresses for which we
     // have an `addresses` table entry, so we can just query for that here.
@@ -1344,11 +1333,13 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
             },
         )
         .optional()?
-        .ok_or(SqliteClientError::AddressNotRecognized(*address))?;
+        .ok_or(SqliteClientError::AddressNotRecognized(
+            *output.recipient_address(),
+        ))?;
 
     let key_scope = KeyScope::decode(key_scope_code)?;
 
-    let output_height = output_height.map(u32::from);
+    let output_height = output.mined_height().map(u32::from);
 
     // Check whether we have an entry in the blocks table for the output height;
     // if not, the transaction will be updated with its mined height when the
@@ -1372,7 +1363,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
              mined_height = :mined_height
          RETURNING id_tx",
         named_params![
-           ":txid": &outpoint.hash().to_vec(),
+           ":txid": &output.outpoint().hash().to_vec(),
            ":block": block,
            ":mined_height": output_height
         ],
@@ -1389,7 +1380,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
              AND tro.output_index = :output_index",
             named_params![
                 ":transaction_id": id_tx,
-                ":output_index": &outpoint.n(),
+                ":output_index": output.outpoint().n(),
             ],
             |row| {
                 row.get::<_, Option<u32>>(0)
@@ -1436,12 +1427,12 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
 
     let sql_args = named_params![
         ":transaction_id": id_tx,
-        ":output_index": &outpoint.n(),
+        ":output_index": output.outpoint().n(),
         ":account_id": account_id.0,
         ":address_id": address_id.0,
-        ":address": &address.encode(params),
-        ":script": &txout.script_pubkey.0,
-        ":value_zat": &i64::from(ZatBalance::from(txout.value)),
+        ":address": output.recipient_address().encode(params),
+        ":script": &output.txout().script_pubkey.0,
+        ":value_zat": &i64::from(ZatBalance::from(output.txout().value)),
         ":max_observed_unspent_height": max_observed_unspent.map(u32::from),
     ];
 
@@ -1459,15 +1450,15 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
              AND ts.prevout_output_index = :prevout_idx
              ORDER BY t.block NULLS LAST LIMIT 1",
             named_params![
-                ":prevout_txid": outpoint.txid().as_ref(),
-                ":prevout_idx": outpoint.n()
+                ":prevout_txid": output.outpoint().txid().as_ref(),
+                ":prevout_idx": output.outpoint().n()
             ],
             |row| row.get::<_, i64>(0).map(TxRef),
         )
         .optional()?;
 
     if let Some(spending_transaction_id) = spending_tx_ref {
-        mark_transparent_utxo_spent(conn, spending_transaction_id, outpoint)?;
+        mark_transparent_utxo_spent(conn, spending_transaction_id, output.outpoint())?;
     }
 
     Ok((account_id, key_scope, utxo_id))
