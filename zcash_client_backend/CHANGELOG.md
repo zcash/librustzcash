@@ -18,6 +18,7 @@ and this library adheres to Rust's notion of
     - `LightdInfo::estimated_height`
     - `LightdInfo::donation_address`
 - `zcash_client_backend::tor`:
+  - `http::Retry`
   - `Client::http_get`
   - `Client::http_get_json`
   - `Client::http_post`

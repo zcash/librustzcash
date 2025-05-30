@@ -25,6 +25,14 @@ use super::{Client, Error};
 
 pub mod cryptex;
 
+/// How a particular connection failure should be retried.
+pub enum Retry {
+    /// Retry using the same Tor circuits that resulted in this error.
+    Same,
+    /// Retry using separate Tor circuits isolated from any other Tor usage.
+    Isolated,
+}
+
 pub(super) fn url_is_https(url: &Uri) -> Result<bool, HttpError> {
     Ok(url.scheme().ok_or_else(|| HttpError::NonHttpUrl)? == &Scheme::HTTPS)
 }
@@ -53,23 +61,22 @@ impl Client {
     /// - [`Builder::header`] with header name `"Host"` (this is internally set based on
     ///   `url`).
     ///
-    /// On error, retries will be attempted as follows:
-    /// - A successful request that resulted in a client error (HTTP 400-499) will cause a
-    ///   retry with an isolated client. The isolation is not for privacy (the server can
-    ///   trivially link the two requests together via timing), but to have a decent
-    ///   chance of using a different exit node (to avoid the common transient failure of
-    ///   a particular exit node being blocked by the server).
-    /// - All other errors will cause a retry with the same client.
-    ///
-    /// Set `retry_limit = 0` to disable this behaviour (e.g. if you require a persistent
-    /// Tor client identity across queries).
-    #[tracing::instrument(skip(self, request, parse_response))]
+    /// There are two arguments for controlling retry behaviour:
+    /// - `retry_limit` is the maximum number of times that a failed request should be
+    ///   retried. You can disable retries by setting this to 0.
+    /// - `retry_filter` can be used to only retry requests that fail in specific ways,
+    ///   and control how the retry is performed. You can disable retries by setting this
+    ///   to `|_| None`, and you can ensure the same circuit is reused by setting this to
+    ///   `|_| Some(Retry::Same)` (e.g. if you require a persistent Tor client identity
+    ///   across queries).
+    #[tracing::instrument(skip(self, request, parse_response, retry_filter))]
     pub async fn http_get<T, F: Future<Output = Result<T, Error>>>(
         &self,
         url: Uri,
         request: impl Fn(Builder) -> Builder,
         parse_response: impl FnOnce(Incoming) -> F,
         retry_limit: u8,
+        retry_filter: impl Fn(&Error) -> Option<Retry>,
     ) -> Result<Response<T>, Error> {
         self.http_request(
             url,
@@ -77,6 +84,7 @@ impl Client {
             Empty::<Bytes>::new(),
             parse_response,
             retry_limit,
+            retry_filter,
         )
         .await
     }
@@ -90,17 +98,15 @@ impl Client {
     /// - [`Builder::header`] with header name `"Host"` (this is internally set based on
     ///   `url`).
     ///
-    /// On error, retries will be attempted as follows:
-    /// - A successful request that resulted in a client error (HTTP 400-499) will cause a
-    ///   retry with an isolated client. The isolation is not for privacy (the server can
-    ///   trivially link the two requests together via timing), but to have a decent
-    ///   chance of using a different exit node (to avoid the common transient failure of
-    ///   a particular exit node being blocked by the server).
-    /// - All other errors will cause a retry with the same client.
-    ///
-    /// Set `retry_limit = 0` to disable this behaviour (e.g. if you require a persistent
-    /// Tor client identity across queries).
-    #[tracing::instrument(skip(self, request, body, parse_response))]
+    /// There are two arguments for controlling retry behaviour:
+    /// - `retry_limit` is the maximum number of times that a failed request should be
+    ///   retried. You can disable retries by setting this to 0.
+    /// - `retry_filter` can be used to only retry requests that fail in specific ways,
+    ///   and control how the retry is performed. You can disable retries by setting this
+    ///   to `|_| None`, and you can ensure the same circuit is reused by setting this to
+    ///   `|_| Some(Retry::Same)` (e.g. if you require a persistent Tor client identity
+    ///   across queries).
+    #[tracing::instrument(skip(self, request, body, parse_response, retry_filter))]
     pub async fn http_post<B, T, F>(
         &self,
         url: Uri,
@@ -108,6 +114,7 @@ impl Client {
         body: B,
         parse_response: impl FnOnce(Incoming) -> F,
         retry_limit: u8,
+        retry_filter: impl Fn(&Error) -> Option<Retry>,
     ) -> Result<Response<T>, Error>
     where
         B: Body + Clone + Send + 'static,
@@ -121,22 +128,21 @@ impl Client {
             body,
             parse_response,
             retry_limit,
+            retry_filter,
         )
         .await
     }
 
     /// Makes an HTTP request over Tor.
     ///
-    /// On error, retries will be attempted as follows:
-    /// - A successful request that resulted in a client error (HTTP 400-499) will cause a
-    ///   retry with an isolated client. The isolation is not for privacy (the server can
-    ///   trivially link the two requests together via timing), but to have a decent
-    ///   chance of using a different exit node (to avoid the common transient failure of
-    ///   a particular exit node being blocked by the server).
-    /// - All other errors will cause a retry with the same client.
-    ///
-    /// Set `retry_limit = 0` to disable this behaviour (e.g. if you require a persistent
-    /// Tor client identity across queries).
+    /// There are two arguments for controlling retry behaviour:
+    /// - `retry_limit` is the maximum number of times that a failed request should be
+    ///   retried. You can disable retries by setting this to 0.
+    /// - `retry_filter` can be used to only retry requests that fail in specific ways,
+    ///   and control how the retry is performed. You can disable retries by setting this
+    ///   to `|_| None`, and you can ensure the same circuit is reused by setting this to
+    ///   `|_| Some(Retry::Same)` (e.g. if you require a persistent Tor client identity
+    ///   across queries).
     async fn http_request<B, T, F>(
         &self,
         url: Uri,
@@ -144,6 +150,7 @@ impl Client {
         body: B,
         parse_response: impl FnOnce(Incoming) -> F,
         retry_limit: u8,
+        retry_filter: impl Fn(&Error) -> Option<Retry>,
     ) -> Result<Response<T>, Error>
     where
         B: Body + Clone + Send + 'static,
@@ -165,26 +172,20 @@ impl Client {
             {
                 Ok(response) => break Ok(response),
 
-                Err(e) => match retries_remaining.checked_sub(1) {
-                    Some(retries) => {
+                Err(e) => match (retries_remaining.checked_sub(1), retry_filter(&e)) {
+                    (Some(retries), Some(retry)) => {
                         debug!("Retrying due to error: {e}");
                         retries_remaining = retries;
 
-                        // A common failure with HTTP requests over Tor is a particular
-                        // exit node being blocked by the server. `Client::http_request`
-                        // isn't used for anything that requires a persistent Tor client
-                        // identity across queries, so we retry with an isolated client in
-                        // order to use new circuits that have a decent chance of using a
-                        // different exit node. The isolation is not for privacy; the
-                        // server can trivially link the two requests together via timing.
-                        if let Error::Http(HttpError::Unsuccessful(status)) = e {
-                            if status.is_client_error() {
-                                debug!("Switching to isolated Tor circuit after getting {status}");
+                        match retry {
+                            Retry::Same => (),
+                            Retry::Isolated => {
+                                debug!("Switching to isolated Tor circuit for retry");
                                 client = Some(self.isolated_client());
                             }
                         }
                     }
-                    None => break Err(e),
+                    (None, _) | (_, None) => break Err(e),
                 },
             }
         }?
@@ -198,20 +199,19 @@ impl Client {
     /// This is a simple wapper around [`Self::http_get`]. Use that method if you need
     /// more control over the request headers or response parsing.
     ///
-    /// On error, retries will be attempted as follows:
-    /// - A successful request that resulted in a client error (HTTP 400-499) will cause a
-    ///   retry with an isolated client. The isolation is not for privacy (the server can
-    ///   trivially link the two requests together via timing), but to have a decent
-    ///   chance of using a different exit node (to avoid the common transient failure of
-    ///   a particular exit node being blocked by the server).
-    /// - All other errors will cause a retry with the same client.
-    ///
-    /// Set `retry_limit = 0` to disable this behaviour (e.g. if you require a persistent
-    /// Tor client identity across queries).
+    /// There are two arguments for controlling retry behaviour:
+    /// - `retry_limit` is the maximum number of times that a failed request should be
+    ///   retried. You can disable retries by setting this to 0.
+    /// - `retry_filter` can be used to only retry requests that fail in specific ways,
+    ///   and control how the retry is performed. You can disable retries by setting this
+    ///   to `|_| None`, and you can ensure the same circuit is reused by setting this to
+    ///   `|_| Some(Retry::Same)` (e.g. if you require a persistent Tor client identity
+    ///   across queries).
     pub async fn http_get_json<T: DeserializeOwned>(
         &self,
         url: Uri,
         retry_limit: u8,
+        retry_filter: impl Fn(&Error) -> Option<Retry>,
     ) -> Result<Response<T>, Error> {
         self.http_get(
             url,
@@ -227,6 +227,7 @@ impl Client {
                 .map_err(HttpError::from)?)
             },
             retry_limit,
+            retry_filter,
         )
         .await
     }
@@ -395,7 +396,10 @@ mod live_network_tests {
     use http_body_util::BodyExt;
     use hyper::body::Buf;
 
-    use crate::tor::{http::HttpError, Client};
+    use crate::tor::{
+        http::{HttpError, Retry},
+        Client,
+    };
 
     #[test]
     fn httpbin() {
@@ -407,7 +411,11 @@ mod live_network_tests {
 
             // Test HTTP GET
             let get_response = client
-                .http_get_json::<serde_json::Value>("https://httpbin.org/get".parse().unwrap(), 3)
+                .http_get_json::<serde_json::Value>(
+                    "https://httpbin.org/get".parse().unwrap(),
+                    3,
+                    |_| Some(Retry::Same),
+                )
                 .await
                 .unwrap();
             assert_eq!(
@@ -449,6 +457,7 @@ mod live_network_tests {
                         .map_err(HttpError::from)?)
                     },
                     3,
+                    |_| Some(Retry::Same),
                 )
                 .await
                 .unwrap();

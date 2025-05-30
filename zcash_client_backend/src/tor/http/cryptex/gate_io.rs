@@ -2,7 +2,7 @@ use hyper::StatusCode;
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
-use super::{Exchange, ExchangeData, RETRY_LIMIT};
+use super::{retry_filter, Exchange, ExchangeData, RETRY_LIMIT};
 use crate::tor::{Client, Error};
 
 /// Querier for the Gate.io exchange.
@@ -41,6 +41,7 @@ impl Exchange for GateIo {
                     .parse()
                     .unwrap(),
                 RETRY_LIMIT,
+                retry_filter,
             )
             .await?;
         let data = res.into_body().into_iter().next().ok_or(Error::Http(
