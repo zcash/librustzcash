@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Migrated to `zcash_transparent 0.3`
+
 ## [0.2.1] - 2025-03-04
 
 Documentation improvements and rendering fix; no code changes.
