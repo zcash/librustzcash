@@ -13,22 +13,38 @@ workspace.
 ## [0.5.0] - 2025-09-25
 
 ### Added
-- `zcash_transparent::address`:
-  - `TransparentAddress::from_script_from_chain`
-  - `TransparentAddress::from_script_pubkey`
-  - `impl From<zcash_script::script::FromChain> for Script`
-  - `impl From<zcash_script::script::PubKey> for Script`
-  - `impl From<zcash_script::script::Sig> for Script`
-- `zcash_transparent::builder`:
-  - `TransparentBuilder::add_null_data_output`
-  - `Bundle<Unauthorized>::prepare_transparent_signatures` to initialize the signing context.
-  - `TransparentSignatureContext` struct for staged application of external signatures.
-- `zcash_transparent::bundle`:
-  - `Outpoint::null`
-  - `TxIn::from_parts`
-  - `TxIn::{prevout, script_sig, sequence}` accessor methods.
-  - `TxOut::{value, script_pubkey}` accessor methods.
-  - `testing::{arb_script_pubkey, arb_script_sig}`
+- `zcash_transparent`:
+  - `address`:
+    - `TransparentAddress::from_script_from_chain`
+    - `TransparentAddress::from_script_pubkey`
+    - `impl From<zcash_script::script::FromChain> for Script`
+    - `impl From<zcash_script::script::PubKey> for Script`
+    - `impl From<zcash_script::script::Sig> for Script`
+  - `builder`:
+    - `Coinbase` marker type
+    - `impl Authorization for Coinbase`
+    - `TransparentBuilder::add_null_data_output`
+    - `Bundle<Unauthorized>::prepare_transparent_signatures` to initialize the signing context.
+    - `TransparentSignatureContext` struct for staged application of external signatures.
+  - `bundle`:
+    - `Outpoint::null`
+    - `TxIn::from_parts`
+    - `TxIn::{prevout, script_sig, sequence}` accessor methods.
+    - `TxIn::<builder::Coinbase>::coinbase`
+    - `TxOut::{value, script_pubkey}` accessor methods.
+    - `testing::{arb_script_pubkey, arb_script_sig}`
+  - `coinbase`:
+    - `MAX_COINBASE_SCRIPT_LEN`
+    - `MIN_COINBASE_SCRIPT_LEN`
+    - `MAX_COINBASE_HEIGHT_LEN`
+    - `MAX_MINER_DATA_LEN`
+    - `MinerData` struct
+    - `impl Default for MinerData`
+    - `impl TryFrom<&[u8]> for MinerData`
+    - `impl AsRef<[u8]> for MinerData`
+    - `Error` enum
+    - `impl fmt::Display for Error`
+    - `impl std::error::Error for Error`
 
 ### Changed
 - `zcash_transparent::address`:
