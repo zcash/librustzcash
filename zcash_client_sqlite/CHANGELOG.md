@@ -13,7 +13,8 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - Migrated to `zcash_address 0.8`, `zip321 0.4`, `zcash_transparent 0.3`,
-  `zcash_primitives 0.23`, `zcash_proofs 0.23`, `zcash_keys 0.9`, `pczt 0.3`
+  `zcash_primitives 0.23`, `zcash_proofs 0.23`, `zcash_keys 0.9`, `pczt 0.3`,
+  `zcash_client_backend 0.19`
 - `zcash_client_sqlite::wallet::init::WalletMigrationError::`
   - Variants `WalletMigrationError::CommitmentTree` and 
     `WalletMigrationError::Other` now `Box` their contents.

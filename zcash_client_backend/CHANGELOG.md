@@ -7,7 +7,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.19.0] - 2025-05-30
+
 ### Added
+- `zcash_client_backend::data_api`:
+  - `TargetValue`: An intent of representing spendable value to reach a certain 
+    targeted amount.
 - `zcash_client_backend::proto::service`:
   - `LightdInfo.donation_address` field.
   - Helper methods for parsing `LightdInfo` fields:
@@ -26,15 +31,13 @@ and this library adheres to Rust's notion of
   - `DormantMode`
 
 ### Changed
-- Migrated to `zcash_address 0.8`, `zip321 0.4`, `zcash_transparent 0.3`,
-  `zcash_primitives 0.23`, `zcash_proofs 0.23`, `zcash_keys 0.9`, `pczt 0.3`
+- Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`, `zcash_address 0.8`, 
+  `zip321 0.4`, `zcash_transparent 0.3`, `zcash_primitives 0.23`, 
+  `zcash_proofs 0.23`, `zcash_keys 0.9`, `pczt 0.3`
 - `zcash_client_backend::data_api`:
-  - `TargetValue`: An intent of representing spendable value to reach a certain 
-    targeted amount.
   - `select_spendable_notes`: parameter `target_value` now is a `TargetValue`. 
     Existing calls to this function that used `Zatoshis` now use 
     `TargetValue::AtLeast(Zatoshis)`
-- Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`.
 - `zcash_client_backend::tor`:
   - `Client::{connect_to_lightwalletd, get_latest_zec_to_usd_rate}` now ensure
     that the inner Tor client is ready for traffic, and re-bootstrap it if
