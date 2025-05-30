@@ -116,6 +116,14 @@ impl Authorization for Unauthorized {
     type ScriptSig = ();
 }
 
+/// [`Authorization`] marker type for coinbase transactions without authorization data.
+#[derive(Debug, Clone)]
+pub struct Coinbase;
+
+impl Authorization for Coinbase {
+    type ScriptSig = Vec<u8>;
+}
+
 impl TransparentBuilder {
     /// Constructs a new TransparentBuilder
     pub fn empty() -> Self {
