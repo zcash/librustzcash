@@ -19,6 +19,7 @@ workspace.
     - `Coinbase` marker type
     - `impl Authorization for Coinbase`
     - `impl TransparentAuthorizingContext for Coinbase`
+    - `impl MapAuth<Coinbase, Authorized> for Coinbase`
   - `coinbase`:
     - `MAX_COINBASE_SCRIPT_LEN`
     - `MIN_COINBASE_SCRIPT_LEN`
