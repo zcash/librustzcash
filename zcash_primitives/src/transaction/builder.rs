@@ -53,7 +53,7 @@ use crate::{
     },
 };
 
-use super::components::sapling::zip212_enforcement;
+use super::{components::sapling::zip212_enforcement, Coinbase};
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
@@ -204,14 +204,17 @@ impl Progress {
     }
 }
 
-/// Rules for how the builder should be configured for each shielded pool.
-#[derive(Clone, Copy)]
+/// Rules for how the builder should be configured for each shielded pool or coinbase tx.
+#[derive(Clone)]
 pub enum BuildConfig {
     Standard {
         sapling_anchor: Option<sapling::Anchor>,
         orchard_anchor: Option<orchard::Anchor>,
     },
-    Coinbase,
+    Coinbase {
+        miner_data: Option<Vec<u8>>,
+        sequence: Option<u32>,
+    },
 }
 
 impl BuildConfig {
@@ -223,7 +226,7 @@ impl BuildConfig {
             BuildConfig::Standard { sapling_anchor, .. } => sapling_anchor
                 .as_ref()
                 .map(|a| (sapling::builder::BundleType::DEFAULT, *a)),
-            BuildConfig::Coinbase => Some((
+            BuildConfig::Coinbase { .. } => Some((
                 sapling::builder::BundleType::Coinbase,
                 sapling::Anchor::empty_tree(),
             )),
@@ -238,7 +241,7 @@ impl BuildConfig {
             BuildConfig::Standard { orchard_anchor, .. } => orchard_anchor
                 .as_ref()
                 .map(|a| (orchard::builder::BundleType::DEFAULT, *a)),
-            BuildConfig::Coinbase => Some((
+            BuildConfig::Coinbase { .. } => Some((
                 orchard::builder::BundleType::Coinbase,
                 orchard::Anchor::empty_tree(),
             )),
@@ -658,16 +661,152 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         output_prover: &OP,
         fee_rule: &FR,
     ) -> Result<BuildResult, Error<FR::Error>> {
-        let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
-        self.build_internal(
-            transparent_signing_set,
-            sapling_extsks,
-            orchard_saks,
-            rng,
-            spend_prover,
-            output_prover,
-            fee,
-        )
+        match self.build_config {
+            BuildConfig::Standard { .. } => {
+                let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
+
+                self.build_standard(
+                    transparent_signing_set,
+                    sapling_extsks,
+                    orchard_saks,
+                    rng,
+                    spend_prover,
+                    output_prover,
+                    fee,
+                )
+            }
+            BuildConfig::Coinbase { .. } => self.build_coinbase(rng, spend_prover, output_prover),
+        }
+    }
+
+    #[cfg(feature = "circuits")]
+    fn build_coinbase<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FE>(
+        self,
+        mut rng: R,
+        spend_prover: &SP,
+        output_prover: &OP,
+    ) -> Result<BuildResult, Error<FE>> {
+        use super::Authorized;
+
+        let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
+
+        let (miner_data, seq) = match self.build_config {
+            BuildConfig::Coinbase {
+                miner_data: data,
+                sequence,
+            } => (data.unwrap_or_default(), sequence.unwrap_or_default()),
+            _ => (Vec::default(), u32::default()),
+        };
+
+        let transparent_bundle =
+            self.transparent_builder
+                .build_coinbase(self.target_height, &miner_data, seq);
+
+        let (sapling_bundle, sapling_meta) = match self
+            .sapling_builder
+            .and_then(|builder| {
+                builder
+                    .build::<SP, OP, _, _>(&[], &mut rng)
+                    .map_err(Error::SaplingBuild)
+                    .transpose()
+                    .map(|res| {
+                        res.map(|(bundle, sapling_meta)| {
+                            (
+                                bundle.create_proofs(
+                                    spend_prover,
+                                    output_prover,
+                                    &mut rng,
+                                    self._progress_notifier,
+                                ),
+                                sapling_meta,
+                            )
+                        })
+                    })
+            })
+            .transpose()?
+        {
+            Some((bundle, meta)) => (Some(bundle), meta),
+            None => (None, SaplingMetadata::empty()),
+        };
+
+        let (orchard_bundle, orchard_meta) = match self
+            .orchard_builder
+            .and_then(|builder| {
+                builder
+                    .build(&mut rng)
+                    .map_err(Error::OrchardBuild)
+                    .transpose()
+            })
+            .transpose()?
+        {
+            Some((bundle, meta)) => (Some(bundle), meta),
+            None => (None, orchard::builder::BundleMetadata::empty()),
+        };
+
+        let unauthed_tx: TransactionData<Coinbase> = TransactionData {
+            version: TxVersion::suggested_for_branch(consensus_branch_id),
+            consensus_branch_id,
+            lock_time: 0,
+            expiry_height: self.expiry_height,
+            transparent_bundle: Some(transparent_bundle.clone()),
+            sprout_bundle: None,
+            sapling_bundle,
+            orchard_bundle,
+            #[cfg(zcash_unstable = "zfuture")]
+            tze_bundle: None,
+        };
+
+        let txid_parts = unauthed_tx.digest(TxIdDigester);
+
+        let transparent_bundle =
+            transparent_bundle.map_authorization(transparent::builder::Coinbase);
+
+        #[cfg(zcash_unstable = "zfuture")]
+        let tze_bundle = unauthed_tx
+            .tze_bundle
+            .clone()
+            .map(|b| b.into_authorized(&unauthed_tx, tze_signers))
+            .transpose()
+            .map_err(Error::TzeBuild)?;
+
+        let shielded_sig_commitment =
+            signature_hash(&unauthed_tx, &SignableInput::Shielded, &txid_parts);
+
+        let sapling_bundle = unauthed_tx
+            .sapling_bundle
+            .map(|b| b.apply_signatures(&mut rng, *shielded_sig_commitment.as_ref(), &[]))
+            .transpose()
+            .map_err(Error::SaplingBuild)?;
+
+        let orchard_bundle = unauthed_tx
+            .orchard_bundle
+            .map(|b| {
+                b.create_proof(&orchard::circuit::ProvingKey::build(), &mut rng)
+                    .and_then(|b| {
+                        b.apply_signatures(&mut rng, *shielded_sig_commitment.as_ref(), &[])
+                    })
+            })
+            .transpose()
+            .map_err(Error::OrchardBuild)?;
+
+        let authed_tx: TransactionData<Authorized> = TransactionData {
+            version: unauthed_tx.version,
+            consensus_branch_id: unauthed_tx.consensus_branch_id,
+            lock_time: unauthed_tx.lock_time,
+            expiry_height: unauthed_tx.expiry_height,
+            transparent_bundle: Some(transparent_bundle),
+            sprout_bundle: unauthed_tx.sprout_bundle,
+            sapling_bundle,
+            orchard_bundle,
+            #[cfg(zcash_unstable = "zfuture")]
+            tze_bundle,
+        };
+
+        Ok(BuildResult {
+            transaction: authed_tx.freeze().unwrap(),
+            sapling_meta,
+            orchard_meta,
+        })
     }
 
     /// Builds a transaction from the configured spends and outputs.
@@ -704,7 +843,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
 
     #[allow(clippy::too_many_arguments)]
     #[cfg(feature = "circuits")]
-    fn build_internal<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FE>(
+    fn build_standard<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FE>(
         self,
         transparent_signing_set: &TransparentSigningSet,
         sapling_extsks: &[sapling::zip32::ExtendedSpendingKey],
@@ -715,9 +854,6 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         fee: Zatoshis,
     ) -> Result<BuildResult, Error<FE>> {
         let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
-
-        // determine transaction version
-        let version = TxVersion::suggested_for_branch(consensus_branch_id);
 
         //
         // Consistency checks
@@ -787,7 +923,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         let (tze_bundle, tze_signers) = self.tze_builder.build();
 
         let unauthed_tx: TransactionData<Unauthorized> = TransactionData {
-            version,
+            version: TxVersion::suggested_for_branch(consensus_branch_id),
             consensus_branch_id: BranchId::for_height(&self.params, self.target_height),
             lock_time: 0,
             expiry_height: self.expiry_height,
