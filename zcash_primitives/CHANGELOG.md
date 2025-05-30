@@ -7,7 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.23.0] - 2025-05-30
+
 ### Changed
+- Migrated to `zcash_address 0.8`, `zcash_transparent 0.3`
 - Variants of `zcash_primitives::transaction::TxVersion` have changed. They
   now represent explicit transaction versions, in order to avoid accidental
   confusion with the names of the network upgrades that they were introduced

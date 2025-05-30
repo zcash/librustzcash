@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.5.2] - 2025-05-30
 ### Added
 - `zcash_protocol::constants::`
   - `V3_TX_VERSION`

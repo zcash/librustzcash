@@ -33,18 +33,18 @@ categories = ["cryptography::cryptocurrencies"]
 [workspace.dependencies]
 # Intra-workspace dependencies
 equihash = { version = "0.2", path = "components/equihash", default-features = false }
-zcash_address = { version = "0.7", path = "components/zcash_address", default-features = false }
-zcash_client_backend = { version = "0.18", path = "zcash_client_backend" }
+zcash_address = { version = "0.8", path = "components/zcash_address", default-features = false }
+zcash_client_backend = { version = "0.19", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.3", path = "components/zcash_encoding", default-features = false }
-zcash_keys = { version = "0.8", path = "zcash_keys" }
+zcash_keys = { version = "0.9", path = "zcash_keys" }
 zcash_protocol = { version = "0.5.1", path = "components/zcash_protocol", default-features = false }
-zip321 = { version = "0.3", path = "components/zip321" }
+zip321 = { version = "0.4", path = "components/zip321" }
 
 zcash_note_encryption = "0.4.1"
-zcash_primitives = { version = "0.22", path = "zcash_primitives", default-features = false }
-zcash_proofs = { version = "0.22", path = "zcash_proofs", default-features = false }
+zcash_primitives = { version = "0.23", path = "zcash_primitives", default-features = false }
+zcash_proofs = { version = "0.23", path = "zcash_proofs", default-features = false }
 
-pczt = { version = "0.2", path = "pczt" }
+pczt = { version = "0.3", path = "pczt" }
 
 # Shielded protocols
 bellman = { version = "0.14", default-features = false, features = ["groth16"] }
@@ -73,7 +73,7 @@ block-buffer = { version = "=0.11.0-rc.3" } # later RCs require edition2024
 crypto-common = { version = "=0.2.0-rc.1" } # later RCs require edition2024
 ripemd = { version = "0.1", default-features = false }
 secp256k1 = { version = "0.29", default-features = false, features = ["alloc"] }
-transparent = { package = "zcash_transparent", version = "0.2", path = "zcash_transparent", default-features = false }
+transparent = { package = "zcash_transparent", version = "0.3", path = "zcash_transparent", default-features = false }
 
 # Boilerplate & missing stdlib
 getset = "0.1"
