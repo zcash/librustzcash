@@ -26,6 +26,7 @@ and this library adheres to Rust's notion of
   - `DormantMode`
 
 ### Changed
+- Migrated to `zcash_address 0.8`
 - `zcash_client_backend::data_api`:
   - `TargetValue`: An intent of representing spendable value to reach a certain 
     targeted amount.

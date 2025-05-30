@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.8.0] - 2025-05-30
 ### Changed
 - The following methods with generic parameter `T` now require `T: TryFromAddress`
   instead of `T: TryFromRawAddress`:
