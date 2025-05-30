@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction`:
+  - `Coinbase` marker type
+  - `impl Authorization for Coinbase`
+
 ### Changed
 - MSRV is now 1.85.1.
 
