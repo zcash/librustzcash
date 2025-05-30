@@ -239,6 +239,14 @@ pub struct TransparentSignatureContext<'a, V: secp256k1::Verification = secp256k
     final_script_sigs: Vec<Option<script::Sig>>,
 }
 
+/// [`Authorization`] marker type for coinbase transactions without authorization data.
+#[derive(Debug, Clone)]
+pub struct Coinbase;
+
+impl Authorization for Coinbase {
+    type ScriptSig = Vec<u8>;
+}
+
 impl TransparentBuilder {
     /// Constructs a new TransparentBuilder
     pub fn empty() -> Self {
