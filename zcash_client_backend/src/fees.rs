@@ -488,7 +488,7 @@ impl EphemeralBalance {
 /// by a transaction having a specified set of inputs and outputs.
 pub trait ChangeStrategy {
     type FeeRule: FeeRule + Clone;
-    type Error;
+    type Error: From<<Self::FeeRule as FeeRule>::Error>;
 
     /// The type of metadata source that this change strategy requires in order to be able to
     /// retrieve required wallet metadata. If more capabilities are required of the backend than
