@@ -6,11 +6,14 @@ use core::fmt;
 
 use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
 
-use zcash_script::{op, script};
+use zcash_script::{
+    op,
+    script::{self, Code},
+};
 
 use crate::{
     address::{Script, TransparentAddress},
-    bundle::{Authorization, Authorized, Bundle, TxIn, TxOut},
+    bundle::{Authorization, Authorized, Bundle, MapAuth, TxIn, TxOut},
     pczt,
     sighash::{SignableInput, TransparentAuthorizingContext},
 };
@@ -254,6 +257,19 @@ impl TransparentAuthorizingContext for Coinbase {
 
     fn input_scriptpubkeys(&self) -> Vec<Script> {
         vec![]
+    }
+}
+
+impl MapAuth<Coinbase, Authorized> for Coinbase {
+    fn map_script_sig(
+        &self,
+        s: <Coinbase as Authorization>::ScriptSig,
+    ) -> <Authorized as Authorization>::ScriptSig {
+        Script(Code(s))
+    }
+
+    fn map_authorization(&self, _: Coinbase) -> Authorized {
+        Authorized
     }
 }
 
