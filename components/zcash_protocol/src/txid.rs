@@ -65,10 +65,4 @@ impl TxId {
         writer.write_all(&self.0)?;
         Ok(())
     }
-
-    /// Returns true when the txid consists of all zeros; this only occurs for coinbase
-    /// transactions.
-    pub fn is_null(&self) -> bool {
-        self.0 == [0u8; 32]
-    }
 }
