@@ -178,9 +178,7 @@ impl OutPoint {
     /// Returns `true` if this `OutPoint` is "null" in the Bitcoin sense: it has txid set to
     /// all-zeroes and output index set to `u32::MAX`.
     fn is_null(&self) -> bool {
-        // From `BaseOutPoint::IsNull()` in zcashd:
-        //   return (hash.IsNull() && n == (uint32_t) -1);
-        self.hash.as_ref() == &[0; 32] && self.n == u32::MAX
+        *self == OutPoint::null()
     }
 
     /// Returns the output index of this `OutPoint`.
