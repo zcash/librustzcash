@@ -168,6 +168,13 @@ impl OutPoint {
         writer.write_all(&self.n.to_le_bytes())
     }
 
+    /// Returns the null [`OutPoint`] in the Bitcoin sense:
+    /// - [`TxId`] is set to all-zeroes, and
+    /// - output index is set to [`u32::MAX`].
+    pub fn null() -> Self {
+        OutPoint::new([0; 32], u32::MAX)
+    }
+
     /// Returns `true` if this `OutPoint` is "null" in the Bitcoin sense: it has txid set to
     /// all-zeroes and output index set to `u32::MAX`.
     fn is_null(&self) -> bool {
