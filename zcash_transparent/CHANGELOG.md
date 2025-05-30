@@ -11,7 +11,25 @@ workspace.
 ## [Unreleased]
 
 ### Added
-- `zcash_transparent::bundle::Outpoint::null`
+- `zcash_transparent`:
+  - `builder`:
+    - `Coinbase` marker type
+    - `impl Authorization for Coinbase`
+  - `bundle`:
+    - `Outpoint::null`
+    - `TxIn::<builder::Coinbase>::coinbase`
+  - `coinbase`:
+    - `MAX_COINBASE_SCRIPT_LEN`
+    - `MIN_COINBASE_SCRIPT_LEN`
+    - `MAX_COINBASE_HEIGHT_LEN`
+    - `MAX_MINER_DATA_LEN`
+    - `MinerData` struct
+    - `impl Default for MinerData`
+    - `impl TryFrom<&[u8]> for MinerData`
+    - `impl AsRef<[u8]> for MinerData`
+    - `Error` enum
+    - `impl fmt::Display for Error`
+    - `impl std::error::Error for Error`
 
 ### Changed
 - MSRV is now 1.85.1.
