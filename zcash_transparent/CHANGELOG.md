@@ -20,6 +20,7 @@ workspace.
     - `impl Authorization for Coinbase`
     - `impl TransparentAuthorizingContext for Coinbase`
     - `impl MapAuth<Coinbase, Authorized> for Coinbase`
+    - `TransparentBuilder::build_coinbase`
   - `coinbase`:
     - `MAX_COINBASE_SCRIPT_LEN`
     - `MIN_COINBASE_SCRIPT_LEN`
