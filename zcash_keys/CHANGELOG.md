@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.9.0] - 2025-05-30
+
 ### Added
 - `zcash_keys::keys::UnifiedAddressRequest::{SHIELDED, ORCHARD}`
 - `zcash_keys::keys::ReceiverRequirements::{SHIELDED, ORCHARD}`
