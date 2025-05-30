@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_transparent::bundle::Outpoint::null`
+
 ## [0.4.0] - 2025-07-31
 
 ### Added
