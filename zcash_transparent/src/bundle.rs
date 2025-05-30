@@ -5,12 +5,16 @@ use core::fmt::Debug;
 use core2::io::{self, Read, Write};
 
 use zcash_protocol::{
+    consensus::BlockHeight,
     value::{BalanceError, ZatBalance, Zatoshis},
     TxId,
 };
+use zcash_script::script;
 
 use crate::{
     address::{Script, TransparentAddress},
+    builder,
+    coinbase::{self, MinerData},
     sighash::TransparentAuthorizingContext,
 };
 
@@ -230,6 +234,34 @@ impl TxIn<Authorized> {
         self.prevout.write(&mut writer)?;
         self.script_sig.write(&mut writer)?;
         writer.write_all(&self.sequence.to_le_bytes())
+    }
+}
+
+impl TxIn<builder::Coinbase> {
+    /// Creates an input for a coinbase transaction. Does not support creating inputs for the
+    /// genesis block.
+    pub fn coinbase(
+        height: BlockHeight,
+        miner_data: &MinerData,
+        sequence: u32,
+    ) -> Result<Self, coinbase::Error> {
+        let height = i64::from(height);
+
+        // Serialize the height. The serialization is specified in
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>.
+        let mut script_sig = match height {
+            0 => Err(coinbase::Error::GenesisInputNotSupported)?,
+            1..=16 => vec![0x50 + height.to_le_bytes()[0]],
+            _ => script::serialize_num(height),
+        };
+
+        script_sig.extend(miner_data.as_ref());
+
+        Ok(TxIn {
+            prevout: OutPoint::null(),
+            script_sig,
+            sequence,
+        })
     }
 }
 

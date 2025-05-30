@@ -57,6 +57,7 @@ hex.workspace = true
 
 # - Transparent protocol
 ripemd.workspace = true
+zcash_script.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

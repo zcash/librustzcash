@@ -53,6 +53,9 @@ exceptions = [
     { name = "untrusted", allow = ["ISC"] },
     { name = "webpki-roots", allow = ["MPL-2.0"] },
     { name = "x25519-dalek", allow = ["BSD-3-Clause"] },
+    { name = "bindgen", allow = ["BSD-3-Clause"] },
+    { name = "bounded-vec", allow = ["CC0-1.0"] },
+    { name = "libloading", allow = ["ISC"] },
 ]
 
 [[licenses.clarify]]
