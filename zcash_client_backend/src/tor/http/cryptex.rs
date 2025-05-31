@@ -1,13 +1,14 @@
 //! Cryptocurrency exchange rate APIs.
 
 use futures_util::{future::join_all, join};
+use hyper::StatusCode;
 use rand::{seq::IteratorRandom, thread_rng};
 use rust_decimal::Decimal;
 use tracing::{error, trace};
 
 use crate::tor::{Client, Error};
 
-use super::{HttpError, Retry};
+use super::Retry;
 
 mod binance;
 mod coinbase;
@@ -34,16 +35,17 @@ const RETRY_LIMIT: u8 = 1;
 /// - A successful request that resulted in a client error (HTTP 400-499) will cause a
 ///   retry with an isolated client.
 /// - All other errors will cause a retry with the same client.
-fn retry_filter(e: &Error) -> Option<Retry> {
-    Some(if let Error::Http(HttpError::Unsuccessful(status)) = e {
-        if status.is_client_error() {
-            Retry::Isolated
-        } else {
-            Retry::Same
+fn retry_filter(res: Result<StatusCode, &Error>) -> Option<Retry> {
+    match res {
+        Ok(status) => {
+            if status.is_client_error() {
+                Some(Retry::Isolated)
+            } else {
+                (!status.is_success()).then_some(Retry::Same)
+            }
         }
-    } else {
-        Retry::Same
-    })
+        Err(_) => Some(Retry::Same),
+    }
 }
 
 /// Exchanges for which we know how to query data over Tor.
