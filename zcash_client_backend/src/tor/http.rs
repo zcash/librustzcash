@@ -9,7 +9,7 @@ use hyper::{
     body::{Body, Buf, Bytes, Incoming},
     client::conn,
     http::{request::Builder, uri::Scheme},
-    Request, Response, Uri,
+    Request, Response, StatusCode, Uri,
 };
 use hyper_util::rt::TokioIo;
 use serde::de::DeserializeOwned;
@@ -61,14 +61,18 @@ impl Client {
     /// - [`Builder::header`] with header name `"Host"` (this is internally set based on
     ///   `url`).
     ///
+    /// Returns `Ok(response)` if an HTTP response is received, even if the HTTP status
+    /// code is not in the 200-299 success range (i.e. [`HttpError::Unsuccessful`] is
+    /// never returned).
+    ///
     /// There are two arguments for controlling retry behaviour:
     /// - `retry_limit` is the maximum number of times that a failed request should be
     ///   retried. You can disable retries by setting this to 0.
     /// - `retry_filter` can be used to only retry requests that fail in specific ways,
     ///   and control how the retry is performed. You can disable retries by setting this
     ///   to `|_| None`, and you can ensure the same circuit is reused by setting this to
-    ///   `|_| Some(Retry::Same)` (e.g. if you require a persistent Tor client identity
-    ///   across queries).
+    ///   `|res| res.is_err().then_some(Retry::Same)` (e.g. if you require a persistent
+    ///   Tor client identity across queries).
     #[tracing::instrument(skip(self, request, parse_response, retry_filter))]
     pub async fn http_get<T, F: Future<Output = Result<T, Error>>>(
         &self,
@@ -76,7 +80,7 @@ impl Client {
         request: impl Fn(Builder) -> Builder,
         parse_response: impl FnOnce(Incoming) -> F,
         retry_limit: u8,
-        retry_filter: impl Fn(&Error) -> Option<Retry>,
+        retry_filter: impl Fn(Result<StatusCode, &Error>) -> Option<Retry>,
     ) -> Result<Response<T>, Error> {
         self.http_request(
             url,
@@ -98,14 +102,18 @@ impl Client {
     /// - [`Builder::header`] with header name `"Host"` (this is internally set based on
     ///   `url`).
     ///
+    /// Returns `Ok(response)` if an HTTP response is received, even if the HTTP status
+    /// code is not in the 200-299 success range (i.e. [`HttpError::Unsuccessful`] is
+    /// never returned).
+    ///
     /// There are two arguments for controlling retry behaviour:
     /// - `retry_limit` is the maximum number of times that a failed request should be
     ///   retried. You can disable retries by setting this to 0.
     /// - `retry_filter` can be used to only retry requests that fail in specific ways,
     ///   and control how the retry is performed. You can disable retries by setting this
     ///   to `|_| None`, and you can ensure the same circuit is reused by setting this to
-    ///   `|_| Some(Retry::Same)` (e.g. if you require a persistent Tor client identity
-    ///   across queries).
+    ///   `|res| res.is_err().then_some(Retry::Same)` (e.g. if you require a persistent
+    ///   Tor client identity across queries).
     #[tracing::instrument(skip(self, request, body, parse_response, retry_filter))]
     pub async fn http_post<B, T, F>(
         &self,
@@ -114,7 +122,7 @@ impl Client {
         body: B,
         parse_response: impl FnOnce(Incoming) -> F,
         retry_limit: u8,
-        retry_filter: impl Fn(&Error) -> Option<Retry>,
+        retry_filter: impl Fn(Result<StatusCode, &Error>) -> Option<Retry>,
     ) -> Result<Response<T>, Error>
     where
         B: Body + Clone + Send + 'static,
@@ -141,8 +149,8 @@ impl Client {
     /// - `retry_filter` can be used to only retry requests that fail in specific ways,
     ///   and control how the retry is performed. You can disable retries by setting this
     ///   to `|_| None`, and you can ensure the same circuit is reused by setting this to
-    ///   `|_| Some(Retry::Same)` (e.g. if you require a persistent Tor client identity
-    ///   across queries).
+    ///   `|res| res.is_err().then_some(Retry::Same)` (e.g. if you require a persistent
+    ///   Tor client identity across queries).
     async fn http_request<B, T, F>(
         &self,
         url: Uri,
@@ -150,7 +158,7 @@ impl Client {
         body: B,
         parse_response: impl FnOnce(Incoming) -> F,
         retry_limit: u8,
-        retry_filter: impl Fn(&Error) -> Option<Retry>,
+        retry_filter: impl Fn(Result<StatusCode, &Error>) -> Option<Retry>,
     ) -> Result<Response<T>, Error>
     where
         B: Body + Clone + Send + 'static,
@@ -162,31 +170,31 @@ impl Client {
         let mut client = None;
 
         let (parts, body) = loop {
-            match one_http_request(
+            let response = one_http_request(
                 &client.as_ref().unwrap_or(self).inner,
                 url.clone(),
                 &request,
                 body.clone(),
             )
-            .await
-            {
-                Ok(response) => break Ok(response),
+            .await;
 
-                Err(e) => match (retries_remaining.checked_sub(1), retry_filter(&e)) {
-                    (Some(retries), Some(retry)) => {
-                        debug!("Retrying due to error: {e}");
-                        retries_remaining = retries;
+            match (
+                retries_remaining.checked_sub(1),
+                retry_filter(response.as_ref().map(|response| response.status())),
+            ) {
+                (Some(retries), Some(retry)) => {
+                    debug!("Retrying due to filter match");
+                    retries_remaining = retries;
 
-                        match retry {
-                            Retry::Same => (),
-                            Retry::Isolated => {
-                                debug!("Switching to isolated Tor circuit for retry");
-                                client = Some(self.isolated_client());
-                            }
+                    match retry {
+                        Retry::Same => (),
+                        Retry::Isolated => {
+                            debug!("Switching to isolated Tor circuit for retry");
+                            client = Some(self.isolated_client());
                         }
                     }
-                    (None, _) | (_, None) => break Err(e),
-                },
+                }
+                (None, _) | (_, None) => break response,
             }
         }?
         .into_parts();
@@ -199,19 +207,23 @@ impl Client {
     /// This is a simple wapper around [`Self::http_get`]. Use that method if you need
     /// more control over the request headers or response parsing.
     ///
+    /// Returns `Ok(response)` if an HTTP response is received, even if the HTTP status
+    /// code is not in the 200-299 success range (i.e. [`HttpError::Unsuccessful`] is
+    /// never returned).
+    ///
     /// There are two arguments for controlling retry behaviour:
     /// - `retry_limit` is the maximum number of times that a failed request should be
     ///   retried. You can disable retries by setting this to 0.
     /// - `retry_filter` can be used to only retry requests that fail in specific ways,
     ///   and control how the retry is performed. You can disable retries by setting this
     ///   to `|_| None`, and you can ensure the same circuit is reused by setting this to
-    ///   `|_| Some(Retry::Same)` (e.g. if you require a persistent Tor client identity
-    ///   across queries).
+    ///   `|res| res.is_err().then_some(Retry::Same)` (e.g. if you require a persistent
+    ///   Tor client identity across queries).
     pub async fn http_get_json<T: DeserializeOwned>(
         &self,
         url: Uri,
         retry_limit: u8,
-        retry_filter: impl Fn(&Error) -> Option<Retry>,
+        retry_filter: impl Fn(Result<StatusCode, &Error>) -> Option<Retry>,
     ) -> Result<Response<T>, Error> {
         self.http_get(
             url,
@@ -312,11 +324,7 @@ where
     let response = sender.send_request(req).await.map_err(HttpError::from)?;
     debug!("Response status code: {}", response.status());
 
-    if response.status().is_success() {
-        Ok(response)
-    } else {
-        Err(Error::Http(HttpError::Unsuccessful(response.status())))
-    }
+    Ok(response)
 }
 
 /// Errors that can occurr while using HTTP-over-Tor.
@@ -336,6 +344,10 @@ pub enum HttpError {
     /// A TLS-specific IO error.
     Tls(io::Error),
     /// The status code indicated that the request was unsuccessful.
+    ///
+    /// This is only returned by APIs that make specific queries, such as
+    /// [`Client::get_latest_zec_to_usd_rate`]. Generic APIs like [`Client::http_get`]
+    /// will not return this error variant.
     Unsuccessful(hyper::http::StatusCode),
 }
 
@@ -414,7 +426,7 @@ mod live_network_tests {
                 .http_get_json::<serde_json::Value>(
                     "https://httpbin.org/get".parse().unwrap(),
                     3,
-                    |_| Some(Retry::Same),
+                    |res| res.is_err().then_some(Retry::Same),
                 )
                 .await
                 .unwrap();
@@ -457,7 +469,7 @@ mod live_network_tests {
                         .map_err(HttpError::from)?)
                     },
                     3,
-                    |_| Some(Retry::Same),
+                    |res| res.is_err().then_some(Retry::Same),
                 )
                 .await
                 .unwrap();
