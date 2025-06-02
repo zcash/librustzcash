@@ -1,6 +1,7 @@
 //! Types and functions for building transparent transaction components.
 
 use alloc::collections::BTreeMap;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
@@ -21,6 +22,7 @@ use {
         bundle::OutPoint,
         sighash::{SighashType, SIGHASH_ALL},
     },
+    alloc::string::ToString,
     sha2::Digest,
 };
 
@@ -30,7 +32,41 @@ pub enum Error {
     InvalidAmount,
     /// A bundle could not be built because a required signing keys was missing.
     MissingSigningKey,
-    NullDataTooLong { actual: usize, limit: usize },
+    /// Provided null data is longer than the maximum supported length
+    NullDataTooLong {
+        actual: usize,
+        limit: usize,
+    },
+    /// The number of provided external signatures does not match the number of transparent inputs.
+    SignatureCountMismatch,
+    /// The number of inputs does not match number of sighashes.
+    InputCountMismatch, // Use this for prepare_transparent_signatures
+    /// A pre-calculated sighash could not be correctly formed or was invalid.
+    SighashGeneration,
+    /// An external signature failed cryptographic verification for a specific transparent input.
+    SignatureVerificationFailed {
+        input_index: usize,
+    },
+    /// A provided external signature did not cryptographically match any available unsigned transparent input.
+    NoMatchingInputForSignature {
+        input_index: usize,
+    },
+    /// An attempt was made to apply a signature to a transparent input that had already been signed.
+    InputAlreadySigned {
+        input_index: usize,
+    },
+    /// A single provided external signature was cryptographically valid for more than one distinct transparent input.
+    AmbiguousSignature,
+    /// Not all transparent inputs that require signing received a valid signature.
+    NotAllInputsSigned,
+    /// One or more provided external signatures were not used to sign any transparent input.
+    UnusedExternalSignature {
+        input_index: usize,
+    },
+    /// An error occurred within the secp256k1 cryptographic library.
+    Secp256k1Error(String), // Stores String to satisfy PartialEq/Eq
+    /// Generic internal error during transparent builder operations.
+    InternalBuilderError(String),
 }
 
 impl fmt::Display for Error {
@@ -39,7 +75,18 @@ impl fmt::Display for Error {
             Error::InvalidAddress => write!(f, "Invalid address"),
             Error::InvalidAmount => write!(f, "Invalid amount"),
             Error::MissingSigningKey => write!(f, "Missing signing key"),
-            Error::NullDataTooLong { actual, limit } => write!(f, "provided null data is longer than the maximum supported length (actual: {}, limit: {})", actual, limit),
+            Error::NullDataTooLong { actual, limit } => write!(f, "Provided null data is longer than the maximum supported length (actual: {}, limit: {}", actual, limit),
+            Error::SignatureCountMismatch => write!(f, "The number of provided external signatures does not match the number of transparent inputs"),
+            Error::InputCountMismatch => write!(f, "The number of inputs does not match the number of sighashes"),
+            Error::SighashGeneration => write!(f, "A pre-calculated sighash could not be correctly formed or was invalid"),
+            Error::SignatureVerificationFailed { input_index } => write!(f, "External signature verification failed for transparent input at index {}", input_index),
+            Error::NoMatchingInputForSignature { input_index } => write!(f, "A provided external signature at index {} did not cryptographically match any available unsigned transparent input", input_index),
+            Error::InputAlreadySigned { input_index } => write!(f, "Transparent input at index {} has already been signed", input_index),
+            Error::AmbiguousSignature => write!(f, "A single provided external signature was cryptographically valid for more than one distinct transparent input"),
+            Error::NotAllInputsSigned => write!(f, "Not all transparent inputs that require signing received a valid signature"),
+            Error::UnusedExternalSignature { input_index } => write!(f, "External signature at index {} was not used to sign any transparent input", input_index),
+            Error::Secp256k1Error(msg) => write!(f, "Secp256k1 cryptographic library error: {}", msg),
+            Error::InternalBuilderError(msg) => write!(f, "Internal transparent builder error: {}", msg),            
         }
     }
 }
@@ -84,6 +131,17 @@ impl TransparentSigningSet {
     }
 }
 
+// Helper function within the transparent-inputs feature gate
+#[cfg(feature = "transparent-inputs")]
+fn construct_script_sig(
+    signature: &secp256k1::ecdsa::Signature,
+    pubkey: &secp256k1::PublicKey,
+) -> Script {
+    let mut sig_bytes: Vec<u8> = signature.serialize_der().to_vec();
+    sig_bytes.push(SIGHASH_ALL);
+    Script::default() << &sig_bytes[..] << &pubkey.serialize()[..]
+}
+
 // TODO: This feature gate can be removed.
 #[cfg(feature = "transparent-inputs")]
 #[derive(Debug, Clone)]
@@ -118,6 +176,21 @@ pub struct Unauthorized {
 
 impl Authorization for Unauthorized {
     type ScriptSig = ();
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub struct TransparentSignatureContext<'a, V: secp256k1::Verification = secp256k1::VerifyOnly> {
+    // Data from the original Bundle<Unauthorized>, needed to reconstruct Bundle<Authorized>
+    original_vin_unauthorized: Vec<TxIn<Unauthorized>>,
+    original_vout: Vec<TxOut>,
+    authorization_inputs: Vec<TransparentInputInfo>,
+
+    // External data references
+    sighashes: &'a [[u8; 32]],
+    secp_ctx: &'a secp256k1::Secp256k1<V>,
+
+    // Mutable state: accumulated script signatures for inputs
+    final_script_sigs: Vec<Option<Script>>,
 }
 
 impl TransparentBuilder {
@@ -286,9 +359,9 @@ impl TransparentBuilder {
         // Check 80 bytes limit.
         const MAX_OP_RETURN_RELAY_BYTES: usize = 80;
         if data.len() > MAX_OP_RETURN_RELAY_BYTES {
-            return Err(Error::NullDataTooLong{
-                actual: data.len(), 
-                limit: MAX_OP_RETURN_RELAY_BYTES
+            return Err(Error::NullDataTooLong {
+                actual: data.len(),
+                limit: MAX_OP_RETURN_RELAY_BYTES,
             });
         }
 
@@ -403,53 +476,135 @@ impl Bundle<Unauthorized> {
         })
     }
 
-    pub fn apply_external_signatures(
+    /// Prepares the bundle for staged application of external signatures.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn prepare_transparent_signatures<'a>(
         self,
-        #[cfg(feature = "transparent-inputs")] signatures: Vec<secp256k1::ecdsa::Signature>,
-    ) -> Bundle<Authorized> {
-        #[cfg(feature = "transparent-inputs")]
-        let script_sigs = {
-            assert_eq!(
-                self.authorization.inputs.len(),
-                signatures.len(),
-                "Number of signatures must match number of inputs"
-            );
+        sighashes: &'a [[u8; 32]],
+        secp_ctx: &'a secp256k1::Secp256k1<secp256k1::VerifyOnly>,
+    ) -> Result<TransparentSignatureContext<'a, secp256k1::VerifyOnly>, Error> {
+        if self.authorization.inputs.len() != sighashes.len() {
+            return Err(Error::InputCountMismatch);
+        }
 
-            // Compute the scriptSigs
-            self.authorization
-                .inputs
-                .iter()
-                .zip(signatures)
-                .map(|(info, signature)| {
-                    // For each (input info, signature) pair...
-                    // Serialize the provided signature to DER format
-                    let mut sig_bytes: Vec<u8> = signature.serialize_der().to_vec();
-                    // Append the SIGHASH_ALL byte (0x01)
-                    sig_bytes.push(SIGHASH_ALL);
+        let num_inputs = self.authorization.inputs.len();
+        Ok(TransparentSignatureContext {
+            original_vin_unauthorized: self.vin,
+            original_vout: self.vout,
+            authorization_inputs: self.authorization.inputs,
+            sighashes,
+            secp_ctx,
+            final_script_sigs: vec![None; num_inputs],
+        })
+    }
+}
 
-                    // Construct the P2PKH scriptSig: <DER sig + SIGHASH byte> <compressed pubkey>
-                    // Assumes P2PKH inputs. Needs info.pubkey which comes from TransparentInputInfo.
-                    Script::default() << &sig_bytes[..] << &info.pubkey.serialize()[..]
-                })
-        };
+#[cfg(feature = "transparent-inputs")]
+impl<'a> TransparentSignatureContext<'a, secp256k1::VerifyOnly> {
+    /// Appends a new batch of external signatures to the transparent inputs.
+    ///
+    /// Each signature will be applied to the one input for which it is valid. An error
+    /// will be returned if the signature is not valid for any inputs, or if it is valid
+    /// for more than one input.
+    pub fn append_external_signatures(
+        &mut self,
+        signatures: &[secp256k1::ecdsa::Signature],
+    ) -> Result<(), Error> {
+        if signatures.is_empty() {
+            return Ok(());
+        }
 
-        #[cfg(not(feature = "transparent-inputs"))]
-        let script_sigs = core::iter::empty::<Script>();
+        let num_inputs = self.authorization_inputs.len();
+        if num_inputs == 0 {
+            return Err(Error::NoMatchingInputForSignature { input_index: 0 });
+        }
 
-        // Construct the new authorized Bundle
-        Bundle {
+        let num_sigs = signatures.len();
+        let mut sig_is_used = vec![false; num_sigs];
+
+        // Iterate through each input that is not yet signed from previous calls
+        for input_idx in 0..num_inputs {
+            if self.final_script_sigs[input_idx].is_some() {
+                continue;
+            }
+
+            let input_info = &self.authorization_inputs[input_idx];
+            let sighash_msg = secp256k1::Message::from_digest_slice(&self.sighashes[input_idx][..])
+                .map_err(|e| Error::Secp256k1Error(e.to_string()))?;
+
+            let mut matching_sig_indices: Vec<usize> = Vec::new();
+            for (sig_idx, sig) in signatures.iter().enumerate() {
+                if self
+                    .secp_ctx
+                    .verify_ecdsa(&sighash_msg, sig, &input_info.pubkey)
+                    .is_ok()
+                {
+                    if sig_is_used[sig_idx] {
+                        // This signature was already used for a previous input_idx in this append call,
+                        // and it also matches this current input_idx. This is "one signature, multiple inputs".
+                        return Err(Error::AmbiguousSignature);
+                    }
+                    matching_sig_indices.push(sig_idx);
+                }
+            }
+
+            if matching_sig_indices.is_empty() {
+                // Remains unsigned for now.
+                continue;
+            } else if matching_sig_indices.len() == 1 {
+                let an_assignable_sig_idx = matching_sig_indices[0];
+                self.final_script_sigs[input_idx] = Some(construct_script_sig(
+                    &signatures[an_assignable_sig_idx],
+                    &input_info.pubkey,
+                ));
+                sig_is_used[an_assignable_sig_idx] = true;
+            } else {
+                // Multiple signatures for one input.
+                return Err(Error::AmbiguousSignature);
+            }
+        }
+
+        // Verify if all provided signatures were used.
+        for (sig_idx, used) in sig_is_used.iter().enumerate() {
+            if !*used {
+                return Err(Error::NoMatchingInputForSignature {
+                    input_index: sig_idx,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Finalizes the signing process and attempts to build the `Bundle<Authorized>`.
+    ///
+    /// Returns an error if any signatures are missing.
+    pub fn finalize_signatures(self) -> Result<Bundle<Authorized>, Error> {
+        let mut fully_signed_scripts = Vec::with_capacity(self.final_script_sigs.len());
+        for script_opt in self.final_script_sigs.iter() {
+            match script_opt {
+                Some(script) => fully_signed_scripts.push(script.clone()),
+                None => {
+                    if !self.authorization_inputs.is_empty() {
+                        return Err(Error::NotAllInputsSigned);
+                    }
+                }
+            }
+        }
+
+        Ok(Bundle {
             vin: self
-                .vin // Take the original vin (which has empty script_sig fields)
+                .original_vin_unauthorized
                 .iter()
-                .zip(script_sigs) // Pair the old TxIn with the newly computed scriptSig
-                .map(|(txin, sig)| TxIn {
-                    prevout: txin.prevout.clone(),
-                    script_sig: sig, // Assign the computed scriptSig
-                    sequence: txin.sequence,
+                .zip(fully_signed_scripts)
+                .map(|(txin_unauth, sig_script)| TxIn {
+                    prevout: txin_unauth.prevout.clone(),
+                    script_sig: sig_script,
+                    sequence: txin_unauth.sequence,
                 })
                 .collect(),
-            vout: self.vout, // Keep the original vout
+            vout: self.original_vout,
             authorization: Authorized,
-        }
+        })
     }
 }

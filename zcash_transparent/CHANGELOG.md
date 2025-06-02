@@ -9,7 +9,22 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `zcash_transparent::builder::TransparentBuilder::add_null_data_output`
-- `zcash_transparent::bundle::Bundle<Unauthorized>::apply_external_signatures`
+- `zcash_transparent::builder::TransparentSignatureContext` struct for staged application of external signatures.
+- `zcash_transparent::builder::Bundle<Unauthorized>::prepare_transparent_signatures` to initialize the signing context.
+- `zcash_transparent::builder::TransparentSignatureContext::append_external_signatures` to add signatures to the context.
+- `zcash_transparent::builder::TransparentSignatureContext::finalize_signatures` to produce an authorized bundle from the context.
+- New error variants to `zcash_transparent::builder::Error`:
+  - `SignatureCountMismatch`
+  - `InputCountMismatch`
+  - `SighashGeneration`
+  - `SignatureVerificationFailed { input_index: usize }`
+  - `NoMatchingInputForSignature { input_index: usize }`
+  - `InputAlreadySigned { input_index: usize }`
+  - `AmbiguousSignature`
+  - `NotAllInputsSigned`
+  - `UnusedExternalSignature { input_index: usize }`
+  - `Secp256k1Error(String)`
+  - `InternalBuilderError(String)`
 
 ### Changed
 - Added `NullDataTooLong` variant to public `Error` enum
