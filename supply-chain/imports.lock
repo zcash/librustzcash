@@ -85,11 +85,11 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.pczt]]
-version = "0.2.1"
-when = "2025-03-05"
-user-id = 6289
-user-login = "str4d"
-user-name = "Jack Grigg"
+version = "0.3.0"
+when = "2025-06-02"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.sapling-crypto]]
 version = "0.5.0"
@@ -281,22 +281,22 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_address]]
-version = "0.7.1"
-when = "2025-05-07"
+version = "0.8.0"
+when = "2025-06-02"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_backend]]
-version = "0.18.0"
-when = "2025-03-21"
+version = "0.19.0"
+when = "2025-06-02"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_sqlite]]
-version = "0.16.2"
-when = "2025-04-03"
+version = "0.17.0"
+when = "2025-06-02"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -323,29 +323,29 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.zcash_keys]]
-version = "0.8.1"
-when = "2025-05-10"
+version = "0.9.0"
+when = "2025-06-02"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_primitives]]
-version = "0.22.0"
-when = "2025-02-21"
+version = "0.23.0"
+when = "2025-06-02"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_proofs]]
-version = "0.22.0"
-when = "2025-02-21"
+version = "0.23.0"
+when = "2025-06-02"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_protocol]]
-version = "0.5.1"
-when = "2025-03-21"
+version = "0.5.2"
+when = "2025-06-02"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -358,8 +358,8 @@ user-login = "daira"
 user-name = "Daira-Emma Hopwood"
 
 [[publisher.zcash_transparent]]
-version = "0.2.3"
-when = "2025-04-04"
+version = "0.3.0"
+when = "2025-06-02"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -372,8 +372,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zip321]]
-version = "0.3.0"
-when = "2025-02-21"
+version = "0.4.0"
+when = "2025-06-02"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
