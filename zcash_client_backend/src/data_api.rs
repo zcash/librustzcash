@@ -152,6 +152,7 @@ pub enum NullifierQuery {
 #[derive(Debug, Clone, Copy)]
 pub enum TargetValue {
     AtLeast(Zatoshis),
+    MaxSpendable,
 }
 
 /// Balance information for a value within a single pool in an account.
@@ -761,6 +762,27 @@ pub struct SpendableNotes<NoteRef> {
     sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
     #[cfg(feature = "orchard")]
     orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
+}
+
+impl<R> SpendableNotes<R> {
+    pub fn total(&self) -> Zatoshis {
+        let total = self.sapling.iter().fold(Zatoshis::ZERO, |acc, n| {
+            (acc + Zatoshis::try_from(n.note().value().inner())
+                .expect("Note MUST have an in range value"))
+            .expect("Balance cannot overflow MAX_MONEY")
+        });
+
+        #[cfg(feature = "orchard")]
+        let total = (total
+            + self.orchard.iter().fold(Zatoshis::ZERO, |acc, n| {
+                (acc + Zatoshis::try_from(n.note().value().inner())
+                    .expect("Note MUST have an in range value"))
+                .expect("Balance cannot overflow MAX_MONEY")
+            }))
+        .expect("Balance cannot overflow MAX_MONEY");
+
+        total
+    }
 }
 
 /// A type describing the mined-ness of transactions that should be returned in response to a
