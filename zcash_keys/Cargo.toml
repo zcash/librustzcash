@@ -37,6 +37,7 @@ core2.workspace = true
 
 # - Transparent protocols
 bip32 = { workspace = true, optional = true }
+secp256k1 = { workspace = true, optional = true, default-features = false }
 transparent.workspace = true
 
 # - Logging and metrics
@@ -74,6 +75,9 @@ proptest.workspace = true
 rand_core.workspace = true
 orchard = { workspace = true, features = ["circuit"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
+rand_chacha.workspace = true
+rand.workspace = true
+secp256k1 = { workspace = true, features = ["rand"] }
 
 [features]
 default = ["std"]
@@ -81,8 +85,13 @@ std = ["dep:document-features"]
 
 ## Enables use of transparent key parts and addresses
 transparent-inputs = [
-  "dep:bip32", 
-  "transparent/transparent-inputs", 
+  "dep:bip32",
+  "transparent/transparent-inputs",
+]
+
+## Enables use of zcashd-derived secp256k1 secret key encodings.
+transparent-key-encoding = [
+  "transparent-inputs", "dep:secp256k1"
 ]
 
 ## Enables use of Orchard key parts and addresses

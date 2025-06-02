@@ -6,6 +6,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::keys::transparent` under a new `transparent-key-encoding`
+  feature flag.
+
 ## [0.9.0] - 2025-05-30
 
 ### Added
