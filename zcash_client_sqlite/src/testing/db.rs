@@ -30,8 +30,7 @@ use zcash_primitives::{
     transaction::{Transaction, TxId},
 };
 use zcash_protocol::{
-    consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo, value::Zatoshis,
-    ShieldedProtocol,
+    consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo, ShieldedProtocol,
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
