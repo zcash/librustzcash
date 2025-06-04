@@ -179,6 +179,10 @@ bip0039 = { version = "0.12" }
 # Workaround for https://anonticket.torproject.org/user/projects/arti/issues/pending/4028/
 time-core = "=0.1.2"
 
+# TODO Remove this patch once the the upstream changes land in a release.
+[patch.crates-io]
+sapling-crypto = { git = "https://github.com/zcash/sapling-crypto.git", branch = "access-inner-param" }
+
 [workspace.metadata.release]
 consolidate-commits = false
 pre-release-commit-message = "{{crate_name}} {{version}}"
