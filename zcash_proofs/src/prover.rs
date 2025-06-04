@@ -21,6 +21,7 @@ use crate::{default_params_folder, SAPLING_OUTPUT_NAME, SAPLING_SPEND_NAME};
 
 /// An implementation of [`SpendProver`] and [`OutputProver`] using Sapling Spend and
 /// Output parameters from locally-accessible paths.
+#[derive(Clone)]
 pub struct LocalTxProver {
     spend_params: SpendParameters,
     output_params: OutputParameters,
@@ -137,6 +138,11 @@ impl LocalTxProver {
             self.spend_params.verifying_key(),
             self.output_params.verifying_key(),
         )
+    }
+
+    /// Exposes the spend and output parameters.
+    pub fn params(self) -> (SpendParameters, OutputParameters) {
+        (self.spend_params, self.output_params)
     }
 }
 
