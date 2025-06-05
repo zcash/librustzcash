@@ -14,6 +14,7 @@ use rusqlite::types::Value;
 use rusqlite::OptionalExtension;
 use rusqlite::{named_params, Connection, Row};
 
+use tracing::debug;
 use transparent::keys::{NonHardenedChildRange, TransparentKeyScope};
 use transparent::{
     address::{Script, TransparentAddress},
@@ -1067,7 +1068,7 @@ pub(crate) fn add_transparent_account_balances(
 ///
 /// Returns `true` if the UTXO was known to the wallet.
 pub(crate) fn mark_transparent_utxo_spent(
-    conn: &rusqlite::Connection,
+    conn: &rusqlite::Transaction,
     spent_in_tx: TxRef,
     outpoint: &OutPoint,
 ) -> Result<bool, SqliteClientError> {
@@ -1122,6 +1123,43 @@ pub(crate) fn mark_transparent_utxo_spent(
     }
 
     Ok(affected_rows > 0)
+}
+
+/// Sets the max observed unspent height for all unspent transparent outputs received at the given
+/// address to at least the given height (calling this method will not cause the max observed
+/// unspent height to decrease).
+pub(crate) fn update_observed_unspent_heights<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    address: TransparentAddress,
+    checked_at: BlockHeight,
+) -> Result<(), SqliteClientError> {
+    let addr_str = address.encode(params);
+    debug!(
+        "Setting max_observed_unspent_height to {} for address {}",
+        checked_at, addr_str
+    );
+
+    let mut stmt_update_observed_unspent = conn.prepare(
+        "UPDATE transparent_received_outputs AS tro
+         SET max_observed_unspent_height = CASE
+            WHEN max_observed_unspent_height IS NULL THEN :checked_at
+            WHEN max_observed_unspent_height < :checked_at THEN :checked_at
+            ELSE max_observed_unspent_height
+         END
+         WHERE address = :addr_str
+         AND tro.id NOT IN (
+             SELECT transparent_received_output_id
+             FROM transparent_received_output_spends
+         )",
+    )?;
+
+    stmt_update_observed_unspent.execute(named_params![
+        ":addr_str": addr_str,
+        ":checked_at": u32::from(checked_at)
+    ])?;
+
+    Ok(())
 }
 
 /// Adds the given received UTXO to the datastore.
@@ -1212,34 +1250,49 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
     let chain_tip_height =
         super::chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
 
+    debug!(
+        "Generating transaction data requests as of chain tip height {}",
+        chain_tip_height
+    );
+
     // We cannot construct address-based transaction data requests for the case where we cannot
     // determine the height at which to begin, so we require that either the target height or mined
     // height be set.
     let mut spend_requests_stmt = conn.prepare_cached(
         "SELECT
             ssq.address,
-            IFNULL(t.target_height, t.mined_height)
+            COALESCE(tro.max_observed_unspent_height, t.mined_height, t.target_height)
          FROM transparent_spend_search_queue ssq
          JOIN transactions t ON t.id_tx = ssq.transaction_id
-         WHERE t.target_height IS NOT NULL
-         OR t.mined_height IS NOT NULL",
+         JOIN transparent_received_outputs tro ON tro.transaction_id = t.id_tx
+         LEFT OUTER JOIN transparent_received_output_spends tros
+            ON tros.transparent_received_output_id = tro.id
+         WHERE tros.transaction_id IS NULL
+         AND (t.target_height IS NOT NULL OR t.mined_height IS NOT NULL)
+         AND (
+             tro.max_observed_unspent_height IS NULL
+             OR tro.max_observed_unspent_height < :chain_tip_height
+         )",
     )?;
 
-    let spend_search_rows = spend_requests_stmt.query_and_then([], |row| {
-        let address = TransparentAddress::decode(params, &row.get::<_, String>(0)?)?;
-        let block_range_start = BlockHeight::from(row.get::<_, u32>(1)?);
-        let max_end_height = block_range_start + DEFAULT_TX_EXPIRY_DELTA + 1;
-        Ok::<TransactionDataRequest, SqliteClientError>(
-            TransactionDataRequest::TransactionsInvolvingAddress {
-                address,
-                block_range_start,
-                block_range_end: Some(std::cmp::min(chain_tip_height + 1, max_end_height)),
-                request_at: None,
-                tx_status_filter: TransactionStatusFilter::Mined,
-                output_status_filter: OutputStatusFilter::All,
-            },
-        )
-    })?;
+    let spend_search_rows = spend_requests_stmt.query_and_then(
+        named_params![":chain_tip_height": u32::from(chain_tip_height)],
+        |row| {
+            let address = TransparentAddress::decode(params, &row.get::<_, String>(0)?)?;
+            let block_range_start = BlockHeight::from(row.get::<_, u32>(1)?);
+            let max_end_height = block_range_start + DEFAULT_TX_EXPIRY_DELTA + 1;
+            Ok::<TransactionDataRequest, SqliteClientError>(
+                TransactionDataRequest::transactions_involving_address(
+                    address,
+                    block_range_start,
+                    Some(std::cmp::min(chain_tip_height + 1, max_end_height)),
+                    None,
+                    TransactionStatusFilter::Mined,
+                    OutputStatusFilter::All,
+                ),
+            )
+        },
+    )?;
 
     // Since we don't want to interpret funds that are temporarily held by an ephemeral address in
     // the course of creating ZIP 320 transaction pair as belonging to the wallet, we will perform
@@ -1276,16 +1329,16 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
                 .transpose()?;
 
             Ok::<TransactionDataRequest, SqliteClientError>(
-                TransactionDataRequest::TransactionsInvolvingAddress {
+                TransactionDataRequest::transactions_involving_address(
                     address,
                     // We don't want these queries to leak anything about when the wallet created
                     // or exposed the address, so we just query for all UTXOs for the address.
-                    block_range_start: BlockHeight::from(0),
-                    block_range_end: None,
+                    BlockHeight::from(0),
+                    None,
                     request_at,
-                    tx_status_filter: TransactionStatusFilter::All,
-                    output_status_filter: OutputStatusFilter::Unspent,
-                },
+                    TransactionStatusFilter::All,
+                    OutputStatusFilter::Unspent,
+                ),
             )
         },
     )?;
@@ -1411,7 +1464,7 @@ pub(crate) fn find_account_uuid_for_transparent_address<P: consensus::Parameters
 /// transaction we created, that we do not yet know to have been mined.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn put_transparent_output<P: consensus::Parameters>(
-    conn: &rusqlite::Connection,
+    conn: &rusqlite::Transaction,
     params: &P,
     output: &WalletTransparentOutput,
     known_unspent: bool,
