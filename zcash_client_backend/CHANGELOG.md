@@ -20,6 +20,8 @@ and this library adheres to Rust's notion of
   - `AddressSource`
   - `AddressInfo::source` replaces `AddressInfo::diversifier_index`
   - `wallet::SpendingKeys`
+  - `TransactionsInvolvingAddress`
+  - `TransactionDataRequest::transactions_involving_address`
 
 ### Changed
 - `zcash_client_backend::data_api`:
@@ -34,6 +36,12 @@ and this library adheres to Rust's notion of
     of a `DiversifierIndex`.
   - `WalletWrite` has added method `import_standalone_transparent_pubkey`
     when the `transparent-inputs` feature flag is enabled.
+  - `WalletWrite` has added method `notify_address_checked` when the
+    `transparent-inputs` feature flag is enabled.
+  - The `TransactionDataRequest::TransactionsInvolvingAddress` variant is no
+    longer structured, but takes a `TransactionsInvolvingAddress` struct value
+    as its payload. This permits the `TransactionsInvolvingAddress` type
+    to be used independent of the rest of the `TransactionDataRequest` variants.
 - The following `zcash_client_backend::data_api::wallet` methods have changed;
   they now each take a `SpendingKeys` value instead of a `UnifiedSpendingKey`.
   This permits the spending of funds controlled by standalone keys not
