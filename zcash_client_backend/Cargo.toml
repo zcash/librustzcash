@@ -134,6 +134,11 @@ webpki-roots = { workspace = true, optional = true }
 # Workaround for https://anonticket.torproject.org/user/projects/arti/issues/pending/4028/
 time-core.workspace = true
 
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Boilerplate
+getset.workspace = true
+
 [build-dependencies]
 tonic-build = { workspace = true, features = ["prost"] }
 which = "7"

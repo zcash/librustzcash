@@ -101,7 +101,9 @@ use {
     crate::wallet::transparent::ephemeral::schedule_ephemeral_address_checks,
     ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     std::collections::BTreeSet,
-    zcash_client_backend::wallet::TransparentAddressMetadata,
+    zcash_client_backend::{
+        data_api::TransactionsInvolvingAddress, wallet::TransparentAddressMetadata,
+    },
     zcash_keys::encoding::AddressCodec,
     zcash_protocol::value::Zatoshis,
 };
@@ -1847,6 +1849,32 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| wallet::set_transaction_status(wdb.conn.0, txid, status))
     }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn notify_address_checked(
+        &mut self,
+        request: TransactionsInvolvingAddress,
+        as_of_height: BlockHeight,
+    ) -> Result<(), Self::Error> {
+        if let Some(requested_end) = request.block_range_end() {
+            // block_end_height is end-exclusive
+            if as_of_height != requested_end - 1 {
+                return Err(SqliteClientError::NotificationMismatch {
+                    expected: requested_end - 1,
+                    actual: as_of_height,
+                });
+            }
+        }
+
+        self.transactionally(|wdb| {
+            wallet::transparent::update_observed_unspent_heights(
+                wdb.conn.0,
+                &wdb.params,
+                request.address(),
+                as_of_height,
+            )
+        })
+    }
 }
 
 pub(crate) type SaplingShardStore<C> = SqliteShardStore<C, sapling::Node, SAPLING_SHARD_HEIGHT>;
@@ -2760,19 +2788,19 @@ mod tests {
         let mut check_times = BTreeSet::new();
         for (addr, _) in ephemeral_addrs {
             let has_valid_request = data_requests.iter().any(|req| match req {
-                TransactionDataRequest::TransactionsInvolvingAddress {
-                    address,
-                    request_at: Some(t),
-                    ..
-                } => {
-                    *address == addr && *t > base_time && {
-                        let t_delta = t.duration_since(base_time).unwrap();
-                        // This is an imprecise check; the objective of the randomized time
-                        // selection is that all ephemeral address checks be performed within a
-                        // day, and that their check times be distinct.
-                        let result = t_delta < day && !check_times.contains(t);
-                        check_times.insert(*t);
-                        result
+                TransactionDataRequest::TransactionsInvolvingAddress(req) => {
+                    if let Some(t) = req.request_at() {
+                        req.address() == addr && t > base_time && {
+                            let t_delta = t.duration_since(base_time).unwrap();
+                            // This is an imprecise check; the objective of the randomized time
+                            // selection is that all ephemeral address checks be performed within a
+                            // day, and that their check times be distinct.
+                            let result = t_delta < day && !check_times.contains(&t);
+                            check_times.insert(t);
+                            result
+                        }
+                    } else {
+                        false
                     }
                 }
                 _ => false,

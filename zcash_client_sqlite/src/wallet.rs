@@ -81,7 +81,7 @@ use incrementalmerkletree::{Marking, Retention};
 use rusqlite::{self, named_params, params, Connection, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use zcash_address::ZcashAddress;
@@ -3268,6 +3268,8 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     d_tx: DecryptedTransaction<AccountUuid>,
     #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
 ) -> Result<(), SqliteClientError> {
+    info!("Storing decrypted transaction with id {}", d_tx.tx().txid());
+
     let funding_accounts = get_funding_accounts(conn, d_tx.tx())?;
 
     // TODO(#1305): Correctly track accounts that fund each transaction output.

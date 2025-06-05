@@ -6320,6 +6320,7 @@ dependencies = [
  "dynosaur",
  "fs-mistrust",
  "futures-util",
+ "getset",
  "group",
  "gumdrop",
  "hex",

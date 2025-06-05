@@ -238,6 +238,10 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::Scheduling(e) => {
             WalletMigrationError::Other(Box::new(SqliteClientError::Scheduling(e)))
         }
+        #[cfg(feature = "transparent-inputs")]
+        SqliteClientError::NotificationMismatch { .. } => {
+            unreachable!("we don't service transaction data requests in migrations")
+        }
     }
 }
 

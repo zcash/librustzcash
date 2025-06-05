@@ -172,6 +172,12 @@ CREATE TABLE blocks (
 ///   foreign key constraint on `block` prevents that column from being populated prior to complete
 ///   scanning of the block. This is constrained to be equal to the `block` column if `block` is
 ///   non-null.
+/// - `tx_index`: the index of the transaction within the block.
+/// - `expiry_height`: stores the maximum height at which the transaction may be mined, if known.
+/// - `raw`: the original serialized byte representation of the transaction, if it has been
+///   retrieved.
+/// - `fee`: the fee paid to send the transaction, if known. This should be present for all
+///   transactions constructed by this wallet.
 /// - `target_height`: stores the target height for which the transaction was constructed, if
 ///   known. This will ordinarily be null for transactions discovered via chain scanning; it
 ///   will only be set for transactions created using this wallet specifically, and not any
@@ -359,11 +365,8 @@ CREATE TABLE orchard_received_note_spends (
 ///   transaction.
 /// - `script`: The full txout script
 /// - `value_zat`: The value of the TXO in zatoshis
-/// - `max_observed_unspent_height`: The maximum block height at which this TXO was either
-///   observed to be a member of the UTXO set at the start of the block, or observed
-///   to be an output of a transaction mined in the block. This is intended to be used to
-///   determine when the TXO is no longer a part of the UTXO set, in the case that the
-///   transaction that spends it is not detected by the wallet.
+/// - `max_observed_unspent_height`: The maximum block height at which this TXO was observed to be
+///   a member of the UTXO set as of the end of the block.
 /// - `address_id`: a foreign key to the address that this note was sent to; non-null because
 ///   we can only find transparent outputs for known addresses (and therefore we must record
 ///   both internal and external addresses in the `addresses` table).
