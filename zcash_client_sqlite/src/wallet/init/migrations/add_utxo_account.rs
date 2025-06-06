@@ -143,7 +143,12 @@ fn get_transparent_receivers<P: consensus::Parameters>(
 
     while let Some(row) = rows.next()? {
         let ua_str: String = row.get(0)?;
-        let di = decode_diversifier_index_be(&row.get::<_, Vec<u8>>(1)?)?;
+        let di = decode_diversifier_index_be(row.get(1)?)?.ok_or_else(|| {
+            SqliteClientError::CorruptedData(
+                "Only derived (not imported) addresses are supported as of this migration."
+                    .to_owned(),
+            )
+        })?;
 
         let ua = Address::decode(params, &ua_str)
             .ok_or_else(|| {
