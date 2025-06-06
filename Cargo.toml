@@ -214,6 +214,6 @@ debug = true
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
-  'cfg(zcash_unstable, values("zfuture", "nu7"))',
+  'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))',
   'cfg(live_network_tests)',
 ] }

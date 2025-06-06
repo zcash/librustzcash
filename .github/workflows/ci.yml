@@ -19,6 +19,7 @@ jobs:
           - Sapling-only
           - Orchard
           - all-pools
+          - NU6.1
           - NU7
 
         include:
@@ -31,6 +32,9 @@ jobs:
             extra_flags: orchard
           - state: all-pools
             extra_flags: orchard transparent-inputs
+          - state: NU6.1
+            extra_flags: orchard transparent-inputs
+            rustflags: '--cfg zcash_unstable="nu6.1"'
           - state: NU7
             extra_flags: orchard transparent-inputs
             rustflags: '--cfg zcash_unstable="nu7"'
@@ -79,6 +83,7 @@ jobs:
           - Sapling-only
           - Orchard
           - all-pools
+          - NU6.1
           - NU7
 
         include:
@@ -93,11 +98,16 @@ jobs:
             extra_flags: orchard
           - state: all-pools
             extra_flags: orchard transparent-inputs
+          - state: NU6.1
+            extra_flags: orchard transparent-inputs
+            rustflags: '--cfg zcash_unstable="nu6.1"'
           - state: NU7
             extra_flags: orchard transparent-inputs
             rustflags: '--cfg zcash_unstable="nu7"'
 
         exclude:
+          - target: macOS
+            state: NU6.1
           - target: macOS
             state: NU7
 
@@ -144,6 +154,7 @@ jobs:
           - Sapling-only
           - Orchard
           - all-pools
+          - NU6.1
           - NU7
 
         include:
@@ -156,6 +167,9 @@ jobs:
             extra_flags: orchard
           - state: all-pools
             extra_flags: orchard transparent-inputs
+          - state: NU6.1
+            extra_flags: orchard transparent-inputs
+            rustflags: '--cfg zcash_unstable="nu6.1"'
           - state: NU7
             extra_flags: orchard transparent-inputs
             rustflags: '--cfg zcash_unstable="nu7"'
