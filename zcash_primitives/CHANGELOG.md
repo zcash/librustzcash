@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_transaction::builder::Builder::add_transparent_null_data_output`
+
 ## [0.23.0] - 2025-05-30
 
 ### Changed
