@@ -47,6 +47,7 @@ tracing.workspace = true
 # - Serialization
 bitflags.workspace = true
 byteorder.workspace = true
+hex.workspace = true
 nonempty.workspace = true
 prost.workspace = true
 group.workspace = true

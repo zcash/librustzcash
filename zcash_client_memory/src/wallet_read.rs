@@ -657,10 +657,18 @@ impl<P: consensus::Parameters> WalletRead for MemoryWalletDb<P> {
         &self,
         account_id: Self::AccountId,
         _include_change: bool,
+        _include_standalone: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         let account = self
             .get_account(account_id)?
             .ok_or(Error::AccountUnknown(account_id))?;
+
+        if _include_change {
+            unimplemented!("include_change is not yet supported");
+        }
+        if _include_standalone {
+            unimplemented!("include_standalone is not yet supported");
+        }
 
         let t_addresses = account
             .addresses()
