@@ -305,11 +305,11 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     build_config: BuildConfig,
     target_height: BlockHeight,
     expiry_height: BlockHeight,
+    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+    zip233_amount: Zatoshis,
     transparent_builder: TransparentBuilder,
     sapling_builder: Option<sapling::builder::Builder>,
     orchard_builder: Option<orchard::builder::Builder>,
-    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-    zip233_amount: Zatoshis,
     #[cfg(zcash_unstable = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(zcash_unstable = "zfuture"))]
@@ -390,11 +390,11 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             build_config,
             target_height,
             expiry_height: target_height + DEFAULT_TX_EXPIRY_DELTA,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            zip233_amount: Zatoshis::ZERO,
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder,
             orchard_builder,
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            zip233_amount: Zatoshis::ZERO,
             #[cfg(zcash_unstable = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]
@@ -419,11 +419,11 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             build_config: self.build_config,
             target_height: self.target_height,
             expiry_height: self.expiry_height,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            zip233_amount: self.zip233_amount,
             transparent_builder: self.transparent_builder,
             sapling_builder: self.sapling_builder,
             orchard_builder: self.orchard_builder,
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            zip233_amount: self.zip233_amount,
             tze_builder: self.tze_builder,
             _progress_notifier,
         }
@@ -527,7 +527,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         self.transparent_builder.add_output(to, value)
     }
 
-    /// Returns the sum of the transparent, Sapling, Orchard, and TZE value balances.
+    /// Returns the sum of the transparent, Sapling, Orchard, zip233_amount and TZE value balances.
     fn value_balance(&self) -> Result<ZatBalance, BalanceError> {
         let value_balances = [
             self.transparent_builder.value_balance()?,
@@ -804,12 +804,12 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             consensus_branch_id: BranchId::for_height(&self.params, self.target_height),
             lock_time: 0,
             expiry_height: self.expiry_height,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            zip233_amount: self.zip233_amount,
             transparent_bundle,
             sprout_bundle: None,
             sapling_bundle,
             orchard_bundle,
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            zip233_amount: self.zip233_amount,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
         };
@@ -882,12 +882,12 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             consensus_branch_id: unauthed_tx.consensus_branch_id,
             lock_time: unauthed_tx.lock_time,
             expiry_height: unauthed_tx.expiry_height,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            zip233_amount: self.zip233_amount,
             transparent_bundle,
             sprout_bundle: unauthed_tx.sprout_bundle,
             sapling_bundle,
             orchard_bundle,
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            zip233_amount: self.zip233_amount,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
         };
@@ -1125,10 +1125,10 @@ mod tests {
             },
             target_height: sapling_activation_height,
             expiry_height: sapling_activation_height + DEFAULT_TX_EXPIRY_DELTA,
-            transparent_builder: TransparentBuilder::empty(),
-            sapling_builder: None,
             #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
             zip233_amount: Zatoshis::ZERO,
+            transparent_builder: TransparentBuilder::empty(),
+            sapling_builder: None,
             #[cfg(zcash_unstable = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(zcash_unstable = "zfuture"))]

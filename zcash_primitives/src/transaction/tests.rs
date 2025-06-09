@@ -25,6 +25,9 @@ use super::components::tze;
 #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
 use crate::transaction::TxVersion;
 
+#[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+use super::sighash_v6::v6_signature_hash;
+
 #[test]
 fn tx_read_write() {
     let data = &self::data::tx_read_write::TX_READ_WRITE;
@@ -58,7 +61,7 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
         txo.orchard_bundle.as_ref().map(|v| *v.value_balance())
     );
     #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-    if tx.version == TxVersion::V6 {
+    if tx.version >= TxVersion::V6 {
         prop_assert_eq!(tx.zip233_amount, txo.zip233_amount);
     }
     Ok(())
@@ -276,12 +279,12 @@ fn zip_0244() {
             txdata.consensus_branch_id(),
             txdata.lock_time(),
             txdata.expiry_height(),
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            txdata.zip233_amount,
             test_bundle,
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            txdata.zip233_amount,
         );
         #[cfg(zcash_unstable = "zfuture")]
         let tdata = TransactionData::from_parts_zfuture(
@@ -289,12 +292,12 @@ fn zip_0244() {
             txdata.consensus_branch_id(),
             txdata.lock_time(),
             txdata.expiry_height(),
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            txdata.zip233_amount,
             test_bundle,
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            txdata.zip233_amount,
             txdata.tze_bundle().cloned(),
         );
         (tdata, txdata.digest(TxIdDigester))
@@ -438,11 +441,11 @@ fn zip_0233() {
             txdata.consensus_branch_id(),
             txdata.lock_time(),
             txdata.expiry_height(),
+            txdata.zip233_amount,
             test_bundle,
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
-            txdata.zip233_amount,
         );
 
         (tdata, txdata.digest(TxIdDigester))
@@ -452,7 +455,7 @@ fn zip_0233() {
         let (txdata, txid_parts) = to_test_txdata(&tv);
 
         assert_eq!(
-            v5_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),
+            v6_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),
             tv.sighash_shielded
         );
     }

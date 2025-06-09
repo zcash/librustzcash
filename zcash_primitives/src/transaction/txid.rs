@@ -237,7 +237,9 @@ fn hash_header_txid_data(
     h.write_u32_le(expiry_height.into()).unwrap();
 
     #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-    h.write_u64_le((*zip233_amount).into()).unwrap();
+    if version >= TxVersion::V6 {
+        h.write_u64_le((*zip233_amount).into()).unwrap();
+    }
 
     h.finalize()
 }

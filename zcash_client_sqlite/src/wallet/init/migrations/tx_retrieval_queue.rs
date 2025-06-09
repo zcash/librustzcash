@@ -285,6 +285,8 @@ mod tests {
             BranchId::Nu5,
             0,
             12345678.into(),
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            Zatoshis::ZERO,
             Some(transparent::bundle::Bundle {
                 vin: vec![TxIn {
                     prevout: OutPoint::fake(),
@@ -300,8 +302,6 @@ mod tests {
             None,
             None,
             None,
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            Zatoshis::ZERO,
         ));
 
         // Check that we can apply this migration.

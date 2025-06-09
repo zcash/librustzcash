@@ -84,6 +84,13 @@ pub fn read_v5_bundle<R: Read>(
     }
 }
 
+#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+pub fn read_v6_bundle<R: Read>(
+    reader: R,
+) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
+    read_v5_bundle(reader)
+}
+
 pub fn read_value_commitment<R: Read>(mut reader: R) -> io::Result<ValueCommitment> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
@@ -214,6 +221,14 @@ pub fn write_v5_bundle<W: Write>(
     }
 
     Ok(())
+}
+
+#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+pub fn write_v6_bundle<W: Write>(
+    bundle: Option<&orchard::Bundle<Authorized, ZatBalance>>,
+    writer: W,
+) -> io::Result<()> {
+    write_v5_bundle(bundle, writer)
 }
 
 pub fn write_value_commitment<W: Write>(mut writer: W, cv: &ValueCommitment) -> io::Result<()> {
