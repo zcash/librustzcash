@@ -29,6 +29,10 @@ and this library adheres to Rust's notion of
     as its argument instead of its parts. This minimizes the API complexity
     that would otherwise arise due to the presence of the `zcashd-compat`
     feature flag.
+  - `WalletRead::get_transparent_receivers` now takes an additional
+    `include_standalone` argument, which can be used to indicate that
+    standalone (imported) transparent addresses should be included in the
+    result.
   - `Zip32Derivation::new` arguments have changed when the `zcashd-compat`
     feature is enabled; in this circumstance, `new` takes an additional
     `legacy_address_index` argument.

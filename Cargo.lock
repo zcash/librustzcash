@@ -6431,6 +6431,7 @@ dependencies = [
  "byteorder",
  "document-features",
  "group",
+ "hex",
  "incrementalmerkletree",
  "incrementalmerkletree-testing",
  "jubjub",
