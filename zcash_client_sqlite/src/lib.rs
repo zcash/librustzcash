@@ -939,18 +939,22 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         &self,
         account: Self::AccountId,
         include_change: bool,
+        include_standalone: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
-        let key_scopes: &[KeyScope] = if include_change {
-            &[KeyScope::EXTERNAL, KeyScope::INTERNAL]
-        } else {
-            &[KeyScope::EXTERNAL]
-        };
+        let key_scopes = Some(KeyScope::EXTERNAL)
+            .into_iter()
+            .chain(include_change.then_some(KeyScope::INTERNAL))
+            .chain(
+                (include_standalone && cfg!(feature = "transparent-key-import"))
+                    .then_some(KeyScope::Foreign),
+            )
+            .collect::<Vec<_>>();
 
         wallet::transparent::get_transparent_receivers(
             self.conn.borrow(),
             &self.params,
             account,
-            key_scopes,
+            &key_scopes[..],
         )
     }
 
@@ -2855,7 +2859,7 @@ mod tests {
 
         let receivers = st
             .wallet()
-            .get_transparent_receivers(account.id(), false)
+            .get_transparent_receivers(account.id(), false, true)
             .unwrap();
 
         // The receiver for the default UA should be in the set.

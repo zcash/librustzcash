@@ -3435,7 +3435,7 @@ fn detect_wallet_transparent_outputs<P: consensus::Parameters>(
                 }
             } else {
                 warn!(
-                    "Unable to determine recipient address for tx {:?} output {}",
+                    "Unable to determine recipient address for tx {} output {}",
                     d_tx.tx().txid(),
                     output_index
                 );

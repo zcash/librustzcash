@@ -1673,6 +1673,15 @@ pub trait WalletRead {
     /// been derived under this account. Wallets should scan the chain for UTXOs sent to
     /// these receivers.
     ///
+    /// # Parameters
+    /// - `account`: The identifier for the account from which transparent receivers should be
+    ///   returned.
+    /// - `include_change`: A flag indicating whether transparent change addresses should be
+    ///   returned.
+    /// - `include_standalone`: A flag indicating whether imported standalone addresses associated
+    ///   with the account should be returned. The value of this flag is ignored unless the
+    ///   `transparent-key-import` feature is enabled.
+    ///
     /// Use [`Self::get_known_ephemeral_addresses`] to obtain the ephemeral transparent
     /// receivers.
     #[cfg(feature = "transparent-inputs")]
@@ -1680,6 +1689,7 @@ pub trait WalletRead {
         &self,
         _account: Self::AccountId,
         _include_change: bool,
+        _include_standalone: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         Ok(HashMap::new())
     }
@@ -1725,7 +1735,10 @@ pub trait WalletRead {
     ) -> Result<Option<TransparentAddressMetadata>, Self::Error> {
         // This should be overridden.
         Ok(
-            if let Some(result) = self.get_transparent_receivers(account, true)?.get(address) {
+            if let Some(result) = self
+                .get_transparent_receivers(account, true, true)?
+                .get(address)
+            {
                 result.clone()
             } else {
                 self.get_known_ephemeral_addresses(account, None)?

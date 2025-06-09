@@ -100,6 +100,10 @@ workspace.
     a target height and confirmations policy.
   - The semantics of `Balance::total` and `AccountBalance::total` have changed;
     these totals no longer include value that is uneconomic to spend ("dust").
+  - `WalletRead::get_transparent_receivers` now takes an additional
+    `include_standalone` argument, which can be used to indicate that
+    standalone (imported) transparent addresses should be included in the
+    result.
   - `Zip32Derivation::new` arguments have changed when the `zcashd-compat`
     feature is enabled; in this circumstance, `new` takes an additional
     `legacy_address_index` argument.
