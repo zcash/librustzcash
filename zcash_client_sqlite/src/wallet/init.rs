@@ -1146,12 +1146,12 @@ mod tests {
                 BranchId::Canopy,
                 0,
                 BlockHeight::from(0),
-                None,
-                None,
-                None,
-                None,
                 #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
                 Zatoshis::ZERO,
+                None,
+                None,
+                None,
+                None,
             )
             .freeze()
             .unwrap();
