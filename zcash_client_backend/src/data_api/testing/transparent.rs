@@ -417,7 +417,7 @@ where
 
     let external_taddrs = st
         .wallet()
-        .get_transparent_receivers(account_uuid, false)
+        .get_transparent_receivers(account_uuid, false, true)
         .unwrap();
     assert_eq!(
         u32::try_from(external_taddrs.len()).unwrap(),
@@ -425,7 +425,7 @@ where
     );
     let internal_taddrs = st
         .wallet()
-        .get_transparent_receivers(account_uuid, true)
+        .get_transparent_receivers(account_uuid, true, false)
         .unwrap();
     assert_eq!(
         u32::try_from(internal_taddrs.len()).unwrap(),
@@ -453,7 +453,7 @@ where
     // updates the gap limit by the index of the default Sapling receiver
     let external_taddrs = st
         .wallet()
-        .get_transparent_receivers(account_uuid, false)
+        .get_transparent_receivers(account_uuid, false, true)
         .unwrap();
     assert_eq!(
         u32::try_from(external_taddrs.len()).unwrap(),
@@ -487,7 +487,7 @@ where
     // never be inspected on wallet recovery.
     let external_taddrs = st
         .wallet()
-        .get_transparent_receivers(account_uuid, false)
+        .get_transparent_receivers(account_uuid, false, true)
         .unwrap();
     assert_eq!(
         u32::try_from(external_taddrs.len()).unwrap(),
@@ -505,7 +505,7 @@ where
     // Now that the transaction has been mined, the gap limit should have increased.
     let external_taddrs = st
         .wallet()
-        .get_transparent_receivers(account_uuid, false)
+        .get_transparent_receivers(account_uuid, false, true)
         .unwrap();
     assert_eq!(
         u32::try_from(external_taddrs.len()).unwrap(),
