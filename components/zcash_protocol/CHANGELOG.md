@@ -6,6 +6,11 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+  - `{mainnet, testnet, regtest}::B58_SECRET_KEY_PREFIX`
+
+### Changed
+- `zcash_protocol::consensus::NetworkConstants` has added method `b58_secret_key_prefix`.
 
 ## [0.5.2] - 2025-05-30
 ### Added
