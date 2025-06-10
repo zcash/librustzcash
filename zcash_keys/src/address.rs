@@ -234,6 +234,17 @@ impl UnifiedAddress {
         );
         result.collect()
     }
+
+    /// Returns the set of receivers in the unified address, excluding unknown receiver types.
+    pub fn receivers(&self) -> Vec<Receiver> {
+        let result = core::iter::empty();
+        #[cfg(feature = "orchard")]
+        let result = result.chain(self.orchard.map(Receiver::Orchard));
+        #[cfg(feature = "sapling")]
+        let result = result.chain(self.sapling.map(Receiver::Sapling));
+        let result = result.chain(self.transparent.map(Receiver::Transparent));
+        result.collect()
+    }
 }
 
 /// An enumeration of protocol-level receiver types.
@@ -457,6 +468,21 @@ impl Address {
             Address::Transparent(_) => None,
             Address::Unified(ua) => ua.sapling().copied(),
             Address::Tex(_) => None,
+        }
+    }
+
+    /// Returns the [`Receiver`]s of this address as a vector. In the case that the underlying
+    /// address is the [`Address::Unified`] variant, this is equivalent to
+    /// [`UnifiedAddress::receivers`] in that it does not return unknown receiver data.
+    pub fn receivers(&self) -> Vec<Receiver> {
+        match self {
+            #[cfg(feature = "sapling")]
+            Address::Sapling(addr) => vec![Receiver::Sapling(*addr)],
+            Address::Transparent(addr) => vec![Receiver::Transparent(*addr)],
+            Address::Unified(ua) => ua.receivers(),
+            Address::Tex(addr) => vec![Receiver::Transparent(TransparentAddress::PublicKeyHash(
+                *addr,
+            ))],
         }
     }
 }
