@@ -171,6 +171,10 @@ pub trait NetworkConstants: Clone {
     /// applies.
     fn b58_pubkey_address_prefix(&self) -> [u8; 2];
 
+    /// Returns the human-readable prefix for Base58Check-encoded transparent secret key for the
+    /// network to which this NetworkConstants value applies.
+    fn b58_secret_key_prefix(&self) -> [u8; 1];
+
     /// Returns the human-readable prefix for Base58Check-encoded transparent pay-to-script-hash
     /// payment addresses for the network to which this NetworkConstants value applies.
     fn b58_script_address_prefix(&self) -> [u8; 2];
@@ -271,6 +275,14 @@ impl NetworkConstants for NetworkType {
         }
     }
 
+    fn b58_secret_key_prefix(&self) -> [u8; 1] {
+        match self {
+            NetworkType::Main => mainnet::B58_SECRET_KEY_PREFIX,
+            NetworkType::Test => testnet::B58_SECRET_KEY_PREFIX,
+            NetworkType::Regtest => regtest::B58_SECRET_KEY_PREFIX,
+        }
+    }
+
     fn b58_script_address_prefix(&self) -> [u8; 2] {
         match self {
             NetworkType::Main => mainnet::B58_SCRIPT_ADDRESS_PREFIX,
@@ -361,6 +373,10 @@ impl<P: Parameters> NetworkConstants for P {
 
     fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
         self.network_type().b58_pubkey_address_prefix()
+    }
+
+    fn b58_secret_key_prefix(&self) -> [u8; 1] {
+        self.network_type().b58_secret_key_prefix()
     }
 
     fn b58_script_address_prefix(&self) -> [u8; 2] {

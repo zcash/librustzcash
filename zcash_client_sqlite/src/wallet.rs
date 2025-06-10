@@ -81,7 +81,7 @@ use incrementalmerkletree::{Marking, Retention};
 use rusqlite::{self, named_params, params, Connection, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use zcash_address::ZcashAddress;
@@ -89,7 +89,7 @@ use zcash_client_backend::{
     data_api::{
         scanning::{ScanPriority, ScanRange},
         Account as _, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, AddressInfo,
-        BlockMetadata, DecryptedTransaction, Progress, Ratio, SentTransaction,
+        AddressSource, BlockMetadata, DecryptedTransaction, Progress, Ratio, SentTransaction,
         SentTransactionOutput, TransactionDataRequest, TransactionStatus, WalletSummary,
         Zip32Derivation, SAPLING_SHARD_HEIGHT,
     },
@@ -140,6 +140,9 @@ use {
 #[cfg(feature = "orchard")]
 use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT};
 
+#[cfg(feature = "zcashd-compat")]
+use zcash_keys::keys::zcashd;
+
 pub mod commitment_tree;
 pub(crate) mod common;
 mod db;
@@ -167,19 +170,35 @@ fn parse_account_source(
     account_kind: u32,
     hd_seed_fingerprint: Option<[u8; 32]>,
     hd_account_index: Option<u32>,
+    #[cfg(feature = "zcashd-compat")] legacy_account_index: Option<u32>,
     spending_key_available: bool,
     key_source: Option<String>,
 ) -> Result<AccountSource, SqliteClientError> {
     let derivation = hd_seed_fingerprint
         .zip(hd_account_index)
         .map(|(seed_fp, idx)| {
-            zip32::AccountId::try_from(idx)
-                .map_err(|_| {
-                    SqliteClientError::CorruptedData(
-                        "ZIP-32 account ID from wallet DB is out of range.".to_string(),
-                    )
-                })
-                .map(|idx| Zip32Derivation::new(SeedFingerprint::from_bytes(seed_fp), idx))
+            zip32::AccountId::try_from(idx).map_or_else(
+                |_| {
+                    Err(SqliteClientError::CorruptedData(
+                        "ZIP-32 account ID is out of range.".to_string(),
+                    ))
+                },
+                |idx| {
+                    Ok(Zip32Derivation::new(
+                        SeedFingerprint::from_bytes(seed_fp),
+                        idx,
+                        #[cfg(feature = "zcashd-compat")]
+                        legacy_account_index
+                            .map(zcashd::LegacyAddressIndex::try_from)
+                            .transpose()
+                            .map_err(|_| {
+                                SqliteClientError::CorruptedData(
+                                    "Legacy zcashd address index is out of range.".to_string(),
+                                )
+                            })?,
+                    ))
+                },
+            )
         })
         .transpose()?;
 
@@ -429,6 +448,12 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     #[cfg(not(feature = "orchard"))]
     let birthday_orchard_tree_size: Option<u64> = None;
 
+    #[cfg(feature = "zcashd-compat")]
+    let zcashd_legacy_address_index =
+        derivation.and_then(|d| d.legacy_address_index().map(u32::from));
+    #[cfg(not(feature = "zcashd-compat"))]
+    let zcashd_legacy_address_index: Option<u32> = None;
+
     let ufvk_encoded = viewing_key.ufvk().map(|ufvk| ufvk.encode(params));
     let account_id = conn
         .query_row(
@@ -436,7 +461,9 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             INSERT INTO accounts (
                 name,
                 uuid,
-                account_kind, hd_seed_fingerprint, hd_account_index, key_source,
+                account_kind, hd_seed_fingerprint, hd_account_index,
+                zcashd_legacy_address_index,
+                key_source,
                 ufvk, uivk,
                 orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
                 birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
@@ -446,7 +473,9 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             VALUES (
                 :account_name,
                 :uuid,
-                :account_kind, :hd_seed_fingerprint, :hd_account_index, :key_source,
+                :account_kind, :hd_seed_fingerprint, :hd_account_index,
+                :zcashd_legacy_address_index,
+                :key_source,
                 :ufvk, :uivk,
                 :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
                 :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
@@ -461,6 +490,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ":account_kind": account_kind_code(kind),
                 ":hd_seed_fingerprint": derivation.map(|d| d.seed_fingerprint().to_bytes()),
                 ":hd_account_index": derivation.map(|d| u32::from(d.account_index())),
+                ":zcashd_legacy_address_index": zcashd_legacy_address_index,
                 ":key_source": key_source,
                 ":ufvk": ufvk_encoded,
                 ":uivk": viewing_key.uivk().encode(params),
@@ -645,6 +675,41 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     Ok(account)
 }
 
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_uuid: AccountUuid,
+    pubkey: secp256k1::PublicKey,
+) -> Result<(), SqliteClientError> {
+    use ::transparent::keys::pubkey_to_address;
+
+    let addr_str = Address::Transparent(pubkey_to_address(&pubkey)).encode(params);
+    conn.execute(
+        r#"
+        INSERT INTO addresses (
+          account_id, key_scope, address, cached_transparent_receiver_address,
+          receiver_flags, cached_transparent_receiver_pubkey
+        )
+        SELECT
+          id, :key_scope, :address, :address,
+          :receiver_flags, :cached_transparent_receiver_pubkey
+          FROM accounts
+          WHERE accounts.uuid = :account_uuid
+        ON CONFLICT (cached_transparent_receiver_pubkey) DO NOTHING
+        "#,
+        named_params![
+            ":account_uuid": account_uuid.0,
+            ":key_scope": KeyScope::Foreign.encode(),
+            ":address": addr_str,
+            ":receiver_flags": ReceiverFlags::P2PKH.bits(),
+            ":cached_transparent_receiver_pubkey": pubkey.serialize()
+        ],
+    )?;
+
+    Ok(())
+}
+
 pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
     conn: &rusqlite::Transaction,
     params: &P,
@@ -707,8 +772,9 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
             addrs
                 .iter()
                 .find_map(|(_, _, meta)| {
-                    let j = DiversifierIndex::from(meta.address_index());
-                    account.uivk().address(j, request).ok().map(|ua| (ua, j))
+                    meta.address_index()
+                        .map(DiversifierIndex::from)
+                        .and_then(|j| account.uivk().address(j, request).ok().map(|ua| (ua, j)))
                 })
                 .ok_or(SqliteClientError::ReachedGapLimit(
                     TransparentKeyScope::EXTERNAL,
@@ -798,22 +864,28 @@ pub(crate) fn list_addresses<P: consensus::Parameters>(
 
     while let Some(row) = rows.next()? {
         let addr_str: String = row.get(0)?;
-        let di_vec: Vec<u8> = row.get(1)?;
+        let di_vec: Option<Vec<u8>> = row.get(1)?;
         let _scope = KeyScope::decode(row.get(2)?)?;
 
         let addr = Address::decode(params, &addr_str).ok_or_else(|| {
             SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
         })?;
-        let diversifier_index = decode_diversifier_index_be(&di_vec)?;
+        let addr_source =
+            decode_diversifier_index_be(di_vec)?.map_or(AddressSource::Imported, |di| {
+                AddressSource::Derived {
+                    diversifier_index: di,
+                }
+            });
         // Sapling and Unified addresses always have external scope.
         #[cfg(feature = "transparent-inputs")]
-        let transparent_scope =
-            matches!(addr, Address::Transparent(_) | Address::Tex(_)).then(|| _scope.into());
+        let transparent_scope = matches!(addr, Address::Transparent(_) | Address::Tex(_))
+            .then(|| _scope.into())
+            .flatten();
 
         addrs.push(
             AddressInfo::from_parts(
                 addr,
-                diversifier_index,
+                addr_source,
                 #[cfg(feature = "transparent-inputs")]
                 transparent_scope,
             )
@@ -846,7 +918,7 @@ pub(crate) fn get_last_generated_address_matching<P: consensus::Parameters>(
     // This returns the most recently exposed external-scope address (the address that was exposed
     // at the greatest block height, using the largest diversifier index to break ties)
     // that conforms to the specified requirements.
-    let addr: Option<(String, Vec<u8>)> = conn
+    let addr: Option<(String, Option<Vec<u8>>)> = conn
         .query_row(
             "SELECT address, diversifier_index_be
              FROM addresses
@@ -868,7 +940,11 @@ pub(crate) fn get_last_generated_address_matching<P: consensus::Parameters>(
         .optional()?;
 
     addr.map(|(addr_str, di_vec)| {
-        let diversifier_index = decode_diversifier_index_be(&di_vec)?;
+        let diversifier_index = decode_diversifier_index_be(di_vec)?.ok_or_else(|| {
+            SqliteClientError::CorruptedData(
+                "Addresses in EXTERNAL scope must be HD-derived".to_owned(),
+            )
+        })?;
         Address::decode(params, &addr_str)
             .ok_or_else(|| {
                 SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
@@ -1098,6 +1174,8 @@ fn parse_account_row<P: consensus::Parameters>(
         row.get("account_kind")?,
         row.get("hd_seed_fingerprint")?,
         row.get("hd_account_index")?,
+        #[cfg(feature = "zcashd-compat")]
+        row.get("zcashd_legacy_address_index")?,
         row.get("has_spend_key")?,
         row.get("key_source")?,
     )?;
@@ -1144,7 +1222,7 @@ pub(crate) fn get_account<P: Parameters>(
     let mut stmt = conn.prepare_cached(
         r#"
         SELECT id, name, uuid, account_kind,
-               hd_seed_fingerprint, hd_account_index, key_source,
+               hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
                ufvk, uivk, has_spend_key, birthday_height
         FROM accounts
         WHERE uuid = :account_uuid
@@ -1168,7 +1246,7 @@ pub(crate) fn get_account_internal<P: Parameters>(
     let mut stmt = conn.prepare_cached(
         r#"
         SELECT id, name, uuid, account_kind,
-               hd_seed_fingerprint, hd_account_index, key_source,
+               hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
                ufvk, uivk, has_spend_key, birthday_height
         FROM accounts
         WHERE id = :account_id
@@ -1204,7 +1282,7 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
 
     let mut stmt = conn.prepare(
         "SELECT id, name, uuid, account_kind,
-                hd_seed_fingerprint, hd_account_index, key_source,
+                hd_seed_fingerprint, hd_account_index, zcashd_legacy_address_index, key_source,
                 ufvk, uivk, has_spend_key, birthday_height
          FROM accounts
          WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
@@ -1239,18 +1317,29 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
     params: &P,
     seed_fp: &SeedFingerprint,
     account_index: zip32::AccountId,
+    #[cfg(feature = "zcashd-compat")] legacy_address_index: Option<zcashd::LegacyAddressIndex>,
 ) -> Result<Option<Account>, SqliteClientError> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, key_source, uuid, ufvk, birthday_height
+        "SELECT id, name, key_source, uuid, ufvk, birthday_height, zcashd_legacy_address_index
          FROM accounts
          WHERE hd_seed_fingerprint = :hd_seed_fingerprint
-         AND hd_account_index = :hd_account_index",
+         AND hd_account_index = :hd_account_index
+         AND (
+             :zcashd_legacy_address_index IS NULL
+             OR zcashd_legacy_address_index = :zcashd_legacy_address_index
+         )",
     )?;
+
+    #[cfg(not(feature = "zcashd-compat"))]
+    let legacy_address_index: Option<u32> = None;
+    #[cfg(feature = "zcashd-compat")]
+    let legacy_address_index = legacy_address_index.map(u32::from);
 
     let mut accounts = stmt.query_and_then::<_, SqliteClientError, _, _>(
         named_params![
             ":hd_seed_fingerprint": seed_fp.to_bytes(),
             ":hd_account_index": u32::from(account_index),
+            ":zcashd_legacy_address_index": legacy_address_index
         ],
         |row| {
             let account_id = AccountRef(row.get("id")?);
@@ -1270,13 +1359,30 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
                 }),
             }?;
             let birthday = BlockHeight::from(row.get::<_, u32>("birthday_height")?);
+            #[cfg(feature = "zcashd-compat")]
+            let legacy_idx = row
+                .get::<_, Option<u32>>("zcashd_legacy_address_index")?
+                .map(|idx| {
+                    zcashd::LegacyAddressIndex::try_from(idx).map_err(|_| {
+                        SqliteClientError::CorruptedData(format!(
+                            "Invalid legacy zcashd address index {}",
+                            idx
+                        ))
+                    })
+                })
+                .transpose()?;
 
             Ok(Account {
                 id: account_id,
                 name: account_name,
                 uuid: account_uuid,
                 kind: AccountSource::Derived {
-                    derivation: Zip32Derivation::new(*seed_fp, account_index),
+                    derivation: Zip32Derivation::new(
+                        *seed_fp,
+                        account_index,
+                        #[cfg(feature = "zcashd-compat")]
+                        legacy_idx,
+                    ),
                     key_source,
                 },
                 viewing_key: ViewingKey::Full(Box::new(ufvk)),
@@ -3252,7 +3358,7 @@ fn detect_wallet_transparent_outputs<P: consensus::Parameters>(
                 }
             } else {
                 warn!(
-                    "Unable to determine recipient address for tx {:?} output {}",
+                    "Unable to determine recipient address for tx {} output {}",
                     d_tx.tx().txid(),
                     output_index
                 );
@@ -3271,6 +3377,8 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     d_tx: DecryptedTransaction<AccountUuid>,
     #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
 ) -> Result<(), SqliteClientError> {
+    info!("Storing decrypted transaction with id {}", d_tx.tx().txid());
+
     let funding_accounts = get_funding_accounts(conn, d_tx.tx())?;
 
     // TODO(#1305): Correctly track accounts that fund each transaction output.
@@ -3765,7 +3873,10 @@ pub(crate) fn queue_transparent_input_retrieval<AccountId>(
         // queue the transparent inputs for enhancement
         queue_tx_retrieval(
             conn,
-            b.vin.iter().map(|txin| *txin.prevout.txid()),
+            b.vin
+                .iter()
+                .map(|txin| *txin.prevout.txid())
+                .filter(|txid| !txid.is_coinbase()),
             Some(tx_ref),
         )?;
     }
@@ -4517,5 +4628,29 @@ mod tests {
             account_birthday(st.wallet().conn(), account_id),
             Ok(birthday) if birthday == st.sapling_activation_height()
         )
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn test_import_standalone_transparent_pubkey() {
+        use rand::SeedableRng;
+        use rand_chacha::ChaChaRng;
+        use secp256k1::{Secp256k1, SecretKey};
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_id = st.test_account().unwrap().id();
+
+        let mut rng = ChaChaRng::from_seed([0u8; 32]);
+        let secp = Secp256k1::new();
+        let pubkey = SecretKey::new(&mut rng).public_key(&secp);
+        assert_matches!(
+            st.wallet_mut()
+                .import_standalone_transparent_pubkey(account_id, pubkey),
+            Ok(_)
+        );
     }
 }
