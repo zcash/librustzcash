@@ -48,18 +48,27 @@ impl From<TxId> for [u8; 32] {
 }
 
 impl TxId {
+    /// Wraps the given byte array as a TxId value
     pub const fn from_bytes(bytes: [u8; 32]) -> Self {
         TxId(bytes)
     }
 
+    /// Reads a 32-byte txid directly from the provided reader.
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut hash = [0u8; 32];
         reader.read_exact(&mut hash)?;
         Ok(TxId::from_bytes(hash))
     }
 
+    /// Writes the 32-byte payload directly to the provided writer.
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.0)?;
         Ok(())
+    }
+
+    /// Returns true when the txid consists of all zeros; this only occurs for coinbase
+    /// transactions.
+    pub fn is_null(&self) -> bool {
+        self.0 == [0u8; 32]
     }
 }
