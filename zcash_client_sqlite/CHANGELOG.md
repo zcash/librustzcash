@@ -3,15 +3,23 @@ All notable changes to this library will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this library adheres to Rust's notion of
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Future releases are
+indicated by the `PLANNED` status in order to make it possible to correctly
+represent the transitive `semver` implications of changes within the enclosing
+workspace.
 
 ## [Unreleased]
+
+## [0.17.0] - PLANNED
 
 ### Added
 - `zcash_client_sqlite::wallet::init::WalletMigrator`
 - `zcash_client_sqlite::wallet::init::migrations`
 
 ### Changed
+- Migrated to `zcash_address 0.8`, `zip321 0.4`, `zcash_transparent 0.3`,
+  `zcash_primitives 0.23`, `zcash_proof 0.23`, `zcash_keys 0.9`, `pczt 0.3`
+  `zcash_client_backend 0.19`
 - `zcash_client_sqlite::wallet::init::WalletMigrationError::`
   - Variants `WalletMigrationError::CommitmentTree` and 
     `WalletMigrationError::Other` now `Box` their contents.
