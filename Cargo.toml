@@ -150,7 +150,7 @@ static_assertions = "1"
 ambassador = "0.4"
 assert_matches = "1.5"
 criterion = "0.5"
-proptest = "1"
+proptest = ">=1,<1.7" # proptest 1.7 updates to rand 0.9
 rand_chacha = "0.3"
 rand_xorshift = "0.3"
 incrementalmerkletree-testing = "0.3"
