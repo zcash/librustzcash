@@ -3,11 +3,17 @@ All notable changes to this library will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this library adheres to Rust's notion of
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Future releases are
+indicated by the `PLANNED` status in order to make it possible to correctly
+represent the transitive `semver` implications of changes within the enclosing
+workspace.
 
 ## [Unreleased]
 
+## [0.23.0] - PLANNED
+
 ### Changed
++- Migrated to `zcash_address 0.8`, `zcash_transparent 0.3`
 - Variants of `zcash_primitives::transaction::TxVersion` have changed. They
   now represent explicit transaction versions, in order to avoid accidental
   confusion with the names of the network upgrades that they were introduced
