@@ -165,7 +165,7 @@ fn fetch_params(
 ) -> Result<PathBuf, minreq::Error> {
     // Ensure that the default Zcash parameters location exists.
     let params_dir = default_params_folder().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::Other, "Could not load default params folder")
+        io::Error::other("Could not load default params folder")
     })?;
     std::fs::create_dir_all(&params_dir)?;
 
