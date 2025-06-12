@@ -7,8 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.16.3] - 2025-06-12
+
 ### Fixed
-- `TransactionDataRequest`s will no longer be generated for the null txid.
+- `TransactionDataRequest`s will no longer be generated for coinbase inputs
+  (which are represented as having the all-zeros txid).
 
 ## [0.16.2] - 2025-04-02
 
