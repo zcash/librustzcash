@@ -74,7 +74,7 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    super::wallet::input_selection::ShieldingSelector,
+    super::{wallet::input_selection::ShieldingSelector, TransactionsInvolvingAddress},
     crate::wallet::TransparentAddressMetadata,
     ::transparent::{address::TransparentAddress, keys::NonHardenedChildIndex},
     std::ops::Range,
@@ -2819,6 +2819,15 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _txid: TxId,
         _status: TransactionStatus,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn notify_address_checked(
+        &mut self,
+        _request: TransactionsInvolvingAddress,
+        _as_of_height: BlockHeight,
     ) -> Result<(), Self::Error> {
         Ok(())
     }
