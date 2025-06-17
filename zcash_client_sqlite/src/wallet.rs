@@ -3762,12 +3762,14 @@ pub(crate) fn queue_transparent_input_retrieval<AccountId>(
     d_tx: &DecryptedTransaction<'_, AccountId>,
 ) -> Result<(), SqliteClientError> {
     if let Some(b) = d_tx.tx().transparent_bundle() {
-        // queue the transparent inputs for enhancement
-        queue_tx_retrieval(
-            conn,
-            b.vin.iter().map(|txin| *txin.prevout.txid()),
-            Some(tx_ref),
-        )?;
+        if !b.is_coinbase() {
+            // queue the transparent inputs for enhancement
+            queue_tx_retrieval(
+                conn,
+                b.vin.iter().map(|txin| *txin.prevout.txid()),
+                Some(tx_ref),
+            )?;
+        }
     }
 
     Ok(())
