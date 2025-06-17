@@ -3054,7 +3054,7 @@ pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, DSF, TC>(
 
     // Spend half of each one of our notes, so that we can get a distribution of sent note values.
     // FIXME: This test is currently excessively specialized to the `zcash_client_sqlite::WalletDb`
-    // implmentation of the `InputSource` trait. A better approach would be to create a test input
+    // implementation of the `InputSource` trait. A better approach would be to create a test input
     // source that can select a set of notes directly based upon their nullifiers.
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let to = T::fvk_default_address(&not_our_key).to_zcash_address(st.network());
