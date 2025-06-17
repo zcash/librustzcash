@@ -3762,760 +3762,762 @@
 <a href=#3762 id=3762 data-nosnippet>3762</a>    d_tx: <span class="kw-2">&amp;</span>DecryptedTransaction&lt;<span class="lifetime">'_</span>, AccountId&gt;,
 <a href=#3763 id=3763 data-nosnippet>3763</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
 <a href=#3764 id=3764 data-nosnippet>3764</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(b) = d_tx.tx().transparent_bundle() {
-<a href=#3765 id=3765 data-nosnippet>3765</a>        <span class="comment">// queue the transparent inputs for enhancement
-<a href=#3766 id=3766 data-nosnippet>3766</a>        </span>queue_tx_retrieval(
-<a href=#3767 id=3767 data-nosnippet>3767</a>            conn,
-<a href=#3768 id=3768 data-nosnippet>3768</a>            b.vin.iter().map(|txin| <span class="kw-2">*</span>txin.prevout.txid()),
-<a href=#3769 id=3769 data-nosnippet>3769</a>            <span class="prelude-val">Some</span>(tx_ref),
-<a href=#3770 id=3770 data-nosnippet>3770</a>        )<span class="question-mark">?</span>;
-<a href=#3771 id=3771 data-nosnippet>3771</a>    }
-<a href=#3772 id=3772 data-nosnippet>3772</a>
-<a href=#3773 id=3773 data-nosnippet>3773</a>    <span class="prelude-val">Ok</span>(())
-<a href=#3774 id=3774 data-nosnippet>3774</a>}
-<a href=#3775 id=3775 data-nosnippet>3775</a>
-<a href=#3776 id=3776 data-nosnippet>3776</a><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#3777 id=3777 data-nosnippet>3777</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>queue_unmined_tx_retrieval&lt;AccountId&gt;(
-<a href=#3778 id=3778 data-nosnippet>3778</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction&lt;<span class="lifetime">'_</span>&gt;,
-<a href=#3779 id=3779 data-nosnippet>3779</a>    d_tx: <span class="kw-2">&amp;</span>DecryptedTransaction&lt;<span class="lifetime">'_</span>, AccountId&gt;,
-<a href=#3780 id=3780 data-nosnippet>3780</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
-<a href=#3781 id=3781 data-nosnippet>3781</a>    <span class="kw">let </span>detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
-<a href=#3782 id=3782 data-nosnippet>3782</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#3783 id=3783 data-nosnippet>3783</a>    </span><span class="kw">let </span>detectable_via_scanning = detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
-<a href=#3784 id=3784 data-nosnippet>3784</a>
-<a href=#3785 id=3785 data-nosnippet>3785</a>    <span class="kw">if </span>d_tx.mined_height().is_none() &amp;&amp; !detectable_via_scanning {
-<a href=#3786 id=3786 data-nosnippet>3786</a>        queue_tx_retrieval(conn, std::iter::once(d_tx.tx().txid()), <span class="prelude-val">None</span>)<span class="question-mark">?
-<a href=#3787 id=3787 data-nosnippet>3787</a>    </span>}
-<a href=#3788 id=3788 data-nosnippet>3788</a>
-<a href=#3789 id=3789 data-nosnippet>3789</a>    <span class="prelude-val">Ok</span>(())
-<a href=#3790 id=3790 data-nosnippet>3790</a>}
-<a href=#3791 id=3791 data-nosnippet>3791</a>
-<a href=#3792 id=3792 data-nosnippet>3792</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>queue_tx_retrieval(
-<a href=#3793 id=3793 data-nosnippet>3793</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction&lt;<span class="lifetime">'_</span>&gt;,
-<a href=#3794 id=3794 data-nosnippet>3794</a>    txids: <span class="kw">impl </span>Iterator&lt;Item = TxId&gt;,
-<a href=#3795 id=3795 data-nosnippet>3795</a>    dependent_tx_ref: <span class="prelude-ty">Option</span>&lt;TxRef&gt;,
-<a href=#3796 id=3796 data-nosnippet>3796</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
-<a href=#3797 id=3797 data-nosnippet>3797</a>    <span class="comment">// Add an entry to the transaction retrieval queue if it would not be redundant.
-<a href=#3798 id=3798 data-nosnippet>3798</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>stmt_insert_tx = conn.prepare_cached(
-<a href=#3799 id=3799 data-nosnippet>3799</a>        <span class="string">"INSERT INTO tx_retrieval_queue (txid, query_type, dependent_transaction_id)
-<a href=#3800 id=3800 data-nosnippet>3800</a>            SELECT
-<a href=#3801 id=3801 data-nosnippet>3801</a>            :txid,
-<a href=#3802 id=3802 data-nosnippet>3802</a>            IIF(
-<a href=#3803 id=3803 data-nosnippet>3803</a>                EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL),
-<a href=#3804 id=3804 data-nosnippet>3804</a>                :status_type,
-<a href=#3805 id=3805 data-nosnippet>3805</a>                :enhancement_type
-<a href=#3806 id=3806 data-nosnippet>3806</a>            ),
-<a href=#3807 id=3807 data-nosnippet>3807</a>            :dependent_transaction_id
-<a href=#3808 id=3808 data-nosnippet>3808</a>        ON CONFLICT (txid) DO UPDATE
-<a href=#3809 id=3809 data-nosnippet>3809</a>        SET query_type =
-<a href=#3810 id=3810 data-nosnippet>3810</a>            IIF(
-<a href=#3811 id=3811 data-nosnippet>3811</a>                EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL),
-<a href=#3812 id=3812 data-nosnippet>3812</a>                :status_type,
-<a href=#3813 id=3813 data-nosnippet>3813</a>                :enhancement_type
-<a href=#3814 id=3814 data-nosnippet>3814</a>            ),
-<a href=#3815 id=3815 data-nosnippet>3815</a>            dependent_transaction_id = IFNULL(:dependent_transaction_id, dependent_transaction_id)"</span>,
-<a href=#3816 id=3816 data-nosnippet>3816</a>    )<span class="question-mark">?</span>;
-<a href=#3817 id=3817 data-nosnippet>3817</a>
-<a href=#3818 id=3818 data-nosnippet>3818</a>    <span class="kw">for </span>txid <span class="kw">in </span>txids {
-<a href=#3819 id=3819 data-nosnippet>3819</a>        stmt_insert_tx.execute(<span class="macro">named_params!</span> {
-<a href=#3820 id=3820 data-nosnippet>3820</a>            <span class="string">":txid"</span>: txid.as_ref(),
-<a href=#3821 id=3821 data-nosnippet>3821</a>            <span class="string">":status_type"</span>: TxQueryType::Status.code(),
-<a href=#3822 id=3822 data-nosnippet>3822</a>            <span class="string">":enhancement_type"</span>: TxQueryType::Enhancement.code(),
-<a href=#3823 id=3823 data-nosnippet>3823</a>            <span class="string">":dependent_transaction_id"</span>: dependent_tx_ref.map(|r| r.<span class="number">0</span>),
-<a href=#3824 id=3824 data-nosnippet>3824</a>        })<span class="question-mark">?</span>;
-<a href=#3825 id=3825 data-nosnippet>3825</a>    }
-<a href=#3826 id=3826 data-nosnippet>3826</a>
-<a href=#3827 id=3827 data-nosnippet>3827</a>    <span class="prelude-val">Ok</span>(())
-<a href=#3828 id=3828 data-nosnippet>3828</a>}
-<a href=#3829 id=3829 data-nosnippet>3829</a>
-<a href=#3830 id=3830 data-nosnippet>3830</a><span class="doccomment">/// Returns the vector of [`TransactionDataRequest`]s that represents the information needed by the
-<a href=#3831 id=3831 data-nosnippet>3831</a>/// wallet backend in order to be able to present a complete view of wallet history and memo data.
-<a href=#3832 id=3832 data-nosnippet>3832</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>transaction_data_requests(
-<a href=#3833 id=3833 data-nosnippet>3833</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
-<a href=#3834 id=3834 data-nosnippet>3834</a>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;TransactionDataRequest&gt;, SqliteClientError&gt; {
-<a href=#3835 id=3835 data-nosnippet>3835</a>    <span class="kw">let </span><span class="kw-2">mut </span>tx_retrieval_stmt =
-<a href=#3836 id=3836 data-nosnippet>3836</a>        conn.prepare_cached(<span class="string">"SELECT txid, query_type FROM tx_retrieval_queue"</span>)<span class="question-mark">?</span>;
-<a href=#3837 id=3837 data-nosnippet>3837</a>
-<a href=#3838 id=3838 data-nosnippet>3838</a>    <span class="kw">let </span>result = tx_retrieval_stmt
-<a href=#3839 id=3839 data-nosnippet>3839</a>        .query_and_then([], |row| {
-<a href=#3840 id=3840 data-nosnippet>3840</a>            <span class="kw">let </span>txid = row.get(<span class="number">0</span>).map(TxId::from_bytes)<span class="question-mark">?</span>;
-<a href=#3841 id=3841 data-nosnippet>3841</a>            <span class="kw">let </span>query_type = row.get(<span class="number">1</span>).map(TxQueryType::from_code)<span class="question-mark">?</span>.ok_or_else(|| {
-<a href=#3842 id=3842 data-nosnippet>3842</a>                SqliteClientError::CorruptedData(
-<a href=#3843 id=3843 data-nosnippet>3843</a>                    <span class="string">"Unrecognized transaction data request type."</span>.to_owned(),
-<a href=#3844 id=3844 data-nosnippet>3844</a>                )
-<a href=#3845 id=3845 data-nosnippet>3845</a>            })<span class="question-mark">?</span>;
-<a href=#3846 id=3846 data-nosnippet>3846</a>
-<a href=#3847 id=3847 data-nosnippet>3847</a>            <span class="prelude-val">Ok</span>::&lt;TransactionDataRequest, SqliteClientError&gt;(<span class="kw">match </span>query_type {
-<a href=#3848 id=3848 data-nosnippet>3848</a>                TxQueryType::Status =&gt; TransactionDataRequest::GetStatus(txid),
-<a href=#3849 id=3849 data-nosnippet>3849</a>                TxQueryType::Enhancement =&gt; TransactionDataRequest::Enhancement(txid),
-<a href=#3850 id=3850 data-nosnippet>3850</a>            })
-<a href=#3851 id=3851 data-nosnippet>3851</a>        })<span class="question-mark">?
-<a href=#3852 id=3852 data-nosnippet>3852</a>        </span>.collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
-<a href=#3853 id=3853 data-nosnippet>3853</a>
-<a href=#3854 id=3854 data-nosnippet>3854</a>    <span class="prelude-val">Ok</span>(result)
-<a href=#3855 id=3855 data-nosnippet>3855</a>}
-<a href=#3856 id=3856 data-nosnippet>3856</a>
-<a href=#3857 id=3857 data-nosnippet>3857</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>notify_tx_retrieved(
-<a href=#3858 id=3858 data-nosnippet>3858</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction&lt;<span class="lifetime">'_</span>&gt;,
-<a href=#3859 id=3859 data-nosnippet>3859</a>    txid: TxId,
-<a href=#3860 id=3860 data-nosnippet>3860</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
-<a href=#3861 id=3861 data-nosnippet>3861</a>    conn.execute(
-<a href=#3862 id=3862 data-nosnippet>3862</a>        <span class="string">"DELETE FROM tx_retrieval_queue WHERE txid = :txid"</span>,
-<a href=#3863 id=3863 data-nosnippet>3863</a>        <span class="macro">named_params!</span>[<span class="string">":txid"</span>: <span class="kw-2">&amp;</span>txid.as_ref()[..]],
-<a href=#3864 id=3864 data-nosnippet>3864</a>    )<span class="question-mark">?</span>;
-<a href=#3865 id=3865 data-nosnippet>3865</a>
-<a href=#3866 id=3866 data-nosnippet>3866</a>    <span class="prelude-val">Ok</span>(())
-<a href=#3867 id=3867 data-nosnippet>3867</a>}
-<a href=#3868 id=3868 data-nosnippet>3868</a>
-<a href=#3869 id=3869 data-nosnippet>3869</a><span class="comment">// A utility function for creation of parameters for use in `insert_sent_output`
-<a href=#3870 id=3870 data-nosnippet>3870</a>// and `put_sent_output`
-<a href=#3871 id=3871 data-nosnippet>3871</a></span><span class="kw">fn </span>recipient_params&lt;P: consensus::Parameters&gt;(
-<a href=#3872 id=3872 data-nosnippet>3872</a>    conn: <span class="kw-2">&amp;</span>Connection,
-<a href=#3873 id=3873 data-nosnippet>3873</a>    _params: <span class="kw-2">&amp;</span>P,
-<a href=#3874 id=3874 data-nosnippet>3874</a>    from: AccountUuid,
-<a href=#3875 id=3875 data-nosnippet>3875</a>    to: <span class="kw-2">&amp;</span>Recipient&lt;AccountUuid&gt;,
-<a href=#3876 id=3876 data-nosnippet>3876</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(AccountRef, <span class="prelude-ty">Option</span>&lt;String&gt;, <span class="prelude-ty">Option</span>&lt;AccountRef&gt;, PoolType), SqliteClientError&gt; {
-<a href=#3877 id=3877 data-nosnippet>3877</a>    <span class="kw">let </span>from_account_id = get_account_ref(conn, from)<span class="question-mark">?</span>;
-<a href=#3878 id=3878 data-nosnippet>3878</a>    <span class="kw">match </span>to {
-<a href=#3879 id=3879 data-nosnippet>3879</a>        Recipient::External {
-<a href=#3880 id=3880 data-nosnippet>3880</a>            recipient_address,
-<a href=#3881 id=3881 data-nosnippet>3881</a>            output_pool,
-<a href=#3882 id=3882 data-nosnippet>3882</a>            ..
-<a href=#3883 id=3883 data-nosnippet>3883</a>        } =&gt; <span class="prelude-val">Ok</span>((
-<a href=#3884 id=3884 data-nosnippet>3884</a>            from_account_id,
-<a href=#3885 id=3885 data-nosnippet>3885</a>            <span class="prelude-val">Some</span>(recipient_address.encode()),
-<a href=#3886 id=3886 data-nosnippet>3886</a>            <span class="prelude-val">None</span>,
-<a href=#3887 id=3887 data-nosnippet>3887</a>            <span class="kw-2">*</span>output_pool,
-<a href=#3888 id=3888 data-nosnippet>3888</a>        )),
-<a href=#3889 id=3889 data-nosnippet>3889</a>        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#3890 id=3890 data-nosnippet>3890</a>        </span>Recipient::EphemeralTransparent {
-<a href=#3891 id=3891 data-nosnippet>3891</a>            receiving_account,
-<a href=#3892 id=3892 data-nosnippet>3892</a>            ephemeral_address,
-<a href=#3893 id=3893 data-nosnippet>3893</a>            ..
-<a href=#3894 id=3894 data-nosnippet>3894</a>        } =&gt; {
-<a href=#3895 id=3895 data-nosnippet>3895</a>            <span class="kw">let </span>to_account = get_account_ref(conn, <span class="kw-2">*</span>receiving_account)<span class="question-mark">?</span>;
-<a href=#3896 id=3896 data-nosnippet>3896</a>            <span class="prelude-val">Ok</span>((
-<a href=#3897 id=3897 data-nosnippet>3897</a>                from_account_id,
-<a href=#3898 id=3898 data-nosnippet>3898</a>                <span class="prelude-val">Some</span>(ephemeral_address.encode(_params)),
-<a href=#3899 id=3899 data-nosnippet>3899</a>                <span class="prelude-val">Some</span>(to_account),
-<a href=#3900 id=3900 data-nosnippet>3900</a>                PoolType::TRANSPARENT,
-<a href=#3901 id=3901 data-nosnippet>3901</a>            ))
-<a href=#3902 id=3902 data-nosnippet>3902</a>        }
-<a href=#3903 id=3903 data-nosnippet>3903</a>        Recipient::InternalAccount {
-<a href=#3904 id=3904 data-nosnippet>3904</a>            receiving_account,
-<a href=#3905 id=3905 data-nosnippet>3905</a>            external_address,
-<a href=#3906 id=3906 data-nosnippet>3906</a>            note,
-<a href=#3907 id=3907 data-nosnippet>3907</a>        } =&gt; {
-<a href=#3908 id=3908 data-nosnippet>3908</a>            <span class="kw">let </span>to_account = get_account_ref(conn, <span class="kw-2">*</span>receiving_account)<span class="question-mark">?</span>;
-<a href=#3909 id=3909 data-nosnippet>3909</a>            <span class="prelude-val">Ok</span>((
-<a href=#3910 id=3910 data-nosnippet>3910</a>                from_account_id,
-<a href=#3911 id=3911 data-nosnippet>3911</a>                external_address.as_ref().map(|a| a.encode()),
-<a href=#3912 id=3912 data-nosnippet>3912</a>                <span class="prelude-val">Some</span>(to_account),
-<a href=#3913 id=3913 data-nosnippet>3913</a>                PoolType::Shielded(note.protocol()),
-<a href=#3914 id=3914 data-nosnippet>3914</a>            ))
-<a href=#3915 id=3915 data-nosnippet>3915</a>        }
-<a href=#3916 id=3916 data-nosnippet>3916</a>    }
-<a href=#3917 id=3917 data-nosnippet>3917</a>}
-<a href=#3918 id=3918 data-nosnippet>3918</a>
-<a href=#3919 id=3919 data-nosnippet>3919</a><span class="kw">fn </span>flag_previously_received_change(
-<a href=#3920 id=3920 data-nosnippet>3920</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction,
-<a href=#3921 id=3921 data-nosnippet>3921</a>    tx_ref: TxRef,
-<a href=#3922 id=3922 data-nosnippet>3922</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
-<a href=#3923 id=3923 data-nosnippet>3923</a>    <span class="kw">let </span>flag_received_change = |table_prefix| {
-<a href=#3924 id=3924 data-nosnippet>3924</a>        conn.execute(
-<a href=#3925 id=3925 data-nosnippet>3925</a>            <span class="kw-2">&amp;</span><span class="macro">format!</span>(
-<a href=#3926 id=3926 data-nosnippet>3926</a>                <span class="string">"UPDATE {table_prefix}_received_notes
-<a href=#3927 id=3927 data-nosnippet>3927</a>                 SET is_change = 1
-<a href=#3928 id=3928 data-nosnippet>3928</a>                 FROM sent_notes sn
-<a href=#3929 id=3929 data-nosnippet>3929</a>                 WHERE sn.tx = {table_prefix}_received_notes.tx
-<a href=#3930 id=3930 data-nosnippet>3930</a>                 AND sn.tx = :tx
-<a href=#3931 id=3931 data-nosnippet>3931</a>                 AND sn.from_account_id = {table_prefix}_received_notes.account_id
-<a href=#3932 id=3932 data-nosnippet>3932</a>                 AND {table_prefix}_received_notes.recipient_key_scope = :internal_scope"
-<a href=#3933 id=3933 data-nosnippet>3933</a>            </span>),
-<a href=#3934 id=3934 data-nosnippet>3934</a>            <span class="macro">named_params!</span> {
-<a href=#3935 id=3935 data-nosnippet>3935</a>                <span class="string">":tx"</span>: tx_ref.<span class="number">0</span>,
-<a href=#3936 id=3936 data-nosnippet>3936</a>                <span class="string">":internal_scope"</span>: KeyScope::INTERNAL.encode()
-<a href=#3937 id=3937 data-nosnippet>3937</a>            },
-<a href=#3938 id=3938 data-nosnippet>3938</a>        )
-<a href=#3939 id=3939 data-nosnippet>3939</a>    };
-<a href=#3940 id=3940 data-nosnippet>3940</a>
-<a href=#3941 id=3941 data-nosnippet>3941</a>    flag_received_change(SAPLING_TABLES_PREFIX)<span class="question-mark">?</span>;
-<a href=#3942 id=3942 data-nosnippet>3942</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#3943 id=3943 data-nosnippet>3943</a>    </span>flag_received_change(ORCHARD_TABLES_PREFIX)<span class="question-mark">?</span>;
-<a href=#3944 id=3944 data-nosnippet>3944</a>
-<a href=#3945 id=3945 data-nosnippet>3945</a>    <span class="prelude-val">Ok</span>(())
-<a href=#3946 id=3946 data-nosnippet>3946</a>}
-<a href=#3947 id=3947 data-nosnippet>3947</a>
-<a href=#3948 id=3948 data-nosnippet>3948</a><span class="doccomment">/// Records information about a transaction output that your wallet created.
-<a href=#3949 id=3949 data-nosnippet>3949</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert_sent_output&lt;P: consensus::Parameters&gt;(
-<a href=#3950 id=3950 data-nosnippet>3950</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction,
-<a href=#3951 id=3951 data-nosnippet>3951</a>    params: <span class="kw-2">&amp;</span>P,
-<a href=#3952 id=3952 data-nosnippet>3952</a>    tx_ref: TxRef,
-<a href=#3953 id=3953 data-nosnippet>3953</a>    from_account_uuid: AccountUuid,
-<a href=#3954 id=3954 data-nosnippet>3954</a>    output: <span class="kw-2">&amp;</span>SentTransactionOutput&lt;AccountUuid&gt;,
-<a href=#3955 id=3955 data-nosnippet>3955</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
-<a href=#3956 id=3956 data-nosnippet>3956</a>    <span class="kw">let </span><span class="kw-2">mut </span>stmt_insert_sent_output = conn.prepare_cached(
-<a href=#3957 id=3957 data-nosnippet>3957</a>        <span class="string">"INSERT INTO sent_notes (
-<a href=#3958 id=3958 data-nosnippet>3958</a>            tx, output_pool, output_index, from_account_id,
-<a href=#3959 id=3959 data-nosnippet>3959</a>            to_address, to_account_id, value, memo)
-<a href=#3960 id=3960 data-nosnippet>3960</a>         VALUES (
-<a href=#3961 id=3961 data-nosnippet>3961</a>            :tx, :output_pool, :output_index, :from_account_id,
-<a href=#3962 id=3962 data-nosnippet>3962</a>            :to_address, :to_account_id, :value, :memo)"</span>,
-<a href=#3963 id=3963 data-nosnippet>3963</a>    )<span class="question-mark">?</span>;
-<a href=#3964 id=3964 data-nosnippet>3964</a>
-<a href=#3965 id=3965 data-nosnippet>3965</a>    <span class="kw">let </span>(from_account_id, to_address, to_account_id, pool_type) =
-<a href=#3966 id=3966 data-nosnippet>3966</a>        recipient_params(conn, params, from_account_uuid, output.recipient())<span class="question-mark">?</span>;
-<a href=#3967 id=3967 data-nosnippet>3967</a>    <span class="kw">let </span>sql_args = <span class="macro">named_params!</span>[
-<a href=#3968 id=3968 data-nosnippet>3968</a>        <span class="string">":tx"</span>: tx_ref.<span class="number">0</span>,
-<a href=#3969 id=3969 data-nosnippet>3969</a>        <span class="string">":output_pool"</span>: <span class="kw-2">&amp;</span>pool_code(pool_type),
-<a href=#3970 id=3970 data-nosnippet>3970</a>        <span class="string">":output_index"</span>: <span class="kw-2">&amp;</span>i64::try_from(output.output_index()).unwrap(),
-<a href=#3971 id=3971 data-nosnippet>3971</a>        <span class="string">":from_account_id"</span>: from_account_id.<span class="number">0</span>,
-<a href=#3972 id=3972 data-nosnippet>3972</a>        <span class="string">":to_address"</span>: <span class="kw-2">&amp;</span>to_address,
-<a href=#3973 id=3973 data-nosnippet>3973</a>        <span class="string">":to_account_id"</span>: to_account_id.map(|a| a.<span class="number">0</span>),
-<a href=#3974 id=3974 data-nosnippet>3974</a>        <span class="string">":value"</span>: <span class="kw-2">&amp;</span>i64::from(ZatBalance::from(output.value())),
-<a href=#3975 id=3975 data-nosnippet>3975</a>        <span class="string">":memo"</span>: memo_repr(output.memo())
-<a href=#3976 id=3976 data-nosnippet>3976</a>    ];
-<a href=#3977 id=3977 data-nosnippet>3977</a>
-<a href=#3978 id=3978 data-nosnippet>3978</a>    stmt_insert_sent_output.execute(sql_args)<span class="question-mark">?</span>;
-<a href=#3979 id=3979 data-nosnippet>3979</a>    flag_previously_received_change(conn, tx_ref)<span class="question-mark">?</span>;
-<a href=#3980 id=3980 data-nosnippet>3980</a>
-<a href=#3981 id=3981 data-nosnippet>3981</a>    <span class="prelude-val">Ok</span>(())
-<a href=#3982 id=3982 data-nosnippet>3982</a>}
-<a href=#3983 id=3983 data-nosnippet>3983</a>
-<a href=#3984 id=3984 data-nosnippet>3984</a><span class="doccomment">/// Records information about a transaction output that your wallet created, from the constituent
-<a href=#3985 id=3985 data-nosnippet>3985</a>/// properties of that output.
-<a href=#3986 id=3986 data-nosnippet>3986</a>///
-<a href=#3987 id=3987 data-nosnippet>3987</a>/// - If `recipient` is a Unified address, `output_index` is an index into the outputs of the
-<a href=#3988 id=3988 data-nosnippet>3988</a>///   transaction within the bundle associated with the recipient's output pool.
-<a href=#3989 id=3989 data-nosnippet>3989</a>/// - If `recipient` is a Sapling address, `output_index` is an index into the Sapling outputs of
-<a href=#3990 id=3990 data-nosnippet>3990</a>///   the transaction.
-<a href=#3991 id=3991 data-nosnippet>3991</a>/// - If `recipient` is a transparent address, `output_index` is an index into the transparent
-<a href=#3992 id=3992 data-nosnippet>3992</a>///   outputs of the transaction.
-<a href=#3993 id=3993 data-nosnippet>3993</a>/// - If `recipient` is an internal account, `output_index` is an index into the Sapling outputs of
-<a href=#3994 id=3994 data-nosnippet>3994</a>///   the transaction.
-<a href=#3995 id=3995 data-nosnippet>3995</a></span><span class="attr">#[allow(clippy::too_many_arguments)]
-<a href=#3996 id=3996 data-nosnippet>3996</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>put_sent_output&lt;P: consensus::Parameters&gt;(
-<a href=#3997 id=3997 data-nosnippet>3997</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction,
-<a href=#3998 id=3998 data-nosnippet>3998</a>    params: <span class="kw-2">&amp;</span>P,
-<a href=#3999 id=3999 data-nosnippet>3999</a>    from_account_uuid: AccountUuid,
-<a href=#4000 id=4000 data-nosnippet>4000</a>    tx_ref: TxRef,
-<a href=#4001 id=4001 data-nosnippet>4001</a>    output_index: usize,
-<a href=#4002 id=4002 data-nosnippet>4002</a>    recipient: <span class="kw-2">&amp;</span>Recipient&lt;AccountUuid&gt;,
-<a href=#4003 id=4003 data-nosnippet>4003</a>    value: Zatoshis,
-<a href=#4004 id=4004 data-nosnippet>4004</a>    memo: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt;,
-<a href=#4005 id=4005 data-nosnippet>4005</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
-<a href=#4006 id=4006 data-nosnippet>4006</a>    <span class="kw">let </span><span class="kw-2">mut </span>stmt_upsert_sent_output = conn.prepare_cached(
-<a href=#4007 id=4007 data-nosnippet>4007</a>        <span class="string">"INSERT INTO sent_notes (
-<a href=#4008 id=4008 data-nosnippet>4008</a>            tx, output_pool, output_index, from_account_id,
-<a href=#4009 id=4009 data-nosnippet>4009</a>            to_address, to_account_id, value, memo)
-<a href=#4010 id=4010 data-nosnippet>4010</a>        VALUES (
-<a href=#4011 id=4011 data-nosnippet>4011</a>            :tx, :output_pool, :output_index, :from_account_id,
-<a href=#4012 id=4012 data-nosnippet>4012</a>            :to_address, :to_account_id, :value, :memo)
-<a href=#4013 id=4013 data-nosnippet>4013</a>        ON CONFLICT (tx, output_pool, output_index) DO UPDATE
-<a href=#4014 id=4014 data-nosnippet>4014</a>        SET from_account_id = :from_account_id,
-<a href=#4015 id=4015 data-nosnippet>4015</a>            to_address = IFNULL(to_address, :to_address),
-<a href=#4016 id=4016 data-nosnippet>4016</a>            to_account_id = IFNULL(to_account_id, :to_account_id),
-<a href=#4017 id=4017 data-nosnippet>4017</a>            value = :value,
-<a href=#4018 id=4018 data-nosnippet>4018</a>            memo = IFNULL(:memo, memo)"</span>,
-<a href=#4019 id=4019 data-nosnippet>4019</a>    )<span class="question-mark">?</span>;
-<a href=#4020 id=4020 data-nosnippet>4020</a>
-<a href=#4021 id=4021 data-nosnippet>4021</a>    <span class="kw">let </span>(from_account_id, to_address, to_account_id, pool_type) =
-<a href=#4022 id=4022 data-nosnippet>4022</a>        recipient_params(conn, params, from_account_uuid, recipient)<span class="question-mark">?</span>;
-<a href=#4023 id=4023 data-nosnippet>4023</a>    <span class="kw">let </span>sql_args = <span class="macro">named_params!</span>[
-<a href=#4024 id=4024 data-nosnippet>4024</a>        <span class="string">":tx"</span>: tx_ref.<span class="number">0</span>,
-<a href=#4025 id=4025 data-nosnippet>4025</a>        <span class="string">":output_pool"</span>: <span class="kw-2">&amp;</span>pool_code(pool_type),
-<a href=#4026 id=4026 data-nosnippet>4026</a>        <span class="string">":output_index"</span>: <span class="kw-2">&amp;</span>i64::try_from(output_index).unwrap(),
-<a href=#4027 id=4027 data-nosnippet>4027</a>        <span class="string">":from_account_id"</span>: from_account_id.<span class="number">0</span>,
-<a href=#4028 id=4028 data-nosnippet>4028</a>        <span class="string">":to_address"</span>: <span class="kw-2">&amp;</span>to_address,
-<a href=#4029 id=4029 data-nosnippet>4029</a>        <span class="string">":to_account_id"</span>: <span class="kw-2">&amp;</span>to_account_id.map(|a| a.<span class="number">0</span>),
-<a href=#4030 id=4030 data-nosnippet>4030</a>        <span class="string">":value"</span>: <span class="kw-2">&amp;</span>i64::from(ZatBalance::from(value)),
-<a href=#4031 id=4031 data-nosnippet>4031</a>        <span class="string">":memo"</span>: memo_repr(memo)
-<a href=#4032 id=4032 data-nosnippet>4032</a>    ];
-<a href=#4033 id=4033 data-nosnippet>4033</a>
-<a href=#4034 id=4034 data-nosnippet>4034</a>    stmt_upsert_sent_output.execute(sql_args)<span class="question-mark">?</span>;
-<a href=#4035 id=4035 data-nosnippet>4035</a>    flag_previously_received_change(conn, tx_ref)<span class="question-mark">?</span>;
-<a href=#4036 id=4036 data-nosnippet>4036</a>
-<a href=#4037 id=4037 data-nosnippet>4037</a>    <span class="prelude-val">Ok</span>(())
-<a href=#4038 id=4038 data-nosnippet>4038</a>}
-<a href=#4039 id=4039 data-nosnippet>4039</a>
-<a href=#4040 id=4040 data-nosnippet>4040</a><span class="doccomment">/// Inserts the given entries into the nullifier map.
-<a href=#4041 id=4041 data-nosnippet>4041</a>///
-<a href=#4042 id=4042 data-nosnippet>4042</a>/// Returns an error if the new entries conflict with existing ones. This indicates either
-<a href=#4043 id=4043 data-nosnippet>4043</a>/// corrupted data, or that a reorg has occurred and the caller needs to repair the wallet
-<a href=#4044 id=4044 data-nosnippet>4044</a>/// state with [`truncate_to_height`].
-<a href=#4045 id=4045 data-nosnippet>4045</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert_nullifier_map&lt;N: AsRef&lt;[u8]&gt;&gt;(
-<a href=#4046 id=4046 data-nosnippet>4046</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction&lt;<span class="lifetime">'_</span>&gt;,
-<a href=#4047 id=4047 data-nosnippet>4047</a>    block_height: BlockHeight,
-<a href=#4048 id=4048 data-nosnippet>4048</a>    spend_pool: ShieldedProtocol,
-<a href=#4049 id=4049 data-nosnippet>4049</a>    new_entries: <span class="kw-2">&amp;</span>[(TxId, u16, Vec&lt;N&gt;)],
-<a href=#4050 id=4050 data-nosnippet>4050</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
-<a href=#4051 id=4051 data-nosnippet>4051</a>    <span class="kw">let </span><span class="kw-2">mut </span>stmt_select_tx_locators = conn.prepare_cached(
-<a href=#4052 id=4052 data-nosnippet>4052</a>        <span class="string">"SELECT block_height, tx_index, txid
-<a href=#4053 id=4053 data-nosnippet>4053</a>        FROM tx_locator_map
-<a href=#4054 id=4054 data-nosnippet>4054</a>        WHERE (block_height = :block_height AND tx_index = :tx_index) OR txid = :txid"</span>,
-<a href=#4055 id=4055 data-nosnippet>4055</a>    )<span class="question-mark">?</span>;
-<a href=#4056 id=4056 data-nosnippet>4056</a>    <span class="kw">let </span><span class="kw-2">mut </span>stmt_insert_tx_locator = conn.prepare_cached(
-<a href=#4057 id=4057 data-nosnippet>4057</a>        <span class="string">"INSERT INTO tx_locator_map
-<a href=#4058 id=4058 data-nosnippet>4058</a>        (block_height, tx_index, txid)
-<a href=#4059 id=4059 data-nosnippet>4059</a>        VALUES (:block_height, :tx_index, :txid)"</span>,
-<a href=#4060 id=4060 data-nosnippet>4060</a>    )<span class="question-mark">?</span>;
-<a href=#4061 id=4061 data-nosnippet>4061</a>    <span class="kw">let </span><span class="kw-2">mut </span>stmt_insert_nullifier_mapping = conn.prepare_cached(
-<a href=#4062 id=4062 data-nosnippet>4062</a>        <span class="string">"INSERT INTO nullifier_map
-<a href=#4063 id=4063 data-nosnippet>4063</a>        (spend_pool, nf, block_height, tx_index)
-<a href=#4064 id=4064 data-nosnippet>4064</a>        VALUES (:spend_pool, :nf, :block_height, :tx_index)
-<a href=#4065 id=4065 data-nosnippet>4065</a>        ON CONFLICT (spend_pool, nf) DO UPDATE
-<a href=#4066 id=4066 data-nosnippet>4066</a>        SET block_height = :block_height,
-<a href=#4067 id=4067 data-nosnippet>4067</a>            tx_index = :tx_index"</span>,
-<a href=#4068 id=4068 data-nosnippet>4068</a>    )<span class="question-mark">?</span>;
-<a href=#4069 id=4069 data-nosnippet>4069</a>
-<a href=#4070 id=4070 data-nosnippet>4070</a>    <span class="kw">for </span>(txid, tx_index, nullifiers) <span class="kw">in </span>new_entries {
-<a href=#4071 id=4071 data-nosnippet>4071</a>        <span class="kw">let </span>tx_args = <span class="macro">named_params!</span>[
-<a href=#4072 id=4072 data-nosnippet>4072</a>            <span class="string">":block_height"</span>: u32::from(block_height),
-<a href=#4073 id=4073 data-nosnippet>4073</a>            <span class="string">":tx_index"</span>: tx_index,
-<a href=#4074 id=4074 data-nosnippet>4074</a>            <span class="string">":txid"</span>: txid.as_ref(),
-<a href=#4075 id=4075 data-nosnippet>4075</a>        ];
-<a href=#4076 id=4076 data-nosnippet>4076</a>
-<a href=#4077 id=4077 data-nosnippet>4077</a>        <span class="comment">// We cannot use an upsert here, because we use the tx locator as the foreign key
-<a href=#4078 id=4078 data-nosnippet>4078</a>        // in `nullifier_map` instead of `txid` for database size efficiency. If an insert
-<a href=#4079 id=4079 data-nosnippet>4079</a>        // into `tx_locator_map` were to conflict, we would need the resulting update to
-<a href=#4080 id=4080 data-nosnippet>4080</a>        // cascade into `nullifier_map` as either:
-<a href=#4081 id=4081 data-nosnippet>4081</a>        // - an update (if a transaction moved within a block), or
-<a href=#4082 id=4082 data-nosnippet>4082</a>        // - a deletion (if the locator now points to a different transaction).
-<a href=#4083 id=4083 data-nosnippet>4083</a>        //
-<a href=#4084 id=4084 data-nosnippet>4084</a>        // `ON UPDATE` has `CASCADE` to always update, but has no deletion option. So we
-<a href=#4085 id=4085 data-nosnippet>4085</a>        // instead set `ON UPDATE RESTRICT` on the foreign key relation, and require the
-<a href=#4086 id=4086 data-nosnippet>4086</a>        // caller to manually rewind the database in this situation.
-<a href=#4087 id=4087 data-nosnippet>4087</a>        </span><span class="kw">let </span>locator = stmt_select_tx_locators
-<a href=#4088 id=4088 data-nosnippet>4088</a>            .query_map(tx_args, |row| {
-<a href=#4089 id=4089 data-nosnippet>4089</a>                <span class="prelude-val">Ok</span>((
-<a href=#4090 id=4090 data-nosnippet>4090</a>                    BlockHeight::from_u32(row.get(<span class="number">0</span>)<span class="question-mark">?</span>),
-<a href=#4091 id=4091 data-nosnippet>4091</a>                    row.get::&lt;<span class="kw">_</span>, u16&gt;(<span class="number">1</span>)<span class="question-mark">?</span>,
-<a href=#4092 id=4092 data-nosnippet>4092</a>                    TxId::from_bytes(row.get(<span class="number">2</span>)<span class="question-mark">?</span>),
-<a href=#4093 id=4093 data-nosnippet>4093</a>                ))
-<a href=#4094 id=4094 data-nosnippet>4094</a>            })<span class="question-mark">?
-<a href=#4095 id=4095 data-nosnippet>4095</a>            </span>.try_fold(<span class="prelude-val">None</span>, |acc, row| -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw">_</span>, SqliteClientError&gt; {
-<a href=#4096 id=4096 data-nosnippet>4096</a>                <span class="kw">match </span>(acc, row<span class="question-mark">?</span>) {
-<a href=#4097 id=4097 data-nosnippet>4097</a>                    (<span class="prelude-val">None</span>, rhs) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(rhs))),
-<a href=#4098 id=4098 data-nosnippet>4098</a>                    <span class="comment">// If there was more than one row, then due to the uniqueness
-<a href=#4099 id=4099 data-nosnippet>4099</a>                    // constraints on the `tx_locator_map` table, all of the rows conflict
-<a href=#4100 id=4100 data-nosnippet>4100</a>                    // with the locator being inserted.
-<a href=#4101 id=4101 data-nosnippet>4101</a>                    </span>(<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="prelude-val">None</span>)),
-<a href=#4102 id=4102 data-nosnippet>4102</a>                }
-<a href=#4103 id=4103 data-nosnippet>4103</a>            })<span class="question-mark">?</span>;
-<a href=#4104 id=4104 data-nosnippet>4104</a>
-<a href=#4105 id=4105 data-nosnippet>4105</a>        <span class="kw">match </span>locator {
-<a href=#4106 id=4106 data-nosnippet>4106</a>            <span class="comment">// If the locator in the table matches the one being inserted, do nothing.
-<a href=#4107 id=4107 data-nosnippet>4107</a>            </span><span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(loc)) <span class="kw">if </span>loc == (block_height, <span class="kw-2">*</span>tx_index, <span class="kw-2">*</span>txid) =&gt; (),
-<a href=#4108 id=4108 data-nosnippet>4108</a>            <span class="comment">// If the locator being inserted would conflict, report it.
-<a href=#4109 id=4109 data-nosnippet>4109</a>            </span><span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(SqliteClientError::DbError(rusqlite::Error::SqliteFailure(
-<a href=#4110 id=4110 data-nosnippet>4110</a>                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
-<a href=#4111 id=4111 data-nosnippet>4111</a>                <span class="prelude-val">Some</span>(<span class="string">"UNIQUE constraint failed: tx_locator_map.block_height, tx_locator_map.tx_index"</span>.into()),
-<a href=#4112 id=4112 data-nosnippet>4112</a>            )))<span class="question-mark">?</span>,
-<a href=#4113 id=4113 data-nosnippet>4113</a>            <span class="comment">// If the locator doesn't exist, insert it.
-<a href=#4114 id=4114 data-nosnippet>4114</a>            </span><span class="prelude-val">None </span>=&gt; stmt_insert_tx_locator.execute(tx_args).map(|<span class="kw">_</span>| ())<span class="question-mark">?</span>,
-<a href=#4115 id=4115 data-nosnippet>4115</a>        }
-<a href=#4116 id=4116 data-nosnippet>4116</a>
-<a href=#4117 id=4117 data-nosnippet>4117</a>        <span class="kw">for </span>nf <span class="kw">in </span>nullifiers {
-<a href=#4118 id=4118 data-nosnippet>4118</a>            <span class="comment">// Here it is okay to use an upsert, because per above we've confirmed that
-<a href=#4119 id=4119 data-nosnippet>4119</a>            // the locator points to the same transaction.
-<a href=#4120 id=4120 data-nosnippet>4120</a>            </span><span class="kw">let </span>nf_args = <span class="macro">named_params!</span>[
-<a href=#4121 id=4121 data-nosnippet>4121</a>                <span class="string">":spend_pool"</span>: pool_code(PoolType::Shielded(spend_pool)),
-<a href=#4122 id=4122 data-nosnippet>4122</a>                <span class="string">":nf"</span>: nf.as_ref(),
-<a href=#4123 id=4123 data-nosnippet>4123</a>                <span class="string">":block_height"</span>: u32::from(block_height),
-<a href=#4124 id=4124 data-nosnippet>4124</a>                <span class="string">":tx_index"</span>: tx_index,
-<a href=#4125 id=4125 data-nosnippet>4125</a>            ];
-<a href=#4126 id=4126 data-nosnippet>4126</a>            stmt_insert_nullifier_mapping.execute(nf_args)<span class="question-mark">?</span>;
-<a href=#4127 id=4127 data-nosnippet>4127</a>        }
-<a href=#4128 id=4128 data-nosnippet>4128</a>    }
-<a href=#4129 id=4129 data-nosnippet>4129</a>
-<a href=#4130 id=4130 data-nosnippet>4130</a>    <span class="prelude-val">Ok</span>(())
-<a href=#4131 id=4131 data-nosnippet>4131</a>}
-<a href=#4132 id=4132 data-nosnippet>4132</a>
-<a href=#4133 id=4133 data-nosnippet>4133</a><span class="doccomment">/// Returns the row of the `transactions` table corresponding to the transaction in which
-<a href=#4134 id=4134 data-nosnippet>4134</a>/// this nullifier is revealed, if any.
-<a href=#4135 id=4135 data-nosnippet>4135</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>query_nullifier_map&lt;N: AsRef&lt;[u8]&gt;&gt;(
-<a href=#4136 id=4136 data-nosnippet>4136</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction&lt;<span class="lifetime">'_</span>&gt;,
-<a href=#4137 id=4137 data-nosnippet>4137</a>    spend_pool: ShieldedProtocol,
-<a href=#4138 id=4138 data-nosnippet>4138</a>    nf: <span class="kw-2">&amp;</span>N,
-<a href=#4139 id=4139 data-nosnippet>4139</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;TxRef&gt;, SqliteClientError&gt; {
-<a href=#4140 id=4140 data-nosnippet>4140</a>    <span class="kw">let </span><span class="kw-2">mut </span>stmt_select_locator = conn.prepare_cached(
-<a href=#4141 id=4141 data-nosnippet>4141</a>        <span class="string">"SELECT block_height, tx_index, txid
-<a href=#4142 id=4142 data-nosnippet>4142</a>        FROM nullifier_map
-<a href=#4143 id=4143 data-nosnippet>4143</a>        LEFT JOIN tx_locator_map USING (block_height, tx_index)
-<a href=#4144 id=4144 data-nosnippet>4144</a>        WHERE spend_pool = :spend_pool AND nf = :nf"</span>,
-<a href=#4145 id=4145 data-nosnippet>4145</a>    )<span class="question-mark">?</span>;
-<a href=#4146 id=4146 data-nosnippet>4146</a>
-<a href=#4147 id=4147 data-nosnippet>4147</a>    <span class="kw">let </span>sql_args = <span class="macro">named_params!</span>[
-<a href=#4148 id=4148 data-nosnippet>4148</a>        <span class="string">":spend_pool"</span>: pool_code(PoolType::Shielded(spend_pool)),
-<a href=#4149 id=4149 data-nosnippet>4149</a>        <span class="string">":nf"</span>: nf.as_ref(),
-<a href=#4150 id=4150 data-nosnippet>4150</a>    ];
-<a href=#4151 id=4151 data-nosnippet>4151</a>
-<a href=#4152 id=4152 data-nosnippet>4152</a>    <span class="comment">// Find the locator corresponding to this nullifier, if any.
-<a href=#4153 id=4153 data-nosnippet>4153</a>    </span><span class="kw">let </span>locator = stmt_select_locator
-<a href=#4154 id=4154 data-nosnippet>4154</a>        .query_row(sql_args, |row| {
-<a href=#4155 id=4155 data-nosnippet>4155</a>            <span class="prelude-val">Ok</span>((
-<a href=#4156 id=4156 data-nosnippet>4156</a>                BlockHeight::from_u32(row.get(<span class="number">0</span>)<span class="question-mark">?</span>),
-<a href=#4157 id=4157 data-nosnippet>4157</a>                row.get(<span class="number">1</span>)<span class="question-mark">?</span>,
-<a href=#4158 id=4158 data-nosnippet>4158</a>                TxId::from_bytes(row.get(<span class="number">2</span>)<span class="question-mark">?</span>),
-<a href=#4159 id=4159 data-nosnippet>4159</a>            ))
-<a href=#4160 id=4160 data-nosnippet>4160</a>        })
-<a href=#4161 id=4161 data-nosnippet>4161</a>        .optional()<span class="question-mark">?</span>;
-<a href=#4162 id=4162 data-nosnippet>4162</a>    <span class="kw">let </span>(height, index, txid) = <span class="kw">match </span>locator {
-<a href=#4163 id=4163 data-nosnippet>4163</a>        <span class="prelude-val">Some</span>(res) =&gt; res,
-<a href=#4164 id=4164 data-nosnippet>4164</a>        <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
-<a href=#4165 id=4165 data-nosnippet>4165</a>    };
-<a href=#4166 id=4166 data-nosnippet>4166</a>
-<a href=#4167 id=4167 data-nosnippet>4167</a>    <span class="comment">// Find or create a corresponding row in the `transactions` table. Usually a row will
-<a href=#4168 id=4168 data-nosnippet>4168</a>    // have been created during the same scan that the locator was added to the nullifier
-<a href=#4169 id=4169 data-nosnippet>4169</a>    // map, but it would not happen if the transaction in question spent the note with no
-<a href=#4170 id=4170 data-nosnippet>4170</a>    // change or explicit in-wallet recipient.
-<a href=#4171 id=4171 data-nosnippet>4171</a>    </span>put_tx_meta(
-<a href=#4172 id=4172 data-nosnippet>4172</a>        conn,
-<a href=#4173 id=4173 data-nosnippet>4173</a>        <span class="kw-2">&amp;</span>WalletTx::new(
-<a href=#4174 id=4174 data-nosnippet>4174</a>            txid,
-<a href=#4175 id=4175 data-nosnippet>4175</a>            index,
-<a href=#4176 id=4176 data-nosnippet>4176</a>            <span class="macro">vec!</span>[],
-<a href=#4177 id=4177 data-nosnippet>4177</a>            <span class="macro">vec!</span>[],
-<a href=#4178 id=4178 data-nosnippet>4178</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#4179 id=4179 data-nosnippet>4179</a>            </span><span class="macro">vec!</span>[],
+<a href=#3765 id=3765 data-nosnippet>3765</a>        <span class="kw">if </span>!b.is_coinbase() {
+<a href=#3766 id=3766 data-nosnippet>3766</a>            <span class="comment">// queue the transparent inputs for enhancement
+<a href=#3767 id=3767 data-nosnippet>3767</a>            </span>queue_tx_retrieval(
+<a href=#3768 id=3768 data-nosnippet>3768</a>                conn,
+<a href=#3769 id=3769 data-nosnippet>3769</a>                b.vin.iter().map(|txin| <span class="kw-2">*</span>txin.prevout.txid()),
+<a href=#3770 id=3770 data-nosnippet>3770</a>                <span class="prelude-val">Some</span>(tx_ref),
+<a href=#3771 id=3771 data-nosnippet>3771</a>            )<span class="question-mark">?</span>;
+<a href=#3772 id=3772 data-nosnippet>3772</a>        }
+<a href=#3773 id=3773 data-nosnippet>3773</a>    }
+<a href=#3774 id=3774 data-nosnippet>3774</a>
+<a href=#3775 id=3775 data-nosnippet>3775</a>    <span class="prelude-val">Ok</span>(())
+<a href=#3776 id=3776 data-nosnippet>3776</a>}
+<a href=#3777 id=3777 data-nosnippet>3777</a>
+<a href=#3778 id=3778 data-nosnippet>3778</a><span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#3779 id=3779 data-nosnippet>3779</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>queue_unmined_tx_retrieval&lt;AccountId&gt;(
+<a href=#3780 id=3780 data-nosnippet>3780</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction&lt;<span class="lifetime">'_</span>&gt;,
+<a href=#3781 id=3781 data-nosnippet>3781</a>    d_tx: <span class="kw-2">&amp;</span>DecryptedTransaction&lt;<span class="lifetime">'_</span>, AccountId&gt;,
+<a href=#3782 id=3782 data-nosnippet>3782</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
+<a href=#3783 id=3783 data-nosnippet>3783</a>    <span class="kw">let </span>detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
+<a href=#3784 id=3784 data-nosnippet>3784</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#3785 id=3785 data-nosnippet>3785</a>    </span><span class="kw">let </span>detectable_via_scanning = detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
+<a href=#3786 id=3786 data-nosnippet>3786</a>
+<a href=#3787 id=3787 data-nosnippet>3787</a>    <span class="kw">if </span>d_tx.mined_height().is_none() &amp;&amp; !detectable_via_scanning {
+<a href=#3788 id=3788 data-nosnippet>3788</a>        queue_tx_retrieval(conn, std::iter::once(d_tx.tx().txid()), <span class="prelude-val">None</span>)<span class="question-mark">?
+<a href=#3789 id=3789 data-nosnippet>3789</a>    </span>}
+<a href=#3790 id=3790 data-nosnippet>3790</a>
+<a href=#3791 id=3791 data-nosnippet>3791</a>    <span class="prelude-val">Ok</span>(())
+<a href=#3792 id=3792 data-nosnippet>3792</a>}
+<a href=#3793 id=3793 data-nosnippet>3793</a>
+<a href=#3794 id=3794 data-nosnippet>3794</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>queue_tx_retrieval(
+<a href=#3795 id=3795 data-nosnippet>3795</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction&lt;<span class="lifetime">'_</span>&gt;,
+<a href=#3796 id=3796 data-nosnippet>3796</a>    txids: <span class="kw">impl </span>Iterator&lt;Item = TxId&gt;,
+<a href=#3797 id=3797 data-nosnippet>3797</a>    dependent_tx_ref: <span class="prelude-ty">Option</span>&lt;TxRef&gt;,
+<a href=#3798 id=3798 data-nosnippet>3798</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
+<a href=#3799 id=3799 data-nosnippet>3799</a>    <span class="comment">// Add an entry to the transaction retrieval queue if it would not be redundant.
+<a href=#3800 id=3800 data-nosnippet>3800</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>stmt_insert_tx = conn.prepare_cached(
+<a href=#3801 id=3801 data-nosnippet>3801</a>        <span class="string">"INSERT INTO tx_retrieval_queue (txid, query_type, dependent_transaction_id)
+<a href=#3802 id=3802 data-nosnippet>3802</a>            SELECT
+<a href=#3803 id=3803 data-nosnippet>3803</a>            :txid,
+<a href=#3804 id=3804 data-nosnippet>3804</a>            IIF(
+<a href=#3805 id=3805 data-nosnippet>3805</a>                EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL),
+<a href=#3806 id=3806 data-nosnippet>3806</a>                :status_type,
+<a href=#3807 id=3807 data-nosnippet>3807</a>                :enhancement_type
+<a href=#3808 id=3808 data-nosnippet>3808</a>            ),
+<a href=#3809 id=3809 data-nosnippet>3809</a>            :dependent_transaction_id
+<a href=#3810 id=3810 data-nosnippet>3810</a>        ON CONFLICT (txid) DO UPDATE
+<a href=#3811 id=3811 data-nosnippet>3811</a>        SET query_type =
+<a href=#3812 id=3812 data-nosnippet>3812</a>            IIF(
+<a href=#3813 id=3813 data-nosnippet>3813</a>                EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL),
+<a href=#3814 id=3814 data-nosnippet>3814</a>                :status_type,
+<a href=#3815 id=3815 data-nosnippet>3815</a>                :enhancement_type
+<a href=#3816 id=3816 data-nosnippet>3816</a>            ),
+<a href=#3817 id=3817 data-nosnippet>3817</a>            dependent_transaction_id = IFNULL(:dependent_transaction_id, dependent_transaction_id)"</span>,
+<a href=#3818 id=3818 data-nosnippet>3818</a>    )<span class="question-mark">?</span>;
+<a href=#3819 id=3819 data-nosnippet>3819</a>
+<a href=#3820 id=3820 data-nosnippet>3820</a>    <span class="kw">for </span>txid <span class="kw">in </span>txids {
+<a href=#3821 id=3821 data-nosnippet>3821</a>        stmt_insert_tx.execute(<span class="macro">named_params!</span> {
+<a href=#3822 id=3822 data-nosnippet>3822</a>            <span class="string">":txid"</span>: txid.as_ref(),
+<a href=#3823 id=3823 data-nosnippet>3823</a>            <span class="string">":status_type"</span>: TxQueryType::Status.code(),
+<a href=#3824 id=3824 data-nosnippet>3824</a>            <span class="string">":enhancement_type"</span>: TxQueryType::Enhancement.code(),
+<a href=#3825 id=3825 data-nosnippet>3825</a>            <span class="string">":dependent_transaction_id"</span>: dependent_tx_ref.map(|r| r.<span class="number">0</span>),
+<a href=#3826 id=3826 data-nosnippet>3826</a>        })<span class="question-mark">?</span>;
+<a href=#3827 id=3827 data-nosnippet>3827</a>    }
+<a href=#3828 id=3828 data-nosnippet>3828</a>
+<a href=#3829 id=3829 data-nosnippet>3829</a>    <span class="prelude-val">Ok</span>(())
+<a href=#3830 id=3830 data-nosnippet>3830</a>}
+<a href=#3831 id=3831 data-nosnippet>3831</a>
+<a href=#3832 id=3832 data-nosnippet>3832</a><span class="doccomment">/// Returns the vector of [`TransactionDataRequest`]s that represents the information needed by the
+<a href=#3833 id=3833 data-nosnippet>3833</a>/// wallet backend in order to be able to present a complete view of wallet history and memo data.
+<a href=#3834 id=3834 data-nosnippet>3834</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>transaction_data_requests(
+<a href=#3835 id=3835 data-nosnippet>3835</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
+<a href=#3836 id=3836 data-nosnippet>3836</a>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;TransactionDataRequest&gt;, SqliteClientError&gt; {
+<a href=#3837 id=3837 data-nosnippet>3837</a>    <span class="kw">let </span><span class="kw-2">mut </span>tx_retrieval_stmt =
+<a href=#3838 id=3838 data-nosnippet>3838</a>        conn.prepare_cached(<span class="string">"SELECT txid, query_type FROM tx_retrieval_queue"</span>)<span class="question-mark">?</span>;
+<a href=#3839 id=3839 data-nosnippet>3839</a>
+<a href=#3840 id=3840 data-nosnippet>3840</a>    <span class="kw">let </span>result = tx_retrieval_stmt
+<a href=#3841 id=3841 data-nosnippet>3841</a>        .query_and_then([], |row| {
+<a href=#3842 id=3842 data-nosnippet>3842</a>            <span class="kw">let </span>txid = row.get(<span class="number">0</span>).map(TxId::from_bytes)<span class="question-mark">?</span>;
+<a href=#3843 id=3843 data-nosnippet>3843</a>            <span class="kw">let </span>query_type = row.get(<span class="number">1</span>).map(TxQueryType::from_code)<span class="question-mark">?</span>.ok_or_else(|| {
+<a href=#3844 id=3844 data-nosnippet>3844</a>                SqliteClientError::CorruptedData(
+<a href=#3845 id=3845 data-nosnippet>3845</a>                    <span class="string">"Unrecognized transaction data request type."</span>.to_owned(),
+<a href=#3846 id=3846 data-nosnippet>3846</a>                )
+<a href=#3847 id=3847 data-nosnippet>3847</a>            })<span class="question-mark">?</span>;
+<a href=#3848 id=3848 data-nosnippet>3848</a>
+<a href=#3849 id=3849 data-nosnippet>3849</a>            <span class="prelude-val">Ok</span>::&lt;TransactionDataRequest, SqliteClientError&gt;(<span class="kw">match </span>query_type {
+<a href=#3850 id=3850 data-nosnippet>3850</a>                TxQueryType::Status =&gt; TransactionDataRequest::GetStatus(txid),
+<a href=#3851 id=3851 data-nosnippet>3851</a>                TxQueryType::Enhancement =&gt; TransactionDataRequest::Enhancement(txid),
+<a href=#3852 id=3852 data-nosnippet>3852</a>            })
+<a href=#3853 id=3853 data-nosnippet>3853</a>        })<span class="question-mark">?
+<a href=#3854 id=3854 data-nosnippet>3854</a>        </span>.collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
+<a href=#3855 id=3855 data-nosnippet>3855</a>
+<a href=#3856 id=3856 data-nosnippet>3856</a>    <span class="prelude-val">Ok</span>(result)
+<a href=#3857 id=3857 data-nosnippet>3857</a>}
+<a href=#3858 id=3858 data-nosnippet>3858</a>
+<a href=#3859 id=3859 data-nosnippet>3859</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>notify_tx_retrieved(
+<a href=#3860 id=3860 data-nosnippet>3860</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction&lt;<span class="lifetime">'_</span>&gt;,
+<a href=#3861 id=3861 data-nosnippet>3861</a>    txid: TxId,
+<a href=#3862 id=3862 data-nosnippet>3862</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
+<a href=#3863 id=3863 data-nosnippet>3863</a>    conn.execute(
+<a href=#3864 id=3864 data-nosnippet>3864</a>        <span class="string">"DELETE FROM tx_retrieval_queue WHERE txid = :txid"</span>,
+<a href=#3865 id=3865 data-nosnippet>3865</a>        <span class="macro">named_params!</span>[<span class="string">":txid"</span>: <span class="kw-2">&amp;</span>txid.as_ref()[..]],
+<a href=#3866 id=3866 data-nosnippet>3866</a>    )<span class="question-mark">?</span>;
+<a href=#3867 id=3867 data-nosnippet>3867</a>
+<a href=#3868 id=3868 data-nosnippet>3868</a>    <span class="prelude-val">Ok</span>(())
+<a href=#3869 id=3869 data-nosnippet>3869</a>}
+<a href=#3870 id=3870 data-nosnippet>3870</a>
+<a href=#3871 id=3871 data-nosnippet>3871</a><span class="comment">// A utility function for creation of parameters for use in `insert_sent_output`
+<a href=#3872 id=3872 data-nosnippet>3872</a>// and `put_sent_output`
+<a href=#3873 id=3873 data-nosnippet>3873</a></span><span class="kw">fn </span>recipient_params&lt;P: consensus::Parameters&gt;(
+<a href=#3874 id=3874 data-nosnippet>3874</a>    conn: <span class="kw-2">&amp;</span>Connection,
+<a href=#3875 id=3875 data-nosnippet>3875</a>    _params: <span class="kw-2">&amp;</span>P,
+<a href=#3876 id=3876 data-nosnippet>3876</a>    from: AccountUuid,
+<a href=#3877 id=3877 data-nosnippet>3877</a>    to: <span class="kw-2">&amp;</span>Recipient&lt;AccountUuid&gt;,
+<a href=#3878 id=3878 data-nosnippet>3878</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(AccountRef, <span class="prelude-ty">Option</span>&lt;String&gt;, <span class="prelude-ty">Option</span>&lt;AccountRef&gt;, PoolType), SqliteClientError&gt; {
+<a href=#3879 id=3879 data-nosnippet>3879</a>    <span class="kw">let </span>from_account_id = get_account_ref(conn, from)<span class="question-mark">?</span>;
+<a href=#3880 id=3880 data-nosnippet>3880</a>    <span class="kw">match </span>to {
+<a href=#3881 id=3881 data-nosnippet>3881</a>        Recipient::External {
+<a href=#3882 id=3882 data-nosnippet>3882</a>            recipient_address,
+<a href=#3883 id=3883 data-nosnippet>3883</a>            output_pool,
+<a href=#3884 id=3884 data-nosnippet>3884</a>            ..
+<a href=#3885 id=3885 data-nosnippet>3885</a>        } =&gt; <span class="prelude-val">Ok</span>((
+<a href=#3886 id=3886 data-nosnippet>3886</a>            from_account_id,
+<a href=#3887 id=3887 data-nosnippet>3887</a>            <span class="prelude-val">Some</span>(recipient_address.encode()),
+<a href=#3888 id=3888 data-nosnippet>3888</a>            <span class="prelude-val">None</span>,
+<a href=#3889 id=3889 data-nosnippet>3889</a>            <span class="kw-2">*</span>output_pool,
+<a href=#3890 id=3890 data-nosnippet>3890</a>        )),
+<a href=#3891 id=3891 data-nosnippet>3891</a>        <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#3892 id=3892 data-nosnippet>3892</a>        </span>Recipient::EphemeralTransparent {
+<a href=#3893 id=3893 data-nosnippet>3893</a>            receiving_account,
+<a href=#3894 id=3894 data-nosnippet>3894</a>            ephemeral_address,
+<a href=#3895 id=3895 data-nosnippet>3895</a>            ..
+<a href=#3896 id=3896 data-nosnippet>3896</a>        } =&gt; {
+<a href=#3897 id=3897 data-nosnippet>3897</a>            <span class="kw">let </span>to_account = get_account_ref(conn, <span class="kw-2">*</span>receiving_account)<span class="question-mark">?</span>;
+<a href=#3898 id=3898 data-nosnippet>3898</a>            <span class="prelude-val">Ok</span>((
+<a href=#3899 id=3899 data-nosnippet>3899</a>                from_account_id,
+<a href=#3900 id=3900 data-nosnippet>3900</a>                <span class="prelude-val">Some</span>(ephemeral_address.encode(_params)),
+<a href=#3901 id=3901 data-nosnippet>3901</a>                <span class="prelude-val">Some</span>(to_account),
+<a href=#3902 id=3902 data-nosnippet>3902</a>                PoolType::TRANSPARENT,
+<a href=#3903 id=3903 data-nosnippet>3903</a>            ))
+<a href=#3904 id=3904 data-nosnippet>3904</a>        }
+<a href=#3905 id=3905 data-nosnippet>3905</a>        Recipient::InternalAccount {
+<a href=#3906 id=3906 data-nosnippet>3906</a>            receiving_account,
+<a href=#3907 id=3907 data-nosnippet>3907</a>            external_address,
+<a href=#3908 id=3908 data-nosnippet>3908</a>            note,
+<a href=#3909 id=3909 data-nosnippet>3909</a>        } =&gt; {
+<a href=#3910 id=3910 data-nosnippet>3910</a>            <span class="kw">let </span>to_account = get_account_ref(conn, <span class="kw-2">*</span>receiving_account)<span class="question-mark">?</span>;
+<a href=#3911 id=3911 data-nosnippet>3911</a>            <span class="prelude-val">Ok</span>((
+<a href=#3912 id=3912 data-nosnippet>3912</a>                from_account_id,
+<a href=#3913 id=3913 data-nosnippet>3913</a>                external_address.as_ref().map(|a| a.encode()),
+<a href=#3914 id=3914 data-nosnippet>3914</a>                <span class="prelude-val">Some</span>(to_account),
+<a href=#3915 id=3915 data-nosnippet>3915</a>                PoolType::Shielded(note.protocol()),
+<a href=#3916 id=3916 data-nosnippet>3916</a>            ))
+<a href=#3917 id=3917 data-nosnippet>3917</a>        }
+<a href=#3918 id=3918 data-nosnippet>3918</a>    }
+<a href=#3919 id=3919 data-nosnippet>3919</a>}
+<a href=#3920 id=3920 data-nosnippet>3920</a>
+<a href=#3921 id=3921 data-nosnippet>3921</a><span class="kw">fn </span>flag_previously_received_change(
+<a href=#3922 id=3922 data-nosnippet>3922</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction,
+<a href=#3923 id=3923 data-nosnippet>3923</a>    tx_ref: TxRef,
+<a href=#3924 id=3924 data-nosnippet>3924</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
+<a href=#3925 id=3925 data-nosnippet>3925</a>    <span class="kw">let </span>flag_received_change = |table_prefix| {
+<a href=#3926 id=3926 data-nosnippet>3926</a>        conn.execute(
+<a href=#3927 id=3927 data-nosnippet>3927</a>            <span class="kw-2">&amp;</span><span class="macro">format!</span>(
+<a href=#3928 id=3928 data-nosnippet>3928</a>                <span class="string">"UPDATE {table_prefix}_received_notes
+<a href=#3929 id=3929 data-nosnippet>3929</a>                 SET is_change = 1
+<a href=#3930 id=3930 data-nosnippet>3930</a>                 FROM sent_notes sn
+<a href=#3931 id=3931 data-nosnippet>3931</a>                 WHERE sn.tx = {table_prefix}_received_notes.tx
+<a href=#3932 id=3932 data-nosnippet>3932</a>                 AND sn.tx = :tx
+<a href=#3933 id=3933 data-nosnippet>3933</a>                 AND sn.from_account_id = {table_prefix}_received_notes.account_id
+<a href=#3934 id=3934 data-nosnippet>3934</a>                 AND {table_prefix}_received_notes.recipient_key_scope = :internal_scope"
+<a href=#3935 id=3935 data-nosnippet>3935</a>            </span>),
+<a href=#3936 id=3936 data-nosnippet>3936</a>            <span class="macro">named_params!</span> {
+<a href=#3937 id=3937 data-nosnippet>3937</a>                <span class="string">":tx"</span>: tx_ref.<span class="number">0</span>,
+<a href=#3938 id=3938 data-nosnippet>3938</a>                <span class="string">":internal_scope"</span>: KeyScope::INTERNAL.encode()
+<a href=#3939 id=3939 data-nosnippet>3939</a>            },
+<a href=#3940 id=3940 data-nosnippet>3940</a>        )
+<a href=#3941 id=3941 data-nosnippet>3941</a>    };
+<a href=#3942 id=3942 data-nosnippet>3942</a>
+<a href=#3943 id=3943 data-nosnippet>3943</a>    flag_received_change(SAPLING_TABLES_PREFIX)<span class="question-mark">?</span>;
+<a href=#3944 id=3944 data-nosnippet>3944</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#3945 id=3945 data-nosnippet>3945</a>    </span>flag_received_change(ORCHARD_TABLES_PREFIX)<span class="question-mark">?</span>;
+<a href=#3946 id=3946 data-nosnippet>3946</a>
+<a href=#3947 id=3947 data-nosnippet>3947</a>    <span class="prelude-val">Ok</span>(())
+<a href=#3948 id=3948 data-nosnippet>3948</a>}
+<a href=#3949 id=3949 data-nosnippet>3949</a>
+<a href=#3950 id=3950 data-nosnippet>3950</a><span class="doccomment">/// Records information about a transaction output that your wallet created.
+<a href=#3951 id=3951 data-nosnippet>3951</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert_sent_output&lt;P: consensus::Parameters&gt;(
+<a href=#3952 id=3952 data-nosnippet>3952</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction,
+<a href=#3953 id=3953 data-nosnippet>3953</a>    params: <span class="kw-2">&amp;</span>P,
+<a href=#3954 id=3954 data-nosnippet>3954</a>    tx_ref: TxRef,
+<a href=#3955 id=3955 data-nosnippet>3955</a>    from_account_uuid: AccountUuid,
+<a href=#3956 id=3956 data-nosnippet>3956</a>    output: <span class="kw-2">&amp;</span>SentTransactionOutput&lt;AccountUuid&gt;,
+<a href=#3957 id=3957 data-nosnippet>3957</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
+<a href=#3958 id=3958 data-nosnippet>3958</a>    <span class="kw">let </span><span class="kw-2">mut </span>stmt_insert_sent_output = conn.prepare_cached(
+<a href=#3959 id=3959 data-nosnippet>3959</a>        <span class="string">"INSERT INTO sent_notes (
+<a href=#3960 id=3960 data-nosnippet>3960</a>            tx, output_pool, output_index, from_account_id,
+<a href=#3961 id=3961 data-nosnippet>3961</a>            to_address, to_account_id, value, memo)
+<a href=#3962 id=3962 data-nosnippet>3962</a>         VALUES (
+<a href=#3963 id=3963 data-nosnippet>3963</a>            :tx, :output_pool, :output_index, :from_account_id,
+<a href=#3964 id=3964 data-nosnippet>3964</a>            :to_address, :to_account_id, :value, :memo)"</span>,
+<a href=#3965 id=3965 data-nosnippet>3965</a>    )<span class="question-mark">?</span>;
+<a href=#3966 id=3966 data-nosnippet>3966</a>
+<a href=#3967 id=3967 data-nosnippet>3967</a>    <span class="kw">let </span>(from_account_id, to_address, to_account_id, pool_type) =
+<a href=#3968 id=3968 data-nosnippet>3968</a>        recipient_params(conn, params, from_account_uuid, output.recipient())<span class="question-mark">?</span>;
+<a href=#3969 id=3969 data-nosnippet>3969</a>    <span class="kw">let </span>sql_args = <span class="macro">named_params!</span>[
+<a href=#3970 id=3970 data-nosnippet>3970</a>        <span class="string">":tx"</span>: tx_ref.<span class="number">0</span>,
+<a href=#3971 id=3971 data-nosnippet>3971</a>        <span class="string">":output_pool"</span>: <span class="kw-2">&amp;</span>pool_code(pool_type),
+<a href=#3972 id=3972 data-nosnippet>3972</a>        <span class="string">":output_index"</span>: <span class="kw-2">&amp;</span>i64::try_from(output.output_index()).unwrap(),
+<a href=#3973 id=3973 data-nosnippet>3973</a>        <span class="string">":from_account_id"</span>: from_account_id.<span class="number">0</span>,
+<a href=#3974 id=3974 data-nosnippet>3974</a>        <span class="string">":to_address"</span>: <span class="kw-2">&amp;</span>to_address,
+<a href=#3975 id=3975 data-nosnippet>3975</a>        <span class="string">":to_account_id"</span>: to_account_id.map(|a| a.<span class="number">0</span>),
+<a href=#3976 id=3976 data-nosnippet>3976</a>        <span class="string">":value"</span>: <span class="kw-2">&amp;</span>i64::from(ZatBalance::from(output.value())),
+<a href=#3977 id=3977 data-nosnippet>3977</a>        <span class="string">":memo"</span>: memo_repr(output.memo())
+<a href=#3978 id=3978 data-nosnippet>3978</a>    ];
+<a href=#3979 id=3979 data-nosnippet>3979</a>
+<a href=#3980 id=3980 data-nosnippet>3980</a>    stmt_insert_sent_output.execute(sql_args)<span class="question-mark">?</span>;
+<a href=#3981 id=3981 data-nosnippet>3981</a>    flag_previously_received_change(conn, tx_ref)<span class="question-mark">?</span>;
+<a href=#3982 id=3982 data-nosnippet>3982</a>
+<a href=#3983 id=3983 data-nosnippet>3983</a>    <span class="prelude-val">Ok</span>(())
+<a href=#3984 id=3984 data-nosnippet>3984</a>}
+<a href=#3985 id=3985 data-nosnippet>3985</a>
+<a href=#3986 id=3986 data-nosnippet>3986</a><span class="doccomment">/// Records information about a transaction output that your wallet created, from the constituent
+<a href=#3987 id=3987 data-nosnippet>3987</a>/// properties of that output.
+<a href=#3988 id=3988 data-nosnippet>3988</a>///
+<a href=#3989 id=3989 data-nosnippet>3989</a>/// - If `recipient` is a Unified address, `output_index` is an index into the outputs of the
+<a href=#3990 id=3990 data-nosnippet>3990</a>///   transaction within the bundle associated with the recipient's output pool.
+<a href=#3991 id=3991 data-nosnippet>3991</a>/// - If `recipient` is a Sapling address, `output_index` is an index into the Sapling outputs of
+<a href=#3992 id=3992 data-nosnippet>3992</a>///   the transaction.
+<a href=#3993 id=3993 data-nosnippet>3993</a>/// - If `recipient` is a transparent address, `output_index` is an index into the transparent
+<a href=#3994 id=3994 data-nosnippet>3994</a>///   outputs of the transaction.
+<a href=#3995 id=3995 data-nosnippet>3995</a>/// - If `recipient` is an internal account, `output_index` is an index into the Sapling outputs of
+<a href=#3996 id=3996 data-nosnippet>3996</a>///   the transaction.
+<a href=#3997 id=3997 data-nosnippet>3997</a></span><span class="attr">#[allow(clippy::too_many_arguments)]
+<a href=#3998 id=3998 data-nosnippet>3998</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>put_sent_output&lt;P: consensus::Parameters&gt;(
+<a href=#3999 id=3999 data-nosnippet>3999</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction,
+<a href=#4000 id=4000 data-nosnippet>4000</a>    params: <span class="kw-2">&amp;</span>P,
+<a href=#4001 id=4001 data-nosnippet>4001</a>    from_account_uuid: AccountUuid,
+<a href=#4002 id=4002 data-nosnippet>4002</a>    tx_ref: TxRef,
+<a href=#4003 id=4003 data-nosnippet>4003</a>    output_index: usize,
+<a href=#4004 id=4004 data-nosnippet>4004</a>    recipient: <span class="kw-2">&amp;</span>Recipient&lt;AccountUuid&gt;,
+<a href=#4005 id=4005 data-nosnippet>4005</a>    value: Zatoshis,
+<a href=#4006 id=4006 data-nosnippet>4006</a>    memo: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>MemoBytes&gt;,
+<a href=#4007 id=4007 data-nosnippet>4007</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
+<a href=#4008 id=4008 data-nosnippet>4008</a>    <span class="kw">let </span><span class="kw-2">mut </span>stmt_upsert_sent_output = conn.prepare_cached(
+<a href=#4009 id=4009 data-nosnippet>4009</a>        <span class="string">"INSERT INTO sent_notes (
+<a href=#4010 id=4010 data-nosnippet>4010</a>            tx, output_pool, output_index, from_account_id,
+<a href=#4011 id=4011 data-nosnippet>4011</a>            to_address, to_account_id, value, memo)
+<a href=#4012 id=4012 data-nosnippet>4012</a>        VALUES (
+<a href=#4013 id=4013 data-nosnippet>4013</a>            :tx, :output_pool, :output_index, :from_account_id,
+<a href=#4014 id=4014 data-nosnippet>4014</a>            :to_address, :to_account_id, :value, :memo)
+<a href=#4015 id=4015 data-nosnippet>4015</a>        ON CONFLICT (tx, output_pool, output_index) DO UPDATE
+<a href=#4016 id=4016 data-nosnippet>4016</a>        SET from_account_id = :from_account_id,
+<a href=#4017 id=4017 data-nosnippet>4017</a>            to_address = IFNULL(to_address, :to_address),
+<a href=#4018 id=4018 data-nosnippet>4018</a>            to_account_id = IFNULL(to_account_id, :to_account_id),
+<a href=#4019 id=4019 data-nosnippet>4019</a>            value = :value,
+<a href=#4020 id=4020 data-nosnippet>4020</a>            memo = IFNULL(:memo, memo)"</span>,
+<a href=#4021 id=4021 data-nosnippet>4021</a>    )<span class="question-mark">?</span>;
+<a href=#4022 id=4022 data-nosnippet>4022</a>
+<a href=#4023 id=4023 data-nosnippet>4023</a>    <span class="kw">let </span>(from_account_id, to_address, to_account_id, pool_type) =
+<a href=#4024 id=4024 data-nosnippet>4024</a>        recipient_params(conn, params, from_account_uuid, recipient)<span class="question-mark">?</span>;
+<a href=#4025 id=4025 data-nosnippet>4025</a>    <span class="kw">let </span>sql_args = <span class="macro">named_params!</span>[
+<a href=#4026 id=4026 data-nosnippet>4026</a>        <span class="string">":tx"</span>: tx_ref.<span class="number">0</span>,
+<a href=#4027 id=4027 data-nosnippet>4027</a>        <span class="string">":output_pool"</span>: <span class="kw-2">&amp;</span>pool_code(pool_type),
+<a href=#4028 id=4028 data-nosnippet>4028</a>        <span class="string">":output_index"</span>: <span class="kw-2">&amp;</span>i64::try_from(output_index).unwrap(),
+<a href=#4029 id=4029 data-nosnippet>4029</a>        <span class="string">":from_account_id"</span>: from_account_id.<span class="number">0</span>,
+<a href=#4030 id=4030 data-nosnippet>4030</a>        <span class="string">":to_address"</span>: <span class="kw-2">&amp;</span>to_address,
+<a href=#4031 id=4031 data-nosnippet>4031</a>        <span class="string">":to_account_id"</span>: <span class="kw-2">&amp;</span>to_account_id.map(|a| a.<span class="number">0</span>),
+<a href=#4032 id=4032 data-nosnippet>4032</a>        <span class="string">":value"</span>: <span class="kw-2">&amp;</span>i64::from(ZatBalance::from(value)),
+<a href=#4033 id=4033 data-nosnippet>4033</a>        <span class="string">":memo"</span>: memo_repr(memo)
+<a href=#4034 id=4034 data-nosnippet>4034</a>    ];
+<a href=#4035 id=4035 data-nosnippet>4035</a>
+<a href=#4036 id=4036 data-nosnippet>4036</a>    stmt_upsert_sent_output.execute(sql_args)<span class="question-mark">?</span>;
+<a href=#4037 id=4037 data-nosnippet>4037</a>    flag_previously_received_change(conn, tx_ref)<span class="question-mark">?</span>;
+<a href=#4038 id=4038 data-nosnippet>4038</a>
+<a href=#4039 id=4039 data-nosnippet>4039</a>    <span class="prelude-val">Ok</span>(())
+<a href=#4040 id=4040 data-nosnippet>4040</a>}
+<a href=#4041 id=4041 data-nosnippet>4041</a>
+<a href=#4042 id=4042 data-nosnippet>4042</a><span class="doccomment">/// Inserts the given entries into the nullifier map.
+<a href=#4043 id=4043 data-nosnippet>4043</a>///
+<a href=#4044 id=4044 data-nosnippet>4044</a>/// Returns an error if the new entries conflict with existing ones. This indicates either
+<a href=#4045 id=4045 data-nosnippet>4045</a>/// corrupted data, or that a reorg has occurred and the caller needs to repair the wallet
+<a href=#4046 id=4046 data-nosnippet>4046</a>/// state with [`truncate_to_height`].
+<a href=#4047 id=4047 data-nosnippet>4047</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert_nullifier_map&lt;N: AsRef&lt;[u8]&gt;&gt;(
+<a href=#4048 id=4048 data-nosnippet>4048</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction&lt;<span class="lifetime">'_</span>&gt;,
+<a href=#4049 id=4049 data-nosnippet>4049</a>    block_height: BlockHeight,
+<a href=#4050 id=4050 data-nosnippet>4050</a>    spend_pool: ShieldedProtocol,
+<a href=#4051 id=4051 data-nosnippet>4051</a>    new_entries: <span class="kw-2">&amp;</span>[(TxId, u16, Vec&lt;N&gt;)],
+<a href=#4052 id=4052 data-nosnippet>4052</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
+<a href=#4053 id=4053 data-nosnippet>4053</a>    <span class="kw">let </span><span class="kw-2">mut </span>stmt_select_tx_locators = conn.prepare_cached(
+<a href=#4054 id=4054 data-nosnippet>4054</a>        <span class="string">"SELECT block_height, tx_index, txid
+<a href=#4055 id=4055 data-nosnippet>4055</a>        FROM tx_locator_map
+<a href=#4056 id=4056 data-nosnippet>4056</a>        WHERE (block_height = :block_height AND tx_index = :tx_index) OR txid = :txid"</span>,
+<a href=#4057 id=4057 data-nosnippet>4057</a>    )<span class="question-mark">?</span>;
+<a href=#4058 id=4058 data-nosnippet>4058</a>    <span class="kw">let </span><span class="kw-2">mut </span>stmt_insert_tx_locator = conn.prepare_cached(
+<a href=#4059 id=4059 data-nosnippet>4059</a>        <span class="string">"INSERT INTO tx_locator_map
+<a href=#4060 id=4060 data-nosnippet>4060</a>        (block_height, tx_index, txid)
+<a href=#4061 id=4061 data-nosnippet>4061</a>        VALUES (:block_height, :tx_index, :txid)"</span>,
+<a href=#4062 id=4062 data-nosnippet>4062</a>    )<span class="question-mark">?</span>;
+<a href=#4063 id=4063 data-nosnippet>4063</a>    <span class="kw">let </span><span class="kw-2">mut </span>stmt_insert_nullifier_mapping = conn.prepare_cached(
+<a href=#4064 id=4064 data-nosnippet>4064</a>        <span class="string">"INSERT INTO nullifier_map
+<a href=#4065 id=4065 data-nosnippet>4065</a>        (spend_pool, nf, block_height, tx_index)
+<a href=#4066 id=4066 data-nosnippet>4066</a>        VALUES (:spend_pool, :nf, :block_height, :tx_index)
+<a href=#4067 id=4067 data-nosnippet>4067</a>        ON CONFLICT (spend_pool, nf) DO UPDATE
+<a href=#4068 id=4068 data-nosnippet>4068</a>        SET block_height = :block_height,
+<a href=#4069 id=4069 data-nosnippet>4069</a>            tx_index = :tx_index"</span>,
+<a href=#4070 id=4070 data-nosnippet>4070</a>    )<span class="question-mark">?</span>;
+<a href=#4071 id=4071 data-nosnippet>4071</a>
+<a href=#4072 id=4072 data-nosnippet>4072</a>    <span class="kw">for </span>(txid, tx_index, nullifiers) <span class="kw">in </span>new_entries {
+<a href=#4073 id=4073 data-nosnippet>4073</a>        <span class="kw">let </span>tx_args = <span class="macro">named_params!</span>[
+<a href=#4074 id=4074 data-nosnippet>4074</a>            <span class="string">":block_height"</span>: u32::from(block_height),
+<a href=#4075 id=4075 data-nosnippet>4075</a>            <span class="string">":tx_index"</span>: tx_index,
+<a href=#4076 id=4076 data-nosnippet>4076</a>            <span class="string">":txid"</span>: txid.as_ref(),
+<a href=#4077 id=4077 data-nosnippet>4077</a>        ];
+<a href=#4078 id=4078 data-nosnippet>4078</a>
+<a href=#4079 id=4079 data-nosnippet>4079</a>        <span class="comment">// We cannot use an upsert here, because we use the tx locator as the foreign key
+<a href=#4080 id=4080 data-nosnippet>4080</a>        // in `nullifier_map` instead of `txid` for database size efficiency. If an insert
+<a href=#4081 id=4081 data-nosnippet>4081</a>        // into `tx_locator_map` were to conflict, we would need the resulting update to
+<a href=#4082 id=4082 data-nosnippet>4082</a>        // cascade into `nullifier_map` as either:
+<a href=#4083 id=4083 data-nosnippet>4083</a>        // - an update (if a transaction moved within a block), or
+<a href=#4084 id=4084 data-nosnippet>4084</a>        // - a deletion (if the locator now points to a different transaction).
+<a href=#4085 id=4085 data-nosnippet>4085</a>        //
+<a href=#4086 id=4086 data-nosnippet>4086</a>        // `ON UPDATE` has `CASCADE` to always update, but has no deletion option. So we
+<a href=#4087 id=4087 data-nosnippet>4087</a>        // instead set `ON UPDATE RESTRICT` on the foreign key relation, and require the
+<a href=#4088 id=4088 data-nosnippet>4088</a>        // caller to manually rewind the database in this situation.
+<a href=#4089 id=4089 data-nosnippet>4089</a>        </span><span class="kw">let </span>locator = stmt_select_tx_locators
+<a href=#4090 id=4090 data-nosnippet>4090</a>            .query_map(tx_args, |row| {
+<a href=#4091 id=4091 data-nosnippet>4091</a>                <span class="prelude-val">Ok</span>((
+<a href=#4092 id=4092 data-nosnippet>4092</a>                    BlockHeight::from_u32(row.get(<span class="number">0</span>)<span class="question-mark">?</span>),
+<a href=#4093 id=4093 data-nosnippet>4093</a>                    row.get::&lt;<span class="kw">_</span>, u16&gt;(<span class="number">1</span>)<span class="question-mark">?</span>,
+<a href=#4094 id=4094 data-nosnippet>4094</a>                    TxId::from_bytes(row.get(<span class="number">2</span>)<span class="question-mark">?</span>),
+<a href=#4095 id=4095 data-nosnippet>4095</a>                ))
+<a href=#4096 id=4096 data-nosnippet>4096</a>            })<span class="question-mark">?
+<a href=#4097 id=4097 data-nosnippet>4097</a>            </span>.try_fold(<span class="prelude-val">None</span>, |acc, row| -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw">_</span>, SqliteClientError&gt; {
+<a href=#4098 id=4098 data-nosnippet>4098</a>                <span class="kw">match </span>(acc, row<span class="question-mark">?</span>) {
+<a href=#4099 id=4099 data-nosnippet>4099</a>                    (<span class="prelude-val">None</span>, rhs) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(rhs))),
+<a href=#4100 id=4100 data-nosnippet>4100</a>                    <span class="comment">// If there was more than one row, then due to the uniqueness
+<a href=#4101 id=4101 data-nosnippet>4101</a>                    // constraints on the `tx_locator_map` table, all of the rows conflict
+<a href=#4102 id=4102 data-nosnippet>4102</a>                    // with the locator being inserted.
+<a href=#4103 id=4103 data-nosnippet>4103</a>                    </span>(<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="prelude-val">None</span>)),
+<a href=#4104 id=4104 data-nosnippet>4104</a>                }
+<a href=#4105 id=4105 data-nosnippet>4105</a>            })<span class="question-mark">?</span>;
+<a href=#4106 id=4106 data-nosnippet>4106</a>
+<a href=#4107 id=4107 data-nosnippet>4107</a>        <span class="kw">match </span>locator {
+<a href=#4108 id=4108 data-nosnippet>4108</a>            <span class="comment">// If the locator in the table matches the one being inserted, do nothing.
+<a href=#4109 id=4109 data-nosnippet>4109</a>            </span><span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(loc)) <span class="kw">if </span>loc == (block_height, <span class="kw-2">*</span>tx_index, <span class="kw-2">*</span>txid) =&gt; (),
+<a href=#4110 id=4110 data-nosnippet>4110</a>            <span class="comment">// If the locator being inserted would conflict, report it.
+<a href=#4111 id=4111 data-nosnippet>4111</a>            </span><span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(SqliteClientError::DbError(rusqlite::Error::SqliteFailure(
+<a href=#4112 id=4112 data-nosnippet>4112</a>                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
+<a href=#4113 id=4113 data-nosnippet>4113</a>                <span class="prelude-val">Some</span>(<span class="string">"UNIQUE constraint failed: tx_locator_map.block_height, tx_locator_map.tx_index"</span>.into()),
+<a href=#4114 id=4114 data-nosnippet>4114</a>            )))<span class="question-mark">?</span>,
+<a href=#4115 id=4115 data-nosnippet>4115</a>            <span class="comment">// If the locator doesn't exist, insert it.
+<a href=#4116 id=4116 data-nosnippet>4116</a>            </span><span class="prelude-val">None </span>=&gt; stmt_insert_tx_locator.execute(tx_args).map(|<span class="kw">_</span>| ())<span class="question-mark">?</span>,
+<a href=#4117 id=4117 data-nosnippet>4117</a>        }
+<a href=#4118 id=4118 data-nosnippet>4118</a>
+<a href=#4119 id=4119 data-nosnippet>4119</a>        <span class="kw">for </span>nf <span class="kw">in </span>nullifiers {
+<a href=#4120 id=4120 data-nosnippet>4120</a>            <span class="comment">// Here it is okay to use an upsert, because per above we've confirmed that
+<a href=#4121 id=4121 data-nosnippet>4121</a>            // the locator points to the same transaction.
+<a href=#4122 id=4122 data-nosnippet>4122</a>            </span><span class="kw">let </span>nf_args = <span class="macro">named_params!</span>[
+<a href=#4123 id=4123 data-nosnippet>4123</a>                <span class="string">":spend_pool"</span>: pool_code(PoolType::Shielded(spend_pool)),
+<a href=#4124 id=4124 data-nosnippet>4124</a>                <span class="string">":nf"</span>: nf.as_ref(),
+<a href=#4125 id=4125 data-nosnippet>4125</a>                <span class="string">":block_height"</span>: u32::from(block_height),
+<a href=#4126 id=4126 data-nosnippet>4126</a>                <span class="string">":tx_index"</span>: tx_index,
+<a href=#4127 id=4127 data-nosnippet>4127</a>            ];
+<a href=#4128 id=4128 data-nosnippet>4128</a>            stmt_insert_nullifier_mapping.execute(nf_args)<span class="question-mark">?</span>;
+<a href=#4129 id=4129 data-nosnippet>4129</a>        }
+<a href=#4130 id=4130 data-nosnippet>4130</a>    }
+<a href=#4131 id=4131 data-nosnippet>4131</a>
+<a href=#4132 id=4132 data-nosnippet>4132</a>    <span class="prelude-val">Ok</span>(())
+<a href=#4133 id=4133 data-nosnippet>4133</a>}
+<a href=#4134 id=4134 data-nosnippet>4134</a>
+<a href=#4135 id=4135 data-nosnippet>4135</a><span class="doccomment">/// Returns the row of the `transactions` table corresponding to the transaction in which
+<a href=#4136 id=4136 data-nosnippet>4136</a>/// this nullifier is revealed, if any.
+<a href=#4137 id=4137 data-nosnippet>4137</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>query_nullifier_map&lt;N: AsRef&lt;[u8]&gt;&gt;(
+<a href=#4138 id=4138 data-nosnippet>4138</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction&lt;<span class="lifetime">'_</span>&gt;,
+<a href=#4139 id=4139 data-nosnippet>4139</a>    spend_pool: ShieldedProtocol,
+<a href=#4140 id=4140 data-nosnippet>4140</a>    nf: <span class="kw-2">&amp;</span>N,
+<a href=#4141 id=4141 data-nosnippet>4141</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;TxRef&gt;, SqliteClientError&gt; {
+<a href=#4142 id=4142 data-nosnippet>4142</a>    <span class="kw">let </span><span class="kw-2">mut </span>stmt_select_locator = conn.prepare_cached(
+<a href=#4143 id=4143 data-nosnippet>4143</a>        <span class="string">"SELECT block_height, tx_index, txid
+<a href=#4144 id=4144 data-nosnippet>4144</a>        FROM nullifier_map
+<a href=#4145 id=4145 data-nosnippet>4145</a>        LEFT JOIN tx_locator_map USING (block_height, tx_index)
+<a href=#4146 id=4146 data-nosnippet>4146</a>        WHERE spend_pool = :spend_pool AND nf = :nf"</span>,
+<a href=#4147 id=4147 data-nosnippet>4147</a>    )<span class="question-mark">?</span>;
+<a href=#4148 id=4148 data-nosnippet>4148</a>
+<a href=#4149 id=4149 data-nosnippet>4149</a>    <span class="kw">let </span>sql_args = <span class="macro">named_params!</span>[
+<a href=#4150 id=4150 data-nosnippet>4150</a>        <span class="string">":spend_pool"</span>: pool_code(PoolType::Shielded(spend_pool)),
+<a href=#4151 id=4151 data-nosnippet>4151</a>        <span class="string">":nf"</span>: nf.as_ref(),
+<a href=#4152 id=4152 data-nosnippet>4152</a>    ];
+<a href=#4153 id=4153 data-nosnippet>4153</a>
+<a href=#4154 id=4154 data-nosnippet>4154</a>    <span class="comment">// Find the locator corresponding to this nullifier, if any.
+<a href=#4155 id=4155 data-nosnippet>4155</a>    </span><span class="kw">let </span>locator = stmt_select_locator
+<a href=#4156 id=4156 data-nosnippet>4156</a>        .query_row(sql_args, |row| {
+<a href=#4157 id=4157 data-nosnippet>4157</a>            <span class="prelude-val">Ok</span>((
+<a href=#4158 id=4158 data-nosnippet>4158</a>                BlockHeight::from_u32(row.get(<span class="number">0</span>)<span class="question-mark">?</span>),
+<a href=#4159 id=4159 data-nosnippet>4159</a>                row.get(<span class="number">1</span>)<span class="question-mark">?</span>,
+<a href=#4160 id=4160 data-nosnippet>4160</a>                TxId::from_bytes(row.get(<span class="number">2</span>)<span class="question-mark">?</span>),
+<a href=#4161 id=4161 data-nosnippet>4161</a>            ))
+<a href=#4162 id=4162 data-nosnippet>4162</a>        })
+<a href=#4163 id=4163 data-nosnippet>4163</a>        .optional()<span class="question-mark">?</span>;
+<a href=#4164 id=4164 data-nosnippet>4164</a>    <span class="kw">let </span>(height, index, txid) = <span class="kw">match </span>locator {
+<a href=#4165 id=4165 data-nosnippet>4165</a>        <span class="prelude-val">Some</span>(res) =&gt; res,
+<a href=#4166 id=4166 data-nosnippet>4166</a>        <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
+<a href=#4167 id=4167 data-nosnippet>4167</a>    };
+<a href=#4168 id=4168 data-nosnippet>4168</a>
+<a href=#4169 id=4169 data-nosnippet>4169</a>    <span class="comment">// Find or create a corresponding row in the `transactions` table. Usually a row will
+<a href=#4170 id=4170 data-nosnippet>4170</a>    // have been created during the same scan that the locator was added to the nullifier
+<a href=#4171 id=4171 data-nosnippet>4171</a>    // map, but it would not happen if the transaction in question spent the note with no
+<a href=#4172 id=4172 data-nosnippet>4172</a>    // change or explicit in-wallet recipient.
+<a href=#4173 id=4173 data-nosnippet>4173</a>    </span>put_tx_meta(
+<a href=#4174 id=4174 data-nosnippet>4174</a>        conn,
+<a href=#4175 id=4175 data-nosnippet>4175</a>        <span class="kw-2">&amp;</span>WalletTx::new(
+<a href=#4176 id=4176 data-nosnippet>4176</a>            txid,
+<a href=#4177 id=4177 data-nosnippet>4177</a>            index,
+<a href=#4178 id=4178 data-nosnippet>4178</a>            <span class="macro">vec!</span>[],
+<a href=#4179 id=4179 data-nosnippet>4179</a>            <span class="macro">vec!</span>[],
 <a href=#4180 id=4180 data-nosnippet>4180</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
 <a href=#4181 id=4181 data-nosnippet>4181</a>            </span><span class="macro">vec!</span>[],
-<a href=#4182 id=4182 data-nosnippet>4182</a>        ),
-<a href=#4183 id=4183 data-nosnippet>4183</a>        height,
-<a href=#4184 id=4184 data-nosnippet>4184</a>    )
-<a href=#4185 id=4185 data-nosnippet>4185</a>    .map(<span class="prelude-val">Some</span>)
-<a href=#4186 id=4186 data-nosnippet>4186</a>}
-<a href=#4187 id=4187 data-nosnippet>4187</a>
-<a href=#4188 id=4188 data-nosnippet>4188</a><span class="doccomment">/// Deletes from the nullifier map any entries with a locator referencing a block height
-<a href=#4189 id=4189 data-nosnippet>4189</a>/// lower than the pruning height.
-<a href=#4190 id=4190 data-nosnippet>4190</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>prune_nullifier_map(
-<a href=#4191 id=4191 data-nosnippet>4191</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction&lt;<span class="lifetime">'_</span>&gt;,
-<a href=#4192 id=4192 data-nosnippet>4192</a>    block_height: BlockHeight,
-<a href=#4193 id=4193 data-nosnippet>4193</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
-<a href=#4194 id=4194 data-nosnippet>4194</a>    <span class="kw">let </span><span class="kw-2">mut </span>stmt_delete_locators = conn.prepare_cached(
-<a href=#4195 id=4195 data-nosnippet>4195</a>        <span class="string">"DELETE FROM tx_locator_map
-<a href=#4196 id=4196 data-nosnippet>4196</a>        WHERE block_height &lt; :block_height"</span>,
-<a href=#4197 id=4197 data-nosnippet>4197</a>    )<span class="question-mark">?</span>;
-<a href=#4198 id=4198 data-nosnippet>4198</a>
-<a href=#4199 id=4199 data-nosnippet>4199</a>    stmt_delete_locators.execute(<span class="macro">named_params!</span>[<span class="string">":block_height"</span>: u32::from(block_height)])<span class="question-mark">?</span>;
+<a href=#4182 id=4182 data-nosnippet>4182</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#4183 id=4183 data-nosnippet>4183</a>            </span><span class="macro">vec!</span>[],
+<a href=#4184 id=4184 data-nosnippet>4184</a>        ),
+<a href=#4185 id=4185 data-nosnippet>4185</a>        height,
+<a href=#4186 id=4186 data-nosnippet>4186</a>    )
+<a href=#4187 id=4187 data-nosnippet>4187</a>    .map(<span class="prelude-val">Some</span>)
+<a href=#4188 id=4188 data-nosnippet>4188</a>}
+<a href=#4189 id=4189 data-nosnippet>4189</a>
+<a href=#4190 id=4190 data-nosnippet>4190</a><span class="doccomment">/// Deletes from the nullifier map any entries with a locator referencing a block height
+<a href=#4191 id=4191 data-nosnippet>4191</a>/// lower than the pruning height.
+<a href=#4192 id=4192 data-nosnippet>4192</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>prune_nullifier_map(
+<a href=#4193 id=4193 data-nosnippet>4193</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Transaction&lt;<span class="lifetime">'_</span>&gt;,
+<a href=#4194 id=4194 data-nosnippet>4194</a>    block_height: BlockHeight,
+<a href=#4195 id=4195 data-nosnippet>4195</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), SqliteClientError&gt; {
+<a href=#4196 id=4196 data-nosnippet>4196</a>    <span class="kw">let </span><span class="kw-2">mut </span>stmt_delete_locators = conn.prepare_cached(
+<a href=#4197 id=4197 data-nosnippet>4197</a>        <span class="string">"DELETE FROM tx_locator_map
+<a href=#4198 id=4198 data-nosnippet>4198</a>        WHERE block_height &lt; :block_height"</span>,
+<a href=#4199 id=4199 data-nosnippet>4199</a>    )<span class="question-mark">?</span>;
 <a href=#4200 id=4200 data-nosnippet>4200</a>
-<a href=#4201 id=4201 data-nosnippet>4201</a>    <span class="prelude-val">Ok</span>(())
-<a href=#4202 id=4202 data-nosnippet>4202</a>}
-<a href=#4203 id=4203 data-nosnippet>4203</a>
-<a href=#4204 id=4204 data-nosnippet>4204</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_block_range(
-<a href=#4205 id=4205 data-nosnippet>4205</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
-<a href=#4206 id=4206 data-nosnippet>4206</a>    protocol: ShieldedProtocol,
-<a href=#4207 id=4207 data-nosnippet>4207</a>    commitment_tree_address: incrementalmerkletree::Address,
-<a href=#4208 id=4208 data-nosnippet>4208</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;Range&lt;BlockHeight&gt;&gt;, SqliteClientError&gt; {
-<a href=#4209 id=4209 data-nosnippet>4209</a>    <span class="kw">let </span>prefix = <span class="kw">match </span>protocol {
-<a href=#4210 id=4210 data-nosnippet>4210</a>        ShieldedProtocol::Sapling =&gt; <span class="string">"sapling"</span>,
-<a href=#4211 id=4211 data-nosnippet>4211</a>        ShieldedProtocol::Orchard =&gt; <span class="string">"orchard"</span>,
-<a href=#4212 id=4212 data-nosnippet>4212</a>    };
-<a href=#4213 id=4213 data-nosnippet>4213</a>    <span class="kw">let </span><span class="kw-2">mut </span>stmt = conn.prepare_cached(<span class="kw-2">&amp;</span><span class="macro">format!</span>(
-<a href=#4214 id=4214 data-nosnippet>4214</a>        <span class="string">"SELECT MIN(height), MAX(height), MAX({prefix}_commitment_tree_size)
-<a href=#4215 id=4215 data-nosnippet>4215</a>         FROM blocks
-<a href=#4216 id=4216 data-nosnippet>4216</a>         WHERE {prefix}_commitment_tree_size BETWEEN :min_tree_size AND :max_tree_size"
-<a href=#4217 id=4217 data-nosnippet>4217</a>    </span>))<span class="question-mark">?</span>;
-<a href=#4218 id=4218 data-nosnippet>4218</a>
-<a href=#4219 id=4219 data-nosnippet>4219</a>    stmt.query_row(
-<a href=#4220 id=4220 data-nosnippet>4220</a>        <span class="comment">// BETWEEN is inclusive on both ends. However, we are comparing commitment tree sizes
-<a href=#4221 id=4221 data-nosnippet>4221</a>        // to commitment tree positions, so we must add one to the start, and we do not subtract
-<a href=#4222 id=4222 data-nosnippet>4222</a>        // one from the end.
-<a href=#4223 id=4223 data-nosnippet>4223</a>        </span><span class="macro">named_params!</span> {
-<a href=#4224 id=4224 data-nosnippet>4224</a>            <span class="string">":min_tree_size"</span>: u64::from(commitment_tree_address.position_range_start()) + <span class="number">1</span>,
-<a href=#4225 id=4225 data-nosnippet>4225</a>            <span class="string">":max_tree_size"</span>: u64::from(commitment_tree_address.position_range_end()),
-<a href=#4226 id=4226 data-nosnippet>4226</a>        },
-<a href=#4227 id=4227 data-nosnippet>4227</a>        |row| {
-<a href=#4228 id=4228 data-nosnippet>4228</a>            <span class="comment">// The first block to be scanned is known to contain the start of the address range in
-<a href=#4229 id=4229 data-nosnippet>4229</a>            // question because the tree size we compared against is measured as of the end of the
-<a href=#4230 id=4230 data-nosnippet>4230</a>            // block.
-<a href=#4231 id=4231 data-nosnippet>4231</a>            </span><span class="kw">let </span>min_height = row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="number">0</span>)<span class="question-mark">?</span>.map(BlockHeight::from_u32);
-<a href=#4232 id=4232 data-nosnippet>4232</a>            <span class="kw">let </span>max_height_inclusive = row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="number">1</span>)<span class="question-mark">?</span>.map(BlockHeight::from_u32);
-<a href=#4233 id=4233 data-nosnippet>4233</a>            <span class="kw">let </span>end_offset = row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u64&gt;&gt;(<span class="number">2</span>)<span class="question-mark">?</span>.map(|max_height_tree_size| {
-<a href=#4234 id=4234 data-nosnippet>4234</a>                <span class="comment">// If the tree size at the end of the max-height block is less than the
-<a href=#4235 id=4235 data-nosnippet>4235</a>                // end-exclusive maximum position of the address range, this means that the end of
-<a href=#4236 id=4236 data-nosnippet>4236</a>                // the subtree referred to by that address is somewhere in the next block, so we
-<a href=#4237 id=4237 data-nosnippet>4237</a>                // need to rescan an extra block to ensure that we have observed all of the note
-<a href=#4238 id=4238 data-nosnippet>4238</a>                // commitments that aggregate up to that address.
-<a href=#4239 id=4239 data-nosnippet>4239</a>                </span><span class="kw">if </span>max_height_tree_size &lt; u64::from(commitment_tree_address.position_range_end()) {
-<a href=#4240 id=4240 data-nosnippet>4240</a>                    <span class="number">1
-<a href=#4241 id=4241 data-nosnippet>4241</a>                </span>} <span class="kw">else </span>{
-<a href=#4242 id=4242 data-nosnippet>4242</a>                    <span class="number">0
-<a href=#4243 id=4243 data-nosnippet>4243</a>                </span>}
-<a href=#4244 id=4244 data-nosnippet>4244</a>            });
-<a href=#4245 id=4245 data-nosnippet>4245</a>
-<a href=#4246 id=4246 data-nosnippet>4246</a>            <span class="prelude-val">Ok</span>(min_height
-<a href=#4247 id=4247 data-nosnippet>4247</a>                .zip(max_height_inclusive)
-<a href=#4248 id=4248 data-nosnippet>4248</a>                .zip(end_offset)
-<a href=#4249 id=4249 data-nosnippet>4249</a>                .map(|((min, max_inclusive), offset)| min..(max_inclusive + offset + <span class="number">1</span>)))
-<a href=#4250 id=4250 data-nosnippet>4250</a>        },
-<a href=#4251 id=4251 data-nosnippet>4251</a>    )
-<a href=#4252 id=4252 data-nosnippet>4252</a>    .map_err(SqliteClientError::from)
-<a href=#4253 id=4253 data-nosnippet>4253</a>}
-<a href=#4254 id=4254 data-nosnippet>4254</a>
-<a href=#4255 id=4255 data-nosnippet>4255</a><span class="attr">#[cfg(any(test, feature = <span class="string">"test-dependencies"</span>))]
-<a href=#4256 id=4256 data-nosnippet>4256</a></span><span class="kw">pub mod </span>testing {
-<a href=#4257 id=4257 data-nosnippet>4257</a>    <span class="kw">use </span>incrementalmerkletree::Position;
-<a href=#4258 id=4258 data-nosnippet>4258</a>    <span class="kw">use </span>zcash_client_backend::data_api::testing::TransactionSummary;
-<a href=#4259 id=4259 data-nosnippet>4259</a>    <span class="kw">use </span>zcash_primitives::transaction::TxId;
-<a href=#4260 id=4260 data-nosnippet>4260</a>    <span class="kw">use </span>zcash_protocol::{
-<a href=#4261 id=4261 data-nosnippet>4261</a>        consensus::BlockHeight,
-<a href=#4262 id=4262 data-nosnippet>4262</a>        value::{ZatBalance, Zatoshis},
-<a href=#4263 id=4263 data-nosnippet>4263</a>        ShieldedProtocol,
-<a href=#4264 id=4264 data-nosnippet>4264</a>    };
-<a href=#4265 id=4265 data-nosnippet>4265</a>
-<a href=#4266 id=4266 data-nosnippet>4266</a>    <span class="kw">use crate</span>::{error::SqliteClientError, AccountUuid, SAPLING_TABLES_PREFIX};
+<a href=#4201 id=4201 data-nosnippet>4201</a>    stmt_delete_locators.execute(<span class="macro">named_params!</span>[<span class="string">":block_height"</span>: u32::from(block_height)])<span class="question-mark">?</span>;
+<a href=#4202 id=4202 data-nosnippet>4202</a>
+<a href=#4203 id=4203 data-nosnippet>4203</a>    <span class="prelude-val">Ok</span>(())
+<a href=#4204 id=4204 data-nosnippet>4204</a>}
+<a href=#4205 id=4205 data-nosnippet>4205</a>
+<a href=#4206 id=4206 data-nosnippet>4206</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_block_range(
+<a href=#4207 id=4207 data-nosnippet>4207</a>    conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
+<a href=#4208 id=4208 data-nosnippet>4208</a>    protocol: ShieldedProtocol,
+<a href=#4209 id=4209 data-nosnippet>4209</a>    commitment_tree_address: incrementalmerkletree::Address,
+<a href=#4210 id=4210 data-nosnippet>4210</a>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;Range&lt;BlockHeight&gt;&gt;, SqliteClientError&gt; {
+<a href=#4211 id=4211 data-nosnippet>4211</a>    <span class="kw">let </span>prefix = <span class="kw">match </span>protocol {
+<a href=#4212 id=4212 data-nosnippet>4212</a>        ShieldedProtocol::Sapling =&gt; <span class="string">"sapling"</span>,
+<a href=#4213 id=4213 data-nosnippet>4213</a>        ShieldedProtocol::Orchard =&gt; <span class="string">"orchard"</span>,
+<a href=#4214 id=4214 data-nosnippet>4214</a>    };
+<a href=#4215 id=4215 data-nosnippet>4215</a>    <span class="kw">let </span><span class="kw-2">mut </span>stmt = conn.prepare_cached(<span class="kw-2">&amp;</span><span class="macro">format!</span>(
+<a href=#4216 id=4216 data-nosnippet>4216</a>        <span class="string">"SELECT MIN(height), MAX(height), MAX({prefix}_commitment_tree_size)
+<a href=#4217 id=4217 data-nosnippet>4217</a>         FROM blocks
+<a href=#4218 id=4218 data-nosnippet>4218</a>         WHERE {prefix}_commitment_tree_size BETWEEN :min_tree_size AND :max_tree_size"
+<a href=#4219 id=4219 data-nosnippet>4219</a>    </span>))<span class="question-mark">?</span>;
+<a href=#4220 id=4220 data-nosnippet>4220</a>
+<a href=#4221 id=4221 data-nosnippet>4221</a>    stmt.query_row(
+<a href=#4222 id=4222 data-nosnippet>4222</a>        <span class="comment">// BETWEEN is inclusive on both ends. However, we are comparing commitment tree sizes
+<a href=#4223 id=4223 data-nosnippet>4223</a>        // to commitment tree positions, so we must add one to the start, and we do not subtract
+<a href=#4224 id=4224 data-nosnippet>4224</a>        // one from the end.
+<a href=#4225 id=4225 data-nosnippet>4225</a>        </span><span class="macro">named_params!</span> {
+<a href=#4226 id=4226 data-nosnippet>4226</a>            <span class="string">":min_tree_size"</span>: u64::from(commitment_tree_address.position_range_start()) + <span class="number">1</span>,
+<a href=#4227 id=4227 data-nosnippet>4227</a>            <span class="string">":max_tree_size"</span>: u64::from(commitment_tree_address.position_range_end()),
+<a href=#4228 id=4228 data-nosnippet>4228</a>        },
+<a href=#4229 id=4229 data-nosnippet>4229</a>        |row| {
+<a href=#4230 id=4230 data-nosnippet>4230</a>            <span class="comment">// The first block to be scanned is known to contain the start of the address range in
+<a href=#4231 id=4231 data-nosnippet>4231</a>            // question because the tree size we compared against is measured as of the end of the
+<a href=#4232 id=4232 data-nosnippet>4232</a>            // block.
+<a href=#4233 id=4233 data-nosnippet>4233</a>            </span><span class="kw">let </span>min_height = row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="number">0</span>)<span class="question-mark">?</span>.map(BlockHeight::from_u32);
+<a href=#4234 id=4234 data-nosnippet>4234</a>            <span class="kw">let </span>max_height_inclusive = row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="number">1</span>)<span class="question-mark">?</span>.map(BlockHeight::from_u32);
+<a href=#4235 id=4235 data-nosnippet>4235</a>            <span class="kw">let </span>end_offset = row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u64&gt;&gt;(<span class="number">2</span>)<span class="question-mark">?</span>.map(|max_height_tree_size| {
+<a href=#4236 id=4236 data-nosnippet>4236</a>                <span class="comment">// If the tree size at the end of the max-height block is less than the
+<a href=#4237 id=4237 data-nosnippet>4237</a>                // end-exclusive maximum position of the address range, this means that the end of
+<a href=#4238 id=4238 data-nosnippet>4238</a>                // the subtree referred to by that address is somewhere in the next block, so we
+<a href=#4239 id=4239 data-nosnippet>4239</a>                // need to rescan an extra block to ensure that we have observed all of the note
+<a href=#4240 id=4240 data-nosnippet>4240</a>                // commitments that aggregate up to that address.
+<a href=#4241 id=4241 data-nosnippet>4241</a>                </span><span class="kw">if </span>max_height_tree_size &lt; u64::from(commitment_tree_address.position_range_end()) {
+<a href=#4242 id=4242 data-nosnippet>4242</a>                    <span class="number">1
+<a href=#4243 id=4243 data-nosnippet>4243</a>                </span>} <span class="kw">else </span>{
+<a href=#4244 id=4244 data-nosnippet>4244</a>                    <span class="number">0
+<a href=#4245 id=4245 data-nosnippet>4245</a>                </span>}
+<a href=#4246 id=4246 data-nosnippet>4246</a>            });
+<a href=#4247 id=4247 data-nosnippet>4247</a>
+<a href=#4248 id=4248 data-nosnippet>4248</a>            <span class="prelude-val">Ok</span>(min_height
+<a href=#4249 id=4249 data-nosnippet>4249</a>                .zip(max_height_inclusive)
+<a href=#4250 id=4250 data-nosnippet>4250</a>                .zip(end_offset)
+<a href=#4251 id=4251 data-nosnippet>4251</a>                .map(|((min, max_inclusive), offset)| min..(max_inclusive + offset + <span class="number">1</span>)))
+<a href=#4252 id=4252 data-nosnippet>4252</a>        },
+<a href=#4253 id=4253 data-nosnippet>4253</a>    )
+<a href=#4254 id=4254 data-nosnippet>4254</a>    .map_err(SqliteClientError::from)
+<a href=#4255 id=4255 data-nosnippet>4255</a>}
+<a href=#4256 id=4256 data-nosnippet>4256</a>
+<a href=#4257 id=4257 data-nosnippet>4257</a><span class="attr">#[cfg(any(test, feature = <span class="string">"test-dependencies"</span>))]
+<a href=#4258 id=4258 data-nosnippet>4258</a></span><span class="kw">pub mod </span>testing {
+<a href=#4259 id=4259 data-nosnippet>4259</a>    <span class="kw">use </span>incrementalmerkletree::Position;
+<a href=#4260 id=4260 data-nosnippet>4260</a>    <span class="kw">use </span>zcash_client_backend::data_api::testing::TransactionSummary;
+<a href=#4261 id=4261 data-nosnippet>4261</a>    <span class="kw">use </span>zcash_primitives::transaction::TxId;
+<a href=#4262 id=4262 data-nosnippet>4262</a>    <span class="kw">use </span>zcash_protocol::{
+<a href=#4263 id=4263 data-nosnippet>4263</a>        consensus::BlockHeight,
+<a href=#4264 id=4264 data-nosnippet>4264</a>        value::{ZatBalance, Zatoshis},
+<a href=#4265 id=4265 data-nosnippet>4265</a>        ShieldedProtocol,
+<a href=#4266 id=4266 data-nosnippet>4266</a>    };
 <a href=#4267 id=4267 data-nosnippet>4267</a>
-<a href=#4268 id=4268 data-nosnippet>4268</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#4269 id=4269 data-nosnippet>4269</a>    </span><span class="kw">use </span><span class="kw">crate</span>::ORCHARD_TABLES_PREFIX;
-<a href=#4270 id=4270 data-nosnippet>4270</a>
-<a href=#4271 id=4271 data-nosnippet>4271</a>    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_tx_history(
-<a href=#4272 id=4272 data-nosnippet>4272</a>        conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
-<a href=#4273 id=4273 data-nosnippet>4273</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;TransactionSummary&lt;AccountUuid&gt;&gt;, SqliteClientError&gt; {
-<a href=#4274 id=4274 data-nosnippet>4274</a>        <span class="kw">let </span><span class="kw-2">mut </span>stmt = conn.prepare_cached(
-<a href=#4275 id=4275 data-nosnippet>4275</a>            <span class="string">"SELECT accounts.uuid as account_uuid, v_transactions.*
-<a href=#4276 id=4276 data-nosnippet>4276</a>             FROM v_transactions
-<a href=#4277 id=4277 data-nosnippet>4277</a>             JOIN accounts ON accounts.uuid = v_transactions.account_uuid
-<a href=#4278 id=4278 data-nosnippet>4278</a>             ORDER BY mined_height DESC, tx_index DESC"</span>,
-<a href=#4279 id=4279 data-nosnippet>4279</a>        )<span class="question-mark">?</span>;
-<a href=#4280 id=4280 data-nosnippet>4280</a>
-<a href=#4281 id=4281 data-nosnippet>4281</a>        <span class="kw">let </span>results = stmt
-<a href=#4282 id=4282 data-nosnippet>4282</a>            .query_and_then::&lt;<span class="kw">_</span>, SqliteClientError, <span class="kw">_</span>, <span class="kw">_</span>&gt;([], |row| {
-<a href=#4283 id=4283 data-nosnippet>4283</a>                <span class="prelude-val">Ok</span>(TransactionSummary::from_parts(
-<a href=#4284 id=4284 data-nosnippet>4284</a>                    AccountUuid(row.get(<span class="string">"account_uuid"</span>)<span class="question-mark">?</span>),
-<a href=#4285 id=4285 data-nosnippet>4285</a>                    TxId::from_bytes(row.get(<span class="string">"txid"</span>)<span class="question-mark">?</span>),
-<a href=#4286 id=4286 data-nosnippet>4286</a>                    row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="string">"expiry_height"</span>)<span class="question-mark">?
-<a href=#4287 id=4287 data-nosnippet>4287</a>                        </span>.map(BlockHeight::from),
-<a href=#4288 id=4288 data-nosnippet>4288</a>                    row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="string">"mined_height"</span>)<span class="question-mark">?
+<a href=#4268 id=4268 data-nosnippet>4268</a>    <span class="kw">use crate</span>::{error::SqliteClientError, AccountUuid, SAPLING_TABLES_PREFIX};
+<a href=#4269 id=4269 data-nosnippet>4269</a>
+<a href=#4270 id=4270 data-nosnippet>4270</a>    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#4271 id=4271 data-nosnippet>4271</a>    </span><span class="kw">use </span><span class="kw">crate</span>::ORCHARD_TABLES_PREFIX;
+<a href=#4272 id=4272 data-nosnippet>4272</a>
+<a href=#4273 id=4273 data-nosnippet>4273</a>    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_tx_history(
+<a href=#4274 id=4274 data-nosnippet>4274</a>        conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
+<a href=#4275 id=4275 data-nosnippet>4275</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;TransactionSummary&lt;AccountUuid&gt;&gt;, SqliteClientError&gt; {
+<a href=#4276 id=4276 data-nosnippet>4276</a>        <span class="kw">let </span><span class="kw-2">mut </span>stmt = conn.prepare_cached(
+<a href=#4277 id=4277 data-nosnippet>4277</a>            <span class="string">"SELECT accounts.uuid as account_uuid, v_transactions.*
+<a href=#4278 id=4278 data-nosnippet>4278</a>             FROM v_transactions
+<a href=#4279 id=4279 data-nosnippet>4279</a>             JOIN accounts ON accounts.uuid = v_transactions.account_uuid
+<a href=#4280 id=4280 data-nosnippet>4280</a>             ORDER BY mined_height DESC, tx_index DESC"</span>,
+<a href=#4281 id=4281 data-nosnippet>4281</a>        )<span class="question-mark">?</span>;
+<a href=#4282 id=4282 data-nosnippet>4282</a>
+<a href=#4283 id=4283 data-nosnippet>4283</a>        <span class="kw">let </span>results = stmt
+<a href=#4284 id=4284 data-nosnippet>4284</a>            .query_and_then::&lt;<span class="kw">_</span>, SqliteClientError, <span class="kw">_</span>, <span class="kw">_</span>&gt;([], |row| {
+<a href=#4285 id=4285 data-nosnippet>4285</a>                <span class="prelude-val">Ok</span>(TransactionSummary::from_parts(
+<a href=#4286 id=4286 data-nosnippet>4286</a>                    AccountUuid(row.get(<span class="string">"account_uuid"</span>)<span class="question-mark">?</span>),
+<a href=#4287 id=4287 data-nosnippet>4287</a>                    TxId::from_bytes(row.get(<span class="string">"txid"</span>)<span class="question-mark">?</span>),
+<a href=#4288 id=4288 data-nosnippet>4288</a>                    row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="string">"expiry_height"</span>)<span class="question-mark">?
 <a href=#4289 id=4289 data-nosnippet>4289</a>                        </span>.map(BlockHeight::from),
-<a href=#4290 id=4290 data-nosnippet>4290</a>                    ZatBalance::from_i64(row.get(<span class="string">"account_balance_delta"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>,
-<a href=#4291 id=4291 data-nosnippet>4291</a>                    Zatoshis::from_nonnegative_i64(row.get(<span class="string">"total_spent"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>,
-<a href=#4292 id=4292 data-nosnippet>4292</a>                    Zatoshis::from_nonnegative_i64(row.get(<span class="string">"total_received"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>,
-<a href=#4293 id=4293 data-nosnippet>4293</a>                    row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;i64&gt;&gt;(<span class="string">"fee_paid"</span>)<span class="question-mark">?
-<a href=#4294 id=4294 data-nosnippet>4294</a>                        </span>.map(Zatoshis::from_nonnegative_i64)
-<a href=#4295 id=4295 data-nosnippet>4295</a>                        .transpose()<span class="question-mark">?</span>,
-<a href=#4296 id=4296 data-nosnippet>4296</a>                    row.get(<span class="string">"spent_note_count"</span>)<span class="question-mark">?</span>,
-<a href=#4297 id=4297 data-nosnippet>4297</a>                    row.get(<span class="string">"has_change"</span>)<span class="question-mark">?</span>,
-<a href=#4298 id=4298 data-nosnippet>4298</a>                    row.get(<span class="string">"sent_note_count"</span>)<span class="question-mark">?</span>,
-<a href=#4299 id=4299 data-nosnippet>4299</a>                    row.get(<span class="string">"received_note_count"</span>)<span class="question-mark">?</span>,
-<a href=#4300 id=4300 data-nosnippet>4300</a>                    row.get(<span class="string">"memo_count"</span>)<span class="question-mark">?</span>,
-<a href=#4301 id=4301 data-nosnippet>4301</a>                    row.get(<span class="string">"expired_unmined"</span>)<span class="question-mark">?</span>,
-<a href=#4302 id=4302 data-nosnippet>4302</a>                    row.get(<span class="string">"is_shielding"</span>)<span class="question-mark">?</span>,
-<a href=#4303 id=4303 data-nosnippet>4303</a>                ))
-<a href=#4304 id=4304 data-nosnippet>4304</a>            })<span class="question-mark">?
-<a href=#4305 id=4305 data-nosnippet>4305</a>            </span>.collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
-<a href=#4306 id=4306 data-nosnippet>4306</a>
-<a href=#4307 id=4307 data-nosnippet>4307</a>        <span class="prelude-val">Ok</span>(results)
-<a href=#4308 id=4308 data-nosnippet>4308</a>    }
-<a href=#4309 id=4309 data-nosnippet>4309</a>
-<a href=#4310 id=4310 data-nosnippet>4310</a>    <span class="doccomment">/// Returns a vector of transaction summaries
-<a href=#4311 id=4311 data-nosnippet>4311</a>    </span><span class="attr">#[allow(dead_code)] </span><span class="comment">// used only for tests that are flagged off by default
-<a href=#4312 id=4312 data-nosnippet>4312</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_checkpoint_history(
-<a href=#4313 id=4313 data-nosnippet>4313</a>        conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
-<a href=#4314 id=4314 data-nosnippet>4314</a>        protocol: <span class="kw-2">&amp;</span>ShieldedProtocol,
-<a href=#4315 id=4315 data-nosnippet>4315</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(BlockHeight, <span class="prelude-ty">Option</span>&lt;Position&gt;)&gt;, SqliteClientError&gt; {
-<a href=#4316 id=4316 data-nosnippet>4316</a>        <span class="kw">let </span>table_prefix = <span class="kw">match </span>protocol {
-<a href=#4317 id=4317 data-nosnippet>4317</a>            ShieldedProtocol::Sapling =&gt; SAPLING_TABLES_PREFIX,
-<a href=#4318 id=4318 data-nosnippet>4318</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#4319 id=4319 data-nosnippet>4319</a>            </span>ShieldedProtocol::Orchard =&gt; ORCHARD_TABLES_PREFIX,
-<a href=#4320 id=4320 data-nosnippet>4320</a>            <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
-<a href=#4321 id=4321 data-nosnippet>4321</a>            </span>ShieldedProtocol::Orchard =&gt; {
-<a href=#4322 id=4322 data-nosnippet>4322</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(SqliteClientError::UnsupportedPoolType(
-<a href=#4323 id=4323 data-nosnippet>4323</a>                    zcash_protocol::PoolType::ORCHARD,
-<a href=#4324 id=4324 data-nosnippet>4324</a>                ));
-<a href=#4325 id=4325 data-nosnippet>4325</a>            }
-<a href=#4326 id=4326 data-nosnippet>4326</a>        };
-<a href=#4327 id=4327 data-nosnippet>4327</a>
-<a href=#4328 id=4328 data-nosnippet>4328</a>        <span class="kw">let </span><span class="kw-2">mut </span>stmt = conn.prepare_cached(<span class="kw-2">&amp;</span><span class="macro">format!</span>(
-<a href=#4329 id=4329 data-nosnippet>4329</a>            <span class="string">"SELECT checkpoint_id, position FROM {}_tree_checkpoints
-<a href=#4330 id=4330 data-nosnippet>4330</a>             ORDER BY checkpoint_id"</span>,
-<a href=#4331 id=4331 data-nosnippet>4331</a>            table_prefix
-<a href=#4332 id=4332 data-nosnippet>4332</a>        ))<span class="question-mark">?</span>;
-<a href=#4333 id=4333 data-nosnippet>4333</a>
-<a href=#4334 id=4334 data-nosnippet>4334</a>        <span class="kw">let </span>results = stmt
-<a href=#4335 id=4335 data-nosnippet>4335</a>            .query_and_then::&lt;<span class="kw">_</span>, SqliteClientError, <span class="kw">_</span>, <span class="kw">_</span>&gt;([], |row| {
-<a href=#4336 id=4336 data-nosnippet>4336</a>                <span class="prelude-val">Ok</span>((
-<a href=#4337 id=4337 data-nosnippet>4337</a>                    BlockHeight::from(row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">0</span>)<span class="question-mark">?</span>),
-<a href=#4338 id=4338 data-nosnippet>4338</a>                    row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u64&gt;&gt;(<span class="number">1</span>)<span class="question-mark">?</span>.map(Position::from),
-<a href=#4339 id=4339 data-nosnippet>4339</a>                ))
-<a href=#4340 id=4340 data-nosnippet>4340</a>            })<span class="question-mark">?
-<a href=#4341 id=4341 data-nosnippet>4341</a>            </span>.collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
-<a href=#4342 id=4342 data-nosnippet>4342</a>
-<a href=#4343 id=4343 data-nosnippet>4343</a>        <span class="prelude-val">Ok</span>(results)
-<a href=#4344 id=4344 data-nosnippet>4344</a>    }
-<a href=#4345 id=4345 data-nosnippet>4345</a>}
-<a href=#4346 id=4346 data-nosnippet>4346</a>
-<a href=#4347 id=4347 data-nosnippet>4347</a><span class="attr">#[cfg(test)]
-<a href=#4348 id=4348 data-nosnippet>4348</a></span><span class="kw">mod </span>tests {
-<a href=#4349 id=4349 data-nosnippet>4349</a>    <span class="kw">use </span>std::num::NonZeroU32;
-<a href=#4350 id=4350 data-nosnippet>4350</a>
-<a href=#4351 id=4351 data-nosnippet>4351</a>    <span class="kw">use </span>sapling::zip32::ExtendedSpendingKey;
-<a href=#4352 id=4352 data-nosnippet>4352</a>    <span class="kw">use </span>secrecy::{ExposeSecret, SecretVec};
-<a href=#4353 id=4353 data-nosnippet>4353</a>    <span class="kw">use </span>uuid::Uuid;
-<a href=#4354 id=4354 data-nosnippet>4354</a>    <span class="kw">use </span>zcash_client_backend::data_api::{
-<a href=#4355 id=4355 data-nosnippet>4355</a>        testing::{AddressType, DataStoreFactory, FakeCompactOutput, TestBuilder, TestState},
-<a href=#4356 id=4356 data-nosnippet>4356</a>        Account <span class="kw">as _</span>, AccountSource, WalletRead, WalletWrite,
-<a href=#4357 id=4357 data-nosnippet>4357</a>    };
-<a href=#4358 id=4358 data-nosnippet>4358</a>    <span class="kw">use </span>zcash_keys::keys::UnifiedAddressRequest;
-<a href=#4359 id=4359 data-nosnippet>4359</a>    <span class="kw">use </span>zcash_primitives::block::BlockHash;
-<a href=#4360 id=4360 data-nosnippet>4360</a>    <span class="kw">use </span>zcash_protocol::value::Zatoshis;
-<a href=#4361 id=4361 data-nosnippet>4361</a>
-<a href=#4362 id=4362 data-nosnippet>4362</a>    <span class="kw">use crate</span>::{
-<a href=#4363 id=4363 data-nosnippet>4363</a>        error::SqliteClientError,
-<a href=#4364 id=4364 data-nosnippet>4364</a>        testing::{db::TestDbFactory, BlockCache},
-<a href=#4365 id=4365 data-nosnippet>4365</a>        AccountUuid,
-<a href=#4366 id=4366 data-nosnippet>4366</a>    };
-<a href=#4367 id=4367 data-nosnippet>4367</a>
-<a href=#4368 id=4368 data-nosnippet>4368</a>    <span class="kw">use </span><span class="kw">super</span>::account_birthday;
+<a href=#4290 id=4290 data-nosnippet>4290</a>                    row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="string">"mined_height"</span>)<span class="question-mark">?
+<a href=#4291 id=4291 data-nosnippet>4291</a>                        </span>.map(BlockHeight::from),
+<a href=#4292 id=4292 data-nosnippet>4292</a>                    ZatBalance::from_i64(row.get(<span class="string">"account_balance_delta"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>,
+<a href=#4293 id=4293 data-nosnippet>4293</a>                    Zatoshis::from_nonnegative_i64(row.get(<span class="string">"total_spent"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>,
+<a href=#4294 id=4294 data-nosnippet>4294</a>                    Zatoshis::from_nonnegative_i64(row.get(<span class="string">"total_received"</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>,
+<a href=#4295 id=4295 data-nosnippet>4295</a>                    row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;i64&gt;&gt;(<span class="string">"fee_paid"</span>)<span class="question-mark">?
+<a href=#4296 id=4296 data-nosnippet>4296</a>                        </span>.map(Zatoshis::from_nonnegative_i64)
+<a href=#4297 id=4297 data-nosnippet>4297</a>                        .transpose()<span class="question-mark">?</span>,
+<a href=#4298 id=4298 data-nosnippet>4298</a>                    row.get(<span class="string">"spent_note_count"</span>)<span class="question-mark">?</span>,
+<a href=#4299 id=4299 data-nosnippet>4299</a>                    row.get(<span class="string">"has_change"</span>)<span class="question-mark">?</span>,
+<a href=#4300 id=4300 data-nosnippet>4300</a>                    row.get(<span class="string">"sent_note_count"</span>)<span class="question-mark">?</span>,
+<a href=#4301 id=4301 data-nosnippet>4301</a>                    row.get(<span class="string">"received_note_count"</span>)<span class="question-mark">?</span>,
+<a href=#4302 id=4302 data-nosnippet>4302</a>                    row.get(<span class="string">"memo_count"</span>)<span class="question-mark">?</span>,
+<a href=#4303 id=4303 data-nosnippet>4303</a>                    row.get(<span class="string">"expired_unmined"</span>)<span class="question-mark">?</span>,
+<a href=#4304 id=4304 data-nosnippet>4304</a>                    row.get(<span class="string">"is_shielding"</span>)<span class="question-mark">?</span>,
+<a href=#4305 id=4305 data-nosnippet>4305</a>                ))
+<a href=#4306 id=4306 data-nosnippet>4306</a>            })<span class="question-mark">?
+<a href=#4307 id=4307 data-nosnippet>4307</a>            </span>.collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
+<a href=#4308 id=4308 data-nosnippet>4308</a>
+<a href=#4309 id=4309 data-nosnippet>4309</a>        <span class="prelude-val">Ok</span>(results)
+<a href=#4310 id=4310 data-nosnippet>4310</a>    }
+<a href=#4311 id=4311 data-nosnippet>4311</a>
+<a href=#4312 id=4312 data-nosnippet>4312</a>    <span class="doccomment">/// Returns a vector of transaction summaries
+<a href=#4313 id=4313 data-nosnippet>4313</a>    </span><span class="attr">#[allow(dead_code)] </span><span class="comment">// used only for tests that are flagged off by default
+<a href=#4314 id=4314 data-nosnippet>4314</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_checkpoint_history(
+<a href=#4315 id=4315 data-nosnippet>4315</a>        conn: <span class="kw-2">&amp;</span>rusqlite::Connection,
+<a href=#4316 id=4316 data-nosnippet>4316</a>        protocol: <span class="kw-2">&amp;</span>ShieldedProtocol,
+<a href=#4317 id=4317 data-nosnippet>4317</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(BlockHeight, <span class="prelude-ty">Option</span>&lt;Position&gt;)&gt;, SqliteClientError&gt; {
+<a href=#4318 id=4318 data-nosnippet>4318</a>        <span class="kw">let </span>table_prefix = <span class="kw">match </span>protocol {
+<a href=#4319 id=4319 data-nosnippet>4319</a>            ShieldedProtocol::Sapling =&gt; SAPLING_TABLES_PREFIX,
+<a href=#4320 id=4320 data-nosnippet>4320</a>            <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#4321 id=4321 data-nosnippet>4321</a>            </span>ShieldedProtocol::Orchard =&gt; ORCHARD_TABLES_PREFIX,
+<a href=#4322 id=4322 data-nosnippet>4322</a>            <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
+<a href=#4323 id=4323 data-nosnippet>4323</a>            </span>ShieldedProtocol::Orchard =&gt; {
+<a href=#4324 id=4324 data-nosnippet>4324</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(SqliteClientError::UnsupportedPoolType(
+<a href=#4325 id=4325 data-nosnippet>4325</a>                    zcash_protocol::PoolType::ORCHARD,
+<a href=#4326 id=4326 data-nosnippet>4326</a>                ));
+<a href=#4327 id=4327 data-nosnippet>4327</a>            }
+<a href=#4328 id=4328 data-nosnippet>4328</a>        };
+<a href=#4329 id=4329 data-nosnippet>4329</a>
+<a href=#4330 id=4330 data-nosnippet>4330</a>        <span class="kw">let </span><span class="kw-2">mut </span>stmt = conn.prepare_cached(<span class="kw-2">&amp;</span><span class="macro">format!</span>(
+<a href=#4331 id=4331 data-nosnippet>4331</a>            <span class="string">"SELECT checkpoint_id, position FROM {}_tree_checkpoints
+<a href=#4332 id=4332 data-nosnippet>4332</a>             ORDER BY checkpoint_id"</span>,
+<a href=#4333 id=4333 data-nosnippet>4333</a>            table_prefix
+<a href=#4334 id=4334 data-nosnippet>4334</a>        ))<span class="question-mark">?</span>;
+<a href=#4335 id=4335 data-nosnippet>4335</a>
+<a href=#4336 id=4336 data-nosnippet>4336</a>        <span class="kw">let </span>results = stmt
+<a href=#4337 id=4337 data-nosnippet>4337</a>            .query_and_then::&lt;<span class="kw">_</span>, SqliteClientError, <span class="kw">_</span>, <span class="kw">_</span>&gt;([], |row| {
+<a href=#4338 id=4338 data-nosnippet>4338</a>                <span class="prelude-val">Ok</span>((
+<a href=#4339 id=4339 data-nosnippet>4339</a>                    BlockHeight::from(row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">0</span>)<span class="question-mark">?</span>),
+<a href=#4340 id=4340 data-nosnippet>4340</a>                    row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u64&gt;&gt;(<span class="number">1</span>)<span class="question-mark">?</span>.map(Position::from),
+<a href=#4341 id=4341 data-nosnippet>4341</a>                ))
+<a href=#4342 id=4342 data-nosnippet>4342</a>            })<span class="question-mark">?
+<a href=#4343 id=4343 data-nosnippet>4343</a>            </span>.collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
+<a href=#4344 id=4344 data-nosnippet>4344</a>
+<a href=#4345 id=4345 data-nosnippet>4345</a>        <span class="prelude-val">Ok</span>(results)
+<a href=#4346 id=4346 data-nosnippet>4346</a>    }
+<a href=#4347 id=4347 data-nosnippet>4347</a>}
+<a href=#4348 id=4348 data-nosnippet>4348</a>
+<a href=#4349 id=4349 data-nosnippet>4349</a><span class="attr">#[cfg(test)]
+<a href=#4350 id=4350 data-nosnippet>4350</a></span><span class="kw">mod </span>tests {
+<a href=#4351 id=4351 data-nosnippet>4351</a>    <span class="kw">use </span>std::num::NonZeroU32;
+<a href=#4352 id=4352 data-nosnippet>4352</a>
+<a href=#4353 id=4353 data-nosnippet>4353</a>    <span class="kw">use </span>sapling::zip32::ExtendedSpendingKey;
+<a href=#4354 id=4354 data-nosnippet>4354</a>    <span class="kw">use </span>secrecy::{ExposeSecret, SecretVec};
+<a href=#4355 id=4355 data-nosnippet>4355</a>    <span class="kw">use </span>uuid::Uuid;
+<a href=#4356 id=4356 data-nosnippet>4356</a>    <span class="kw">use </span>zcash_client_backend::data_api::{
+<a href=#4357 id=4357 data-nosnippet>4357</a>        testing::{AddressType, DataStoreFactory, FakeCompactOutput, TestBuilder, TestState},
+<a href=#4358 id=4358 data-nosnippet>4358</a>        Account <span class="kw">as _</span>, AccountSource, WalletRead, WalletWrite,
+<a href=#4359 id=4359 data-nosnippet>4359</a>    };
+<a href=#4360 id=4360 data-nosnippet>4360</a>    <span class="kw">use </span>zcash_keys::keys::UnifiedAddressRequest;
+<a href=#4361 id=4361 data-nosnippet>4361</a>    <span class="kw">use </span>zcash_primitives::block::BlockHash;
+<a href=#4362 id=4362 data-nosnippet>4362</a>    <span class="kw">use </span>zcash_protocol::value::Zatoshis;
+<a href=#4363 id=4363 data-nosnippet>4363</a>
+<a href=#4364 id=4364 data-nosnippet>4364</a>    <span class="kw">use crate</span>::{
+<a href=#4365 id=4365 data-nosnippet>4365</a>        error::SqliteClientError,
+<a href=#4366 id=4366 data-nosnippet>4366</a>        testing::{db::TestDbFactory, BlockCache},
+<a href=#4367 id=4367 data-nosnippet>4367</a>        AccountUuid,
+<a href=#4368 id=4368 data-nosnippet>4368</a>    };
 <a href=#4369 id=4369 data-nosnippet>4369</a>
-<a href=#4370 id=4370 data-nosnippet>4370</a>    <span class="attr">#[test]
-<a href=#4371 id=4371 data-nosnippet>4371</a>    </span><span class="kw">fn </span>empty_database_has_no_balance() {
-<a href=#4372 id=4372 data-nosnippet>4372</a>        <span class="kw">let </span>st = TestBuilder::new()
-<a href=#4373 id=4373 data-nosnippet>4373</a>            .with_data_store_factory(TestDbFactory::default())
-<a href=#4374 id=4374 data-nosnippet>4374</a>            .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
-<a href=#4375 id=4375 data-nosnippet>4375</a>            .build();
-<a href=#4376 id=4376 data-nosnippet>4376</a>        <span class="kw">let </span>account = st.test_account().unwrap();
-<a href=#4377 id=4377 data-nosnippet>4377</a>
-<a href=#4378 id=4378 data-nosnippet>4378</a>        <span class="comment">// The account should have no summary information
-<a href=#4379 id=4379 data-nosnippet>4379</a>        </span><span class="macro">assert_eq!</span>(st.get_wallet_summary(<span class="number">0</span>), <span class="prelude-val">None</span>);
-<a href=#4380 id=4380 data-nosnippet>4380</a>
-<a href=#4381 id=4381 data-nosnippet>4381</a>        <span class="comment">// We can't get an anchor height, as we have not scanned any blocks.
-<a href=#4382 id=4382 data-nosnippet>4382</a>        </span><span class="macro">assert_eq!</span>(
-<a href=#4383 id=4383 data-nosnippet>4383</a>            st.wallet()
-<a href=#4384 id=4384 data-nosnippet>4384</a>                .get_target_and_anchor_heights(NonZeroU32::new(<span class="number">10</span>).unwrap())
-<a href=#4385 id=4385 data-nosnippet>4385</a>                .unwrap(),
-<a href=#4386 id=4386 data-nosnippet>4386</a>            <span class="prelude-val">None
-<a href=#4387 id=4387 data-nosnippet>4387</a>        </span>);
-<a href=#4388 id=4388 data-nosnippet>4388</a>
-<a href=#4389 id=4389 data-nosnippet>4389</a>        <span class="comment">// The default address is set for the test account
-<a href=#4390 id=4390 data-nosnippet>4390</a>        </span><span class="macro">assert_matches!</span>(
-<a href=#4391 id=4391 data-nosnippet>4391</a>            st.wallet().get_last_generated_address_matching(
-<a href=#4392 id=4392 data-nosnippet>4392</a>                account.id(),
-<a href=#4393 id=4393 data-nosnippet>4393</a>                UnifiedAddressRequest::AllAvailableKeys
-<a href=#4394 id=4394 data-nosnippet>4394</a>            ),
-<a href=#4395 id=4395 data-nosnippet>4395</a>            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="kw">_</span>))
-<a href=#4396 id=4396 data-nosnippet>4396</a>        );
-<a href=#4397 id=4397 data-nosnippet>4397</a>
-<a href=#4398 id=4398 data-nosnippet>4398</a>        <span class="comment">// No default address is set for an un-initialized account
-<a href=#4399 id=4399 data-nosnippet>4399</a>        </span><span class="macro">assert_matches!</span>(
-<a href=#4400 id=4400 data-nosnippet>4400</a>            st.wallet().get_last_generated_address_matching(
-<a href=#4401 id=4401 data-nosnippet>4401</a>                AccountUuid(Uuid::nil()),
-<a href=#4402 id=4402 data-nosnippet>4402</a>                UnifiedAddressRequest::AllAvailableKeys
-<a href=#4403 id=4403 data-nosnippet>4403</a>            ),
-<a href=#4404 id=4404 data-nosnippet>4404</a>            <span class="prelude-val">Err</span>(SqliteClientError::AccountUnknown)
-<a href=#4405 id=4405 data-nosnippet>4405</a>        );
-<a href=#4406 id=4406 data-nosnippet>4406</a>    }
-<a href=#4407 id=4407 data-nosnippet>4407</a>
-<a href=#4408 id=4408 data-nosnippet>4408</a>    <span class="attr">#[test]
-<a href=#4409 id=4409 data-nosnippet>4409</a>    </span><span class="kw">fn </span>get_default_account_index() {
-<a href=#4410 id=4410 data-nosnippet>4410</a>        <span class="kw">let </span>st = TestBuilder::new()
-<a href=#4411 id=4411 data-nosnippet>4411</a>            .with_data_store_factory(TestDbFactory::default())
-<a href=#4412 id=4412 data-nosnippet>4412</a>            .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
-<a href=#4413 id=4413 data-nosnippet>4413</a>            .build();
-<a href=#4414 id=4414 data-nosnippet>4414</a>        <span class="kw">let </span>account_id = st.test_account().unwrap().id();
-<a href=#4415 id=4415 data-nosnippet>4415</a>        <span class="kw">let </span>account_parameters = st.wallet().get_account(account_id).unwrap().unwrap();
-<a href=#4416 id=4416 data-nosnippet>4416</a>
-<a href=#4417 id=4417 data-nosnippet>4417</a>        <span class="kw">let </span>expected_account_index = zip32::AccountId::try_from(<span class="number">0</span>).unwrap();
-<a href=#4418 id=4418 data-nosnippet>4418</a>        <span class="macro">assert_matches!</span>(
-<a href=#4419 id=4419 data-nosnippet>4419</a>            account_parameters.kind,
-<a href=#4420 id=4420 data-nosnippet>4420</a>            AccountSource::Derived{derivation, ..} <span class="kw">if </span>derivation.account_index() == expected_account_index
-<a href=#4421 id=4421 data-nosnippet>4421</a>        );
-<a href=#4422 id=4422 data-nosnippet>4422</a>    }
-<a href=#4423 id=4423 data-nosnippet>4423</a>
-<a href=#4424 id=4424 data-nosnippet>4424</a>    <span class="attr">#[test]
-<a href=#4425 id=4425 data-nosnippet>4425</a>    </span><span class="kw">fn </span>get_account_ids() {
-<a href=#4426 id=4426 data-nosnippet>4426</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
-<a href=#4427 id=4427 data-nosnippet>4427</a>            .with_data_store_factory(TestDbFactory::default())
-<a href=#4428 id=4428 data-nosnippet>4428</a>            .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
-<a href=#4429 id=4429 data-nosnippet>4429</a>            .build();
-<a href=#4430 id=4430 data-nosnippet>4430</a>
-<a href=#4431 id=4431 data-nosnippet>4431</a>        <span class="kw">let </span>seed = SecretVec::new(st.test_seed().unwrap().expose_secret().clone());
-<a href=#4432 id=4432 data-nosnippet>4432</a>        <span class="kw">let </span>birthday = st.test_account().unwrap().birthday().clone();
-<a href=#4433 id=4433 data-nosnippet>4433</a>
-<a href=#4434 id=4434 data-nosnippet>4434</a>        st.wallet_mut()
-<a href=#4435 id=4435 data-nosnippet>4435</a>            .create_account(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>)
-<a href=#4436 id=4436 data-nosnippet>4436</a>            .unwrap();
-<a href=#4437 id=4437 data-nosnippet>4437</a>
-<a href=#4438 id=4438 data-nosnippet>4438</a>        <span class="kw">for </span>acct_id <span class="kw">in </span>st.wallet().get_account_ids().unwrap() {
-<a href=#4439 id=4439 data-nosnippet>4439</a>            <span class="macro">assert_matches!</span>(st.wallet().get_account(acct_id), <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="kw">_</span>)))
-<a href=#4440 id=4440 data-nosnippet>4440</a>        }
-<a href=#4441 id=4441 data-nosnippet>4441</a>    }
-<a href=#4442 id=4442 data-nosnippet>4442</a>
-<a href=#4443 id=4443 data-nosnippet>4443</a>    <span class="attr">#[test]
-<a href=#4444 id=4444 data-nosnippet>4444</a>    </span><span class="kw">fn </span>block_fully_scanned() {
-<a href=#4445 id=4445 data-nosnippet>4445</a>        check_block_fully_scanned(TestDbFactory::default())
-<a href=#4446 id=4446 data-nosnippet>4446</a>    }
-<a href=#4447 id=4447 data-nosnippet>4447</a>
-<a href=#4448 id=4448 data-nosnippet>4448</a>    <span class="kw">fn </span>check_block_fully_scanned&lt;DsF: DataStoreFactory&gt;(dsf: DsF) {
-<a href=#4449 id=4449 data-nosnippet>4449</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
-<a href=#4450 id=4450 data-nosnippet>4450</a>            .with_data_store_factory(dsf)
-<a href=#4451 id=4451 data-nosnippet>4451</a>            .with_block_cache(BlockCache::new())
-<a href=#4452 id=4452 data-nosnippet>4452</a>            .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
-<a href=#4453 id=4453 data-nosnippet>4453</a>            .build();
-<a href=#4454 id=4454 data-nosnippet>4454</a>
-<a href=#4455 id=4455 data-nosnippet>4455</a>        <span class="kw">let </span>block_fully_scanned = |st: <span class="kw-2">&amp;</span>TestState&lt;<span class="kw">_</span>, DsF::DataStore, <span class="kw">_</span>&gt;| {
-<a href=#4456 id=4456 data-nosnippet>4456</a>            st.wallet()
-<a href=#4457 id=4457 data-nosnippet>4457</a>                .block_fully_scanned()
-<a href=#4458 id=4458 data-nosnippet>4458</a>                .unwrap()
-<a href=#4459 id=4459 data-nosnippet>4459</a>                .map(|meta| meta.block_height())
-<a href=#4460 id=4460 data-nosnippet>4460</a>        };
-<a href=#4461 id=4461 data-nosnippet>4461</a>
-<a href=#4462 id=4462 data-nosnippet>4462</a>        <span class="comment">// A fresh wallet should have no fully-scanned block.
-<a href=#4463 id=4463 data-nosnippet>4463</a>        </span><span class="macro">assert_eq!</span>(block_fully_scanned(<span class="kw-2">&amp;</span>st), <span class="prelude-val">None</span>);
-<a href=#4464 id=4464 data-nosnippet>4464</a>
-<a href=#4465 id=4465 data-nosnippet>4465</a>        <span class="comment">// Scan a block above the wallet's birthday height.
-<a href=#4466 id=4466 data-nosnippet>4466</a>        </span><span class="kw">let </span>not_our_key = ExtendedSpendingKey::master(<span class="kw-2">&amp;</span>[]).to_diversifiable_full_viewing_key();
-<a href=#4467 id=4467 data-nosnippet>4467</a>        <span class="kw">let </span>not_our_value = Zatoshis::const_from_u64(<span class="number">10000</span>);
-<a href=#4468 id=4468 data-nosnippet>4468</a>        <span class="kw">let </span>start_height = st.sapling_activation_height();
-<a href=#4469 id=4469 data-nosnippet>4469</a>        <span class="kw">let _ </span>= st.generate_block_at(
-<a href=#4470 id=4470 data-nosnippet>4470</a>            start_height,
-<a href=#4471 id=4471 data-nosnippet>4471</a>            BlockHash([<span class="number">0</span>; <span class="number">32</span>]),
-<a href=#4472 id=4472 data-nosnippet>4472</a>            <span class="kw-2">&amp;</span>[FakeCompactOutput::new(
-<a href=#4473 id=4473 data-nosnippet>4473</a>                <span class="kw-2">&amp;</span>not_our_key,
-<a href=#4474 id=4474 data-nosnippet>4474</a>                AddressType::DefaultExternal,
-<a href=#4475 id=4475 data-nosnippet>4475</a>                not_our_value,
-<a href=#4476 id=4476 data-nosnippet>4476</a>            )],
-<a href=#4477 id=4477 data-nosnippet>4477</a>            <span class="number">0</span>,
-<a href=#4478 id=4478 data-nosnippet>4478</a>            <span class="number">0</span>,
-<a href=#4479 id=4479 data-nosnippet>4479</a>            <span class="bool-val">false</span>,
-<a href=#4480 id=4480 data-nosnippet>4480</a>        );
-<a href=#4481 id=4481 data-nosnippet>4481</a>        <span class="kw">let </span>(mid_height, <span class="kw">_</span>, <span class="kw">_</span>) =
-<a href=#4482 id=4482 data-nosnippet>4482</a>            st.generate_next_block(<span class="kw-2">&amp;</span>not_our_key, AddressType::DefaultExternal, not_our_value);
-<a href=#4483 id=4483 data-nosnippet>4483</a>        <span class="kw">let </span>(end_height, <span class="kw">_</span>, <span class="kw">_</span>) =
+<a href=#4370 id=4370 data-nosnippet>4370</a>    <span class="kw">use </span><span class="kw">super</span>::account_birthday;
+<a href=#4371 id=4371 data-nosnippet>4371</a>
+<a href=#4372 id=4372 data-nosnippet>4372</a>    <span class="attr">#[test]
+<a href=#4373 id=4373 data-nosnippet>4373</a>    </span><span class="kw">fn </span>empty_database_has_no_balance() {
+<a href=#4374 id=4374 data-nosnippet>4374</a>        <span class="kw">let </span>st = TestBuilder::new()
+<a href=#4375 id=4375 data-nosnippet>4375</a>            .with_data_store_factory(TestDbFactory::default())
+<a href=#4376 id=4376 data-nosnippet>4376</a>            .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
+<a href=#4377 id=4377 data-nosnippet>4377</a>            .build();
+<a href=#4378 id=4378 data-nosnippet>4378</a>        <span class="kw">let </span>account = st.test_account().unwrap();
+<a href=#4379 id=4379 data-nosnippet>4379</a>
+<a href=#4380 id=4380 data-nosnippet>4380</a>        <span class="comment">// The account should have no summary information
+<a href=#4381 id=4381 data-nosnippet>4381</a>        </span><span class="macro">assert_eq!</span>(st.get_wallet_summary(<span class="number">0</span>), <span class="prelude-val">None</span>);
+<a href=#4382 id=4382 data-nosnippet>4382</a>
+<a href=#4383 id=4383 data-nosnippet>4383</a>        <span class="comment">// We can't get an anchor height, as we have not scanned any blocks.
+<a href=#4384 id=4384 data-nosnippet>4384</a>        </span><span class="macro">assert_eq!</span>(
+<a href=#4385 id=4385 data-nosnippet>4385</a>            st.wallet()
+<a href=#4386 id=4386 data-nosnippet>4386</a>                .get_target_and_anchor_heights(NonZeroU32::new(<span class="number">10</span>).unwrap())
+<a href=#4387 id=4387 data-nosnippet>4387</a>                .unwrap(),
+<a href=#4388 id=4388 data-nosnippet>4388</a>            <span class="prelude-val">None
+<a href=#4389 id=4389 data-nosnippet>4389</a>        </span>);
+<a href=#4390 id=4390 data-nosnippet>4390</a>
+<a href=#4391 id=4391 data-nosnippet>4391</a>        <span class="comment">// The default address is set for the test account
+<a href=#4392 id=4392 data-nosnippet>4392</a>        </span><span class="macro">assert_matches!</span>(
+<a href=#4393 id=4393 data-nosnippet>4393</a>            st.wallet().get_last_generated_address_matching(
+<a href=#4394 id=4394 data-nosnippet>4394</a>                account.id(),
+<a href=#4395 id=4395 data-nosnippet>4395</a>                UnifiedAddressRequest::AllAvailableKeys
+<a href=#4396 id=4396 data-nosnippet>4396</a>            ),
+<a href=#4397 id=4397 data-nosnippet>4397</a>            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="kw">_</span>))
+<a href=#4398 id=4398 data-nosnippet>4398</a>        );
+<a href=#4399 id=4399 data-nosnippet>4399</a>
+<a href=#4400 id=4400 data-nosnippet>4400</a>        <span class="comment">// No default address is set for an un-initialized account
+<a href=#4401 id=4401 data-nosnippet>4401</a>        </span><span class="macro">assert_matches!</span>(
+<a href=#4402 id=4402 data-nosnippet>4402</a>            st.wallet().get_last_generated_address_matching(
+<a href=#4403 id=4403 data-nosnippet>4403</a>                AccountUuid(Uuid::nil()),
+<a href=#4404 id=4404 data-nosnippet>4404</a>                UnifiedAddressRequest::AllAvailableKeys
+<a href=#4405 id=4405 data-nosnippet>4405</a>            ),
+<a href=#4406 id=4406 data-nosnippet>4406</a>            <span class="prelude-val">Err</span>(SqliteClientError::AccountUnknown)
+<a href=#4407 id=4407 data-nosnippet>4407</a>        );
+<a href=#4408 id=4408 data-nosnippet>4408</a>    }
+<a href=#4409 id=4409 data-nosnippet>4409</a>
+<a href=#4410 id=4410 data-nosnippet>4410</a>    <span class="attr">#[test]
+<a href=#4411 id=4411 data-nosnippet>4411</a>    </span><span class="kw">fn </span>get_default_account_index() {
+<a href=#4412 id=4412 data-nosnippet>4412</a>        <span class="kw">let </span>st = TestBuilder::new()
+<a href=#4413 id=4413 data-nosnippet>4413</a>            .with_data_store_factory(TestDbFactory::default())
+<a href=#4414 id=4414 data-nosnippet>4414</a>            .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
+<a href=#4415 id=4415 data-nosnippet>4415</a>            .build();
+<a href=#4416 id=4416 data-nosnippet>4416</a>        <span class="kw">let </span>account_id = st.test_account().unwrap().id();
+<a href=#4417 id=4417 data-nosnippet>4417</a>        <span class="kw">let </span>account_parameters = st.wallet().get_account(account_id).unwrap().unwrap();
+<a href=#4418 id=4418 data-nosnippet>4418</a>
+<a href=#4419 id=4419 data-nosnippet>4419</a>        <span class="kw">let </span>expected_account_index = zip32::AccountId::try_from(<span class="number">0</span>).unwrap();
+<a href=#4420 id=4420 data-nosnippet>4420</a>        <span class="macro">assert_matches!</span>(
+<a href=#4421 id=4421 data-nosnippet>4421</a>            account_parameters.kind,
+<a href=#4422 id=4422 data-nosnippet>4422</a>            AccountSource::Derived{derivation, ..} <span class="kw">if </span>derivation.account_index() == expected_account_index
+<a href=#4423 id=4423 data-nosnippet>4423</a>        );
+<a href=#4424 id=4424 data-nosnippet>4424</a>    }
+<a href=#4425 id=4425 data-nosnippet>4425</a>
+<a href=#4426 id=4426 data-nosnippet>4426</a>    <span class="attr">#[test]
+<a href=#4427 id=4427 data-nosnippet>4427</a>    </span><span class="kw">fn </span>get_account_ids() {
+<a href=#4428 id=4428 data-nosnippet>4428</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
+<a href=#4429 id=4429 data-nosnippet>4429</a>            .with_data_store_factory(TestDbFactory::default())
+<a href=#4430 id=4430 data-nosnippet>4430</a>            .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
+<a href=#4431 id=4431 data-nosnippet>4431</a>            .build();
+<a href=#4432 id=4432 data-nosnippet>4432</a>
+<a href=#4433 id=4433 data-nosnippet>4433</a>        <span class="kw">let </span>seed = SecretVec::new(st.test_seed().unwrap().expose_secret().clone());
+<a href=#4434 id=4434 data-nosnippet>4434</a>        <span class="kw">let </span>birthday = st.test_account().unwrap().birthday().clone();
+<a href=#4435 id=4435 data-nosnippet>4435</a>
+<a href=#4436 id=4436 data-nosnippet>4436</a>        st.wallet_mut()
+<a href=#4437 id=4437 data-nosnippet>4437</a>            .create_account(<span class="string">""</span>, <span class="kw-2">&amp;</span>seed, <span class="kw-2">&amp;</span>birthday, <span class="prelude-val">None</span>)
+<a href=#4438 id=4438 data-nosnippet>4438</a>            .unwrap();
+<a href=#4439 id=4439 data-nosnippet>4439</a>
+<a href=#4440 id=4440 data-nosnippet>4440</a>        <span class="kw">for </span>acct_id <span class="kw">in </span>st.wallet().get_account_ids().unwrap() {
+<a href=#4441 id=4441 data-nosnippet>4441</a>            <span class="macro">assert_matches!</span>(st.wallet().get_account(acct_id), <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="kw">_</span>)))
+<a href=#4442 id=4442 data-nosnippet>4442</a>        }
+<a href=#4443 id=4443 data-nosnippet>4443</a>    }
+<a href=#4444 id=4444 data-nosnippet>4444</a>
+<a href=#4445 id=4445 data-nosnippet>4445</a>    <span class="attr">#[test]
+<a href=#4446 id=4446 data-nosnippet>4446</a>    </span><span class="kw">fn </span>block_fully_scanned() {
+<a href=#4447 id=4447 data-nosnippet>4447</a>        check_block_fully_scanned(TestDbFactory::default())
+<a href=#4448 id=4448 data-nosnippet>4448</a>    }
+<a href=#4449 id=4449 data-nosnippet>4449</a>
+<a href=#4450 id=4450 data-nosnippet>4450</a>    <span class="kw">fn </span>check_block_fully_scanned&lt;DsF: DataStoreFactory&gt;(dsf: DsF) {
+<a href=#4451 id=4451 data-nosnippet>4451</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = TestBuilder::new()
+<a href=#4452 id=4452 data-nosnippet>4452</a>            .with_data_store_factory(dsf)
+<a href=#4453 id=4453 data-nosnippet>4453</a>            .with_block_cache(BlockCache::new())
+<a href=#4454 id=4454 data-nosnippet>4454</a>            .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
+<a href=#4455 id=4455 data-nosnippet>4455</a>            .build();
+<a href=#4456 id=4456 data-nosnippet>4456</a>
+<a href=#4457 id=4457 data-nosnippet>4457</a>        <span class="kw">let </span>block_fully_scanned = |st: <span class="kw-2">&amp;</span>TestState&lt;<span class="kw">_</span>, DsF::DataStore, <span class="kw">_</span>&gt;| {
+<a href=#4458 id=4458 data-nosnippet>4458</a>            st.wallet()
+<a href=#4459 id=4459 data-nosnippet>4459</a>                .block_fully_scanned()
+<a href=#4460 id=4460 data-nosnippet>4460</a>                .unwrap()
+<a href=#4461 id=4461 data-nosnippet>4461</a>                .map(|meta| meta.block_height())
+<a href=#4462 id=4462 data-nosnippet>4462</a>        };
+<a href=#4463 id=4463 data-nosnippet>4463</a>
+<a href=#4464 id=4464 data-nosnippet>4464</a>        <span class="comment">// A fresh wallet should have no fully-scanned block.
+<a href=#4465 id=4465 data-nosnippet>4465</a>        </span><span class="macro">assert_eq!</span>(block_fully_scanned(<span class="kw-2">&amp;</span>st), <span class="prelude-val">None</span>);
+<a href=#4466 id=4466 data-nosnippet>4466</a>
+<a href=#4467 id=4467 data-nosnippet>4467</a>        <span class="comment">// Scan a block above the wallet's birthday height.
+<a href=#4468 id=4468 data-nosnippet>4468</a>        </span><span class="kw">let </span>not_our_key = ExtendedSpendingKey::master(<span class="kw-2">&amp;</span>[]).to_diversifiable_full_viewing_key();
+<a href=#4469 id=4469 data-nosnippet>4469</a>        <span class="kw">let </span>not_our_value = Zatoshis::const_from_u64(<span class="number">10000</span>);
+<a href=#4470 id=4470 data-nosnippet>4470</a>        <span class="kw">let </span>start_height = st.sapling_activation_height();
+<a href=#4471 id=4471 data-nosnippet>4471</a>        <span class="kw">let _ </span>= st.generate_block_at(
+<a href=#4472 id=4472 data-nosnippet>4472</a>            start_height,
+<a href=#4473 id=4473 data-nosnippet>4473</a>            BlockHash([<span class="number">0</span>; <span class="number">32</span>]),
+<a href=#4474 id=4474 data-nosnippet>4474</a>            <span class="kw-2">&amp;</span>[FakeCompactOutput::new(
+<a href=#4475 id=4475 data-nosnippet>4475</a>                <span class="kw-2">&amp;</span>not_our_key,
+<a href=#4476 id=4476 data-nosnippet>4476</a>                AddressType::DefaultExternal,
+<a href=#4477 id=4477 data-nosnippet>4477</a>                not_our_value,
+<a href=#4478 id=4478 data-nosnippet>4478</a>            )],
+<a href=#4479 id=4479 data-nosnippet>4479</a>            <span class="number">0</span>,
+<a href=#4480 id=4480 data-nosnippet>4480</a>            <span class="number">0</span>,
+<a href=#4481 id=4481 data-nosnippet>4481</a>            <span class="bool-val">false</span>,
+<a href=#4482 id=4482 data-nosnippet>4482</a>        );
+<a href=#4483 id=4483 data-nosnippet>4483</a>        <span class="kw">let </span>(mid_height, <span class="kw">_</span>, <span class="kw">_</span>) =
 <a href=#4484 id=4484 data-nosnippet>4484</a>            st.generate_next_block(<span class="kw-2">&amp;</span>not_our_key, AddressType::DefaultExternal, not_our_value);
-<a href=#4485 id=4485 data-nosnippet>4485</a>
-<a href=#4486 id=4486 data-nosnippet>4486</a>        <span class="comment">// Scan the last block first
-<a href=#4487 id=4487 data-nosnippet>4487</a>        </span>st.scan_cached_blocks(end_height, <span class="number">1</span>);
-<a href=#4488 id=4488 data-nosnippet>4488</a>
-<a href=#4489 id=4489 data-nosnippet>4489</a>        <span class="comment">// The wallet should still have no fully-scanned block, as no scanned block range
-<a href=#4490 id=4490 data-nosnippet>4490</a>        // overlaps the wallet's birthday.
-<a href=#4491 id=4491 data-nosnippet>4491</a>        </span><span class="macro">assert_eq!</span>(block_fully_scanned(<span class="kw-2">&amp;</span>st), <span class="prelude-val">None</span>);
-<a href=#4492 id=4492 data-nosnippet>4492</a>
-<a href=#4493 id=4493 data-nosnippet>4493</a>        <span class="comment">// Scan the block at the wallet's birthday height.
-<a href=#4494 id=4494 data-nosnippet>4494</a>        </span>st.scan_cached_blocks(start_height, <span class="number">1</span>);
-<a href=#4495 id=4495 data-nosnippet>4495</a>
-<a href=#4496 id=4496 data-nosnippet>4496</a>        <span class="comment">// The fully-scanned height should now be that of the scanned block.
-<a href=#4497 id=4497 data-nosnippet>4497</a>        </span><span class="macro">assert_eq!</span>(block_fully_scanned(<span class="kw-2">&amp;</span>st), <span class="prelude-val">Some</span>(start_height));
-<a href=#4498 id=4498 data-nosnippet>4498</a>
-<a href=#4499 id=4499 data-nosnippet>4499</a>        <span class="comment">// Scan the block in between the two previous blocks.
-<a href=#4500 id=4500 data-nosnippet>4500</a>        </span>st.scan_cached_blocks(mid_height, <span class="number">1</span>);
-<a href=#4501 id=4501 data-nosnippet>4501</a>
-<a href=#4502 id=4502 data-nosnippet>4502</a>        <span class="comment">// The fully-scanned height should now be the latest block, as the two disjoint
-<a href=#4503 id=4503 data-nosnippet>4503</a>        // ranges have been connected.
-<a href=#4504 id=4504 data-nosnippet>4504</a>        </span><span class="macro">assert_eq!</span>(block_fully_scanned(<span class="kw-2">&amp;</span>st), <span class="prelude-val">Some</span>(end_height));
-<a href=#4505 id=4505 data-nosnippet>4505</a>    }
-<a href=#4506 id=4506 data-nosnippet>4506</a>
-<a href=#4507 id=4507 data-nosnippet>4507</a>    <span class="attr">#[test]
-<a href=#4508 id=4508 data-nosnippet>4508</a>    </span><span class="kw">fn </span>test_account_birthday() {
-<a href=#4509 id=4509 data-nosnippet>4509</a>        <span class="kw">let </span>st = TestBuilder::new()
-<a href=#4510 id=4510 data-nosnippet>4510</a>            .with_data_store_factory(TestDbFactory::default())
-<a href=#4511 id=4511 data-nosnippet>4511</a>            .with_block_cache(BlockCache::new())
-<a href=#4512 id=4512 data-nosnippet>4512</a>            .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
-<a href=#4513 id=4513 data-nosnippet>4513</a>            .build();
-<a href=#4514 id=4514 data-nosnippet>4514</a>
-<a href=#4515 id=4515 data-nosnippet>4515</a>        <span class="kw">let </span>account_id = st.test_account().unwrap().id();
-<a href=#4516 id=4516 data-nosnippet>4516</a>        <span class="macro">assert_matches!</span>(
-<a href=#4517 id=4517 data-nosnippet>4517</a>            account_birthday(st.wallet().conn(), account_id),
-<a href=#4518 id=4518 data-nosnippet>4518</a>            <span class="prelude-val">Ok</span>(birthday) <span class="kw">if </span>birthday == st.sapling_activation_height()
-<a href=#4519 id=4519 data-nosnippet>4519</a>        )
-<a href=#4520 id=4520 data-nosnippet>4520</a>    }
-<a href=#4521 id=4521 data-nosnippet>4521</a>}</code></pre></div></section></main></body></html>
+<a href=#4485 id=4485 data-nosnippet>4485</a>        <span class="kw">let </span>(end_height, <span class="kw">_</span>, <span class="kw">_</span>) =
+<a href=#4486 id=4486 data-nosnippet>4486</a>            st.generate_next_block(<span class="kw-2">&amp;</span>not_our_key, AddressType::DefaultExternal, not_our_value);
+<a href=#4487 id=4487 data-nosnippet>4487</a>
+<a href=#4488 id=4488 data-nosnippet>4488</a>        <span class="comment">// Scan the last block first
+<a href=#4489 id=4489 data-nosnippet>4489</a>        </span>st.scan_cached_blocks(end_height, <span class="number">1</span>);
+<a href=#4490 id=4490 data-nosnippet>4490</a>
+<a href=#4491 id=4491 data-nosnippet>4491</a>        <span class="comment">// The wallet should still have no fully-scanned block, as no scanned block range
+<a href=#4492 id=4492 data-nosnippet>4492</a>        // overlaps the wallet's birthday.
+<a href=#4493 id=4493 data-nosnippet>4493</a>        </span><span class="macro">assert_eq!</span>(block_fully_scanned(<span class="kw-2">&amp;</span>st), <span class="prelude-val">None</span>);
+<a href=#4494 id=4494 data-nosnippet>4494</a>
+<a href=#4495 id=4495 data-nosnippet>4495</a>        <span class="comment">// Scan the block at the wallet's birthday height.
+<a href=#4496 id=4496 data-nosnippet>4496</a>        </span>st.scan_cached_blocks(start_height, <span class="number">1</span>);
+<a href=#4497 id=4497 data-nosnippet>4497</a>
+<a href=#4498 id=4498 data-nosnippet>4498</a>        <span class="comment">// The fully-scanned height should now be that of the scanned block.
+<a href=#4499 id=4499 data-nosnippet>4499</a>        </span><span class="macro">assert_eq!</span>(block_fully_scanned(<span class="kw-2">&amp;</span>st), <span class="prelude-val">Some</span>(start_height));
+<a href=#4500 id=4500 data-nosnippet>4500</a>
+<a href=#4501 id=4501 data-nosnippet>4501</a>        <span class="comment">// Scan the block in between the two previous blocks.
+<a href=#4502 id=4502 data-nosnippet>4502</a>        </span>st.scan_cached_blocks(mid_height, <span class="number">1</span>);
+<a href=#4503 id=4503 data-nosnippet>4503</a>
+<a href=#4504 id=4504 data-nosnippet>4504</a>        <span class="comment">// The fully-scanned height should now be the latest block, as the two disjoint
+<a href=#4505 id=4505 data-nosnippet>4505</a>        // ranges have been connected.
+<a href=#4506 id=4506 data-nosnippet>4506</a>        </span><span class="macro">assert_eq!</span>(block_fully_scanned(<span class="kw-2">&amp;</span>st), <span class="prelude-val">Some</span>(end_height));
+<a href=#4507 id=4507 data-nosnippet>4507</a>    }
+<a href=#4508 id=4508 data-nosnippet>4508</a>
+<a href=#4509 id=4509 data-nosnippet>4509</a>    <span class="attr">#[test]
+<a href=#4510 id=4510 data-nosnippet>4510</a>    </span><span class="kw">fn </span>test_account_birthday() {
+<a href=#4511 id=4511 data-nosnippet>4511</a>        <span class="kw">let </span>st = TestBuilder::new()
+<a href=#4512 id=4512 data-nosnippet>4512</a>            .with_data_store_factory(TestDbFactory::default())
+<a href=#4513 id=4513 data-nosnippet>4513</a>            .with_block_cache(BlockCache::new())
+<a href=#4514 id=4514 data-nosnippet>4514</a>            .with_account_from_sapling_activation(BlockHash([<span class="number">0</span>; <span class="number">32</span>]))
+<a href=#4515 id=4515 data-nosnippet>4515</a>            .build();
+<a href=#4516 id=4516 data-nosnippet>4516</a>
+<a href=#4517 id=4517 data-nosnippet>4517</a>        <span class="kw">let </span>account_id = st.test_account().unwrap().id();
+<a href=#4518 id=4518 data-nosnippet>4518</a>        <span class="macro">assert_matches!</span>(
+<a href=#4519 id=4519 data-nosnippet>4519</a>            account_birthday(st.wallet().conn(), account_id),
+<a href=#4520 id=4520 data-nosnippet>4520</a>            <span class="prelude-val">Ok</span>(birthday) <span class="kw">if </span>birthday == st.sapling_activation_height()
+<a href=#4521 id=4521 data-nosnippet>4521</a>        )
+<a href=#4522 id=4522 data-nosnippet>4522</a>    }
+<a href=#4523 id=4523 data-nosnippet>4523</a>}</code></pre></div></section></main></body></html>
