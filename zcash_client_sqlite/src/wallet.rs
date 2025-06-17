@@ -876,8 +876,7 @@ pub(crate) fn get_last_generated_address_matching<P: consensus::Parameters>(
             .and_then(|addr| match addr {
                 Address::Unified(ua) => Ok(ua),
                 _ => Err(SqliteClientError::CorruptedData(format!(
-                    "Addresses table contains {} which is not a unified address",
-                    addr_str,
+                    "Addresses table contains {addr_str} which is not a unified address",
                 ))),
             })
             .map(|addr| (addr, diversifier_index))
@@ -1960,8 +1959,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
             let value_raw = row.get::<_, i64>(1)?;
             let value = Zatoshis::from_nonnegative_i64(value_raw).map_err(|_| {
                 SqliteClientError::CorruptedData(format!(
-                    "Negative received note value: {}",
-                    value_raw
+                    "Negative received note value: {value_raw}"
                 ))
             })?;
 
@@ -1976,8 +1974,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 |raw| {
                     parse_priority_code(raw).ok_or_else(|| {
                         SqliteClientError::CorruptedData(format!(
-                            "Priority code {} not recognized.",
-                            raw
+                            "Priority code {raw} not recognized."
                         ))
                     })
                 },
@@ -4328,9 +4325,8 @@ pub mod testing {
         };
 
         let mut stmt = conn.prepare_cached(&format!(
-            "SELECT checkpoint_id, position FROM {}_tree_checkpoints
-             ORDER BY checkpoint_id",
-            table_prefix
+            "SELECT checkpoint_id, position FROM {table_prefix}_tree_checkpoints
+             ORDER BY checkpoint_id"
         ))?;
 
         let results = stmt

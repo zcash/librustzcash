@@ -79,8 +79,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             let address: String = row.get(2)?;
             let decoded = Address::decode(&self.params, &address).ok_or_else(|| {
                 WalletMigrationError::CorruptedData(format!(
-                    "Could not decode {} as a valid Zcash address.",
-                    address
+                    "Could not decode {address} as a valid Zcash address."
                 ))
             })?;
             let decoded_address = if let Address::Unified(ua) = decoded {
@@ -108,8 +107,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 let decoded_transparent = Address::decode(&self.params, &transparent_address)
                     .ok_or_else(|| {
                         WalletMigrationError::CorruptedData(format!(
-                            "Could not decode {} as a valid Zcash address.",
-                            address
+                            "Could not decode {address} as a valid Zcash address."
                         ))
                     })?;
                 let decoded_transparent_address = if let Address::Transparent(addr) =
@@ -135,8 +133,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         .and_then(|k| k.derive_external_ivk().ok().map(|k| k.default_address().0));
                     if Some(decoded_transparent_address) != expected_address {
                         return Err(WalletMigrationError::CorruptedData(format!(
-                            "Decoded transparent address {} is not the default transparent address.",
-                            transparent_address,
+                            "Decoded transparent address {transparent_address} is not the default transparent address.",
                         )));
                     }
                 }
