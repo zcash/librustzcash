@@ -184,7 +184,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             })?;
 
             // We previously set the default to external scope, so we now verify whether the output
-            // is decryptable using the intenally-scoped IVK and, if so, mark it as such.
+            // is decryptable using the internally-scoped IVK and, if so, mark it as such.
             if let Some(tx_data) = tx_data_opt {
                 let tx = Transaction::read(&tx_data[..], BranchId::Canopy).map_err(|e| {
                     WalletMigrationError::CorruptedData(format!(
