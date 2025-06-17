@@ -7,6 +7,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.16.3, 0.17.1] - 2025-06-17
+
+### Fixed
+- `TransactionDataRequest`s will no longer be generated for coinbase inputs
+  (which are represented as having the all-zeros txid).
+
 ## [0.17.0] - 2025-05-30
 
 ### Added
@@ -20,12 +26,6 @@ and this library adheres to Rust's notion of
 - `zcash_client_sqlite::wallet::init::WalletMigrationError::`
   - Variants `WalletMigrationError::CommitmentTree` and 
     `WalletMigrationError::Other` now `Box` their contents.
-
-## [0.16.3] - 2025-06-12
-
-### Fixed
-- `TransactionDataRequest`s will no longer be generated for coinbase inputs
-  (which are represented as having the all-zeros txid).
 
 ## [0.16.2] - 2025-04-02
 
