@@ -117,13 +117,16 @@ use zcash_protocol::{
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 
-use self::scanning::{parse_priority_code, priority_code, replace_queue_entries};
+use self::{
+    common::{table_constants, TableConstants},
+    scanning::{parse_priority_code, priority_code, replace_queue_entries},
+};
 use crate::{
     error::SqliteClientError,
     util::Clock,
     wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
     AccountRef, AccountUuid, AddressRef, SqlTransaction, TransferType, TxRef,
-    WalletCommitmentTrees, WalletDb, PRUNING_DEPTH, SAPLING_TABLES_PREFIX, VERIFY_LOOKAHEAD,
+    WalletCommitmentTrees, WalletDb, PRUNING_DEPTH, VERIFY_LOOKAHEAD,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -138,7 +141,7 @@ use {
 };
 
 #[cfg(feature = "orchard")]
-use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT};
+use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 pub mod commitment_tree;
 pub(crate) mod common;
@@ -512,7 +515,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         let shard_store =
             SqliteShardStore::<_, ::sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
                 conn,
-                SAPLING_TABLES_PREFIX,
+                crate::SAPLING_TABLES_PREFIX,
             )?;
         let mut shard_tree: ShardTree<
             _,
@@ -540,7 +543,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             _,
             ::orchard::tree::MerkleHashOrchard,
             ORCHARD_SHARD_HEIGHT,
-        >::from_connection(conn, ORCHARD_TABLES_PREFIX)?;
+        >::from_connection(conn, crate::ORCHARD_TABLES_PREFIX)?;
         let mut shard_tree: ShardTree<
             _,
             { ::orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
@@ -1314,26 +1317,6 @@ pub(crate) trait ProgressEstimator {
 #[derive(Debug)]
 pub(crate) struct SubtreeProgressEstimator;
 
-fn table_constants(
-    shielded_protocol: ShieldedProtocol,
-) -> Result<(&'static str, &'static str, u8), SqliteClientError> {
-    match shielded_protocol {
-        ShieldedProtocol::Sapling => Ok((
-            SAPLING_TABLES_PREFIX,
-            "sapling_output_count",
-            SAPLING_SHARD_HEIGHT,
-        )),
-        #[cfg(feature = "orchard")]
-        ShieldedProtocol::Orchard => Ok((
-            ORCHARD_TABLES_PREFIX,
-            "orchard_action_count",
-            ORCHARD_SHARD_HEIGHT,
-        )),
-        #[cfg(not(feature = "orchard"))]
-        ShieldedProtocol::Orchard => Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD)),
-    }
-}
-
 fn estimate_tree_size<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -1341,7 +1324,11 @@ fn estimate_tree_size<P: consensus::Parameters>(
     pool_activation_height: BlockHeight,
     chain_tip_height: BlockHeight,
 ) -> Result<Option<u64>, SqliteClientError> {
-    let (table_prefix, _, shard_height) = table_constants(shielded_protocol)?;
+    let TableConstants {
+        table_prefix,
+        shard_height,
+        ..
+    } = table_constants::<SqliteClientError>(shielded_protocol)?;
 
     // Estimate the size of the tree by linear extrapolation from available
     // data closest to the chain tip.
@@ -1515,7 +1502,12 @@ fn subtree_scan_progress<P: consensus::Parameters>(
     fully_scanned_height: Option<BlockHeight>,
     chain_tip_height: BlockHeight,
 ) -> Result<Option<Progress>, SqliteClientError> {
-    let (table_prefix, output_count_col, shard_height) = table_constants(shielded_protocol)?;
+    let TableConstants {
+        table_prefix,
+        output_count_col,
+        shard_height,
+        ..
+    } = table_constants::<SqliteClientError>(shielded_protocol)?;
 
     let mut stmt_scanned_count_until = conn.prepare_cached(&format!(
         "SELECT SUM({output_count_col})
@@ -1893,16 +1885,18 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         })
         .collect::<Result<HashMap<AccountUuid, AccountBalance>, _>>()?;
 
-    fn count_notes<F>(
+    fn with_pool_balances<F>(
         tx: &rusqlite::Transaction,
         summary_height: BlockHeight,
         account_balances: &mut HashMap<AccountUuid, AccountBalance>,
-        table_prefix: &'static str,
+        protocol: ShieldedProtocol,
         with_pool_balance: F,
     ) -> Result<(), SqliteClientError>
     where
         F: Fn(&mut AccountBalance, Zatoshis, Zatoshis, Zatoshis) -> Result<(), SqliteClientError>,
     {
+        let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
+
         // If the shard containing the summary height contains any unscanned ranges that start below or
         // including that height, none of our shielded balance is currently spendable.
         #[tracing::instrument(skip_all)]
@@ -2018,11 +2012,11 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     #[cfg(feature = "orchard")]
     {
         let orchard_trace = tracing::info_span!("orchard_balances").entered();
-        count_notes(
+        with_pool_balances(
             tx,
             summary_height,
             &mut account_balances,
-            ORCHARD_TABLES_PREFIX,
+            ShieldedProtocol::Orchard,
             |balances, spendable_value, change_pending_confirmation, value_pending_spendability| {
                 balances.with_orchard_balance_mut::<_, SqliteClientError>(|bal| {
                     bal.add_spendable_value(spendable_value)?;
@@ -2036,11 +2030,11 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     }
 
     let sapling_trace = tracing::info_span!("sapling_balances").entered();
-    count_notes(
+    with_pool_balances(
         tx,
         summary_height,
         &mut account_balances,
-        SAPLING_TABLES_PREFIX,
+        ShieldedProtocol::Sapling,
         |balances, spendable_value, change_pending_confirmation, value_pending_spendability| {
             balances.with_sapling_balance_mut::<_, SqliteClientError>(|bal| {
                 bal.add_spendable_value(spendable_value)?;
@@ -2067,7 +2061,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         let shard_store =
             SqliteShardStore::<_, ::sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
                 tx,
-                SAPLING_TABLES_PREFIX,
+                crate::SAPLING_TABLES_PREFIX,
             )?;
 
         // The last shard will be incomplete, and we want the next range to overlap with
@@ -2088,7 +2082,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
             _,
             ::orchard::tree::MerkleHashOrchard,
             ORCHARD_SHARD_HEIGHT,
-        >::from_connection(tx, ORCHARD_TABLES_PREFIX)?;
+        >::from_connection(tx, crate::ORCHARD_TABLES_PREFIX)?;
 
         // The last shard will be incomplete, and we want the next range to overlap with
         // the last complete shard, so return the index of the second-to-last shard root.
@@ -2120,40 +2114,34 @@ pub(crate) fn get_received_memo(
     conn: &rusqlite::Connection,
     note_id: NoteId,
 ) -> Result<Option<Memo>, SqliteClientError> {
-    let fetch_memo = |table_prefix: &'static str, output_col: &'static str| {
-        conn.query_row(
+    let TableConstants {
+        table_prefix,
+        output_index_col,
+        ..
+    } = table_constants::<SqliteClientError>(note_id.protocol())?;
+
+    let memo_bytes = conn
+        .query_row(
             &format!(
                 "SELECT memo FROM {table_prefix}_received_notes
                 JOIN transactions ON {table_prefix}_received_notes.tx = transactions.id_tx
                 WHERE transactions.txid = :txid
-                AND {table_prefix}_received_notes.{output_col} = :output_index"
+                AND {table_prefix}_received_notes.{output_index_col} = :output_index"
             ),
             named_params![
                 ":txid": note_id.txid().as_ref(),
                 ":output_index": note_id.output_index()
             ],
-            |row| row.get(0),
+            |row| row.get::<_, Option<Vec<u8>>>(0),
         )
-        .optional()
-    };
+        .optional()?
+        .flatten();
 
-    let memo_bytes: Option<Vec<_>> = match note_id.protocol() {
-        ShieldedProtocol::Sapling => fetch_memo(SAPLING_TABLES_PREFIX, "output_index")?.flatten(),
-        #[cfg(feature = "orchard")]
-        ShieldedProtocol::Orchard => fetch_memo(ORCHARD_TABLES_PREFIX, "action_index")?.flatten(),
-        #[cfg(not(feature = "orchard"))]
-        ShieldedProtocol::Orchard => {
-            return Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD))
-        }
-    };
+    let memo = memo_bytes
+        .map(|b| MemoBytes::from_bytes(&b).and_then(Memo::try_from))
+        .transpose()?;
 
-    memo_bytes
-        .map(|b| {
-            MemoBytes::from_bytes(&b)
-                .and_then(Memo::try_from)
-                .map_err(SqliteClientError::from)
-        })
-        .transpose()
+    Ok(memo)
 }
 
 /// Looks up a transaction by its [`TxId`].
@@ -2401,12 +2389,12 @@ pub(crate) fn chain_tip_height(
 pub(crate) fn get_target_and_anchor_heights(
     conn: &rusqlite::Connection,
     min_confirmations: NonZeroU32,
-) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
+) -> Result<Option<(BlockHeight, BlockHeight)>, SqliteClientError> {
     match chain_tip_height(conn)? {
         Some(chain_tip_height) => {
             let sapling_anchor_height = get_max_checkpointed_height(
                 conn,
-                SAPLING_TABLES_PREFIX,
+                ShieldedProtocol::Sapling,
                 chain_tip_height,
                 min_confirmations,
             )?;
@@ -2414,7 +2402,7 @@ pub(crate) fn get_target_and_anchor_heights(
             #[cfg(feature = "orchard")]
             let orchard_anchor_height = get_max_checkpointed_height(
                 conn,
-                ORCHARD_TABLES_PREFIX,
+                ShieldedProtocol::Orchard,
                 chain_tip_height,
                 min_confirmations,
             )?;
@@ -3922,7 +3910,8 @@ fn flag_previously_received_change(
     conn: &rusqlite::Transaction,
     tx_ref: TxRef,
 ) -> Result<(), SqliteClientError> {
-    let flag_received_change = |table_prefix| {
+    let flag_received_change = |protocol| {
+        let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
         conn.execute(
             &format!(
                 "UPDATE {table_prefix}_received_notes
@@ -3938,11 +3927,12 @@ fn flag_previously_received_change(
                 ":internal_scope": KeyScope::INTERNAL.encode()
             },
         )
+        .map_err(SqliteClientError::from)
     };
 
-    flag_received_change(SAPLING_TABLES_PREFIX)?;
+    flag_received_change(ShieldedProtocol::Sapling)?;
     #[cfg(feature = "orchard")]
-    flag_received_change(ORCHARD_TABLES_PREFIX)?;
+    flag_received_change(ShieldedProtocol::Orchard)?;
 
     Ok(())
 }
@@ -4265,10 +4255,8 @@ pub mod testing {
         ShieldedProtocol,
     };
 
-    use crate::{error::SqliteClientError, AccountUuid, SAPLING_TABLES_PREFIX};
-
-    #[cfg(feature = "orchard")]
-    use crate::ORCHARD_TABLES_PREFIX;
+    use super::common::{table_constants, TableConstants};
+    use crate::{error::SqliteClientError, AccountUuid};
 
     pub(crate) fn get_tx_history(
         conn: &rusqlite::Connection,
@@ -4313,24 +4301,13 @@ pub mod testing {
     #[allow(dead_code)] // used only for tests that are flagged off by default
     pub(crate) fn get_checkpoint_history(
         conn: &rusqlite::Connection,
-        protocol: &ShieldedProtocol,
+        protocol: ShieldedProtocol,
     ) -> Result<Vec<(BlockHeight, Option<Position>)>, SqliteClientError> {
-        let table_prefix = match protocol {
-            ShieldedProtocol::Sapling => SAPLING_TABLES_PREFIX,
-            #[cfg(feature = "orchard")]
-            ShieldedProtocol::Orchard => ORCHARD_TABLES_PREFIX,
-            #[cfg(not(feature = "orchard"))]
-            ShieldedProtocol::Orchard => {
-                return Err(SqliteClientError::UnsupportedPoolType(
-                    zcash_protocol::PoolType::ORCHARD,
-                ));
-            }
-        };
+        let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
 
         let mut stmt = conn.prepare_cached(&format!(
-            "SELECT checkpoint_id, position FROM {}_tree_checkpoints
+            "SELECT checkpoint_id, position FROM {table_prefix}_tree_checkpoints
              ORDER BY checkpoint_id",
-            table_prefix
         ))?;
 
         let results = stmt

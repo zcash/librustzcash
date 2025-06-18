@@ -13,7 +13,10 @@ use zcash_keys::keys::AddressGenerationError;
 use zcash_protocol::{consensus::BlockHeight, value::BalanceError, PoolType, TxId};
 use zip32::DiversifierIndex;
 
-use crate::{wallet::commitment_tree, AccountUuid};
+use crate::{
+    wallet::{commitment_tree, common::ErrUnsupportedPool},
+    AccountUuid,
+};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -292,5 +295,11 @@ impl From<AddressGenerationError> for SqliteClientError {
 impl From<SchedulingError> for SqliteClientError {
     fn from(value: SchedulingError) -> Self {
         SqliteClientError::Scheduling(value)
+    }
+}
+
+impl ErrUnsupportedPool for SqliteClientError {
+    fn unsupported_pool_type(pool_type: PoolType) -> Self {
+        SqliteClientError::UnsupportedPoolType(pool_type)
     }
 }

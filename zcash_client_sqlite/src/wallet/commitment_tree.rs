@@ -28,6 +28,8 @@ use crate::{error::SqliteClientError, sapling_tree};
 #[cfg(feature = "orchard")]
 use crate::orchard_tree;
 
+use super::common::{table_constants, TableConstants};
+
 /// Errors that can appear in SQLite-back [`ShardStore`] implementation operations.
 #[derive(Debug)]
 pub enum Error {
@@ -791,10 +793,11 @@ pub(crate) fn get_checkpoint(
 
 pub(crate) fn get_max_checkpointed_height(
     conn: &rusqlite::Connection,
-    table_prefix: &'static str,
+    protocol: ShieldedProtocol,
     chain_tip_height: BlockHeight,
     min_confirmations: NonZeroU32,
-) -> Result<Option<BlockHeight>, rusqlite::Error> {
+) -> Result<Option<BlockHeight>, SqliteClientError> {
+    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
     let max_checkpoint_height =
         u32::from(chain_tip_height).saturating_sub(u32::from(min_confirmations) - 1);
 
@@ -803,16 +806,16 @@ pub(crate) fn get_max_checkpointed_height(
     conn.query_row(
         &format!(
             "SELECT checkpoint_id
-             FROM {}_tree_checkpoints
+             FROM {table_prefix}_tree_checkpoints
              WHERE checkpoint_id <= :max_checkpoint_height
              ORDER BY checkpoint_id DESC
              LIMIT 1",
-            table_prefix
         ),
         named_params![":max_checkpoint_height": max_checkpoint_height],
         |row| row.get::<_, u32>(0).map(BlockHeight::from),
     )
     .optional()
+    .map_err(SqliteClientError::from)
 }
 
 pub(crate) fn get_checkpoint_at_depth(
@@ -824,11 +827,10 @@ pub(crate) fn get_checkpoint_at_depth(
         .query_row(
             &format!(
                 "SELECT checkpoint_id, position
-                FROM {}_tree_checkpoints
+                FROM {table_prefix}_tree_checkpoints
                 ORDER BY checkpoint_id DESC
                 LIMIT 1
                 OFFSET :offset",
-                table_prefix
             ),
             named_params![":offset": checkpoint_depth],
             |row| {

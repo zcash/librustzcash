@@ -85,7 +85,7 @@ use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 use wallet::{
     commitment_tree::{self, put_shard_roots},
-    common::spendable_notes_meta,
+    common::{spendable_notes_meta, TableConstants},
     scanning::replace_queue_entries,
     upsert_address, SubtreeProgressEstimator,
 };
@@ -1059,7 +1059,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         Vec<(BlockHeight, Option<incrementalmerkletree::Position>)>,
         <Self as WalletRead>::Error,
     > {
-        wallet::testing::get_checkpoint_history(self.conn.borrow(), protocol)
+        wallet::testing::get_checkpoint_history(self.conn.borrow(), *protocol)
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -1079,9 +1079,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         &self,
         protocol: ShieldedProtocol,
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error> {
-        let (table_prefix, index_col, _) = wallet::common::per_protocol_names(protocol);
+        let TableConstants {
+            table_prefix,
+            output_index_col,
+            ..
+        } = wallet::common::table_constants::<<Self as InputSource>::Error>(protocol)?;
         let mut stmt_received_notes = self.conn.borrow().prepare(&format!(
-            "SELECT txid, {index_col}
+            "SELECT txid, {output_index_col}
              FROM {table_prefix}_received_notes rn
              INNER JOIN transactions ON transactions.id_tx = rn.tx
              WHERE transactions.block IS NOT NULL
