@@ -83,8 +83,7 @@ fn select_note_scope<S: ShardStore<H = sapling::Node, CheckpointId = BlockHeight
         .get_marked_leaf(note_commitment_tree_position)
         .map_err(|e| {
             WalletMigrationError::CorruptedData(format!(
-                "Error querying note commitment tree: {:?}",
-                e
+                "Error querying note commitment tree: {e:?}"
             ))
         })?
     {
@@ -174,7 +173,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
             let ufvk_str: String = row.get(5)?;
             let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str).map_err(|e| {
-                WalletMigrationError::CorruptedData(format!("Stored UFVK was invalid: {:?}", e))
+                WalletMigrationError::CorruptedData(format!("Stored UFVK was invalid: {e:?}"))
             })?;
 
             let dfvk = ufvk.sapling().ok_or_else(|| {
@@ -188,15 +187,14 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             if let Some(tx_data) = tx_data_opt {
                 let tx = Transaction::read(&tx_data[..], BranchId::Canopy).map_err(|e| {
                     WalletMigrationError::CorruptedData(format!(
-                        "Unable to parse raw transaction: {:?}",
-                        e
+                        "Unable to parse raw transaction: {e:?}"
                     ))
                 })?;
                 let output = tx
                     .sapling_bundle()
                     .and_then(|b| b.shielded_outputs().get(output_index))
                     .unwrap_or_else(|| {
-                        panic!("A Sapling output must exist at index {}", output_index)
+                        panic!("A Sapling output must exist at index {output_index}")
                     });
 
                 let pivk = PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal));
@@ -227,13 +225,12 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     let rcm_bytes: [u8; 32] =
                         row.get::<_, Vec<u8>>(8)?[..].try_into().map_err(|_| {
                             WalletMigrationError::CorruptedData(format!(
-                                "Note {} is invalid",
-                                note_id
+                                "Note {note_id} is invalid"
                             ))
                         })?;
 
                     let rcm = Option::from(jubjub::Fr::from_repr(rcm_bytes)).ok_or_else(|| {
-                        WalletMigrationError::CorruptedData(format!("Note {} is invalid", note_id))
+                        WalletMigrationError::CorruptedData(format!("Note {note_id} is invalid"))
                     })?;
 
                     // The wallet database always stores the `rcm` value, and not `rseed`,

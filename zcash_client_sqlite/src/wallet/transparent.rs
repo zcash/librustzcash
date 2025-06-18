@@ -125,8 +125,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
         let address_index: u32 = row.get(1)?;
         let address_index = NonHardenedChildIndex::from_index(address_index).ok_or(
             SqliteClientError::CorruptedData(format!(
-                "{} is not a valid transparent child index",
-                address_index
+                "{address_index} is not a valid transparent child index"
             )),
         )?;
         let scope = KeyScope::decode(row.get(2)?)?;
@@ -673,7 +672,7 @@ fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, S
     let script_pubkey = Script(row.get("script")?);
     let raw_value: i64 = row.get("value_zat")?;
     let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
-        SqliteClientError::CorruptedData(format!("Invalid UTXO value: {}", raw_value))
+        SqliteClientError::CorruptedData(format!("Invalid UTXO value: {raw_value}"))
     })?;
     let height: Option<u32> = row.get("received_height")?;
 
@@ -923,7 +922,7 @@ pub(crate) fn add_transparent_account_balances(
         let account = AccountUuid(row.get(0)?);
         let raw_value = row.get(1)?;
         let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
-            SqliteClientError::CorruptedData(format!("Negative UTXO value {:?}", raw_value))
+            SqliteClientError::CorruptedData(format!("Negative UTXO value {raw_value:?}"))
         })?;
 
         account_balances
@@ -966,7 +965,7 @@ pub(crate) fn add_transparent_account_balances(
         let account = AccountUuid(row.get(0)?);
         let raw_value = row.get(1)?;
         let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
-            SqliteClientError::CorruptedData(format!("Negative UTXO value {:?}", raw_value))
+            SqliteClientError::CorruptedData(format!("Negative UTXO value {raw_value:?}"))
         })?;
 
         account_balances
@@ -1063,10 +1062,10 @@ impl std::fmt::Display for SchedulingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
             SchedulingError::Distribution(e) => {
-                write!(f, "Failure in sampling scheduling time: {}", e)
+                write!(f, "Failure in sampling scheduling time: {e}")
             }
-            SchedulingError::Time(t) => write!(f, "Invalid system time: {}", t),
-            SchedulingError::OutOfRange(t) => write!(f, "Not a valid timestamp or duration: {}", t),
+            SchedulingError::Time(t) => write!(f, "Invalid system time: {t}"),
+            SchedulingError::OutOfRange(t) => write!(f, "Not a valid timestamp or duration: {t}"),
         }
     }
 }
