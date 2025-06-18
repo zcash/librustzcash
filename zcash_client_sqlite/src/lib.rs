@@ -243,7 +243,7 @@ pub struct ReceivedNoteId(pub(crate) ShieldedProtocol, pub(crate) i64);
 impl fmt::Display for ReceivedNoteId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ReceivedNoteId(protocol, id) => write!(f, "Received {:?} Note: {}", protocol, id),
+            ReceivedNoteId(protocol, id) => write!(f, "Received {protocol:?} Note: {id}"),
         }
     }
 }
@@ -830,7 +830,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         min_confirmations: NonZeroU32,
     ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
         wallet::get_target_and_anchor_heights(self.conn.borrow(), min_confirmations)
-            .map_err(SqliteClientError::from)
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
@@ -2269,13 +2268,13 @@ impl std::fmt::Display for FsBlockDbError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             FsBlockDbError::Fs(io_error) => {
-                write!(f, "Failed to access the file system: {}", io_error)
+                write!(f, "Failed to access the file system: {io_error}")
             }
             FsBlockDbError::Db(e) => {
-                write!(f, "There was a problem with the sqlite db: {}", e)
+                write!(f, "There was a problem with the sqlite db: {e}")
             }
             FsBlockDbError::Protobuf(e) => {
-                write!(f, "Failed to parse protobuf-encoded record: {}", e)
+                write!(f, "Failed to parse protobuf-encoded record: {e}")
             }
             FsBlockDbError::MissingBlockPath(block_path) => {
                 write!(
@@ -2301,15 +2300,13 @@ impl std::fmt::Display for FsBlockDbError {
             FsBlockDbError::CorruptedData(e) => {
                 write!(
                     f,
-                    "The block cache has corrupted data and this caused an error: {}",
-                    e,
+                    "The block cache has corrupted data and this caused an error: {e}",
                 )
             }
             FsBlockDbError::CacheMiss(height) => {
                 write!(
                     f,
-                    "Requested height {} does not exist in the block cache",
-                    height
+                    "Requested height {height} does not exist in the block cache"
                 )
             }
         }

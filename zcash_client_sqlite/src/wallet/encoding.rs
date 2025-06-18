@@ -118,8 +118,7 @@ impl KeyScope {
             1i64 => Ok(KeyScope::INTERNAL),
             2i64 => Ok(KeyScope::Ephemeral),
             other => Err(SqliteClientError::CorruptedData(format!(
-                "Invalid key scope code: {}",
-                other
+                "Invalid key scope code: {other}"
             ))),
         }
     }

@@ -69,8 +69,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             let ufvk_str: String = row.get(3)?;
             let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str).map_err(|e| {
                 WalletMigrationError::CorruptedData(format!(
-                    "Could not decode unified full viewing key for account {}: {:?}",
-                    account, e
+                    "Could not decode unified full viewing key for account {account}: {e:?}"
                 ))
             })?;
 
@@ -97,14 +96,12 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     }
                     SqliteClientError::DbError(err) => WalletMigrationError::DbError(err),
                     other => WalletMigrationError::CorruptedData(format!(
-                        "An error was encountered decoding transaction data: {:?}",
-                        other
+                        "An error was encountered decoding transaction data: {other:?}"
                     )),
                 })?
                 .ok_or_else(|| {
                     WalletMigrationError::CorruptedData(format!(
-                        "Transaction not found for id {:?}",
-                        txid
+                        "Transaction not found for id {txid:?}"
                     ))
                 })?;
 
