@@ -55,7 +55,9 @@ document-features = { workspace = true, optional = true }
 
 [dev-dependencies]
 incrementalmerkletree.workspace = true
+ripemd.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
+sha2.workspace = true
 shardtree.workspace = true
 zcash_primitives = { workspace = true, features = [
     "test-dependencies",

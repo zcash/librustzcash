@@ -1,9 +1,10 @@
-use rand_core::OsRng;
 use std::sync::OnceLock;
 
 use ::transparent::{
+    address::TransparentAddress,
     bundle as transparent,
     keys::{AccountPrivKey, IncomingViewingKey},
+    sighash::SighashType,
 };
 use orchard::tree::MerkleHashOrchard;
 use pczt::{
@@ -14,17 +15,27 @@ use pczt::{
     },
     Pczt,
 };
+use rand_core::OsRng;
+use sha2::Digest as _;
 use shardtree::{store::memory::MemoryShardStore, ShardTree};
 use zcash_note_encryption::try_note_decryption;
 use zcash_primitives::transaction::{
     builder::{BuildConfig, Builder, PcztResult},
     fees::zip317,
+    sighash::SignableInput,
+    sighash_v5::v5_signature_hash,
+    txid::TxIdDigester,
 };
 use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::{
     consensus::MainNetwork,
     memo::{Memo, MemoBytes},
     value::Zatoshis,
+};
+use zcash_script::{
+    pattern::check_multisig,
+    script::{self, Parsable},
+    ZcashScript,
 };
 
 static ORCHARD_PROVING_KEY: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
@@ -133,6 +144,175 @@ fn transparent_to_orchard() {
     assert_eq!(u32::from(tx.expiry_height()), 10_000_040);
 
     // TODO: Validate the transaction.
+}
+
+#[test]
+fn transparent_p2sh_multisig_to_orchard() {
+    let params = MainNetwork;
+    let rng = OsRng;
+    let secp = secp256k1::Secp256k1::signing_only();
+
+    // Create 3 transparent accounts to control a 2-of-3 P2SH address.
+    let transparent_sk = |i| {
+        let transparent_account_sk =
+            AccountPrivKey::from_seed(&params, &[i; 32], zip32::AccountId::ZERO).unwrap();
+        let (_, address_index) = transparent_account_sk
+            .to_account_pubkey()
+            .derive_external_ivk()
+            .unwrap()
+            .default_address();
+        transparent_account_sk
+            .derive_external_secret_key(address_index)
+            .unwrap()
+    };
+    let transparent_sks = [transparent_sk(1), transparent_sk(2), transparent_sk(3)];
+    let transparent_pubkeys = transparent_sks.map(|sk| sk.public_key(&secp).serialize());
+
+    let pks = [
+        transparent_pubkeys[0].as_slice(),
+        transparent_pubkeys[1].as_slice(),
+        transparent_pubkeys[2].as_slice(),
+    ];
+    let redeem_script = script::PubKey(check_multisig(2, &pks, false));
+    let p2sh_addr = TransparentAddress::ScriptHash(
+        *ripemd::Ripemd160::digest(sha2::Sha256::digest(&redeem_script.to_bytes())).as_ref(),
+    );
+
+    // Create an Orchard account to receive funds.
+    let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
+    let orchard_fvk = orchard::keys::FullViewingKey::from(&orchard_sk);
+    let orchard_ovk = orchard_fvk.to_ovk(orchard::keys::Scope::External);
+    let recipient = orchard_fvk.address_at(0u32, orchard::keys::Scope::External);
+
+    // Pretend we already have a transparent coin.
+    let utxo = transparent::OutPoint::fake();
+    let coin = transparent::TxOut {
+        value: Zatoshis::const_from_u64(1_000_000),
+        script_pubkey: p2sh_addr.script(),
+    };
+
+    // Create the transaction's I/O.
+    let mut builder = Builder::new(
+        params,
+        10_000_000.into(),
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: Some(orchard::Anchor::empty_tree()),
+        },
+    );
+    // TODO: Blocked on https://github.com/zcash/librustzcash/issues/1360
+    builder
+        .add_transparent_p2sh_input(redeem_script, utxo, coin.clone())
+        .unwrap();
+    builder
+        .add_orchard_output::<zip317::FeeRule>(
+            Some(orchard_ovk),
+            recipient,
+            100_000,
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    builder
+        .add_orchard_output::<zip317::FeeRule>(
+            Some(orchard_fvk.to_ovk(zip32::Scope::Internal)),
+            orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal),
+            880_000,
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    let PcztResult { pczt_parts, .. } = builder
+        .build_for_pczt(rng, &zip317::FeeRule::standard())
+        .unwrap();
+
+    // Create the base PCZT.
+    let pczt = Creator::build_from_parts(pczt_parts).unwrap();
+    check_round_trip(&pczt);
+
+    // Finalize the I/O.
+    let pczt = IoFinalizer::new(pczt).finalize_io().unwrap();
+    check_round_trip(&pczt);
+
+    // Create proofs.
+    let pczt = Prover::new(pczt)
+        .create_orchard_proof(orchard_proving_key())
+        .unwrap()
+        .finish();
+    check_round_trip(&pczt);
+
+    // If we only sign with one of the signers, we can't finalize spends.
+    {
+        let mut signer = Signer::new(pczt.clone()).unwrap();
+        signer.sign_transparent(0, &transparent_sks[0]).unwrap();
+        assert!(matches!(
+            SpendFinalizer::new(signer.finish()).finalize_spends(),
+            Err(pczt::roles::spend_finalizer::Error::TransparentFinalize(
+                ::transparent::pczt::SpendFinalizerError::MissingSignature
+            ))
+        ));
+    }
+
+    // Sign the input with all three signers.
+    let mut signer = Signer::new(pczt).unwrap();
+    for sk in &transparent_sks {
+        signer.sign_transparent(0, sk).unwrap();
+    }
+    let pczt = signer.finish();
+    check_round_trip(&pczt);
+
+    // Finalize spends. This will pick 2 of the signatures to use in the P2SH scriptSig.
+    // TODO: Blocked on https://github.com/zcash/librustzcash/issues/1834
+    let pczt = SpendFinalizer::new(pczt).finalize_spends().unwrap();
+    check_round_trip(&pczt);
+
+    // Grab the transaction's effects here, as it's easier.
+    let tx_effects = pczt.clone().into_effects().unwrap();
+
+    // We should now be able to extract the fully authorized transaction.
+    let tx = TransactionExtractor::new(pczt).extract().unwrap();
+    let tx_digests = tx.digest(TxIdDigester);
+
+    assert_eq!(u32::from(tx.expiry_height()), 10_000_040);
+
+    // Validate the transaction.
+    let bundle = tx.transparent_bundle().unwrap();
+    assert_eq!(bundle.vin.len(), 1);
+    let txin = bundle.vin.first().unwrap();
+    assert_eq!(
+        zcash_script::RustInterpreter::verify_callback(
+            &|script_code, hash_type| script::PubKey::from_bytes(script_code).ok().map(
+                |(script_code, _)| v5_signature_hash(
+                    &tx_effects,
+                    &SignableInput::Transparent(::transparent::sighash::SignableInput::from_parts(
+                        match (hash_type.signed_outputs, hash_type.anyone_can_pay) {
+                            (zcash_script::SignedOutputs::All, false) => SighashType::ALL,
+                            (zcash_script::SignedOutputs::All, true) =>
+                                SighashType::ALL_ANYONECANPAY,
+                            (zcash_script::SignedOutputs::Single, false) => SighashType::SINGLE,
+                            (zcash_script::SignedOutputs::Single, true) =>
+                                SighashType::SINGLE_ANYONECANPAY,
+                            (zcash_script::SignedOutputs::None, false) => SighashType::NONE,
+                            (zcash_script::SignedOutputs::None, true) =>
+                                SighashType::NONE_ANYONECANPAY,
+                        },
+                        0,
+                        &script_code,
+                        &coin.script_pubkey,
+                        coin.value,
+                    )),
+                    &tx_digests,
+                )
+                .as_ref()
+                .try_into()
+                .unwrap()
+            ),
+            tx.lock_time().into(),
+            txin.sequence == 0xFFFFFFFF,
+            &p2sh_addr.script().to_bytes(),
+            &txin.script_sig.to_bytes(),
+            zcash_script::VerificationFlags::all(),
+        ),
+        Ok(())
+    );
 }
 
 #[test]
