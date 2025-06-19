@@ -80,7 +80,7 @@ pub(crate) fn suggest_scan_ranges(
         };
         let code = row.get::<_, i64>(2)?;
         let priority = parse_priority_code(code).ok_or_else(|| {
-            SqliteClientError::CorruptedData(format!("scan priority not recognized: {}", code))
+            SqliteClientError::CorruptedData(format!("scan priority not recognized: {code}"))
         })?;
 
         result.push(ScanRange::from_parts(range, priority));
@@ -181,7 +181,7 @@ pub(crate) fn replace_queue_entries<E: WalletError>(
                 {
                     let code = row.get::<_, i64>(2).map_err(E::db_error)?;
                     parse_priority_code(code).ok_or_else(|| {
-                        E::corrupt(format!("scan priority not recognized: {}", code))
+                        E::corrupt(format!("scan priority not recognized: {code}"))
                     })?
                 },
             );
@@ -239,9 +239,8 @@ fn extend_range(
 
     let mut shard_end_stmt = conn.prepare_cached(&format!(
         "SELECT subtree_end_height
-                FROM {}_tree_shards
-                WHERE shard_index = :shard_index",
-        table_prefix
+                FROM {table_prefix}_tree_shards
+                WHERE shard_index = :shard_index"
     ))?;
 
     let mut shard_end = |index: u64| -> Result<Option<BlockHeight>, rusqlite::Error> {

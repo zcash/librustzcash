@@ -266,13 +266,12 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
                 )
             }
             ChangeError::StrategyError(err) => {
-                write!(f, "{}", err)
+                write!(f, "{err}")
             }
             ChangeError::BundleError(err) => {
                 write!(
                     f,
-                    "The proposed transaction structure violates bundle type constraints: {}",
-                    err
+                    "The proposed transaction structure violates bundle type constraints: {err}"
                 )
             }
         }
