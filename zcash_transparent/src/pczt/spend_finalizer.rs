@@ -1,6 +1,9 @@
 use ripemd::Ripemd160;
 use sha2::{Digest, Sha256};
-use zcash_script::{pattern::push_vec, script};
+use zcash_script::{
+    pattern::{push_script, push_vec},
+    pv, script, standard,
+};
 
 use crate::address::TransparentAddress;
 
@@ -37,7 +40,58 @@ impl super::Bundle {
                         })
                     }
                     TransparentAddress::ScriptHash(_) => {
-                        Err(SpendFinalizerError::UnsupportedScriptPubkey)
+                        let redeem_script = input
+                            .redeem_script
+                            .as_ref()
+                            .ok_or(SpendFinalizerError::MissingRedeemScript)?;
+
+                        match standard::solver(redeem_script) {
+                            Some(standard::ScriptKind::MultiSig { required, pubkeys }) => {
+                                // P2MS-in-P2SH `script_sig` format is:
+                                // - Dummy OP_0 to bypass OP_CHECKMULTISIG bug.
+                                let mut script_sig = vec![pv::_0];
+
+                                // - PushData(signature) * required
+                                //
+                                // The OP_CHECKMULTISIG logic matches pubkeys and
+                                // signatures together sequentially, so we look for
+                                // signatures in the order that the pubkeys exist in
+                                // `redeem_script`.
+                                let mut signatures_found = 0;
+                                for pubkey in pubkeys {
+                                    // Once we reach the threshold of required signatures,
+                                    // any additional signatures present in the PCZT are
+                                    // discarded.
+                                    if signatures_found == required {
+                                        break;
+                                    }
+
+                                    // PCZT requires compressed pubkeys.
+                                    let pubkey =
+                                        <[u8; 33]>::try_from(pubkey.as_slice()).map_err(|_| {
+                                            SpendFinalizerError::UncompressedPubkeyInScript
+                                        })?;
+
+                                    // If we have a signature from this pubkey, use it.
+                                    if let Some(sig) = input.partial_signatures.get(&pubkey) {
+                                        script_sig.push(push_vec(sig));
+                                        signatures_found += 1;
+                                    }
+                                }
+                                if signatures_found < required {
+                                    return Err(SpendFinalizerError::MissingSignature);
+                                }
+
+                                // - PushData(redeem_script)
+                                script_sig.push(push_script(&redeem_script));
+
+                                // P2SH scriptSig
+                                input.script_sig = Some(script::Sig::new(script_sig));
+
+                                Ok(())
+                            }
+                            _ => Err(SpendFinalizerError::UnsupportedScriptPubkey),
+                        }
                     }
                 })?
         }
@@ -64,8 +118,12 @@ impl super::Bundle {
 /// Errors that can occur while finalizing the transparent inputs of a PCZT bundle.
 #[derive(Debug)]
 pub enum SpendFinalizerError {
-    /// `partial_signatures` contained no signatures.
+    /// `script_pubkey` is a P2SH script, but `redeem_script` is not set.
+    MissingRedeemScript,
+    /// `partial_signatures` contained too few signatures.
     MissingSignature,
+    /// `redeem_script` contained an uncompressed pubkey, which PCZT does not support.
+    UncompressedPubkeyInScript,
     /// `partial_signatures` contained unexpected signatures.
     UnexpectedSignatures,
     /// The `script_pubkey` kind is unsupported.

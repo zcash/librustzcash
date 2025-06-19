@@ -21,7 +21,7 @@ impl super::Input {
 
         // Check that the corresponding pubkey appears in either `script_pubkey` or
         // `redeem_script`.
-        // TODO
+        // TODO Use `zcash_script` to obtain these.
 
         let sighash = calculate_sighash(SignableInput {
             hash_type: self.sighash_type,
