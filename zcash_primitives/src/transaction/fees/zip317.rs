@@ -126,9 +126,9 @@ impl FeeRule {
 pub enum FeeError {
     /// An overflow or underflow of amount computation occurred.
     Balance(BalanceError),
-    /// Transparent inputs provided to the fee calculation included coins that do not pay to
-    /// standard P2pkh scripts.
-    NonP2pkhInputs(Vec<OutPoint>),
+    /// Transparent inputs provided to the fee calculation included coins that pay to
+    /// unknown P2SH redeem scripts.
+    UnknownP2shInputs(Vec<OutPoint>),
 }
 
 impl From<BalanceError> for FeeError {
@@ -144,7 +144,9 @@ impl core::fmt::Display for FeeError {
                 f,
                 "A balance calculation violated amount validity bounds: {e}."
             ),
-            FeeError::NonP2pkhInputs(_) => write!(f, "Only P2PKH inputs are supported."),
+            FeeError::UnknownP2shInputs(_) => {
+                write!(f, "Only P2PKH or known-P2SH inputs are supported.")
+            }
         }
     }
 }
@@ -163,20 +165,20 @@ impl super::FeeRule for FeeRule {
         orchard_action_count: usize,
     ) -> Result<Zatoshis, Self::Error> {
         let mut t_in_total_size: usize = 0;
-        let mut non_p2pkh_outpoints = vec![];
+        let mut unknown_p2sh_outpoints = vec![];
         for sz in transparent_input_sizes.into_iter() {
             match sz {
                 transparent::InputSize::Known(s) => {
                     t_in_total_size += s;
                 }
                 transparent::InputSize::Unknown(outpoint) => {
-                    non_p2pkh_outpoints.push(outpoint.clone());
+                    unknown_p2sh_outpoints.push(outpoint.clone());
                 }
             }
         }
 
-        if !non_p2pkh_outpoints.is_empty() {
-            return Err(FeeError::NonP2pkhInputs(non_p2pkh_outpoints));
+        if !unknown_p2sh_outpoints.is_empty() {
+            return Err(FeeError::UnknownP2shInputs(unknown_p2sh_outpoints));
         }
 
         let t_out_total_size = transparent_output_sizes.into_iter().sum();

@@ -168,8 +168,14 @@ impl TransparentAddress {
     /// Derives the P2PKH transparent address corresponding to the given pubkey.
     #[cfg(feature = "transparent-inputs")]
     pub fn from_pubkey(pubkey: &secp256k1::PublicKey) -> Self {
+        Self::from_pubkey_bytes(&pubkey.serialize())
+    }
+
+    /// Derives the P2PKH transparent address corresponding to the given pubkey bytes.
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn from_pubkey_bytes(pubkey: &[u8; 33]) -> Self {
         TransparentAddress::PublicKeyHash(
-            *ripemd::Ripemd160::digest(Sha256::digest(pubkey.serialize())).as_ref(),
+            *ripemd::Ripemd160::digest(Sha256::digest(pubkey)).as_ref(),
         )
     }
 }
