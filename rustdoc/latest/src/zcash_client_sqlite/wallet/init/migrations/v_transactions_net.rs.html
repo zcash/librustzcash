@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/v_transactions_net.rs`."><title>v_transactions_net.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-84e720fa.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.89.0-nightly (f3db63916 2025-06-17)" data-channel="nightly" data-search-js="search-f7877310.js" data-settings-js="settings-5514c975.js" ><script src="../../../../../static.files/storage-4e99c027.js"></script><script defer src="../../../../../static.files/src-script-63605ae7.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-fd3af306.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-32bb7600.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>v_transactions_net.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Migration that fixes a bug in v_transactions that caused the change to be incorrectly ignored
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/init/migrations/v_transactions_net.rs`."><title>v_transactions_net.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-84e720fa.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.89.0-nightly (c68340350 2025-06-18)" data-channel="nightly" data-search-js="search-343419c9.js" data-settings-js="settings-5514c975.js" ><script src="../../../../../static.files/storage-4e99c027.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-fd3af306.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-32bb7600.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/init/migrations/</div>v_transactions_net.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Migration that fixes a bug in v_transactions that caused the change to be incorrectly ignored
 <a href=#2 id=2 data-nosnippet>2</a>//! as received value.
 <a href=#3 id=3 data-nosnippet>3</a></span><span class="kw">use </span>std::collections::HashSet;
 <a href=#4 id=4 data-nosnippet>4</a>
@@ -387,7 +387,7 @@
 <a href=#387 id=387 data-nosnippet>387</a>                        <span class="macro">assert_eq!</span>(memo_count, <span class="number">0</span>);
 <a href=#388 id=388 data-nosnippet>388</a>                    }
 <a href=#389 id=389 data-nosnippet>389</a>                    other =&gt; {
-<a href=#390 id=390 data-nosnippet>390</a>                        <span class="macro">panic!</span>(<span class="string">"Transaction {} is not a sent tx."</span>, other);
+<a href=#390 id=390 data-nosnippet>390</a>                        <span class="macro">panic!</span>(<span class="string">"Transaction {other} is not a sent tx."</span>);
 <a href=#391 id=391 data-nosnippet>391</a>                    }
 <a href=#392 id=392 data-nosnippet>392</a>                }
 <a href=#393 id=393 data-nosnippet>393</a>            }
@@ -453,7 +453,7 @@
 <a href=#453 id=453 data-nosnippet>453</a>                        <span class="macro">assert_eq!</span>(received_note_count, <span class="number">1</span>);
 <a href=#454 id=454 data-nosnippet>454</a>                    }
 <a href=#455 id=455 data-nosnippet>455</a>                    other =&gt; {
-<a href=#456 id=456 data-nosnippet>456</a>                        <span class="macro">panic!</span>(<span class="string">"(Account, Transaction) pair {:?} is not expected to exist in the wallet."</span>, other);
+<a href=#456 id=456 data-nosnippet>456</a>                        <span class="macro">panic!</span>(<span class="string">"(Account, Transaction) pair {other:?} is not expected to exist in the wallet."</span>);
 <a href=#457 id=457 data-nosnippet>457</a>                    }
 <a href=#458 id=458 data-nosnippet>458</a>                }
 <a href=#459 id=459 data-nosnippet>459</a>            }
@@ -505,7 +505,7 @@
 <a href=#505 id=505 data-nosnippet>505</a>                        <span class="macro">assert!</span>(is_change);
 <a href=#506 id=506 data-nosnippet>506</a>                    }
 <a href=#507 id=507 data-nosnippet>507</a>                    other =&gt; {
-<a href=#508 id=508 data-nosnippet>508</a>                        <span class="macro">panic!</span>(<span class="string">"Unexpected output index for tx {}: {}."</span>, tx, other);
+<a href=#508 id=508 data-nosnippet>508</a>                        <span class="macro">panic!</span>(<span class="string">"Unexpected output index for tx {tx}: {other}."</span>);
 <a href=#509 id=509 data-nosnippet>509</a>                    }
 <a href=#510 id=510 data-nosnippet>510</a>                }
 <a href=#511 id=511 data-nosnippet>511</a>            }
@@ -550,48 +550,42 @@
 <a href=#550 id=550 data-nosnippet>550</a>                        <span class="macro">assert!</span>(!is_change);
 <a href=#551 id=551 data-nosnippet>551</a>                    }
 <a href=#552 id=552 data-nosnippet>552</a>                    other =&gt; {
-<a href=#553 id=553 data-nosnippet>553</a>                        <span class="macro">panic!</span>(
-<a href=#554 id=554 data-nosnippet>554</a>                            <span class="string">"Unexpected output pool and index for tx {}: {:?}."</span>,
-<a href=#555 id=555 data-nosnippet>555</a>                            tx, other
-<a href=#556 id=556 data-nosnippet>556</a>                        );
-<a href=#557 id=557 data-nosnippet>557</a>                    }
-<a href=#558 id=558 data-nosnippet>558</a>                }
-<a href=#559 id=559 data-nosnippet>559</a>            }
-<a href=#560 id=560 data-nosnippet>560</a>            <span class="macro">assert_eq!</span>(row_count, <span class="number">3</span>);
-<a href=#561 id=561 data-nosnippet>561</a>
-<a href=#562 id=562 data-nosnippet>562</a>            <span class="kw">let </span><span class="kw-2">mut </span>q = db_data
-<a href=#563 id=563 data-nosnippet>563</a>                .conn
-<a href=#564 id=564 data-nosnippet>564</a>                .prepare(<span class="string">"SELECT * FROM v_tx_outputs WHERE id_tx = 3"</span>)
-<a href=#565 id=565 data-nosnippet>565</a>                .unwrap();
-<a href=#566 id=566 data-nosnippet>566</a>            <span class="kw">let </span><span class="kw-2">mut </span>rows = q.query([]).unwrap();
-<a href=#567 id=567 data-nosnippet>567</a>            <span class="kw">let </span><span class="kw-2">mut </span>row_count = <span class="number">0</span>;
-<a href=#568 id=568 data-nosnippet>568</a>            <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next().unwrap() {
-<a href=#569 id=569 data-nosnippet>569</a>                row_count += <span class="number">1</span>;
-<a href=#570 id=570 data-nosnippet>570</a>                <span class="kw">let </span>tx: i64 = row.get(<span class="number">0</span>).unwrap();
-<a href=#571 id=571 data-nosnippet>571</a>                <span class="kw">let </span>output_pool: i64 = row.get(<span class="number">1</span>).unwrap();
-<a href=#572 id=572 data-nosnippet>572</a>                <span class="kw">let </span>output_index: i64 = row.get(<span class="number">2</span>).unwrap();
-<a href=#573 id=573 data-nosnippet>573</a>                <span class="kw">let </span>from_account: <span class="prelude-ty">Option</span>&lt;i64&gt; = row.get(<span class="number">3</span>).unwrap();
-<a href=#574 id=574 data-nosnippet>574</a>                <span class="kw">let </span>to_account: <span class="prelude-ty">Option</span>&lt;i64&gt; = row.get(<span class="number">4</span>).unwrap();
-<a href=#575 id=575 data-nosnippet>575</a>                <span class="kw">let </span>to_address: <span class="prelude-ty">Option</span>&lt;String&gt; = row.get(<span class="number">5</span>).unwrap();
-<a href=#576 id=576 data-nosnippet>576</a>                <span class="kw">let </span>value: i64 = row.get(<span class="number">6</span>).unwrap();
-<a href=#577 id=577 data-nosnippet>577</a>                <span class="kw">let </span>is_change: bool = row.get(<span class="number">7</span>).unwrap();
-<a href=#578 id=578 data-nosnippet>578</a>                <span class="kw">match </span>(output_pool, output_index) {
-<a href=#579 id=579 data-nosnippet>579</a>                    (<span class="number">0</span>, <span class="number">0</span>) =&gt; {
-<a href=#580 id=580 data-nosnippet>580</a>                        <span class="macro">assert_eq!</span>(from_account, <span class="prelude-val">None</span>);
-<a href=#581 id=581 data-nosnippet>581</a>                        <span class="macro">assert_eq!</span>(to_account, <span class="prelude-val">Some</span>(<span class="number">0</span>));
-<a href=#582 id=582 data-nosnippet>582</a>                        <span class="macro">assert_eq!</span>(to_address, <span class="prelude-val">Some</span>(<span class="string">"taddr_tx3"</span>.to_string()));
-<a href=#583 id=583 data-nosnippet>583</a>                        <span class="macro">assert_eq!</span>(value, <span class="number">1</span>);
-<a href=#584 id=584 data-nosnippet>584</a>                        <span class="macro">assert!</span>(!is_change);
+<a href=#553 id=553 data-nosnippet>553</a>                        <span class="macro">panic!</span>(<span class="string">"Unexpected output pool and index for tx {tx}: {other:?}."</span>);
+<a href=#554 id=554 data-nosnippet>554</a>                    }
+<a href=#555 id=555 data-nosnippet>555</a>                }
+<a href=#556 id=556 data-nosnippet>556</a>            }
+<a href=#557 id=557 data-nosnippet>557</a>            <span class="macro">assert_eq!</span>(row_count, <span class="number">3</span>);
+<a href=#558 id=558 data-nosnippet>558</a>
+<a href=#559 id=559 data-nosnippet>559</a>            <span class="kw">let </span><span class="kw-2">mut </span>q = db_data
+<a href=#560 id=560 data-nosnippet>560</a>                .conn
+<a href=#561 id=561 data-nosnippet>561</a>                .prepare(<span class="string">"SELECT * FROM v_tx_outputs WHERE id_tx = 3"</span>)
+<a href=#562 id=562 data-nosnippet>562</a>                .unwrap();
+<a href=#563 id=563 data-nosnippet>563</a>            <span class="kw">let </span><span class="kw-2">mut </span>rows = q.query([]).unwrap();
+<a href=#564 id=564 data-nosnippet>564</a>            <span class="kw">let </span><span class="kw-2">mut </span>row_count = <span class="number">0</span>;
+<a href=#565 id=565 data-nosnippet>565</a>            <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next().unwrap() {
+<a href=#566 id=566 data-nosnippet>566</a>                row_count += <span class="number">1</span>;
+<a href=#567 id=567 data-nosnippet>567</a>                <span class="kw">let </span>tx: i64 = row.get(<span class="number">0</span>).unwrap();
+<a href=#568 id=568 data-nosnippet>568</a>                <span class="kw">let </span>output_pool: i64 = row.get(<span class="number">1</span>).unwrap();
+<a href=#569 id=569 data-nosnippet>569</a>                <span class="kw">let </span>output_index: i64 = row.get(<span class="number">2</span>).unwrap();
+<a href=#570 id=570 data-nosnippet>570</a>                <span class="kw">let </span>from_account: <span class="prelude-ty">Option</span>&lt;i64&gt; = row.get(<span class="number">3</span>).unwrap();
+<a href=#571 id=571 data-nosnippet>571</a>                <span class="kw">let </span>to_account: <span class="prelude-ty">Option</span>&lt;i64&gt; = row.get(<span class="number">4</span>).unwrap();
+<a href=#572 id=572 data-nosnippet>572</a>                <span class="kw">let </span>to_address: <span class="prelude-ty">Option</span>&lt;String&gt; = row.get(<span class="number">5</span>).unwrap();
+<a href=#573 id=573 data-nosnippet>573</a>                <span class="kw">let </span>value: i64 = row.get(<span class="number">6</span>).unwrap();
+<a href=#574 id=574 data-nosnippet>574</a>                <span class="kw">let </span>is_change: bool = row.get(<span class="number">7</span>).unwrap();
+<a href=#575 id=575 data-nosnippet>575</a>                <span class="kw">match </span>(output_pool, output_index) {
+<a href=#576 id=576 data-nosnippet>576</a>                    (<span class="number">0</span>, <span class="number">0</span>) =&gt; {
+<a href=#577 id=577 data-nosnippet>577</a>                        <span class="macro">assert_eq!</span>(from_account, <span class="prelude-val">None</span>);
+<a href=#578 id=578 data-nosnippet>578</a>                        <span class="macro">assert_eq!</span>(to_account, <span class="prelude-val">Some</span>(<span class="number">0</span>));
+<a href=#579 id=579 data-nosnippet>579</a>                        <span class="macro">assert_eq!</span>(to_address, <span class="prelude-val">Some</span>(<span class="string">"taddr_tx3"</span>.to_string()));
+<a href=#580 id=580 data-nosnippet>580</a>                        <span class="macro">assert_eq!</span>(value, <span class="number">1</span>);
+<a href=#581 id=581 data-nosnippet>581</a>                        <span class="macro">assert!</span>(!is_change);
+<a href=#582 id=582 data-nosnippet>582</a>                    }
+<a href=#583 id=583 data-nosnippet>583</a>                    other =&gt; {
+<a href=#584 id=584 data-nosnippet>584</a>                        <span class="macro">panic!</span>(<span class="string">"Unexpected output pool and index for tx {tx}: {other:?}."</span>);
 <a href=#585 id=585 data-nosnippet>585</a>                    }
-<a href=#586 id=586 data-nosnippet>586</a>                    other =&gt; {
-<a href=#587 id=587 data-nosnippet>587</a>                        <span class="macro">panic!</span>(
-<a href=#588 id=588 data-nosnippet>588</a>                            <span class="string">"Unexpected output pool and index for tx {}: {:?}."</span>,
-<a href=#589 id=589 data-nosnippet>589</a>                            tx, other
-<a href=#590 id=590 data-nosnippet>590</a>                        );
-<a href=#591 id=591 data-nosnippet>591</a>                    }
-<a href=#592 id=592 data-nosnippet>592</a>                }
-<a href=#593 id=593 data-nosnippet>593</a>            }
-<a href=#594 id=594 data-nosnippet>594</a>            <span class="macro">assert_eq!</span>(row_count, <span class="number">1</span>);
-<a href=#595 id=595 data-nosnippet>595</a>        }
-<a href=#596 id=596 data-nosnippet>596</a>    }
-<a href=#597 id=597 data-nosnippet>597</a>}</code></pre></div></section></main></body></html>
+<a href=#586 id=586 data-nosnippet>586</a>                }
+<a href=#587 id=587 data-nosnippet>587</a>            }
+<a href=#588 id=588 data-nosnippet>588</a>            <span class="macro">assert_eq!</span>(row_count, <span class="number">1</span>);
+<a href=#589 id=589 data-nosnippet>589</a>        }
+<a href=#590 id=590 data-nosnippet>590</a>    }
+<a href=#591 id=591 data-nosnippet>591</a>}</code></pre></div></section></main></body></html>

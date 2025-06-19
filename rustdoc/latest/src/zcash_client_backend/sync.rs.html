@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/sync.rs`."><title>sync.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-84e720fa.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.89.0-nightly (f3db63916 2025-06-17)" data-channel="nightly" data-search-js="search-f7877310.js" data-settings-js="settings-5514c975.js" ><script src="../../static.files/storage-4e99c027.js"></script><script defer src="../../static.files/src-script-63605ae7.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-fd3af306.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-32bb7600.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>sync.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Implementation of the synchronization flow described in the crate root.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_backend/src/sync.rs`."><title>sync.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-84e720fa.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="zcash_client_backend" data-themes="" data-resource-suffix="" data-rustdoc-version="1.89.0-nightly (c68340350 2025-06-18)" data-channel="nightly" data-search-js="search-343419c9.js" data-settings-js="settings-5514c975.js" ><script src="../../static.files/storage-4e99c027.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-fd3af306.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-32bb7600.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_backend/</div>sync.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Implementation of the synchronization flow described in the crate root.
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! This is currently a simple implementation that does not yet implement a few features:
 <a href=#4 id=4 data-nosnippet>4</a>//!
@@ -564,44 +564,41 @@
 <a href=#564 id=564 data-nosnippet>564</a>{
 <a href=#565 id=565 data-nosnippet>565</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; fmt::Result {
 <a href=#566 id=566 data-nosnippet>566</a>        <span class="kw">match </span><span class="self">self </span>{
-<a href=#567 id=567 data-nosnippet>567</a>            Error::Cache(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"Error while interacting with block cache: {}"</span>, e),
+<a href=#567 id=567 data-nosnippet>567</a>            Error::Cache(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"Error while interacting with block cache: {e}"</span>),
 <a href=#568 id=568 data-nosnippet>568</a>            Error::MisbehavingServer =&gt; <span class="macro">write!</span>(f, <span class="string">"lightwalletd server is misbehaving"</span>),
-<a href=#569 id=569 data-nosnippet>569</a>            Error::Scan(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"Error while scanning blocks: {}"</span>, e),
-<a href=#570 id=570 data-nosnippet>570</a>            Error::Server(e) =&gt; <span class="macro">write!</span>(
-<a href=#571 id=571 data-nosnippet>571</a>                f,
-<a href=#572 id=572 data-nosnippet>572</a>                <span class="string">"Error while communicating with lightwalletd server: {}"</span>,
-<a href=#573 id=573 data-nosnippet>573</a>                e
-<a href=#574 id=574 data-nosnippet>574</a>            ),
-<a href=#575 id=575 data-nosnippet>575</a>            Error::Wallet(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"Error while interacting with wallet database: {}"</span>, e),
-<a href=#576 id=576 data-nosnippet>576</a>            Error::WalletTrees(e) =&gt; <span class="macro">write!</span>(
-<a href=#577 id=577 data-nosnippet>577</a>                f,
-<a href=#578 id=578 data-nosnippet>578</a>                <span class="string">"Error while interacting with wallet commitment trees: {}"</span>,
-<a href=#579 id=579 data-nosnippet>579</a>                e
-<a href=#580 id=580 data-nosnippet>580</a>            ),
-<a href=#581 id=581 data-nosnippet>581</a>        }
-<a href=#582 id=582 data-nosnippet>582</a>    }
-<a href=#583 id=583 data-nosnippet>583</a>}
-<a href=#584 id=584 data-nosnippet>584</a>
-<a href=#585 id=585 data-nosnippet>585</a><span class="kw">impl</span>&lt;CaErr, DbErr, TrErr&gt; std::error::Error <span class="kw">for </span>Error&lt;CaErr, DbErr, TrErr&gt;
-<a href=#586 id=586 data-nosnippet>586</a><span class="kw">where
-<a href=#587 id=587 data-nosnippet>587</a>    </span>CaErr: std::error::Error,
-<a href=#588 id=588 data-nosnippet>588</a>    DbErr: std::error::Error,
-<a href=#589 id=589 data-nosnippet>589</a>    TrErr: std::error::Error,
-<a href=#590 id=590 data-nosnippet>590</a>{
-<a href=#591 id=591 data-nosnippet>591</a>}
-<a href=#592 id=592 data-nosnippet>592</a>
-<a href=#593 id=593 data-nosnippet>593</a><span class="kw">impl</span>&lt;CaErr, DbErr, TrErr&gt; From&lt;ChainError&lt;DbErr, CaErr&gt;&gt; <span class="kw">for </span>Error&lt;CaErr, DbErr, TrErr&gt; {
-<a href=#594 id=594 data-nosnippet>594</a>    <span class="kw">fn </span>from(e: ChainError&lt;DbErr, CaErr&gt;) -&gt; <span class="self">Self </span>{
-<a href=#595 id=595 data-nosnippet>595</a>        <span class="kw">match </span>e {
-<a href=#596 id=596 data-nosnippet>596</a>            ChainError::Wallet(e) =&gt; Error::Wallet(e),
-<a href=#597 id=597 data-nosnippet>597</a>            ChainError::BlockSource(e) =&gt; Error::Cache(e),
-<a href=#598 id=598 data-nosnippet>598</a>            ChainError::Scan(e) =&gt; Error::Scan(e),
-<a href=#599 id=599 data-nosnippet>599</a>        }
-<a href=#600 id=600 data-nosnippet>600</a>    }
-<a href=#601 id=601 data-nosnippet>601</a>}
-<a href=#602 id=602 data-nosnippet>602</a>
-<a href=#603 id=603 data-nosnippet>603</a><span class="kw">impl</span>&lt;CaErr, DbErr, TrErr&gt; From&lt;tonic::Status&gt; <span class="kw">for </span>Error&lt;CaErr, DbErr, TrErr&gt; {
-<a href=#604 id=604 data-nosnippet>604</a>    <span class="kw">fn </span>from(status: tonic::Status) -&gt; <span class="self">Self </span>{
-<a href=#605 id=605 data-nosnippet>605</a>        Error::Server(status)
-<a href=#606 id=606 data-nosnippet>606</a>    }
-<a href=#607 id=607 data-nosnippet>607</a>}</code></pre></div></section></main></body></html>
+<a href=#569 id=569 data-nosnippet>569</a>            Error::Scan(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"Error while scanning blocks: {e}"</span>),
+<a href=#570 id=570 data-nosnippet>570</a>            Error::Server(e) =&gt; {
+<a href=#571 id=571 data-nosnippet>571</a>                <span class="macro">write!</span>(f, <span class="string">"Error while communicating with lightwalletd server: {e}"</span>)
+<a href=#572 id=572 data-nosnippet>572</a>            }
+<a href=#573 id=573 data-nosnippet>573</a>            Error::Wallet(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"Error while interacting with wallet database: {e}"</span>),
+<a href=#574 id=574 data-nosnippet>574</a>            Error::WalletTrees(e) =&gt; <span class="macro">write!</span>(
+<a href=#575 id=575 data-nosnippet>575</a>                f,
+<a href=#576 id=576 data-nosnippet>576</a>                <span class="string">"Error while interacting with wallet commitment trees: {e}"
+<a href=#577 id=577 data-nosnippet>577</a>            </span>),
+<a href=#578 id=578 data-nosnippet>578</a>        }
+<a href=#579 id=579 data-nosnippet>579</a>    }
+<a href=#580 id=580 data-nosnippet>580</a>}
+<a href=#581 id=581 data-nosnippet>581</a>
+<a href=#582 id=582 data-nosnippet>582</a><span class="kw">impl</span>&lt;CaErr, DbErr, TrErr&gt; std::error::Error <span class="kw">for </span>Error&lt;CaErr, DbErr, TrErr&gt;
+<a href=#583 id=583 data-nosnippet>583</a><span class="kw">where
+<a href=#584 id=584 data-nosnippet>584</a>    </span>CaErr: std::error::Error,
+<a href=#585 id=585 data-nosnippet>585</a>    DbErr: std::error::Error,
+<a href=#586 id=586 data-nosnippet>586</a>    TrErr: std::error::Error,
+<a href=#587 id=587 data-nosnippet>587</a>{
+<a href=#588 id=588 data-nosnippet>588</a>}
+<a href=#589 id=589 data-nosnippet>589</a>
+<a href=#590 id=590 data-nosnippet>590</a><span class="kw">impl</span>&lt;CaErr, DbErr, TrErr&gt; From&lt;ChainError&lt;DbErr, CaErr&gt;&gt; <span class="kw">for </span>Error&lt;CaErr, DbErr, TrErr&gt; {
+<a href=#591 id=591 data-nosnippet>591</a>    <span class="kw">fn </span>from(e: ChainError&lt;DbErr, CaErr&gt;) -&gt; <span class="self">Self </span>{
+<a href=#592 id=592 data-nosnippet>592</a>        <span class="kw">match </span>e {
+<a href=#593 id=593 data-nosnippet>593</a>            ChainError::Wallet(e) =&gt; Error::Wallet(e),
+<a href=#594 id=594 data-nosnippet>594</a>            ChainError::BlockSource(e) =&gt; Error::Cache(e),
+<a href=#595 id=595 data-nosnippet>595</a>            ChainError::Scan(e) =&gt; Error::Scan(e),
+<a href=#596 id=596 data-nosnippet>596</a>        }
+<a href=#597 id=597 data-nosnippet>597</a>    }
+<a href=#598 id=598 data-nosnippet>598</a>}
+<a href=#599 id=599 data-nosnippet>599</a>
+<a href=#600 id=600 data-nosnippet>600</a><span class="kw">impl</span>&lt;CaErr, DbErr, TrErr&gt; From&lt;tonic::Status&gt; <span class="kw">for </span>Error&lt;CaErr, DbErr, TrErr&gt; {
+<a href=#601 id=601 data-nosnippet>601</a>    <span class="kw">fn </span>from(status: tonic::Status) -&gt; <span class="self">Self </span>{
+<a href=#602 id=602 data-nosnippet>602</a>        Error::Server(status)
+<a href=#603 id=603 data-nosnippet>603</a>    }
+<a href=#604 id=604 data-nosnippet>604</a>}</code></pre></div></section></main></body></html>
