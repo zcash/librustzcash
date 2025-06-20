@@ -143,6 +143,17 @@ pub enum SqliteClientError {
     /// The wallet encountered an error when attempting to schedule wallet operations.
     #[cfg(feature = "transparent-inputs")]
     Scheduling(SchedulingError),
+
+    /// The caller responded to a [`TransactionsInvolvingAddress`] request by querying a range of
+    /// block heights ending at a height that did not match the (exclusive) end of the requested
+    /// range.
+    ///
+    /// [`TransactionsInvolvingAddress`]: zcash_client_backend::data_api::TransactionsInvolvingAddress
+    #[cfg(feature = "transparent-inputs")]
+    NotificationMismatch {
+        expected: BlockHeight,
+        actual: BlockHeight,
+    },
 }
 
 impl error::Error for SqliteClientError {
@@ -170,7 +181,7 @@ impl fmt::Display for SqliteClientError {
                 f,
                 "A rewind for your wallet may only target height {} or greater; the requested height was {}.",
                 safe_rewind_height.map_or("<unavailable>".to_owned(), |h0| format!("{h0}")),
-               requested_height
+                requested_height
             ),
             SqliteClientError::DecodingError(e) => write!(f, "{e}"),
             #[cfg(feature = "transparent-inputs")]
@@ -222,6 +233,10 @@ impl fmt::Display for SqliteClientError {
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::Scheduling(err) => {
                 write!(f, "The wallet was unable to schedule an event: {err}")
+            },
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::NotificationMismatch { expected, actual } => {
+                write!(f, "The client performed an address check over a block range that did not match the requested range; expected as_of_height: {expected}, actual as_of_height: {actual}")
             }
         }
     }

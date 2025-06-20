@@ -96,6 +96,7 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::TransparentAddressMetadata,
+    getset::{CopyGetters, Getters},
     std::ops::Range,
     std::time::SystemTime,
     transparent::{
@@ -788,6 +789,44 @@ pub enum OutputStatusFilter {
     All,
 }
 
+/// Payload data for [`TransactionDataRequest::TransactionsInvolvingAddress`].
+///
+/// Values of this type are not constructed directly, but are instead constructed using
+/// [`TransactionDataRequest::transactions_involving_address`].
+#[cfg(feature = "transparent-inputs")]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Getters, CopyGetters)]
+pub struct TransactionsInvolvingAddress {
+    /// The address to request transactions and/or UTXOs for.
+    #[getset(get_copy = "pub")]
+    address: TransparentAddress,
+    /// Only transactions mined at heights greater than or equal to this height should be
+    /// returned.
+    #[getset(get_copy = "pub")]
+    block_range_start: BlockHeight,
+    /// Only transactions mined at heights less than this height should be returned.
+    #[getset(get_copy = "pub")]
+    block_range_end: Option<BlockHeight>,
+    /// If a `request_at` time is set, the caller evaluating this request should attempt to
+    /// retrieve transaction data related to the specified address at a time that is as close
+    /// as practical to the specified instant, and in a fashion that decorrelates this request
+    /// to a light wallet server from other requests made by the same caller.
+    ///
+    /// This may be ignored by callers that are able to satisfy the request without exposing
+    /// correlations between addresses to untrusted parties; for example, a wallet application
+    /// that uses a private, trusted-for-privacy supplier of chain data can safely ignore this
+    /// field.
+    #[getset(get_copy = "pub")]
+    request_at: Option<SystemTime>,
+    /// The caller should respond to this request only with transactions that conform to the
+    /// specified transaction status filter.
+    #[getset(get = "pub")]
+    tx_status_filter: TransactionStatusFilter,
+    /// The caller should respond to this request only with transactions containing outputs
+    /// that conform to the specified output status filter.
+    #[getset(get = "pub")]
+    output_status_filter: OutputStatusFilter,
+}
+
 /// A request for transaction data enhancement, spentness check, or discovery
 /// of spends from a given transparent address within a specific block range.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -828,35 +867,56 @@ pub enum TransactionDataRequest {
     /// request by detecting transactions involving the specified address within the provided block
     /// range; if using `lightwalletd` for access to chain data, this may be performed using the
     /// [`GetTaddressTxids`] RPC method. It should then call [`wallet::decrypt_and_store_transaction`]
-    /// for each transaction so detected.
+    /// for each transaction so detected. If no transactions are detected within the given range,
+    /// the caller should instead invoke [`WalletWrite::notify_address_checked`] with
+    /// `block_end_height - 1` as the `as_of_height` argument.
     ///
     /// [`GetTaddressTxids`]: crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient::get_taddress_txids
     #[cfg(feature = "transparent-inputs")]
-    TransactionsInvolvingAddress {
-        /// The address to request transactions and/or UTXOs for.
+    TransactionsInvolvingAddress(TransactionsInvolvingAddress),
+}
+
+impl TransactionDataRequest {
+    /// Constructs a request for Information about transactions that receive or spend funds
+    /// belonging to the specified transparent address.
+    ///
+    /// # Parameters:
+    /// - `address`: The address to request transactions and/or UTXOs for.
+    /// - `block_range_start`: Only transactions mined at heights greater than or equal to this
+    ///   height should be returned.
+    /// - `block_range_end`: Only transactions mined at heights less than this height should be
+    ///   returned.
+    /// - `request_at`: If a `request_at` time is set, the caller evaluating this request should attempt to
+    ///   retrieve transaction data related to the specified address at a time that is as close
+    ///   as practical to the specified instant, and in a fashion that decorrelates this request
+    ///   to a light wallet server from other requests made by the same caller. This may be ignored
+    ///   by callers that are able to satisfy the request without exposing correlations between
+    ///   addresses to untrusted parties; for example, a wallet application that uses a private,
+    ///   trusted-for-privacy supplier of chain data can safely ignore this field.
+    /// - `tx_status_filter`: The caller should respond to this request only with transactions that
+    ///   conform to the specified transaction status filter.
+    /// - `output_status_filter: The caller should respond to this request only with transactions
+    ///   containing outputs that conform to the specified output status filter.
+    ///
+    /// See [`TransactionDataRequest::TransactionsInvolvingAddress`] for more information.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transactions_involving_address(
         address: TransparentAddress,
-        /// Only transactions mined at heights greater than or equal to this height should be
-        /// returned.
         block_range_start: BlockHeight,
-        /// Only transactions mined at heights less than this height should be returned.
         block_range_end: Option<BlockHeight>,
-        /// If a `request_at` time is set, the caller evaluating this request should attempt to
-        /// retrieve transaction data related to the specified address at a time that is as close
-        /// as practical to the specified instant, and in a fashion that decorrelates this request
-        /// to a light wallet server from other requests made by the same caller.
-        ///
-        /// This may be ignored by callers that are able to satisfy the request without exposing
-        /// correlations between addresses to untrusted parties; for example, a wallet application
-        /// that uses a private, trusted-for-privacy supplier of chain data can safely ignore this
-        /// field.
         request_at: Option<SystemTime>,
-        /// The caller should respond to this request only with transactions that conform to the
-        /// specified transaction status filter.
         tx_status_filter: TransactionStatusFilter,
-        /// The caller should respond to this request only with transactions containing outputs
-        /// that conform to the specified output status filter.
         output_status_filter: OutputStatusFilter,
-    },
+    ) -> Self {
+        TransactionDataRequest::TransactionsInvolvingAddress(TransactionsInvolvingAddress {
+            address,
+            block_range_start,
+            block_range_end,
+            request_at,
+            tx_status_filter,
+            output_status_filter,
+        })
+    }
 }
 
 /// Metadata about the status of a transaction obtained by inspecting the chain state.
@@ -2643,6 +2703,20 @@ pub trait WalletWrite: WalletRead {
         &mut self,
         _txid: TxId,
         _status: TransactionStatus,
+    ) -> Result<(), Self::Error>;
+
+    /// Notifies the wallet backend that the given query for transactions involving a particular
+    /// address has completed evaluation.
+    ///
+    /// # Arguments
+    /// - `request`: the [`TransactionsInvolvingAddress`] request that was executed.
+    /// - `as_of_height`: The maximum height among blocks that were inspected in the process of
+    ///   performing the requested check.
+    #[cfg(feature = "transparent-inputs")]
+    fn notify_address_checked(
+        &mut self,
+        request: TransactionsInvolvingAddress,
+        as_of_height: BlockHeight,
     ) -> Result<(), Self::Error>;
 }
 

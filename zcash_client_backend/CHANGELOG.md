@@ -10,6 +10,21 @@ workspace.
 
 ## [Unreleased]
 
+## [0.20.0] - PLANNED
+
+### Added
+- `zcash_client_backend::data_api::TransactionsInvolvingAddress`
+- `zcash_client_backend::data_api::TransactionDataRequest::transactions_involving_address`
+
+### Changed
+- `zcash_client_backend::data_api`:
+  - `WalletWrite` has added method `notify_address_checked` when the
+    `transparent-inputs` feature flag is enabled.
+  - The `TransactionDataRequest::TransactionsInvolvingAddress` variant is no
+    longer structured, but takes a `TransactionsInvolvingAddress` struct value
+    as its payload. This permits the `TransactionsInvolvingAddress` type
+    to be used independent of the rest of the `TransactionDataRequest` variants.
+
 ## [0.19.0] - PLANNED
 
 ### Added
