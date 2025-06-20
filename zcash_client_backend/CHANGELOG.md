@@ -3,7 +3,10 @@ All notable changes to this library will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this library adheres to Rust's notion of
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Future releases are
+indicated by the `PLANNED` status in order to make it possible to correctly
+represent the transitive `semver` implications of changes within the enclosing
+workspace.
 
 ## [Unreleased]
 
@@ -11,7 +14,7 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `zcash_client_backend::data_api`:
-  - `TargetValue`: An intent of representing spendable value to reach a certain 
+  - `TargetValue`: An intent of representing spendable value to reach a certain
     targeted amount.
 - `zcash_client_backend::proto::service`:
   - `LightdInfo.donation_address` field.
@@ -31,12 +34,12 @@ and this library adheres to Rust's notion of
   - `DormantMode`
 
 ### Changed
-- Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`, `zcash_address 0.8`, 
-  `zip321 0.4`, `zcash_transparent 0.3`, `zcash_primitives 0.23`, 
+- Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`, `zcash_address 0.8`,
+  `zip321 0.4`, `zcash_transparent 0.3`, `zcash_primitives 0.23`,
   `zcash_proofs 0.23`, `zcash_keys 0.9`, `pczt 0.3`
 - `zcash_client_backend::data_api`:
-  - `select_spendable_notes`: parameter `target_value` now is a `TargetValue`. 
-    Existing calls to this function that used `Zatoshis` now use 
+  - `select_spendable_notes`: parameter `target_value` now is a `TargetValue`.
+    Existing calls to this function that used `Zatoshis` now use
     `TargetValue::AtLeast(Zatoshis)`
 - `zcash_client_backend::tor`:
   - `Client::{connect_to_lightwalletd, get_latest_zec_to_usd_rate}` now ensure

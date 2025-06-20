@@ -85,20 +85,18 @@ impl Display for ProposalError {
                 "The proposal violates the rules for a shielding transaction."
             ),
             ProposalError::AnchorNotFound(h) => {
-                write!(f, "Unable to compute anchor for block height {:?}", h)
+                write!(f, "Unable to compute anchor for block height {h:?}")
             }
             ProposalError::ReferenceError(r) => {
-                write!(f, "No prior step output found for reference {:?}", r)
+                write!(f, "No prior step output found for reference {r:?}")
             }
             ProposalError::StepDoubleSpend(r) => write!(
                 f,
-                "The proposal uses the output of step {:?} in more than one place.",
-                r
+                "The proposal uses the output of step {r:?} in more than one place."
             ),
             ProposalError::ChainDoubleSpend(pool, txid, index) => write!(
                 f,
-                "The proposal attempts to spend the same output twice: {}, {}, {}",
-                pool, txid, index
+                "The proposal attempts to spend the same output twice: {pool}, {txid}, {index}"
             ),
             ProposalError::PaymentPoolsMismatch => write!(
                 f,
@@ -106,14 +104,12 @@ impl Display for ProposalError {
             ),
             ProposalError::SpendsChange(r) => write!(
                 f,
-                "The proposal attempts to spends the change output created at step {:?}.",
-                r,
+                "The proposal attempts to spends the change output created at step {r:?}.",
             ),
             #[cfg(feature = "transparent-inputs")]
             ProposalError::EphemeralOutputLeftUnspent(r) => write!(
                 f,
-                "The proposal created an ephemeral output at step {:?} that was not spent in any later step.",
-                r,
+                "The proposal created an ephemeral output at step {r:?} that was not spent in any later step.",
             ),
             #[cfg(feature = "transparent-inputs")]
             ProposalError::PaysTexFromShielded => write!(

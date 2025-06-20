@@ -38,7 +38,7 @@ fn main() {
             .expect("Failed to write data to file");
     } else {
         for n in iterator {
-            println!("{:?}", n);
+            println!("{n:?}");
         }
     }
 }

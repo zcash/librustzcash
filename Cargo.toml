@@ -37,7 +37,7 @@ zcash_address = { version = "0.8", path = "components/zcash_address", default-fe
 zcash_client_backend = { version = "0.19", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.3", path = "components/zcash_encoding", default-features = false }
 zcash_keys = { version = "0.9", path = "zcash_keys" }
-zcash_protocol = { version = "0.5.1", path = "components/zcash_protocol", default-features = false }
+zcash_protocol = { version = "0.5.3", path = "components/zcash_protocol", default-features = false }
 zip321 = { version = "0.4", path = "components/zip321" }
 
 zcash_note_encryption = "0.4.1"
@@ -152,7 +152,7 @@ static_assertions = "1"
 ambassador = "0.4"
 assert_matches = "1.5"
 criterion = "0.5"
-proptest = "1"
+proptest = ">=1,<1.7" # proptest 1.7 updates to rand 0.9
 rand_chacha = "0.3"
 rand_xorshift = "0.3"
 incrementalmerkletree-testing = "0.3"
@@ -214,6 +214,6 @@ debug = true
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
-  'cfg(zcash_unstable, values("zfuture", "nu7"))',
+  'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))',
   'cfg(live_network_tests)',
 ] }

@@ -30,7 +30,7 @@ impl<R: Read> HashReader<R> {
 
         let mut s = String::new();
         for c in hash.as_bytes().iter() {
-            write!(&mut s, "{:02x}", c).expect("writing to a string never fails");
+            write!(&mut s, "{c:02x}").expect("writing to a string never fails");
         }
 
         s
