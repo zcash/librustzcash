@@ -236,7 +236,7 @@ impl fmt::Display for SqliteClientError {
             },
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::NotificationMismatch { expected, actual } => {
-                write!(f, "The client performed an address check over a block range that did not match the requested range; expected height: {expected}, actual height: {actual}")
+                write!(f, "The client performed an address check over a block range that did not match the requested range; expected as_of_height: {expected}, actual as_of_height: {actual}")
             }
         }
     }

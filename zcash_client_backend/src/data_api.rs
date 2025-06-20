@@ -869,7 +869,7 @@ pub enum TransactionDataRequest {
     /// [`GetTaddressTxids`] RPC method. It should then call [`wallet::decrypt_and_store_transaction`]
     /// for each transaction so detected. If no transactions are detected within the given range,
     /// the caller should instead invoke [`WalletWrite::notify_address_checked`] with
-    /// `block_end_height` as the `as_of_height` argument.
+    /// `block_end_height - 1` as the `as_of_height` argument.
     ///
     /// [`GetTaddressTxids`]: crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient::get_taddress_txids
     #[cfg(feature = "transparent-inputs")]
