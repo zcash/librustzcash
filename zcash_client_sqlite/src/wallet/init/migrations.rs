@@ -22,6 +22,7 @@ mod spend_key_available;
 mod support_legacy_sqlite;
 mod transparent_gap_limit_handling;
 mod tx_retrieval_queue;
+mod tx_retrieval_queue_expiry;
 mod ufvk_support;
 mod utxos_table;
 mod utxos_to_txos;
@@ -175,6 +176,7 @@ pub(super) fn all_migrations<
         Box::new(ensure_default_transparent_address::Migration {
             params: params.clone(),
         }),
+        Box::new(tx_retrieval_queue_expiry::Migration),
     ]
 }
 
