@@ -499,7 +499,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             .map_err(Error::SaplingBuild)
     }
 
-    /// Adds a transparent coin to be spent in this transaction.
+    /// Adds a transparent P2PKH coin to be spent in this transaction.
     #[cfg(feature = "transparent-inputs")]
     pub fn add_transparent_input(
         &mut self,
@@ -508,6 +508,18 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         coin: TxOut,
     ) -> Result<(), transparent::builder::Error> {
         self.transparent_builder.add_input(pubkey, utxo, coin)
+    }
+
+    /// Adds a transparent P2SH coin to be spent in this transaction.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn add_transparent_p2sh_input(
+        &mut self,
+        redeem_script: transparent::address::Script,
+        utxo: transparent::bundle::OutPoint,
+        coin: TxOut,
+    ) -> Result<(), transparent::builder::Error> {
+        self.transparent_builder
+            .add_p2sh_input(redeem_script, utxo, coin)
     }
 
     /// Adds a transparent address to send funds to.
