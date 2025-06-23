@@ -1758,6 +1758,7 @@ where
     <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
     use zcash_keys::keys::UnifiedAddressRequest;
+    use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
 
     let mut st = TestBuilder::new()
         .with_data_store_factory(ds_factory)
@@ -1783,8 +1784,9 @@ where
     );
     st.scan_cached_blocks(h, 1);
 
+    let spent_outpoint = OutPoint::fake();
     let utxo = WalletTransparentOutput::from_parts(
-        OutPoint::fake(),
+        spent_outpoint.clone(),
         TxOut {
             value: Zatoshis::const_from_u64(100000),
             script_pubkey: taddr.script(),
@@ -1813,24 +1815,76 @@ where
         .unwrap();
     assert_eq!(txids.len(), 1);
 
-    let tx = st.get_tx_from_history(*txids.first()).unwrap().unwrap();
-    assert_eq!(tx.spent_note_count(), 1);
-    assert!(tx.has_change());
-    assert_eq!(tx.received_note_count(), 0);
-    assert_eq!(tx.sent_note_count(), 0);
-    assert!(tx.is_shielding());
+    let tx_summary = st.get_tx_from_history(*txids.first()).unwrap().unwrap();
+    assert_eq!(tx_summary.spent_note_count(), 1);
+    assert!(tx_summary.has_change());
+    assert_eq!(tx_summary.received_note_count(), 0);
+    assert_eq!(tx_summary.sent_note_count(), 0);
+    assert!(tx_summary.is_shielding());
 
     // Generate and scan the block including the transaction
     let (h, _) = st.generate_next_block_including(*txids.first());
-    st.scan_cached_blocks(h, 1);
+    let scan_result = st.scan_cached_blocks(h, 1);
 
     // Ensure that the transaction metadata is still correct after the update produced by scanning.
-    let tx = st.get_tx_from_history(*txids.first()).unwrap().unwrap();
-    assert_eq!(tx.spent_note_count(), 1);
-    assert!(tx.has_change());
-    assert_eq!(tx.received_note_count(), 0);
-    assert_eq!(tx.sent_note_count(), 0);
-    assert!(tx.is_shielding());
+    let tx_summary = st.get_tx_from_history(*txids.first()).unwrap().unwrap();
+    assert_eq!(tx_summary.spent_note_count(), 1);
+    assert!(tx_summary.has_change());
+    assert_eq!(tx_summary.received_note_count(), 0);
+    assert_eq!(tx_summary.sent_note_count(), 0);
+    assert!(tx_summary.is_shielding());
+
+    // Verify that a transaction enhancement request for the transaction containing the spent
+    // outpoint does not yet exist.
+    let requests = st.wallet().transaction_data_requests().unwrap();
+    assert!(!requests
+        .iter()
+        .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid())));
+
+    // Use `decrypt_and_store_transaction` for the side effect of creating enhancement requests for
+    // the transparent inputs of the transaction.
+    let tx = st
+        .wallet()
+        .get_transaction(*txids.first())
+        .unwrap()
+        .unwrap();
+    let params = *st.network();
+    decrypt_and_store_transaction(&params, st.wallet_mut(), &tx, Some(h)).unwrap();
+
+    // Verify that a transaction enhancement request for the received transaction was created
+    let requests = st.wallet().transaction_data_requests().unwrap();
+    assert!(requests
+        .iter()
+        .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid())));
+
+    // Now advance the chain by 40 blocks; even though a record for the transaction that created
+    // `spent_outpoint` exists in the wallet database, the transaction can't be enhanced because
+    // the outpoint was fake. Advancing the chain will cause the request for enhancement to expire.
+    for _ in 0..DEFAULT_TX_EXPIRY_DELTA {
+        st.generate_next_block(
+            &dfvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10000),
+        );
+    }
+    st.scan_cached_blocks(
+        scan_result.scanned_range().end,
+        usize::try_from(DEFAULT_TX_EXPIRY_DELTA).unwrap(),
+    );
+
+    // Simulate the situation where the enhancement request results in `TxidNotRecognized`
+    st.wallet_mut()
+        .set_transaction_status(
+            *spent_outpoint.txid(),
+            data_api::TransactionStatus::TxidNotRecognized,
+        )
+        .unwrap();
+
+    // Verify that the transaction enhancement request for the invalid txid has been deleted.
+    let requests = st.wallet().transaction_data_requests().unwrap();
+    assert!(!requests
+        .iter()
+        .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid())));
 }
 
 // FIXME: This requires fixes to the test framework.
