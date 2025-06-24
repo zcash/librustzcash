@@ -165,10 +165,7 @@ fn to_spendable_note<P: consensus::Parameters>(
 
             let spending_key_scope = zip32::Scope::try_from(KeyScope::decode(scope_code)?)
                 .map_err(|_| {
-                    SqliteClientError::CorruptedData(format!(
-                        "Invalid key scope code {}",
-                        scope_code
-                    ))
+                    SqliteClientError::CorruptedData(format!("Invalid key scope code {scope_code}"))
                 })?;
 
             let recipient = match spending_key_scope {

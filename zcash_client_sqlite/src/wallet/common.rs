@@ -357,7 +357,7 @@ pub(crate) fn spendable_notes_meta(
 
     fn zatoshis(value: i64) -> Result<Zatoshis, SqliteClientError> {
         Zatoshis::from_nonnegative_i64(value).map_err(|_| {
-            SqliteClientError::CorruptedData(format!("Negative received note value: {}", value))
+            SqliteClientError::CorruptedData(format!("Negative received note value: {value}"))
         })
     }
 

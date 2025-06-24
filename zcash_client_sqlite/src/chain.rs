@@ -169,9 +169,7 @@ pub(crate) fn blockmetadb_insert(
                     // Panicking here is probably the right thing to do, because it
                     // means the database is corrupt.
                     panic!(
-                        "Rollback failed with error {} while attempting to recover from error {}; database is likely corrupt.",
-                        e,
-                        error
+                        "Rollback failed with error {e} while attempting to recover from error {error}; database is likely corrupt."
                     )
             }
         }

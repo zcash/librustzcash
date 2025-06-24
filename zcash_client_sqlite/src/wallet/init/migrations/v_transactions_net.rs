@@ -390,7 +390,7 @@ mod tests {
                         assert_eq!(memo_count, 0);
                     }
                     other => {
-                        panic!("Transaction {} is not a sent tx.", other);
+                        panic!("Transaction {other} is not a sent tx.");
                     }
                 }
             }
@@ -453,7 +453,7 @@ mod tests {
                         assert_eq!(received_note_count, 1);
                     }
                     other => {
-                        panic!("(Account, Transaction) pair {:?} is not expected to exist in the wallet.", other);
+                        panic!("(Account, Transaction) pair {other:?} is not expected to exist in the wallet.");
                     }
                 }
             }
@@ -505,7 +505,7 @@ mod tests {
                         assert!(is_change);
                     }
                     other => {
-                        panic!("Unexpected output index for tx {}: {}.", tx, other);
+                        panic!("Unexpected output index for tx {tx}: {other}.");
                     }
                 }
             }
@@ -550,10 +550,7 @@ mod tests {
                         assert!(!is_change);
                     }
                     other => {
-                        panic!(
-                            "Unexpected output pool and index for tx {}: {:?}.",
-                            tx, other
-                        );
+                        panic!("Unexpected output pool and index for tx {tx}: {other:?}.");
                     }
                 }
             }
@@ -584,10 +581,7 @@ mod tests {
                         assert!(!is_change);
                     }
                     other => {
-                        panic!(
-                            "Unexpected output pool and index for tx {}: {:?}.",
-                            tx, other
-                        );
+                        panic!("Unexpected output pool and index for tx {tx}: {other:?}.");
                     }
                 }
             }
