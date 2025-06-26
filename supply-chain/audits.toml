@@ -1001,7 +1001,7 @@ end = "2025-10-22"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-03-25"
-end = "2025-04-22"
+end = "2026-06-26"
 
 [[trusted.zcash_encoding]]
 criteria = "safe-to-deploy"

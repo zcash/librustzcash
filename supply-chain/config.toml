@@ -109,10 +109,6 @@ criteria = "safe-to-deploy"
 version = "2.0.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.android-tzdata]]
-version = "0.1.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.arrayvec]]
 version = "0.7.4"
 criteria = "safe-to-deploy"
@@ -797,10 +793,6 @@ criteria = "safe-to-deploy"
 version = "0.2.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.option-ext]]
-version = "0.2.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.ordered-float]]
 version = "2.10.1"
 criteria = "safe-to-deploy"
@@ -1119,10 +1111,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.secrecy]]
 version = "0.8.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.serde-value]]
-version = "0.7.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.serde_ignored]]
