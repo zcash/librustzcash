@@ -162,42 +162,42 @@ impl fmt::Display for SqliteClientError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
             SqliteClientError::CorruptedData(reason) => {
-                write!(f, "Data DB is corrupted: {}", reason)
+                write!(f, "Data DB is corrupted: {reason}")
             }
-            SqliteClientError::Protobuf(e) => write!(f, "Failed to parse protobuf-encoded record: {}", e),
+            SqliteClientError::Protobuf(e) => write!(f, "Failed to parse protobuf-encoded record: {e}"),
             SqliteClientError::InvalidNote => write!(f, "Invalid note"),
             SqliteClientError::RequestedRewindInvalid { safe_rewind_height,  requested_height } => write!(
                 f,
                 "A rewind for your wallet may only target height {} or greater; the requested height was {}.",
-                safe_rewind_height.map_or("<unavailable>".to_owned(), |h0| format!("{}", h0)),
+                safe_rewind_height.map_or("<unavailable>".to_owned(), |h0| format!("{h0}")),
                requested_height
             ),
-            SqliteClientError::DecodingError(e) => write!(f, "{}", e),
+            SqliteClientError::DecodingError(e) => write!(f, "{e}"),
             #[cfg(feature = "transparent-inputs")]
-            SqliteClientError::TransparentDerivation(e) => write!(f, "{:?}", e),
+            SqliteClientError::TransparentDerivation(e) => write!(f, "{e:?}"),
             #[cfg(feature = "transparent-inputs")]
-            SqliteClientError::TransparentAddress(e) => write!(f, "{}", e),
+            SqliteClientError::TransparentAddress(e) => write!(f, "{e}"),
             SqliteClientError::TableNotEmpty => write!(f, "Table is not empty"),
-            SqliteClientError::DbError(e) => write!(f, "{}", e),
-            SqliteClientError::Io(e) => write!(f, "{}", e),
-            SqliteClientError::InvalidMemo(e) => write!(f, "{}", e),
+            SqliteClientError::DbError(e) => write!(f, "{e}"),
+            SqliteClientError::Io(e) => write!(f, "{e}"),
+            SqliteClientError::InvalidMemo(e) => write!(f, "{e}"),
             SqliteClientError::BlockConflict(h) => write!(f, "A block hash conflict occurred at height {}; rewind required.", u32::from(*h)),
             SqliteClientError::NonSequentialBlocks => write!(f, "`put_blocks` requires that the provided block range be sequential"),
-            SqliteClientError::AddressGeneration(e) => write!(f, "{}", e),
+            SqliteClientError::AddressGeneration(e) => write!(f, "{e}"),
             SqliteClientError::AccountUnknown => write!(f, "The account with the given ID does not belong to this wallet."),
             SqliteClientError::UnknownZip32Derivation => write!(f, "ZIP-32 derivation information is not known for this account."),
             SqliteClientError::KeyDerivationError(zip32_index) => write!(f, "Key derivation failed for ZIP 32 account index {}", u32::from(*zip32_index)),
-            SqliteClientError::BadAccountData(e) => write!(f, "Failed to add account: {}", e),
+            SqliteClientError::BadAccountData(e) => write!(f, "Failed to add account: {e}"),
             SqliteClientError::Zip32AccountIndexOutOfRange => write!(f, "ZIP 32 account identifiers must be less than 0x7FFFFFFF."),
             SqliteClientError::AccountCollision(account_uuid) => write!(f, "An account corresponding to the data provided already exists in the wallet with UUID {account_uuid:?}."),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::AddressNotRecognized(_) => write!(f, "The address associated with a received txo is not identifiable as belonging to the wallet."),
-            SqliteClientError::CommitmentTree(err) => write!(f, "An error occurred accessing or updating note commitment tree data: {}.", err),
-            SqliteClientError::CacheMiss(height) => write!(f, "Requested height {} does not exist in the block cache.", height),
+            SqliteClientError::CommitmentTree(err) => write!(f, "An error occurred accessing or updating note commitment tree data: {err}."),
+            SqliteClientError::CacheMiss(height) => write!(f, "Requested height {height} does not exist in the block cache."),
             SqliteClientError::ChainHeightUnknown => write!(f, "Chain height unknown; please call `update_chain_tip`"),
-            SqliteClientError::UnsupportedPoolType(t) => write!(f, "Pool type is not currently supported: {}", t),
-            SqliteClientError::BalanceError(e) => write!(f, "Balance error: {}", e),
-            SqliteClientError::NoteFilterInvalid(s) => write!(f, "Could not evaluate filter query: {:?}", s),
+            SqliteClientError::UnsupportedPoolType(t) => write!(f, "Pool type is not currently supported: {t}"),
+            SqliteClientError::BalanceError(e) => write!(f, "Balance error: {e}"),
+            SqliteClientError::NoteFilterInvalid(s) => write!(f, "Could not evaluate filter query: {s:?}"),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::ReachedGapLimit(key_scope, bad_index) => write!(f,
                 "The proposal cannot be constructed until a transaction with outputs to a previously reserved {} address has been mined. \
@@ -217,11 +217,11 @@ impl fmt::Display for SqliteClientError {
                 )
             }
             SqliteClientError::AddressReuse(address_str, txids) => {
-                write!(f, "The address {address_str} previously used in txid(s) {:?} would be reused.", txids)
+                write!(f, "The address {address_str} previously used in txid(s) {txids:?} would be reused.")
             }
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::Scheduling(err) => {
-                write!(f, "The wallet was unable to schedule an event: {}", err)
+                write!(f, "The wallet was unable to schedule an event: {err}")
             }
         }
     }

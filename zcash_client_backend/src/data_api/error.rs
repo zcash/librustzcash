@@ -155,21 +155,20 @@ where
             Error::DataSource(e) => {
                 write!(
                     f,
-                    "The underlying datasource produced the following error: {}",
-                    e
+                    "The underlying datasource produced the following error: {e}"
                 )
             }
             Error::CommitmentTree(e) => {
-                write!(f, "An error occurred in querying or updating a note commitment tree: {}", e)
+                write!(f, "An error occurred in querying or updating a note commitment tree: {e}")
             }
             Error::NoteSelection(e) => {
-                write!(f, "Note selection encountered the following error: {}", e)
+                write!(f, "Note selection encountered the following error: {e}")
             }
             Error::Change(e) => {
-                write!(f, "Change output generation failed: {}", e)
+                write!(f, "Change output generation failed: {e}")
             }
             Error::Proposal(e) => {
-                write!(f, "Input selection attempted to construct an invalid proposal: {}", e)
+                write!(f, "Input selection attempted to construct an invalid proposal: {e}")
             }
             Error::ProposalNotSupported => write!(
                 f,
@@ -197,8 +196,7 @@ where
             }
             Error::BalanceError(e) => write!(
                 f,
-                "The value lies outside the valid range of Zcash amounts: {:?}.",
-                e
+                "The value lies outside the valid range of Zcash amounts: {e:?}."
             ),
             Error::InsufficientFunds { available, required } => write!(
                 f,
@@ -207,9 +205,9 @@ where
                 u64::from(*required)
             ),
             Error::ScanRequired => write!(f, "Must scan blocks first"),
-            Error::Builder(e) => write!(f, "An error occurred building the transaction: {}", e),
+            Error::Builder(e) => write!(f, "An error occurred building the transaction: {e}"),
             Error::MemoForbidden => write!(f, "It is not possible to send a memo to a transparent address."),
-            Error::UnsupportedChangeType(t) => write!(f, "Attempted to send change to an unsupported pool type: {}", t),
+            Error::UnsupportedChangeType(t) => write!(f, "Attempted to send change to an unsupported pool type: {t}"),
             Error::NoSupportedReceivers(ua) => write!(
                 f,
                 "A recipient's unified address does not contain any receivers to which the wallet can send funds; required one of {}",
@@ -218,11 +216,11 @@ where
                     acc
                 })
             ),
-            Error::KeyNotAvailable(pool) => write!(f, "A key required for transaction construction was not available for pool type {}", pool),
-            Error::NoteMismatch(n) => write!(f, "A note being spent ({:?}) does not correspond to either the internal or external full viewing key for the provided spending key.", n),
+            Error::KeyNotAvailable(pool) => write!(f, "A key required for transaction construction was not available for pool type {pool}"),
+            Error::NoteMismatch(n) => write!(f, "A note being spent ({n:?}) does not correspond to either the internal or external full viewing key for the provided spending key."),
 
             Error::Address(e) => {
-                write!(f, "An error occurred decoding the address from a payment request: {}.", e)
+                write!(f, "An error occurred decoding the address from a payment request: {e}.")
             }
             #[cfg(feature = "transparent-inputs")]
             Error::AddressNotRecognized(_) => {
@@ -230,7 +228,7 @@ where
             }
             #[cfg(feature = "transparent-inputs")]
             Error::PaysEphemeralTransparentAddress(addr) => {
-                write!(f, "The wallet tried to pay to an ephemeral transparent address as a normal output: {}", addr)
+                write!(f, "The wallet tried to pay to an ephemeral transparent address as a normal output: {addr}")
             }
             #[cfg(feature = "pczt")]
             Error::Pczt(e) => write!(f, "PCZT error: {e}"),
@@ -249,25 +247,25 @@ impl fmt::Display for PcztError {
                 )
             }
             PcztError::IoFinalization(e) => {
-                write!(f, "Failed to finalize IO: {:?}.", e)
+                write!(f, "Failed to finalize IO: {e:?}.")
             }
             PcztError::UpdateOrchard(e) => {
-                write!(f, "Failed to updating Orchard PCZT data: {:?}.", e)
+                write!(f, "Failed to updating Orchard PCZT data: {e:?}.")
             }
             PcztError::UpdateSapling(e) => {
-                write!(f, "Failed to updating Sapling PCZT data: {:?}.", e)
+                write!(f, "Failed to updating Sapling PCZT data: {e:?}.")
             }
             PcztError::UpdateTransparent(e) => {
-                write!(f, "Failed to updating transparent PCZT data: {:?}.", e)
+                write!(f, "Failed to updating transparent PCZT data: {e:?}.")
             }
             PcztError::SpendFinalization(e) => {
-                write!(f, "Failed to finalize the PCZT spends: {:?}.", e)
+                write!(f, "Failed to finalize the PCZT spends: {e:?}.")
             }
             PcztError::Extraction(e) => {
-                write!(f, "Failed to extract the final transaction: {:?}.", e)
+                write!(f, "Failed to extract the final transaction: {e:?}.")
             }
             PcztError::Invalid(e) => {
-                write!(f, "PCZT parsing resulted in an invalid condition: {}.", e)
+                write!(f, "PCZT parsing resulted in an invalid condition: {e}.")
             }
         }
     }

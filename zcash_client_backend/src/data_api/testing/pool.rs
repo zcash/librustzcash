@@ -306,7 +306,7 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
             Some(m) if m == &Memo::Empty => {
                 found_sent_empty_memo = true;
             }
-            Some(other) => panic!("Unexpected memo value: {:?}", other),
+            Some(other) => panic!("Unexpected memo value: {other:?}"),
             None => panic!("Memo should not be stored as NULL"),
         }
     }
@@ -464,7 +464,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
             Some(m) if m == &Memo::Empty => {
                 found_sent_empty_memo = true;
             }
-            Some(other) => panic!("Unexpected memo value: {:?}", other),
+            Some(other) => panic!("Unexpected memo value: {other:?}"),
             None => panic!("Memo should not be stored as NULL"),
         }
     }

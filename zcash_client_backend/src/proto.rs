@@ -272,7 +272,7 @@ impl service::TreeState {
             let sapling_tree_bytes = hex::decode(&self.sapling_tree).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("Hex decoding of Sapling tree bytes failed: {:?}", e),
+                    format!("Hex decoding of Sapling tree bytes failed: {e:?}"),
                 )
             })?;
             read_commitment_tree::<Node, _, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>(
@@ -293,7 +293,7 @@ impl service::TreeState {
             let orchard_tree_bytes = hex::decode(&self.orchard_tree).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("Hex decoding of Orchard tree bytes failed: {:?}", e),
+                    format!("Hex decoding of Orchard tree bytes failed: {e:?}"),
                 )
             })?;
             read_commitment_tree::<
@@ -311,7 +311,7 @@ impl service::TreeState {
         let mut hash_bytes = hex::decode(&self.hash).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("Block hash is not valid hex: {:?}", e),
+                format!("Block hash is not valid hex: {e:?}"),
             )
         })?;
         // Zcashd hex strings for block hashes are byte-reversed.
@@ -383,60 +383,52 @@ impl<E: Display> Display for ProposalDecodingError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ProposalDecodingError::NoSteps => write!(f, "The proposal had no steps."),
-            ProposalDecodingError::Zip321(err) => write!(f, "Transaction request invalid: {}", err),
+            ProposalDecodingError::Zip321(err) => write!(f, "Transaction request invalid: {err}"),
             ProposalDecodingError::NullInput(i) => {
-                write!(f, "Proposed input was null at index {}", i)
+                write!(f, "Proposed input was null at index {i}")
             }
             ProposalDecodingError::TxIdInvalid(err) => {
-                write!(f, "Invalid transaction id: {:?}", err)
+                write!(f, "Invalid transaction id: {err:?}")
             }
             ProposalDecodingError::ValuePoolNotSupported(id) => {
-                write!(f, "Invalid value pool identifier: {:?}", id)
+                write!(f, "Invalid value pool identifier: {id:?}")
             }
-            ProposalDecodingError::InputRetrieval(err) => write!(
-                f,
-                "An error occurred retrieving a transaction input: {}",
-                err
-            ),
-            ProposalDecodingError::InputNotFound(txid, pool, idx) => write!(
-                f,
-                "No {} input found for txid {}, index {}",
-                pool, txid, idx
-            ),
+            ProposalDecodingError::InputRetrieval(err) => {
+                write!(f, "An error occurred retrieving a transaction input: {err}")
+            }
+            ProposalDecodingError::InputNotFound(txid, pool, idx) => {
+                write!(f, "No {pool} input found for txid {txid}, index {idx}")
+            }
             ProposalDecodingError::BalanceInvalid => {
                 write!(f, "An error occurred decoding the proposal balance.")
             }
             ProposalDecodingError::MemoInvalid(err) => {
-                write!(f, "An error occurred decoding a proposed memo: {}", err)
+                write!(f, "An error occurred decoding a proposed memo: {err}")
             }
             ProposalDecodingError::VersionInvalid(v) => {
-                write!(f, "Unrecognized proposal version {}", v)
+                write!(f, "Unrecognized proposal version {v}")
             }
             ProposalDecodingError::FeeRuleNotSupported(r) => {
                 write!(
                     f,
-                    "Fee calculation using the {:?} fee rule is not supported.",
-                    r
+                    "Fee calculation using the {r:?} fee rule is not supported."
                 )
             }
-            ProposalDecodingError::ProposalInvalid(err) => write!(f, "{}", err),
+            ProposalDecodingError::ProposalInvalid(err) => write!(f, "{err}"),
             ProposalDecodingError::EmptyShieldedInputs(protocol) => write!(
                 f,
-                "An inputs field was present for {:?}, but contained no note references.",
-                protocol
+                "An inputs field was present for {protocol:?}, but contained no note references."
             ),
             ProposalDecodingError::TransparentMemo => {
                 write!(f, "Transparent outputs cannot have memos.")
             }
             ProposalDecodingError::InvalidChangeRecipient(pool_type) => write!(
                 f,
-                "Change outputs to the {} pool are not supported.",
-                pool_type
+                "Change outputs to the {pool_type} pool are not supported."
             ),
             ProposalDecodingError::InvalidEphemeralRecipient(pool_type) => write!(
                 f,
-                "Ephemeral outputs to the {} pool are not supported.",
-                pool_type
+                "Ephemeral outputs to the {pool_type} pool are not supported."
             ),
         }
     }

@@ -170,12 +170,12 @@ impl fmt::Display for HttpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             HttpError::NonHttpUrl => write!(f, "Only HTTP or HTTPS URLs are supported"),
-            HttpError::Http(e) => write!(f, "HTTP error: {}", e),
-            HttpError::Hyper(e) => write!(f, "Hyper error: {}", e),
-            HttpError::Json(e) => write!(f, "Failed to parse JSON: {}", e),
-            HttpError::Spawn(e) => write!(f, "Failed to spawn task: {}", e),
-            HttpError::Tls(e) => write!(f, "TLS error: {}", e),
-            HttpError::Unsuccessful(status) => write!(f, "Request was unsuccessful ({:?})", status),
+            HttpError::Http(e) => write!(f, "HTTP error: {e}"),
+            HttpError::Hyper(e) => write!(f, "Hyper error: {e}"),
+            HttpError::Json(e) => write!(f, "Failed to parse JSON: {e}"),
+            HttpError::Spawn(e) => write!(f, "Failed to spawn task: {e}"),
+            HttpError::Tls(e) => write!(f, "TLS error: {e}"),
+            HttpError::Unsuccessful(status) => write!(f, "Request was unsuccessful ({status:?})"),
         }
     }
 }

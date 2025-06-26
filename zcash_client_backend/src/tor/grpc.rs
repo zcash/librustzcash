@@ -86,7 +86,7 @@ pub enum GrpcError {
 impl fmt::Display for GrpcError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            GrpcError::Tonic(e) => write!(f, "Hyper error: {}", e),
+            GrpcError::Tonic(e) => write!(f, "Hyper error: {e}"),
         }
     }
 }

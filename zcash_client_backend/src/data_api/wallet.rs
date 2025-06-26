@@ -1712,8 +1712,7 @@ where
         .and_then(|v| {
             postcard::from_bytes::<ProposalInfo<DbT::AccountId>>(v).map_err(|e| {
                 PcztError::Invalid(format!(
-                    "Postcard decoding of proprietary proposal info failed: {}",
-                    e
+                    "Postcard decoding of proprietary proposal info failed: {e}"
                 ))
             })
         })?;
@@ -1746,7 +1745,7 @@ where
                 .as_deref()
                 .map(ZcashAddress::try_from_encoded)
                 .transpose()
-                .map_err(|e| PcztError::Invalid(format!("Invalid user_address: {}", e)))?;
+                .map_err(|e| PcztError::Invalid(format!("Invalid user_address: {e}")))?;
 
             let pczt_recipient = act
                 .output()
@@ -1756,8 +1755,7 @@ where
                 .transpose()
                 .map_err(|e: postcard::Error| {
                     PcztError::Invalid(format!(
-                        "Postcard decoding of proprietary output info failed: {}",
-                        e
+                        "Postcard decoding of proprietary output info failed: {e}"
                     ))
                 })?
                 .map(|pczt_recipient| (pczt_recipient, external_address));
@@ -1794,7 +1792,7 @@ where
                 .as_deref()
                 .map(ZcashAddress::try_from_encoded)
                 .transpose()
-                .map_err(|e| PcztError::Invalid(format!("Invalid user_address: {}", e)))?;
+                .map_err(|e| PcztError::Invalid(format!("Invalid user_address: {e}")))?;
 
             let pczt_recipient = out
                 .proprietary()
@@ -1803,8 +1801,7 @@ where
                 .transpose()
                 .map_err(|e: postcard::Error| {
                     PcztError::Invalid(format!(
-                        "Postcard decoding of proprietary output info failed: {}",
-                        e
+                        "Postcard decoding of proprietary output info failed: {e}"
                     ))
                 })?
                 .map(|pczt_recipient| (pczt_recipient, external_address));
@@ -1826,7 +1823,7 @@ where
                 .as_deref()
                 .map(ZcashAddress::try_from_encoded)
                 .transpose()
-                .map_err(|e| PcztError::Invalid(format!("Invalid user_address: {}", e)))?;
+                .map_err(|e| PcztError::Invalid(format!("Invalid user_address: {e}")))?;
 
             let pczt_recipient = out
                 .proprietary()
@@ -1835,8 +1832,7 @@ where
                 .transpose()
                 .map_err(|e: postcard::Error| {
                     PcztError::Invalid(format!(
-                        "Postcard decoding of proprietary output info failed: {}",
-                        e
+                        "Postcard decoding of proprietary output info failed: {e}"
                     ))
                 })?
                 .map(|pczt_recipient| (pczt_recipient, external_address));

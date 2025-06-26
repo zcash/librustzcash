@@ -286,7 +286,7 @@ impl fmt::Debug for Script {
                         }
                         l.entry(&opcode);
                     } else {
-                        let encoded = format!("{:02x}", b);
+                        let encoded = format!("{b:02x}");
                         if let Some(s) = &mut unknown {
                             s.push_str(&encoded);
                         } else {

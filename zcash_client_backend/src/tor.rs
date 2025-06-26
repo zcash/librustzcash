@@ -104,10 +104,10 @@ impl fmt::Display for Error {
         match self {
             Error::MissingTorDirectory => write!(f, "Tor directory is missing"),
             #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
-            Error::Grpc(e) => write!(f, "gRPC-over-Tor error: {}", e),
-            Error::Http(e) => write!(f, "HTTP-over-Tor error: {}", e),
-            Error::Io(e) => write!(f, "IO error: {}", e),
-            Error::Tor(e) => write!(f, "Tor error: {}", e),
+            Error::Grpc(e) => write!(f, "gRPC-over-Tor error: {e}"),
+            Error::Http(e) => write!(f, "HTTP-over-Tor error: {e}"),
+            Error::Io(e) => write!(f, "IO error: {e}"),
+            Error::Tor(e) => write!(f, "Tor error: {e}"),
         }
     }
 }

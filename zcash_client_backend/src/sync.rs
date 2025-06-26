@@ -564,19 +564,16 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::Cache(e) => write!(f, "Error while interacting with block cache: {}", e),
+            Error::Cache(e) => write!(f, "Error while interacting with block cache: {e}"),
             Error::MisbehavingServer => write!(f, "lightwalletd server is misbehaving"),
-            Error::Scan(e) => write!(f, "Error while scanning blocks: {}", e),
-            Error::Server(e) => write!(
-                f,
-                "Error while communicating with lightwalletd server: {}",
-                e
-            ),
-            Error::Wallet(e) => write!(f, "Error while interacting with wallet database: {}", e),
+            Error::Scan(e) => write!(f, "Error while scanning blocks: {e}"),
+            Error::Server(e) => {
+                write!(f, "Error while communicating with lightwalletd server: {e}")
+            }
+            Error::Wallet(e) => write!(f, "Error while interacting with wallet database: {e}"),
             Error::WalletTrees(e) => write!(
                 f,
-                "Error while interacting with wallet commitment trees: {}",
-                e
+                "Error while interacting with wallet commitment trees: {e}"
             ),
         }
     }

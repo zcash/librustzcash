@@ -183,7 +183,7 @@ mod tests {
                 assert!(ua.has_sapling());
                 assert_eq!(ua.has_transparent(), UA_TRANSPARENT == Require);
             }
-            other => panic!("Unexpected result from address decoding: {:?}", other),
+            other => panic!("Unexpected result from address decoding: {other:?}"),
         }
 
         assert_matches!(
@@ -201,7 +201,7 @@ mod tests {
                 assert!(ua.has_sapling());
                 assert_eq!(ua.has_transparent(), UA_TRANSPARENT == Require);
             }
-            other => panic!("Unexpected result from address decoding: {:?}", other),
+            other => panic!("Unexpected result from address decoding: {other:?}"),
         }
     }
 }
