@@ -7,6 +7,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Fixed
+- `TransactionDataRequest::GetStatus` requests for txids that do not
+  correspond to unexpired transactions in the transactions table are now
+  deleted from the status check queue when `set_transaction_status` is
+  called with a status of either `TxidNotRecognized` or `NotInMainChain`.
+
 ## [0.16.3] - 2025-06-12
 
 ### Fixed

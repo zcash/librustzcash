@@ -107,7 +107,7 @@ use zcash_keys::{
 use zcash_primitives::{
     block::BlockHash,
     merkle_tree::read_commitment_tree,
-    transaction::{Transaction, TransactionData},
+    transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, Transaction, TransactionData},
 };
 use zcash_protocol::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
@@ -123,7 +123,7 @@ use crate::{
     util::Clock,
     wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
     AccountRef, AccountUuid, AddressRef, SqlTransaction, TransferType, TxRef,
-    WalletCommitmentTrees, WalletDb, PRUNING_DEPTH, SAPLING_TABLES_PREFIX, VERIFY_LOOKAHEAD,
+    WalletCommitmentTrees, WalletDb, PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -2758,16 +2758,16 @@ pub(crate) fn set_transaction_status(
     // is whether that transaction ends up being mined or expires.
     match status {
         TransactionStatus::TxidNotRecognized | TransactionStatus::NotInMainChain => {
-            // If the transaction is now expired, remove it from the retrieval queue.
+            // Remove the txid from the retrieval queue unless an unexpired transaction having that
+            // txid exists in the transactions table.
             if let Some(chain_tip) = chain_tip_height(conn)? {
                 conn.execute(
-                    "DELETE FROM tx_retrieval_queue WHERE txid IN (
-                        SELECT txid FROM transactions
-                        WHERE txid = :txid AND expiry_height < :chain_tip_minus_lookahead
-                    )",
+                    "DELETE FROM tx_retrieval_queue
+                     WHERE txid = :txid
+                     AND request_expiry <= :chain_tip",
                     named_params![
                         ":txid": txid.as_ref(),
-                        ":chain_tip_minus_lookahead": u32::from(chain_tip).saturating_sub(VERIFY_LOOKAHEAD)
+                        ":chain_tip": u32::from(chain_tip)
                     ],
                 )?;
             }
@@ -3670,17 +3670,26 @@ pub(crate) fn queue_tx_retrieval(
     txids: impl Iterator<Item = TxId>,
     dependent_tx_ref: Option<TxRef>,
 ) -> Result<(), SqliteClientError> {
+    let chain_tip = chain_tip_height(conn)?;
+
+    let mut q_tx_expiry = conn.prepare_cached(
+        "SELECT expiry_height
+         FROM transactions
+         WHERE txid = :txid",
+    )?;
+
     // Add an entry to the transaction retrieval queue if it would not be redundant.
     let mut stmt_insert_tx = conn.prepare_cached(
-        "INSERT INTO tx_retrieval_queue (txid, query_type, dependent_transaction_id)
-            SELECT
+        "INSERT INTO tx_retrieval_queue (txid, query_type, dependent_transaction_id, request_expiry)
+         SELECT
             :txid,
             IIF(
                 EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL),
                 :status_type,
                 :enhancement_type
             ),
-            :dependent_transaction_id
+            :dependent_transaction_id,
+            :request_expiry
         ON CONFLICT (txid) DO UPDATE
         SET query_type =
             IIF(
@@ -3688,15 +3697,30 @@ pub(crate) fn queue_tx_retrieval(
                 :status_type,
                 :enhancement_type
             ),
-            dependent_transaction_id = IFNULL(:dependent_transaction_id, dependent_transaction_id)",
+            dependent_transaction_id = IFNULL(:dependent_transaction_id, dependent_transaction_id),
+            request_expiry = :request_expiry",
     )?;
 
     for txid in txids {
+        let request_expiry = q_tx_expiry
+            .query_row(
+                named_params! {
+                    ":txid": txid.as_ref(),
+                },
+                |row| row.get::<_, Option<u32>>(0),
+            )
+            .optional()?
+            .flatten();
+
         stmt_insert_tx.execute(named_params! {
             ":txid": txid.as_ref(),
             ":status_type": TxQueryType::Status.code(),
             ":enhancement_type": TxQueryType::Enhancement.code(),
             ":dependent_transaction_id": dependent_tx_ref.map(|r| r.0),
+            ":request_expiry": request_expiry.map_or_else(
+                || chain_tip.map(|h| u32::from(h) + DEFAULT_TX_EXPIRY_DELTA),
+                Some
+            )
         })?;
     }
 
