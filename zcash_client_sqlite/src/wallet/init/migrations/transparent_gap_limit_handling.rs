@@ -737,7 +737,9 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
 
         // At this point, we have completed updating the infrastructure for gap limit handling,
         // so we can regenerate the gap limit worth of addresses for each account that we
-        // recorded.
+        // recorded. The body of this method duplicates thje logic in `generate_gap_addresses`
+        // in order to avoid the `get_account_internal` call, since we already have the internal
+        // account id in each iteration of the loop.
         #[cfg(feature = "transparent-inputs")]
         for (account_id, (uivk, ufvk)) in account_ids {
             for key_scope in [KeyScope::EXTERNAL, KeyScope::INTERNAL] {

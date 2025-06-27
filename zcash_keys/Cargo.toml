@@ -34,7 +34,7 @@ rand_core.workspace = true
 bech32.workspace = true
 bs58.workspace = true
 core2.workspace = true
-regex.workspace = true
+regex = { workspace = true, optional = true }
 
 # - Transparent protocols
 bip32 = { workspace = true, optional = true }
@@ -116,7 +116,7 @@ unstable-frost = ["orchard"]
 unstable = ["dep:byteorder"]
 
 ## Exposes APIs that are useful for interacting with legacy zcashd key material
-zcashd-compat = ["dep:bip0039"]
+zcashd-compat = ["dep:bip0039", "dep:regex"]
 
 [badges]
 maintenance = { status = "actively-developed" }

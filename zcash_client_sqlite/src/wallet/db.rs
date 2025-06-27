@@ -18,9 +18,12 @@ use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
 
 use crate::wallet::scanning::priority_code;
 
-/// Stores information about the accounts that the wallet is tracking. An account corresponds to a
-/// logical "bucket of funds" that has its own balance within the wallets and for which spending
-/// operations should treat received value 4
+/// Stores information about the accounts that the wallet is tracking.
+///
+/// An account corresponds to a logical "bucket of funds" that has its own balance within the
+/// wallet and for which spending operations should treat received value as interchangeable,
+/// excepting situations where care must be taken to avoid publicly linking addresses within the
+/// account or where turnstile-crossings may have privacy implications.
 ///
 /// ### Columns
 ///
@@ -55,7 +58,12 @@ use crate::wallet::scanning::priority_code;
 ///   as of the start of the birthday block.
 /// - `birthday_orchard_tree_size`: A cache of the size of the Orchard note commitment tree
 ///   as of the start of the birthday block.
-/// - `recover_until_height`: The block height at which wallet recovery was initiated.
+/// - `recover_until_height`: The boundary between recovery and regular scanning for this account.
+///   Unscanned blocks up to and excluding this height are counted towards recovery progress. It
+///   is initially set via the `AccountBirthday` parameter of the `WalletWrite::import_account_*`
+///   methods (usually to the chain tip height at which account recovery was initiated), and may
+///   in future be automatically updated by the backend if the wallet is offline for an extended
+///   period (to keep the scan progress percentage accurate to what actually needs scanning).
 /// - `has_spend_key`: A boolean flag (0 or 1) indicating whether the application that embeds
 ///   this wallet database has access to spending key(s) for the account.
 /// - `zcash_legacy_address_index`: This column is only potentially populated for wallets imported

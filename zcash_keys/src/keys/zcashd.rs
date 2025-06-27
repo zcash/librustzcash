@@ -70,21 +70,38 @@ impl From<LegacyAddressIndex> for ChildIndex {
     }
 }
 
+/// An enumeration of the address derivation algorithm variants used by `zcashd`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ZcashdHdDerivation {
+    /// A unified account derived according to ZIP 32.
     Zip32 { account_id: AccountId },
+    /// The address was derived under a nonstandard path of the form:
+    ///
+    /// `m/32'/<coin_type>'/0x7FFFFFFF'/<address_index>'
     Post470LegacySapling { address_index: LegacyAddressIndex },
 }
 
 /// Errors that can occur in parsing the string representation of an HD key path.
 #[derive(Debug)]
 pub enum PathParseError {
+    /// The string did not match the format of the subset of HD derivation paths that are produced
+    /// by zcashd.
     PathInvalid,
+    /// The coin type component of the HD derivation path did match a supported zcashd coin type.
     CoinTypeInvalid(String),
+    /// The coin type component of the HD derivation did not match the coin type for the specified
+    /// network.
     CoinTypeMismatch { expected: u32, actual: u32 },
+    /// The account index component of the HD derivation path could not be parsed as a value in the
+    /// range of a `u32`.
     AccountIndexInvalid(String),
+    /// The account index component of the HD derivation path is not in the range of valid ZIP 32
+    /// account indices.
     AccountIdInvalid(u32),
+    /// The derivation path did not contain an address index component.
     AddressIndexMissing,
+    /// The address index component of the HD derivation path could not be parsed as a value in the
+    /// range of valid ZIP 32 address indices.
     AddressIndexInvalid(String),
 }
 
@@ -140,6 +157,9 @@ impl ZcashdHdDerivation {
             }?;
             Ok(ZcashdHdDerivation::Post470LegacySapling { address_index })
         } else {
+            if parts.len() != 3 {
+                return Err(PathParseError::PathInvalid);
+            }
             let account_id = AccountId::try_from(account_index)
                 .map_err(|_| PathParseError::AccountIdInvalid(account_index))?;
             Ok(ZcashdHdDerivation::Zip32 { account_id })
