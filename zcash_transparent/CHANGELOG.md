@@ -12,8 +12,15 @@ workspace.
 
 ## [0.3.0] - PLANNED
 
+### Added
+- `zcash_transparent::address::TransparentAddress::from_pubkey`
+
 ### Changed
 - Migrated to `zcash_address 0.8`.
+
+### Removed
+- Removed deprecated method `zcash_transparent::keys::pubkey_to_address`;
+  use `zcash_transparent::address::TransparentAddress::from_pubkey` instead.
 
 ## [0.2.3] - 2025-04-04
 

@@ -11,7 +11,6 @@ use {
     alloc::vec::Vec,
     bip32::{ExtendedKey, ExtendedKeyAttrs, ExtendedPrivateKey, ExtendedPublicKey, Prefix},
     secp256k1::PublicKey,
-    sha2::{Digest, Sha256},
     zcash_protocol::consensus::{self, NetworkConstants},
     zcash_spec::PrfExpand,
     zip32::AccountId,
@@ -433,15 +432,6 @@ impl AccountPubKey {
     }
 }
 
-/// Derives the P2PKH transparent address corresponding to the given pubkey.
-#[cfg(feature = "transparent-inputs")]
-#[deprecated(note = "This function will be removed from the public API in an upcoming refactor.")]
-pub fn pubkey_to_address(pubkey: &secp256k1::PublicKey) -> TransparentAddress {
-    TransparentAddress::PublicKeyHash(
-        *ripemd::Ripemd160::digest(Sha256::digest(pubkey.serialize())).as_ref(),
-    )
-}
-
 #[cfg(feature = "transparent-inputs")]
 pub(crate) mod private {
     use super::TransparentKeyScope;
@@ -478,7 +468,7 @@ pub trait IncomingViewingKey: private::SealedChangeLevelKey + core::marker::Size
         address_index: NonHardenedChildIndex,
     ) -> Result<TransparentAddress, bip32::Error> {
         let child_key = self.extended_pubkey().derive_child(address_index.into())?;
-        Ok(pubkey_to_address(child_key.public_key()))
+        Ok(TransparentAddress::from_pubkey(child_key.public_key()))
     }
 
     /// Searches the space of child indexes for an index that will
@@ -595,7 +585,7 @@ impl EphemeralIvk {
     ) -> Result<TransparentAddress, bip32::Error> {
         let child_key = self.0.derive_child(address_index.into())?;
         #[allow(deprecated)]
-        Ok(pubkey_to_address(child_key.public_key()))
+        Ok(TransparentAddress::from_pubkey(child_key.public_key()))
     }
 }
 
@@ -627,7 +617,6 @@ mod tests {
     use super::AccountPubKey;
     use super::NonHardenedChildIndex;
     #[allow(deprecated)]
-    use crate::keys::pubkey_to_address;
     use crate::{
         address::TransparentAddress,
         keys::{AccountPrivKey, IncomingViewingKey, TransparentKeyScope},
@@ -654,7 +643,8 @@ mod tests {
             let address_pubkey = account_pubkey
                 .derive_address_pubkey(TransparentKeyScope::EXTERNAL, address_index)
                 .unwrap();
-            assert_eq!(pubkey_to_address(&address_pubkey), address);
+            #[cfg(feature = "transparent-inputs")]
+            assert_eq!(TransparentAddress::from_pubkey(&address_pubkey), address);
 
             let expected_path = [
                 ChildNumber::new(44, true).unwrap(),
@@ -727,7 +717,12 @@ mod tests {
             // The test vectors are broken here: they should be deriving an address at the
             // address level, but instead use the account pubkey as an address.
             let address = TransparentAddress::PublicKeyHash(tv.address);
-            assert_eq!(pubkey_to_address(account_pubkey.0.public_key()), address);
+
+            #[cfg(feature = "transparent-inputs")]
+            assert_eq!(
+                TransparentAddress::from_pubkey(account_pubkey.0.public_key()),
+                address
+            );
         }
     }
 

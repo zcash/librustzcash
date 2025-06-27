@@ -79,6 +79,9 @@ pub mod sapling {
     }
 }
 
+#[cfg(feature = "zcashd-compat")]
+pub mod zcashd;
+
 #[cfg(feature = "transparent-inputs")]
 fn to_transparent_child_index(j: DiversifierIndex) -> Option<NonHardenedChildIndex> {
     let (low_4_bytes, rest) = j.as_bytes().split_at(4);

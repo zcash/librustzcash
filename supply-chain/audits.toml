@@ -45,6 +45,15 @@ who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "1.2.0 -> 1.3.0"
 
+[[audits.bip0039]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+version = "0.12.0"
+notes = """
+Crate contains no unsafe code.
+Crate has no powerful imports.
+"""
+
 [[audits.bip32]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -371,6 +380,21 @@ delta = "0.12.2 -> 0.12.3"
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-run"
 delta = "0.9.9 -> 0.9.10"
+
+[[audits.password-hash]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+version = "0.5.0"
+notes = """
+- Crate contains no unsafe code and sets `#![forbid(unsafe_code)]`. 
+- Crate consists primarily of data types and traits for safe construction of bounded password hashes with support for base64 encoding.
+"""
+
+[[audits.pbkdf2]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+version = "0.12.2"
+notes = "Crate contains no unsafe code. I have not audited the pbkdf2 algorithm implementation for correctness."
 
 [[audits.pczt]]
 who = "Kris Nuttycombe <kris@nutty.land>"
