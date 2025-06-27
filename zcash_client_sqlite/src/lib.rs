@@ -892,18 +892,20 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         &self,
         account: Self::AccountId,
         include_change: bool,
+        include_standalone: bool,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
-        let key_scopes: &[KeyScope] = if include_change {
-            &[KeyScope::EXTERNAL, KeyScope::INTERNAL]
-        } else {
-            &[KeyScope::EXTERNAL]
-        };
+        let key_scopes = Some(KeyScope::EXTERNAL)
+            .iter()
+            .chain(include_change.then_some(KeyScope::INTERNAL).iter())
+            .chain(include_standalone.then_some(KeyScope::Foreign).iter())
+            .copied()
+            .collect::<Vec<_>>();
 
         wallet::transparent::get_transparent_receivers(
             self.conn.borrow(),
             &self.params,
             account,
-            key_scopes,
+            &key_scopes[..],
         )
     }
 
@@ -1246,6 +1248,17 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R>
                 #[cfg(feature = "transparent-inputs")]
                 &wdb.gap_limits,
             )
+        })
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        account: Self::AccountId,
+        pubkey: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| {
+            wallet::import_standalone_transparent_pubkey(wdb.conn.0, wdb.params, account, pubkey)
         })
     }
 
@@ -2770,7 +2783,7 @@ mod tests {
 
         let receivers = st
             .wallet()
-            .get_transparent_receivers(account.id(), false)
+            .get_transparent_receivers(account.id(), false, true)
             .unwrap();
 
         // The receiver for the default UA should be in the set.
