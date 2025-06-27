@@ -2,7 +2,7 @@
 //! `ephemeral_addresses` tables.
 
 use rand_core::RngCore;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Mutex;
 use uuid::Uuid;
@@ -11,7 +11,7 @@ use rusqlite::{named_params, Transaction};
 use schemerz_rusqlite::RusqliteMigration;
 
 use zcash_address::ZcashAddress;
-use zcash_keys::keys::{UnifiedAddressRequest, UnifiedIncomingViewingKey};
+use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey};
 use zcash_protocol::consensus::{self, BlockHeight};
 
 use super::add_account_uuids;
@@ -26,7 +26,7 @@ use {
     crate::{
         wallet::{
             encoding::{decode_diversifier_index_be, encode_diversifier_index_be, epoch_seconds},
-            transparent::{generate_address_range, generate_gap_addresses, next_check_time},
+            transparent::{find_gap_start, generate_address_range_internal, next_check_time},
         },
         GapLimits,
     },
@@ -60,6 +60,30 @@ impl<P, C, R> schemerz::Migration<Uuid> for Migration<P, C, R> {
     }
 }
 
+fn decode_uivk<P: consensus::Parameters>(
+    params: &P,
+    uivk_str: String,
+) -> Result<UnifiedIncomingViewingKey, WalletMigrationError> {
+    UnifiedIncomingViewingKey::decode(params, &uivk_str).map_err(|e| {
+        WalletMigrationError::CorruptedData(format!("Invalid UIVK encoding {uivk_str}: {e}"))
+    })
+}
+
+fn decode_ufvk<P: consensus::Parameters>(
+    params: &P,
+    ufvk_str: Option<String>,
+) -> Result<Option<UnifiedFullViewingKey>, WalletMigrationError> {
+    ufvk_str
+        .map(|ufvk_str| {
+            UnifiedFullViewingKey::decode(params, &ufvk_str).map_err(|e| {
+                WalletMigrationError::CorruptedData(format!(
+                    "Invalid UFVK encoding {ufvk_str}: {e}"
+                ))
+            })
+        })
+        .transpose()
+}
+
 // For each account, ensure that all diversifier indexes prior to that for the default
 // address have corresponding cached transparent addresses.
 #[cfg(feature = "transparent-inputs")]
@@ -70,6 +94,8 @@ pub(super) fn insert_initial_transparent_addrs<P: consensus::Parameters>(
     let mut min_addr_diversifiers = conn.prepare(
         r#"
         SELECT accounts.id AS account_id,
+               accounts.uivk,
+               accounts.ufvk,
                MIN(addresses.transparent_child_index) AS transparent_child_index,
                MIN(addresses.diversifier_index_be) AS diversifier_index_be
         FROM accounts
@@ -85,6 +111,8 @@ pub(super) fn insert_initial_transparent_addrs<P: consensus::Parameters>(
     ])?;
     while let Some(row) = min_addr_rows.next()? {
         let account_id = AccountRef(row.get("account_id")?);
+        let uivk = decode_uivk(params, row.get("uivk")?)?;
+        let ufvk = decode_ufvk(params, row.get::<_, Option<String>>("ufvk")?)?;
 
         let min_transparent_idx = row
             .get::<_, Option<u32>>("transparent_child_index")?
@@ -117,10 +145,12 @@ pub(super) fn insert_initial_transparent_addrs<P: consensus::Parameters>(
                 .expect("default external gap limit fits in non-hardened child index space."),
         );
 
-        generate_address_range(
+        generate_address_range_internal(
             conn,
             params,
             account_id,
+            &uivk,
+            ufvk.as_ref(),
             KeyScope::EXTERNAL,
             UnifiedAddressRequest::ALLOW_ALL,
             start..end,
@@ -135,14 +165,6 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
     type Error = WalletMigrationError;
 
     fn up(&self, conn: &Transaction) -> Result<(), WalletMigrationError> {
-        let decode_uivk = |uivk_str: String| {
-            UnifiedIncomingViewingKey::decode(&self.params, &uivk_str).map_err(|e| {
-                WalletMigrationError::CorruptedData(format!(
-                    "Invalid UIVK encoding {uivk_str}: {e}"
-                ))
-            })
-        };
-
         let external_scope_code = KeyScope::EXTERNAL.encode();
 
         conn.execute_batch(&format!(
@@ -154,7 +176,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
             "#
         ))?;
 
-        let mut account_ids = HashSet::new();
+        let mut account_ids = HashMap::new();
 
         {
             // If the diversifier index is in the valid range of non-hardened child indices, set
@@ -167,6 +189,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                     account_id,
                     address,
                     accounts.uivk AS uivk,
+                    accounts.ufvk AS ufvk,
                     diversifier_index_be,
                     accounts.birthday_height
                 FROM addresses
@@ -175,8 +198,10 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
             )?;
             let mut rows = di_query.query([])?;
             while let Some(row) = rows.next()? {
-                let account_id: i64 = row.get("account_id")?;
-                account_ids.insert(account_id);
+                let account_id = AccountRef(row.get("account_id")?);
+                let uivk = decode_uivk(&self.params, row.get("uivk")?)?;
+                let ufvk = decode_ufvk(&self.params, row.get("ufvk")?)?;
+                account_ids.insert(account_id, (uivk.clone(), ufvk));
 
                 let addr_str: String = row.get("address")?;
                 let address = ZcashAddress::try_from_encoded(&addr_str).map_err(|e| {
@@ -200,7 +225,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                         AND diversifier_index_be = :diversifier_index_be
                         "#,
                         named_params! {
-                            ":account_id": account_id,
+                            ":account_id": account_id.0,
                             ":diversifier_index_be": &di_be[..],
                             ":account_birthday": account_birthday,
                             ":receiver_flags": receiver_flags.bits(),
@@ -210,7 +235,6 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
 
                 #[cfg(feature = "transparent-inputs")]
                 {
-                    let uivk = decode_uivk(row.get("uivk")?)?;
                     let diversifier_index = decode_diversifier_index_be(&di_be)?;
                     let transparent_external = NonHardenedChildIndex::try_from(diversifier_index)
                         .ok()
@@ -239,7 +263,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                             AND diversifier_index_be = :diversifier_index_be
                             "#,
                             named_params! {
-                                ":account_id": account_id,
+                                ":account_id": account_id.0,
                                 ":diversifier_index_be": &di_be[..],
                                 ":transparent_child_index": idx.index(),
                                 ":t_addr": t_addr,
@@ -319,9 +343,10 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
             let mut ea_query = conn.prepare(
                 r#"
                 SELECT
-                    account_id, address_index, address,
+                    account_id, accounts.uivk, accounts.ufvk, address_index, address,
                     t.expiry_height - :expiry_delta AS exposed_at_height
                 FROM ephemeral_addresses ea
+                JOIN accounts ON accounts.id = account_id
                 LEFT OUTER JOIN transactions t ON t.id_tx = ea.used_in_tx
                 "#,
             )?;
@@ -329,7 +354,9 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                 .query_and_then(
                     named_params! {":expiry_delta": DEFAULT_TX_EXPIRY_DELTA },
                     |row| {
-                        let account_id: i64 = row.get("account_id")?;
+                        let account_id = AccountRef(row.get("account_id")?);
+                        let uivk = decode_uivk(&self.params, row.get("uivk")?)?;
+                        let ufvk = decode_ufvk(&self.params, row.get("ufvk")?)?;
                         let transparent_child_index = row.get::<_, i64>("address_index")?;
                         let diversifier_index = DiversifierIndex::from(
                             u32::try_from(transparent_child_index)
@@ -345,6 +372,8 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                         let exposed_at_height: Option<i64> = row.get("exposed_at_height")?;
                         Ok((
                             account_id,
+                            uivk,
+                            ufvk,
                             diversifier_index,
                             transparent_child_index,
                             address,
@@ -359,6 +388,8 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
             let mut check_time = self._clock.now();
             for (
                 account_id,
+                uivk,
+                ufvk,
                 diversifier_index,
                 transparent_child_index,
                 address,
@@ -383,7 +414,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                 // column to the same value here; there is no Unified address that corresponds to
                 // this transparent address.
                 ea_insert.execute(named_params! {
-                    ":account_id": account_id,
+                    ":account_id": account_id.0,
                     ":key_scope": KeyScope::Ephemeral.encode(),
                     ":diversifier_index_be": encode_diversifier_index_be(diversifier_index),
                     ":address": address,
@@ -394,7 +425,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                     ":transparent_receiver_next_check_time": next_check_epoch_seconds
                 })?;
 
-                account_ids.insert(account_id);
+                account_ids.insert(account_id, (uivk, ufvk));
                 check_time = next_check_time;
             }
         }
@@ -474,7 +505,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                         .get::<_, Option<u32>>("mined_height")?
                         .map(BlockHeight::from);
 
-                    let uivk = decode_uivk(row.get("uivk")?)?;
+                    let uivk = decode_uivk(&self.params, row.get("uivk")?)?;
                     let diversifier =
                         orchard::keys::Diversifier::from_bytes(row.get("diversifier")?);
 
@@ -536,7 +567,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                         .get::<_, Option<u32>>("mined_height")?
                         .map(BlockHeight::from);
 
-                    let uivk = decode_uivk(row.get("uivk")?)?;
+                    let uivk = decode_uivk(&self.params, row.get("uivk")?)?;
                     let diversifier = sapling::Diversifier(row.get("diversifier")?);
 
                     // TODO: It's annoying that `IncomingViewingKey` doesn't expose the ability to
@@ -706,20 +737,34 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
 
         // At this point, we have completed updating the infrastructure for gap limit handling,
         // so we can regenerate the gap limit worth of addresses for each account that we
-        // recorded.
+        // recorded. The body of this method duplicates thje logic in `generate_gap_addresses`
+        // in order to avoid the `get_account_internal` call, since we already have the internal
+        // account id in each iteration of the loop.
         #[cfg(feature = "transparent-inputs")]
-        for account_id in account_ids {
+        for (account_id, (uivk, ufvk)) in account_ids {
             for key_scope in [KeyScope::EXTERNAL, KeyScope::INTERNAL] {
                 use ReceiverRequirement::*;
-                generate_gap_addresses(
-                    conn,
-                    &self.params,
-                    AccountRef(account_id),
-                    key_scope,
-                    &GapLimits::default(),
-                    UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
-                    false,
-                )?;
+                let gap_limit = match key_scope {
+                    KeyScope::Zip32(zip32::Scope::External) => GapLimits::default().external(),
+                    KeyScope::Zip32(zip32::Scope::Internal) => GapLimits::default().internal(),
+                    KeyScope::Ephemeral => {
+                        unreachable!("Ephemeral keys are omitted by the enclosing context.")
+                    }
+                };
+
+                if let Some(gap_start) = find_gap_start(conn, account_id, key_scope, gap_limit)? {
+                    generate_address_range_internal(
+                        conn,
+                        &self.params,
+                        account_id,
+                        &uivk,
+                        ufvk.as_ref(),
+                        key_scope,
+                        UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+                        gap_start..gap_start.saturating_add(gap_limit),
+                        false,
+                    )?;
+                }
             }
         }
 

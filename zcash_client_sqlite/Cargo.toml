@@ -132,6 +132,12 @@ transparent-inputs = [
   "zcash_client_backend/transparent-inputs"
 ]
 
+## Enables import from legacy zcashd wallet.dat wallets.
+zcashd-compat = [
+  "zcash_keys/zcashd-compat",
+  "zcash_client_backend/zcashd-compat"
+]
+
 ## Enables `serde` derives for certain types.
 serde = ["dep:serde", "uuid/serde"]
 
