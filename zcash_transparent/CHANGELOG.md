@@ -49,6 +49,7 @@ workspace.
     - `TransparentBuilder::{add_null_data_output, build_coinbase}`
     - `Bundle<Unauthorized>::prepare_transparent_signatures` to initialize the signing context.
     - `TransparentSignatureContext` struct for staged application of external signatures.
+    - `std::error::Error for Error`
   - `bundle`:
     - `Outpoint::null`
     - `TxIn::from_parts`
