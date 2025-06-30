@@ -18,6 +18,7 @@ workspace.
     - `impl MapAuth<Coinbase, Authorized> for Coinbase`
     - `impl TransparentAuthorizingContext for Coinbase`
     - `TransparentBuilder::build_coinbase`
+    - `std::error::Error for Error`
   - `bundle`:
     - `Outpoint::null`
     - `TxIn::<builder::Coinbase>::coinbase`
