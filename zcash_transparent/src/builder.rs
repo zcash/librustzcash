@@ -99,6 +99,9 @@ impl fmt::Display for Error {
     }
 }
 
+#[cfg(feature = "std")]
+impl std::error::Error for Error {}
+
 /// A set of transparent signing keys.
 ///
 /// When the `transparent-inputs` feature flag is enabled, transparent signing keys can be
