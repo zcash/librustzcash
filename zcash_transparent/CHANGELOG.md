@@ -21,6 +21,7 @@ workspace.
     - `impl TransparentAuthorizingContext for Coinbase`
     - `impl MapAuth<Coinbase, Authorized> for Coinbase`
     - `TransparentBuilder::build_coinbase`
+    - `std::error::Error for Error`
   - `coinbase`:
     - `MAX_COINBASE_SCRIPT_LEN`
     - `MIN_COINBASE_SCRIPT_LEN`
