@@ -6,6 +6,9 @@
 
 #![no_std]
 
+#[cfg(feature = "std")]
+extern crate std;
+
 pub mod address;
 pub mod builder;
 pub mod bundle;
