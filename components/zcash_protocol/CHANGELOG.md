@@ -10,6 +10,7 @@ workspace.
 
 ## [Unreleased]
 ### Added
+- `zcash_protocol::constants::`
   - `{mainnet, testnet, regtest}::B58_SECRET_KEY_PREFIX`
 
 ### Changed

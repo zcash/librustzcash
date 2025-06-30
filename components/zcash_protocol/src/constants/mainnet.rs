@@ -45,12 +45,12 @@ pub const B58_SECRET_KEY_PREFIX: [u8; 1] = [0x80];
 
 /// The prefix for a Base58Check-encoded mainnet [`PublicKeyHash`].
 ///
-/// [`PublicKeyHash`]: https://docs.rs/zcash_transparent/latest/address/enum.TransparentAddress.html
+/// [`PublicKeyHash`]: https://docs.rs/zcash_transparent/latest/zcash_transparent/address/enum.TransparentAddress.html
 pub const B58_PUBKEY_ADDRESS_PREFIX: [u8; 2] = [0x1c, 0xb8];
 
 /// The prefix for a Base58Check-encoded mainnet [`ScriptHash`].
 ///
-/// [`ScriptHash`]: https://docs.rs/zcash_transparent/latest/address/enum.TransparentAddress.html
+/// [`ScriptHash`]: https://docs.rs/zcash_transparent/latest/zcash_transparent/address/enum.TransparentAddress.html
 pub const B58_SCRIPT_ADDRESS_PREFIX: [u8; 2] = [0x1c, 0xbd];
 
 /// The HRP for a Bech32m-encoded mainnet [ZIP 320] TEX address.

@@ -60,9 +60,9 @@ impl Key {
         );
         let prefix = network.b58_secret_key_prefix();
         let decoded_len = decoded.expose_secret().len();
-        let compressed = decoded_len == (33 + prefix.len());
-        if (decoded_len == 32 + prefix.len()
-            || (compressed && decoded.expose_secret().last() == Some(&1)))
+        let compressed =
+            decoded_len == (33 + prefix.len()) && decoded.expose_secret().last() == Some(&1);
+        if (decoded_len == 32 + prefix.len() || compressed)
             && decoded.expose_secret()[0..prefix.len()] == prefix
         {
             let key_end = decoded_len - if compressed { 1 } else { 0 };
@@ -76,7 +76,7 @@ impl Key {
         }
     }
 
-    /// Decodes a base58-encoded secret key.
+    /// Encodes a base58-encoded secret key.
     ///
     /// This corresponds to <https://github.com/zcash/zcash/blob/1f1f7a385adc048154e7f25a3a0de76f3658ca09/src/key_io.cpp#L298>
     pub fn encode_base58<N: NetworkConstants>(&self, network: &N) -> SecretString {
@@ -85,7 +85,7 @@ impl Key {
                 .b58_secret_key_prefix()
                 .iter()
                 .chain(self.secret.secret_bytes().iter())
-                .chain(if self.compressed { &[1] } else { &[0] })
+                .chain(self.compressed.then_some(&1))
                 .copied()
                 .collect(),
         );
@@ -98,8 +98,8 @@ impl Key {
     }
 
     /// Returns the wrapped secp256k1 secret key.
-    pub fn secret(&self) -> SecretKey {
-        self.secret
+    pub fn secret(&self) -> &SecretKey {
+        &self.secret
     }
 
     /// Returns the value of the compressed flag.
@@ -273,7 +273,7 @@ impl Key {
         //        return 0;
         //    }
         //    seckey += 3;
-        if seckey.len() < 3 || seckey[0] != 0x02 || seckey[1] != 0x01 || seckey[2] != 0x01 {
+        if seckey.len() < 3 || &seckey[..3] != &[0x02, 0x01, 0x01] {
             return Err(());
         }
         let seckey = &seckey[3..];
