@@ -11,6 +11,7 @@ use secrecy::{ExposeSecret, SecretString, SecretVec, Zeroize};
 use zcash_protocol::consensus::NetworkConstants;
 
 /// Errors that can occur in the parsing of Bitcoin-style base58-encoded secret key material
+#[derive(Debug)]
 pub enum ParseError {
     /// The data being decoded had an incorrect length.
     LengthInvalid,
@@ -314,13 +315,22 @@ impl Key {
     }
 }
 
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod test_vectors;
+
 #[cfg(test)]
 mod tests {
     use rand::{Rng, SeedableRng as _};
     use rand_chacha::ChaChaRng;
     use secp256k1::{Secp256k1, SecretKey};
+    use secrecy::SecretString;
+    use transparent::address::TransparentAddress;
+    use zcash_protocol::consensus::NetworkType;
 
-    use super::Key;
+    use super::{
+        test_vectors::{VectorKind, INVALID, VALID},
+        Key,
+    };
 
     #[test]
     fn der_encoding_roundtrip() {
@@ -335,6 +345,59 @@ mod tests {
             let decoded = Key::der_decode(&encoded, compressed).unwrap();
 
             assert_eq!(key.secret(), decoded.secret());
+        }
+    }
+
+    /// Checks that parsed keys match test payload.
+    #[test]
+    fn base58_keys_valid_parse() {
+        for v in VALID {
+            match v.kind {
+                VectorKind::Privkey { is_compressed } => {
+                    // Must be valid private key
+                    let secret = &SecretString::new(v.base58_encoding.into());
+                    let privkey = Key::decode_base58(&v.network, secret).unwrap();
+                    assert_eq!(privkey.compressed, is_compressed);
+                    assert_eq!(hex::encode(privkey.secret.as_ref()), v.raw_bytes_hex);
+
+                    // Private key must be invalid public key
+                    assert_eq!(
+                        zcash_address::ZcashAddress::try_from_encoded(v.base58_encoding),
+                        Err(zcash_address::ParseError::NotZcash),
+                    );
+                }
+                VectorKind::Pubkey => {
+                    // Must be valid public key
+                    let destination: TransparentAddress =
+                        zcash_address::ZcashAddress::try_from_encoded(v.base58_encoding)
+                            .unwrap()
+                            .convert_if_network(v.network)
+                            .unwrap();
+                    let script = destination.script();
+                    assert_eq!(hex::encode(&script.0), v.raw_bytes_hex);
+
+                    // Public key must be invalid private key
+                    assert!(Key::decode_base58(
+                        &v.network,
+                        &SecretString::new(v.base58_encoding.into())
+                    )
+                    .is_err());
+                }
+            }
+        }
+    }
+
+    /// Checks that Base58 key parsing code is robust against a variety of corrupted data.
+    #[test]
+    fn base58_keys_invalid() {
+        for &encoded in INVALID {
+            assert!(
+                Key::decode_base58(&NetworkType::Main, &SecretString::new(encoded.into())).is_err()
+            );
+            assert_eq!(
+                zcash_address::ZcashAddress::try_from_encoded(encoded),
+                Err(zcash_address::ParseError::NotZcash),
+            );
         }
     }
 }
