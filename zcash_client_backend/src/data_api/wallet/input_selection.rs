@@ -1,18 +1,22 @@
 //! Types related to the process of selecting inputs to be spent given a transaction request.
-
+use ::transparent::bundle::TxOut;
 use core::marker::PhantomData;
+use nonempty::NonEmpty;
 use std::{
     collections::BTreeMap,
     error,
     fmt::{self, Debug, Display},
 };
-
-use ::transparent::bundle::TxOut;
-use nonempty::NonEmpty;
-use zcash_address::ConversionError;
+use zcash_address::{ConversionError, ZcashAddress};
 use zcash_keys::address::{Address, UnifiedAddress};
+use zcash_primitives::transaction::fees::{
+    transparent::InputSize,
+    zip317::{P2PKH_STANDARD_INPUT_SIZE, P2PKH_STANDARD_OUTPUT_SIZE},
+    FeeRule,
+};
 use zcash_protocol::{
     consensus::{self, BlockHeight},
+    memo::MemoBytes,
     value::{BalanceError, Zatoshis},
     PoolType, ShieldedProtocol,
 };
@@ -181,6 +185,37 @@ pub trait InputSelector {
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
+    ) -> Result<
+        Proposal<<ChangeT as ChangeStrategy>::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
+        InputSelectorError<
+            <Self::InputSource as InputSource>::Error,
+            Self::Error,
+            ChangeT::Error,
+            <Self::InputSource as InputSource>::NoteRef,
+        >,
+    >
+    where
+        ParamsT: consensus::Parameters,
+        ChangeT: ChangeStrategy<MetaSource = Self::InputSource>;
+
+    /// Performs input selection and returns a proposal for the construction of a transaction
+    /// that sends the maximum amount possible from a given account to the specified recipient
+    /// ignoring notes that are below MARGINAL_FEE amount. This transaction will use all the
+    /// funds available minus the resulting fees that will vary depending on the `change_strategy`
+    /// used.
+    #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
+    fn propose_send_max<ParamsT, ChangeT>(
+        &self,
+        params: &ParamsT,
+        wallet_db: &Self::InputSource,
+        change_strategy: &ChangeT,
+        source_account: <Self::InputSource as InputSource>::AccountId,
+        spend_pool: &[ShieldedProtocol],
+        anchor_height: BlockHeight,
+        target_height: BlockHeight,
+        recipient: ZcashAddress,
+        memo: Option<MemoBytes>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
         InputSelectorError<
@@ -763,6 +798,165 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 prior_available = new_available;
             }
         }
+    }
+
+    fn propose_send_max<ParamsT, ChangeT>(
+        &self,
+        params: &ParamsT,
+        wallet_db: &Self::InputSource,
+        change_strategy: &ChangeT,
+        source_account: <Self::InputSource as InputSource>::AccountId,
+        spend_pools: &[ShieldedProtocol],
+        anchor_height: BlockHeight,
+        target_height: BlockHeight,
+        recipient: ZcashAddress,
+        memo: Option<MemoBytes>,
+    ) -> Result<
+        Proposal<<ChangeT as ChangeStrategy>::FeeRule, DbT::NoteRef>,
+        InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, DbT::NoteRef>,
+    >
+    where
+        ParamsT: consensus::Parameters,
+        Self::InputSource: InputSource,
+        ChangeT: ChangeStrategy<MetaSource = DbT>,
+    {
+        let spendable_notes = wallet_db
+            .select_spendable_notes(
+                source_account,
+                TargetValue::MaxSpendable,
+                spend_pools,
+                anchor_height,
+                &[],
+            )
+            .map_err(InputSelectorError::DataSource)?;
+
+        let input_total = spendable_notes.total();
+
+        #[cfg(feature = "orchard")]
+        let (spends_sapling, spends_orchard) = (
+            !spendable_notes.sapling().is_empty(),
+            !spendable_notes.orchard().is_empty(),
+        );
+        #[cfg(not(feature = "orchard"))]
+        let (spends_sapling, spends_orchard) = (!spendable_notes.sapling().is_empty(), false);
+
+        let requested_sapling_outputs: usize = if spends_sapling { 2 } else { 0 };
+
+        let requested_orchard_actions: usize = if spends_orchard { 2 } else { 0 };
+        let sapling_output_count = ::sapling::builder::BundleType::DEFAULT
+            .num_outputs(spendable_notes.sapling.len(), requested_sapling_outputs)
+            .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?;
+
+        #[cfg(feature = "orchard")]
+        let orchard_output_count = orchard::builder::BundleType::DEFAULT
+            .num_actions(spendable_notes.orchard.len(), requested_orchard_actions)
+            .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?;
+
+        #[cfg(not(feature = "orchard"))]
+        let orchard_output_count: usize = requested_orchard_actions;
+
+        let fee_required = match recipient
+            .clone()
+            .convert_if_network(params.network_type())?
+        {
+            Address::Sapling(_) => change_strategy.fee_rule().fee_required(
+                params,
+                target_height,
+                [],
+                [],
+                spendable_notes.sapling().len(),
+                sapling_output_count,
+                orchard_output_count,
+            ),
+            Address::Transparent(_) => change_strategy.fee_rule().fee_required(
+                params,
+                target_height,
+                [],
+                [P2PKH_STANDARD_OUTPUT_SIZE],
+                spendable_notes.sapling().len(),
+                sapling_output_count,
+                orchard_output_count,
+            ),
+            Address::Unified(addr) => {
+                if addr.has_orchard() || addr.has_sapling() {
+                    change_strategy.fee_rule().fee_required(
+                        params,
+                        target_height,
+                        [],
+                        [],
+                        spendable_notes.sapling().len(),
+                        sapling_output_count,
+                        orchard_output_count,
+                    )
+                } else if addr.has_transparent() {
+                    change_strategy.fee_rule().fee_required(
+                        params,
+                        target_height,
+                        [],
+                        [P2PKH_STANDARD_OUTPUT_SIZE],
+                        spendable_notes.sapling().len(),
+                        sapling_output_count,
+                        orchard_output_count,
+                    )
+                } else {
+                    unreachable!()
+                }
+            }
+            Address::Tex(_) => change_strategy
+                .fee_rule()
+                .fee_required(
+                    params,
+                    target_height,
+                    [],
+                    [P2PKH_STANDARD_OUTPUT_SIZE],
+                    spendable_notes.sapling().len(),
+                    sapling_output_count,
+                    orchard_output_count,
+                )
+                .and_then(|t0_fee| {
+                    let t1_fee = change_strategy.fee_rule().fee_required(
+                        params,
+                        target_height,
+                        [InputSize::Known(P2PKH_STANDARD_INPUT_SIZE)],
+                        [P2PKH_STANDARD_OUTPUT_SIZE],
+                        0,
+                        0,
+                        0,
+                    )?;
+
+                    Ok((t0_fee + t1_fee).expect("fee is in range of valid Zatoshis values"))
+                }),
+        }
+        .map_err(|fee_error| {
+            InputSelectorError::Change(ChangeError::StrategyError(ChangeT::Error::from(fee_error)))
+        })?;
+
+        let amount = (input_total - fee_required).ok_or(InputSelectorError::InsufficientFunds {
+            available: input_total,
+            required: fee_required,
+        })?;
+
+        let payment = zip321::Payment::new(recipient, amount, memo, None, None, vec![])
+            .ok_or_else(|| {
+                InputSelectorError::Proposal(ProposalError::Zip321(
+                    zip321::Zip321Error::TransparentMemo(0),
+                ))
+            })?;
+
+        let transaction_request =
+            TransactionRequest::new(vec![payment]).map_err(|payment_error| {
+                InputSelectorError::Proposal(ProposalError::Zip321(payment_error))
+            })?;
+
+        self.propose_transaction(
+            params,
+            wallet_db,
+            target_height,
+            anchor_height,
+            source_account,
+            transaction_request,
+            change_strategy,
+        )
     }
 }
 
