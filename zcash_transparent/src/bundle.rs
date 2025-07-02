@@ -266,7 +266,24 @@ impl TxIn<builder::Coinbase> {
 
         // The genesis coinbase tx has no configurable miner data.
         if height != H0 {
-            script_sig.extend(miner_data);
+            // `zcashd` includes an empty byte after the coinbase height:
+            //
+            // <https://github.com/zcash/zcash/blob/18238d90cd0b810f5b07d5aaa1338126aa128c06/src/miner.cpp#L296>
+            //
+            // We do that only if the data is empty to comply with the following consensus rule:
+            //
+            // > A coinbase transaction script MUST have length in {2 .. 100} bytes.
+            //
+            // ## Rationale
+            //
+            // Coinbase heights < 17 are serialized as a single byte, and if there is no miner data,
+            // the script of a coinbase tx with such a height would consist only of this single
+            // byte, violating the consensus rule.
+            script_sig.extend(if miner_data.is_empty() {
+                &[0; 1]
+            } else {
+                miner_data
+            });
         }
 
         TxIn {
