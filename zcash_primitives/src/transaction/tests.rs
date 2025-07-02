@@ -9,6 +9,8 @@ use ::transparent::{
 };
 use zcash_protocol::{consensus::BranchId, value::Zatoshis};
 
+#[cfg(zcash_unstable = "zfuture")]
+use super::components::tze;
 use super::{
     sighash::SignableInput,
     sighash_v4::v4_signature_hash,
@@ -21,8 +23,6 @@ use super::{
 use crate::transaction::OrchardBundle::OrchardVanilla;
 #[cfg(zcash_unstable = "nu7")]
 use crate::transaction::OrchardBundle::OrchardZSA;
-#[cfg(zcash_unstable = "zfuture")]
-use super::components::tze;
 
 #[test]
 fn tx_read_write() {

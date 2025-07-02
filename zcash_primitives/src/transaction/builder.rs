@@ -35,11 +35,11 @@ use {
     alloc::vec::Vec,
 };
 
+use crate::transaction::OrchardBundle;
 use orchard::builder::{BundleType, InProgress, Unproven};
 use orchard::note::AssetBase;
 use orchard::orchard_flavor::{OrchardFlavor, OrchardVanilla};
 use orchard::Address;
-use crate::transaction::OrchardBundle;
 
 #[cfg(feature = "transparent-inputs")]
 use ::transparent::builder::TransparentInputInfo;

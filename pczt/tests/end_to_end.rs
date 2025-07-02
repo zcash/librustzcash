@@ -333,9 +333,17 @@ fn orchard_to_orchard() {
             orchard::Anchor::empty_tree(),
         );
         orchard_builder
-            .add_output(None, recipient, value, AssetBase::native(), Memo::Empty.encode().into_bytes())
+            .add_output(
+                None,
+                recipient,
+                value,
+                AssetBase::native(),
+                Memo::Empty.encode().into_bytes(),
+            )
             .unwrap();
-        let (bundle, meta) = orchard_builder.build::<i64, OrchardVanilla>(&mut rng).unwrap();
+        let (bundle, meta) = orchard_builder
+            .build::<i64, OrchardVanilla>(&mut rng)
+            .unwrap();
         let action = bundle
             .actions()
             .get(meta.output_action_index(0).unwrap())
