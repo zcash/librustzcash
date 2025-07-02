@@ -2,9 +2,7 @@
 //! on an internal address to the sent_notes table.
 use std::collections::HashSet;
 
-use rusqlite;
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use super::ufvk_support;
@@ -13,15 +11,17 @@ use crate::wallet::init::WalletMigrationError;
 /// This migration adds the `to_account` field to the `sent_notes` table.
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x0ddbe561_8259_4212_9ab7_66fdc4a74e1d);
 
+const DEPENDENCIES: &[Uuid] = &[ufvk_support::MIGRATION_ID];
+
 pub(super) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [ufvk_support::MIGRATION_ID].into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -75,5 +75,15 @@ impl RusqliteMigration for Migration {
 
     fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::wallet::init::migrations::tests::test_migrate;
+
+    #[test]
+    fn migrate() {
+        test_migrate(&[super::MIGRATION_ID]);
     }
 }

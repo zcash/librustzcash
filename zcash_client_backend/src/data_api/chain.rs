@@ -155,10 +155,8 @@ use std::ops::Range;
 
 use incrementalmerkletree::frontier::Frontier;
 use subtle::ConditionallySelectable;
-use zcash_primitives::{
-    block::BlockHash,
-    consensus::{self, BlockHeight},
-};
+use zcash_primitives::block::BlockHash;
+use zcash_protocol::consensus::{self, BlockHeight};
 
 use crate::{
     data_api::{NullifierQuery, WalletWrite},
@@ -188,6 +186,10 @@ pub struct CommitmentTreeRoot<H> {
 
 impl<H> CommitmentTreeRoot<H> {
     /// Construct a new `CommitmentTreeRoot` from its constituent parts.
+    ///
+    /// - `subtree_end_height`: The height of the block containing the note commitment that
+    ///   completed the subtree.
+    /// - `root_hash`: The Merkle root of the completed subtree.
     pub fn from_parts(subtree_end_height: BlockHeight, root_hash: H) -> Self {
         Self {
             subtree_end_height,
@@ -697,7 +699,7 @@ where
 #[cfg(feature = "test-dependencies")]
 pub mod testing {
     use std::convert::Infallible;
-    use zcash_primitives::consensus::BlockHeight;
+    use zcash_protocol::consensus::BlockHeight;
 
     use crate::proto::compact_formats::CompactBlock;
 

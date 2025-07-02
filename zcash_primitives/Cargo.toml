@@ -1,7 +1,7 @@
 [package]
 name = "zcash_primitives"
 description = "Rust implementations of the Zcash primitives"
-version = "0.15.0"
+version = "0.23.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -37,14 +37,14 @@ sha2.workspace = true
 
 # - Logging and metrics
 memuse.workspace = true
-tracing.workspace = true
+tracing = { workspace = true, default-features = false }
 
 # - Secret management
 subtle.workspace = true
 
 # - Shielded protocols
 ff.workspace = true
-group = { workspace = true, features = ["wnaf-memuse"] }
+group.workspace = true
 jubjub.workspace = true
 nonempty.workspace = true
 orchard.workspace = true
@@ -57,33 +57,40 @@ incrementalmerkletree = { workspace = true, features = ["legacy-api"] }
 # - Test dependencies
 proptest = { workspace = true, optional = true }
 
+# - Transparent protocol
+transparent.workspace = true
+
 # - Transparent inputs
 #   - `Error` type exposed
-hdwallet = { workspace = true, optional = true }
+bip32.workspace = true
+block-buffer.workspace = true # remove after edition2024 upgrade
+crypto-common.workspace = true # remove after edition2024 upgrade
 #   - `SecretKey` and `PublicKey` types exposed
 secp256k1 = { workspace = true, optional = true }
 
-# - ZIP 339
-bip0039 = { version = "0.10", features = ["std", "all-languages"] }
-
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Boilerplate
+getset.workspace = true
+
 # - Documentation
-document-features.workspace = true
+document-features = { workspace = true, optional = true }
 
 # - Encodings
-byteorder.workspace = true
+bs58.workspace = true
 hex.workspace = true
 
 # - Shielded protocols
-redjubjub = "0.7"
+redjubjub.workspace = true
 
-# - Transparent inputs
-ripemd = { workspace = true, optional = true }
+# - Transparent protocol
+ripemd.workspace = true
 
 # - ZIP 32
-aes.workspace = true
 fpe.workspace = true
+
+# No-std support
+core2.workspace = true
 
 [dependencies.zcash_note_encryption]
 workspace = true
@@ -96,20 +103,30 @@ incrementalmerkletree = { workspace = true, features = ["legacy-api", "test-depe
 proptest.workspace = true
 assert_matches.workspace = true
 rand_xorshift.workspace = true
+transparent = { workspace = true, features = ["test-dependencies"] }
 sapling = { workspace = true, features = ["test-dependencies"] }
 orchard = { workspace = true, features = ["test-dependencies"] }
+zcash_protocol = { workspace = true, features = ["test-dependencies"] }
 
 [target.'cfg(unix)'.dev-dependencies]
-pprof = { version = "0.11", features = ["criterion", "flamegraph"] } # MSRV 1.56
+pprof = { version = "0.14", features = ["criterion", "flamegraph"] }
 
 [features]
-default = ["multicore"]
+default = ["multicore", "std", "circuits"]
+std = ["document-features", "redjubjub/std"]
+
+## Enables creating proofs
+circuits = ["orchard/circuit", "sapling/circuit"]
 
 ## Enables multithreading support for creating proofs.
 multicore = ["orchard/multicore", "sapling/multicore"]
 
 ## Enables spending transparent notes with the transaction builder.
-transparent-inputs = ["dep:hdwallet", "dep:ripemd", "dep:secp256k1"]
+transparent-inputs = [
+    "transparent/transparent-inputs",
+    "bip32/secp256k1-ffi",
+    "dep:secp256k1",
+]
 
 ### A temporary feature flag that exposes granular APIs needed by `zcashd`. These APIs
 ### should not be relied upon and will be removed in a future release.
@@ -118,13 +135,19 @@ temporary-zcashd = []
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
     "dep:proptest",
+    "incrementalmerkletree/test-dependencies",
     "orchard/test-dependencies",
     "sapling/test-dependencies",
+    "transparent/test-dependencies",
     "zcash_protocol/test-dependencies",
 ]
 
 ## A feature used to isolate tests that are expensive to run. Test-only.
 expensive-tests = []
+
+## A feature that provides `FeeRule` implementations and constructors for
+## non-standard fees.
+non-standard-fees = []
 
 [lib]
 bench = false
@@ -135,3 +158,6 @@ harness = false
 
 [badges]
 maintenance = { status = "actively-developed" }
+
+[lints]
+workspace = true

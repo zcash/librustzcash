@@ -3,9 +3,7 @@
 //! table prior to being mined.
 use std::collections::HashSet;
 
-use rusqlite;
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use super::v_transactions_net;
@@ -13,15 +11,17 @@ use crate::wallet::init::WalletMigrationError;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xbdcdcedc_7b29_4f1c_8307_35f937f0d32a);
 
+const DEPENDENCIES: &[Uuid] = &[v_transactions_net::MIGRATION_ID];
+
 pub(crate) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [v_transactions_net::MIGRATION_ID].into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -226,25 +226,30 @@ mod tests {
     use rusqlite::{self, params};
     use tempfile::NamedTempFile;
 
-    use zcash_client_backend::keys::UnifiedSpendingKey;
-    use zcash_primitives::{consensus::Network, zip32::AccountId};
+    use zcash_keys::keys::UnifiedSpendingKey;
+    use zcash_protocol::consensus::Network;
+    use zip32::AccountId;
 
     use crate::{
-        wallet::init::{init_wallet_db_internal, migrations::v_transactions_net},
+        testing::db::{test_clock, test_rng},
+        wallet::init::{migrations::v_transactions_net, WalletMigrator},
         WalletDb,
     };
 
     #[test]
     fn received_notes_nullable_migration() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
-        init_wallet_db_internal(
-            &mut db_data,
-            None,
-            &[v_transactions_net::MIGRATION_ID],
-            false,
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
         )
         .unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[v_transactions_net::MIGRATION_ID])
+            .unwrap();
 
         // Create an account in the wallet
         let usk0 = UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::ZERO)
@@ -269,7 +274,10 @@ mod tests {
             VALUES (0, 3, 0, '', 5, '', 'nf_b', false);").unwrap();
 
         // Apply the current migration
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[super::MIGRATION_ID])
+            .unwrap();
 
         {
             let mut q = db_data
@@ -299,7 +307,7 @@ mod tests {
                         assert_eq!(received_note_count, 2);
                     }
                     other => {
-                        panic!("(Account, Transaction) pair {:?} is not expected to exist in the wallet.", other);
+                        panic!("(Account, Transaction) pair {other:?} is not expected to exist in the wallet.");
                     }
                 }
             }
@@ -363,7 +371,7 @@ mod tests {
                         assert_eq!(received_note_count, 0);
                     }
                     other => {
-                        panic!("(Account, Transaction) pair {:?} is not expected to exist in the wallet.", other);
+                        panic!("(Account, Transaction) pair {other:?} is not expected to exist in the wallet.");
                     }
                 }
             }

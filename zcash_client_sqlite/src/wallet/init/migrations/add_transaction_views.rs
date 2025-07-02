@@ -2,15 +2,13 @@
 use std::collections::HashSet;
 
 use rusqlite::{self, types::ToSql, OptionalExtension};
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
-use zcash_primitives::{
+use zcash_primitives::transaction::Transaction;
+use zcash_protocol::{
     consensus::BranchId,
-    transaction::{
-        components::amount::{Amount, BalanceError},
-        Transaction,
-    },
+    value::{BalanceError, ZatBalance},
 };
 
 use super::{add_utxo_account, sent_notes_to_internal};
@@ -18,20 +16,20 @@ use crate::wallet::init::WalletMigrationError;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x282fad2e_8372_4ca0_8bed_71821320909f);
 
+const DEPENDENCIES: &[Uuid] = &[
+    add_utxo_account::MIGRATION_ID,
+    sent_notes_to_internal::MIGRATION_ID,
+];
+
 pub(crate) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [
-            add_utxo_account::MIGRATION_ID,
-            sent_notes_to_internal::MIGRATION_ID,
-        ]
-        .into_iter()
-        .collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -89,8 +87,7 @@ impl RusqliteMigration for Migration {
                 )
                 .map_err(|e| {
                     WalletMigrationError::CorruptedData(format!(
-                        "Parsing failed for transaction {:?}: {:?}",
-                        id_tx, e
+                        "Parsing failed for transaction {id_tx:?}: {e:?}"
                     ))
                 })?;
 
@@ -105,10 +102,9 @@ impl RusqliteMigration for Migration {
                     op_amount.map_or_else(
                         || Err(FeeError::UtxoNotFound),
                         |i| {
-                            Amount::from_i64(i).map_err(|_| {
+                            ZatBalance::from_i64(i).map_err(|_| {
                                 FeeError::CorruptedData(format!(
-                                    "UTXO amount out of range in outpoint {:?}",
-                                    op
+                                    "UTXO amount out of range in outpoint {op:?}"
                                 ))
                             })
                         },
@@ -275,28 +271,29 @@ mod tests {
     use rusqlite::{self, params};
     use tempfile::NamedTempFile;
 
-    use zcash_client_backend::keys::UnifiedSpendingKey;
-    use zcash_primitives::{consensus::Network, zip32::AccountId};
+    use zcash_keys::keys::UnifiedSpendingKey;
+    use zcash_protocol::consensus::Network;
+    use zip32::AccountId;
 
     use crate::{
-        wallet::init::{init_wallet_db_internal, migrations::addresses_table},
+        testing::db::{test_clock, test_rng},
+        wallet::init::{migrations::addresses_table, WalletMigrator},
         WalletDb,
     };
 
     #[cfg(feature = "transparent-inputs")]
     use {
         crate::wallet::init::migrations::{ufvk_support, utxos_table},
-        zcash_client_backend::encoding::AddressCodec,
-        zcash_primitives::{
+        ::transparent::{
+            address::Script,
+            bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut},
+            keys::IncomingViewingKey,
+        },
+        zcash_keys::encoding::AddressCodec,
+        zcash_primitives::transaction::{TransactionData, TxVersion},
+        zcash_protocol::{
             consensus::{BlockHeight, BranchId},
-            legacy::{keys::IncomingViewingKey, Script},
-            transaction::{
-                components::{
-                    transparent::{self, Authorized, OutPoint},
-                    Amount, TxIn, TxOut,
-                },
-                TransactionData, TxVersion,
-            },
+            value::ZatBalance,
         },
     };
 
@@ -304,8 +301,11 @@ mod tests {
     fn transaction_views() {
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
-        init_wallet_db_internal(&mut db_data, None, &[addresses_table::MIGRATION_ID], false)
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[addresses_table::MIGRATION_ID])
             .unwrap();
         let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32][..], AccountId::ZERO).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
@@ -337,7 +337,10 @@ mod tests {
             VALUES (0, 4, 0, '', 7, '', 'c', true, X'63');",
         ).unwrap();
 
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[super::MIGRATION_ID])
+            .unwrap();
 
         let mut q = db_data
             .conn
@@ -394,44 +397,43 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn migrate_from_wm2() {
+        use ::transparent::keys::NonHardenedChildIndex;
         use zcash_client_backend::keys::UnifiedAddressRequest;
-        use zcash_primitives::{
-            legacy::keys::NonHardenedChildIndex, transaction::components::amount::NonNegativeAmount,
-        };
+        use zcash_keys::keys::ReceiverRequirement::*;
+        use zcash_protocol::value::Zatoshis;
 
         use crate::UA_TRANSPARENT;
 
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
-        init_wallet_db_internal(
-            &mut db_data,
-            None,
-            &[utxos_table::MIGRATION_ID, ufvk_support::MIGRATION_ID],
-            false,
-        )
-        .unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(
+                &mut db_data,
+                &[utxos_table::MIGRATION_ID, ufvk_support::MIGRATION_ID],
+            )
+            .unwrap();
 
         // create a UTXO to spend
         let tx = TransactionData::from_parts(
-            TxVersion::Sapling,
+            TxVersion::V4,
             BranchId::Canopy,
             0,
             BlockHeight::from(3),
             Some(transparent::Bundle {
                 vin: vec![TxIn {
-                    prevout: OutPoint::new([1u8; 32], 1),
+                    prevout: OutPoint::fake(),
                     script_sig: Script(vec![]),
                     sequence: 0,
                 }],
                 vout: vec![TxOut {
-                    value: NonNegativeAmount::const_from_u64(1100000000),
+                    value: Zatoshis::const_from_u64(1100000000),
                     script_pubkey: Script(vec![]),
                 }],
                 authorization: Authorized,
             }),
-            None,
-            None,
             None,
             None,
             None,
@@ -445,9 +447,9 @@ mod tests {
         let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32][..], AccountId::ZERO).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
         let (ua, _) = ufvk
-            .default_address(UnifiedAddressRequest::unsafe_new(
-                false,
-                true,
+            .default_address(UnifiedAddressRequest::unsafe_custom(
+                Omit,
+                Require,
                 UA_TRANSPARENT,
             ))
             .expect("A valid default address exists for the UFVK");
@@ -483,15 +485,18 @@ mod tests {
             )
             .unwrap();
 
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
+        WalletMigrator::new()
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[super::MIGRATION_ID])
+            .unwrap();
 
         let fee = db_data
             .conn
             .query_row("SELECT fee FROM transactions WHERE id_tx = 0", [], |row| {
-                Ok(Amount::from_i64(row.get(0)?).unwrap())
+                Ok(ZatBalance::from_i64(row.get(0)?).unwrap())
             })
             .unwrap();
 
-        assert_eq!(fee, Amount::from_i64(300000000).unwrap());
+        assert_eq!(fee, ZatBalance::from_i64(300000000).unwrap());
     }
 }

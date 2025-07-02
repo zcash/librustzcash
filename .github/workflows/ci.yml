@@ -1,45 +1,43 @@
-name: CI checks
+name: CI
 
 on:
   pull_request:
   push:
     branches: main
+  merge_group:
 
 jobs:
-  test:
-    name: >
-      Test${{
-      matrix.state != 'NOT_A_PUZZLE' && format(' {0}', matrix.state) || ''
-      }} on ${{ matrix.target }}
+  required-test:
+    name: Test ${{ matrix.state }} on ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.state != 'NOT_A_PUZZLE' }}
     strategy:
       matrix:
         target:
           - Linux
-          - macOS
-          - Windows
         state:
-          - NOT_A_PUZZLE
+          - transparent
+          - Sapling-only
           - Orchard
-          - NU6
+          - all-pools
+          - NU6.1
+          - NU7
 
         include:
           - target: Linux
-            os: ubuntu-latest
-          - target: macOS
-            os: macOS-latest
-          - target: Windows
-            os: windows-latest
+            os: ubuntu-latest-8cores
 
+          - state: transparent
+            extra_flags: transparent-inputs
           - state: Orchard
             extra_flags: orchard
-          - state: NU6
-            rustflags: '--cfg zcash_unstable="nu6"'
-
-        exclude:
-          - target: macOS
-            state: NU6
+          - state: all-pools
+            extra_flags: orchard transparent-inputs
+          - state: NU6.1
+            extra_flags: orchard transparent-inputs
+            rustflags: '--cfg zcash_unstable="nu6.1"'
+          - state: NU7
+            extra_flags: orchard transparent-inputs
+            rustflags: '--cfg zcash_unstable="nu7"'
 
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
@@ -47,10 +45,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          extra-features: ${{ matrix.state != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
+          all-pools: false
+          extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
         with:
           path: |
@@ -63,13 +64,141 @@ jobs:
       - name: Run tests
         run: >
           cargo test
-          --release
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+
+  test:
+    name: Test ${{ matrix.state }} on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      matrix:
+        target:
+          - macOS
+          - Windows
+        state:
+          - transparent
+          - Sapling-only
+          - Orchard
+          - all-pools
+          - NU6.1
+          - NU7
+
+        include:
+          - target: macOS
+            os: macOS-latest
+          - target: Windows
+            os: windows-latest-8cores
+
+          - state: transparent
+            extra_flags: transparent-inputs
+          - state: Orchard
+            extra_flags: orchard
+          - state: all-pools
+            extra_flags: orchard transparent-inputs
+          - state: NU6.1
+            extra_flags: orchard transparent-inputs
+            rustflags: '--cfg zcash_unstable="nu6.1"'
+          - state: NU7
+            extra_flags: orchard transparent-inputs
+            rustflags: '--cfg zcash_unstable="nu7"'
+
+        exclude:
+          - target: macOS
+            state: NU6.1
+          - target: macOS
+            state: NU7
+
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      RUSTDOCFLAGS: ${{ matrix.rustflags }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: prepare
+        uses: ./.github/actions/prepare
+        with:
+          all-pools: false
+          extra-features: ${{ matrix.extra_flags || '' }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run tests
+        run: >
+          cargo test
+          --workspace
+          ${{ steps.prepare.outputs.feature-flags }}
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+
+  test-slow:
+    name: Slow Test ${{ matrix.state }} on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      matrix:
+        target:
+          - Linux
+        state:
+          - transparent
+          - Sapling-only
+          - Orchard
+          - all-pools
+          - NU6.1
+          - NU7
+
+        include:
+          - target: Linux
+            os: ubuntu-latest-8cores
+
+          - state: transparent
+            extra_flags: transparent-inputs
+          - state: Orchard
+            extra_flags: orchard
+          - state: all-pools
+            extra_flags: orchard transparent-inputs
+          - state: NU6.1
+            extra_flags: orchard transparent-inputs
+            rustflags: '--cfg zcash_unstable="nu6.1"'
+          - state: NU7
+            extra_flags: orchard transparent-inputs
+            rustflags: '--cfg zcash_unstable="nu7"'
+
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      RUSTDOCFLAGS: ${{ matrix.rustflags }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: prepare
+        uses: ./.github/actions/prepare
+        with:
+          all-pools: false
+          extra-features: ${{ matrix.extra_flags || '' }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
       - name: Run slow tests
         run: >
           cargo test
-          --release
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
           --features expensive-tests
@@ -79,12 +208,8 @@ jobs:
 
   # States that we want to ensure can be built, but that we don't actively run tests for.
   check-msrv:
-    name: >
-      Check${{
-      matrix.state != 'NOT_A_PUZZLE' && format(' {0}', matrix.state) || ''
-      }} build on ${{ matrix.target }}
+    name: Check ${{ matrix.state }} build on ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.state != 'NOT_A_PUZZLE' }}
     strategy:
       matrix:
         target:
@@ -111,10 +236,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          extra-features: ${{ matrix.state != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
+          extra-features: ${{ matrix.extra_flags || '' }}
       - uses: actions/cache@v4
         with:
           path: |
@@ -142,6 +269,8 @@ jobs:
         os: [ubuntu-latest, windows-latest, macOS-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
       - uses: actions/cache@v4
@@ -155,7 +284,10 @@ jobs:
           key: ${{ runner.os }}-cargo-latest
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
-      - run: rustup override set ${{steps.toolchain.outputs.name}}
+      - run: rustup override set "${TOOLCHAIN}"
+        shell: sh
+        env:
+          TOOLCHAIN: ${{steps.toolchain.outputs.name}}
       - name: Remove lockfile to build with latest dependencies
         run: rm Cargo.lock
       - name: Build crates
@@ -175,17 +307,19 @@ jobs:
       matrix:
         target:
           - wasm32-wasi
-
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           path: crates
       # We use a synthetic crate to ensure no dev-dependencies are enabled, which can
       # be incompatible with some of these targets.
+      - name: Copy Rust toolchain into the root for use in synthetic crate setup
+        run: cp crates/rust-toolchain.toml .
       - name: Create synthetic crate for testing
-        run: cargo init --lib --edition 2021 ci-build
-      - name: Copy Rust version into synthetic crate
-        run: cp crates/rust-toolchain.toml ci-build/
+        run: cargo init --lib ci-build
+      - name: Move Rust toolchain file into synthetic crate
+        run: mv rust-toolchain.toml ci-build/
       - name: Copy patch directives into synthetic crate
         run: |
           echo "[patch.crates-io]" >> ./ci-build/Cargo.toml
@@ -195,9 +329,55 @@ jobs:
         run: cargo add --no-default-features --path ../crates/zcash_proofs
       - name: Add zcash_client_backend as a dependency of the synthetic crate
         working-directory: ./ci-build
-        run: cargo add --features lightwalletd-tonic --path ../crates/zcash_client_backend
+        run: cargo add --path ../crates/zcash_client_backend
       - name: Copy pinned dependencies into synthetic crate
         run: cp crates/Cargo.lock ci-build/
+      - name: Add target
+        working-directory: ./ci-build
+        run: rustup target add ${{ matrix.target }}
+      - name: Build for target
+        working-directory: ./ci-build
+        run: cargo build --verbose --target ${{ matrix.target }}
+
+  build-nostd:
+    name: Build target ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - thumbv7em-none-eabihf
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          path: crates
+      # We use a synthetic crate to ensure no dev-dependencies are enabled, which can
+      # be incompatible with some of these targets.
+      - name: Copy Rust toolchain into the root for use in synthetic crate setup
+        run: cp crates/rust-toolchain.toml .
+      - name: Create synthetic crate for testing
+        run: cargo init --lib ci-build
+      - name: Move Rust toolchain file into synthetic crate
+        run: mv rust-toolchain.toml ci-build/
+      - name: Copy patch directives into synthetic crate
+        run: |
+          echo "[patch.crates-io]" >> ./ci-build/Cargo.toml
+          cat ./crates/Cargo.toml | sed "0,/.\+\(patch.crates.\+\)/d" >> ./ci-build/Cargo.toml
+      - name: Add no_std pragma to lib.rs
+        run: |
+          echo "#![no_std]" > ./ci-build/src/lib.rs
+      - name: Add zcash_keys as a dependency of the synthetic crate
+        working-directory: ./ci-build
+        run: cargo add --no-default-features --path ../crates/zcash_keys
+      - name: Add pczt as a dependency of the synthetic crate
+        working-directory: ./ci-build
+        run: cargo add --no-default-features --path ../crates/pczt
+      - name: Add zcash_primitives as a dependency of the synthetic crate
+        working-directory: ./ci-build
+        run: cargo add --no-default-features --path ../crates/zcash_primitives
+      - name: Add lazy_static with the spin_no_std feature
+        working-directory: ./ci-build
+        run: cargo add lazy_static --features "spin_no_std"
       - name: Add target
         working-directory: ./ci-build
         run: rustup target add ${{ matrix.target }}
@@ -210,6 +390,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       # Build benchmarks to prevent bitrot
       - name: Build benchmarks
         run: cargo build --all --benches
@@ -219,6 +401,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
       - name: Run clippy
@@ -238,14 +422,20 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
       - uses: dtolnay/rust-toolchain@beta
         id: toolchain
-      - run: rustup override set ${{steps.toolchain.outputs.name}}
+        with:
+          components: clippy
+      - run: rustup override set "${TOOLCHAIN}"
+        shell: sh
+        env:
+          TOOLCHAIN: ${{steps.toolchain.outputs.name}}
       - name: Run Clippy (beta)
         uses: actions-rs/clippy-check@v1
-        continue-on-error: true
         with:
           name: Clippy (beta)
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -264,6 +454,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
       - uses: actions/cache@v4
@@ -275,8 +467,6 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: codecov-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Install Rust toolchain
-        run: rustup toolchain install 1.71.0-x86_64-unknown-linux-gnu
       - name: Generate coverage report
         run: >
           cargo tarpaulin
@@ -286,7 +476,7 @@ jobs:
           --timeout 600
           --out xml
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4.3.0
+        uses: codecov/codecov-action@v5.3.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -295,6 +485,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
       - run: cargo fetch
@@ -311,6 +503,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -319,6 +513,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
       - name: Install protoc
@@ -341,12 +537,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Extract UUIDs
         id: extract
         run: |
           {
             echo 'UUIDS<<EOF'
-            git grep -h "Uuid::from_u128" zcash_client_sqlite/ |
+            git grep -h "const MIGRATION_ID: Uuid = Uuid::from_u128" zcash_client_sqlite/ |
               sed -e "s,.*Uuid::from_u128(0x,," -e "s,_,-,g" -e "s,);,,"
             echo EOF
           } >> "$GITHUB_OUTPUT"
@@ -367,3 +565,25 @@ jobs:
           ) -eq $(
             uuidparse -n -o uuid $U4 | sort | uniq | wc -l
           )
+
+  required-checks:
+    name: Required status checks have passed
+    needs:
+      - required-test
+      - check-msrv
+      - build-latest
+      - build-nodefault
+      - bitrot
+      - clippy
+      - doc-links
+      - fmt
+      - protobuf
+      - uuid
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine whether all required-pass steps succeeded
+        run: |
+          echo "${NEEDS}" | jq -e '[ .[] | .result == "success" ] | all'
+        env:
+          NEEDS: ${{ toJSON(needs) }}

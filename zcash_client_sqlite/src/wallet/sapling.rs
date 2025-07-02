@@ -4,30 +4,34 @@ use std::{collections::HashSet, rc::Rc};
 
 use group::ff::PrimeField;
 use incrementalmerkletree::Position;
-use rusqlite::{named_params, types::Value, Connection, Row, Transaction};
+use rusqlite::{named_params, types::Value, Connection, Row};
 
 use sapling::{self, Diversifier, Nullifier, Rseed};
 use zcash_client_backend::{
-    data_api::NullifierQuery,
+    data_api::{Account, NullifierQuery, TargetValue},
     wallet::{ReceivedNote, WalletSaplingOutput},
-    DecryptedOutput, ShieldedProtocol, TransferType,
+    DecryptedOutput, TransferType,
 };
-use zcash_keys::keys::UnifiedFullViewingKey;
-use zcash_primitives::transaction::{components::amount::NonNegativeAmount, TxId};
+use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
+    ShieldedProtocol, TxId,
 };
 use zip32::Scope;
 
-use crate::{error::SqliteClientError, AccountId, ReceivedNoteId};
+use crate::{error::SqliteClientError, AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef};
 
-use super::{memo_repr, parse_scope, scope_code};
+use super::{
+    common::UnspentNoteMeta, get_account, get_account_ref, memo_repr, upsert_address, KeyScope,
+};
 
 /// This trait provides a generalization over shielded output representations.
 pub(crate) trait ReceivedSaplingOutput {
+    type AccountId;
+
     fn index(&self) -> usize;
-    fn account_id(&self) -> AccountId;
+    fn account_id(&self) -> Self::AccountId;
     fn note(&self) -> &sapling::Note;
     fn memo(&self) -> Option<&MemoBytes>;
     fn is_change(&self) -> bool;
@@ -36,11 +40,13 @@ pub(crate) trait ReceivedSaplingOutput {
     fn recipient_key_scope(&self) -> Option<Scope>;
 }
 
-impl ReceivedSaplingOutput for WalletSaplingOutput<AccountId> {
+impl<AccountId: Copy> ReceivedSaplingOutput for WalletSaplingOutput<AccountId> {
+    type AccountId = AccountId;
+
     fn index(&self) -> usize {
         self.index()
     }
-    fn account_id(&self) -> AccountId {
+    fn account_id(&self) -> Self::AccountId {
         *WalletSaplingOutput::account_id(self)
     }
     fn note(&self) -> &sapling::Note {
@@ -63,11 +69,13 @@ impl ReceivedSaplingOutput for WalletSaplingOutput<AccountId> {
     }
 }
 
-impl ReceivedSaplingOutput for DecryptedOutput<sapling::Note, AccountId> {
+impl<AccountId: Copy> ReceivedSaplingOutput for DecryptedOutput<sapling::Note, AccountId> {
+    type AccountId = AccountId;
+
     fn index(&self) -> usize {
         self.index()
     }
-    fn account_id(&self) -> AccountId {
+    fn account_id(&self) -> Self::AccountId {
         *self.account()
     }
     fn note(&self) -> &sapling::Note {
@@ -154,9 +162,10 @@ fn to_spendable_note<P: consensus::Parameters>(
             let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
                 .map_err(SqliteClientError::CorruptedData)?;
 
-            let spending_key_scope = parse_scope(scope_code).ok_or_else(|| {
-                SqliteClientError::CorruptedData(format!("Invalid key scope code {}", scope_code))
-            })?;
+            let spending_key_scope = zip32::Scope::try_from(KeyScope::decode(scope_code)?)
+                .map_err(|_| {
+                    SqliteClientError::CorruptedData(format!("Invalid key scope code {scope_code}"))
+                })?;
 
             let recipient = match spending_key_scope {
                 Scope::Internal => ufvk
@@ -212,8 +221,8 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
 pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
-    account: AccountId,
-    target_value: NonNegativeAmount,
+    account: AccountUuid,
+    target_value: TargetValue,
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
@@ -229,6 +238,19 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     )
 }
 
+pub(crate) fn select_unspent_note_meta(
+    conn: &Connection,
+    chain_tip_height: BlockHeight,
+    wallet_birthday: BlockHeight,
+) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
+    super::common::select_unspent_note_meta(
+        conn,
+        ShieldedProtocol::Sapling,
+        chain_tip_height,
+        wallet_birthday,
+    )
+}
+
 /// Retrieves the set of nullifiers for "potentially spendable" Sapling notes that the
 /// wallet is tracking.
 ///
@@ -238,12 +260,13 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
 pub(crate) fn get_sapling_nullifiers(
     conn: &Connection,
     query: NullifierQuery,
-) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
+) -> Result<Vec<(AccountUuid, Nullifier)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = match query {
         NullifierQuery::Unspent => conn.prepare(
-            "SELECT rn.account_id, rn.nf
+            "SELECT a.uuid, rn.nf
              FROM sapling_received_notes rn
+             JOIN accounts a ON a.id = rn.account_id
              JOIN transactions tx ON tx.id_tx = rn.tx
              WHERE rn.nf IS NOT NULL
              AND tx.block IS NOT NULL
@@ -256,14 +279,15 @@ pub(crate) fn get_sapling_nullifiers(
              )",
         ),
         NullifierQuery::All => conn.prepare(
-            "SELECT rn.account_id, rn.nf
+            "SELECT a.uuid, rn.nf
              FROM sapling_received_notes rn
+             JOIN accounts a ON a.id = rn.account_id
              WHERE nf IS NOT NULL",
         ),
     }?;
 
     let nullifiers = stmt_fetch_nullifiers.query_and_then([], |row| {
-        let account = AccountId(row.get(0)?);
+        let account = AccountUuid(row.get(0)?);
         let nf_bytes: Vec<u8> = row.get(1)?;
         Ok::<_, rusqlite::Error>((account, sapling::Nullifier::from_slice(&nf_bytes).unwrap()))
     })?;
@@ -275,10 +299,11 @@ pub(crate) fn get_sapling_nullifiers(
 pub(crate) fn detect_spending_accounts<'a>(
     conn: &Connection,
     nfs: impl Iterator<Item = &'a Nullifier>,
-) -> Result<HashSet<AccountId>, rusqlite::Error> {
+) -> Result<HashSet<AccountUuid>, rusqlite::Error> {
     let mut account_q = conn.prepare_cached(
-        "SELECT rn.account_id
+        "SELECT accounts.uuid
         FROM sapling_received_notes rn
+        JOIN accounts ON accounts.id = rn.account_id
         WHERE rn.nf IN rarray(:nf_ptr)",
     )?;
 
@@ -286,7 +311,7 @@ pub(crate) fn detect_spending_accounts<'a>(
     let nf_ptr = Rc::new(nf_values);
     let res = account_q
         .query_and_then(named_params![":nf_ptr": &nf_ptr], |row| {
-            row.get::<_, u32>(0).map(AccountId)
+            row.get(0).map(AccountUuid)
         })?
         .collect::<Result<HashSet<_>, _>>()?;
 
@@ -300,7 +325,7 @@ pub(crate) fn detect_spending_accounts<'a>(
 /// spending transaction has been mined.
 pub(crate) fn mark_sapling_note_spent(
     conn: &Connection,
-    tx_ref: i64,
+    tx_ref: TxRef,
     nf: &sapling::Nullifier,
 ) -> Result<bool, SqliteClientError> {
     let mut stmt_mark_sapling_note_spent = conn.prepare_cached(
@@ -311,11 +336,53 @@ pub(crate) fn mark_sapling_note_spent(
 
     match stmt_mark_sapling_note_spent.execute(named_params![
        ":nf": &nf.0[..],
-       ":transaction_id": tx_ref
+       ":transaction_id": tx_ref.0
     ])? {
         0 => Ok(false),
         1 => Ok(true),
         _ => unreachable!("nf column is marked as UNIQUE"),
+    }
+}
+
+pub(crate) fn ensure_address<
+    T: ReceivedSaplingOutput<AccountId = AccountUuid>,
+    P: consensus::Parameters,
+>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    output: &T,
+    exposure_height: Option<BlockHeight>,
+) -> Result<Option<AddressRef>, SqliteClientError> {
+    if output.recipient_key_scope() != Some(Scope::Internal) {
+        let account = get_account(conn, params, output.account_id())?
+            .ok_or(SqliteClientError::AccountUnknown)?;
+
+        let uivk = account.uivk();
+        let ivk = uivk
+            .sapling()
+            .as_ref()
+            .expect("uivk decrypted this output.");
+        let to = output.note().recipient();
+        let diversifier_index = ivk
+            .decrypt_diversifier(&to)
+            .expect("address corresponds to account");
+
+        let ua = account
+            .uivk()
+            .address(diversifier_index, UnifiedAddressRequest::ALLOW_ALL)?;
+
+        upsert_address(
+            conn,
+            params,
+            account.internal_id(),
+            diversifier_index,
+            &ua,
+            exposure_height,
+            false,
+        )
+        .map(Some)
+    } else {
+        Ok(None)
     }
 }
 
@@ -324,21 +391,33 @@ pub(crate) fn mark_sapling_note_spent(
 /// This implementation relies on the facts that:
 /// - A transaction will not contain more than 2^63 shielded outputs.
 /// - A note value will never exceed 2^63 zatoshis.
-pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
-    conn: &Transaction,
+///
+/// Returns the internal account identifier of the account that received the output.
+pub(crate) fn put_received_note<
+    T: ReceivedSaplingOutput<AccountId = AccountUuid>,
+    P: consensus::Parameters,
+>(
+    conn: &rusqlite::Transaction,
+    params: &P,
     output: &T,
-    tx_ref: i64,
-    spent_in: Option<i64>,
-) -> Result<(), SqliteClientError> {
+    tx_ref: TxRef,
+    target_or_mined_height: Option<BlockHeight>,
+    spent_in: Option<TxRef>,
+) -> Result<AccountRef, SqliteClientError> {
+    let account_id = get_account_ref(conn, output.account_id())?;
+    let address_id = ensure_address(conn, params, output, target_or_mined_height)?;
     let mut stmt_upsert_received_note = conn.prepare_cached(
-        "INSERT INTO sapling_received_notes
-        (tx, output_index, account_id, diversifier, value, rcm, memo, nf,
-         is_change, commitment_tree_position,
-         recipient_key_scope)
+        "INSERT INTO sapling_received_notes (
+            tx, output_index, account_id, address_id,
+            diversifier, value, rcm, memo, nf,
+            is_change, commitment_tree_position,
+            recipient_key_scope
+        )
         VALUES (
             :tx,
             :output_index,
             :account_id,
+            :address_id,
             :diversifier,
             :value,
             :rcm,
@@ -350,12 +429,13 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
         )
         ON CONFLICT (tx, output_index) DO UPDATE
         SET account_id = :account_id,
+            address_id = :address_id,
             diversifier = :diversifier,
             value = :value,
             rcm = :rcm,
             nf = IFNULL(:nf, nf),
             memo = IFNULL(:memo, memo),
-            is_change = IFNULL(:is_change, is_change),
+            is_change = MAX(:is_change, is_change),
             commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position),
             recipient_key_scope = :recipient_key_scope
         RETURNING sapling_received_notes.id",
@@ -366,17 +446,18 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
     let diversifier = to.diversifier();
 
     let sql_args = named_params![
-        ":tx": &tx_ref,
+        ":tx": tx_ref.0,
         ":output_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
-        ":account_id": output.account_id().0,
-        ":diversifier": &diversifier.0.as_ref(),
+        ":account_id": account_id.0,
+        ":address_id": address_id.map(|a| a.0),
+        ":diversifier": &diversifier.0,
         ":value": output.note().value().inner(),
-        ":rcm": &rcm.as_ref(),
-        ":nf": output.nullifier().map(|nf| nf.0.as_ref()),
+        ":rcm": &rcm,
+        ":nf": output.nullifier().map(|nf| nf.0),
         ":memo": memo_repr(output.memo()),
         ":is_change": output.is_change(),
         ":commitment_tree_position": output.note_commitment_tree_position().map(u64::from),
-        ":recipient_key_scope": output.recipient_key_scope().map(scope_code)
+        ":recipient_key_scope": output.recipient_key_scope().map(|s| KeyScope::from(s).encode()),
     ];
 
     let received_note_id = stmt_upsert_received_note
@@ -390,189 +471,31 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
              ON CONFLICT (sapling_received_note_id, transaction_id) DO NOTHING",
             named_params![
                 ":sapling_received_note_id": received_note_id,
-                ":transaction_id": spent_in
+                ":transaction_id": spent_in.0
             ],
         )?;
     }
 
-    Ok(())
+    Ok(account_id)
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use incrementalmerkletree::{Hashable, Level};
-    use shardtree::error::ShardTreeError;
-    use zcash_proofs::prover::LocalTxProver;
+    use zcash_client_backend::data_api::testing::sapling::SaplingPoolTester;
 
-    use sapling::{
-        self,
-        note_encryption::try_sapling_output_recovery,
-        prover::{OutputProver, SpendProver},
-        zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
-    };
-    use zcash_primitives::{
-        consensus::BlockHeight,
-        memo::MemoBytes,
-        transaction::{
-            components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
-            Transaction,
-        },
-        zip32::Scope,
-    };
+    use crate::testing;
 
-    use zcash_client_backend::{
-        address::Address,
-        data_api::{
-            chain::CommitmentTreeRoot, DecryptedTransaction, WalletCommitmentTrees, WalletSummary,
-        },
-        keys::UnifiedSpendingKey,
-        wallet::{Note, ReceivedNote},
-        ShieldedProtocol,
-    };
-
-    use crate::{
-        error::SqliteClientError,
-        testing::{
-            self,
-            pool::{OutputRecoveryError, ShieldedPoolTester},
-            TestState,
-        },
-        wallet::{commitment_tree, sapling::select_spendable_sapling_notes},
-        AccountId, ReceivedNoteId, SAPLING_TABLES_PREFIX,
-    };
-
-    pub(crate) struct SaplingPoolTester;
-    impl ShieldedPoolTester for SaplingPoolTester {
-        const SHIELDED_PROTOCOL: ShieldedProtocol = ShieldedProtocol::Sapling;
-        const TABLES_PREFIX: &'static str = SAPLING_TABLES_PREFIX;
-        // const MERKLE_TREE_DEPTH: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH;
-
-        type Sk = ExtendedSpendingKey;
-        type Fvk = DiversifiableFullViewingKey;
-        type MerkleTreeHash = sapling::Node;
-        type Note = sapling::Note;
-
-        fn test_account_fvk<Cache>(st: &TestState<Cache>) -> Self::Fvk {
-            st.test_account_sapling().unwrap()
-        }
-
-        fn usk_to_sk(usk: &UnifiedSpendingKey) -> &Self::Sk {
-            usk.sapling()
-        }
-
-        fn sk(seed: &[u8]) -> Self::Sk {
-            ExtendedSpendingKey::master(seed)
-        }
-
-        fn sk_to_fvk(sk: &Self::Sk) -> Self::Fvk {
-            sk.to_diversifiable_full_viewing_key()
-        }
-
-        fn sk_default_address(sk: &Self::Sk) -> Address {
-            sk.default_address().1.into()
-        }
-
-        fn fvk_default_address(fvk: &Self::Fvk) -> Address {
-            fvk.default_address().1.into()
-        }
-
-        fn fvks_equal(a: &Self::Fvk, b: &Self::Fvk) -> bool {
-            a.to_bytes() == b.to_bytes()
-        }
-
-        fn empty_tree_leaf() -> Self::MerkleTreeHash {
-            sapling::Node::empty_leaf()
-        }
-
-        fn empty_tree_root(level: Level) -> Self::MerkleTreeHash {
-            sapling::Node::empty_root(level)
-        }
-
-        fn put_subtree_roots<Cache>(
-            st: &mut TestState<Cache>,
-            start_index: u64,
-            roots: &[CommitmentTreeRoot<Self::MerkleTreeHash>],
-        ) -> Result<(), ShardTreeError<commitment_tree::Error>> {
-            st.wallet_mut()
-                .put_sapling_subtree_roots(start_index, roots)
-        }
-
-        fn next_subtree_index(s: &WalletSummary<AccountId>) -> u64 {
-            s.next_sapling_subtree_index()
-        }
-
-        fn select_spendable_notes<Cache>(
-            st: &TestState<Cache>,
-            account: AccountId,
-            target_value: NonNegativeAmount,
-            anchor_height: BlockHeight,
-            exclude: &[ReceivedNoteId],
-        ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Self::Note>>, SqliteClientError> {
-            select_spendable_sapling_notes(
-                &st.wallet().conn,
-                &st.wallet().params,
-                account,
-                target_value,
-                anchor_height,
-                exclude,
-            )
-        }
-
-        fn decrypted_pool_outputs_count(d_tx: &DecryptedTransaction<'_, AccountId>) -> usize {
-            d_tx.sapling_outputs().len()
-        }
-
-        fn with_decrypted_pool_memos(
-            d_tx: &DecryptedTransaction<'_, AccountId>,
-            mut f: impl FnMut(&MemoBytes),
-        ) {
-            for output in d_tx.sapling_outputs() {
-                f(output.memo());
-            }
-        }
-
-        fn try_output_recovery<Cache>(
-            st: &TestState<Cache>,
-            height: BlockHeight,
-            tx: &Transaction,
-            fvk: &Self::Fvk,
-        ) -> Result<Option<(Note, Address, MemoBytes)>, OutputRecoveryError> {
-            for output in tx.sapling_bundle().unwrap().shielded_outputs() {
-                // Find the output that decrypts with the external OVK
-                let result = try_sapling_output_recovery(
-                    &fvk.to_ovk(Scope::External),
-                    output,
-                    zip212_enforcement(&st.network(), height),
-                );
-
-                if result.is_some() {
-                    return Ok(result.map(|(note, addr, memo)| {
-                        (
-                            Note::Sapling(note),
-                            addr.into(),
-                            MemoBytes::from_bytes(&memo).expect("correct length"),
-                        )
-                    }));
-                }
-            }
-
-            Ok(None)
-        }
-
-        fn received_note_count(
-            summary: &zcash_client_backend::data_api::chain::ScanSummary,
-        ) -> usize {
-            summary.received_sapling_note_count()
-        }
-    }
-
-    pub(crate) fn test_prover() -> impl SpendProver + OutputProver {
-        LocalTxProver::bundled()
-    }
+    #[cfg(feature = "orchard")]
+    use zcash_client_backend::data_api::testing::orchard::OrchardPoolTester;
 
     #[test]
     fn send_single_step_proposed_transfer() {
         testing::pool::send_single_step_proposed_transfer::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn send_with_multiple_change_outputs() {
+        testing::pool::send_with_multiple_change_outputs::<SaplingPoolTester>()
     }
 
     #[test]
@@ -582,13 +505,17 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
+    #[cfg(feature = "transparent-inputs")]
+    fn proposal_fails_if_not_all_ephemeral_outputs_consumed() {
+        testing::pool::proposal_fails_if_not_all_ephemeral_outputs_consumed::<SaplingPoolTester>()
+    }
+
+    #[test]
     fn create_to_address_fails_on_incorrect_usk() {
         testing::pool::create_to_address_fails_on_incorrect_usk::<SaplingPoolTester>()
     }
 
     #[test]
-    #[allow(deprecated)]
     fn proposal_fails_with_no_blocks() {
         testing::pool::proposal_fails_with_no_blocks::<SaplingPoolTester>()
     }
@@ -654,42 +581,49 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn metadata_queries_exclude_unwanted_notes() {
+        testing::pool::metadata_queries_exclude_unwanted_notes::<SaplingPoolTester>()
+    }
+
+    #[test]
     #[cfg(feature = "orchard")]
     fn pool_crossing_required() {
-        use crate::wallet::orchard::tests::OrchardPoolTester;
-
         testing::pool::pool_crossing_required::<SaplingPoolTester, OrchardPoolTester>()
     }
 
     #[test]
     #[cfg(feature = "orchard")]
     fn fully_funded_fully_private() {
-        use crate::wallet::orchard::tests::OrchardPoolTester;
-
         testing::pool::fully_funded_fully_private::<SaplingPoolTester, OrchardPoolTester>()
     }
 
     #[test]
-    #[cfg(feature = "orchard")]
+    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
     fn fully_funded_send_to_t() {
-        use crate::wallet::orchard::tests::OrchardPoolTester;
-
         testing::pool::fully_funded_send_to_t::<SaplingPoolTester, OrchardPoolTester>()
     }
 
     #[test]
     #[cfg(feature = "orchard")]
     fn multi_pool_checkpoint() {
-        use crate::wallet::orchard::tests::OrchardPoolTester;
-
         testing::pool::multi_pool_checkpoint::<SaplingPoolTester, OrchardPoolTester>()
     }
 
     #[test]
     #[cfg(feature = "orchard")]
     fn multi_pool_checkpoints_with_pruning() {
-        use crate::wallet::orchard::tests::OrchardPoolTester;
-
         testing::pool::multi_pool_checkpoints_with_pruning::<SaplingPoolTester, OrchardPoolTester>()
+    }
+
+    #[cfg(feature = "pczt-tests")]
+    #[test]
+    fn pczt_single_step_sapling_only() {
+        testing::pool::pczt_single_step::<SaplingPoolTester, SaplingPoolTester>()
+    }
+
+    #[cfg(feature = "pczt-tests")]
+    #[test]
+    fn pczt_single_step_sapling_to_orchard() {
+        testing::pool::pczt_single_step::<SaplingPoolTester, OrchardPoolTester>()
     }
 }

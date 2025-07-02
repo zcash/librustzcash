@@ -19,9 +19,9 @@ message ChainMetadata {
 // A compact representation of the shielded data in a Zcash block.
 //
 // CompactBlock is a packaging of ONLY the data from a block that's needed to:
-//   1. Detect a payment to your shielded Sapling address
-//   2. Detect a spend of your shielded Sapling notes
-//   3. Update your witnesses to generate new Sapling spend proofs.
+//   1. Detect a payment to your Shielded address
+//   2. Detect a spend of your Shielded notes
+//   3. Update your witnesses to generate new spend proofs.
 message CompactBlock {
     uint32 protoVersion = 1;         // the version of this wire format, for storage
     uint64 height = 2;               // the height of this block

@@ -34,6 +34,9 @@ message TxFilter {
 // RawTransaction contains the complete transaction data. It also optionally includes 
 // the block height in which the transaction was included, or, when returned
 // by GetMempoolStream(), the latest block height.
+//
+// FIXME: the documentation here about mempool status contradicts the documentation
+// for the `height` field. See https://github.com/zcash/librustzcash/issues/1484
 message RawTransaction {
     bytes data = 1;     // exact data returned by Zcash 'getrawtransaction'
     uint64 height = 2;  // height that the transaction was mined (or -1)
@@ -70,6 +73,7 @@ message LightdInfo {
     uint64 estimatedHeight = 12;        // less than tip height if zcashd is syncing
     string zcashdBuild = 13;            // example: "v4.1.1-877212414"
     string zcashdSubversion = 14;       // example: "/MagicBean:4.1.1/"
+    string donationAddress = 15;        // Zcash donation UA address
 }
 
 // TransparentAddressBlockFilter restricts the results to the given address
@@ -154,7 +158,7 @@ message GetAddressUtxosReplyList {
 }
 
 service CompactTxStreamer {
-    // Return the height of the tip of the best chain
+    // Return the BlockID of the block at the tip of the best chain
     rpc GetLatestBlock(ChainSpec) returns (BlockID) {}
     // Return the compact block corresponding to the given block identifier
     rpc GetBlock(BlockID) returns (CompactBlock) {}
@@ -170,7 +174,9 @@ service CompactTxStreamer {
     // Submit the given transaction to the Zcash network
     rpc SendTransaction(RawTransaction) returns (SendResponse) {}
 
-    // Return the txids corresponding to the given t-address within the given block range
+    // Return RawTransactions that match the given transparent address filter.
+    //
+    // Note: This function is misnamed, it returns complete `RawTransaction` values, not TxIds.
     rpc GetTaddressTxids(TransparentAddressBlockFilter) returns (stream RawTransaction) {}
     rpc GetTaddressBalance(AddressList) returns (Balance) {}
     rpc GetTaddressBalanceStream(stream Address) returns (Balance) {}

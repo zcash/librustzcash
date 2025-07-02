@@ -5,7 +5,7 @@ use std::convert::TryFrom;
 use std::fmt::{self, Debug};
 use std::hash::Hash;
 
-use incrementalmerkletree::{Position, Retention};
+use incrementalmerkletree::{Marking, Position, Retention};
 use sapling::{
     note_encryption::{CompactOutputDescription, SaplingDomain},
     SaplingIvk,
@@ -14,10 +14,11 @@ use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use tracing::{debug, trace};
 use zcash_keys::keys::UnifiedFullViewingKey;
-use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput};
-use zcash_primitives::{
+use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput, COMPACT_NOTE_SIZE};
+use zcash_primitives::transaction::{components::sapling::zip212_enforcement, TxId};
+use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade},
-    transaction::{components::sapling::zip212_enforcement, TxId},
+    ShieldedProtocol,
 };
 use zip32::Scope;
 
@@ -26,13 +27,11 @@ use crate::{
     proto::compact_formats::CompactBlock,
     scan::{Batch, BatchRunner, CompactDecryptor, DecryptedOutput, Tasks},
     wallet::{WalletOutput, WalletSpend, WalletTx},
-    ShieldedProtocol,
 };
 
 #[cfg(feature = "orchard")]
 use orchard::{
-    domain::{CompactAction, OrchardDomain},
-    orchard_flavor::OrchardVanilla,
+    note_encryption::{CompactAction, OrchardDomain},
     tree::MerkleHashOrchard,
 };
 
@@ -162,7 +161,7 @@ impl<AccountId> ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>
 }
 
 #[cfg(feature = "orchard")]
-impl<AccountId> ScanningKeyOps<OrchardDomain<OrchardVanilla>, AccountId, orchard::note::Nullifier>
+impl<AccountId> ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>
     for ScanningKey<orchard::keys::IncomingViewingKey, orchard::keys::FullViewingKey, AccountId>
 {
     fn prepare(&self) -> orchard::keys::PreparedIncomingViewingKey {
@@ -192,7 +191,7 @@ pub struct ScanningKeys<AccountId, IvkTag> {
     #[cfg(feature = "orchard")]
     orchard: HashMap<
         IvkTag,
-        Box<dyn ScanningKeyOps<OrchardDomain<OrchardVanilla>, AccountId, orchard::note::Nullifier>>,
+        Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
     >,
 }
 
@@ -205,13 +204,7 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
         >,
         #[cfg(feature = "orchard")] orchard: HashMap<
             IvkTag,
-            Box<
-                dyn ScanningKeyOps<
-                    OrchardDomain<OrchardVanilla>,
-                    AccountId,
-                    orchard::note::Nullifier,
-                >,
-            >,
+            Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
         >,
     ) -> Self {
         Self {
@@ -242,10 +235,8 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
     #[cfg(feature = "orchard")]
     pub fn orchard(
         &self,
-    ) -> &HashMap<
-        IvkTag,
-        Box<dyn ScanningKeyOps<OrchardDomain<OrchardVanilla>, AccountId, orchard::note::Nullifier>>,
-    > {
+    ) -> &HashMap<IvkTag, Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>>
+    {
         &self.orchard
     }
 }
@@ -265,13 +256,7 @@ impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, 
         #[cfg(feature = "orchard")]
         let mut orchard: HashMap<
             (AccountId, Scope),
-            Box<
-                dyn ScanningKeyOps<
-                    OrchardDomain<OrchardVanilla>,
-                    AccountId,
-                    orchard::note::Nullifier,
-                >,
-            >,
+            Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
         > = HashMap::new();
 
         for (account_id, ufvk) in ufvks {
@@ -466,25 +451,23 @@ impl fmt::Display for ScanError {
         match &self {
             EncodingInvalid { txid, pool_type, index, .. } => write!(
                 f,
-                "{:?} output {} of transaction {} was improperly encoded.",
-                pool_type, index, txid
+                "{pool_type:?} output {index} of transaction {txid} was improperly encoded."
             ),
             PrevHashMismatch { at_height } => write!(
                 f,
-                "The parent hash of proposed block does not correspond to the block hash at height {}.",
-                at_height
+                "The parent hash of proposed block does not correspond to the block hash at height {at_height}."
             ),
             BlockHeightDiscontinuity { prev_height, new_height } => {
-                write!(f, "Block height discontinuity at height {}; previous height was: {}", new_height, prev_height)
+                write!(f, "Block height discontinuity at height {new_height}; previous height was: {prev_height}")
             }
             TreeSizeMismatch { protocol, at_height, given, computed } => {
-                write!(f, "The {:?} note commitment tree size provided by a compact block did not match the expected size at height {}; given {}, expected {}", protocol, at_height, given, computed)
+                write!(f, "The {protocol:?} note commitment tree size provided by a compact block did not match the expected size at height {at_height}; given {given}, expected {computed}")
             }
             TreeSizeUnknown { protocol, at_height } => {
-                write!(f, "Unable to determine {:?} note commitment tree size at height {}", protocol, at_height)
+                write!(f, "Unable to determine {protocol:?} note commitment tree size at height {at_height}")
             }
             TreeSizeInvalid { protocol, at_height } => {
-                write!(f, "Received invalid (potentially default) {:?} note commitment tree size metadata at height {}", protocol, at_height)
+                write!(f, "Received invalid (potentially default) {protocol:?} note commitment tree size metadata at height {at_height}")
             }
         }
     }
@@ -534,17 +517,13 @@ type TaggedSaplingBatchRunner<IvkTag, Tasks> = BatchRunner<
 >;
 
 #[cfg(feature = "orchard")]
-type TaggedOrchardBatch<IvkTag> = Batch<
-    IvkTag,
-    OrchardDomain<OrchardVanilla>,
-    orchard::domain::CompactAction<OrchardVanilla>,
-    CompactDecryptor,
->;
+type TaggedOrchardBatch<IvkTag> =
+    Batch<IvkTag, OrchardDomain, orchard::note_encryption::CompactAction, CompactDecryptor>;
 #[cfg(feature = "orchard")]
 type TaggedOrchardBatchRunner<IvkTag, Tasks> = BatchRunner<
     IvkTag,
-    OrchardDomain<OrchardVanilla>,
-    orchard::domain::CompactAction<OrchardVanilla>,
+    OrchardDomain,
+    orchard::note_encryption::CompactAction,
     CompactDecryptor,
     Tasks,
 >;
@@ -652,7 +631,7 @@ where
                         CompactAction::try_from(action).map_err(|_| ScanError::EncodingInvalid {
                             at_height: block_height,
                             txid,
-                            pool_type: ShieldedProtocol::Sapling,
+                            pool_type: ShieldedProtocol::Orchard,
                             index: i,
                         })
                     })
@@ -1057,7 +1036,7 @@ fn find_received<
     Nf,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
     SK: ScanningKeyOps<D, AccountId, Nf>,
-    Output: ShieldedOutput<D>,
+    Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>,
     NoteCommitment,
 >(
     block_height: BlockHeight,
@@ -1124,7 +1103,11 @@ fn find_received<
         let retention = match (decrypted_note.is_some(), is_checkpoint) {
             (is_marked, true) => Retention::Checkpoint {
                 id: block_height,
-                is_marked,
+                marking: if is_marked {
+                    Marking::Marked
+                } else {
+                    Marking::None
+                },
             },
             (true, false) => Retention::Marked,
             (false, false) => Retention::Ephemeral,
@@ -1174,18 +1157,20 @@ pub mod testing {
     use rand_core::{OsRng, RngCore};
     use sapling::{
         constants::SPENDING_KEY_GENERATOR,
-        note_encryption::{sapling_note_encryption, SaplingDomain, COMPACT_NOTE_SIZE},
+        note_encryption::{sapling_note_encryption, SaplingDomain},
         util::generate_random_rseed,
         value::NoteValue,
         zip32::DiversifiableFullViewingKey,
         Nullifier,
     };
-    use zcash_note_encryption::Domain;
+    use zcash_note_encryption::{Domain, COMPACT_NOTE_SIZE};
     use zcash_primitives::{
-        block::BlockHash,
+        block::BlockHash, transaction::components::sapling::zip212_enforcement,
+    };
+    use zcash_protocol::{
         consensus::{BlockHeight, Network},
         memo::MemoBytes,
-        transaction::components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
+        value::Zatoshis,
     };
 
     use crate::proto::compact_formats::{
@@ -1200,7 +1185,7 @@ pub mod testing {
         };
         let fake_cmu = {
             let fake_cmu = bls12_381::Scalar::random(&mut rng);
-            fake_cmu.to_repr().as_ref().to_owned()
+            fake_cmu.to_repr().to_vec()
         };
         let fake_epk = {
             let mut buffer = [0; 64];
@@ -1235,7 +1220,7 @@ pub mod testing {
         prev_hash: BlockHash,
         nf: Nullifier,
         dfvk: &DiversifiableFullViewingKey,
-        value: NonNegativeAmount,
+        value: Zatoshis,
         tx_after: bool,
         initial_tree_sizes: Option<(u32, u32)>,
     ) -> CompactBlock {
@@ -1249,7 +1234,7 @@ pub mod testing {
         let encryptor = sapling_note_encryption(
             Some(dfvk.fvk().ovk),
             note.clone(),
-            *MemoBytes::empty().as_array(),
+            MemoBytes::empty().into_bytes(),
             &mut rng,
         );
         let cmu = note.cmu().to_bytes().to_vec();
@@ -1279,7 +1264,7 @@ pub mod testing {
         let cout = CompactSaplingOutput {
             cmu,
             ephemeral_key,
-            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+            ciphertext: enc_ciphertext[..52].to_vec(),
         };
         let mut ctx = CompactTx::default();
         let mut txid = vec![0; 32];
@@ -1316,15 +1301,15 @@ mod tests {
 
     use std::convert::Infallible;
 
-    use incrementalmerkletree::{Position, Retention};
+    use incrementalmerkletree::{Marking, Position, Retention};
     use sapling::Nullifier;
     use zcash_keys::keys::UnifiedSpendingKey;
-    use zcash_primitives::{
-        block::BlockHash,
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::{
         consensus::{BlockHeight, Network},
-        transaction::components::amount::NonNegativeAmount,
-        zip32::AccountId,
+        value::Zatoshis,
     };
+    use zip32::AccountId;
 
     use crate::{
         data_api::BlockMetadata,
@@ -1349,7 +1334,7 @@ mod tests {
                 BlockHash([0; 32]),
                 Nullifier([0; 32]),
                 &sapling_dfvk,
-                NonNegativeAmount::const_from_u64(5),
+                Zatoshis::const_from_u64(5),
                 false,
                 None,
             );
@@ -1409,7 +1394,7 @@ mod tests {
                     Retention::Ephemeral,
                     Retention::Checkpoint {
                         id: scanned_block.height(),
-                        is_marked: true
+                        marking: Marking::Marked
                     }
                 ]
             );
@@ -1435,7 +1420,7 @@ mod tests {
                 BlockHash([0; 32]),
                 Nullifier([0; 32]),
                 &sapling_dfvk,
-                NonNegativeAmount::const_from_u64(5),
+                Zatoshis::const_from_u64(5),
                 true,
                 Some((0, 0)),
             );
@@ -1485,7 +1470,7 @@ mod tests {
                     Retention::Marked,
                     Retention::Checkpoint {
                         id: scanned_block.height(),
-                        is_marked: false
+                        marking: Marking::None
                     }
                 ]
             );
@@ -1515,7 +1500,7 @@ mod tests {
             BlockHash([0; 32]),
             nf,
             ufvk.sapling().unwrap(),
-            NonNegativeAmount::const_from_u64(5),
+            Zatoshis::const_from_u64(5),
             false,
             Some((0, 0)),
         );
@@ -1544,7 +1529,7 @@ mod tests {
                 Retention::Ephemeral,
                 Retention::Checkpoint {
                     id: scanned_block.height(),
-                    is_marked: false
+                    marking: Marking::None
                 }
             ]
         );

@@ -1,7 +1,7 @@
 [package]
 name = "zcash_proofs"
 description = "Zcash zk-SNARK circuits and proving APIs"
-version = "0.15.0"
+version = "0.23.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
 ]
@@ -18,11 +18,11 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-zcash_primitives.workspace = true
+zcash_primitives = { workspace = true, features = ["circuits"] }
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
-bellman = { version = "0.14", default-features = false, features = ["groth16"] }
+bellman.workspace = true
 bls12_381.workspace = true
 group.workspace = true
 jubjub.workspace = true
@@ -38,7 +38,7 @@ blake2b_simd.workspace = true
 document-features.workspace = true
 home = { version = "0.5", optional = true }
 known-folders = { version = "1", optional = true }
-redjubjub = "0.7"
+redjubjub.workspace = true
 wagyu-zcash-parameters = { version = "0.2", optional = true }
 xdg = { version = "2.5", optional = true }
 
@@ -75,3 +75,6 @@ bench = false
 
 [badges]
 maintenance = { status = "actively-developed" }
+
+[lints]
+workspace = true

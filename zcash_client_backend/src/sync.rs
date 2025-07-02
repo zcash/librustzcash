@@ -15,15 +15,15 @@ use futures_util::TryStreamExt;
 use shardtree::error::ShardTreeError;
 use subtle::ConditionallySelectable;
 use tonic::{
-    body::BoxBody,
+    body::Body as TonicBody,
     client::GrpcService,
     codegen::{Body, Bytes, StdError},
 };
 use tracing::{debug, info};
-use zcash_primitives::{
-    consensus::{BlockHeight, Parameters},
-    merkle_tree::HashSer,
-};
+
+use zcash_keys::encoding::AddressCodec as _;
+use zcash_primitives::merkle_tree::HashSer;
+use zcash_protocol::consensus::{BlockHeight, Parameters};
 
 use crate::{
     data_api::{
@@ -41,6 +41,16 @@ use crate::{
 #[cfg(feature = "orchard")]
 use orchard::tree::MerkleHashOrchard;
 
+#[cfg(feature = "transparent-inputs")]
+use {
+    crate::wallet::WalletTransparentOutput,
+    ::transparent::{
+        address::Script,
+        bundle::{OutPoint, TxOut},
+    },
+    zcash_protocol::value::Zatoshis,
+};
+
 /// Scans the chain until the wallet is up-to-date.
 pub async fn run<P, ChT, CaT, DbT>(
     client: &mut CompactTxStreamerClient<ChT>,
@@ -51,7 +61,7 @@ pub async fn run<P, ChT, CaT, DbT>(
 ) -> Result<(), Error<CaT::Error, <DbT as WalletRead>::Error, <DbT as WalletCommitmentTrees>::Error>>
 where
     P: Parameters + Send + 'static,
-    ChT: GrpcService<BoxBody>,
+    ChT: GrpcService<TonicBody>,
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
@@ -80,7 +90,7 @@ async fn running<P, ChT, CaT, DbT, TrErr>(
 ) -> Result<bool, Error<CaT::Error, <DbT as WalletRead>::Error, TrErr>>
 where
     P: Parameters + Send + 'static,
-    ChT: GrpcService<BoxBody>,
+    ChT: GrpcService<TonicBody>,
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
@@ -93,6 +103,21 @@ where
     // 3) Download chain tip metadata from lightwalletd
     // 4) Notify the wallet of the updated chain tip.
     update_chain_tip(client, db_data).await?;
+
+    // Refresh UTXOs for the accounts in the wallet. We do this before we perform
+    // any shielded scanning, to ensure that we discover any UTXOs between the old
+    // fully-scanned height and the current chain tip.
+    #[cfg(feature = "transparent-inputs")]
+    for account_id in db_data.get_account_ids().map_err(Error::Wallet)? {
+        let start_height = db_data
+            .utxo_query_height(account_id)
+            .map_err(Error::Wallet)?;
+        info!(
+            "Refreshing UTXOs for {:?} from height {}",
+            account_id, start_height,
+        );
+        refresh_utxos(params, client, db_data, account_id, start_height).await?;
+    }
 
     // 5) Get the suggested scan ranges from the wallet database
     let mut scan_ranges = db_data.suggest_scan_ranges().map_err(Error::Wallet)?;
@@ -199,7 +224,7 @@ async fn update_subtree_roots<ChT, DbT, CaErr, DbErr>(
     db_data: &mut DbT,
 ) -> Result<(), Error<CaErr, DbErr, <DbT as WalletCommitmentTrees>::Error>>
 where
-    ChT: GrpcService<BoxBody>,
+    ChT: GrpcService<TonicBody>,
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
@@ -208,8 +233,6 @@ where
 {
     let mut request = service::GetSubtreeRootsArg::default();
     request.set_shielded_protocol(service::ShieldedProtocol::Sapling);
-    // Hack to work around a bug in the initial lightwalletd implementation.
-    request.max_entries = 65536;
 
     let sapling_roots: Vec<CommitmentTreeRoot<sapling::Node>> = client
         .get_subtree_roots(request)
@@ -234,8 +257,7 @@ where
     {
         let mut request = service::GetSubtreeRootsArg::default();
         request.set_shielded_protocol(service::ShieldedProtocol::Orchard);
-        // Hack to work around a bug in the initial lightwalletd implementation.
-        request.max_entries = 65536;
+
         let orchard_roots: Vec<CommitmentTreeRoot<MerkleHashOrchard>> = client
             .get_subtree_roots(request)
             .await?
@@ -264,7 +286,7 @@ async fn update_chain_tip<ChT, DbT, CaErr, TrErr>(
     db_data: &mut DbT,
 ) -> Result<(), Error<CaErr, <DbT as WalletRead>::Error, TrErr>>
 where
-    ChT: GrpcService<BoxBody>,
+    ChT: GrpcService<TonicBody>,
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
@@ -293,7 +315,7 @@ async fn download_blocks<ChT, CaT, DbErr, TrErr>(
     scan_range: &ScanRange,
 ) -> Result<(), Error<CaT::Error, DbErr, TrErr>>
 where
-    ChT: GrpcService<BoxBody>,
+    ChT: GrpcService<TonicBody>,
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
@@ -329,7 +351,7 @@ async fn download_chain_state<ChT, CaErr, DbErr, TrErr>(
     block_height: BlockHeight,
 ) -> Result<ChainState, Error<CaErr, DbErr, TrErr>>
 where
-    ChT: GrpcService<BoxBody>,
+    ChT: GrpcService<TonicBody>,
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
@@ -422,6 +444,100 @@ where
     }
 }
 
+/// Refreshes the given account's view of UTXOs that exist starting at the given height.
+///
+/// ## Note about UTXO tracking
+///
+/// (Extracted from [a comment in the Android SDK].)
+///
+/// We no longer clear UTXOs here, as `WalletDb::put_received_transparent_utxo` now uses
+/// an upsert instead of an insert. This means that now-spent UTXOs would previously have
+/// been deleted, but now are left in the database (like shielded notes).
+///
+/// Due to the fact that the `lightwalletd` query only returns _current_ UTXOs, we don't
+/// learn about recently-spent UTXOs here, so the transparent balance does not get updated
+/// here.
+///
+/// Instead, when a received shielded note is "enhanced" by downloading the full
+/// transaction, we mark any UTXOs spent in that transaction as spent in the database.
+/// This relies on two current properties:
+/// - UTXOs are only ever spent in shielding transactions.
+/// - At least one shielded note from each shielding transaction is always enhanced.
+///
+/// However, for greater reliability, we may want to alter the Data Access API to support
+/// "inferring spentness" from what is _not_ returned as a UTXO, or alternatively fetch
+/// TXOs from `lightwalletd` instead of just UTXOs.
+///
+/// [a comment in the Android SDK]: https://github.com/Electric-Coin-Company/zcash-android-wallet-sdk/blob/855204fc8ae4057fdac939f98df4aa38c8e662f1/sdk-lib/src/main/java/cash/z/ecc/android/sdk/block/processor/CompactBlockProcessor.kt#L979-L991
+#[cfg(feature = "transparent-inputs")]
+async fn refresh_utxos<P, ChT, DbT, CaErr, TrErr>(
+    params: &P,
+    client: &mut CompactTxStreamerClient<ChT>,
+    db_data: &mut DbT,
+    account_id: DbT::AccountId,
+    start_height: BlockHeight,
+) -> Result<(), Error<CaErr, <DbT as WalletRead>::Error, TrErr>>
+where
+    P: Parameters + Send + 'static,
+    ChT: GrpcService<TonicBody>,
+    ChT::Error: Into<StdError>,
+    ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
+    <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
+    DbT: WalletWrite,
+    DbT::Error: std::error::Error + Send + Sync + 'static,
+{
+    let request = service::GetAddressUtxosArg {
+        addresses: db_data
+            .get_transparent_receivers(account_id, true)
+            .map_err(Error::Wallet)?
+            .into_keys()
+            .map(|addr| addr.encode(params))
+            .collect(),
+        start_height: start_height.into(),
+        max_entries: 0,
+    };
+
+    if request.addresses.is_empty() {
+        info!("{:?} has no transparent receivers", account_id);
+    } else {
+        client
+            .get_address_utxos_stream(request)
+            .await?
+            .into_inner()
+            .map_err(Error::Server)
+            .and_then(|reply| async move {
+                WalletTransparentOutput::from_parts(
+                    OutPoint::new(
+                        reply.txid[..]
+                            .try_into()
+                            .map_err(|_| Error::MisbehavingServer)?,
+                        reply
+                            .index
+                            .try_into()
+                            .map_err(|_| Error::MisbehavingServer)?,
+                    ),
+                    TxOut {
+                        value: Zatoshis::from_nonnegative_i64(reply.value_zat)
+                            .map_err(|_| Error::MisbehavingServer)?,
+                        script_pubkey: Script(reply.script),
+                    },
+                    Some(
+                        BlockHeight::try_from(reply.height)
+                            .map_err(|_| Error::MisbehavingServer)?,
+                    ),
+                )
+                .ok_or(Error::MisbehavingServer)
+            })
+            .try_for_each(|output| {
+                let res = db_data.put_received_transparent_utxo(&output).map(|_| ());
+                async move { res.map_err(Error::Wallet) }
+            })
+            .await?;
+    }
+
+    Ok(())
+}
+
 /// Errors that can occur while syncing.
 #[derive(Debug)]
 pub enum Error<CaErr, DbErr, TrErr> {
@@ -448,19 +564,16 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::Cache(e) => write!(f, "Error while interacting with block cache: {}", e),
+            Error::Cache(e) => write!(f, "Error while interacting with block cache: {e}"),
             Error::MisbehavingServer => write!(f, "lightwalletd server is misbehaving"),
-            Error::Scan(e) => write!(f, "Error while scanning blocks: {}", e),
-            Error::Server(e) => write!(
-                f,
-                "Error while communicating with lightwalletd server: {}",
-                e
-            ),
-            Error::Wallet(e) => write!(f, "Error while interacting with wallet database: {}", e),
+            Error::Scan(e) => write!(f, "Error while scanning blocks: {e}"),
+            Error::Server(e) => {
+                write!(f, "Error while communicating with lightwalletd server: {e}")
+            }
+            Error::Wallet(e) => write!(f, "Error while interacting with wallet database: {e}"),
             Error::WalletTrees(e) => write!(
                 f,
-                "Error while interacting with wallet commitment trees: {}",
-                e
+                "Error while interacting with wallet commitment trees: {e}"
             ),
         }
     }

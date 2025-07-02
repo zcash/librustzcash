@@ -3,24 +3,27 @@
 
 use std::collections::HashSet;
 
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::{PoolType, ShieldedProtocol};
+
+use zcash_protocol::PoolType;
 
 use super::full_account_ids;
 use crate::wallet::{init::WalletMigrationError, pool_code};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x51d7a273_aa19_4109_9325_80e4a5545048);
 
+const DEPENDENCIES: &[Uuid] = &[full_account_ids::MIGRATION_ID];
+
 pub(super) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [full_account_ids::MIGRATION_ID].into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -72,8 +75,8 @@ impl RusqliteMigration for Migration {
         )?;
 
         transaction.execute_batch({
-            let sapling_pool_code = pool_code(PoolType::Shielded(ShieldedProtocol::Sapling));
-            let orchard_pool_code = pool_code(PoolType::Shielded(ShieldedProtocol::Orchard));
+            let sapling_pool_code = pool_code(PoolType::SAPLING);
+            let orchard_pool_code = pool_code(PoolType::ORCHARD);
             &format!(
                 "CREATE VIEW v_received_notes AS
                     SELECT
@@ -109,8 +112,8 @@ impl RusqliteMigration for Migration {
         })?;
 
         transaction.execute_batch({
-            let sapling_pool_code = pool_code(PoolType::Shielded(ShieldedProtocol::Sapling));
-            let orchard_pool_code = pool_code(PoolType::Shielded(ShieldedProtocol::Orchard));
+            let sapling_pool_code = pool_code(PoolType::SAPLING);
+            let orchard_pool_code = pool_code(PoolType::ORCHARD);
             &format!(
                 "CREATE VIEW v_received_note_spends AS
                 SELECT
@@ -128,7 +131,7 @@ impl RusqliteMigration for Migration {
         })?;
 
         transaction.execute_batch({
-            let transparent_pool_code = pool_code(PoolType::Transparent);
+            let transparent_pool_code = pool_code(PoolType::TRANSPARENT);
             &format!(
                 "DROP VIEW v_transactions;
                 CREATE VIEW v_transactions AS
@@ -257,7 +260,7 @@ impl RusqliteMigration for Migration {
         })?;
 
         transaction.execute_batch({
-            let transparent_pool_code = pool_code(PoolType::Transparent);
+            let transparent_pool_code = pool_code(PoolType::TRANSPARENT);
             &format!(
                 "DROP VIEW v_tx_outputs;
                 CREATE VIEW v_tx_outputs AS
@@ -310,5 +313,15 @@ impl RusqliteMigration for Migration {
 
     fn down(&self, _transaction: &rusqlite::Transaction<'_>) -> Result<(), Self::Error> {
         Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::wallet::init::migrations::tests::test_migrate;
+
+    #[test]
+    fn migrate() {
+        test_migrate(&[super::MIGRATION_ID]);
     }
 }

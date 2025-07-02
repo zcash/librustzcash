@@ -1,10 +1,8 @@
 use gumdrop::Options;
 use sapling::zip32::ExtendedFullViewingKey;
-use zcash_client_backend::encoding::{decode_extended_full_viewing_key, encode_payment_address};
-use zcash_primitives::{
-    constants::{mainnet, testnet},
-    zip32::DiversifierIndex,
-};
+use zcash_keys::encoding::{decode_extended_full_viewing_key, encode_payment_address};
+use zcash_protocol::constants::{mainnet, testnet};
+use zip32::DiversifierIndex;
 
 fn parse_viewing_key(s: &str) -> Result<(ExtendedFullViewingKey, bool), &'static str> {
     decode_extended_full_viewing_key(mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, s)

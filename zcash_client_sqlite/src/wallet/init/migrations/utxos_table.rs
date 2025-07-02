@@ -1,24 +1,24 @@
 //! The migration that adds initial support for transparent UTXOs to the wallet.
 use std::collections::HashSet;
 
-use rusqlite;
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use crate::wallet::init::{migrations::initial_setup, WalletMigrationError};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xa2e0ed2e_8852_475e_b0a4_f154b15b9dbe);
 
+const DEPENDENCIES: &[Uuid] = &[initial_setup::MIGRATION_ID];
+
 pub(super) struct Migration;
 
-impl schemer::Migration for Migration {
+impl schemerz::Migration<Uuid> for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [initial_setup::MIGRATION_ID].into_iter().collect()
+        DEPENDENCIES.iter().copied().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -50,5 +50,15 @@ impl RusqliteMigration for Migration {
     fn down(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         transaction.execute_batch("DROP TABLE utxos;")?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::wallet::init::migrations::tests::test_migrate;
+
+    #[test]
+    fn migrate() {
+        test_migrate(&[super::MIGRATION_ID]);
     }
 }

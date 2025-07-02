@@ -2,9 +2,9 @@
 //! of a transaction.
 
 use std::convert::Infallible;
-use zcash_primitives::transaction::components::amount::NonNegativeAmount;
 
 use orchard::builder::BundleType;
+use zcash_protocol::value::Zatoshis;
 
 /// A trait that provides a minimized view of Orchard bundle configuration
 /// suitable for use in fee and change calculation.
@@ -41,20 +41,40 @@ impl<'a, NoteRef, In: InputView<NoteRef>, Out: OutputView> BundleView<NoteRef>
     }
 }
 
+/// A [`BundleView`] for the empty bundle with [`BundleType::DEFAULT`] bundle type.
+pub struct EmptyBundleView;
+
+impl<NoteRef> BundleView<NoteRef> for EmptyBundleView {
+    type In = Infallible;
+    type Out = Infallible;
+
+    fn bundle_type(&self) -> BundleType {
+        BundleType::DEFAULT
+    }
+
+    fn inputs(&self) -> &[Self::In] {
+        &[]
+    }
+
+    fn outputs(&self) -> &[Self::Out] {
+        &[]
+    }
+}
+
 /// A trait that provides a minimized view of an Orchard input suitable for use in fee and change
 /// calculation.
 pub trait InputView<NoteRef> {
     /// An identifier for the input being spent.
     fn note_id(&self) -> &NoteRef;
     /// The value of the input being spent.
-    fn value(&self) -> NonNegativeAmount;
+    fn value(&self) -> Zatoshis;
 }
 
 impl<N> InputView<N> for Infallible {
     fn note_id(&self) -> &N {
         unreachable!()
     }
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         unreachable!()
     }
 }
@@ -63,11 +83,11 @@ impl<N> InputView<N> for Infallible {
 /// calculation.
 pub trait OutputView {
     /// The value of the output being produced.
-    fn value(&self) -> NonNegativeAmount;
+    fn value(&self) -> Zatoshis;
 }
 
 impl OutputView for Infallible {
-    fn value(&self) -> NonNegativeAmount {
+    fn value(&self) -> Zatoshis {
         unreachable!()
     }
 }
