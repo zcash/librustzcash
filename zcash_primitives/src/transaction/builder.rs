@@ -388,11 +388,26 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
                 )
             });
 
+        // # Consensus Rules
+        //
+        // > [NU5 onward] The `nExpiryHeight` field of a coinbase transaction MUST be equal to its
+        // > block height.
+        //
+        // ## Notes
+        //
+        // We set the expiry height for coinbase txs to the block height regardless of the network
+        // upgrade.
+        let expiry_height = if build_config.is_coinbase() {
+            target_height
+        } else {
+            target_height + DEFAULT_TX_EXPIRY_DELTA
+        };
+
         Builder {
             params,
             build_config,
             target_height,
-            expiry_height: target_height + DEFAULT_TX_EXPIRY_DELTA,
+            expiry_height,
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder,
             orchard_builder,
