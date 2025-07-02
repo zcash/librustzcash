@@ -688,21 +688,20 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         output_prover: &OP,
         fee_rule: &FR,
     ) -> Result<BuildResult, Error<FR::Error>> {
-        match self.build_config {
-            BuildConfig::Standard { .. } => {
-                let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
+        if self.build_config.is_coinbase() {
+            self.build_coinbase(rng, spend_prover, output_prover)
+        } else {
+            let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
 
-                self.build_standard(
-                    transparent_signing_set,
-                    sapling_extsks,
-                    orchard_saks,
-                    rng,
-                    spend_prover,
-                    output_prover,
-                    fee,
-                )
-            }
-            BuildConfig::Coinbase { .. } => self.build_coinbase(rng, spend_prover, output_prover),
+            self.build_standard(
+                transparent_signing_set,
+                sapling_extsks,
+                orchard_saks,
+                rng,
+                spend_prover,
+                output_prover,
+                fee,
+            )
         }
     }
 
