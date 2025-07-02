@@ -264,7 +264,7 @@ impl TxIn<builder::Coinbase> {
             }
         };
 
-        // The genesis coinbase has no configurable miner data.
+        // The genesis coinbase tx has no configurable miner data.
         if height != BlockHeight::from(0) {
             script_sig.extend(miner_data);
         }
