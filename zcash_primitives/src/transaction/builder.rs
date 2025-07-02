@@ -245,6 +245,10 @@ impl BuildConfig {
             )),
         }
     }
+
+    pub fn is_coinbase(&self) -> bool {
+        matches!(self, BuildConfig::Coinbase { .. })
+    }
 }
 
 /// The result of a transaction build operation, which includes the resulting transaction along
