@@ -123,7 +123,7 @@ mod tests {
         #[cfg(zcash_unstable = "nu6.1")]
         assert!(regtest.is_nu_active(NetworkUpgrade::Nu6_1, expected_nu6_1));
         #[cfg(zcash_unstable = "nu7")]
-        assert!(!regtest.is_nu_active(NetworkUpgrade::Nu7, expected_nu6));
+        assert!(!regtest.is_nu_active(NetworkUpgrade::Nu7, expected_nu7));
         #[cfg(zcash_unstable = "zfuture")]
         assert!(!regtest.is_nu_active(NetworkUpgrade::ZFuture, expected_nu6));
     }

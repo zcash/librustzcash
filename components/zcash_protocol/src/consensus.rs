@@ -409,9 +409,9 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Nu5 => Some(BlockHeight(1_687_104)),
             NetworkUpgrade::Nu6 => Some(BlockHeight(2_726_400)),
             #[cfg(zcash_unstable = "nu6.1")]
-            NetworkUpgrade::Nu6_1 => None,
+            NetworkUpgrade::Nu6_1 => Some(BlockHeight(2_726_400)),
             #[cfg(zcash_unstable = "nu7")]
-            NetworkUpgrade::Nu7 => None,
+            NetworkUpgrade::Nu7 => Some(BlockHeight(2_726_401)),
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => None,
         }
@@ -443,9 +443,42 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Nu5 => Some(BlockHeight(1_842_420)),
             NetworkUpgrade::Nu6 => Some(BlockHeight(2_976_000)),
             #[cfg(zcash_unstable = "nu6.1")]
-            NetworkUpgrade::Nu6_1 => None,
+            NetworkUpgrade::Nu6_1 => Some(BlockHeight(2_976_000)),
             #[cfg(zcash_unstable = "nu7")]
-            NetworkUpgrade::Nu7 => None,
+            NetworkUpgrade::Nu7 => Some(BlockHeight(2_976_001)),
+            #[cfg(zcash_unstable = "zfuture")]
+            NetworkUpgrade::ZFuture => None,
+        }
+    }
+}
+
+/// Marker struct for the regtest network.
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+pub struct RegtestNetwork;
+
+memuse::impl_no_dynamic_usage!(RegtestNetwork);
+
+pub const REGTEST_NETWORK: RegtestNetwork = RegtestNetwork;
+
+impl Parameters for RegtestNetwork {
+    fn network_type(&self) -> NetworkType {
+        NetworkType::Regtest
+    }
+
+    fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight> {
+        match nu {
+            NetworkUpgrade::Overwinter => Some(BlockHeight(1)),
+            NetworkUpgrade::Sapling => Some(BlockHeight(1)),
+            NetworkUpgrade::Blossom => Some(BlockHeight(1)),
+            NetworkUpgrade::Heartwood => Some(BlockHeight(1)),
+            NetworkUpgrade::Canopy => Some(BlockHeight(1)),
+            NetworkUpgrade::Nu5 => Some(BlockHeight(1)),
+            #[cfg(zcash_unstable = "nu6")]
+            NetworkUpgrade::Nu6 => Some(BlockHeight(1)),
+            #[cfg(zcash_unstable = "nu6.1")]
+            NetworkUpgrade::Nu6_1 => Some(BlockHeight(1)),
+            #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+            NetworkUpgrade::Nu7 => Some(BlockHeight(1)),
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => None,
         }
@@ -453,12 +486,14 @@ impl Parameters for TestNetwork {
 }
 
 /// The enumeration of known Zcash networks.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug, Hash)]
 pub enum Network {
     /// Zcash Mainnet.
     MainNetwork,
     /// Zcash Testnet.
     TestNetwork,
+    /// Zcash Regtest.
+    RegtestNetwork,
 }
 
 #[cfg(feature = "std")]
@@ -469,6 +504,7 @@ impl Parameters for Network {
         match self {
             Network::MainNetwork => NetworkType::Main,
             Network::TestNetwork => NetworkType::Test,
+            Network::RegtestNetwork => NetworkType::Regtest,
         }
     }
 
@@ -476,6 +512,7 @@ impl Parameters for Network {
         match self {
             Network::MainNetwork => MAIN_NETWORK.activation_height(nu),
             Network::TestNetwork => TEST_NETWORK.activation_height(nu),
+            Network::RegtestNetwork => REGTEST_NETWORK.activation_height(nu),
         }
     }
 }
@@ -661,7 +698,7 @@ impl TryFrom<u32> for BranchId {
             #[cfg(zcash_unstable = "nu6.1")]
             0x4dec_4df0 => Ok(BranchId::Nu6_1),
             #[cfg(zcash_unstable = "nu7")]
-            0xffff_ffff => Ok(BranchId::Nu7),
+            0x7719_0ad8 => Ok(BranchId::Nu7),
             #[cfg(zcash_unstable = "zfuture")]
             0xffff_ffff => Ok(BranchId::ZFuture),
             _ => Err("Unknown consensus branch ID"),
@@ -683,7 +720,7 @@ impl From<BranchId> for u32 {
             #[cfg(zcash_unstable = "nu6.1")]
             BranchId::Nu6_1 => 0x4dec_4df0,
             #[cfg(zcash_unstable = "nu7")]
-            BranchId::Nu7 => 0xffff_ffff,
+            BranchId::Nu7 => 0x7719_0ad8,
             #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => 0xffff_ffff,
         }
@@ -907,9 +944,15 @@ mod tests {
             BranchId::for_height(&MAIN_NETWORK, BlockHeight(2_726_400)),
             BranchId::Nu6,
         );
+        #[cfg(not(zcash_unstable = "nu7"))]
         assert_eq!(
             BranchId::for_height(&MAIN_NETWORK, BlockHeight(5_000_000)),
             BranchId::Nu6,
+        );
+        #[cfg(zcash_unstable = "nu7")]
+        assert_eq!(
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(5_000_000)),
+            BranchId::Nu7,
         );
     }
 }
