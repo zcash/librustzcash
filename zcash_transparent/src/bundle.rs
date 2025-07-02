@@ -5,7 +5,7 @@ use core::fmt::Debug;
 use core2::io::{self, Read, Write};
 
 use zcash_protocol::{
-    consensus::BlockHeight,
+    consensus::{BlockHeight, H0},
     value::{BalanceError, ZatBalance as Amount, Zatoshis as NonNegativeAmount},
     TxId,
 };
@@ -265,7 +265,7 @@ impl TxIn<builder::Coinbase> {
         };
 
         // The genesis coinbase tx has no configurable miner data.
-        if height != BlockHeight::from(0) {
+        if height != H0 {
             script_sig.extend(miner_data);
         }
 
