@@ -235,7 +235,7 @@ impl TxIn<builder::Coinbase> {
     pub fn coinbase(height: BlockHeight, miner_data: &[u8], sequence: u32) -> Self {
         // Coinbase data for the genesis block.
         //
-        // Zcash uses the same coinbase data for Mainnet, Testnet, and Regtest.
+        // Zcash uses the same genesis coinbase data for Mainnet, Testnet, and Regtest.
         pub const GENESIS_COINBASE: [u8; 77] = [
             4, 255, 255, 7, 31, 1, 4, 69, 90, 99, 97, 115, 104, 48, 98, 57, 99, 52, 101, 101, 102,
             56, 98, 55, 99, 99, 52, 49, 55, 101, 101, 53, 48, 48, 49, 101, 51, 53, 48, 48, 57, 56,
