@@ -132,6 +132,16 @@ pub struct Spend {
     /// information, or after signatures have been applied, this can be redacted.
     pub(crate) value: Option<u64>,
 
+    /// The asset of the input being spent.
+    ///
+    /// - This is required by the Prover.
+    /// - This may be used by Signers to verify that the value matches `cv`, and to
+    ///   confirm the values and change involved in the transaction.
+    ///
+    /// This exposes the asset value to all participants. For Signers who don't need this
+    /// information, or after signatures have been applied, this can be redacted.
+    pub(crate) asset: Option<[u8; 32]>,
+
     /// The rho value for the note being spent.
     ///
     /// - This is set by the Constructor.
@@ -143,6 +153,18 @@ pub struct Spend {
     /// - This is set by the Constructor.
     /// - This is required by the Prover.
     pub(crate) rseed: Option<[u8; 32]>,
+
+    /// The seed randomness for split notes.
+    ///
+    /// - This is set by the Constructor.
+    /// - This is required by the Prover.
+    pub(crate) rseed_split_note: Option<[u8; 32]>,
+
+    /// A flag to indicate whether the value of the SpendInfo will be counted in the `ValueSum` of the action.
+    ///
+    /// - This is chosen by the Constructor.
+    /// - This is required by the Prover.
+    pub(crate) split_flag: Option<bool>,
 
     /// The full viewing key that received the note being spent.
     ///
@@ -338,8 +360,11 @@ impl Bundle {
                         spend_auth_sig,
                         recipient,
                         value,
+                        asset,
                         rho,
                         rseed,
+                        rseed_split_note,
+                        split_flag,
                         fvk,
                         witness,
                         alpha,
@@ -378,8 +403,11 @@ impl Bundle {
             if !(merge_optional(&mut lhs.spend.spend_auth_sig, spend_auth_sig)
                 && merge_optional(&mut lhs.spend.recipient, recipient)
                 && merge_optional(&mut lhs.spend.value, value)
+                && merge_optional(&mut lhs.spend.asset, asset)
                 && merge_optional(&mut lhs.spend.rho, rho)
                 && merge_optional(&mut lhs.spend.rseed, rseed)
+                && merge_optional(&mut lhs.spend.rseed_split_note, rseed_split_note)
+                && merge_optional(&mut lhs.spend.split_flag, split_flag)
                 && merge_optional(&mut lhs.spend.fvk, fvk)
                 && merge_optional(&mut lhs.spend.witness, witness)
                 && merge_optional(&mut lhs.spend.alpha, alpha)
@@ -416,11 +444,14 @@ impl Bundle {
                     action.spend.spend_auth_sig,
                     action.spend.recipient,
                     action.spend.value,
+                    action.spend.asset,
                     action.spend.rho,
                     action.spend.rseed,
+                    action.spend.rseed_split_note,
                     action.spend.fvk,
                     action.spend.witness,
                     action.spend.alpha,
+                    action.spend.split_flag,
                     action
                         .spend
                         .zip32_derivation
@@ -468,6 +499,8 @@ impl Bundle {
             self.flags,
             self.value_sum,
             self.anchor,
+            vec![], // TODO burn
+            0,      // TODO expiry height
             self.zkproof,
             self.bsk,
         )
@@ -492,8 +525,13 @@ impl Bundle {
                             .recipient()
                             .map(|recipient| recipient.to_raw_address_bytes()),
                         value: spend.value().map(|value| value.inner()),
+                        asset: spend.asset().map(|asset| asset.to_bytes()),
                         rho: spend.rho().map(|rho| rho.to_bytes()),
                         rseed: spend.rseed().map(|rseed| *rseed.as_bytes()),
+                        rseed_split_note: spend
+                            .rseed_split_note()
+                            .map(|rseed_split_note| *rseed_split_note.as_bytes()),
+                        split_flag: *spend.split_flag(),
                         fvk: spend.fvk().as_ref().map(|fvk| fvk.to_bytes()),
                         witness: spend.witness().as_ref().map(|witness| {
                             (
@@ -528,7 +566,7 @@ impl Bundle {
                     output: Output {
                         cmx: output.cmx().to_bytes(),
                         ephemeral_key: output.encrypted_note().epk_bytes,
-                        enc_ciphertext: output.encrypted_note().enc_ciphertext.to_vec(),
+                        enc_ciphertext: output.encrypted_note().enc_ciphertext.clone(),
                         out_ciphertext: output.encrypted_note().out_ciphertext.to_vec(),
                         recipient: action
                             .output()

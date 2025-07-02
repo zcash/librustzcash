@@ -40,12 +40,8 @@ runs:
         echo "flags=--features '
         bundled-prover
         download-params
-        lightwalletd-tonic
-        sync
         temporary-zcashd
         unstable
-        unstable-serialization
-        unstable-spanning-tree
         ${EXTRA_FEATURES}
         ${{ steps.pools.outputs.features }}
         ${{ steps.test.outputs.feature }}

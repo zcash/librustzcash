@@ -327,9 +327,9 @@ jobs:
       - name: Add zcash_proofs as a dependency of the synthetic crate
         working-directory: ./ci-build
         run: cargo add --no-default-features --path ../crates/zcash_proofs
-      - name: Add zcash_client_backend as a dependency of the synthetic crate
-        working-directory: ./ci-build
-        run: cargo add --path ../crates/zcash_client_backend
+#      - name: Add zcash_client_backend as a dependency of the synthetic crate
+#        working-directory: ./ci-build
+#        run: cargo add --path ../crates/zcash_client_backend
       - name: Copy pinned dependencies into synthetic crate
         run: cp crates/Cargo.lock ci-build/
       - name: Add target
@@ -476,7 +476,7 @@ jobs:
           --timeout 600
           --out xml
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5.3.1
+        uses: codecov/codecov-action@13ce06bfc6bbe3ecf90edbbf1bc32fe5978ca1d3
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 

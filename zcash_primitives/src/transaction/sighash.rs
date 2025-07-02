@@ -1,8 +1,8 @@
 use blake2b_simd::Hash as Blake2bHash;
 
 use super::{
-    sighash_v4::v4_signature_hash, sighash_v5::v5_v6_signature_hash, Authorization, TransactionData,
-    TxDigests, TxVersion,
+    sighash_v4::v4_signature_hash, sighash_v5::v5_v6_signature_hash, Authorization,
+    TransactionData, TxDigests, TxVersion,
 };
 use ::sapling::bundle::GrothProofBytes;
 

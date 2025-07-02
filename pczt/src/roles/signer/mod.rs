@@ -18,8 +18,8 @@ use rand_core::OsRng;
 
 use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE};
 use zcash_primitives::transaction::{
-    sighash::SignableInput, sighash_v5::v5_signature_hash, txid::TxIdDigester, Authorization,
-    TransactionData, TxDigests, TxVersion,
+    sighash::SignableInput, sighash_v5::v5_v6_signature_hash, txid::TxIdDigester, Authorization,
+    OrchardBundle, TransactionData, TxDigests, TxVersion,
 };
 use zcash_protocol::consensus::BranchId;
 
@@ -32,6 +32,9 @@ use crate::{
 };
 
 use crate::common::determine_lock_time;
+
+#[cfg(zcash_unstable = "nu7")]
+use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
 
 const V5_TX_VERSION: u32 = 5;
 const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
@@ -68,15 +71,18 @@ impl Signer {
         // TODO: Pick sighash based on tx version.
         match (global.tx_version, global.version_group_id) {
             (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(()),
+            #[cfg(zcash_unstable = "nu7")]
+            (V6_TX_VERSION, V6_VERSION_GROUP_ID) => Ok(()),
             (version, version_group_id) => Err(Error::Global(GlobalError::UnsupportedTxVersion {
                 version,
                 version_group_id,
             })),
         }?;
-        let shielded_sighash = v5_signature_hash(&tx_data, &SignableInput::Shielded, &txid_parts)
-            .as_ref()
-            .try_into()
-            .expect("correct length");
+        let shielded_sighash =
+            v5_v6_signature_hash(&tx_data, &SignableInput::Shielded, &txid_parts)
+                .as_ref()
+                .try_into()
+                .expect("correct length");
 
         Ok(Self {
             global,
@@ -113,7 +119,7 @@ impl Signer {
             .sign(
                 index,
                 |input| {
-                    v5_signature_hash(
+                    v5_v6_signature_hash(
                         &self.tx_data,
                         &SignableInput::Transparent(input),
                         &self.txid_parts,
@@ -261,6 +267,8 @@ pub(crate) fn pczt_to_tx_data(
 ) -> Result<TransactionData<EffectsOnly>, Error> {
     let version = match (global.tx_version, global.version_group_id) {
         (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::V5),
+        #[cfg(zcash_unstable = "nu7")]
+        (V6_TX_VERSION, V6_VERSION_GROUP_ID) => Ok(TxVersion::V6),
         (version, version_group_id) => Err(Error::Global(GlobalError::UnsupportedTxVersion {
             version,
             version_group_id,
@@ -276,7 +284,22 @@ pub(crate) fn pczt_to_tx_data(
 
     let sapling_bundle = sapling.extract_effects().map_err(Error::SaplingExtract)?;
 
-    let orchard_bundle = orchard.extract_effects().map_err(Error::OrchardExtract)?;
+    let orchard_bundle = match version {
+        TxVersion::V5 => orchard
+            .extract_effects()
+            .map_err(Error::OrchardExtract)?
+            .map(OrchardBundle::OrchardVanilla),
+        TxVersion::V6 => orchard
+            .extract_effects()
+            .map_err(Error::OrchardExtract)?
+            .map(OrchardBundle::OrchardZSA),
+        _ => {
+            return Err(Error::Global(GlobalError::UnsupportedTxVersion {
+                version: global.tx_version,
+                version_group_id: global.version_group_id,
+            }));
+        }
+    };
 
     Ok(TransactionData::from_parts(
         version,
@@ -287,6 +310,8 @@ pub(crate) fn pczt_to_tx_data(
         None,
         sapling_bundle,
         orchard_bundle,
+        #[cfg(zcash_unstable = "nu7")]
+        None,
     ))
 }
 
@@ -296,6 +321,8 @@ impl Authorization for EffectsOnly {
     type TransparentAuth = transparent::bundle::EffectsOnly;
     type SaplingAuth = sapling::bundle::EffectsOnly;
     type OrchardAuth = orchard::bundle::EffectsOnly;
+    #[cfg(zcash_unstable = "nu7")]
+    type IssueAuth = orchard::issuance::EffectsOnly;
     #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth = core::convert::Infallible;
 }

@@ -1362,7 +1362,7 @@ impl UnifiedIncomingViewingKey {
     /// required to satisfy the unified address request are not enabled.
     ///
     /// [`Require`]: ReceiverRequirement::Require
-    #[allow(unused_mut)]
+    #[allow(unused_mut, clippy::never_loop)]
     pub fn find_address(
         &self,
         mut j: DiversifierIndex,

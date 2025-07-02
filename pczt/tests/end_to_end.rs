@@ -5,6 +5,9 @@ use ::transparent::{
     bundle as transparent,
     keys::{AccountPrivKey, IncomingViewingKey},
 };
+use orchard::domain::OrchardDomain;
+use orchard::note::AssetBase;
+use orchard::orchard_flavor::OrchardVanilla;
 use orchard::tree::MerkleHashOrchard;
 use pczt::{
     roles::{
@@ -30,7 +33,7 @@ use zcash_protocol::{
 static ORCHARD_PROVING_KEY: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
 
 fn orchard_proving_key() -> &'static orchard::circuit::ProvingKey {
-    ORCHARD_PROVING_KEY.get_or_init(orchard::circuit::ProvingKey::build)
+    ORCHARD_PROVING_KEY.get_or_init(orchard::circuit::ProvingKey::build::<OrchardVanilla>)
 }
 
 fn check_round_trip(pczt: &Pczt) {
@@ -87,6 +90,7 @@ fn transparent_to_orchard() {
             Some(orchard_ovk),
             recipient,
             100_000,
+            AssetBase::native(),
             MemoBytes::empty(),
         )
         .unwrap();
@@ -95,6 +99,7 @@ fn transparent_to_orchard() {
             Some(orchard_fvk.to_ovk(zip32::Scope::Internal)),
             orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal),
             885_000,
+            AssetBase::native(),
             MemoBytes::empty(),
         )
         .unwrap();
@@ -112,7 +117,7 @@ fn transparent_to_orchard() {
 
     // Create proofs.
     let pczt = Prover::new(pczt)
-        .create_orchard_proof(orchard_proving_key())
+        .create_orchard_proof::<OrchardVanilla>(orchard_proving_key())
         .unwrap()
         .finish();
     check_round_trip(&pczt);
@@ -161,12 +166,7 @@ fn sapling_to_orchard() {
             sapling::Anchor::empty_tree(),
         );
         sapling_builder
-            .add_output(
-                None,
-                sapling_recipient,
-                value,
-                Memo::Empty.encode().into_bytes(),
-            )
+            .add_output(None, sapling_recipient, value, None)
             .unwrap();
         let (bundle, meta) = sapling_builder
             .build::<LocalTxProver, LocalTxProver, _, i64>(&[], &mut rng)
@@ -220,6 +220,7 @@ fn sapling_to_orchard() {
             Some(sapling_dfvk.to_ovk(zip32::Scope::External).0.into()),
             recipient,
             100_000,
+            AssetBase::native(),
             MemoBytes::empty(),
         )
         .unwrap();
@@ -271,7 +272,7 @@ fn sapling_to_orchard() {
 
     // Create Orchard proof.
     let pczt_with_orchard_proof = Prover::new(pczt.clone())
-        .create_orchard_proof(orchard_proving_key())
+        .create_orchard_proof::<OrchardVanilla>(orchard_proving_key())
         .unwrap()
         .finish();
     check_round_trip(&pczt_with_orchard_proof);
@@ -328,18 +329,18 @@ fn orchard_to_orchard() {
     let value = orchard::value::NoteValue::from_raw(1_000_000);
     let note = {
         let mut orchard_builder = orchard::builder::Builder::new(
-            orchard::builder::BundleType::DEFAULT,
+            orchard::builder::BundleType::DEFAULT_VANILLA,
             orchard::Anchor::empty_tree(),
         );
         orchard_builder
-            .add_output(None, recipient, value, Memo::Empty.encode().into_bytes())
+            .add_output(None, recipient, value, AssetBase::native(), Memo::Empty.encode().into_bytes())
             .unwrap();
-        let (bundle, meta) = orchard_builder.build::<i64>(&mut rng).unwrap().unwrap();
+        let (bundle, meta) = orchard_builder.build::<i64, OrchardVanilla>(&mut rng).unwrap();
         let action = bundle
             .actions()
             .get(meta.output_action_index(0).unwrap())
             .unwrap();
-        let domain = orchard::note_encryption::OrchardDomain::for_action(action);
+        let domain = OrchardDomain::for_action(action);
         let (note, _, _) = try_note_decryption(&domain, &orchard_ivk.prepare(), action).unwrap();
         note
     };
@@ -379,6 +380,7 @@ fn orchard_to_orchard() {
             Some(orchard_ovk),
             recipient,
             100_000,
+            AssetBase::native(),
             MemoBytes::empty(),
         )
         .unwrap();
@@ -387,6 +389,7 @@ fn orchard_to_orchard() {
             Some(orchard_fvk.to_ovk(zip32::Scope::Internal)),
             orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal),
             890_000,
+            AssetBase::native(),
             MemoBytes::empty(),
         )
         .unwrap();
@@ -408,7 +411,7 @@ fn orchard_to_orchard() {
 
     // Create proofs.
     let pczt = Prover::new(pczt)
-        .create_orchard_proof(orchard_proving_key())
+        .create_orchard_proof::<OrchardVanilla>(orchard_proving_key())
         .unwrap()
         .finish();
     check_round_trip(&pczt);

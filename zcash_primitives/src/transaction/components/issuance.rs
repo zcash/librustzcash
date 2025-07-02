@@ -1,4 +1,4 @@
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use crate::encoding::{ReadBytesExt, WriteBytesExt};
 use nonempty::NonEmpty;
 use orchard::issuance::{IssueAction, IssueAuth, IssueBundle, Signed};
 use orchard::keys::IssuanceValidatingKey;
@@ -72,7 +72,9 @@ fn read_action<R: Read>(mut reader: R) -> io::Result<IssueAction> {
 
 pub fn read_note<R: Read>(mut reader: R) -> io::Result<Note> {
     let recipient = read_recipient(&mut reader)?;
-    let value = reader.read_u64::<LittleEndian>()?;
+    let mut tmp = [0; 8];
+    reader.read_exact(&mut tmp)?;
+    let value = u64::from_le_bytes(tmp);
     let asset = read_asset(&mut reader)?;
     let rho = read_rho(&mut reader)?;
     let rseed = read_rseed(&mut reader, &rho)?;
@@ -142,7 +144,7 @@ fn write_action<W: Write>(mut writer: &mut W, action: &IssueAction) -> io::Resul
 
 pub fn write_note<W: Write>(writer: &mut W, note: &Note) -> io::Result<()> {
     writer.write_all(&note.recipient().to_raw_address_bytes())?;
-    writer.write_u64::<LittleEndian>(note.value().inner())?;
+    writer.write_all(&note.value().to_bytes())?;
     writer.write_all(&note.asset().to_bytes())?;
     writer.write_all(&note.rho().to_bytes())?;
     writer.write_all(note.rseed().as_bytes())?;
