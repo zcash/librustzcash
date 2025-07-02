@@ -49,7 +49,7 @@ fn bench_note_decryption(c: &mut Criterion) {
                 None,
                 pa,
                 NoteValue::from_raw(100),
-                Memo::Empty.encode().into_bytes(),
+                Some(Memo::Empty.encode().into_bytes()),
             )
             .unwrap();
         let (bundle, _) = builder
