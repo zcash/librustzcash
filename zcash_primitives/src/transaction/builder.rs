@@ -1122,9 +1122,11 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
                     #[cfg(not(zcash_unstable = "nu7"))]
                     Err(Error::OrchardBuild(BundleTypeNotSatisfiable))
                 }
-                BundleType::DEFAULT_VANILLA => builder
-                    .build_for_pczt::<OrchardVanilla>(&mut rng)
-                    .map_err(Error::OrchardBuild),
+                BundleType::DEFAULT_VANILLA => {
+                    return builder
+                        .build_for_pczt::<OrchardVanilla>(&mut rng)
+                        .map_err(Error::OrchardBuild)
+                }
                 _ => Err(Error::OrchardBuild(BundleTypeNotSatisfiable)),
             })
             .transpose()?
