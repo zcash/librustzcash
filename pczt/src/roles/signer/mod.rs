@@ -289,6 +289,7 @@ pub(crate) fn pczt_to_tx_data(
             .extract_effects()
             .map_err(Error::OrchardExtract)?
             .map(OrchardBundle::OrchardVanilla),
+        #[cfg(zcash_unstable = "nu7")]
         TxVersion::V6 => orchard
             .extract_effects()
             .map_err(Error::OrchardExtract)?
