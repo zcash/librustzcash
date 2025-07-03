@@ -17,7 +17,6 @@ members = [
     "zcash_proofs",
     "zcash_transparent",
 ]
-resolver = "2"
 
 [workspace.package]
 edition = "2021"
