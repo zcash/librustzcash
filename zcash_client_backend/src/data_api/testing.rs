@@ -2126,7 +2126,7 @@ fn compact_orchard_action<R: RngCore + CryptoRng>(
             nullifier: compact_action.nullifier().to_bytes().to_vec(),
             cmx: compact_action.cmx().to_bytes().to_vec(),
             ephemeral_key: compact_action.ephemeral_key().0.to_vec(),
-            ciphertext: compact_action.enc_ciphertext().unwrap().0[..52].to_vec(),
+            ciphertext: compact_action.enc_ciphertext_compact().unwrap().0[..52].to_vec(),
         },
         note,
     )
