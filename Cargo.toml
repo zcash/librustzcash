@@ -8,8 +8,8 @@ members = [
     "components/zip321",
     "pczt",
     "zcash",
-#    "zcash_client_backend",
-#    "zcash_client_sqlite",
+    "zcash_client_backend",
+    "zcash_client_sqlite",
     "zcash_extensions",
     "zcash_history",
     "zcash_keys",
@@ -17,7 +17,6 @@ members = [
     "zcash_proofs",
     "zcash_transparent",
 ]
-resolver = "2"
 
 [workspace.package]
 edition = "2021"

@@ -76,7 +76,7 @@ orchard = { workspace = true, features = ["circuit"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 
 [features]
-default = ["std", "sapling"]
+default = ["std"]
 std = ["dep:document-features"]
 
 ## Enables use of transparent key parts and addresses

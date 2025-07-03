@@ -14,7 +14,7 @@ use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use tracing::{debug, trace};
 use zcash_keys::keys::UnifiedFullViewingKey;
-use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput, COMPACT_NOTE_SIZE};
+use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput};
 use zcash_primitives::transaction::{components::sapling::zip212_enforcement, TxId};
 use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade},
@@ -1036,7 +1036,7 @@ fn find_received<
     Nf,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
     SK: ScanningKeyOps<D, AccountId, Nf>,
-    Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>,
+    Output: ShieldedOutput<D>,
     NoteCommitment,
 >(
     block_height: BlockHeight,
@@ -1163,7 +1163,8 @@ pub mod testing {
         zip32::DiversifiableFullViewingKey,
         Nullifier,
     };
-    use zcash_note_encryption::{Domain, COMPACT_NOTE_SIZE};
+    use sapling::note_encryption::COMPACT_NOTE_SIZE;
+    use zcash_note_encryption::{Domain};
     use zcash_primitives::{
         block::BlockHash, transaction::components::sapling::zip212_enforcement,
     };
@@ -1264,7 +1265,7 @@ pub mod testing {
         let cout = CompactSaplingOutput {
             cmu,
             ephemeral_key,
-            ciphertext: enc_ciphertext[..52].to_vec(),
+            ciphertext: enc_ciphertext.0[..52].to_vec(),
         };
         let mut ctx = CompactTx::default();
         let mut txid = vec![0; 32];
