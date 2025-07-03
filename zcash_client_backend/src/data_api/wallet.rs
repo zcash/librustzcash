@@ -59,6 +59,7 @@ use ::sapling::{
 use ::transparent::{
     address::TransparentAddress, builder::TransparentSigningSet, bundle::OutPoint,
 };
+use orchard::note::AssetBase;
 use zcash_address::ZcashAddress;
 use zcash_keys::{
     address::Address,
@@ -995,6 +996,7 @@ where
                     orchard_external_ovk.clone(),
                     to,
                     payment.amount().into(),
+                    AssetBase::native(),
                     memo.clone(),
                 )?;
                 orchard_output_meta.push((
@@ -1119,6 +1121,7 @@ where
                             .ok_or(Error::KeyNotAvailable(PoolType::ORCHARD))?
                             .address_at(0u32, orchard::keys::Scope::Internal),
                         change_value.value().into(),
+                        AssetBase::native(),
                         memo.clone(),
                     )?;
                     orchard_output_meta.push((
@@ -1279,6 +1282,7 @@ where
                     .orchard_bundle()
                     .and_then(|bundle| {
                         bundle
+                            .as_vanilla_bundle()
                             .decrypt_output_with_key(output_index, &orchard_internal_ivk)
                             .map(|(note, _, _)| Note::Orchard(note))
                     })

@@ -49,7 +49,7 @@ impl<NoteRef> BundleView<NoteRef> for EmptyBundleView {
     type Out = Infallible;
 
     fn bundle_type(&self) -> BundleType {
-        BundleType::DEFAULT
+        BundleType::DEFAULT_VANILLA
     }
 
     fn inputs(&self) -> &[Self::In] {

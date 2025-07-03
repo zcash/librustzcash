@@ -2240,9 +2240,13 @@ pub(crate) fn get_funding_accounts(
     #[cfg(feature = "orchard")]
     funding_accounts.extend(orchard::detect_spending_accounts(
         conn,
-        tx.orchard_bundle()
-            .iter()
-            .flat_map(|bundle| bundle.actions().iter().map(|action| action.nullifier())),
+        tx.orchard_bundle().iter().flat_map(|bundle| {
+            bundle
+                .as_vanilla_bundle()
+                .actions()
+                .iter()
+                .map(|action| action.nullifier())
+        }),
     )?);
 
     Ok(funding_accounts)
@@ -2662,7 +2666,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
         #[cfg(feature = "orchard")]
         {
             detectable_via_scanning = true;
-            for action in _bundle.actions() {
+            for action in _bundle.as_vanilla_bundle().actions() {
                 orchard::mark_orchard_note_spent(conn, tx_ref, action.nullifier())?;
             }
         }

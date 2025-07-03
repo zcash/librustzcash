@@ -607,7 +607,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 ),
                 #[cfg(feature = "orchard")]
                 &(
-                    ::orchard::builder::BundleType::DEFAULT,
+                    ::orchard::builder::BundleType::DEFAULT_VANILLA,
                     &orchard_inputs[..],
                     &orchard_outputs[..],
                 ),

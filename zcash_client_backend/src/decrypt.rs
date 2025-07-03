@@ -16,7 +16,7 @@ use zip32::Scope;
 use crate::data_api::DecryptedTransaction;
 
 #[cfg(feature = "orchard")]
-use orchard::note_encryption::OrchardDomain;
+use orchard::domain::OrchardDomain;
 
 /// An enumeration of the possible relationships a TXO can have to the wallet.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -203,6 +203,7 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
                     let ovk = fvk.to_ovk(Scope::External);
 
                     bundle
+                        .as_vanilla_bundle()
                         .actions()
                         .iter()
                         .enumerate()
