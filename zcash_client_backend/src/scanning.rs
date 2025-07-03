@@ -31,11 +31,11 @@ use crate::{
 
 #[cfg(feature = "orchard")]
 use orchard::{
+    orchard_flavor::OrchardVanilla,
     domain::{CompactAction, OrchardDomain},
     tree::MerkleHashOrchard,
 };
 
-use orchard::orchard_flavor::OrchardVanilla;
 #[cfg(not(feature = "orchard"))]
 use std::marker::PhantomData;
 

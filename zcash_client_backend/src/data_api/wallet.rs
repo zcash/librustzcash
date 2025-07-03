@@ -59,7 +59,6 @@ use ::sapling::{
 use ::transparent::{
     address::TransparentAddress, builder::TransparentSigningSet, bundle::OutPoint,
 };
-use orchard::note::AssetBase;
 use zcash_address::ZcashAddress;
 use zcash_keys::{
     address::Address,
@@ -108,6 +107,9 @@ use {
         value::{BalanceError, ZatBalance},
     },
 };
+
+#[cfg(feature = "orchard")]
+use orchard::note::AssetBase;
 
 pub mod input_selection;
 use input_selection::{GreedyInputSelector, InputSelector, InputSelectorError};
