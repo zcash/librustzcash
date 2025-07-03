@@ -31,8 +31,8 @@ use crate::{
 
 #[cfg(feature = "orchard")]
 use orchard::{
-    orchard_flavor::OrchardVanilla,
     domain::{CompactAction, OrchardDomain},
+    orchard_flavor::OrchardVanilla,
     tree::MerkleHashOrchard,
 };
 
