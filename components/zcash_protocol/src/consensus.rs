@@ -456,6 +456,7 @@ impl Parameters for TestNetwork {
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct RegtestNetwork;
 
+#[cfg(feature = "std")]
 memuse::impl_no_dynamic_usage!(RegtestNetwork);
 
 pub const REGTEST_NETWORK: RegtestNetwork = RegtestNetwork;
