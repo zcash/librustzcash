@@ -11,7 +11,7 @@ use std::{
 use zcash_address::unified::{self, Encoding};
 
 use sapling::{self, note::ExtractedNoteCommitment, Node};
-use zcash_note_encryption::{EphemeralKeyBytes};
+use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     merkle_tree::read_commitment_tree,

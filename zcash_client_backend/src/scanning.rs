@@ -1155,6 +1155,7 @@ pub mod testing {
         GroupEncoding,
     };
     use rand_core::{OsRng, RngCore};
+    use sapling::note_encryption::COMPACT_NOTE_SIZE;
     use sapling::{
         constants::SPENDING_KEY_GENERATOR,
         note_encryption::{sapling_note_encryption, SaplingDomain},
@@ -1163,8 +1164,7 @@ pub mod testing {
         zip32::DiversifiableFullViewingKey,
         Nullifier,
     };
-    use sapling::note_encryption::COMPACT_NOTE_SIZE;
-    use zcash_note_encryption::{Domain};
+    use zcash_note_encryption::Domain;
     use zcash_primitives::{
         block::BlockHash, transaction::components::sapling::zip212_enforcement,
     };
