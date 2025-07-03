@@ -11,7 +11,7 @@ workspace.
 ## [Unreleased]
 
 ### Added
-- `zcash_transaction::builder::Builder::add_transparent_null_data_output`
+- `zcash_primitives::transaction::builder::Builder::add_transparent_null_data_output`
 
 ## [0.23.0] - 2025-05-30
 
