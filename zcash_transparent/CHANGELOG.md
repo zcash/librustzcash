@@ -16,21 +16,15 @@ workspace.
 - `zcash_transparent::builder::Bundle<Unauthorized>::prepare_transparent_signatures` to initialize the signing context.
 - `zcash_transparent::builder::TransparentSignatureContext::append_external_signatures` to add signatures to the context.
 - `zcash_transparent::builder::TransparentSignatureContext::finalize_signatures` to produce an authorized bundle from the context.
-- New error variants to `zcash_transparent::builder::Error`:
-  - `SignatureCountMismatch`
-  - `InputCountMismatch`
-  - `SighashGeneration`
-  - `SignatureVerificationFailed { input_index: usize }`
-  - `NoMatchingInputForSignature { input_index: usize }`
-  - `InputAlreadySigned { input_index: usize }`
-  - `AmbiguousSignature`
-  - `NotAllInputsSigned`
-  - `UnusedExternalSignature { input_index: usize }`
-  - `Secp256k1Error(String)`
-  - `InternalBuilderError(String)`
 
 ### Changed
 - Added `NullDataTooLong` variant to public `Error` enum
+- `zcash_transparent::builder::Error` has added variants:
+  - `InputCountMismatch`
+  - `NoMatchingInputForSignature { sig_index: usize }`
+  - `AmbiguousSignature`
+  - `NotAllInputsSigned`
+  - `Secp256k1Error(String)`
 
 ## [0.3.0] - 2025-05-30
 
