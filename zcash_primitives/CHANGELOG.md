@@ -25,6 +25,8 @@ workspace.
     - `BuildConfig::Coinbase` enum variant now contains `miner_data: MinerData`
       and `sequence: u32`.
     - `Builder` now supports constructing coinbase transactions.
+    - `Builder::add_orchard_output`'s `value` parameter is now `Zatoshis`
+      instead of `u64`.
 
 ## [0.24.0] - 2025-07-31
 
