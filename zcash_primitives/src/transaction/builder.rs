@@ -481,7 +481,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         &mut self,
         ovk: Option<orchard::keys::OutgoingViewingKey>,
         recipient: orchard::Address,
-        value: u64,
+        value: Zatoshis,
         memo: MemoBytes,
     ) -> Result<(), Error<FE>> {
         self.orchard_builder
@@ -490,7 +490,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             .add_output(
                 ovk,
                 recipient,
-                orchard::value::NoteValue::from_raw(value),
+                orchard::value::NoteValue::from_raw(value.into()),
                 memo.into_bytes(),
             )
             .map_err(Error::OrchardRecipient)
