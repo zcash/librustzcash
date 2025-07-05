@@ -10,6 +10,22 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_transparent::builder::TransparentBuilder::add_null_data_output`
+- `zcash_transparent::builder::TransparentSignatureContext` struct for staged application of external signatures.
+- `zcash_transparent::builder::Bundle<Unauthorized>::prepare_transparent_signatures` to initialize the signing context.
+- `zcash_transparent::builder::TransparentSignatureContext::append_external_signatures` to add signatures to the context.
+- `zcash_transparent::builder::TransparentSignatureContext::finalize_signatures` to produce an authorized bundle from the context.
+
+### Changed
+- Added `NullDataTooLong` variant to public `Error` enum
+- `zcash_transparent::builder::Error` has added variants:
+  - `InputCountMismatch`
+  - `NoMatchingInputForSignature { sig_index: usize }`
+  - `AmbiguousSignature`
+  - `NotAllInputsSigned`
+  - `Secp256k1Error(String)`
+
 ## [0.3.0] - 2025-05-30
 
 ### Changed
