@@ -37,6 +37,8 @@ workspace.
       and `sequence: u32`.
     - `BuildConfig::is_coinbase`
     - `Builder::add_transparent_null_data_output`
+    - `Builder::add_orchard_output`'s `value` parameter is now `Zatoshis`
+      instead of `u64`.
     - `Builder` now supports constructing coinbase transactions.
   - `Coinbase` marker type
   - `impl Authorization for Coinbase`
