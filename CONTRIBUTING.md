@@ -54,9 +54,9 @@ recommend the following:
 - Provide as much context as you can about what you're running into.
 - Provide project and platform versions depending on what seems relevant.
 
-We will then take care of the issue as soon as possible. Please be aware that
-the maintainers of `librustzcash` have a relatively heavy workload, so this may
-take some time.
+We will then attempt to triage the issue as soon as practical. Please be aware
+that the maintainers of `librustzcash` have a relatively heavy workload, so
+this may take some time.
 
 
 ## I Want To Contribute
@@ -99,8 +99,7 @@ possible.
 
 - Determine if your bug is really a bug and not an error on your side e.g.
   using incompatible environment components/versions or violating the
-  documented preconditions for an operation. you are looking for support, you
-  might want to check [this section](#i-have-a-question)).
+  documented preconditions for an operation. 
 - To see if other users have experienced (and potentially already solved) the
   same issue you are having, check if there is not already a bug report
   existing for your bug or error in the [bug tracker](issues?q=label%3Abug).
@@ -126,11 +125,10 @@ We use GitHub issues to track bugs and errors. If you run into an issue with
 the project:
 
 - Open an [Issue](/issues/new). (Since we can't be sure at this point whether
-  it is a bug or not, we ask you not to talk about a bug yet and not to label
-  the issue.)
+  the issue describes a bug or not, we ask you not to label the issue.)
 - Explain the behavior you would expect and the actual behavior.
-- Please provide as much context as possible and describe the *reproduction
-  steps* that someone else can follow to recreate the issue on their own. This
+- Please provide as much context as possible and describe the **reproduction
+  steps** that someone else can follow to recreate the issue on their own. This
   usually includes your code. For good bug reports you should isolate the
   problem and create a reduced test case.
 - Provide the information you collected in the previous section.
@@ -301,29 +299,40 @@ numerous implications, including but not limited to the following:
     arguments and return values.
 - Prefer immutability; make data types immutable unless there is a strong
   reason to believe that values will need to be modified in-place for
-  performance reasons. Take care when introducing and/or using structured enum
-  variants, because Rust does not provide adequate language features for making
-  such enumeration values immutable.
+  performance reasons. 
+- Take care when introducing and/or using structured enum variants, because
+  Rust does not provide adequate language features for making such values
+  immutable or ensuring safe construction. Instead of creating structured or
+  tuple variants, it is often preferable for a variant to wrap an immutable
+  type and expose a safe constructor for the variant along with accessors for
+  the members of the wrapped type.
 
 #### Side Effects & Capability-Oriented Programming
 
 Whenever it's possible to do without impairing performance in hot code paths,
-prefer a functional programming style. This means:
+prefer a functional programming style, with allowances for Rust's limitations.
+This means:
 - Write referentially transparent functions. A referentially transparent
   function is one that, given a particular input, always returns the same
   output.
-- When possible, use mutable variables only in the narrowest possible lexical
-  scope.
-- If a statement produces a side-effect, the context in which that statement of
-  executed should use imperative programming style. For example, use a `for` loop
-  instead of the `map` function of a collection if any side effect is performed
-  by the body of the loop.
+- Avoid mutation whenever possible. If it's strictly necessary, use mutable
+  variables only in the narrowest possible scope.
+- In Rust, we don't have good tools for referentially transparent treatment
+  of operations that involve side effects. If a statement produces or makes use
+  of a side-effect, the context in which that statement of executed should use
+  imperative programming style to make the presence of the side effect more
+  evident. For example, use a `for` loop instead of the `map` function of a
+  collection if any side effect is performed by the body of the loop.
 - If a procedure or method will invoke operations that produce side effects,
   the capability to perform such side effects should be provided to the
-  procedure as an explicit argument. For example, if a procedure will write to
-  the system console, that procedure should take an argument `console: impl
-  Console` where `Console` is a trait that provides a method that allows the
-  caller to print a string to `stdout`.
+  procedure as an explicit argument. For example, if a procedure will needs to
+  access the current time, that procedure should take an argument `clock: impl
+  Clock` where `Clock` is a trait that provides a method that allows the caller
+  to obtain the current time. 
+- Effect capabilities should be defined independent of implementation concerns;
+  for example, a data persistence capability should be defined to operate on
+  high-level types appropriate to the domain, not to a particular persistence
+  layer or serialization.
 
 ## Attribution
 This guide is based on the template supplied by the
