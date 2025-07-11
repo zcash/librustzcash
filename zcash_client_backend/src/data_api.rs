@@ -830,6 +830,97 @@ pub struct SpendableNotes<NoteRef> {
     orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
 }
 
+impl<NoteRef> SpendableNotes<NoteRef> {
+    /// Construct a new empty [`SpendableNotes`].
+    pub fn empty() -> Self {
+        Self::new(
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+        )
+    }
+
+    /// Construct a new [`SpendableNotes`] from its constituent parts.
+    pub fn new(
+        sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
+        #[cfg(feature = "orchard")] orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
+    ) -> Self {
+        Self {
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+        }
+    }
+
+    /// Returns the set of spendable Sapling notes.
+    pub fn sapling(&self) -> &[ReceivedNote<NoteRef, sapling::Note>] {
+        self.sapling.as_ref()
+    }
+
+    /// Consumes this value and returns the Sapling notes contained within it.
+    pub fn take_sapling(self) -> Vec<ReceivedNote<NoteRef, sapling::Note>> {
+        self.sapling
+    }
+
+    /// Returns the set of spendable Orchard notes.
+    #[cfg(feature = "orchard")]
+    pub fn orchard(&self) -> &[ReceivedNote<NoteRef, orchard::note::Note>] {
+        self.orchard.as_ref()
+    }
+
+    /// Consumes this value and returns the Orchard notes contained within it.
+    #[cfg(feature = "orchard")]
+    pub fn take_orchard(self) -> Vec<ReceivedNote<NoteRef, orchard::note::Note>> {
+        self.orchard
+    }
+
+    /// Computes the total value of Sapling notes.
+    pub fn sapling_value(&self) -> Result<Zatoshis, BalanceError> {
+        self.sapling.iter().try_fold(Zatoshis::ZERO, |acc, n| {
+            (acc + n.note_value()?).ok_or(BalanceError::Overflow)
+        })
+    }
+
+    /// Computes the total value of Sapling notes.
+    #[cfg(feature = "orchard")]
+    pub fn orchard_value(&self) -> Result<Zatoshis, BalanceError> {
+        self.orchard.iter().try_fold(Zatoshis::ZERO, |acc, n| {
+            (acc + n.note_value()?).ok_or(BalanceError::Overflow)
+        })
+    }
+
+    /// Computes the total value of spendable inputs
+    pub fn total_value(&self) -> Result<Zatoshis, BalanceError> {
+        #[cfg(not(feature = "orchard"))]
+        return self.sapling_value();
+
+        #[cfg(feature = "orchard")]
+        return (self.sapling_value()? + self.orchard_value()?).ok_or(BalanceError::Overflow);
+    }
+
+    /// Consumes this [`SpendableNotes`] value and produces a vector of
+    /// [`ReceivedNote<NoteRef, Note>`] values.
+    pub fn into_vec(
+        self,
+        retention: &impl NoteRetention<NoteRef>,
+    ) -> Vec<ReceivedNote<NoteRef, Note>> {
+        let iter = self.sapling.into_iter().filter_map(|n| {
+            retention
+                .should_retain_sapling(&n)
+                .then(|| n.map_note(Note::Sapling))
+        });
+
+        #[cfg(feature = "orchard")]
+        let iter = iter.chain(self.orchard.into_iter().filter_map(|n| {
+            retention
+                .should_retain_orchard(&n)
+                .then(|| n.map_note(Note::Orchard))
+        }));
+
+        iter.collect()
+    }
+}
+
 /// A type describing the mined-ness of transactions that should be returned in response to a
 /// [`TransactionDataRequest`].
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -997,97 +1088,6 @@ pub enum TransactionStatus {
     /// The requested transaction ID corresponds to a transaction that has been included in the
     /// block at the provided height.
     Mined(BlockHeight),
-}
-
-impl<NoteRef> SpendableNotes<NoteRef> {
-    /// Construct a new empty [`SpendableNotes`].
-    pub fn empty() -> Self {
-        Self::new(
-            vec![],
-            #[cfg(feature = "orchard")]
-            vec![],
-        )
-    }
-
-    /// Construct a new [`SpendableNotes`] from its constituent parts.
-    pub fn new(
-        sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
-        #[cfg(feature = "orchard")] orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
-    ) -> Self {
-        Self {
-            sapling,
-            #[cfg(feature = "orchard")]
-            orchard,
-        }
-    }
-
-    /// Returns the set of spendable Sapling notes.
-    pub fn sapling(&self) -> &[ReceivedNote<NoteRef, sapling::Note>] {
-        self.sapling.as_ref()
-    }
-
-    /// Consumes this value and returns the Sapling notes contained within it.
-    pub fn take_sapling(self) -> Vec<ReceivedNote<NoteRef, sapling::Note>> {
-        self.sapling
-    }
-
-    /// Returns the set of spendable Orchard notes.
-    #[cfg(feature = "orchard")]
-    pub fn orchard(&self) -> &[ReceivedNote<NoteRef, orchard::note::Note>] {
-        self.orchard.as_ref()
-    }
-
-    /// Consumes this value and returns the Orchard notes contained within it.
-    #[cfg(feature = "orchard")]
-    pub fn take_orchard(self) -> Vec<ReceivedNote<NoteRef, orchard::note::Note>> {
-        self.orchard
-    }
-
-    /// Computes the total value of Sapling notes.
-    pub fn sapling_value(&self) -> Result<Zatoshis, BalanceError> {
-        self.sapling.iter().try_fold(Zatoshis::ZERO, |acc, n| {
-            (acc + n.note_value()?).ok_or(BalanceError::Overflow)
-        })
-    }
-
-    /// Computes the total value of Sapling notes.
-    #[cfg(feature = "orchard")]
-    pub fn orchard_value(&self) -> Result<Zatoshis, BalanceError> {
-        self.orchard.iter().try_fold(Zatoshis::ZERO, |acc, n| {
-            (acc + n.note_value()?).ok_or(BalanceError::Overflow)
-        })
-    }
-
-    /// Computes the total value of spendable inputs
-    pub fn total_value(&self) -> Result<Zatoshis, BalanceError> {
-        #[cfg(not(feature = "orchard"))]
-        return self.sapling_value();
-
-        #[cfg(feature = "orchard")]
-        return (self.sapling_value()? + self.orchard_value()?).ok_or(BalanceError::Overflow);
-    }
-
-    /// Consumes this [`SpendableNotes`] value and produces a vector of
-    /// [`ReceivedNote<NoteRef, Note>`] values.
-    pub fn into_vec(
-        self,
-        retention: &impl NoteRetention<NoteRef>,
-    ) -> Vec<ReceivedNote<NoteRef, Note>> {
-        let iter = self.sapling.into_iter().filter_map(|n| {
-            retention
-                .should_retain_sapling(&n)
-                .then(|| n.map_note(Note::Sapling))
-        });
-
-        #[cfg(feature = "orchard")]
-        let iter = iter.chain(self.orchard.into_iter().filter_map(|n| {
-            retention
-                .should_retain_orchard(&n)
-                .then(|| n.map_note(Note::Orchard))
-        }));
-
-        iter.collect()
-    }
 }
 
 /// Metadata about the structure of unspent outputs in a single pool within a wallet account.
