@@ -82,6 +82,7 @@ use rusqlite::{self, named_params, params, Connection, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use tracing::{debug, warn};
+use transparent::get_wallet_transparent_output;
 use uuid::Uuid;
 
 use zcash_address::ZcashAddress;
@@ -112,7 +113,7 @@ use zcash_primitives::{
 use zcash_protocol::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
-    value::{ZatBalance, Zatoshis},
+    value::{BalanceError, ZatBalance, Zatoshis},
     PoolType, ShieldedProtocol, TxId,
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
@@ -3088,13 +3089,82 @@ pub(crate) fn put_block(
     Ok(())
 }
 
+fn determine_fee(
+    conn: &rusqlite::Connection,
+    tx: &Transaction,
+) -> Result<Option<Zatoshis>, SqliteClientError> {
+    let value_balance: ZatBalance = tx
+        .sapling_bundle()
+        .map_or(ZatBalance::zero(), |s_bundle| *s_bundle.value_balance());
+
+    let value_balance = tx.orchard_bundle().map_or(Ok(value_balance), |o_bundle| {
+        (value_balance + *o_bundle.value_balance()).ok_or(BalanceError::Overflow)
+    })?;
+
+    match tx.transparent_bundle() {
+        Some(t_bundle) => {
+            let t_out_total = t_bundle
+                .vout
+                .iter()
+                .map(|o| o.value)
+                .sum::<Option<Zatoshis>>()
+                .ok_or(BalanceError::Overflow)?;
+            let value_balance = (value_balance - t_out_total).ok_or(BalanceError::Underflow)?;
+
+            if t_bundle.vin.is_empty() {
+                Zatoshis::try_from(value_balance)
+                    .map(Some)
+                    .map_err(SqliteClientError::from)
+            } else {
+                #[cfg(feature = "transparent-inputs")]
+                let mut result = Some(value_balance);
+
+                #[cfg(feature = "transparent-inputs")]
+                for t_in in &t_bundle.vin {
+                    match (
+                        result,
+                        get_wallet_transparent_output(conn, &t_in.prevout, true)?,
+                    ) {
+                        (Some(b), Some(out)) => {
+                            result = Some((b + out.txout().value).ok_or(BalanceError::Overflow)?)
+                        }
+                        _ => {
+                            result = None;
+                            break;
+                        }
+                    }
+                }
+
+                #[cfg(not(feature = "transparent-inputs"))]
+                let result = None;
+
+                Ok(result.map(Zatoshis::try_from).transpose()?)
+            }
+        }
+        None => {
+            // The sum of the value balances represents the total value of inputs not consumed by
+            // outputs. Without transparent outputs to consume any leftover value, the total is
+            // available for and treated as fee.
+            Ok(Some(
+                value_balance
+                    .try_into()
+                    .map_err(|_| BalanceError::Underflow)?,
+            ))
+        }
+    }
+}
+
 pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     d_tx: DecryptedTransaction<AccountUuid>,
     #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
 ) -> Result<(), SqliteClientError> {
-    let tx_ref = put_tx_data(conn, d_tx.tx(), None, None, None)?;
+    // If the transaction is fully shielded, or all transparent inputs are available, set the
+    // fee value.
+    let fee = determine_fee(conn, d_tx.tx())?;
+
+    let tx_ref = put_tx_data(conn, d_tx.tx(), fee, None, None)?;
     if let Some(height) = d_tx.mined_height() {
         set_transaction_status(conn, d_tx.tx().txid(), TransactionStatus::Mined(height))?;
     }

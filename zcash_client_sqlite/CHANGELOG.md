@@ -15,6 +15,8 @@ and this library adheres to Rust's notion of
 - This release fixes a bug that caused transparent UTXO value to be
   double_counted in the wallet summary, contributing to both spendable and
   pending balance, when queried with `min_confirmations == 0`.
+- Transaction fees are now restored when possible by calls to
+  `WalletDb::store_decrypted_tx`.
 
 ## [0.16.3] - 2025-06-12
 
