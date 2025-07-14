@@ -1,4 +1,4 @@
-# Contributing to CONTRIBUTING.md
+# Contributing to `librustzcash` Crates
 
 First off, thanks for taking the time to contribute! ❤️
 
@@ -10,10 +10,10 @@ smooth out the experience for all involved. The community looks forward to your
 contributions. 🎉
 
 > And if you like the project, but just don't have time to contribute, that's fine. There are other easy ways to support the project and show your appreciation, which we would also be very happy about:
-> - Star the project on GitHub
-> - Post about the project
-> - Refer this project in your project's readme
-> - Mention the project at local meetups and tell your friends/colleagues
+> - Star the project on GitHub.
+> - Post about the project.
+> - Refer this project in your project's readme.
+> - Mention the project at local meetups and tell your friends/colleagues.
 
 
 ## Table of Contents
@@ -23,12 +23,9 @@ contributions. 🎉
 - [I Want To Contribute](#i-want-to-contribute)
 - [Reporting Bugs](#reporting-bugs)
 - [Suggesting Enhancements](#suggesting-enhancements)
-- [Your First Code Contribution](#your-first-code-contribution)
-- [Improving The Documentation](#improving-the-documentation)
 - [Styleguides](#styleguides)
-- [Commit Messages](#commit-messages)
-- [Join The Project Team](#join-the-project-team)
-
+- [Git Usage](#git-usage)
+- [Coding Style](#coding-style)
 
 ## Code of Conduct
 
@@ -61,7 +58,7 @@ this may take some time.
 
 ## I Want To Contribute
 
-> ### Legal Notice 
+> ### Legal Notice
 > When contributing to this project, you must agree that you have authored 100% of the content, that you have the necessary rights to the content and that the content you contribute may be provided under the project licenses.
 
 ### Project Structure
@@ -76,7 +73,7 @@ summary documentation for each module.
 The libraries supplied by this project follow [Semantic
 Versioning](https://semver.org/). If possible, it is desirable for users to
 depend upon the latest released version. Detailed change logs are available in
-the `CHANGELOG.md` file for each module. 
+the `CHANGELOG.md` file for each module.
 
 Please note that the libraries in this workspace are under continuous
 development and new SemVer major-version releases are frequent. Users of these
@@ -99,13 +96,13 @@ possible.
 
 - Determine if your bug is really a bug and not an error on your side e.g.
   using incompatible environment components/versions or violating the
-  documented preconditions for an operation. 
+  documented preconditions for an operation.
 - To see if other users have experienced (and potentially already solved) the
   same issue you are having, check if there is not already a bug report
   existing for your bug or error in the [bug tracker](issues?q=label%3Abug).
 - Also make sure to search the internet to see if users outside of the GitHub
-  community have discussed the issue. You can also ask about your problem in 
-  the [Zcash R&D Discord channel](https://discordapp.com/channels/809218587167293450/876655911790321684).
+  community have discussed the issue. You can also ask about your problem in
+  the [Zcash R&D Discord](https://discordapp.com/channels/809218587167293450/876655911790321684).
 - Collect information about the problem:
   - OS, Platform and Version (Windows, Linux, macOS, x86, ARM)
   - Version of the compiler, runtime environment, etc. depending on what seems
@@ -136,7 +133,8 @@ the project:
 Once it's filed:
 
 - The project team will label the issue accordingly.
-- A team member will try to reproduce the issue with your provided steps. If
+- Unless the issue is naturally hard to reproduce, such as a deadlock,
+  a team member will try to reproduce the issue with your provided steps. If
   there are no reproduction steps or no obvious way to reproduce the issue, the
   team will ask you for those steps and mark the issue as `needs-repro`. Bugs
   with the `needs-repro` tag will not be addressed until they are reproduced.
@@ -144,7 +142,7 @@ Once it's filed:
   appropriate category and fixed according to the criticality of the issue. If
   you're able to contribute a proposed fix, this will likely speed up the
   process, although be aware that `librustzcash` is a complex project and fixes
-  will be considered in the context the safety and potential for unintentional
+  will be considered in the context of safety and potential for unintentional
   misuse of overall API; you should be prepared to alter your approach based on
   suggestions from the team and for your contributions to undergo multiple
   rounds of review.
@@ -203,25 +201,32 @@ Enhancement suggestions are tracked as [GitHub issues](/issues).
 ### Git Usage
 
 This project uses a merge-based workflow. When creating a branch, it is
-advisable to branch from the earliest sub-module tag to which the modification
-can be applied as a SemVer-compatible change without generating substantial
-source-code-level or semantic conflicts with the current state of the `main`
-branch. While this does not ensure that a SemVer point release containing the
-change will be made, it at least makes such a release possible and helps to
-clarify the scope of the change for reviewers. If branching from somewhere
-other than the current state of `main`, please indicate the relevant tag in the
-top message of the pull request; the maintainers may request that you change
-the "base" branch of your PR to simplify such releases.
+advisable to branch from a release tag for the crate to which the modification
+will be applied. There are two cases to consider here:
+
+- If the modification involves a SemVer-breaking API change, branch from
+  the latest release tag for the crate in question.
+
+- If the modification can be applied as a SemVer-compatible change without
+  generating substantial source-code-level or semantic conflicts with the
+  current state of the `main` branch, it is often useful to branch from the
+  most recent tag in the series from the *previous* SemVer major release
+  relative to the current state of `main`. By including the change in two
+  SemVer major release versions, it can help support more users. While this
+  does not ensure that a SemVer point release containing the change will be
+  made, it at least makes such a release possible and helps to clarify the
+  scope of the change for reviewers. Please indicate the relevant tag in the
+  top message of the pull request on GitHub; the maintainers may request that
+  you change the "base" branch of your PR to simplify such releases.
 
 #### Branch History
 
-- Commits should represent discrete semantic changes. 
+- Commits should represent discrete semantic changes.
 - When a commit alters the public API, fixes a bug, or changes the underlying
   semantics of existing code, the commit MUST also modify the affected
   submodules' `CHANGELOG.md` files to clearly document the change.
 - Updated or added members of the public API MUST include complete `rustdoc`
-  documentation comments. See the [Documentation](#documentation) section of
-  this style guide for additional information.
+  documentation comments.
 - It is acceptable and desirable to open pull requests in "Draft" status. Only
   once the pull request has passed CI checks should it be transitioned to
   "Ready For Review".
@@ -260,7 +265,7 @@ the "base" branch of your PR to simplify such releases.
   - When changes are requested in pull request review, it is desirable to apply
     those changes to the affected commit in order to avoid excessive noise in the
     commit history. The [git revise](https://github.com/mystor/git-revise) plugin
-    is **extremely** useful for this purpose. 
+    is **extremely** useful for this purpose.
   - If a maintainer or other user uses the GitHub `suggestion` feature to
     suggest explicit code changes, it's usually best to accept those changes
     via the "Apply Suggested Changes" GitHub workflow, and then to amend the
@@ -285,7 +290,7 @@ In `librustzcash` code, type safety is of paramount importance. This has
 numerous implications, including but not limited to the following:
 - Invalid states should be made unrepresentable at the type level. In general:
   - `structs` should have all internal members private or crate-private, and
-    should expose constructors that return in `Result<...>` or `Option<...>`
+    should expose constructors that result in `Result<...>` or `Option<...>`
     that check for invariant violations, if any such violations are possible.
     Provide public or crate-public accessors for internal members when necessary.
   - "bare" native integer types, strings, and so forth should be avoided in
@@ -299,7 +304,7 @@ numerous implications, including but not limited to the following:
     arguments and return values.
 - Prefer immutability; make data types immutable unless there is a strong
   reason to believe that values will need to be modified in-place for
-  performance reasons. 
+  performance reasons.
 - Take care when introducing and/or using structured enum variants, because
   Rust does not provide adequate language features for making such values
   immutable or ensuring safe construction. Instead of creating structured or
@@ -319,13 +324,13 @@ This means:
   variables only in the narrowest possible scope.
 - In Rust, we don't have good tools for referentially transparent treatment
   of operations that involve side effects. If a statement produces or makes use
-  of a side-effect, the context in which that statement of executed should use
+  of a side-effect, the context in which that statement is executed should use
   imperative programming style to make the presence of the side effect more
   evident. For example, use a `for` loop instead of the `map` function of a
   collection if any side effect is performed by the body of the loop.
 - If a procedure or method will invoke operations that produce side effects,
   the capability to perform such side effects should be provided to the
-  procedure as an explicit argument. For example, if a procedure will needs to
+  procedure as an explicit argument. For example, if a procedure needs to
   access the current time, that procedure should take an argument `clock: impl
   Clock` where `Clock` is a trait that provides a method that allows the caller
   to obtain the current time. 
