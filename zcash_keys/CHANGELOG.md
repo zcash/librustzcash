@@ -15,6 +15,8 @@ workspace.
   under a newly-added `zcashd-compat` feature flag.
 - `zcash_keys::address::UnifiedAddress::receivers`
 - `zcash_keys::address::Address::receivers`
+- `zcash_keys::keys::transparent` under a new `transparent-key-encoding`
+  feature flag.
 
 ## [0.9.0] - PLANNED
 
