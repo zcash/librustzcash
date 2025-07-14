@@ -7,7 +7,7 @@ use core::array::TryFromSliceError;
 
 use bip32::{PrivateKey, PrivateKeyBytes};
 use secp256k1::{PublicKey, Secp256k1, SecretKey, Signing};
-use secrecy::{ExposeSecret, SecretString, SecretVec, Zeroize};
+use secrecy::{zeroize::ZeroizeOnDrop, ExposeSecret, SecretString, SecretVec, Zeroize};
 use zcash_protocol::consensus::NetworkConstants;
 
 /// Errors that can occur in the parsing of Bitcoin-style base58-encoded secret key material
@@ -305,15 +305,22 @@ impl Key {
         }
         let mut secret_buf = [0u8; 32];
         secret_buf[(32 - oslen)..].copy_from_slice(&seckey[..oslen]);
-        match SecretKey::from_bytes(&secret_buf) {
-            Ok(secret) => Ok(Self { secret, compressed }),
-            Err(_) => {
-                secret_buf.zeroize();
-                Err(())
-            }
-        }
+        let secret_key = SecretKey::from_bytes(&secret_buf);
+        secret_buf.zeroize();
+
+        secret_key
+            .map(|secret| Self { secret, compressed })
+            .map_err(|_| ())
     }
 }
+
+impl Zeroize for Key {
+    fn zeroize(&mut self) {
+        self.secret.non_secure_erase();
+    }
+}
+
+impl ZeroizeOnDrop for Key {}
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod test_vectors;
