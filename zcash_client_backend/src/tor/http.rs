@@ -12,7 +12,7 @@ use hyper::{
     Request, Response, StatusCode, Uri,
 };
 use hyper_util::rt::TokioIo;
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::{
     rustls::{pki_types::ServerName, ClientConfig, RootCertStore},
@@ -228,6 +228,51 @@ impl Client {
         self.http_get(
             url,
             |builder| builder.header(hyper::header::ACCEPT, "application/json"),
+            |body| async {
+                Ok(serde_json::from_reader(
+                    body.collect()
+                        .await
+                        .map_err(HttpError::from)?
+                        .aggregate()
+                        .reader(),
+                )
+                .map_err(HttpError::from)?)
+            },
+            retry_limit,
+            retry_filter,
+        )
+        .await
+    }
+
+    /// Makes an HTTP POST request over Tor, encoding the request and parsing the response
+    /// as JSON.
+    ///
+    /// This is a simple wapper around [`Self::http_post`]. Use that method if you need
+    /// more control over the request headers or response parsing.
+    ///
+    /// Returns `Ok(response)` if an HTTP response is received, even if the HTTP status
+    /// code is not in the 200-299 success range (i.e. [`HttpError::Unsuccessful`] is
+    /// never returned).
+    ///
+    /// There are two arguments for controlling retry behaviour:
+    /// - `retry_limit` is the maximum number of times that a failed request should be
+    ///   retried. You can disable retries by setting this to 0.
+    /// - `retry_filter` can be used to only retry requests that fail in specific ways,
+    ///   and control how the retry is performed. You can disable retries by setting this
+    ///   to `|_| None`, and you can ensure the same circuit is reused by setting this to
+    ///   `|res| res.is_err().then_some(Retry::Same)` (e.g. if you require a persistent
+    ///   Tor client identity across queries).
+    async fn http_post_json<B: Serialize, T: DeserializeOwned>(
+        &self,
+        url: Uri,
+        body: &B,
+        retry_limit: u8,
+        retry_filter: impl Fn(Result<StatusCode, &Error>) -> Option<Retry>,
+    ) -> Result<Response<T>, Error> {
+        self.http_post(
+            url,
+            |builder| builder.header(hyper::header::ACCEPT, "application/json"),
+            dbg!(serde_json::to_string(body).map_err(HttpError::Json)?),
             |body| async {
                 Ok(serde_json::from_reader(
                     body.collect()

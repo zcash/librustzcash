@@ -27,6 +27,7 @@ workspace.
     - `LightdInfo::donation_address`
 - `zcash_client_backend::tor`:
   - `http::Retry`
+  - `http::cryptex::exchanges::NearIntents`
   - `Client::http_get`
   - `Client::http_get_json`
   - `Client::http_post`
@@ -48,6 +49,8 @@ workspace.
   - The exchanges in `http::cryptex::exchanges` will now retry queries once on
     failure, and will use isolated circuits for the retry if the error looks
     like a blocked Tor exit node.
+  - `http::cryptex::Exchanges::unauthenticated_known_with_gemini_trusted` now
+    includes `NearIntents`.
 
 ## [0.18.0] - 2025-03-19
 
