@@ -13,8 +13,9 @@ use zcash_protocol::consensus::NetworkConstants;
 /// Errors that can occur in the parsing of Bitcoin-style base58-encoded secret key material
 #[derive(Debug)]
 pub enum ParseError {
-    /// The data being decoded had an incorrect length.
-    LengthInvalid,
+    /// The data being decoded had an incorrect length, an incorrect prefix, or has the correct
+    /// length for a compressed encoding but has its final byte not equal to `1`.
+    InvalidEncoding,
     /// Errors that occur in base58 decoding.
     Base58(bs58::decode::Error),
     /// Errors that occur when a decoded binary value does not correspond to a valid secp256k1 secret key.
@@ -29,7 +30,7 @@ impl From<bs58::decode::Error> for ParseError {
 
 impl From<TryFromSliceError> for ParseError {
     fn from(_: TryFromSliceError) -> Self {
-        ParseError::LengthInvalid
+        ParseError::InvalidEncoding
     }
 }
 
@@ -73,7 +74,7 @@ impl Key {
                 compressed,
             })
         } else {
-            Err(ParseError::LengthInvalid)
+            Err(ParseError::InvalidEncoding)
         }
     }
 
@@ -111,24 +112,24 @@ impl Key {
     /// Derives the secp256k1 public key corresponding to the secret key.
     pub fn pubkey(&self) -> PublicKey {
         let secp = secp256k1::Secp256k1::new();
-        self.pubkey_internal(&secp)
+        self.pubkey_with_context(&secp)
     }
 
     /// Derives the secp256k1 public key corresponding to the secret key,
     /// using the provided secp context.
-    pub fn pubkey_internal<C: Signing>(&self, secp: &Secp256k1<C>) -> PublicKey {
+    pub fn pubkey_with_context<C: Signing>(&self, secp: &Secp256k1<C>) -> PublicKey {
         self.secret.public_key(secp)
     }
 
     /// Generates the "openssh-inspired" DER encoding of the secret key used by zcashd.
     pub fn der_encode(&self) -> SecretVec<u8> {
         let secp = secp256k1::Secp256k1::new();
-        self.der_encode_internal(&secp)
+        self.der_encode_with_context(&secp)
     }
 
     /// Generates the "openssh-inspired" DER encoding of the secret key used by zcashd,
     /// using the provided secp context for pubkey encoding.
-    pub fn der_encode_internal<C: Signing>(&self, secp: &Secp256k1<C>) -> SecretVec<u8> {
+    pub fn der_encode_with_context<C: Signing>(&self, secp: &Secp256k1<C>) -> SecretVec<u8> {
         // Ported from https://github.com/zcash/zcash/blob/1f1f7a385adc048154e7f25a3a0de76f3658ca09/src/key.cpp#L93
         // The original c++ code is retained as comments.
 
@@ -223,10 +224,10 @@ impl Key {
         //        return 0;
         //    }
         //    seckey++;
-        if seckey.is_empty() || seckey[0] != 0x30 {
-            return Err(());
-        }
-        let seckey = &seckey[1..];
+        let seckey = match seckey.split_first() {
+            Some((&0x30, rest)) => Ok(rest),
+            _ => Err(()),
+        }?;
 
         //    /* sequence length constructor */
         //    if (end - seckey < 1 || !(*seckey & 0x80u)) {
@@ -239,11 +240,10 @@ impl Key {
         //    if (end - seckey < lenb) {
         //        return 0;
         //    }
-        if seckey.is_empty() || (seckey[0] & 0x80 == 0) {
-            return Err(());
-        }
-        let lenb = usize::from(seckey[0] & !0x80);
-        let seckey = &seckey[1..];
+        let (lenb, seckey) = match seckey.split_first() {
+            Some((lenb, seckey)) if lenb & 0x80 != 0 => Ok((usize::from(lenb & !0x80), seckey)),
+            _ => Err(()),
+        }?;
         if !(1..=2).contains(&lenb) {
             return Err(());
         }
@@ -274,10 +274,10 @@ impl Key {
         //        return 0;
         //    }
         //    seckey += 3;
-        if seckey.len() < 3 || &seckey[..3] != &[0x02, 0x01, 0x01] {
-            return Err(());
-        }
-        let seckey = &seckey[3..];
+        let seckey = match seckey.split_at(3) {
+            (&[0x02, 0x01, 0x01], rest) => Ok(rest),
+            _ => Err(()),
+        }?;
 
         //    /* sequence element 1: octet string, up to 32 bytes */
         //    if (end - seckey < 2 || seckey[0] != 0x04u) {
@@ -348,7 +348,7 @@ mod tests {
             let compressed = rng.gen_bool(0.5);
             let key = Key { secret, compressed };
 
-            let encoded = key.der_encode_internal(&secp);
+            let encoded = key.der_encode_with_context(&secp);
             let decoded = Key::der_decode(&encoded, compressed).unwrap();
 
             assert_eq!(key.secret(), decoded.secret());
