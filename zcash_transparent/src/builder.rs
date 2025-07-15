@@ -717,7 +717,7 @@ mod tests {
             .prepare_transparent_signatures(calculate_sighash, &secp)
             .unwrap();
 
-        // Create a signature from adifferent key
+        // Create a signature from a different key
         let unrelated_sk_bytes = [2; 32];
         let unrelated_sk = SecretKey::from_slice(&unrelated_sk_bytes).unwrap();
 
