@@ -3,6 +3,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::{self, Display};
 
+use snafu::prelude::*;
 use zcash_address::unified::{self, Container, Encoding, Typecode, Ufvk, Uivk};
 use zcash_protocol::consensus;
 use zip32::{AccountId, DiversifierIndex};
@@ -131,54 +132,33 @@ pub enum Era {
 }
 
 /// A type for errors that can occur when decoding keys from their serialized representations.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Snafu, Debug, PartialEq, Eq)]
 pub enum DecodingError {
     #[cfg(feature = "unstable")]
-    ReadError(&'static str),
+    #[snafu(display("Read error: {msg}"))]
+    ReadError { msg: &'static str },
     #[cfg(feature = "unstable")]
+    #[snafu(display("Invalid era"))]
     EraInvalid,
     #[cfg(feature = "unstable")]
-    EraMismatch(Era),
+    #[snafu(display("Era mismatch: actual {era}"))]
+    EraMismatch { era: Era },
     #[cfg(feature = "unstable")]
+    #[snafu(display("Invalid typecode"))]
     TypecodeInvalid,
     #[cfg(feature = "unstable")]
+    #[snafu(display("Invalid length"))]
     LengthInvalid,
     #[cfg(feature = "unstable")]
-    LengthMismatch(Typecode, u32),
+    #[snafu(display("Length mismatch: received {length} bytes for typecode {typecode:?}"))]
+    LengthMismatch { typecode: Typecode, length: u32 },
     #[cfg(feature = "unstable")]
-    InsufficientData(Typecode),
+    #[snafu(display("Insufficient data for typecode {typecode:?}"))]
+    InsufficientData { typecode: Typecode },
     /// The key data could not be decoded from its string representation to a valid key.
-    KeyDataInvalid(Typecode),
+    #[snafu(display("Invalid key data for key type {typecode:?}"))]
+    KeyDataInvalid { typecode: Typecode },
 }
-
-impl core::fmt::Display for DecodingError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            #[cfg(feature = "unstable")]
-            DecodingError::ReadError(s) => write!(f, "Read error: {s}"),
-            #[cfg(feature = "unstable")]
-            DecodingError::EraInvalid => write!(f, "Invalid era"),
-            #[cfg(feature = "unstable")]
-            DecodingError::EraMismatch(e) => write!(f, "Era mismatch: actual {e:?}"),
-            #[cfg(feature = "unstable")]
-            DecodingError::TypecodeInvalid => write!(f, "Invalid typecode"),
-            #[cfg(feature = "unstable")]
-            DecodingError::LengthInvalid => write!(f, "Invalid length"),
-            #[cfg(feature = "unstable")]
-            DecodingError::LengthMismatch(t, l) => {
-                write!(f, "Length mismatch: received {l} bytes for typecode {t:?}")
-            }
-            #[cfg(feature = "unstable")]
-            DecodingError::InsufficientData(t) => {
-                write!(f, "Insufficient data for typecode {t:?}")
-            }
-            DecodingError::KeyDataInvalid(t) => write!(f, "Invalid key data for key type {t:?}"),
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for DecodingError {}
 
 #[cfg(feature = "unstable")]
 impl Era {

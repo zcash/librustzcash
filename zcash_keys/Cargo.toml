@@ -67,6 +67,9 @@ byteorder = { workspace = true, optional = true }
 # - Digests
 blake2b_simd = { workspace = true }
 
+# - Error handling
+thiserror.workspace = true
+
 [dev-dependencies]
 hex.workspace = true
 jubjub.workspace = true
