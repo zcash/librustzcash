@@ -7,6 +7,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Variants of `zcash_primitives::transaction::TxVersion` have changed. They
+  now represent explicit transaction versions, in order to avoid accidental
+  confusion with the names of the network upgrades that they were introduced
+  in.
+
 ## [0.22.0] - 2025-02-21
 
 ### Changed

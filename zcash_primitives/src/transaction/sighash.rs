@@ -67,12 +67,14 @@ pub fn signature_hash<
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> SignatureHash {
     SignatureHash(match tx.version {
-        TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => {
+        TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
             v4_signature_hash(tx, signable_input)
         }
 
-        TxVersion::Zip225 => v5_signature_hash(tx, signable_input, txid_parts),
+        TxVersion::V5 => v5_signature_hash(tx, signable_input, txid_parts),
 
+        #[cfg(zcash_unstable = "nu7")]
+        TxVersion::V6 => todo!(),
         #[cfg(zcash_unstable = "zfuture")]
         TxVersion::ZFuture => v5_signature_hash(tx, signable_input, txid_parts),
     })
