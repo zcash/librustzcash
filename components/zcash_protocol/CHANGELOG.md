@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.5.4] - 2025-07-15
+
 ### Added
 - `impl {Add,Sub}<Zatoshis> for {ZatBalance, Option<ZatBalance>}`
 
