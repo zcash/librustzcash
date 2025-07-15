@@ -1157,7 +1157,7 @@ pub mod testing {
         }
     }
 
-    #[cfg(all(not(zcash_unstable = "zfuture"), not(feature = "zip-233")))]
+    #[cfg(all(not(zcash_unstable = "zfuture"), not(zcash_unstable = "nu7")))]
     prop_compose! {
         pub fn arb_txdata(consensus_branch_id: BranchId)(
             version in arb_tx_version(consensus_branch_id),

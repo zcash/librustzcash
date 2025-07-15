@@ -78,7 +78,6 @@ use zcash_primitives::{
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::Memo,
-    value::Zatoshis,
     ShieldedProtocol,
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
@@ -124,6 +123,14 @@ use crate::wallet::encoding::KeyScope;
 
 #[cfg(any(test, feature = "test-dependencies", not(feature = "orchard")))]
 use zcash_protocol::PoolType;
+
+#[cfg(any(
+    test,
+    feature = "transparent-inputs",
+    feature = "unstable",
+    feature = "test-dependencies"
+))]
+use zcash_protocol::value::Zatoshis;
 
 /// `maybe-rayon` doesn't provide this as a fallback, so we have to.
 #[cfg(not(feature = "multicore"))]
