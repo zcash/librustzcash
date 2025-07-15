@@ -294,7 +294,7 @@ impl Zatoshis {
         self.0
     }
 
-    /// Returns this Zatoshis as a u64.
+    /// Returns this Zatoshis as an i64.
     pub(crate) fn into_i64(self) -> i64 {
         // this cast is safe as we know by construction that the value fits into the range of an
         // i64

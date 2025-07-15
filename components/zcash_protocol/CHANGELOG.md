@@ -8,7 +8,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
-- `impl {Add,Sub}<Zatoshis> for {ZatBalance, Option<ZatBalance}`
+- `impl {Add,Sub}<Zatoshis> for {ZatBalance, Option<ZatBalance>}`
 
 ## [0.5.3] - 2025-06-12
 ### Added
