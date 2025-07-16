@@ -59,13 +59,14 @@ workspace.
     - `MIN_COINBASE_SCRIPT_LEN`
     - `MAX_COINBASE_HEIGHT_LEN`
     - `MAX_MINER_DATA_LEN`
-    - `MinerData` struct
+    - `MinerData` struct being `serde::Serialize` under the feature `serde`.
     - `impl Default for MinerData`
     - `impl TryFrom<&[u8]> for MinerData`
     - `impl AsRef<[u8]> for MinerData`
     - `Error` enum
     - `impl fmt::Display for Error`
     - `impl std::error::Error for Error`
+  - Optional dependency on `serde` under the implicit `serde` feature.
 
 ### Changed
 - `zcash_transparent::address`:

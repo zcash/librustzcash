@@ -40,6 +40,7 @@ pub const MAX_MINER_DATA_LEN: usize = MAX_COINBASE_SCRIPT_LEN - MAX_COINBASE_HEI
 /// - The data cannot be empty.
 /// - The data must be less than [`MAX_MINER_DATA_LEN`] bytes.
 #[derive(Clone, Eq, PartialEq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct MinerData(Vec<u8>);
 
 impl Default for MinerData {
