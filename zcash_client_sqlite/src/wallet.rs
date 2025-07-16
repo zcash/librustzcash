@@ -3172,6 +3172,7 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     let fee = determine_fee(conn, d_tx.tx())?;
 
     let tx_ref = put_tx_data(conn, d_tx.tx(), fee, None, None)?;
+
     if let Some(height) = d_tx.mined_height() {
         set_transaction_status(conn, d_tx.tx().txid(), TransactionStatus::Mined(height))?;
     }
@@ -3546,6 +3547,52 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
             UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
             false,
         )?;
+    }
+
+    // For each transaction that spends a transparent output of this transaction and does not
+    // already have a known fee value, set the fee if possible.
+    let mut spending_txs_stmt = conn.prepare(
+        "SELECT DISTINCT t.id_tx, t.raw, t.block, t.expiry_height
+         FROM transactions t
+         -- find transactions that spend transparent outputs of the decrypted tx
+         LEFT OUTER JOIN transparent_received_output_spends ts
+            ON ts.transaction_id = t.id_tx
+         LEFT OUTER JOIN transparent_received_outputs tro
+            ON tro.transaction_id = :transaction_id
+            AND tro.id = ts.transparent_received_output_id
+         WHERE t.fee IS NULL
+         AND t.raw IS NOT NULL
+         AND ts.transaction_id IS NOT NULL",
+    )?;
+
+    let mut spending_txs_rows = spending_txs_stmt.query(named_params! {
+        ":transaction_id": tx_ref.0
+    })?;
+
+    while let Some(row) = spending_txs_rows.next()? {
+        let spending_tx_ref = row.get(0).map(TxRef)?;
+        let tx_bytes: Vec<u8> = row.get(1)?;
+        let block: Option<u32> = row.get(2)?;
+        let expiry: Option<u32> = row.get(3)?;
+
+        let (_, spending_tx) = parse_tx(
+            params,
+            &tx_bytes,
+            block.map(BlockHeight::from),
+            expiry.map(BlockHeight::from),
+        )?;
+
+        if let Some(fee) = determine_fee(conn, &spending_tx)? {
+            conn.execute(
+                "UPDATE transactions
+                 SET fee = :fee
+                 WHERE id_tx = :transaction_id",
+                named_params! {
+                    ":transaction_id": spending_tx_ref.0,
+                    ":fee": u64::from(fee)
+                },
+            )?;
+        }
     }
 
     // If the transaction has outputs that belong to the wallet as well as transparent
