@@ -722,8 +722,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         //
 
         // After fees are accounted for, the value balance of the transaction must be zero.
-        let balance_after_fees =
-            (self.value_balance()? - fee.into()).ok_or(BalanceError::Underflow)?;
+        let balance_after_fees = (self.value_balance()? - fee).ok_or(BalanceError::Underflow)?;
 
         match balance_after_fees.cmp(&ZatBalance::zero()) {
             Ordering::Less => {
@@ -905,8 +904,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         //
 
         // After fees are accounted for, the value balance of the transaction must be zero.
-        let balance_after_fees =
-            (self.value_balance()? - fee.into()).ok_or(BalanceError::Underflow)?;
+        let balance_after_fees = (self.value_balance()? - fee).ok_or(BalanceError::Underflow)?;
 
         match balance_after_fees.cmp(&ZatBalance::zero()) {
             Ordering::Less => {
