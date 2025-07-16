@@ -330,8 +330,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_primitives]]
-version = "0.23.0"
-when = "2025-06-02"
+version = "0.23.1"
+when = "2025-07-16"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
