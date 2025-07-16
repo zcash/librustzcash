@@ -1,6 +1,7 @@
 //! Types, constants, and functions related to coinbase transactions.
 
 use alloc::{fmt, vec::Vec};
+use serde::Serialize;
 
 /// The maximum length of the coinbase script sig field.
 ///
@@ -39,7 +40,7 @@ pub const MAX_MINER_DATA_LEN: usize = MAX_COINBASE_SCRIPT_LEN - MAX_COINBASE_HEI
 ///
 /// - The data cannot be empty.
 /// - The data must be less than [`MAX_MINER_DATA_LEN`] bytes.
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub struct MinerData(Vec<u8>);
 
 impl Default for MinerData {
