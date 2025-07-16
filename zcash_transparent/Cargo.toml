@@ -26,7 +26,10 @@ blake2b_simd.workspace = true
 sha2.workspace = true
 
 # - Encodings
+bs58.workspace = true
 core2.workspace = true
+hex.workspace = true
+serde = { workspace = true, optional = true, features = ["alloc"] }
 
 # - Secret management
 subtle.workspace = true
@@ -50,10 +53,6 @@ getset.workspace = true
 
 # - Documentation
 document-features = { workspace = true, optional = true }
-
-# - Encodings
-bs58.workspace = true
-hex.workspace = true
 
 # - Transparent protocol
 ripemd.workspace = true

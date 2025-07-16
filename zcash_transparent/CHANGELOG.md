@@ -34,6 +34,8 @@ workspace.
     - `Error` enum
     - `impl fmt::Display for Error`
     - `impl std::error::Error for Error`
+    - `MinerData` is now `serde::Serialize` under the feature `serde`.
+  - Optional dependency on `serde` under the implicit `serde` feature.
   - Dependency on `zcash_script 0.3`
 
 ## [0.4.0] - 2025-07-31
