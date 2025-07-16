@@ -47,9 +47,13 @@ to search the internet for answers first.
 If you then still feel the need to ask a question and need clarification, we
 recommend the following:
 
-- Open an [Issue](/issues/new).
-- Provide as much context as you can about what you're running into.
-- Provide project and platform versions depending on what seems relevant.
+- Ask for help in the `#libraries` channel of the [Zcash R&D Discord](https://discordapp.com/channels/809218587167293450/876655911790321684).
+  There are no bad questions, only insufficiently documented answers. If you're
+  able to find an answer and it wasn't already in the docs, consider opening a
+  pull request to add it to the documentation!
+- You can also open an [Issue](/issues/new). If you do so:
+  - Provide as much context as you can about what you're running into.
+  - Provide project and platform versions depending on what seems relevant.
 
 We will then attempt to triage the issue as soon as practical. Please be aware
 that the maintainers of `librustzcash` have a relatively heavy workload, so
