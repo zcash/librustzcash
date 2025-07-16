@@ -7,6 +7,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.23.1] - 2025-07-16
+
+### Changed
+- Migrated to `zcash_protocol 0.5.4` to alleviate a type inference issue
+  observed by downstream users.
+
 ## [0.23.0] - 2025-05-30
 
 ### Changed
