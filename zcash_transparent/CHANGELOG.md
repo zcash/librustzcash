@@ -34,6 +34,7 @@ workspace.
     - `Error` enum
     - `impl fmt::Display for Error`
     - `impl std::error::Error for Error`
+  - Optional dependency on `serde` under the implicit `serde` feature.
 
 ### Changed
 - MSRV is now 1.85.1.
