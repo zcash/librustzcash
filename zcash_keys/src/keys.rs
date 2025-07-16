@@ -176,7 +176,7 @@ pub enum DecodingError {
         expected: zcash_protocol::consensus::NetworkType,
     },
 
-    #[snafu(display("Derivation error - typecode {typecode:?}",))]
+    #[snafu(display("Derivation error - typecode {typecode:?}"))]
     Derivation {
         #[cfg(any(feature = "orchard", feature = "transparent-inputs"))]
         error: DerivationError,
@@ -862,7 +862,9 @@ impl UnifiedFullViewingKey {
             .filter_map(|receiver| match receiver {
                 #[cfg(feature = "orchard")]
                 unified::Fvk::Orchard(data) => orchard::keys::FullViewingKey::from_bytes(data)
-                    .ok_or(DecodingError::KeyDataInvalid(Typecode::Orchard))
+                    .context(KeyDataInvalidSnafu {
+                        typecode: Typecode::Orchard,
+                    })
                     .map(|addr| {
                         orchard = Some(addr);
                         None
@@ -895,7 +897,13 @@ impl UnifiedFullViewingKey {
                 ))),
                 #[cfg(feature = "transparent-inputs")]
                 unified::Fvk::P2pkh(data) => transparent::keys::AccountPubKey::deserialize(data)
-                    .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh))
+                    .map_err(|_| {
+                        // Note: the bip32::Error is ignored
+                        KeyDataInvalidSnafu {
+                            typecode: Typecode::P2pkh,
+                        }
+                        .build()
+                    })
                     .map(|tfvk| {
                         transparent = Some(tfvk);
                         None
@@ -1120,7 +1128,9 @@ impl UnifiedIncomingViewingKey {
                     {
                         orchard = Some(
                             Option::from(orchard::keys::IncomingViewingKey::from_bytes(data))
-                                .ok_or(DecodingError::KeyDataInvalid(Typecode::Orchard))?,
+                                .context(KeyDataInvalidSnafu {
+                                    typecode: Typecode::Orchard,
+                                })?,
                         );
                     }
 
@@ -1145,8 +1155,13 @@ impl UnifiedIncomingViewingKey {
                     #[cfg(feature = "transparent-inputs")]
                     {
                         transparent = Some(
-                            transparent::keys::ExternalIvk::deserialize(data)
-                                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh))?,
+                            transparent::keys::ExternalIvk::deserialize(data).map_err(|_| {
+                                // Note: the bip32:Error is ignored
+                                KeyDataInvalidSnafu {
+                                    typecode: Typecode::P2pkh,
+                                }
+                                .build()
+                            })?,
                         );
                     }
 
