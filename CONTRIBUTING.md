@@ -204,9 +204,34 @@ Enhancement suggestions are tracked as [GitHub issues](/issues).
 
 ### Git Usage
 
-This project uses a merge-based workflow. When creating a branch, it is
-advisable to branch from a release tag for the crate to which the modification
-will be applied. There are two cases to consider here:
+This repository is currently developed with an "unstable main" workflow. The
+current contents of the main branch is a preview of what the next full release
+of all crates may look like, but is not stable. For example, as-yet-unreleased
+zcash_client_sqlite migrations may be altered incompatibly at any time.
+
+In the main branch, all crates have the version corresponding to their most
+recent stable release on https://crates.io; this enables the preview state to
+be tested ahead-of-time by downstream users via [patch.crates-io] directives.
+
+Individual crates have their own tags, e.g. `zcash_primitives-0.19.0`. These
+tags point to the Git commit at which that crate version was published (which
+in general is not the merge commit for a release branch, but the actual commit
+that incremented the crate's version). Note however that other crates should
+not be considered stable at that revision.
+
+#### Merge Workflow
+
+This project uses a merge-based workflow.
+
+We have a strong preference for preserving commit history. PRs are generally
+merged to their target branch with merge commits. We do not use the
+"rebase-merge" option in GitHub. We will avoid using the "squash-merge" option
+in GitHub except on a case-by-case basis for PRs that do not have clean commit
+histories.
+
+When creating a branch, it is advisable to branch from a release tag for the
+crate to which the modification will be applied. There are two cases to
+consider here:
 
 - If the modification involves a SemVer-breaking API change, branch from
   the latest release tag for the crate in question.
@@ -223,9 +248,28 @@ will be applied. There are two cases to consider here:
   top message of the pull request on GitHub; the maintainers may request that
   you change the "base" branch of your PR to simplify such releases.
 
+If the contents of the target branch for a PR changes in a way that creates a
+merge conflict in a PR (either explicit such that GitHub detects it and
+prevents PR merging, or implicit such that CI detects it via test failures when
+testing the merged state), the author should rebase the PR on top of the latest
+state of the target branch, updating each commit as necessary to address the
+conflicts.
+
+In order to keep larger changes to a manageable size for review, we use Stacked PRs:
+
+Each PR after the first branches from, and targets, the branch of the "parent"
+PR. When an earlier PR changes, each subsequent PR's branch is rebased in
+sequence on its "parent" PR's branch. We do not currently use specific tooling
+to aid with PR stacking.
+
 #### Branch History
 
 - Commits should represent discrete semantic changes.
+- We have a strong preference for a clean commit history. We will actively
+  rebase PRs to squash changes (such as bugfixes or responses to review
+  comments) into the relevant earlier commits on the PR branch. We recommend
+  the use of the `git revise` tool to help maintain such a clean history within
+  the context of a single PR.
 - When a commit alters the public API, fixes a bug, or changes the underlying
   semantics of existing code, the commit MUST also modify the affected
   submodules' `CHANGELOG.md` files to clearly document the change.
@@ -249,6 +293,61 @@ will be applied. There are two cases to consider here:
     additions or other changes to the test framework may be required. Please
     consult with the maintainers if substantial changes of this sort are
     needed, or if you are having difficulties reproducing the bug in a test.
+
+#### Pull Request Review
+
+Our rebase-heavy workflow for in-progress PRs can interact poorly with PR
+review, because GitHub prevents reviewers from adding review comments to a
+pre-rebase PR state and forces them to refresh their webpage (losing review
+state).
+
+To get around this GitHub UI limitation, the general process we follow is:
+
+- Before a PR gets any review, PR authors rebase whenever they want.
+- If anyone does not want the PR to be rebased (e.g. because they are actively
+  reviewing it or because rebasing would make future reviews more difficult),
+  they add the `S-please-do-not-rebase` label.
+- While the PR author sees this label or while they know someone is reviewing
+  the PR, they avoid rebasing or force-pushing.
+- The PR author adjusts the branch as necessary to address any comments. They
+  may always add new commits. If `S-please-do-not-rebase` is not present then
+  they can also force-push or rebase previous commits. In any case they push
+  the result to the branch.
+- In cases where it is likely to aid reviewers, the PR author also posts a
+  comment to the PR with a diff link between the previous branch tip and the
+  new branch tip. When submitting a review for a PR, reviewers note the commit
+  up to which the review covers; this aids PR authors in constructing these
+  diff links.
+- If the author would like to rebase the branch but `S-please-do-not-rebase` is
+  present, they should ask the reviewer(s) through an external channel whether
+  rebasing is okay. If everyone is agreed that it is no longer needed, they
+  remove the label.
+- PR authors try to separate target branch rebases from addressing comments. If
+  a rebase is needed to fix a merge conflict, that rebase is performed and
+  force-pushed first (and a comment created with the corresponding diff link).
+  After that, the necessary commit alterations are made to address review
+  comments, followed by a second force-push (with a separate diff link).
+- If for whatever reason a particular PR becomes "too large" (for example, due
+  to there not being a good way to split the contents down into stacked PRs),
+  and significant review has started, then older commits in the PR will
+  generally ossify. In that case we will add `S-please-do-not-rebase`
+  permanently, and avoid rebasing the PR from then on. We will switch to
+  merging the target branch (e.g. main) into the PR branch for merge conflict
+  resolution, and commit changes in response to PR review as separate commits
+  rather than updating the ossified earlier ones. Recent commits might still be
+  okay to amend via force-push if they have not been reviewed yet, but if a PR
+  is in this state then we generally tend to just eat the cost of the
+  lower-value "addressed review comments" commits. This is a generally
+  undesirable state for "leaf-level" change PRs, and we avoid it where
+  possible.
+
+If a PR author is non-responsive to review comments, the crate maintainers will
+generally make the necessary changes to the PR ourselves. For PRs created from
+user forks we can generally do this in the same PR. PRs from an organization
+forks do not allow changes from maintainers (due to missing cross-organization
+permissions); in this case (or if a user's PR has "allow maintainers to edit"
+disabled), we will close the PR and open a new PR containing the commits from
+the old PR.
 
 #### Commit Messages
 
@@ -286,7 +385,11 @@ will be applied. There are two cases to consider here:
 The `librustzcash` authors hold our software to a high standard of quality. The
 list of style requirements below is not comprehensive, but violation of any of
 the following guidelines is likely to cause your pull request to be rejected or
-changes to be required.
+changes to be required. The coding style in this repository has evolved over
+time, and not all preexisting code follows this style; when modifications are
+being made to existing code, it should be upgraded to reflect the recommended
+style (although please ensure that you separate functional changes from
+style-oriented refactoring in the Git commit history.)
 
 #### Type Safety
 
