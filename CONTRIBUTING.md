@@ -337,11 +337,17 @@ This means:
   procedure as an explicit argument. For example, if a procedure needs to
   access the current time, that procedure should take an argument `clock: impl
   Clock` where `Clock` is a trait that provides a method that allows the caller
-  to obtain the current time. 
+  to obtain the current time.
 - Effect capabilities should be defined independent of implementation concerns;
   for example, a data persistence capability should be defined to operate on
   high-level types appropriate to the domain, not to a particular persistence
   layer or serialization.
+
+#### Error Handling
+
+This project consistently uses `Result` with custom error `enum`s to indicate
+the presence of errors. The `std::error::Error` trait should be implemented for
+such error types when the error type is part of the public API of the crate.
 
 ## Attribution
 This guide is based on the template supplied by the
