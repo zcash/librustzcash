@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- The signature of `zcash_client_backend::data_api::testing::TestState::create_proposed_transaction`
+  has been modified to allow transactions to be created from shielding proposals; this API
+  was previously overconstrained. This only affects users of the `test-dependencies` feature.
+
 ## [0.18.0] - 2025-03-19
 
 ### Added
