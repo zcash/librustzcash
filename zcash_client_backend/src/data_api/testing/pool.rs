@@ -77,7 +77,7 @@ use {
         fees::zip317,
     },
     zcash_proofs::prover::LocalTxProver,
-    zcash_protocol::value::ZatBalance,
+    zcash_protocol::{value::ZatBalance, TxId},
 };
 
 #[cfg(feature = "orchard")]
@@ -3247,10 +3247,16 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, DSF>(
     st.scan_cached_blocks(h, 1);
 }
 
+/// Ensure that wallet recovery recomputes fees.
+///
+/// Callers must provide an `intervene` function that deletes fee information for the specified
+/// txid from the database. This deletion is checked and the test will fail if fee information is
+/// not deleted.
 #[cfg(all(feature = "transparent-inputs"))]
-pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester>(
-    ds_factory: impl DataStoreFactory,
+pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactory>(
+    ds_factory: DsF,
     cache: impl TestCache,
+    intervene: impl FnOnce(&mut DsF::DataStore, TxId) -> Result<(), DsF::DsError>,
 ) {
     use secrecy::ExposeSecret;
 
@@ -3327,4 +3333,50 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester>(
         st.get_total_balance(dest_account_id),
         (transfer_amount + transfer_amount).unwrap()
     );
+
+    // Shield the funds in the destination account
+    let p1 = st
+        .propose_shielding(
+            &input_selector,
+            &change_strategy,
+            Zatoshis::const_from_u64(10000),
+            &[to],
+            dest_account_id,
+            1,
+        )
+        .unwrap();
+    let result1 = st
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
+            &dest_usk,
+            OvkPolicy::Sender,
+            &p1,
+        )
+        .unwrap();
+    assert_eq!(result1.len(), 1);
+    let txid = result1[0];
+    let (h, _) = st.generate_next_block_including(txid);
+    st.scan_cached_blocks(h, 1);
+
+    // Since our wallet constructed the transaction, we have the fee information;
+    // we will need to wipe it out via a backend-level intervention in order to simulate
+    // what happens in recovery.
+    let shielding_tx = st.get_tx_from_history(txid).unwrap().unwrap();
+    assert_matches!(shielding_tx.fee_paid, Some(_));
+    let created_fee = shielding_tx.fee_paid.unwrap();
+
+    intervene(st.wallet_mut(), txid).unwrap();
+
+    // Verify that the intervention removed the fee information for the transaction.
+    let shielding_tx = st.get_tx_from_history(txid).unwrap().unwrap();
+    assert_matches!(shielding_tx.fee_paid, None);
+
+    // Run `decrypt_and_store_transaction; this should restore the fee, since the wallet has all of
+    // the necessary input and output data.
+    let tx = st.wallet().get_transaction(txid).unwrap().unwrap();
+    let network = st.network().clone();
+    decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, Some(h)).unwrap();
+
+    // Verify that the fee information has been restored.
+    let shielding_tx = st.get_tx_from_history(txid).unwrap().unwrap();
+    assert_eq!(shielding_tx.fee_paid, Some(created_fee));
 }
