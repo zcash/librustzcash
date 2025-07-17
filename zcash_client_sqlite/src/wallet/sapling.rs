@@ -622,9 +622,15 @@ pub(crate) mod tests {
         testing::pool::pczt_single_step::<SaplingPoolTester, SaplingPoolTester>()
     }
 
-    #[cfg(feature = "pczt-tests")]
+    #[cfg(all(feature = "orchard", feature = "pczt-tests"))]
     #[test]
     fn pczt_single_step_sapling_to_orchard() {
         testing::pool::pczt_single_step::<SaplingPoolTester, OrchardPoolTester>()
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    #[test]
+    fn wallet_recovery_compute_fees() {
+        testing::pool::wallet_recovery_computes_fees::<SaplingPoolTester>();
     }
 }

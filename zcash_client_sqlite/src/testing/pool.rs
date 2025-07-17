@@ -269,3 +269,11 @@ pub(crate) fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester>()
         BlockCache::new(),
     )
 }
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn wallet_recovery_computes_fees<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::wallet_recovery_computes_fees::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}

@@ -606,4 +606,10 @@ pub(crate) mod tests {
     fn pczt_single_step_orchard_to_sapling() {
         testing::pool::pczt_single_step::<OrchardPoolTester, SaplingPoolTester>()
     }
+
+    #[cfg(feature = "transparent-inputs")]
+    #[test]
+    fn wallet_recovery_compute_fees() {
+        testing::pool::wallet_recovery_computes_fees::<OrchardPoolTester>();
+    }
 }

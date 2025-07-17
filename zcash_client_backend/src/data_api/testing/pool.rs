@@ -3246,3 +3246,85 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, DSF>(
     let (h, _) = st.generate_next_block_including(txid);
     st.scan_cached_blocks(h, 1);
 }
+
+#[cfg(all(feature = "transparent-inputs"))]
+pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    use secrecy::ExposeSecret;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let seed = Secret::new(st.test_seed().unwrap().expose_secret().clone());
+    let source_account = st.test_account().cloned().unwrap();
+    let (dest_account_id, dest_usk) = st
+        .wallet_mut()
+        .create_account("dest", &seed, source_account.birthday(), None)
+        .unwrap();
+
+    let from = T::test_account_fvk(&st);
+    let (to, _) = dest_usk.default_transparent_address();
+
+    // Get some funds in the source account
+    let note_value = Zatoshis::const_from_u64(350000);
+    st.generate_next_block(&from, AddressType::DefaultExternal, note_value);
+    st.generate_next_block(&from, AddressType::DefaultExternal, note_value);
+    st.scan_cached_blocks(source_account.birthday().height(), 2);
+
+    // Create two transactions sending from the source account to a transparent address in the
+    // destination account.
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let transfer_amount = Zatoshis::const_from_u64(200000);
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        Address::from(to).to_zcash_address(st.network()),
+        transfer_amount,
+    )])
+    .unwrap();
+
+    for _ in 0..2 {
+        let p0 = st
+            .propose_transfer(
+                source_account.id(),
+                &input_selector,
+                &change_strategy,
+                request.clone(),
+                NonZeroU32::new(1).unwrap(),
+            )
+            .unwrap();
+        let result0 = st
+            .create_proposed_transactions::<Infallible, _, Infallible, _>(
+                source_account.usk(),
+                OvkPolicy::Sender,
+                &p0,
+            )
+            .unwrap();
+        assert_eq!(result0.len(), 1);
+        let txid = result0[0];
+        let (h, _) = st.generate_next_block_including(txid);
+        st.scan_cached_blocks(h, 1);
+
+        // Make the destination account aware of the received UTXOs
+        let tx = st.wallet().get_transaction(txid).unwrap().unwrap();
+        let t_bundle = tx.transparent_bundle().unwrap();
+        assert_eq!(t_bundle.vout.len(), 1);
+
+        let outpoint = OutPoint::new(*txid.as_ref(), 0);
+        let utxo = WalletTransparentOutput::from_parts(outpoint, t_bundle.vout[0].clone(), Some(h))
+            .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+    }
+
+    assert_eq!(
+        st.get_total_balance(dest_account_id),
+        (transfer_amount + transfer_amount).unwrap()
+    );
+}
