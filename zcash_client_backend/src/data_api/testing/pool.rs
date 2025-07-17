@@ -3256,7 +3256,7 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, DSF>(
 pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactory>(
     ds_factory: DsF,
     cache: impl TestCache,
-    intervene: impl FnOnce(&mut DsF::DataStore, TxId) -> Result<(), DsF::DsError>,
+    mut intervene: impl FnMut(&mut DsF::DataStore, TxId) -> Result<(), DsF::DsError>,
 ) {
     use secrecy::ExposeSecret;
 
@@ -3294,7 +3294,7 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
     )])
     .unwrap();
 
-    for _ in 0..2 {
+    let mut send_transparent = || {
         let p0 = st
             .propose_transfer(
                 source_account.id(),
@@ -3327,7 +3327,12 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
         st.wallet_mut()
             .put_received_transparent_utxo(&utxo)
             .unwrap();
-    }
+
+        (txid, h)
+    };
+
+    send_transparent();
+    let (input_tx_1_txid, input_tx_1_height) = send_transparent();
 
     assert_eq!(
         st.get_total_balance(dest_account_id),
@@ -3375,6 +3380,27 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
     let tx = st.wallet().get_transaction(txid).unwrap().unwrap();
     let network = st.network().clone();
     decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, Some(h)).unwrap();
+
+    // Verify that the fee information has been restored.
+    let shielding_tx = st.get_tx_from_history(txid).unwrap().unwrap();
+    assert_eq!(shielding_tx.fee_paid, Some(created_fee));
+
+    // Wipe the fee information again; calling `decrypt_and_store_transaction` with the *input* tx
+    // should also cause the fees to be restored.
+    intervene(st.wallet_mut(), txid).unwrap();
+
+    let shielding_tx = st.get_tx_from_history(txid).unwrap().unwrap();
+    assert_matches!(shielding_tx.fee_paid, None);
+
+    // Run `decrypt_and_store_transaction with one of the inputs; this should also restore the fee,
+    // since the wallet has all of the necessary input and output data.
+    let tx = st
+        .wallet()
+        .get_transaction(input_tx_1_txid)
+        .unwrap()
+        .unwrap();
+    let network = st.network().clone();
+    decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, Some(input_tx_1_height)).unwrap();
 
     // Verify that the fee information has been restored.
     let shielding_tx = st.get_tx_from_history(txid).unwrap().unwrap();
