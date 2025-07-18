@@ -154,7 +154,8 @@ pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     params: &P,
     account: AccountUuid,
     target_value: TargetValue,
-    anchor_height: BlockHeight,
+    trusted_anchor_height: BlockHeight,
+    untrusted_anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
     to_spendable_note: F,
@@ -168,7 +169,8 @@ where
             params,
             account,
             zats,
-            anchor_height,
+            trusted_anchor_height,
+            untrusted_anchor_height,
             exclude,
             protocol,
             to_spendable_note,
@@ -182,7 +184,8 @@ fn select_minimum_spendable_notes<P: consensus::Parameters, F, Note>(
     params: &P,
     account: AccountUuid,
     target_value: Zatoshis,
-    anchor_height: BlockHeight,
+    trusted_anchor_height: BlockHeight,
+    untrusted_anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
     to_spendable_note: F,
@@ -224,6 +227,7 @@ where
     //    well as a single note for which the sum was greater than or equal to the
     //    required value, bringing the sum of all selected notes across the threshold.
     let mut stmt_select_notes = conn.prepare_cached(
+        // TODO(schell): query should take anchor height of untrusted as well
         &format!(
             "WITH eligible AS (
                  SELECT

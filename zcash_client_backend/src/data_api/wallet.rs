@@ -255,6 +255,64 @@ pub type ExtractErrT<DbT, N> = Error<
     N,
 >;
 
+#[derive(Clone, Copy)]
+struct ConfirmationPolicy {
+    trusted: NonZeroU32,
+    untrusted: NonZeroU32,
+}
+
+/// Result of querying the wallet for target and anchor heights for a given
+/// `ConfirmationPolicy`.
+#[derive(Clone, Copy)]
+struct ConfirmationHeights {
+    /// This is always the `chain_tip_height + 1`, and
+    /// `chain_tip_height` does **not** depend on any `ConfirmationPolicy`.
+    ///
+    /// Note:
+    /// Those details are visible in `zcash_client_sqlite::wallet::get_target_and_anchor_heights`.
+    target_height: BlockHeight,
+    /// Block height of the anchor when using the minimum confirmations for
+    /// a trusted transaction.
+    trusted_anchor_height: BlockHeight,
+    /// Block height of the anchor when using the minimum confirmations for
+    /// an untrusted transaction.
+    untrusted_anchor_height: BlockHeight,
+    /// The policy used to query the wallet that generated the heights in this struct.
+    // TODO(schell): determine if this is needed at lower levels
+    policy: ConfirmationPolicy,
+}
+
+impl ConfirmationHeights {
+    pub fn new<DbT, CommitmentTreeErrT, InputsT, ChangeT>(
+        wallet_db: &mut DbT,
+        policy: ConfirmationPolicy,
+    ) -> Result<Self, ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>>
+    where
+        DbT: WalletRead + InputSource<Error = <DbT as WalletRead>::Error>,
+        ChangeT: ChangeStrategy<MetaSource = DbT>,
+        InputsT: InputSelector<InputSource = DbT>,
+    {
+        let (untrusted_target_height, untrusted_anchor_height) = wallet_db
+            .get_target_and_anchor_heights(policy.untrusted)
+            .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
+            .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
+        let (trusted_target_height, trusted_anchor_height) = wallet_db
+            .get_target_and_anchor_heights(policy.trusted)
+            .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
+            .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
+        assert_eq!(
+            untrusted_target_height, trusted_target_height,
+            "TODO(schell): heights assumption was wrong"
+        );
+        Ok(Self {
+            target_height: untrusted_target_height,
+            trusted_anchor_height,
+            untrusted_anchor_height,
+            policy,
+        })
+    }
+}
+
 /// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
 /// of transactions that can then be authorized and made ready for submission to the network with
 /// [`create_proposed_transactions`].
@@ -267,7 +325,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     input_selector: &InputsT,
     change_strategy: &ChangeT,
     request: zip321::TransactionRequest,
-    min_confirmations: NonZeroU32,
+    min_confirmations: ConfirmationPolicy,
 ) -> Result<
     Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
     ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -279,17 +337,16 @@ where
     InputsT: InputSelector<InputSource = DbT>,
     ChangeT: ChangeStrategy<MetaSource = DbT>,
 {
-    let (target_height, anchor_height) = wallet_db
-        .get_target_and_anchor_heights(min_confirmations)
-        .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
-        .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
+    let heights = ConfirmationHeights::new::<DbT, CommitmentTreeErrT, InputsT, ChangeT>(
+        wallet_db,
+        min_confirmations,
+    )?;
 
     input_selector
         .propose_transaction(
             params,
             wallet_db,
-            target_height,
-            anchor_height,
+            min_confirmations,
             spend_from_account,
             request,
             change_strategy,
