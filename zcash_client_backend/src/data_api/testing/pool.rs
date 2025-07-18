@@ -3252,7 +3252,7 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, DSF>(
 /// Callers must provide an `intervene` function that deletes fee information for the specified
 /// txid from the database. This deletion is checked and the test will fail if fee information is
 /// not deleted.
-#[cfg(all(feature = "transparent-inputs"))]
+#[cfg(feature = "transparent-inputs")]
 pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactory>(
     ds_factory: DsF,
     cache: impl TestCache,
@@ -3378,7 +3378,7 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
     // Run `decrypt_and_store_transaction; this should restore the fee, since the wallet has all of
     // the necessary input and output data.
     let tx = st.wallet().get_transaction(txid).unwrap().unwrap();
-    let network = st.network().clone();
+    let network = *st.network();
     decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, Some(h)).unwrap();
 
     // Verify that the fee information has been restored.
@@ -3399,7 +3399,7 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
         .get_transaction(input_tx_1_txid)
         .unwrap()
         .unwrap();
-    let network = st.network().clone();
+    let network = *st.network();
     decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, Some(input_tx_1_height)).unwrap();
 
     // Verify that the fee information has been restored.

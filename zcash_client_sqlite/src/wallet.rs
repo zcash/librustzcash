@@ -2129,11 +2129,11 @@ fn parse_tx<P: consensus::Parameters>(
     if let Some(height) =
         block_height.or_else(|| expiry_height.filter(|h| h > &BlockHeight::from(0)))
     {
-        Transaction::read(&tx_bytes[..], BranchId::for_height(params, height))
+        Transaction::read(tx_bytes, BranchId::for_height(params, height))
             .map(|t| (height, t))
             .map_err(SqliteClientError::from)
     } else {
-        let tx_data = Transaction::read(&tx_bytes[..], BranchId::Sprout)
+        let tx_data = Transaction::read(tx_bytes, BranchId::Sprout)
             .map_err(SqliteClientError::from)?
             .into_data();
 
