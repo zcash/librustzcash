@@ -48,9 +48,6 @@ use {
     zcash_protocol::value::Zatoshis,
 };
 
-#[cfg(feature = "test-dependencies")]
-use crate::Zatoshis;
-
 /// Tuesday, 25 February 2025 00:00:00Z (the day the clock code was added).
 const TEST_EPOCH_SECONDS_OFFSET: Duration = Duration::from_secs(1740441600);
 
