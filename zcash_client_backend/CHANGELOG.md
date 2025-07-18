@@ -16,6 +16,7 @@ workspace.
 - `zcash_client_backend::data_api::TransactionsInvolvingAddress`
 - `zcash_client_backend::data_api::TransactionDataRequest::transactions_involving_address`
 - `zcash_client_backend::data_api::AccountBirthday::from_parts`
+- `zcash_client_backend::data_api::wallet::ConfirmationsPolicy`
 - A `zcashd-compat` feature flag has been added in service of being able to
   import data from the zcashd `wallet.dat` format. It enables functionality
   needed in order to represent the nonstandard derivations for keys and
@@ -38,6 +39,16 @@ workspace.
     as its argument instead of its parts. This minimizes the API complexity
     that would otherwise arise due to the presence of the `zcashd-compat`
     feature flag.
+  - Arguments to `InputSource::select_spendable_notes` have changed; it now takes
+    a target height and a `ConfirmationsPolicy` instead of an anchor height.
+    The signatures of `wallet::propose_transfer`, `wallet::propose_standard_transfer`,
+    and `wallet::propose_standard_transfer_to_address`, have also been modified to
+    take this change into account, as have the signatures of the
+    `test-dependencies`-flagged methods
+    `testing::TestState::{spend, propose_transfer, propose_standard_transfer}`.
+  - Arguments to `wallet::input_selection::InputSelector::propose_transaction`
+    have changed; it now takes a `ConfirmationsPolicy` in addition to its
+    anchor height.
   - `Zip32Derivation::new` arguments have changed when the `zcashd-compat`
     feature is enabled; in this circumstance, `new` takes an additional
     `legacy_address_index` argument.

@@ -7,8 +7,8 @@ use std::{
     fmt::{self, Debug, Display},
 };
 
-use ::transparent::bundle::TxOut;
 use nonempty::NonEmpty;
+use transparent::bundle::TxOut;
 use zcash_address::ConversionError;
 use zcash_keys::address::{Address, UnifiedAddress};
 use zcash_protocol::{
@@ -25,15 +25,17 @@ use crate::{
     wallet::WalletTransparentOutput,
 };
 
+use super::ConfirmationsPolicy;
+
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
         fees::EphemeralBalance,
         proposal::{Step, StepOutput, StepOutputIndex},
     },
-    ::transparent::{address::TransparentAddress, bundle::OutPoint},
     std::collections::BTreeSet,
     std::convert::Infallible,
+    transparent::{address::TransparentAddress, bundle::OutPoint},
     zip321::Payment,
 };
 
@@ -178,6 +180,7 @@ pub trait InputSelector {
         wallet_db: &Self::InputSource,
         target_height: BlockHeight,
         anchor_height: BlockHeight,
+        confirmations_policy: ConfirmationsPolicy,
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
@@ -364,7 +367,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         params: &ParamsT,
         wallet_db: &Self::InputSource,
         target_height: BlockHeight,
-        anchor_height: BlockHeight,
+        untrusted_anchor_height: BlockHeight,
+        confirmations_policy: ConfirmationsPolicy,
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
@@ -626,7 +630,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             #[cfg(feature = "orchard")]
                             orchard: use_orchard,
                         }))
-                        .map(|notes| ShieldedInputs::from_parts(anchor_height, notes));
+                        .map(|notes| ShieldedInputs::from_parts(untrusted_anchor_height, notes));
 
                     #[cfg(feature = "transparent-inputs")]
                     if let Some(tr1_balance) = tr1_balance_opt {
@@ -746,7 +750,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     account,
                     TargetValue::AtLeast(amount_required),
                     selectable_pools,
-                    anchor_height,
+                    target_height,
+                    confirmations_policy,
                     &exclude,
                 )
                 .map_err(InputSelectorError::DataSource)?;

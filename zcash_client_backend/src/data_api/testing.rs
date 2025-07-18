@@ -51,7 +51,7 @@ use super::{
     wallet::{
         create_proposed_transactions,
         input_selection::{GreedyInputSelector, InputSelector},
-        propose_standard_transfer_to_address, propose_transfer,
+        propose_standard_transfer_to_address, propose_transfer, ConfirmationsPolicy,
     },
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
     AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
@@ -922,7 +922,7 @@ where
             from_account.usk(),
             request,
             OvkPolicy::Sender,
-            NonZeroU32::MIN,
+            ConfirmationsPolicy::MIN,
         )
     }
 
@@ -935,7 +935,7 @@ where
         usk: &UnifiedSpendingKey,
         request: zip321::TransactionRequest,
         ovk_policy: OvkPolicy,
-        min_confirmations: NonZeroU32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<NonEmpty<TxId>, super::wallet::TransferErrT<DbT, InputsT, ChangeT>>
     where
         InputsT: InputSelector<InputSource = DbT>,
@@ -957,7 +957,7 @@ where
             input_selector,
             change_strategy,
             request,
-            min_confirmations,
+            confirmations_policy,
         )?;
 
         create_proposed_transactions(
@@ -979,7 +979,7 @@ where
         input_selector: &InputsT,
         change_strategy: &ChangeT,
         request: zip321::TransactionRequest,
-        min_confirmations: NonZeroU32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<
         Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
         super::wallet::ProposeTransferErrT<DbT, Infallible, InputsT, ChangeT>,
@@ -996,7 +996,7 @@ where
             input_selector,
             change_strategy,
             request,
-            min_confirmations,
+            confirmations_policy,
         )
     }
 
@@ -1007,7 +1007,7 @@ where
         &mut self,
         spend_from_account: <DbT as InputSource>::AccountId,
         fee_rule: StandardFeeRule,
-        min_confirmations: NonZeroU32,
+        confirmations_policy: ConfirmationsPolicy,
         to: &Address,
         amount: Zatoshis,
         memo: Option<MemoBytes>,
@@ -1028,7 +1028,7 @@ where
             &network,
             fee_rule,
             spend_from_account,
-            min_confirmations,
+            confirmations_policy,
             to,
             amount,
             memo,
@@ -2500,6 +2500,7 @@ impl InputSource for MockWalletDb {
         _target_value: TargetValue,
         _sources: &[ShieldedProtocol],
         _anchor_height: BlockHeight,
+        _confirmations_policy: ConfirmationsPolicy,
         _exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
         Ok(SpendableNotes::empty())

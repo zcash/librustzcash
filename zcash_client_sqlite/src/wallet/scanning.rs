@@ -595,7 +595,7 @@ pub(crate) mod tests {
     use {
         incrementalmerkletree::Level,
         orchard::tree::MerkleHashOrchard,
-        std::{convert::Infallible, num::NonZeroU32},
+        std::convert::Infallible,
         zcash_client_backend::{
             data_api::{
                 testing::orchard::OrchardPoolTester, wallet::input_selection::GreedyInputSelector,
@@ -1717,7 +1717,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn orchard_block_spanning_tip_boundary_complete() {
-        use zcash_client_backend::data_api::Account as _;
+        use zcash_client_backend::data_api::{wallet::ConfirmationsPolicy, Account as _};
 
         let mut st = prepare_orchard_block_spanning_test(true);
         let account = st.test_account().cloned().unwrap();
@@ -1793,7 +1793,7 @@ pub(crate) mod tests {
                 &input_selector,
                 &change_strategy,
                 request,
-                NonZeroU32::new(10).unwrap(),
+                ConfirmationsPolicy::new_symmetrical(10).unwrap(),
             )
             .unwrap();
 
@@ -1811,7 +1811,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn orchard_block_spanning_tip_boundary_incomplete() {
-        use zcash_client_backend::data_api::Account as _;
+        use zcash_client_backend::data_api::{wallet::ConfirmationsPolicy, Account as _};
 
         let mut st = prepare_orchard_block_spanning_test(false);
         let account = st.test_account().cloned().unwrap();
@@ -1879,7 +1879,7 @@ pub(crate) mod tests {
             &input_selector,
             &change_strategy,
             request.clone(),
-            NonZeroU32::new(10).unwrap(),
+            ConfirmationsPolicy::new_symmetrical(10).unwrap(),
         );
 
         assert_matches!(proposal, Err(_));
@@ -1893,7 +1893,7 @@ pub(crate) mod tests {
             &input_selector,
             &change_strategy,
             request,
-            NonZeroU32::new(10).unwrap(),
+            ConfirmationsPolicy::new_symmetrical(10).unwrap(),
         );
 
         assert_matches!(proposal, Ok(_));

@@ -17,6 +17,7 @@ use zcash_client_backend::{
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
         testing::{DataStoreFactory, Reset, TestState},
+        wallet::ConfirmationsPolicy,
         TargetValue, *,
     },
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},

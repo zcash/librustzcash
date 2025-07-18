@@ -5,7 +5,9 @@ use rusqlite::{named_params, types::Value, Connection, Row};
 use std::{num::NonZeroU64, rc::Rc};
 
 use zcash_client_backend::{
-    data_api::{NoteFilter, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT},
+    data_api::{
+        wallet::ConfirmationsPolicy, NoteFilter, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT,
+    },
     wallet::ReceivedNote,
 };
 use zcash_primitives::transaction::TxId;
@@ -155,6 +157,7 @@ pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     account: AccountUuid,
     target_value: TargetValue,
     anchor_height: BlockHeight,
+    confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
     to_spendable_note: F,
@@ -169,6 +172,7 @@ where
             account,
             zats,
             anchor_height,
+            confirmations_policy,
             exclude,
             protocol,
             to_spendable_note,
@@ -183,6 +187,7 @@ fn select_minimum_spendable_notes<P: consensus::Parameters, F, Note>(
     account: AccountUuid,
     target_value: Zatoshis,
     anchor_height: BlockHeight,
+    _confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
     to_spendable_note: F,
@@ -224,6 +229,7 @@ where
     //    well as a single note for which the sum was greater than or equal to the
     //    required value, bringing the sum of all selected notes across the threshold.
     let mut stmt_select_notes = conn.prepare_cached(
+        // TODO(schell): query should take anchor height of untrusted as well
         &format!(
             "WITH eligible AS (
                  SELECT
