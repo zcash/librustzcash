@@ -248,7 +248,7 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
         )
         .unwrap();
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal,
@@ -406,7 +406,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
     let step = &proposal.steps().head;
     assert_eq!(step.balance().proposed_change().len(), 2);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal,
@@ -621,11 +621,12 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         );
         assert_eq!(steps[1].balance().proposed_change(), []);
 
-        let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
-            account.usk(),
-            OvkPolicy::Sender,
-            &proposal,
-        );
+        let create_proposed_result = st
+            .create_proposed_transactions::<Infallible, _, Infallible, _>(
+                account.usk(),
+                OvkPolicy::Sender,
+                &proposal,
+            );
         assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 2);
         let txids = create_proposed_result.unwrap();
 
@@ -730,7 +731,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         )
         .unwrap();
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal,
@@ -944,7 +945,7 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
     // This is somewhat redundant with `send_multi_step_proposed_transfer`,
     // but tests the case with no change memo and ensures we haven't messed
     // up the test setup.
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal,
@@ -960,7 +961,7 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
     )
     .unwrap();
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &frobbed_proposal,
@@ -1187,7 +1188,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
 
     // Executing the proposal should succeed
     let txid = st
-        .create_proposed_transactions::<Infallible, _, Infallible>(
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
             account.usk(),
             OvkPolicy::Sender,
             &proposal,
@@ -1249,7 +1250,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
 
     // Executing the proposal should succeed
     assert_matches!(
-        st.create_proposed_transactions::<Infallible, _, Infallible>(account.usk(), OvkPolicy::Sender, &proposal,),
+        st.create_proposed_transactions::<Infallible, _, Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal,),
         Ok(txids) if txids.len() == 1
     );
 
@@ -1331,7 +1332,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
         .unwrap();
 
     let txid2 = st
-        .create_proposed_transactions::<Infallible, _, Infallible>(
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
             account.usk(),
             OvkPolicy::Sender,
             &proposal,
@@ -1483,7 +1484,7 @@ pub fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>(
 
     // Executing the proposal should succeed
     assert_matches!(
-        st.create_proposed_transactions::<Infallible, _, Infallible>(account.usk(), OvkPolicy::Sender, &proposal),
+        st.create_proposed_transactions::<Infallible, _, Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal),
         Ok(txids) if txids.len() == 1
     );
 }
@@ -1543,7 +1544,7 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
 
     // Executing the proposal should succeed
     assert_matches!(
-        st.create_proposed_transactions::<Infallible, _, Infallible>(account.usk(), OvkPolicy::Sender, &proposal),
+        st.create_proposed_transactions::<Infallible, _, Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal),
         Ok(txids) if txids.len() == 1
     );
 }
@@ -2152,7 +2153,7 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     );
     assert_eq!(change_output.value(), expected_change);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal0,
@@ -2243,7 +2244,7 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
     );
     assert_eq!(change_output.value(), expected_change);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal0,
@@ -2330,7 +2331,7 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     assert_eq!(change_output.output_pool(), PoolType::SAPLING);
     assert_eq!(change_output.value(), expected_change);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal0,
