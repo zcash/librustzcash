@@ -255,6 +255,44 @@ pub type ExtractErrT<DbT, N> = Error<
     N,
 >;
 
+/// The minimum number of confirmations required for trusted and untrusted
+/// transactions.
+#[derive(Clone, Copy)]
+pub struct ConfirmationsPolicy {
+    pub trusted: NonZeroU32,
+    pub untrusted: NonZeroU32,
+}
+
+impl Default for ConfirmationsPolicy {
+    fn default() -> Self {
+        ConfirmationsPolicy {
+            // 3
+            trusted: NonZeroU32::MIN.saturating_add(2),
+            // 10
+            untrusted: NonZeroU32::MIN.saturating_add(8),
+        }
+    }
+}
+
+impl ConfirmationsPolicy {
+    pub const MIN: Self = ConfirmationsPolicy {
+        trusted: NonZeroU32::MIN,
+        untrusted: NonZeroU32::MIN,
+    };
+
+    /// Create a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields both
+    /// set to `min_confirmations`.
+    ///
+    /// Returns `None` if `min_confirmations` is `0`.
+    pub fn new_symmetrical(min_confirmations: u32) -> Option<Self> {
+        let confirmations = NonZeroU32::new(min_confirmations)?;
+        Some(Self {
+            trusted: confirmations,
+            untrusted: confirmations,
+        })
+    }
+}
+
 /// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
 /// of transactions that can then be authorized and made ready for submission to the network with
 /// [`create_proposed_transactions`].
@@ -267,7 +305,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     input_selector: &InputsT,
     change_strategy: &ChangeT,
     request: zip321::TransactionRequest,
-    min_confirmations: NonZeroU32,
+    min_confirmations: ConfirmationsPolicy,
 ) -> Result<
     Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
     ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -279,22 +317,27 @@ where
     InputsT: InputSelector<InputSource = DbT>,
     ChangeT: ChangeStrategy<MetaSource = DbT>,
 {
-    let (target_height, anchor_height) = wallet_db
-        .get_target_and_anchor_heights(min_confirmations)
-        .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
-        .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
+    // Using the trusted confirmations results in an anchor_height that will
+    // include the maximum number of notes being selected, and we can filter
+    // later based on the input source (whether it's trusted or not) and the
+    // number of confirmations
+    let maybe_intial_heights = wallet_db
+        .get_target_and_anchor_heights(min_confirmations.trusted)
+        .map_err(InputSelectorError::DataSource)?;
+    let (target_height, anchor_height) =
+        maybe_intial_heights.ok_or_else(|| InputSelectorError::SyncRequired)?;
 
-    input_selector
-        .propose_transaction(
-            params,
-            wallet_db,
-            target_height,
-            anchor_height,
-            spend_from_account,
-            request,
-            change_strategy,
-        )
-        .map_err(Error::from)
+    let proposal = input_selector.propose_transaction(
+        params,
+        wallet_db,
+        target_height,
+        anchor_height,
+        min_confirmations,
+        spend_from_account,
+        request,
+        change_strategy,
+    )?;
+    Ok(proposal)
 }
 
 /// Proposes making a payment to the specified address from the given account.
@@ -329,7 +372,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     params: &ParamsT,
     fee_rule: StandardFeeRule,
     spend_from_account: <DbT as InputSource>::AccountId,
-    min_confirmations: NonZeroU32,
+    min_confirmations: ConfirmationsPolicy,
     to: &Address,
     amount: Zatoshis,
     memo: Option<MemoBytes>,

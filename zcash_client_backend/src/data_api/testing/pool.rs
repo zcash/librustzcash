@@ -2,7 +2,7 @@ use std::{
     cmp::Eq,
     convert::Infallible,
     hash::Hash,
-    num::{NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize},
+    num::{NonZeroU64, NonZeroU8, NonZeroUsize},
 };
 
 use assert_matches::assert_matches;
@@ -40,7 +40,8 @@ use crate::{
             TestBuilder,
         },
         wallet::{
-            decrypt_and_store_transaction, input_selection::GreedyInputSelector, TransferErrT,
+            decrypt_and_store_transaction, input_selection::GreedyInputSelector,
+            ConfirmationsPolicy, TransferErrT,
         },
         Account as _, AccountBirthday, BoundedU8, DecryptedTransaction, InputSource, NoteFilter,
         Ratio, TargetValue, WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest,
@@ -149,7 +150,8 @@ pub trait ShieldedPoolTester {
         st: &TestState<Cache, DbT, P>,
         account: <DbT as InputSource>::AccountId,
         target_value: TargetValue,
-        anchor_height: BlockHeight,
+        target_height: BlockHeight,
+        confirmations_policy: ConfirmationsPolicy,
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error>;
 
@@ -245,7 +247,7 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
             &input_selector,
             &change_strategy,
             request,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
         )
         .unwrap();
 
@@ -400,7 +402,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
             &input_selector,
             &change_strategy,
             request.clone(),
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
         )
         .unwrap();
 
@@ -515,7 +517,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
             &input_selector,
             &change_strategy,
             request,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
         )
         .unwrap();
 
@@ -599,7 +601,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
             .propose_standard_transfer::<Infallible>(
                 account_id,
                 StandardFeeRule::Zip317,
-                NonZeroU32::new(1).unwrap(),
+                ConfirmationsPolicy::MIN,
                 &tex_addr,
                 transfer_amount,
                 None,
@@ -723,7 +725,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         .propose_standard_transfer::<Infallible>(
             account_id,
             StandardFeeRule::Zip317,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
             &ephemeral0,
             transfer_amount,
             None,
@@ -934,7 +936,7 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
         .propose_standard_transfer::<Infallible>(
             account_id,
             StandardFeeRule::Zip317,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
             &tex_addr,
             transfer_amount,
             None,
@@ -1006,7 +1008,7 @@ pub fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester, DSF: Data
             &usk1,
             req,
             OvkPolicy::Sender,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
         ),
         Err(data_api::error::Error::KeyNotRecognized)
     );
@@ -1034,7 +1036,7 @@ where
         st.propose_standard_transfer::<Infallible>(
             account_id,
             StandardFeeRule::Zip317,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
             &to,
             Zatoshis::const_from_u64(1),
             None,
@@ -1110,7 +1112,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
         st.propose_standard_transfer::<Infallible>(
             account_id,
             StandardFeeRule::Zip317,
-            NonZeroU32::new(2).unwrap(),
+            ConfirmationsPolicy::new_symmetrical(2).unwrap(),
             &to,
             Zatoshis::const_from_u64(70000),
             None,
@@ -1140,7 +1142,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
         st.propose_standard_transfer::<Infallible>(
             account_id,
             StandardFeeRule::Zip317,
-            NonZeroU32::new(10).unwrap(),
+            ConfirmationsPolicy::new_symmetrical(10).unwrap(),
             &to,
             Zatoshis::const_from_u64(70000),
             None,
@@ -1173,7 +1175,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
 
     // Should now be able to generate a proposal
     let amount_sent = Zatoshis::from_u64(70000).unwrap();
-    let min_confirmations = NonZeroU32::new(10).unwrap();
+    let min_confirmations = ConfirmationsPolicy::new_symmetrical(10).unwrap();
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
@@ -1235,7 +1237,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     // Send some of the funds to another address, but don't mine the tx.
     let extsk2 = T::sk(&[0xf5; 32]);
     let to = T::sk_default_address(&extsk2);
-    let min_confirmations = NonZeroU32::new(1).unwrap();
+    let min_confirmations = ConfirmationsPolicy::new_symmetrical(1).unwrap();
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
@@ -1260,7 +1262,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
         st.propose_standard_transfer::<Infallible>(
             account_id,
             fee_rule,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
             &to,
             Zatoshis::const_from_u64(2000),
             None,
@@ -1290,7 +1292,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
         st.propose_standard_transfer::<Infallible>(
             account_id,
             fee_rule,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
             &to,
             Zatoshis::const_from_u64(2000),
             None,
@@ -1318,7 +1320,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
 
     // Second spend should now succeed
     let amount_sent2 = Zatoshis::const_from_u64(2000);
-    let min_confirmations = NonZeroU32::new(1).unwrap();
+    let min_confirmations = ConfirmationsPolicy::MIN;
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
@@ -1391,7 +1393,7 @@ pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, DSF>(
             SingleOutputChangeStrategy<DSF::DataStore>,
         >,
     > {
-        let min_confirmations = NonZeroU32::new(1).unwrap();
+        let min_confirmations = ConfirmationsPolicy::MIN;
         let proposal = st.propose_standard_transfer(
             account_id,
             fee_rule,
@@ -1469,7 +1471,7 @@ pub fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>(
 
     // TODO: generate_next_block_from_tx does not currently support transparent outputs.
     let to = TransparentAddress::PublicKeyHash([7; 20]).into();
-    let min_confirmations = NonZeroU32::new(1).unwrap();
+    let min_confirmations = ConfirmationsPolicy::MIN;
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
@@ -1529,7 +1531,7 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
 
     // TODO: generate_next_block_from_tx does not currently support transparent outputs.
     let to = TransparentAddress::PublicKeyHash([7; 20]).into();
-    let min_confirmations = NonZeroU32::new(1).unwrap();
+    let min_confirmations = ConfirmationsPolicy::MIN;
     let proposal = st
         .propose_standard_transfer::<Infallible>(
             account_id,
@@ -1614,7 +1616,7 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
             &usk,
             req,
             OvkPolicy::Sender,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
         )
         .unwrap()[0];
 
@@ -1715,7 +1717,7 @@ pub fn zip317_spend<T: ShieldedPoolTester, DSF: DataStoreFactory>(
             account.usk(),
             req,
             OvkPolicy::Sender,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
         ),
         Err(Error::InsufficientFunds { available, required })
             if available == Zatoshis::const_from_u64(51000)
@@ -1737,7 +1739,7 @@ pub fn zip317_spend<T: ShieldedPoolTester, DSF: DataStoreFactory>(
             account.usk(),
             req,
             OvkPolicy::Sender,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
         )
         .unwrap()[0];
 
@@ -1985,7 +1987,10 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
         &st,
         account_id,
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
+        // TODO(schell): this height needs to be changed as we're now taking the target_height (chain tip + 1)
+        // instead of anchor height
         received_tx_height + 10,
+        ConfirmationsPolicy::default(),
         &[],
     )
     .unwrap();
@@ -2001,6 +2006,7 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
         account_id,
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
         received_tx_height + 10,
+        ConfirmationsPolicy::default(),
         &[],
     )
     .unwrap();
@@ -2055,6 +2061,7 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
         account.id(),
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
         account.birthday().height() + 5,
+        ConfirmationsPolicy::default(),
         &[],
     )
     .unwrap();
@@ -2079,7 +2086,7 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
             account.usk(),
             req,
             OvkPolicy::Sender,
-            NonZeroU32::new(5).unwrap(),
+            ConfirmationsPolicy::new_symmetrical(5).unwrap(),
         ),
         Ok(_)
     );
@@ -2128,7 +2135,7 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
             &input_selector,
             &change_strategy,
             p0_to_p1,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
         )
         .unwrap();
 
@@ -2220,7 +2227,7 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
             &input_selector,
             &change_strategy,
             p0_to_p1,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
         )
         .unwrap();
 
@@ -2310,7 +2317,7 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
             &input_selector,
             &change_strategy,
             p0_to_p1,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
         )
         .unwrap();
 
@@ -2417,7 +2424,7 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
             account.usk(),
             p0_transfer,
             OvkPolicy::Sender,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
         )
         .unwrap();
     st.generate_next_block_including(*res.first());
@@ -2449,7 +2456,7 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
             account.usk(),
             both_transfer,
             OvkPolicy::Sender,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
         )
         .unwrap();
     st.generate_next_block_including(*res.first());
@@ -2896,7 +2903,7 @@ pub fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>(
             account.usk(),
             req,
             OvkPolicy::Sender,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
         ),
         Ok(_)
     );
@@ -3200,7 +3207,7 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, DSF>(
             &input_selector,
             &change_strategy,
             p0_to_p1,
-            NonZeroU32::new(1).unwrap(),
+            ConfirmationsPolicy::MIN,
         )
         .unwrap();
 
@@ -3302,7 +3309,7 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
                 &input_selector,
                 &change_strategy,
                 request.clone(),
-                NonZeroU32::new(1).unwrap(),
+                ConfirmationsPolicy::new_symmetrical(1).unwrap(),
             )
             .unwrap();
         let result0 = st

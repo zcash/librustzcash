@@ -64,6 +64,7 @@ use std::{
     io,
     num::{NonZeroU32, TryFromIntError},
 };
+use wallet::ConfirmationsPolicy;
 
 use incrementalmerkletree::{frontier::Frontier, Retention};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
@@ -1294,7 +1295,8 @@ pub trait InputSource {
         account: Self::AccountId,
         target_value: TargetValue,
         sources: &[ShieldedProtocol],
-        anchor_height: BlockHeight,
+        target_height: BlockHeight,
+        confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
 
