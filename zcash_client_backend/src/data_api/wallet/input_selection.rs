@@ -19,11 +19,13 @@ use zcash_protocol::{
 use zip321::TransactionRequest;
 
 use crate::{
-    data_api::{InputSource, SimpleNoteRetention, SpendableNotes, TargetValue},
+    data_api::{InputSource, SimpleNoteRetention, SpendableNotes, TargetValue, WalletRead},
     fees::{sapling, ChangeError, ChangeStrategy},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
 };
+
+use super::ConfirmationsPolicy;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -178,6 +180,7 @@ pub trait InputSelector {
         wallet_db: &Self::InputSource,
         target_height: BlockHeight,
         anchor_height: BlockHeight,
+        min_confirmations: ConfirmationsPolicy,
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
@@ -354,7 +357,7 @@ impl<DbT> Default for GreedyInputSelector<DbT> {
     }
 }
 
-impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
+impl<DbT: WalletRead + InputSource> InputSelector for GreedyInputSelector<DbT> {
     type Error = GreedyInputSelectorError;
     type InputSource = DbT;
 
@@ -364,7 +367,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         params: &ParamsT,
         wallet_db: &Self::InputSource,
         target_height: BlockHeight,
-        anchor_height: BlockHeight,
+        untrusted_anchor_height: BlockHeight,
+        min_confirmations: ConfirmationsPolicy,
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
@@ -374,7 +378,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
     >
     where
         ParamsT: consensus::Parameters,
-        Self::InputSource: InputSource,
+        Self::InputSource: WalletRead + InputSource,
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
         let mut transparent_outputs = vec![];
@@ -626,7 +630,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             #[cfg(feature = "orchard")]
                             orchard: use_orchard,
                         }))
-                        .map(|notes| ShieldedInputs::from_parts(anchor_height, notes));
+                        .map(|notes| ShieldedInputs::from_parts(untrusted_anchor_height, notes));
 
                     #[cfg(feature = "transparent-inputs")]
                     if let Some(tr1_balance) = tr1_balance_opt {
@@ -746,7 +750,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     account,
                     TargetValue::AtLeast(amount_required),
                     selectable_pools,
-                    anchor_height,
+                    target_height,
+                    min_confirmations,
                     &exclude,
                 )
                 .map_err(InputSelectorError::DataSource)?;
