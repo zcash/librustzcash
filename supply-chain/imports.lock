@@ -344,8 +344,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_protocol]]
-version = "0.5.1"
-when = "2025-03-21"
+version = "0.5.4"
+when = "2025-07-15"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
