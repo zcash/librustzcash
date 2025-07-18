@@ -6,6 +6,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.8.2] - 2025-07-18
+
+### Added
+- `zcash_keys::keys::{UnifiedFullViewingKey, UnifiedIncomingViewingKey}::default_transparent_address`
+  have been added under the `test-dependencies` feature.
+
 ## [0.4.1, 0.5.1, 0.6.1, 0.7.1, 0.8.1] - 2025-05-07
 
 ### Added
