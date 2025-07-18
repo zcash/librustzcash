@@ -102,10 +102,7 @@ use {
     sapling::note_encryption::SaplingDomain,
     serde::{Deserialize, Serialize},
     zcash_note_encryption::try_output_recovery_with_pkd_esk,
-    zcash_protocol::{
-        consensus::NetworkConstants,
-        value::{BalanceError, ZatBalance},
-    },
+    zcash_protocol::{consensus::NetworkConstants, value::BalanceError},
 };
 
 pub mod input_selection;
@@ -1846,7 +1843,7 @@ where
         .inputs()
         .iter()
         .map(|input| {
-            ZatBalance::from_u64(*input.value()).map(|value| {
+            Zatoshis::from_u64(*input.value()).map(|value| {
                 (
                     OutPoint::new(*input.prevout_txid(), *input.prevout_index()),
                     value,
@@ -2050,14 +2047,11 @@ where
     outputs.extend(sapling_outputs.into_iter().flatten());
     outputs.extend(transparent_outputs.into_iter().flatten());
 
-    let fee_amount = Zatoshis::try_from(transaction.fee_paid(|outpoint| {
-        utxos_map
-            .get(outpoint)
-            .copied()
-            // Error doesn't matter, this can never happen because we constructed the
-            // UTXOs map and the transaction from the same PCZT.
-            .ok_or(BalanceError::Overflow)
-    })?)?;
+    let fee_amount = transaction
+        .fee_paid(|outpoint| Ok::<_, BalanceError>(utxos_map.get(outpoint).copied()))?
+        // We should never obtain a `None` result because we constructed the UTXOs map and the
+        // transaction from the same PCZT.
+        .expect("input map was constructed correctly");
 
     // We don't need the spent UTXOs to be in transaction order.
     let utxos_spent = utxos_map.into_keys().collect::<Vec<_>>();
