@@ -27,7 +27,7 @@ pub struct Tree<V: Version> {
 
 impl<V: Version> Tree<V> {
     /// Resolve link originated from this tree
-    pub fn resolve_link(&self, link: EntryLink) -> Result<IndexedNode<V>, Error> {
+    pub fn resolve_link(&self, link: EntryLink) -> Result<IndexedNode<'_, V>, Error> {
         match link {
             EntryLink::Generated(index) => self.generated.get(index as usize),
             EntryLink::Stored(index) => self.stored.get(&index),
@@ -274,7 +274,7 @@ impl<V: Version> Tree<V> {
     }
 
     /// Reference to the root node.
-    pub fn root_node(&self) -> Result<IndexedNode<V>, Error> {
+    pub fn root_node(&self) -> Result<IndexedNode<'_, V>, Error> {
         self.resolve_link(self.root)
     }
 

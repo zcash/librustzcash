@@ -7,6 +7,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.23.1] - 2025-07-16
+
+### Changed
+- Migrated to `zcash_protocol 0.5.4` to alleviate a type inference issue
+  observed by downstream users.
+
 ## [0.23.0] - 2025-05-30
 
 ### Changed
@@ -15,6 +21,12 @@ and this library adheres to Rust's notion of
   now represent explicit transaction versions, in order to avoid accidental
   confusion with the names of the network upgrades that they were introduced
   in.
+
+## [0.22.1] - 2025-02-21
+
+### Fixed
+- This fixes a potential build error caused by incautious use of `into()`,
+  where the addition of a `From` impl can cause resolution failure.
 
 ## [0.22.0] - 2025-02-21
 
