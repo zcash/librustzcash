@@ -5,9 +5,9 @@ use schemerz_rusqlite::RusqliteMigration;
 use std::collections::HashSet;
 use uuid::Uuid;
 use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
-use zcash_protocol::{consensus, TxId};
+use zcash_protocol::consensus;
 
-use crate::wallet::{init::WalletMigrationError, TxQueryType};
+use crate::wallet::init::WalletMigrationError;
 
 use super::{
     ensure_orchard_ua_receiver, ephemeral_addresses, nullifier_map, orchard_shardtree,
@@ -19,15 +19,19 @@ pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xfec02b61_3988_4b4f_9699_
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        error::SqliteClientError, wallet::transparent::uivk_legacy_transparent_address, AccountRef,
-        TxRef,
+        error::SqliteClientError,
+        wallet::{transparent::uivk_legacy_transparent_address, TxQueryType},
+        AccountRef, TxRef,
     },
     rusqlite::OptionalExtension as _,
     std::convert::Infallible,
     transparent::address::TransparentAddress,
     zcash_client_backend::data_api::DecryptedTransaction,
     zcash_keys::encoding::AddressCodec,
-    zcash_protocol::consensus::{BlockHeight, BranchId},
+    zcash_protocol::{
+        consensus::{BlockHeight, BranchId},
+        TxId,
+    },
 };
 
 const DEPENDENCIES: &[Uuid] = &[
@@ -276,6 +280,7 @@ fn queue_unmined_tx_retrieval<AccountId>(
     Ok(())
 }
 
+#[cfg(feature = "transparent-inputs")]
 fn queue_tx_retrieval(
     conn: &rusqlite::Transaction<'_>,
     txids: impl Iterator<Item = TxId>,

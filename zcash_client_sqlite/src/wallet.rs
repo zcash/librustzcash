@@ -82,7 +82,6 @@ use rusqlite::{self, named_params, params, Connection, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use tracing::{debug, warn};
-use transparent::get_wallet_transparent_output;
 use uuid::Uuid;
 
 use zcash_address::ZcashAddress;
@@ -135,6 +134,7 @@ use {
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
     std::collections::BTreeMap,
+    transparent::get_wallet_transparent_output,
 };
 
 #[cfg(feature = "orchard")]
@@ -3097,7 +3097,7 @@ pub(crate) fn put_block(
 }
 
 fn determine_fee(
-    conn: &rusqlite::Connection,
+    _conn: &rusqlite::Connection,
     tx: &Transaction,
 ) -> Result<Option<Zatoshis>, SqliteClientError> {
     let value_balance: ZatBalance = tx
@@ -3130,7 +3130,7 @@ fn determine_fee(
                 for t_in in &t_bundle.vin {
                     match (
                         result,
-                        get_wallet_transparent_output(conn, &t_in.prevout, true)?,
+                        get_wallet_transparent_output(_conn, &t_in.prevout, true)?,
                     ) {
                         (Some(b), Some(out)) => {
                             result = Some((b + out.txout().value).ok_or(BalanceError::Overflow)?)
@@ -3143,7 +3143,7 @@ fn determine_fee(
                 }
 
                 #[cfg(not(feature = "transparent-inputs"))]
-                let result = None;
+                let result: Option<ZatBalance> = None;
 
                 Ok(result.map(Zatoshis::try_from).transpose()?)
             }
