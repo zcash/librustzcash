@@ -10,6 +10,17 @@ workspace.
 
 ## [Unreleased]
 
+## [0.18.1, 0.19.1] - 2025-07-19
+
+### Changed
+- The signature of `zcash_client_backend::data_api::testing::TestState::create_proposed_transaction`
+  has been modified to allow transactions to be created from shielding
+  proposals; this API was previously overconstrained. This only affects users
+  of the `test-dependencies` feature.
+- Documentation of the `test-dependencies` feature has been updated to indicate
+  that breaking changes to the APIs exposed by this feature flag may appear
+  in any release version of this crate, including patch releases.
+
 ## [0.19.0] - 2025-05-30
 
 ### Added
