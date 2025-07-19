@@ -25,6 +25,12 @@ workspace.
   confusion with the names of the network upgrades that they were introduced
   in.
 
+## [0.22.1] - 2025-07-18
+
+### Fixed
+- This fixes a potential build error caused by incautious use of `into()`,
+  where the addition of a `From` impl can cause resolution failure.
+
 ## [0.22.0] - 2025-02-21
 
 ### Changed

@@ -230,6 +230,14 @@ pub struct TxOut {
 }
 
 impl TxOut {
+    // Constructs a new `TxOut` from its constituent parts.
+    pub fn new(value: NonNegativeAmount, script_pubkey: Script) -> Self {
+        Self {
+            value,
+            script_pubkey,
+        }
+    }
+
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let value = {
             let mut tmp = [0u8; 8];

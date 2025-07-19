@@ -1082,15 +1082,12 @@ where
 
     /// Invokes [`create_proposed_transactions`] with the given arguments.
     #[allow(clippy::type_complexity)]
-    pub fn create_proposed_transactions<InputsErrT, FeeRuleT, ChangeErrT>(
+    pub fn create_proposed_transactions<InputsErrT, FeeRuleT, ChangeErrT, N>(
         &mut self,
         usk: &UnifiedSpendingKey,
         ovk_policy: OvkPolicy,
-        proposal: &Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
-    ) -> Result<
-        NonEmpty<TxId>,
-        super::wallet::CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, DbT::NoteRef>,
-    >
+        proposal: &Proposal<FeeRuleT, N>,
+    ) -> Result<NonEmpty<TxId>, super::wallet::CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
     where
         FeeRuleT: FeeRule,
     {

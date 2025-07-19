@@ -492,11 +492,15 @@ pub(super) const INDEX_SENT_NOTES_TX: &str = r#"CREATE INDEX sent_notes_tx ON "s
 ///   about transparent inputs to a transaction, this is a reference to that transaction record.
 ///   NULL for transactions where the request for enhancement data is based on discovery due
 ///   to blockchain scanning.
+/// - `request_expiry`: The block height at which this transaction data request will be considered
+///   expired. This is used to ensure that permanently-unsatisfiable transaction data requests
+///   do not stay in the queue forever.
 pub(super) const TABLE_TX_RETRIEVAL_QUEUE: &str = r#"
 CREATE TABLE tx_retrieval_queue (
     txid BLOB NOT NULL UNIQUE,
     query_type INTEGER NOT NULL,
     dependent_transaction_id INTEGER,
+    request_expiry INTEGER,
     FOREIGN KEY (dependent_transaction_id) REFERENCES transactions(id_tx)
 )"#;
 

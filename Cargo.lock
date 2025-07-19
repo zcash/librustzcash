@@ -6303,7 +6303,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.19.0"
+version = "0.19.1"
 dependencies = [
  "ambassador",
  "arti-client",
@@ -6375,7 +6375,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_sqlite"
-version = "0.17.1"
+version = "0.17.2"
 dependencies = [
  "ambassador",
  "assert_matches",
