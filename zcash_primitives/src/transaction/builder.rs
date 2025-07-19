@@ -495,7 +495,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             .add_output(
                 ovk,
                 to,
-                sapling::value::NoteValue::from_raw(value.into()),
+                sapling::value::NoteValue::from_raw(u64::from(value)),
                 memo.into_bytes(),
             )
             .map_err(Error::SaplingBuild)
