@@ -388,6 +388,52 @@ where
     )
 }
 
+/// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
+/// of transactions that would spend all available funds from the given `spend_pool`s that can then
+/// be authorized and made ready for submission to the network with [`create_proposed_transactions`].
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+pub fn propose_send_max_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
+    wallet_db: &mut DbT,
+    params: &ParamsT,
+    spend_from_account: <DbT as InputSource>::AccountId,
+    spend_pool: &[ShieldedProtocol],
+    input_selector: &InputsT,
+    change_strategy: &ChangeT,
+    recipient: &Address,
+    memo: Option<MemoBytes>,
+    min_confirmations: NonZeroU32,
+) -> Result<
+    Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
+    ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
+>
+where
+    DbT: WalletRead + InputSource<Error = <DbT as WalletRead>::Error>,
+    <DbT as InputSource>::NoteRef: Copy + Eq + Ord,
+    ParamsT: consensus::Parameters + Clone,
+    InputsT: InputSelector<InputSource = DbT>,
+    ChangeT: ChangeStrategy<MetaSource = DbT>,
+{
+    let (target_height, anchor_height) = wallet_db
+        .get_target_and_anchor_heights(min_confirmations)
+        .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
+        .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
+
+    input_selector
+        .propose_send_max(
+            params,
+            wallet_db,
+            change_strategy,
+            spend_from_account,
+            spend_pool,
+            anchor_height,
+            target_height,
+            recipient.to_zcash_address(params),
+            memo,
+        )
+        .map_err(Error::from)
+}
+
 /// Constructs a proposal to shield all of the funds belonging to the provided set of
 /// addresses.
 #[cfg(feature = "transparent-inputs")]
