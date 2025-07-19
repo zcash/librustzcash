@@ -125,8 +125,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
         let address_index: u32 = row.get(1)?;
         let address_index = NonHardenedChildIndex::from_index(address_index).ok_or(
             SqliteClientError::CorruptedData(format!(
-                "{} is not a valid transparent child index",
-                address_index
+                "{address_index} is not a valid transparent child index"
             )),
         )?;
         let scope = KeyScope::decode(row.get(2)?)?;
@@ -673,7 +672,7 @@ fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, S
     let script_pubkey = Script(row.get("script")?);
     let raw_value: i64 = row.get("value_zat")?;
     let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
-        SqliteClientError::CorruptedData(format!("Invalid UTXO value: {}", raw_value))
+        SqliteClientError::CorruptedData(format!("Invalid UTXO value: {raw_value}"))
     })?;
     let height: Option<u32> = row.get("received_height")?;
 
@@ -899,8 +898,16 @@ pub(crate) fn add_transparent_account_balances(
          JOIN transactions t ON t.id_tx = u.transaction_id
          -- the transaction that created the output is mined and with enough confirmations
          WHERE (
-            t.mined_height < :mempool_height -- tx is mined
-            AND :mempool_height - t.mined_height >= :min_confirmations -- has at least min_confirmations
+            -- tx is mined and has at least has at least min_confirmations
+            (
+                t.mined_height < :mempool_height -- tx is mined
+                AND :mempool_height - t.mined_height >= :min_confirmations
+            )
+            -- or the utxo can be spent with zero confirmations and is definitely unexpired
+            OR (
+                :min_confirmations = 0
+                AND (t.expiry_height = 0 OR t.expiry_height >= :mempool_height)
+            )
          )
          -- and the received txo is unspent
          AND u.id NOT IN (
@@ -923,7 +930,7 @@ pub(crate) fn add_transparent_account_balances(
         let account = AccountUuid(row.get(0)?);
         let raw_value = row.get(1)?;
         let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
-            SqliteClientError::CorruptedData(format!("Negative UTXO value {:?}", raw_value))
+            SqliteClientError::CorruptedData(format!("Negative UTXO value {raw_value:?}"))
         })?;
 
         account_balances
@@ -932,47 +939,57 @@ pub(crate) fn add_transparent_account_balances(
             .with_unshielded_balance_mut(|bal| bal.add_spendable_value(value))?;
     }
 
-    let mut stmt_account_unconfirmed_balances = conn.prepare(
-        "SELECT a.uuid, SUM(u.value_zat)
-         FROM transparent_received_outputs u
-         JOIN accounts a ON a.id = u.account_id
-         JOIN transactions t ON t.id_tx = u.transaction_id
-         -- the transaction that created the output is mined with not enough confirmations or is definitely unexpired
-         WHERE (
-            t.mined_height < :mempool_height
-            AND :mempool_height - t.mined_height < :min_confirmations -- tx is mined but not confirmed
-            OR t.expiry_height = 0 -- tx will not expire
-            OR t.expiry_height >= :mempool_height
-         )
-         -- and the received txo is unspent
-         AND u.id NOT IN (
-           SELECT transparent_received_output_id
-           FROM transparent_received_output_spends txo_spends
-           JOIN transactions tx
-             ON tx.id_tx = txo_spends.transaction_id
-           WHERE tx.mined_height IS NOT NULL -- the spending tx is mined
-           OR tx.expiry_height = 0 -- the spending tx will not expire
-           OR tx.expiry_height >= :mempool_height -- the spending tx is unexpired
-         )
-         GROUP BY a.uuid",
-    )?;
+    // Pending spendable balance for transparent UTXOs is only relevant for min_confirmations > 0;
+    // with min_confirmations == 0, zero-conf spends are allowed and therefore the value will
+    // appear in the spendable balance and we don't want to double-count it.
+    if min_confirmations > 0 {
+        let mut stmt_account_unconfirmed_balances = conn.prepare(
+            "SELECT a.uuid, SUM(u.value_zat)
+             FROM transparent_received_outputs u
+             JOIN accounts a ON a.id = u.account_id
+             JOIN transactions t ON t.id_tx = u.transaction_id
+             WHERE (
+                 -- the transaction that created the output is mined with not enough confirmations
+                (
+                    t.mined_height < :mempool_height
+                    AND :mempool_height - t.mined_height < :min_confirmations -- tx is mined but not confirmed
+                )
+                -- or the tx is unmined but definitely not expired
+                OR (
+                    t.mined_height IS NULL
+                    AND (t.expiry_height = 0 OR t.expiry_height >= :mempool_height)
+                )
+             )
+             -- and the received txo is unspent
+             AND u.id NOT IN (
+               SELECT transparent_received_output_id
+               FROM transparent_received_output_spends txo_spends
+               JOIN transactions tx
+                 ON tx.id_tx = txo_spends.transaction_id
+               WHERE tx.mined_height IS NOT NULL -- the spending tx is mined
+               OR tx.expiry_height = 0 -- the spending tx will not expire
+               OR tx.expiry_height >= :mempool_height -- the spending tx is unexpired
+             )
+             GROUP BY a.uuid",
+        )?;
 
-    let mut rows = stmt_account_unconfirmed_balances.query(named_params![
-        ":mempool_height": u32::from(mempool_height),
-        ":min_confirmations": min_confirmations,
-    ])?;
+        let mut rows = stmt_account_unconfirmed_balances.query(named_params![
+            ":mempool_height": u32::from(mempool_height),
+            ":min_confirmations": min_confirmations,
+        ])?;
 
-    while let Some(row) = rows.next()? {
-        let account = AccountUuid(row.get(0)?);
-        let raw_value = row.get(1)?;
-        let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
-            SqliteClientError::CorruptedData(format!("Negative UTXO value {:?}", raw_value))
-        })?;
+        while let Some(row) = rows.next()? {
+            let account = AccountUuid(row.get(0)?);
+            let raw_value = row.get(1)?;
+            let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
+                SqliteClientError::CorruptedData(format!("Negative UTXO value {raw_value:?}"))
+            })?;
 
-        account_balances
-            .entry(account)
-            .or_insert(AccountBalance::ZERO)
-            .with_unshielded_balance_mut(|bal| bal.add_pending_spendable_value(value))?;
+            account_balances
+                .entry(account)
+                .or_insert(AccountBalance::ZERO)
+                .with_unshielded_balance_mut(|bal| bal.add_pending_spendable_value(value))?;
+        }
     }
     Ok(())
 }
@@ -1063,10 +1080,10 @@ impl std::fmt::Display for SchedulingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
             SchedulingError::Distribution(e) => {
-                write!(f, "Failure in sampling scheduling time: {}", e)
+                write!(f, "Failure in sampling scheduling time: {e}")
             }
-            SchedulingError::Time(t) => write!(f, "Invalid system time: {}", t),
-            SchedulingError::OutOfRange(t) => write!(f, "Not a valid timestamp or duration: {}", t),
+            SchedulingError::Time(t) => write!(f, "Invalid system time: {t}"),
+            SchedulingError::OutOfRange(t) => write!(f, "Not a valid timestamp or duration: {t}"),
         }
     }
 }

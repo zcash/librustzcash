@@ -269,3 +269,24 @@ pub(crate) fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester>()
         BlockCache::new(),
     )
 }
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn wallet_recovery_computes_fees<T: ShieldedPoolTester>() {
+    use rusqlite::named_params;
+
+    zcash_client_backend::data_api::testing::pool::wallet_recovery_computes_fees::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+        |db, txid| {
+            db.db_mut().conn.execute(
+                "UPDATE transactions
+                 SET fee = NULL
+                 WHERE txid = :txid",
+                named_params! {
+                     ":txid": txid.as_ref(),
+                },
+            )?;
+            Ok(())
+        },
+    )
+}

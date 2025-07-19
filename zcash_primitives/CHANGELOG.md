@@ -22,7 +22,7 @@ and this library adheres to Rust's notion of
   confusion with the names of the network upgrades that they were introduced
   in.
 
-## [0.22.1] - 2025-02-21
+## [0.22.1] - 2025-07-18
 
 ### Fixed
 - This fixes a potential build error caused by incautious use of `into()`,
