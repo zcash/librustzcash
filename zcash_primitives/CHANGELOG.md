@@ -10,6 +10,17 @@ workspace.
 
 ## [Unreleased]
 
+## [0.24.0] - PLANNED
+
+### Changed
+- The type of `zcash_primitives::transaction::TransactionData::fee_paid` has
+  changed. The closure provided to this method for input retrieval can now
+  indicate that an input for the given outpoint is not available, and
+  `fee_paid` will return `Ok(None)` when this is the case. In addition, this
+  method now requires nonnegative input values be provided by the closure, and
+  will only return positive fee value; negative fee value will result in an
+  error instead of reporting a potentially invalid result.
+
 ## [0.23.1] - 2025-07-16
 
 ### Changed
