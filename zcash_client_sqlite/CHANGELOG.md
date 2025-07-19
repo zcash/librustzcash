@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.16.4] - 2025-08-19
+
 ### Fixed
 - `TransactionDataRequest::GetStatus` requests for txids that do not
   correspond to unexpired transactions in the transactions table are now
