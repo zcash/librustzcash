@@ -16,6 +16,7 @@ mod gate_io;
 mod gemini;
 mod ku_coin;
 mod mexc;
+mod near_intents;
 
 /// Maximum number of retries for exchange queries implemented in this crate.
 const RETRY_LIMIT: u8 = 1;
@@ -58,6 +59,7 @@ pub mod exchanges {
     pub use super::gemini::Gemini;
     pub use super::ku_coin::KuCoin;
     pub use super::mexc::Mexc;
+    pub use super::near_intents::NearIntents;
 }
 
 /// An exchange that can be queried for ZEC data.
@@ -107,6 +109,7 @@ impl Exchanges {
             .with(exchanges::GateIo::unauthenticated())
             .with(exchanges::KuCoin::unauthenticated())
             .with(exchanges::Mexc::unauthenticated())
+            .with(exchanges::NearIntents::unauthenticated())
             .build()
     }
 
@@ -231,5 +234,25 @@ impl Client {
             let median = rates.len() / 2;
             Ok(rates[median])
         }
+    }
+}
+
+#[cfg(all(test, live_network_tests))]
+mod live_network_tests {
+    use crate::tor::{http::cryptex::Exchanges, Client};
+
+    #[test]
+    fn zec_to_usd() {
+        let tor_dir = tempfile::tempdir().unwrap();
+
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            // Start a new Tor client.
+            let client = Client::create(tor_dir.path(), |_| ()).await.unwrap();
+
+            // Test HTTP GET
+            let exchanges = Exchanges::unauthenticated_known_with_gemini_trusted();
+            let rate = client.get_latest_zec_to_usd_rate(&exchanges).await;
+            assert_matches!(rate, Ok(_));
+        })
     }
 }
