@@ -19,11 +19,13 @@ use zcash_protocol::{
 use zip321::TransactionRequest;
 
 use crate::{
-    data_api::{InputSource, SimpleNoteRetention, SpendableNotes, TargetValue},
+    data_api::{InputSource, SimpleNoteRetention, SpendableNotes, TargetValue, WalletRead},
     fees::{sapling, ChangeError, ChangeStrategy},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
 };
+
+use super::{ConfirmationHeights, ConfirmationPolicy};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -176,8 +178,7 @@ pub trait InputSelector {
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
-        target_height: BlockHeight,
-        anchor_height: BlockHeight,
+        heights: ConfirmationHeights,
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
@@ -354,7 +355,7 @@ impl<DbT> Default for GreedyInputSelector<DbT> {
     }
 }
 
-impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
+impl<DbT: WalletRead + InputSource> InputSelector for GreedyInputSelector<DbT> {
     type Error = GreedyInputSelectorError;
     type InputSource = DbT;
 
@@ -363,8 +364,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
-        target_height: BlockHeight,
-        anchor_height: BlockHeight,
+        heights: ConfirmationHeights,
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
@@ -374,7 +374,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
     >
     where
         ParamsT: consensus::Parameters,
-        Self::InputSource: InputSource,
+        Self::InputSource: WalletRead + InputSource,
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
         let mut transparent_outputs = vec![];
@@ -382,6 +382,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         #[cfg(feature = "orchard")]
         let mut orchard_outputs = vec![];
         let mut payment_pools = BTreeMap::new();
+
+        let (target_height, anchor_height) = todo!();
 
         // In a ZIP 320 pair, tr0 refers to the first transaction request that
         // collects shielded value and sends it to an ephemeral address, and tr1
