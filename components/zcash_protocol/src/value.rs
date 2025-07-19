@@ -197,6 +197,38 @@ impl Sub<ZatBalance> for Option<ZatBalance> {
     }
 }
 
+impl Add<Zatoshis> for ZatBalance {
+    type Output = Option<ZatBalance>;
+
+    fn add(self, rhs: Zatoshis) -> Option<ZatBalance> {
+        ZatBalance::from_i64(self.0 + rhs.into_i64()).ok()
+    }
+}
+
+impl Add<Zatoshis> for Option<ZatBalance> {
+    type Output = Self;
+
+    fn add(self, rhs: Zatoshis) -> Option<ZatBalance> {
+        self.and_then(|lhs| lhs + rhs)
+    }
+}
+
+impl Sub<Zatoshis> for ZatBalance {
+    type Output = Option<ZatBalance>;
+
+    fn sub(self, rhs: Zatoshis) -> Option<ZatBalance> {
+        ZatBalance::from_i64(self.0 - rhs.into_i64()).ok()
+    }
+}
+
+impl Sub<Zatoshis> for Option<ZatBalance> {
+    type Output = Self;
+
+    fn sub(self, rhs: Zatoshis) -> Option<ZatBalance> {
+        self.and_then(|lhs| lhs - rhs)
+    }
+}
+
 impl Sum<ZatBalance> for Option<ZatBalance> {
     fn sum<I: Iterator<Item = ZatBalance>>(mut iter: I) -> Self {
         iter.try_fold(ZatBalance::zero(), |acc, a| acc + a)
@@ -260,6 +292,13 @@ impl Zatoshis {
     /// Returns this Zatoshis as a u64.
     pub fn into_u64(self) -> u64 {
         self.0
+    }
+
+    /// Returns this Zatoshis as an i64.
+    pub(crate) fn into_i64(self) -> i64 {
+        // this cast is safe as we know by construction that the value fits into the range of an
+        // i64
+        self.0 as i64
     }
 
     /// Creates a Zatoshis from a u64.
