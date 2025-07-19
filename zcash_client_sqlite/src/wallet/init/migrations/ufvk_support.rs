@@ -112,8 +112,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 let address: String = row.get(1)?;
                 let decoded = Address::decode(&self.params, &address).ok_or_else(|| {
                     WalletMigrationError::CorruptedData(format!(
-                        "Could not decode {} as a valid Zcash address.",
-                        address
+                        "Could not decode {address} as a valid Zcash address."
                     ))
                 })?;
                 match decoded {
@@ -259,8 +258,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
                 let decoded_address = Address::decode(&self.params, &address).ok_or_else(|| {
                     WalletMigrationError::CorruptedData(format!(
-                        "Could not decode {} as a valid Zcash address.",
-                        address
+                        "Could not decode {address} as a valid Zcash address."
                     ))
                 })?;
                 let output_pool = match decoded_address {

@@ -63,7 +63,6 @@ pub mod exchanges {
 /// An exchange that can be queried for ZEC data.
 #[trait_variant::make(Exchange: Send)]
 #[dynosaur::dynosaur(DynExchange = dyn Exchange)]
-#[dynosaur::dynosaur(DynLocalExchange = dyn LocalExchange)]
 pub trait LocalExchange {
     /// Queries data about the USD/ZEC pair.
     ///

@@ -90,7 +90,7 @@ pub(super) fn insert_initial_transparent_addrs<P: consensus::Parameters>(
             .get::<_, Option<u32>>("transparent_child_index")?
             .map(|i| {
                 NonHardenedChildIndex::from_index(i).ok_or(WalletMigrationError::CorruptedData(
-                    format!("{} is not a valid transparent child index.", i),
+                    format!("{i} is not a valid transparent child index."),
                 ))
             })
             .transpose()?;
@@ -138,8 +138,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
         let decode_uivk = |uivk_str: String| {
             UnifiedIncomingViewingKey::decode(&self.params, &uivk_str).map_err(|e| {
                 WalletMigrationError::CorruptedData(format!(
-                    "Invalid UIVK encoding {}: {}",
-                    uivk_str, e
+                    "Invalid UIVK encoding {uivk_str}: {e}"
                 ))
             })
         };
@@ -182,8 +181,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
                 let addr_str: String = row.get("address")?;
                 let address = ZcashAddress::try_from_encoded(&addr_str).map_err(|e| {
                     WalletMigrationError::CorruptedData(format!(
-                        "Encoded address {} is not a valid zcash address: {}",
-                        addr_str, e
+                        "Encoded address {addr_str} is not a valid zcash address: {e}"
                     ))
                 })?;
                 let receiver_flags = address.convert::<ReceiverFlags>().map_err(|_| {

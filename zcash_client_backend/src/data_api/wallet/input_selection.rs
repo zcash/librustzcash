@@ -72,30 +72,26 @@ impl<DE: fmt::Display, SE: fmt::Display, CE: fmt::Display, N: fmt::Display> fmt:
             InputSelectorError::DataSource(e) => {
                 write!(
                     f,
-                    "The underlying datasource produced the following error: {}",
-                    e
+                    "The underlying datasource produced the following error: {e}"
                 )
             }
             InputSelectorError::Selection(e) => {
-                write!(f, "Note selection encountered the following error: {}", e)
+                write!(f, "Note selection encountered the following error: {e}")
             }
             InputSelectorError::Change(e) => write!(
                 f,
-                "Proposal generation failed due to an error in computing change or transaction fees: {}",
-                e
+                "Proposal generation failed due to an error in computing change or transaction fees: {e}"
             ),
             InputSelectorError::Proposal(e) => {
                 write!(
                     f,
-                    "Input selection attempted to generate an invalid proposal: {}",
-                    e
+                    "Input selection attempted to generate an invalid proposal: {e}"
                 )
             }
             InputSelectorError::Address(e) => {
                 write!(
                     f,
-                    "An error occurred decoding the address from a payment request: {}.",
-                    e
+                    "An error occurred decoding the address from a payment request: {e}."
                 )
             }
             InputSelectorError::InsufficientFunds {
@@ -263,8 +259,7 @@ impl fmt::Display for GreedyInputSelectorError {
         match &self {
             GreedyInputSelectorError::Balance(e) => write!(
                 f,
-                "A balance calculation violated amount validity bounds: {:?}.",
-                e
+                "A balance calculation violated amount validity bounds: {e:?}."
             ),
             GreedyInputSelectorError::UnsupportedAddress(_) => {
                 // we can't encode the UA to its string representation because we

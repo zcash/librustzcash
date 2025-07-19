@@ -56,7 +56,7 @@ impl InputNote {
         let mut cur = cm;
 
         for (i, layer) in auth_path.iter().enumerate() {
-            let cs = &mut cs.namespace(|| format!("layer {}", i));
+            let cs = &mut cs.namespace(|| format!("layer {i}"));
 
             let cur_is_right = AllocatedBit::alloc(
                 cs.namespace(|| "cur is right"),
@@ -106,7 +106,7 @@ impl InputNote {
             // if enforce is zero, cur and rt can be different
             // if enforce is one, they must be equal
             cs.enforce(
-                || format!("conditionally enforce correct root for bit {}", i),
+                || format!("conditionally enforce correct root for bit {i}"),
                 |_| cur.lc(CS::one(), Scalar::ONE) - &rt.lc(CS::one(), Scalar::ONE),
                 |lc| lc + enforce.get_variable(),
                 |lc| lc,
@@ -136,7 +136,7 @@ where
     let mut new_rhs = vec![];
 
     for (i, (lhs, rhs)) in lhs.iter().zip(rhs.iter()).enumerate() {
-        let cs = &mut cs.namespace(|| format!("bit {}", i));
+        let cs = &mut cs.namespace(|| format!("bit {i}"));
 
         let x = Boolean::from(AllocatedBit::alloc(
             cs.namespace(|| "x"),

@@ -27,19 +27,17 @@ impl<WE: fmt::Display, BE: fmt::Display> fmt::Display for Error<WE, BE> {
             Error::Wallet(e) => {
                 write!(
                     f,
-                    "The underlying datasource produced the following error: {}",
-                    e
+                    "The underlying datasource produced the following error: {e}"
                 )
             }
             Error::BlockSource(e) => {
                 write!(
                     f,
-                    "The underlying block store produced the following error: {}",
-                    e
+                    "The underlying block store produced the following error: {e}"
                 )
             }
             Error::Scan(e) => {
-                write!(f, "Scanning produced the following error: {}", e)
+                write!(f, "Scanning produced the following error: {e}")
             }
         }
     }

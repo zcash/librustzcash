@@ -62,15 +62,14 @@ impl From<CheckedHrpstringError> for Bech32DecodeError {
 impl fmt::Display for Bech32DecodeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
-            Bech32DecodeError::Bech32Error(e) => write!(f, "{}", e),
+            Bech32DecodeError::Bech32Error(e) => write!(f, "{e}"),
             Bech32DecodeError::Hrp(e) => write!(f, "Incorrect HRP encoding: {e}"),
             Bech32DecodeError::ReadError => {
                 write!(f, "Failed to decode key from its binary representation.")
             }
             Bech32DecodeError::HrpMismatch { expected, actual } => write!(
                 f,
-                "Key was encoded for a different network: expected {}, got {}.",
-                expected, actual
+                "Key was encoded for a different network: expected {expected}, got {actual}."
             ),
         }
     }
@@ -127,10 +126,9 @@ impl fmt::Display for TransparentCodecError {
         match &self {
             TransparentCodecError::UnsupportedAddressType(s) => write!(
                 f,
-                "Could not recognize {} as a supported p2sh or p2pkh address.",
-                s
+                "Could not recognize {s} as a supported p2sh or p2pkh address."
             ),
-            TransparentCodecError::Base58(e) => write!(f, "{}", e),
+            TransparentCodecError::Base58(e) => write!(f, "{e}"),
         }
     }
 }
@@ -184,14 +182,13 @@ impl<P: consensus::Parameters> AddressCodec<P> for UnifiedAddress {
 
     fn decode(params: &P, address: &str) -> Result<Self, String> {
         unified::Address::decode(address)
-            .map_err(|e| format!("{}", e))
+            .map_err(|e| format!("{e}"))
             .and_then(|(network, addr)| {
                 if params.network_type() == network {
                     UnifiedAddress::try_from(addr).map_err(|e| e.to_owned())
                 } else {
                     Err(format!(
-                        "Address {} is for a different network: {:?}",
-                        address, network
+                        "Address {address} is for a different network: {network:?}"
                     ))
                 }
             })

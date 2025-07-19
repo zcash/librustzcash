@@ -50,9 +50,7 @@ impl ScanRange {
     pub fn from_parts(block_range: Range<BlockHeight>, priority: ScanPriority) -> Self {
         assert!(
             block_range.end >= block_range.start,
-            "{:?} is invalid for ScanRange({:?})",
-            block_range,
-            priority,
+            "{block_range:?} is invalid for ScanRange({priority:?})",
         );
         ScanRange {
             block_range,

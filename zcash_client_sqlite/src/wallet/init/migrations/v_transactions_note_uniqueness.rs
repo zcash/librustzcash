@@ -245,10 +245,7 @@ mod tests {
                         assert_eq!(received_note_count, expected_notes);
                     }
                     other => {
-                        panic!(
-                            "Account {:?} is not expected to exist in the wallet.",
-                            other
-                        );
+                        panic!("Account {other:?} is not expected to exist in the wallet.");
                     }
                 }
             }

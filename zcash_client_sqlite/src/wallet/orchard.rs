@@ -163,10 +163,7 @@ fn to_spendable_note<P: consensus::Parameters>(
 
             let spending_key_scope = zip32::Scope::try_from(KeyScope::decode(scope_code)?)
                 .map_err(|_| {
-                    SqliteClientError::CorruptedData(format!(
-                        "Invalid key scope code {}",
-                        scope_code
-                    ))
+                    SqliteClientError::CorruptedData(format!("Invalid key scope code {scope_code}"))
                 })?;
 
             let recipient = ufvk
@@ -607,5 +604,11 @@ pub(crate) mod tests {
     #[test]
     fn pczt_single_step_orchard_to_sapling() {
         testing::pool::pczt_single_step::<OrchardPoolTester, SaplingPoolTester>()
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    #[test]
+    fn wallet_recovery_compute_fees() {
+        testing::pool::wallet_recovery_computes_fees::<OrchardPoolTester>();
     }
 }

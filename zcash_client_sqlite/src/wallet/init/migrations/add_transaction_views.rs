@@ -87,8 +87,7 @@ impl RusqliteMigration for Migration {
                 )
                 .map_err(|e| {
                     WalletMigrationError::CorruptedData(format!(
-                        "Parsing failed for transaction {:?}: {:?}",
-                        id_tx, e
+                        "Parsing failed for transaction {id_tx:?}: {e:?}"
                     ))
                 })?;
 
@@ -105,8 +104,7 @@ impl RusqliteMigration for Migration {
                         |i| {
                             ZatBalance::from_i64(i).map_err(|_| {
                                 FeeError::CorruptedData(format!(
-                                    "UTXO amount out of range in outpoint {:?}",
-                                    op
+                                    "UTXO amount out of range in outpoint {op:?}"
                                 ))
                             })
                         },

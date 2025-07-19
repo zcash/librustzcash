@@ -73,8 +73,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             WalletMigrationError::CorruptedData(s)
                         }
                         other => WalletMigrationError::CorruptedData(format!(
-                            "Unexpected error in migration: {}",
-                            other
+                            "Unexpected error in migration: {other}"
                         )),
                     })?;
 
@@ -152,8 +151,7 @@ fn get_transparent_receivers<P: consensus::Parameters>(
             .and_then(|addr| match addr {
                 Address::Unified(ua) => Ok(ua),
                 _ => Err(SqliteClientError::CorruptedData(format!(
-                    "Addresses table contains {} which is not a unified address",
-                    ua_str,
+                    "Addresses table contains {ua_str} which is not a unified address",
                 ))),
             })?;
 

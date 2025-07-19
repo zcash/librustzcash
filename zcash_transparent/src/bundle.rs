@@ -173,7 +173,7 @@ impl OutPoint {
     fn is_null(&self) -> bool {
         // From `BaseOutPoint::IsNull()` in zcashd:
         //   return (hash.IsNull() && n == (uint32_t) -1);
-        self.hash.as_ref() == &[0; 32] && self.n == u32::MAX
+        self.hash.is_null() && self.n == u32::MAX
     }
 
     /// Returns the output index of this `OutPoint`.
@@ -230,6 +230,14 @@ pub struct TxOut {
 }
 
 impl TxOut {
+    // Constructs a new `TxOut` from its constituent parts.
+    pub fn new(value: NonNegativeAmount, script_pubkey: Script) -> Self {
+        Self {
+            value,
+            script_pubkey,
+        }
+    }
+
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let value = {
             let mut tmp = [0u8; 8];

@@ -142,8 +142,7 @@ impl core::fmt::Display for FeeError {
         match &self {
             FeeError::Balance(e) => write!(
                 f,
-                "A balance calculation violated amount validity bounds: {}.",
-                e
+                "A balance calculation violated amount validity bounds: {e}."
             ),
             FeeError::NonP2pkhInputs(_) => write!(f, "Only P2PKH inputs are supported."),
         }

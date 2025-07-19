@@ -451,25 +451,23 @@ impl fmt::Display for ScanError {
         match &self {
             EncodingInvalid { txid, pool_type, index, .. } => write!(
                 f,
-                "{:?} output {} of transaction {} was improperly encoded.",
-                pool_type, index, txid
+                "{pool_type:?} output {index} of transaction {txid} was improperly encoded."
             ),
             PrevHashMismatch { at_height } => write!(
                 f,
-                "The parent hash of proposed block does not correspond to the block hash at height {}.",
-                at_height
+                "The parent hash of proposed block does not correspond to the block hash at height {at_height}."
             ),
             BlockHeightDiscontinuity { prev_height, new_height } => {
-                write!(f, "Block height discontinuity at height {}; previous height was: {}", new_height, prev_height)
+                write!(f, "Block height discontinuity at height {new_height}; previous height was: {prev_height}")
             }
             TreeSizeMismatch { protocol, at_height, given, computed } => {
-                write!(f, "The {:?} note commitment tree size provided by a compact block did not match the expected size at height {}; given {}, expected {}", protocol, at_height, given, computed)
+                write!(f, "The {protocol:?} note commitment tree size provided by a compact block did not match the expected size at height {at_height}; given {given}, expected {computed}")
             }
             TreeSizeUnknown { protocol, at_height } => {
-                write!(f, "Unable to determine {:?} note commitment tree size at height {}", protocol, at_height)
+                write!(f, "Unable to determine {protocol:?} note commitment tree size at height {at_height}")
             }
             TreeSizeInvalid { protocol, at_height } => {
-                write!(f, "Received invalid (potentially default) {:?} note commitment tree size metadata at height {}", protocol, at_height)
+                write!(f, "Received invalid (potentially default) {protocol:?} note commitment tree size metadata at height {at_height}")
             }
         }
     }
