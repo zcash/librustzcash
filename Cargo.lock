@@ -6349,15 +6349,17 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.22.0"
+version = "0.22.1"
 dependencies = [
  "assert_matches",
  "bip32",
  "blake2b_simd",
+ "block-buffer 0.11.0-rc.3",
  "bs58",
  "chacha20poly1305",
  "core2",
  "criterion",
+ "crypto-common 0.2.0-rc.1",
  "document-features",
  "equihash",
  "ff",

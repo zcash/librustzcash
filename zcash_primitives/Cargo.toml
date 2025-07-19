@@ -1,7 +1,7 @@
 [package]
 name = "zcash_primitives"
 description = "Rust implementations of the Zcash primitives"
-version = "0.22.0"
+version = "0.22.1"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -63,6 +63,8 @@ transparent.workspace = true
 # - Transparent inputs
 #   - `Error` type exposed
 bip32.workspace = true
+block-buffer.workspace = true # remove after edition2024 upgrade
+crypto-common.workspace = true # remove after edition2024 upgrade
 #   - `SecretKey` and `PublicKey` types exposed
 secp256k1 = { workspace = true, optional = true }
 
