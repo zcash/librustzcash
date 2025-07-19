@@ -7,6 +7,19 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.16.4, 0.17.2] - 2025-08-19
+
+### Fixed
+- `TransactionDataRequest::GetStatus` requests for txids that do not
+  correspond to unexpired transactions in the transactions table are now
+  deleted from the status check queue when `set_transaction_status` is
+  called with a status of either `TxidNotRecognized` or `NotInMainChain`.
+- This release fixes a bug that caused transparent UTXO value to be
+  double_counted in the wallet summary, contributing to both spendable and
+  pending balance, when queried with `min_confirmations == 0`.
+- Transaction fees are now restored when possible by calls to
+  `WalletDb::store_decrypted_tx`.
+
 ## [0.16.3, 0.17.1] - 2025-06-17
 
 ### Fixed

@@ -102,13 +102,12 @@ fn bench_note_decryption(c: &mut Criterion) {
                 .map(|output| (SaplingDomain::new(zip212_enforcement), output))
                 .collect();
 
-            group.bench_function(
-                BenchmarkId::new(format!("valid-{}", nivks), noutputs),
-                |b| b.iter(|| batch::try_note_decryption(&valid_ivks, &outputs)),
-            );
+            group.bench_function(BenchmarkId::new(format!("valid-{nivks}"), noutputs), |b| {
+                b.iter(|| batch::try_note_decryption(&valid_ivks, &outputs))
+            });
 
             group.bench_function(
-                BenchmarkId::new(format!("invalid-{}", nivks), noutputs),
+                BenchmarkId::new(format!("invalid-{nivks}"), noutputs),
                 |b| b.iter(|| batch::try_note_decryption(&invalid_ivks, &outputs)),
             );
 
@@ -118,12 +117,12 @@ fn bench_note_decryption(c: &mut Criterion) {
                 .collect();
 
             group.bench_function(
-                BenchmarkId::new(format!("compact-valid-{}", nivks), noutputs),
+                BenchmarkId::new(format!("compact-valid-{nivks}"), noutputs),
                 |b| b.iter(|| batch::try_compact_note_decryption(&valid_ivks, &compact)),
             );
 
             group.bench_function(
-                BenchmarkId::new(format!("compact-invalid-{}", nivks), noutputs),
+                BenchmarkId::new(format!("compact-invalid-{nivks}"), noutputs),
                 |b| b.iter(|| batch::try_compact_note_decryption(&invalid_ivks, &compact)),
             );
         }
