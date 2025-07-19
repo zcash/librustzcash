@@ -31,7 +31,44 @@ impl super::Bundle {
                     input.script_sig = Some(Script::default() << &sig_bytes[..] << &pubkey[..]);
                 }
                 Some(TransparentAddress::ScriptHash(_)) => {
-                    return Err(SpendFinalizerError::UnsupportedScriptPubkey)
+                    let redeem_script = input
+                        .redeem_script
+                        .as_ref()
+                        .ok_or(SpendFinalizerError::MissingRedeemScript)?;
+
+                    // TODO: Replace this hacky P2MS detection logic with `zcash_script`.
+                    if redeem_script.0.len() >= 3
+                    // OP_1..=OP_15
+                    && (0x51..=0x5f).contains(&redeem_script.0[0])
+                    && (0x51..=0x5f).contains(&redeem_script.0[redeem_script.0.len()-2])
+                    // OP_CHECKMULTISIG
+                    && redeem_script.0.last() == Some(&0xae)
+                    {
+                        // P2MS-in-P2SH `script_sig` format is:
+                        // - Dummy OP_0 to bypass OP_CHECKMULTISIG bug.
+                        let mut script_sig = Script(vec![0x00]);
+
+                        // - PushData(secp256k1::ecdsa::serialized_signature::MAX_LEN + 1) * num_sigs
+                        let num_sigs = usize::from(redeem_script.0[0] - 0x50);
+                        // TODO: We need to parse the pubkeys out from `redeem_script`,
+                        // and look them up in-order in `input.partial_signatures`. The
+                        // OP_CHECKMULTISIG logic matches pubkeys and signatures together
+                        // sequentially.
+                        if input.partial_signatures.len() < num_sigs {
+                            return Err(SpendFinalizerError::MissingSignature);
+                        }
+                        for _ in 0..num_sigs {
+                            script_sig = script_sig << &[][..];
+                        }
+
+                        // - PushData(redeem_script)
+                        script_sig = script_sig << &redeem_script.0[..];
+
+                        // P2SH scriptSig
+                        input.script_sig = Some(script_sig);
+                    } else {
+                        return Err(SpendFinalizerError::UnsupportedScriptPubkey);
+                    }
                 }
                 None => return Err(SpendFinalizerError::UnsupportedScriptPubkey),
             }
@@ -59,7 +96,9 @@ impl super::Bundle {
 /// Errors that can occur while finalizing the transparent inputs of a PCZT bundle.
 #[derive(Debug)]
 pub enum SpendFinalizerError {
-    /// `partial_signatures` contained no signatures.
+    /// `script_pubkey` is a P2SH script, but `redeem_script` is not set.
+    MissingRedeemScript,
+    /// `partial_signatures` contained too few signatures.
     MissingSignature,
     /// `partial_signatures` contained unexpected signatures.
     UnexpectedSignatures,

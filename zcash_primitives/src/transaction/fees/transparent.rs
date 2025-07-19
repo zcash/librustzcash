@@ -38,7 +38,9 @@ pub trait InputView: core::fmt::Debug {
     /// The previous output being spent.
     fn coin(&self) -> &TxOut;
 
-    /// The size of the transparent script required to spend this input.
+    /// The size of this transparent input in a transaction, as used in [ZIP 317].
+    ///
+    /// [ZIP 317]: https://zips.z.cash/zip-0317#rationale-for-the-chosen-parameters
     fn serialized_size(&self) -> InputSize {
         match self.coin().script_pubkey.address() {
             Some(TransparentAddress::PublicKeyHash(_)) => InputSize::STANDARD_P2PKH,
@@ -55,6 +57,13 @@ impl InputView for TransparentInputInfo {
 
     fn coin(&self) -> &TxOut {
         self.coin()
+    }
+
+    fn serialized_size(&self) -> InputSize {
+        self.serialized_len().map_or(
+            InputSize::Unknown(self.outpoint().clone()),
+            InputSize::Known,
+        )
     }
 }
 
