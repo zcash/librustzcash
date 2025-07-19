@@ -989,7 +989,7 @@ end = "2025-08-26"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-03-25"
-end = "2025-04-22"
+end = "2026-07-19"
 
 [[trusted.zcash_client_sqlite]]
 criteria = "safe-to-deploy"
@@ -1043,7 +1043,7 @@ end = "2025-04-22"
 criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-01-15"
-end = "2025-04-22"
+end = "2026-07-19"
 
 [[trusted.zcash_note_encryption]]
 criteria = ["safe-to-deploy", "crypto-reviewed"]
