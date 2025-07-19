@@ -46,6 +46,17 @@ and this library adheres to Rust's notion of
     failure, and will use isolated circuits for the retry if the error looks
     like a blocked Tor exit node.
 
+## [0.18.1] - 2025-07-18
+
+### Changed
+- The signature of `zcash_client_backend::data_api::testing::TestState::create_proposed_transaction`
+  has been modified to allow transactions to be created from shielding
+  proposals; this API was previously overconstrained. This only affects users
+  of the `test-dependencies` feature.
+- Documentation of the `test-dependencies` feature has been updated to indicate
+  that breaking changes to the APIs exposed by this feature flag may appear
+  in any release version of this crate, including patch releases.
+
 ## [0.18.0] - 2025-03-19
 
 ### Added

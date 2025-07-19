@@ -222,6 +222,9 @@ tor = [
 ]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
+##
+## NOTE: Semver-breaking changes to the APIs exposed by this feature may be
+## present in any release version, including patch releases.
 test-dependencies = [
     "dep:ambassador",
     "dep:assert_matches",
