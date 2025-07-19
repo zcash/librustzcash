@@ -82,6 +82,7 @@ use rusqlite::{self, named_params, params, Connection, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use tracing::{debug, warn};
+use transparent::get_wallet_transparent_output;
 use uuid::Uuid;
 
 use zcash_address::ZcashAddress;
@@ -112,7 +113,7 @@ use zcash_primitives::{
 use zcash_protocol::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
-    value::{ZatBalance, Zatoshis},
+    value::{BalanceError, ZatBalance, Zatoshis},
     PoolType, ShieldedProtocol, TxId,
 };
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
@@ -2110,6 +2111,56 @@ pub(crate) fn get_received_memo(
         .transpose()
 }
 
+fn parse_tx<P: consensus::Parameters>(
+    params: &P,
+    tx_bytes: &[u8],
+    block_height: Option<BlockHeight>,
+    expiry_height: Option<BlockHeight>,
+) -> Result<(BlockHeight, Transaction), SqliteClientError> {
+    // We need to provide a consensus branch ID so that pre-v5 `Transaction` structs
+    // (which don't commit directly to one) can store it internally.
+    // - If the transaction is mined, we use the block height to get the correct one.
+    // - If the transaction is unmined and has a cached non-zero expiry height, we use
+    //   that (relying on the invariant that a transaction can't be mined across a network
+    //   upgrade boundary, so the expiry height must be in the same epoch).
+    // - Otherwise, we use a placeholder for the initial transaction parse (as the
+    //   consensus branch ID is not used there), and then either use its non-zero expiry
+    //   height or return an error.
+    if let Some(height) =
+        block_height.or_else(|| expiry_height.filter(|h| h > &BlockHeight::from(0)))
+    {
+        Transaction::read(tx_bytes, BranchId::for_height(params, height))
+            .map(|t| (height, t))
+            .map_err(SqliteClientError::from)
+    } else {
+        let tx_data = Transaction::read(tx_bytes, BranchId::Sprout)
+            .map_err(SqliteClientError::from)?
+            .into_data();
+
+        let expiry_height = tx_data.expiry_height();
+        if expiry_height > BlockHeight::from(0) {
+            TransactionData::from_parts(
+                tx_data.version(),
+                BranchId::for_height(params, expiry_height),
+                tx_data.lock_time(),
+                expiry_height,
+                tx_data.transparent_bundle().cloned(),
+                tx_data.sprout_bundle().cloned(),
+                tx_data.sapling_bundle().cloned(),
+                tx_data.orchard_bundle().cloned(),
+            )
+            .freeze()
+            .map(|t| (expiry_height, t))
+            .map_err(SqliteClientError::from)
+        } else {
+            Err(SqliteClientError::CorruptedData(
+                "Consensus branch ID not known, cannot parse this transaction until it is mined"
+                    .to_string(),
+            ))
+        }
+    }
+}
+
 /// Looks up a transaction by its [`TxId`].
 ///
 /// Returns the decoded transaction, along with the block height that was used in its decoding.
@@ -2136,50 +2187,7 @@ pub(crate) fn get_transaction<P: Parameters>(
         },
     )
     .optional()?
-    .map(|(tx_bytes, block_height, expiry_height)| {
-        // We need to provide a consensus branch ID so that pre-v5 `Transaction` structs
-        // (which don't commit directly to one) can store it internally.
-        // - If the transaction is mined, we use the block height to get the correct one.
-        // - If the transaction is unmined and has a cached non-zero expiry height, we use
-        //   that (relying on the invariant that a transaction can't be mined across a network
-        //   upgrade boundary, so the expiry height must be in the same epoch).
-        // - Otherwise, we use a placeholder for the initial transaction parse (as the
-        //   consensus branch ID is not used there), and then either use its non-zero expiry
-        //   height or return an error.
-        if let Some(height) =
-            block_height.or_else(|| expiry_height.filter(|h| h > &BlockHeight::from(0)))
-        {
-            Transaction::read(&tx_bytes[..], BranchId::for_height(params, height))
-                .map(|t| (height, t))
-                .map_err(SqliteClientError::from)
-        } else {
-            let tx_data = Transaction::read(&tx_bytes[..], BranchId::Sprout)
-                .map_err(SqliteClientError::from)?
-                .into_data();
-
-            let expiry_height = tx_data.expiry_height();
-            if expiry_height > BlockHeight::from(0) {
-                TransactionData::from_parts(
-                    tx_data.version(),
-                    BranchId::for_height(params, expiry_height),
-                    tx_data.lock_time(),
-                    expiry_height,
-                    tx_data.transparent_bundle().cloned(),
-                    tx_data.sprout_bundle().cloned(),
-                    tx_data.sapling_bundle().cloned(),
-                    tx_data.orchard_bundle().cloned(),
-                )
-                .freeze()
-                .map(|t| (expiry_height, t))
-                .map_err(SqliteClientError::from)
-            } else {
-                Err(SqliteClientError::CorruptedData(
-                    "Consensus branch ID not known, cannot parse this transaction until it is mined"
-                        .to_string(),
-                ))
-            }
-        }
-    })
+    .map(|(t, b, e)| parse_tx(params, &t, b, e))
     .transpose()
 }
 
@@ -3088,13 +3096,83 @@ pub(crate) fn put_block(
     Ok(())
 }
 
+fn determine_fee(
+    conn: &rusqlite::Connection,
+    tx: &Transaction,
+) -> Result<Option<Zatoshis>, SqliteClientError> {
+    let value_balance: ZatBalance = tx
+        .sapling_bundle()
+        .map_or(ZatBalance::zero(), |s_bundle| *s_bundle.value_balance());
+
+    let value_balance = tx.orchard_bundle().map_or(Ok(value_balance), |o_bundle| {
+        (value_balance + *o_bundle.value_balance()).ok_or(BalanceError::Overflow)
+    })?;
+
+    match tx.transparent_bundle() {
+        Some(t_bundle) => {
+            let t_out_total = t_bundle
+                .vout
+                .iter()
+                .map(|o| o.value)
+                .sum::<Option<Zatoshis>>()
+                .ok_or(BalanceError::Overflow)?;
+            let value_balance = (value_balance - t_out_total).ok_or(BalanceError::Underflow)?;
+
+            if t_bundle.vin.is_empty() {
+                Zatoshis::try_from(value_balance)
+                    .map(Some)
+                    .map_err(SqliteClientError::from)
+            } else {
+                #[cfg(feature = "transparent-inputs")]
+                let mut result = Some(value_balance);
+
+                #[cfg(feature = "transparent-inputs")]
+                for t_in in &t_bundle.vin {
+                    match (
+                        result,
+                        get_wallet_transparent_output(conn, &t_in.prevout, true)?,
+                    ) {
+                        (Some(b), Some(out)) => {
+                            result = Some((b + out.txout().value).ok_or(BalanceError::Overflow)?)
+                        }
+                        _ => {
+                            result = None;
+                            break;
+                        }
+                    }
+                }
+
+                #[cfg(not(feature = "transparent-inputs"))]
+                let result = None;
+
+                Ok(result.map(Zatoshis::try_from).transpose()?)
+            }
+        }
+        None => {
+            // The sum of the value balances represents the total value of inputs not consumed by
+            // outputs. Without transparent outputs to consume any leftover value, the total is
+            // available for and treated as fee.
+            Ok(Some(
+                value_balance
+                    .try_into()
+                    .map_err(|_| BalanceError::Underflow)?,
+            ))
+        }
+    }
+}
+
 pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     d_tx: DecryptedTransaction<AccountUuid>,
     #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
 ) -> Result<(), SqliteClientError> {
-    let tx_ref = put_tx_data(conn, d_tx.tx(), None, None, None)?;
+    // If the transaction is fully shielded, or all transparent inputs are available, set the
+    // fee value.
+    let fee = determine_fee(conn, d_tx.tx())?;
+
+    let tx_ref = put_tx_data(conn, d_tx.tx(), fee, None, None)?;
+
     if let Some(height) = d_tx.mined_height() {
         set_transaction_status(conn, d_tx.tx().txid(), TransactionStatus::Mined(height))?;
     }
@@ -3469,6 +3547,52 @@ pub(crate) fn store_decrypted_tx<P: consensus::Parameters>(
             UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
             false,
         )?;
+    }
+
+    // For each transaction that spends a transparent output of this transaction and does not
+    // already have a known fee value, set the fee if possible.
+    let mut spending_txs_stmt = conn.prepare(
+        "SELECT DISTINCT t.id_tx, t.raw, t.block, t.expiry_height
+         FROM transactions t
+         -- find transactions that spend transparent outputs of the decrypted tx
+         LEFT OUTER JOIN transparent_received_output_spends ts
+            ON ts.transaction_id = t.id_tx
+         LEFT OUTER JOIN transparent_received_outputs tro
+            ON tro.transaction_id = :transaction_id
+            AND tro.id = ts.transparent_received_output_id
+         WHERE t.fee IS NULL
+         AND t.raw IS NOT NULL
+         AND ts.transaction_id IS NOT NULL",
+    )?;
+
+    let mut spending_txs_rows = spending_txs_stmt.query(named_params! {
+        ":transaction_id": tx_ref.0
+    })?;
+
+    while let Some(row) = spending_txs_rows.next()? {
+        let spending_tx_ref = row.get(0).map(TxRef)?;
+        let tx_bytes: Vec<u8> = row.get(1)?;
+        let block: Option<u32> = row.get(2)?;
+        let expiry: Option<u32> = row.get(3)?;
+
+        let (_, spending_tx) = parse_tx(
+            params,
+            &tx_bytes,
+            block.map(BlockHeight::from),
+            expiry.map(BlockHeight::from),
+        )?;
+
+        if let Some(fee) = determine_fee(conn, &spending_tx)? {
+            conn.execute(
+                "UPDATE transactions
+                 SET fee = :fee
+                 WHERE id_tx = :transaction_id",
+                named_params! {
+                    ":transaction_id": spending_tx_ref.0,
+                    ":fee": u64::from(fee)
+                },
+            )?;
+        }
     }
 
     // If the transaction has outputs that belong to the wallet as well as transparent
