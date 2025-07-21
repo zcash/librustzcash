@@ -800,7 +800,7 @@ impl Transaction {
 
     #[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
     fn read_v6<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
-        let (consensus_branch_id, lock_time, expiry_height, zip233_amount) =
+        let (consensus_branch_id, lock_time, expiry_height, _zip233_amount) =
             Self::read_v6_header_fragment(&mut reader)?;
 
         let transparent_bundle = Self::read_transparent(&mut reader)?;
@@ -816,7 +816,7 @@ impl Transaction {
             lock_time,
             expiry_height,
             #[cfg(feature = "zip-233")]
-            zip233_amount,
+            zip233_amount: _zip233_amount,
             transparent_bundle,
             sprout_bundle: None,
             sapling_bundle,
@@ -1162,7 +1162,7 @@ pub mod testing {
         }
     }
 
-    #[cfg(all(not(zcash_unstable = "zfuture"), not(zcash_unstable = "nu7")))]
+    #[cfg(all(not(zcash_unstable = "nu7"), not(zcash_unstable = "zfuture")))]
     prop_compose! {
         pub fn arb_txdata(consensus_branch_id: BranchId)(
             version in arb_tx_version(consensus_branch_id),
@@ -1187,11 +1187,32 @@ pub mod testing {
         }
     }
 
-    #[cfg(all(
-        not(zcash_unstable = "zfuture"),
-        feature = "zip-233",
-        zcash_unstable = "nu7"
-    ))]
+    #[cfg(all(zcash_unstable = "nu7", not(feature = "zip-233")))]
+    prop_compose! {
+        pub fn arb_txdata(consensus_branch_id: BranchId)(
+            version in arb_tx_version(consensus_branch_id)
+        )(
+            lock_time in any::<u32>(),
+            expiry_height in any::<u32>(),
+            transparent_bundle in transparent::arb_bundle(),
+            sapling_bundle in sapling::arb_bundle_for_version(version),
+            orchard_bundle in orchard::arb_bundle_for_version(version),
+            version in Just(version),
+        ) -> TransactionData<Authorized> {
+            TransactionData {
+                version,
+                consensus_branch_id,
+                lock_time,
+                expiry_height: expiry_height.into(),
+                transparent_bundle,
+                sprout_bundle: None,
+                sapling_bundle,
+                orchard_bundle,
+            }
+        }
+    }
+
+    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
     prop_compose! {
         pub fn arb_txdata(consensus_branch_id: BranchId)(
             version in arb_tx_version(consensus_branch_id)
@@ -1245,11 +1266,7 @@ pub mod testing {
         }
     }
 
-    #[cfg(all(
-        zcash_unstable = "zfuture",
-        feature = "zip-233",
-        zcash_unstable = "nu7"
-    ))]
+    #[cfg(all(zcash_unstable = "zfuture", feature = "zip-233"))]
     prop_compose! {
         pub fn arb_txdata(consensus_branch_id: BranchId)(
             version in arb_tx_version(consensus_branch_id),

@@ -1,32 +1,26 @@
-use alloc::vec::Vec;
-use blake2b_simd::Hash as Blake2bHash;
-use core::ops::Deref;
-
 use proptest::prelude::*;
 
-use ::transparent::{
-    address::Script, sighash::SighashType, sighash::TransparentAuthorizingContext,
+#[cfg(test)]
+use {
+    crate::transaction::{
+        sighash::SignableInput, sighash_v4::v4_signature_hash, sighash_v5::v5_signature_hash,
+        testing::arb_tx, transparent, txid::TxIdDigester, Authorization, Transaction,
+        TransactionData, TxDigests, TxIn,
+    },
+    ::transparent::{
+        address::Script, sighash::SighashType, sighash::TransparentAuthorizingContext,
+    },
+    alloc::vec::Vec,
+    blake2b_simd::Hash as Blake2bHash,
+    core::ops::Deref,
+    zcash_protocol::{consensus::BranchId, value::Zatoshis},
 };
-use zcash_protocol::{consensus::BranchId, value::Zatoshis};
 
-use super::{
-    sighash::SignableInput,
-    sighash_v4::v4_signature_hash,
-    sighash_v5::v5_signature_hash,
-    testing::arb_tx,
-    transparent::{self},
-    txid::TxIdDigester,
-    Authorization, Transaction, TransactionData, TxDigests, TxIn,
-};
-
-#[cfg(zcash_unstable = "zfuture")]
+#[cfg(all(test, zcash_unstable = "zfuture"))]
 use super::components::tze;
 
-#[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-use crate::transaction::TxVersion;
-
-#[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-use super::sighash_v6::v6_signature_hash;
+#[cfg(all(test, zcash_unstable = "nu7", feature = "zip-233"))]
+use {super::sighash_v6::v6_signature_hash, crate::transaction::TxVersion};
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod data;
@@ -45,6 +39,7 @@ fn tx_read_write() {
     assert_eq!(&data[..], &encoded[..]);
 }
 
+#[cfg(test)]
 fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     let mut txn_bytes = vec![];
     tx.write(&mut txn_bytes).unwrap();
@@ -198,16 +193,19 @@ fn zip_0243() {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 struct TestTransparentAuth {
     input_amounts: Vec<Zatoshis>,
     input_scriptpubkeys: Vec<Script>,
 }
 
+#[cfg(test)]
 impl transparent::Authorization for TestTransparentAuth {
     type ScriptSig = Script;
 }
 
+#[cfg(test)]
 impl TransparentAuthorizingContext for TestTransparentAuth {
     fn input_amounts(&self) -> Vec<Zatoshis> {
         self.input_amounts.clone()
@@ -218,8 +216,10 @@ impl TransparentAuthorizingContext for TestTransparentAuth {
     }
 }
 
+#[cfg(test)]
 struct TestUnauthorized;
 
+#[cfg(test)]
 impl Authorization for TestUnauthorized {
     type TransparentAuth = TestTransparentAuth;
     type SaplingAuth = sapling::bundle::Authorized;
