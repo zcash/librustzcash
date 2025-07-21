@@ -236,6 +236,7 @@ fn hash_header_txid_data(
     h.write_u32_le(lock_time).unwrap();
     h.write_u32_le(expiry_height.into()).unwrap();
 
+    // TODO: Factor this out into a separate txid computation when implementing ZIP 246 in full.
     #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
     if version >= TxVersion::V6 {
         h.write_u64_le((*zip233_amount).into()).unwrap();

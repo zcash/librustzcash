@@ -16,5 +16,7 @@ pub fn v6_signature_hash<
     signable_input: &SignableInput<'_>,
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> Blake2bHash {
+    // TODO: Implement this directly when implementing ZIP 246 in full, rather than delegating to
+    // the V5 implementation.
     v5_signature_hash(tx, signable_input, txid_parts)
 }
