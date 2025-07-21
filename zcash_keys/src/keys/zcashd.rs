@@ -129,13 +129,16 @@ impl ZcashdHdDerivation {
     ) -> Result<Self, PathParseError> {
         let re = Regex::new(r"^m/32'/(\d+)'/(\d+)'(?:/(\d+)')?$").expect("checked to be valid");
         let parts = re.captures(path).ok_or(PathParseError::PathInvalid)?;
-        if parts.len() < 3 {
-            return Err(PathParseError::PathInvalid);
-        }
+        assert!(parts.len() <= 4);
 
-        let coin_type = parts[1]
-            .parse::<u32>()
-            .map_err(|_| PathParseError::CoinTypeInvalid(parts[1].to_string()))?;
+        let coin_type = parts
+            .get(1)
+            .map_or(Err(PathParseError::PathInvalid), |part| {
+                let part_str = part.as_str();
+                part_str
+                    .parse::<u32>()
+                    .map_err(|_| PathParseError::CoinTypeInvalid(part_str.to_string()))
+            })?;
         if coin_type != network.coin_type() {
             return Err(PathParseError::CoinTypeMismatch {
                 expected: network.coin_type(),
@@ -143,21 +146,31 @@ impl ZcashdHdDerivation {
             });
         }
 
-        let account_index = parts[2]
-            .parse::<u32>()
-            .map_err(|_| PathParseError::AccountIndexInvalid(parts[2].to_string()))?;
+        let account_index = parts
+            .get(2)
+            .map_or(Err(PathParseError::PathInvalid), |part| {
+                let part_str = part.as_str();
+                part_str
+                    .parse::<u32>()
+                    .map_err(|_| PathParseError::AccountIndexInvalid(part_str.to_string()))
+            })?;
 
         if account_index == Self::ZCASHD_LEGACY_ACCOUNT_INDEX {
-            if parts.len() != 4 {
-                return Err(PathParseError::AddressIndexMissing);
-            }
-            let address_index = match parts[3].parse::<u32>() {
-                Ok(v) if v < (1 << 31) => Ok(LegacyAddressIndex(v)),
-                _ => Err(PathParseError::AddressIndexInvalid(parts[3].to_string())),
-            }?;
+            let address_index =
+                parts
+                    .get(3)
+                    .map_or(Err(PathParseError::AddressIndexMissing), |part| {
+                        let part_str = part.as_str();
+
+                        match part_str.parse::<u32>() {
+                            Ok(v) if v < (1 << 31) => Ok(LegacyAddressIndex(v)),
+                            _ => Err(PathParseError::AddressIndexInvalid(part_str.to_string())),
+                        }
+                    })?;
+
             Ok(ZcashdHdDerivation::Post470LegacySapling { address_index })
         } else {
-            if parts.len() != 3 {
+            if parts.get(4).is_some() {
                 return Err(PathParseError::PathInvalid);
             }
             let account_id = AccountId::try_from(account_index)
