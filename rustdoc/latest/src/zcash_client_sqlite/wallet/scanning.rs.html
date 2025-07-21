@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/scanning.rs`."><title>scanning.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-aa0817cf.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.90.0-nightly (e46629662 2025-07-17)" data-channel="nightly" data-search-js="search-179e01a3.js" data-settings-js="settings-5514c975.js" ><script src="../../../static.files/storage-4e99c027.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-673ee1e0.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-32bb7600.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>scanning.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>incrementalmerkletree::{Address, Position};
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `zcash_client_sqlite/src/wallet/scanning.rs`."><title>scanning.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-aa0817cf.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="zcash_client_sqlite" data-themes="" data-resource-suffix="" data-rustdoc-version="1.90.0-nightly (9982d6462 2025-07-20)" data-channel="nightly" data-search-js="search-fa3e91e5.js" data-settings-js="settings-5514c975.js" ><script src="../../../static.files/storage-4e99c027.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-673ee1e0.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-32bb7600.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">zcash_client_sqlite/wallet/</div>scanning.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>incrementalmerkletree::{Address, Position};
 <a href=#2 id=2 data-nosnippet>2</a><span class="kw">use </span>rusqlite::{<span class="self">self</span>, named_params, types::Value, OptionalExtension};
 <a href=#3 id=3 data-nosnippet>3</a><span class="kw">use </span>std::cmp::{max, min};
 <a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span>std::collections::BTreeSet;
@@ -1797,104 +1797,105 @@
 <a href=#1797 id=1797 data-nosnippet>1797</a>            )
 <a href=#1798 id=1798 data-nosnippet>1798</a>            .unwrap();
 <a href=#1799 id=1799 data-nosnippet>1799</a>
-<a href=#1800 id=1800 data-nosnippet>1800</a>        <span class="kw">let </span>create_proposed_result = st.create_proposed_transactions::&lt;Infallible, <span class="kw">_</span>, Infallible&gt;(
-<a href=#1801 id=1801 data-nosnippet>1801</a>            account.usk(),
-<a href=#1802 id=1802 data-nosnippet>1802</a>            OvkPolicy::Sender,
-<a href=#1803 id=1803 data-nosnippet>1803</a>            <span class="kw-2">&amp;</span>proposal,
-<a href=#1804 id=1804 data-nosnippet>1804</a>        );
-<a href=#1805 id=1805 data-nosnippet>1805</a>        <span class="macro">assert_matches!</span>(<span class="kw-2">&amp;</span>create_proposed_result, <span class="prelude-val">Ok</span>(txids) <span class="kw">if </span>txids.len() == <span class="number">1</span>);
-<a href=#1806 id=1806 data-nosnippet>1806</a>    }
-<a href=#1807 id=1807 data-nosnippet>1807</a>
-<a href=#1808 id=1808 data-nosnippet>1808</a>    <span class="doccomment">/// This test verifies that missing a single block that is required for computing a witness is
-<a href=#1809 id=1809 data-nosnippet>1809</a>    /// sufficient to prevent witness construction.
-<a href=#1810 id=1810 data-nosnippet>1810</a>    </span><span class="attr">#[test]
-<a href=#1811 id=1811 data-nosnippet>1811</a>    #[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#1812 id=1812 data-nosnippet>1812</a>    </span><span class="kw">fn </span>orchard_block_spanning_tip_boundary_incomplete() {
-<a href=#1813 id=1813 data-nosnippet>1813</a>        <span class="kw">use </span>zcash_client_backend::data_api::Account <span class="kw">as _</span>;
-<a href=#1814 id=1814 data-nosnippet>1814</a>
-<a href=#1815 id=1815 data-nosnippet>1815</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = prepare_orchard_block_spanning_test(<span class="bool-val">false</span>);
-<a href=#1816 id=1816 data-nosnippet>1816</a>        <span class="kw">let </span>account = st.test_account().cloned().unwrap();
-<a href=#1817 id=1817 data-nosnippet>1817</a>        <span class="kw">let </span>birthday = account.birthday();
-<a href=#1818 id=1818 data-nosnippet>1818</a>
-<a href=#1819 id=1819 data-nosnippet>1819</a>        <span class="comment">// set the chain tip to the final position we expect
-<a href=#1820 id=1820 data-nosnippet>1820</a>        </span><span class="kw">let </span>new_tip = birthday.height() + <span class="number">122</span>;
-<a href=#1821 id=1821 data-nosnippet>1821</a>        st.wallet_mut().update_chain_tip(new_tip).unwrap();
-<a href=#1822 id=1822 data-nosnippet>1822</a>
-<a href=#1823 id=1823 data-nosnippet>1823</a>        <span class="comment">// Verify that the suggested scan ranges includes only the chain-tip range with ChainTip
-<a href=#1824 id=1824 data-nosnippet>1824</a>        // priority, and that the range from the wallet birthday to the end of the birthday shard
-<a href=#1825 id=1825 data-nosnippet>1825</a>        // has Historic priority.
-<a href=#1826 id=1826 data-nosnippet>1826</a>        </span><span class="kw">let </span>birthday_height = birthday.height().into();
-<a href=#1827 id=1827 data-nosnippet>1827</a>        <span class="kw">let </span>expected = <span class="macro">vec!</span>[
-<a href=#1828 id=1828 data-nosnippet>1828</a>            scan_range(
-<a href=#1829 id=1829 data-nosnippet>1829</a>                birthday_height..(new_tip + <span class="number">1</span>).into(),
-<a href=#1830 id=1830 data-nosnippet>1830</a>                ScanPriority::ChainTip,
-<a href=#1831 id=1831 data-nosnippet>1831</a>            ),
-<a href=#1832 id=1832 data-nosnippet>1832</a>            scan_range(
-<a href=#1833 id=1833 data-nosnippet>1833</a>                st.sapling_activation_height().into()..birthday_height,
-<a href=#1834 id=1834 data-nosnippet>1834</a>                ScanPriority::Ignored,
-<a href=#1835 id=1835 data-nosnippet>1835</a>            ),
-<a href=#1836 id=1836 data-nosnippet>1836</a>        ];
-<a href=#1837 id=1837 data-nosnippet>1837</a>
-<a href=#1838 id=1838 data-nosnippet>1838</a>        <span class="kw">let </span>actual = suggest_scan_ranges(st.wallet().conn(), ScanPriority::Ignored).unwrap();
-<a href=#1839 id=1839 data-nosnippet>1839</a>        <span class="macro">assert_eq!</span>(actual, expected);
-<a href=#1840 id=1840 data-nosnippet>1840</a>
-<a href=#1841 id=1841 data-nosnippet>1841</a>        <span class="comment">// Scan the chain-tip range, but omitting the spanning block.
-<a href=#1842 id=1842 data-nosnippet>1842</a>        </span>st.scan_cached_blocks(birthday.height() + <span class="number">13</span>, <span class="number">112</span>);
-<a href=#1843 id=1843 data-nosnippet>1843</a>
-<a href=#1844 id=1844 data-nosnippet>1844</a>        <span class="comment">// We haven't yet discovered our note, so balances should still be zero
-<a href=#1845 id=1845 data-nosnippet>1845</a>        </span><span class="macro">assert_eq!</span>(st.get_total_balance(account.id()), Zatoshis::ZERO);
-<a href=#1846 id=1846 data-nosnippet>1846</a>
-<a href=#1847 id=1847 data-nosnippet>1847</a>        <span class="comment">// Now scan the historic range; this should discover our note but not
-<a href=#1848 id=1848 data-nosnippet>1848</a>        // complete the tree. The note should not be considered spendable.
-<a href=#1849 id=1849 data-nosnippet>1849</a>        </span>st.scan_cached_blocks(birthday.height(), <span class="number">12</span>);
-<a href=#1850 id=1850 data-nosnippet>1850</a>        <span class="macro">assert_eq!</span>(
-<a href=#1851 id=1851 data-nosnippet>1851</a>            st.get_total_balance(account.id()),
-<a href=#1852 id=1852 data-nosnippet>1852</a>            Zatoshis::const_from_u64(<span class="number">100000</span>)
-<a href=#1853 id=1853 data-nosnippet>1853</a>        );
-<a href=#1854 id=1854 data-nosnippet>1854</a>        <span class="macro">assert_eq!</span>(st.get_spendable_balance(account.id(), <span class="number">10</span>), Zatoshis::ZERO);
-<a href=#1855 id=1855 data-nosnippet>1855</a>
-<a href=#1856 id=1856 data-nosnippet>1856</a>        <span class="comment">// Attempting to spend the note should fail to generate a proposal
-<a href=#1857 id=1857 data-nosnippet>1857</a>        </span><span class="kw">let </span>to_extsk = OrchardPoolTester::sk(<span class="kw-2">&amp;</span>[<span class="number">0xf5</span>; <span class="number">32</span>]);
-<a href=#1858 id=1858 data-nosnippet>1858</a>        <span class="kw">let </span>to = OrchardPoolTester::sk_default_address(<span class="kw-2">&amp;</span>to_extsk);
-<a href=#1859 id=1859 data-nosnippet>1859</a>        <span class="kw">let </span>request = zip321::TransactionRequest::new(<span class="macro">vec!</span>[zip321::Payment::without_memo(
-<a href=#1860 id=1860 data-nosnippet>1860</a>            to.to_zcash_address(st.network()),
-<a href=#1861 id=1861 data-nosnippet>1861</a>            Zatoshis::const_from_u64(<span class="number">10000</span>),
-<a href=#1862 id=1862 data-nosnippet>1862</a>        )])
-<a href=#1863 id=1863 data-nosnippet>1863</a>        .unwrap();
-<a href=#1864 id=1864 data-nosnippet>1864</a>
-<a href=#1865 id=1865 data-nosnippet>1865</a>        <span class="kw">let </span>fee_rule = StandardFeeRule::Zip317;
-<a href=#1866 id=1866 data-nosnippet>1866</a>
-<a href=#1867 id=1867 data-nosnippet>1867</a>        <span class="kw">let </span>change_memo = <span class="string">"Test change memo"</span>.parse::&lt;Memo&gt;().unwrap();
-<a href=#1868 id=1868 data-nosnippet>1868</a>        <span class="kw">let </span>change_strategy = standard::SingleOutputChangeStrategy::new(
-<a href=#1869 id=1869 data-nosnippet>1869</a>            fee_rule,
-<a href=#1870 id=1870 data-nosnippet>1870</a>            <span class="prelude-val">Some</span>(change_memo.into()),
-<a href=#1871 id=1871 data-nosnippet>1871</a>            OrchardPoolTester::SHIELDED_PROTOCOL,
-<a href=#1872 id=1872 data-nosnippet>1872</a>            DustOutputPolicy::default(),
-<a href=#1873 id=1873 data-nosnippet>1873</a>        );
-<a href=#1874 id=1874 data-nosnippet>1874</a>        <span class="kw">let </span>input_selector = GreedyInputSelector::new();
-<a href=#1875 id=1875 data-nosnippet>1875</a>
-<a href=#1876 id=1876 data-nosnippet>1876</a>        <span class="kw">let </span>proposal = st.propose_transfer(
-<a href=#1877 id=1877 data-nosnippet>1877</a>            account.id(),
-<a href=#1878 id=1878 data-nosnippet>1878</a>            <span class="kw-2">&amp;</span>input_selector,
-<a href=#1879 id=1879 data-nosnippet>1879</a>            <span class="kw-2">&amp;</span>change_strategy,
-<a href=#1880 id=1880 data-nosnippet>1880</a>            request.clone(),
-<a href=#1881 id=1881 data-nosnippet>1881</a>            NonZeroU32::new(<span class="number">10</span>).unwrap(),
-<a href=#1882 id=1882 data-nosnippet>1882</a>        );
-<a href=#1883 id=1883 data-nosnippet>1883</a>
-<a href=#1884 id=1884 data-nosnippet>1884</a>        <span class="macro">assert_matches!</span>(proposal, <span class="prelude-val">Err</span>(<span class="kw">_</span>));
-<a href=#1885 id=1885 data-nosnippet>1885</a>
-<a href=#1886 id=1886 data-nosnippet>1886</a>        <span class="comment">// Scan the missing block
-<a href=#1887 id=1887 data-nosnippet>1887</a>        </span>st.scan_cached_blocks(birthday.height() + <span class="number">12</span>, <span class="number">1</span>);
-<a href=#1888 id=1888 data-nosnippet>1888</a>
-<a href=#1889 id=1889 data-nosnippet>1889</a>        <span class="comment">// Verify that it's now possible to create the proposal
-<a href=#1890 id=1890 data-nosnippet>1890</a>        </span><span class="kw">let </span>proposal = st.propose_transfer(
-<a href=#1891 id=1891 data-nosnippet>1891</a>            account.id(),
-<a href=#1892 id=1892 data-nosnippet>1892</a>            <span class="kw-2">&amp;</span>input_selector,
-<a href=#1893 id=1893 data-nosnippet>1893</a>            <span class="kw-2">&amp;</span>change_strategy,
-<a href=#1894 id=1894 data-nosnippet>1894</a>            request,
-<a href=#1895 id=1895 data-nosnippet>1895</a>            NonZeroU32::new(<span class="number">10</span>).unwrap(),
-<a href=#1896 id=1896 data-nosnippet>1896</a>        );
-<a href=#1897 id=1897 data-nosnippet>1897</a>
-<a href=#1898 id=1898 data-nosnippet>1898</a>        <span class="macro">assert_matches!</span>(proposal, <span class="prelude-val">Ok</span>(<span class="kw">_</span>));
-<a href=#1899 id=1899 data-nosnippet>1899</a>    }
-<a href=#1900 id=1900 data-nosnippet>1900</a>}</code></pre></div></section></main></body></html>
+<a href=#1800 id=1800 data-nosnippet>1800</a>        <span class="kw">let </span>create_proposed_result = st
+<a href=#1801 id=1801 data-nosnippet>1801</a>            .create_proposed_transactions::&lt;Infallible, <span class="kw">_</span>, Infallible, <span class="kw">_</span>&gt;(
+<a href=#1802 id=1802 data-nosnippet>1802</a>                account.usk(),
+<a href=#1803 id=1803 data-nosnippet>1803</a>                OvkPolicy::Sender,
+<a href=#1804 id=1804 data-nosnippet>1804</a>                <span class="kw-2">&amp;</span>proposal,
+<a href=#1805 id=1805 data-nosnippet>1805</a>            );
+<a href=#1806 id=1806 data-nosnippet>1806</a>        <span class="macro">assert_matches!</span>(<span class="kw-2">&amp;</span>create_proposed_result, <span class="prelude-val">Ok</span>(txids) <span class="kw">if </span>txids.len() == <span class="number">1</span>);
+<a href=#1807 id=1807 data-nosnippet>1807</a>    }
+<a href=#1808 id=1808 data-nosnippet>1808</a>
+<a href=#1809 id=1809 data-nosnippet>1809</a>    <span class="doccomment">/// This test verifies that missing a single block that is required for computing a witness is
+<a href=#1810 id=1810 data-nosnippet>1810</a>    /// sufficient to prevent witness construction.
+<a href=#1811 id=1811 data-nosnippet>1811</a>    </span><span class="attr">#[test]
+<a href=#1812 id=1812 data-nosnippet>1812</a>    #[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#1813 id=1813 data-nosnippet>1813</a>    </span><span class="kw">fn </span>orchard_block_spanning_tip_boundary_incomplete() {
+<a href=#1814 id=1814 data-nosnippet>1814</a>        <span class="kw">use </span>zcash_client_backend::data_api::Account <span class="kw">as _</span>;
+<a href=#1815 id=1815 data-nosnippet>1815</a>
+<a href=#1816 id=1816 data-nosnippet>1816</a>        <span class="kw">let </span><span class="kw-2">mut </span>st = prepare_orchard_block_spanning_test(<span class="bool-val">false</span>);
+<a href=#1817 id=1817 data-nosnippet>1817</a>        <span class="kw">let </span>account = st.test_account().cloned().unwrap();
+<a href=#1818 id=1818 data-nosnippet>1818</a>        <span class="kw">let </span>birthday = account.birthday();
+<a href=#1819 id=1819 data-nosnippet>1819</a>
+<a href=#1820 id=1820 data-nosnippet>1820</a>        <span class="comment">// set the chain tip to the final position we expect
+<a href=#1821 id=1821 data-nosnippet>1821</a>        </span><span class="kw">let </span>new_tip = birthday.height() + <span class="number">122</span>;
+<a href=#1822 id=1822 data-nosnippet>1822</a>        st.wallet_mut().update_chain_tip(new_tip).unwrap();
+<a href=#1823 id=1823 data-nosnippet>1823</a>
+<a href=#1824 id=1824 data-nosnippet>1824</a>        <span class="comment">// Verify that the suggested scan ranges includes only the chain-tip range with ChainTip
+<a href=#1825 id=1825 data-nosnippet>1825</a>        // priority, and that the range from the wallet birthday to the end of the birthday shard
+<a href=#1826 id=1826 data-nosnippet>1826</a>        // has Historic priority.
+<a href=#1827 id=1827 data-nosnippet>1827</a>        </span><span class="kw">let </span>birthday_height = birthday.height().into();
+<a href=#1828 id=1828 data-nosnippet>1828</a>        <span class="kw">let </span>expected = <span class="macro">vec!</span>[
+<a href=#1829 id=1829 data-nosnippet>1829</a>            scan_range(
+<a href=#1830 id=1830 data-nosnippet>1830</a>                birthday_height..(new_tip + <span class="number">1</span>).into(),
+<a href=#1831 id=1831 data-nosnippet>1831</a>                ScanPriority::ChainTip,
+<a href=#1832 id=1832 data-nosnippet>1832</a>            ),
+<a href=#1833 id=1833 data-nosnippet>1833</a>            scan_range(
+<a href=#1834 id=1834 data-nosnippet>1834</a>                st.sapling_activation_height().into()..birthday_height,
+<a href=#1835 id=1835 data-nosnippet>1835</a>                ScanPriority::Ignored,
+<a href=#1836 id=1836 data-nosnippet>1836</a>            ),
+<a href=#1837 id=1837 data-nosnippet>1837</a>        ];
+<a href=#1838 id=1838 data-nosnippet>1838</a>
+<a href=#1839 id=1839 data-nosnippet>1839</a>        <span class="kw">let </span>actual = suggest_scan_ranges(st.wallet().conn(), ScanPriority::Ignored).unwrap();
+<a href=#1840 id=1840 data-nosnippet>1840</a>        <span class="macro">assert_eq!</span>(actual, expected);
+<a href=#1841 id=1841 data-nosnippet>1841</a>
+<a href=#1842 id=1842 data-nosnippet>1842</a>        <span class="comment">// Scan the chain-tip range, but omitting the spanning block.
+<a href=#1843 id=1843 data-nosnippet>1843</a>        </span>st.scan_cached_blocks(birthday.height() + <span class="number">13</span>, <span class="number">112</span>);
+<a href=#1844 id=1844 data-nosnippet>1844</a>
+<a href=#1845 id=1845 data-nosnippet>1845</a>        <span class="comment">// We haven't yet discovered our note, so balances should still be zero
+<a href=#1846 id=1846 data-nosnippet>1846</a>        </span><span class="macro">assert_eq!</span>(st.get_total_balance(account.id()), Zatoshis::ZERO);
+<a href=#1847 id=1847 data-nosnippet>1847</a>
+<a href=#1848 id=1848 data-nosnippet>1848</a>        <span class="comment">// Now scan the historic range; this should discover our note but not
+<a href=#1849 id=1849 data-nosnippet>1849</a>        // complete the tree. The note should not be considered spendable.
+<a href=#1850 id=1850 data-nosnippet>1850</a>        </span>st.scan_cached_blocks(birthday.height(), <span class="number">12</span>);
+<a href=#1851 id=1851 data-nosnippet>1851</a>        <span class="macro">assert_eq!</span>(
+<a href=#1852 id=1852 data-nosnippet>1852</a>            st.get_total_balance(account.id()),
+<a href=#1853 id=1853 data-nosnippet>1853</a>            Zatoshis::const_from_u64(<span class="number">100000</span>)
+<a href=#1854 id=1854 data-nosnippet>1854</a>        );
+<a href=#1855 id=1855 data-nosnippet>1855</a>        <span class="macro">assert_eq!</span>(st.get_spendable_balance(account.id(), <span class="number">10</span>), Zatoshis::ZERO);
+<a href=#1856 id=1856 data-nosnippet>1856</a>
+<a href=#1857 id=1857 data-nosnippet>1857</a>        <span class="comment">// Attempting to spend the note should fail to generate a proposal
+<a href=#1858 id=1858 data-nosnippet>1858</a>        </span><span class="kw">let </span>to_extsk = OrchardPoolTester::sk(<span class="kw-2">&amp;</span>[<span class="number">0xf5</span>; <span class="number">32</span>]);
+<a href=#1859 id=1859 data-nosnippet>1859</a>        <span class="kw">let </span>to = OrchardPoolTester::sk_default_address(<span class="kw-2">&amp;</span>to_extsk);
+<a href=#1860 id=1860 data-nosnippet>1860</a>        <span class="kw">let </span>request = zip321::TransactionRequest::new(<span class="macro">vec!</span>[zip321::Payment::without_memo(
+<a href=#1861 id=1861 data-nosnippet>1861</a>            to.to_zcash_address(st.network()),
+<a href=#1862 id=1862 data-nosnippet>1862</a>            Zatoshis::const_from_u64(<span class="number">10000</span>),
+<a href=#1863 id=1863 data-nosnippet>1863</a>        )])
+<a href=#1864 id=1864 data-nosnippet>1864</a>        .unwrap();
+<a href=#1865 id=1865 data-nosnippet>1865</a>
+<a href=#1866 id=1866 data-nosnippet>1866</a>        <span class="kw">let </span>fee_rule = StandardFeeRule::Zip317;
+<a href=#1867 id=1867 data-nosnippet>1867</a>
+<a href=#1868 id=1868 data-nosnippet>1868</a>        <span class="kw">let </span>change_memo = <span class="string">"Test change memo"</span>.parse::&lt;Memo&gt;().unwrap();
+<a href=#1869 id=1869 data-nosnippet>1869</a>        <span class="kw">let </span>change_strategy = standard::SingleOutputChangeStrategy::new(
+<a href=#1870 id=1870 data-nosnippet>1870</a>            fee_rule,
+<a href=#1871 id=1871 data-nosnippet>1871</a>            <span class="prelude-val">Some</span>(change_memo.into()),
+<a href=#1872 id=1872 data-nosnippet>1872</a>            OrchardPoolTester::SHIELDED_PROTOCOL,
+<a href=#1873 id=1873 data-nosnippet>1873</a>            DustOutputPolicy::default(),
+<a href=#1874 id=1874 data-nosnippet>1874</a>        );
+<a href=#1875 id=1875 data-nosnippet>1875</a>        <span class="kw">let </span>input_selector = GreedyInputSelector::new();
+<a href=#1876 id=1876 data-nosnippet>1876</a>
+<a href=#1877 id=1877 data-nosnippet>1877</a>        <span class="kw">let </span>proposal = st.propose_transfer(
+<a href=#1878 id=1878 data-nosnippet>1878</a>            account.id(),
+<a href=#1879 id=1879 data-nosnippet>1879</a>            <span class="kw-2">&amp;</span>input_selector,
+<a href=#1880 id=1880 data-nosnippet>1880</a>            <span class="kw-2">&amp;</span>change_strategy,
+<a href=#1881 id=1881 data-nosnippet>1881</a>            request.clone(),
+<a href=#1882 id=1882 data-nosnippet>1882</a>            NonZeroU32::new(<span class="number">10</span>).unwrap(),
+<a href=#1883 id=1883 data-nosnippet>1883</a>        );
+<a href=#1884 id=1884 data-nosnippet>1884</a>
+<a href=#1885 id=1885 data-nosnippet>1885</a>        <span class="macro">assert_matches!</span>(proposal, <span class="prelude-val">Err</span>(<span class="kw">_</span>));
+<a href=#1886 id=1886 data-nosnippet>1886</a>
+<a href=#1887 id=1887 data-nosnippet>1887</a>        <span class="comment">// Scan the missing block
+<a href=#1888 id=1888 data-nosnippet>1888</a>        </span>st.scan_cached_blocks(birthday.height() + <span class="number">12</span>, <span class="number">1</span>);
+<a href=#1889 id=1889 data-nosnippet>1889</a>
+<a href=#1890 id=1890 data-nosnippet>1890</a>        <span class="comment">// Verify that it's now possible to create the proposal
+<a href=#1891 id=1891 data-nosnippet>1891</a>        </span><span class="kw">let </span>proposal = st.propose_transfer(
+<a href=#1892 id=1892 data-nosnippet>1892</a>            account.id(),
+<a href=#1893 id=1893 data-nosnippet>1893</a>            <span class="kw-2">&amp;</span>input_selector,
+<a href=#1894 id=1894 data-nosnippet>1894</a>            <span class="kw-2">&amp;</span>change_strategy,
+<a href=#1895 id=1895 data-nosnippet>1895</a>            request,
+<a href=#1896 id=1896 data-nosnippet>1896</a>            NonZeroU32::new(<span class="number">10</span>).unwrap(),
+<a href=#1897 id=1897 data-nosnippet>1897</a>        );
+<a href=#1898 id=1898 data-nosnippet>1898</a>
+<a href=#1899 id=1899 data-nosnippet>1899</a>        <span class="macro">assert_matches!</span>(proposal, <span class="prelude-val">Ok</span>(<span class="kw">_</span>));
+<a href=#1900 id=1900 data-nosnippet>1900</a>    }
+<a href=#1901 id=1901 data-nosnippet>1901</a>}</code></pre></div></section></main></body></html>
