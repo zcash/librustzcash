@@ -287,15 +287,17 @@ where
     InputsT: InputSelector<InputSource = DbT>,
     ChangeT: ChangeStrategy<MetaSource = DbT>,
 {
-    let maybe_chain_tip_height = wallet_db
-        .chain_height()
-        .map_err(|e| InputSelectorError::DataSource(e))?;
-    let chain_tip_height =
-        maybe_chain_tip_height.ok_or_else(|| InputSelectorError::SyncRequired)?;
-    let target_height = chain_tip_height + 1;
+    let maybe_intial_heights = wallet_db
+        .get_target_and_anchor_heights(min_confirmations.untrusted)
+        .map_err(InputSelectorError::DataSource)?;
+    let (target_height, untrusted_anchor_height) =
+        maybe_intial_heights.ok_or_else(|| InputSelectorError::SyncRequired)?;
+
     let proposal = input_selector.propose_transaction(
         params,
         wallet_db,
+        target_height,
+        untrusted_anchor_height,
         min_confirmations,
         spend_from_account,
         request,

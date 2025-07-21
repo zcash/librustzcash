@@ -179,6 +179,7 @@ pub trait InputSelector {
         params: &ParamsT,
         wallet_db: &Self::InputSource,
         target_height: BlockHeight,
+        untrusted_anchor_height: BlockHeight,
         min_confirmations: ConfirmationsPolicy,
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
@@ -366,6 +367,7 @@ impl<DbT: WalletRead + InputSource> InputSelector for GreedyInputSelector<DbT> {
         params: &ParamsT,
         wallet_db: &Self::InputSource,
         target_height: BlockHeight,
+        untrusted_anchor_height: BlockHeight,
         min_confirmations: ConfirmationsPolicy,
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
@@ -628,7 +630,7 @@ impl<DbT: WalletRead + InputSource> InputSelector for GreedyInputSelector<DbT> {
                             #[cfg(feature = "orchard")]
                             orchard: use_orchard,
                         }))
-                        .map(|notes| ShieldedInputs::from_parts(anchor_height, notes));
+                        .map(|notes| ShieldedInputs::from_parts(untrusted_anchor_height, notes));
 
                     #[cfg(feature = "transparent-inputs")]
                     if let Some(tr1_balance) = tr1_balance_opt {
