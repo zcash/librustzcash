@@ -33,6 +33,7 @@ mod support_legacy_sqlite;
 mod support_zcashd_wallet_import;
 mod transparent_gap_limit_handling;
 mod tx_retrieval_queue;
+mod tx_retrieval_queue_expiry;
 mod ufvk_support;
 mod utxos_table;
 mod utxos_to_txos;
@@ -103,12 +104,12 @@ pub(super) fn all_migrations<
     //            \                          \     ephemeral_addresses     /                       /
     //             \                          \            |              /                       /
     //              ------------------------------ tx_retrieval_queue ----------------------------
-    //                                                     |
-    //                                            support_legacy_sqlite
-    //                                               /              \
-    //                         fix_broken_commitment_trees         add_account_uuids
-    //                             /                                /             \
-    //          fix_bad_change_flagging      transparent_gap_limit_handling    v_transactions_additional_totals
+    //                                              |              \
+    //                                    support_legacy_sqlite    tx_retrieval_queue_expiry
+    //                                       /              \
+    //                  fix_broken_commitment_trees         add_account_uuids
+    //                             /                                /        \
+    //          fix_bad_change_flagging      transparent_gap_limit_handling   v_transactions_additional_totals
     //                             \                       |                      /
     //                              \      ensure_default_transparent_address    /
     //                               \                     |                    /
@@ -188,6 +189,7 @@ pub(super) fn all_migrations<
         Box::new(ensure_default_transparent_address::Migration {
             _params: params.clone(),
         }),
+        Box::new(tx_retrieval_queue_expiry::Migration),
         Box::new(fix_transparent_received_outputs::Migration),
         Box::new(support_zcashd_wallet_import::Migration),
     ]

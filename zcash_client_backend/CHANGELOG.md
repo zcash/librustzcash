@@ -40,6 +40,17 @@ workspace.
     feature is enabled; in this circumstance, `new` takes an additional
     `legacy_address_index` argument.
 
+## [0.18.1, 0.19.1] - PLANNED
+
+### Changed
+- The signature of `zcash_client_backend::data_api::testing::TestState::create_proposed_transaction`
+  has been modified to allow transactions to be created from shielding
+  proposals; this API was previously overconstrained. This only affects users
+  of the `test-dependencies` feature.
+- Documentation of the `test-dependencies` feature has been updated to indicate
+  that breaking changes to the APIs exposed by this feature flag may appear
+  in any release version of this crate, including patch releases.
+
 ## [0.19.0] - PLANNED
 
 ### Added
@@ -64,7 +75,7 @@ workspace.
   - `DormantMode`
 
 ### Changed
-- Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`. `zcash_address 0.8`,
+- Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`, `zcash_address 0.8`,
   `zip321 0.4`, `zcash_transparent 0.3`, `zcash_primitives 0.23`,
   `zcash_proofs 0.23`, `zcash_keys 0.9`, `pczt 0.3`
 - `zcash_client_backend::data_api`:

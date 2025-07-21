@@ -181,7 +181,7 @@ impl fmt::Display for SqliteClientError {
                 f,
                 "A rewind for your wallet may only target height {} or greater; the requested height was {}.",
                 safe_rewind_height.map_or("<unavailable>".to_owned(), |h0| format!("{h0}")),
-                requested_height
+               requested_height
             ),
             SqliteClientError::DecodingError(e) => write!(f, "{e}"),
             #[cfg(feature = "transparent-inputs")]

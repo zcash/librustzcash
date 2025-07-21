@@ -10,14 +10,26 @@ workspace.
 
 ## [Unreleased]
 
+## [0.23.1] - PLANNED
+
+### Changed
+- Migrated to `zcash_protocol 0.5.4` to alleviate a type inference issue
+  observed by downstream users.
+
 ## [0.23.0] - PLANNED
 
 ### Changed
-+- Migrated to `zcash_address 0.8`, `zcash_transparent 0.3`
+- Migrated to `zcash_address 0.8`, `zcash_transparent 0.3`
 - Variants of `zcash_primitives::transaction::TxVersion` have changed. They
   now represent explicit transaction versions, in order to avoid accidental
   confusion with the names of the network upgrades that they were introduced
   in.
+
+## [0.22.1] - 2025-07-18
+
+### Fixed
+- This fixes a potential build error caused by incautious use of `into()`,
+  where the addition of a `From` impl can cause resolution failure.
 
 ## [0.22.0] - 2025-02-21
 
