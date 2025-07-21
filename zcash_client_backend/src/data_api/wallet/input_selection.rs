@@ -25,7 +25,7 @@ use crate::{
     wallet::WalletTransparentOutput,
 };
 
-use super::{ConfirmationHeights, ConfirmationPolicy};
+use super::ConfirmationsPolicy;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -178,7 +178,8 @@ pub trait InputSelector {
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
-        heights: ConfirmationHeights,
+        target_height: BlockHeight,
+        min_confirmations: ConfirmationsPolicy,
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
@@ -364,7 +365,8 @@ impl<DbT: WalletRead + InputSource> InputSelector for GreedyInputSelector<DbT> {
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
-        heights: ConfirmationHeights,
+        target_height: BlockHeight,
+        min_confirmations: ConfirmationsPolicy,
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
@@ -382,8 +384,6 @@ impl<DbT: WalletRead + InputSource> InputSelector for GreedyInputSelector<DbT> {
         #[cfg(feature = "orchard")]
         let mut orchard_outputs = vec![];
         let mut payment_pools = BTreeMap::new();
-
-        let (target_height, anchor_height) = todo!();
 
         // In a ZIP 320 pair, tr0 refers to the first transaction request that
         // collects shielded value and sends it to an ephemeral address, and tr1
