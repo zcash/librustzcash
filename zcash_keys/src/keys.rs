@@ -453,6 +453,10 @@ impl UnifiedSpendingKey {
         }
     }
 
+    /// Returns the unified address corresponding to the smallest valid diversifier index,
+    /// along with that diversifier index.
+    ///
+    /// See [`UnifiedFullViewingKey::default_address`] for additional details.
     #[cfg(any(test, feature = "test-dependencies"))]
     pub fn default_address(
         &self,
@@ -463,6 +467,11 @@ impl UnifiedSpendingKey {
             .unwrap()
     }
 
+    /// Returns the default external transparent address using the transparent account pubkey.
+    ///
+    /// See [`ExternalIvk::default_address`] for more information.
+    ///
+    /// [`ExternalIvk::default_address`]: transparent::keys::ExternalIvk::default_address
     #[cfg(all(
         feature = "transparent-inputs",
         any(test, feature = "test-dependencies")
@@ -984,8 +993,6 @@ impl UnifiedFullViewingKey {
     }
 
     /// Attempts to derive the Unified Address for the given diversifier index and receiver types.
-    /// If `request` is None, the address should be derived to contain a receiver for each item in
-    /// this UFVK.
     ///
     /// Returns `None` if the specified index does not produce a valid diversifier.
     pub fn address(
@@ -998,8 +1005,7 @@ impl UnifiedFullViewingKey {
 
     /// Searches the diversifier space starting at diversifier index `j` for one which will produce
     /// a valid diversifier, and return the Unified Address constructed using that diversifier
-    /// along with the index at which the valid diversifier was found. If `request` is None, the
-    /// address should be derived to contain a receiver for each item in this UFVK.
+    /// along with the index at which the valid diversifier was found.
     ///
     /// Returns an `Err(AddressGenerationError)` if no valid diversifier exists or if the features
     /// required to satisfy the unified address request are not properly enabled.
@@ -1013,8 +1019,7 @@ impl UnifiedFullViewingKey {
     }
 
     /// Find the Unified Address corresponding to the smallest valid diversifier index, along with
-    /// that index. If `request` is None, the address should be derived to contain a receiver for
-    /// each item in this UFVK.
+    /// that index.
     ///
     /// Returns an `Err(AddressGenerationError)` if no valid diversifier exists or if the features
     /// required to satisfy the unified address request are not properly enabled.
@@ -1023,6 +1028,25 @@ impl UnifiedFullViewingKey {
         request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.find_address(DiversifierIndex::new(), request)
+    }
+
+    /// Returns the default external transparent address using the transparent account pubkey.
+    ///
+    /// See [`ExternalIvk::default_address`] for more information.
+    ///
+    /// [`ExternalIvk::default_address`]: transparent::keys::ExternalIvk::default_address
+    #[cfg(all(
+        feature = "transparent-inputs",
+        any(test, feature = "test-dependencies")
+    ))]
+    pub fn default_transparent_address(
+        &self,
+    ) -> Option<(TransparentAddress, NonHardenedChildIndex)> {
+        self.transparent().map(|k| {
+            k.derive_external_ivk()
+                .expect("ability to derive the external IVK was checked at construction")
+                .default_address()
+        })
     }
 }
 
@@ -1236,8 +1260,6 @@ impl UnifiedIncomingViewingKey {
     }
 
     /// Attempts to derive the Unified Address for the given diversifier index and receiver types.
-    /// If `request` is None, the address will be derived to contain a receiver for each item in
-    /// this UFVK.
     ///
     /// Returns an error if the this key does not produce a valid receiver for a required receiver
     /// type at the given diversifier index.
@@ -1389,8 +1411,7 @@ impl UnifiedIncomingViewingKey {
     }
 
     /// Find the Unified Address corresponding to the smallest valid diversifier index, along with
-    /// that index. If `request` is None, the address will be derived to contain a receiver for
-    /// each data item in this UFVK.
+    /// that index.
     ///
     /// Returns an error if the this key does not produce a valid receiver for a required receiver
     /// type at any diversifier index.
@@ -1465,6 +1486,21 @@ impl UnifiedIncomingViewingKey {
         }
 
         ReceiverRequirements::new(orchard, sapling, p2pkh)
+    }
+
+    /// Returns the default external transparent address using the transparent account pubkey.
+    ///
+    /// See [`ExternalIvk::default_address`] for more information.
+    ///
+    /// [`ExternalIvk::default_address`]: transparent::keys::ExternalIvk::default_address
+    #[cfg(all(
+        feature = "transparent-inputs",
+        any(test, feature = "test-dependencies")
+    ))]
+    pub fn default_transparent_address(
+        &self,
+    ) -> Option<(TransparentAddress, NonHardenedChildIndex)> {
+        self.transparent.as_ref().map(|k| k.default_address())
     }
 }
 
