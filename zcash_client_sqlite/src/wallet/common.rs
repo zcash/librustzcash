@@ -5,7 +5,9 @@ use rusqlite::{named_params, types::Value, Connection, Row};
 use std::{num::NonZeroU64, rc::Rc};
 
 use zcash_client_backend::{
-    data_api::{NoteFilter, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT},
+    data_api::{
+        wallet::ConfirmationsPolicy, NoteFilter, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT,
+    },
     wallet::ReceivedNote,
 };
 use zcash_primitives::transaction::TxId;
@@ -184,8 +186,8 @@ fn select_minimum_spendable_notes<P: consensus::Parameters, F, Note>(
     params: &P,
     account: AccountUuid,
     target_value: Zatoshis,
-    trusted_anchor_height: BlockHeight,
-    untrusted_anchor_height: BlockHeight,
+    target_height: BlockHeight,
+    min_confirmations: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
     to_spendable_note: F,
