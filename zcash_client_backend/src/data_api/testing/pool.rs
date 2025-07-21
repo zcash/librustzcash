@@ -78,7 +78,7 @@ use {
         fees::zip317,
     },
     zcash_proofs::prover::LocalTxProver,
-    zcash_protocol::value::ZatBalance,
+    zcash_protocol::{value::ZatBalance, TxId},
 };
 
 #[cfg(feature = "orchard")]
@@ -249,7 +249,7 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
         )
         .unwrap();
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal,
@@ -307,7 +307,7 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
             Some(m) if m == &Memo::Empty => {
                 found_sent_empty_memo = true;
             }
-            Some(other) => panic!("Unexpected memo value: {:?}", other),
+            Some(other) => panic!("Unexpected memo value: {other:?}"),
             None => panic!("Memo should not be stored as NULL"),
         }
     }
@@ -407,7 +407,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
     let step = &proposal.steps().head;
     assert_eq!(step.balance().proposed_change().len(), 2);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal,
@@ -465,7 +465,7 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
             Some(m) if m == &Memo::Empty => {
                 found_sent_empty_memo = true;
             }
-            Some(other) => panic!("Unexpected memo value: {:?}", other),
+            Some(other) => panic!("Unexpected memo value: {other:?}"),
             None => panic!("Memo should not be stored as NULL"),
         }
     }
@@ -622,11 +622,12 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         );
         assert_eq!(steps[1].balance().proposed_change(), []);
 
-        let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
-            account.usk(),
-            OvkPolicy::Sender,
-            &proposal,
-        );
+        let create_proposed_result = st
+            .create_proposed_transactions::<Infallible, _, Infallible, _>(
+                account.usk(),
+                OvkPolicy::Sender,
+                &proposal,
+            );
         assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 2);
         let txids = create_proposed_result.unwrap();
 
@@ -731,7 +732,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         )
         .unwrap();
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal,
@@ -945,7 +946,7 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
     // This is somewhat redundant with `send_multi_step_proposed_transfer`,
     // but tests the case with no change memo and ensures we haven't messed
     // up the test setup.
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal,
@@ -961,7 +962,7 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
     )
     .unwrap();
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &frobbed_proposal,
@@ -1188,7 +1189,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
 
     // Executing the proposal should succeed
     let txid = st
-        .create_proposed_transactions::<Infallible, _, Infallible>(
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
             account.usk(),
             OvkPolicy::Sender,
             &proposal,
@@ -1250,7 +1251,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
 
     // Executing the proposal should succeed
     assert_matches!(
-        st.create_proposed_transactions::<Infallible, _, Infallible>(account.usk(), OvkPolicy::Sender, &proposal,),
+        st.create_proposed_transactions::<Infallible, _, Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal,),
         Ok(txids) if txids.len() == 1
     );
 
@@ -1332,7 +1333,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
         .unwrap();
 
     let txid2 = st
-        .create_proposed_transactions::<Infallible, _, Infallible>(
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
             account.usk(),
             OvkPolicy::Sender,
             &proposal,
@@ -1484,7 +1485,7 @@ pub fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>(
 
     // Executing the proposal should succeed
     assert_matches!(
-        st.create_proposed_transactions::<Infallible, _, Infallible>(account.usk(), OvkPolicy::Sender, &proposal),
+        st.create_proposed_transactions::<Infallible, _, Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal),
         Ok(txids) if txids.len() == 1
     );
 }
@@ -1544,7 +1545,7 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
 
     // Executing the proposal should succeed
     assert_matches!(
-        st.create_proposed_transactions::<Infallible, _, Infallible>(account.usk(), OvkPolicy::Sender, &proposal),
+        st.create_proposed_transactions::<Infallible, _, Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal),
         Ok(txids) if txids.len() == 1
     );
 }
@@ -1759,6 +1760,7 @@ where
     <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
     use zcash_keys::keys::UnifiedAddressRequest;
+    use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
 
     let mut st = TestBuilder::new()
         .with_data_store_factory(ds_factory)
@@ -1784,8 +1786,9 @@ where
     );
     st.scan_cached_blocks(h, 1);
 
+    let spent_outpoint = OutPoint::fake();
     let utxo = WalletTransparentOutput::from_parts(
-        OutPoint::fake(),
+        spent_outpoint.clone(),
         TxOut {
             value: Zatoshis::const_from_u64(100000),
             script_pubkey: taddr.script(),
@@ -1814,24 +1817,76 @@ where
         .unwrap();
     assert_eq!(txids.len(), 1);
 
-    let tx = st.get_tx_from_history(*txids.first()).unwrap().unwrap();
-    assert_eq!(tx.spent_note_count(), 1);
-    assert!(tx.has_change());
-    assert_eq!(tx.received_note_count(), 0);
-    assert_eq!(tx.sent_note_count(), 0);
-    assert!(tx.is_shielding());
+    let tx_summary = st.get_tx_from_history(*txids.first()).unwrap().unwrap();
+    assert_eq!(tx_summary.spent_note_count(), 1);
+    assert!(tx_summary.has_change());
+    assert_eq!(tx_summary.received_note_count(), 0);
+    assert_eq!(tx_summary.sent_note_count(), 0);
+    assert!(tx_summary.is_shielding());
 
     // Generate and scan the block including the transaction
     let (h, _) = st.generate_next_block_including(*txids.first());
-    st.scan_cached_blocks(h, 1);
+    let scan_result = st.scan_cached_blocks(h, 1);
 
     // Ensure that the transaction metadata is still correct after the update produced by scanning.
-    let tx = st.get_tx_from_history(*txids.first()).unwrap().unwrap();
-    assert_eq!(tx.spent_note_count(), 1);
-    assert!(tx.has_change());
-    assert_eq!(tx.received_note_count(), 0);
-    assert_eq!(tx.sent_note_count(), 0);
-    assert!(tx.is_shielding());
+    let tx_summary = st.get_tx_from_history(*txids.first()).unwrap().unwrap();
+    assert_eq!(tx_summary.spent_note_count(), 1);
+    assert!(tx_summary.has_change());
+    assert_eq!(tx_summary.received_note_count(), 0);
+    assert_eq!(tx_summary.sent_note_count(), 0);
+    assert!(tx_summary.is_shielding());
+
+    // Verify that a transaction enhancement request for the transaction containing the spent
+    // outpoint does not yet exist.
+    let requests = st.wallet().transaction_data_requests().unwrap();
+    assert!(!requests
+        .iter()
+        .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid())));
+
+    // Use `decrypt_and_store_transaction` for the side effect of creating enhancement requests for
+    // the transparent inputs of the transaction.
+    let tx = st
+        .wallet()
+        .get_transaction(*txids.first())
+        .unwrap()
+        .unwrap();
+    let params = *st.network();
+    decrypt_and_store_transaction(&params, st.wallet_mut(), &tx, Some(h)).unwrap();
+
+    // Verify that a transaction enhancement request for the received transaction was created
+    let requests = st.wallet().transaction_data_requests().unwrap();
+    assert!(requests
+        .iter()
+        .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid())));
+
+    // Now advance the chain by 40 blocks; even though a record for the transaction that created
+    // `spent_outpoint` exists in the wallet database, the transaction can't be enhanced because
+    // the outpoint was fake. Advancing the chain will cause the request for enhancement to expire.
+    for _ in 0..DEFAULT_TX_EXPIRY_DELTA {
+        st.generate_next_block(
+            &dfvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10000),
+        );
+    }
+    st.scan_cached_blocks(
+        scan_result.scanned_range().end,
+        usize::try_from(DEFAULT_TX_EXPIRY_DELTA).unwrap(),
+    );
+
+    // Simulate the situation where the enhancement request results in `TxidNotRecognized`
+    st.wallet_mut()
+        .set_transaction_status(
+            *spent_outpoint.txid(),
+            data_api::TransactionStatus::TxidNotRecognized,
+        )
+        .unwrap();
+
+    // Verify that the transaction enhancement request for the invalid txid has been deleted.
+    let requests = st.wallet().transaction_data_requests().unwrap();
+    assert!(!requests
+        .iter()
+        .any(|req| req == &TransactionDataRequest::Enhancement(*spent_outpoint.txid())));
 }
 
 // FIXME: This requires fixes to the test framework.
@@ -2099,7 +2154,7 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     );
     assert_eq!(change_output.value(), expected_change);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal0,
@@ -2190,7 +2245,7 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
     );
     assert_eq!(change_output.value(), expected_change);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal0,
@@ -2277,7 +2332,7 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     assert_eq!(change_output.output_pool(), PoolType::SAPLING);
     assert_eq!(change_output.value(), expected_change);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         account.usk(),
         OvkPolicy::Sender,
         &proposal0,
@@ -3191,4 +3246,164 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, DSF>(
 
     let (h, _) = st.generate_next_block_including(txid);
     st.scan_cached_blocks(h, 1);
+}
+
+/// Ensure that wallet recovery recomputes fees.
+///
+/// Callers must provide an `intervene` function that deletes fee information for the specified
+/// txid from the database. This deletion is checked and the test will fail if fee information is
+/// not deleted.
+#[cfg(feature = "transparent-inputs")]
+pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactory>(
+    ds_factory: DsF,
+    cache: impl TestCache,
+    mut intervene: impl FnMut(&mut DsF::DataStore, TxId) -> Result<(), DsF::DsError>,
+) {
+    use secrecy::ExposeSecret;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let seed = Secret::new(st.test_seed().unwrap().expose_secret().clone());
+    let source_account = st.test_account().cloned().unwrap();
+    let (dest_account_id, dest_usk) = st
+        .wallet_mut()
+        .create_account("dest", &seed, source_account.birthday(), None)
+        .unwrap();
+
+    let from = T::test_account_fvk(&st);
+    let (to, _) = dest_usk.default_transparent_address();
+
+    // Get some funds in the source account
+    let note_value = Zatoshis::const_from_u64(350000);
+    st.generate_next_block(&from, AddressType::DefaultExternal, note_value);
+    st.generate_next_block(&from, AddressType::DefaultExternal, note_value);
+    st.scan_cached_blocks(source_account.birthday().height(), 2);
+
+    // Create two transactions sending from the source account to a transparent address in the
+    // destination account.
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let transfer_amount = Zatoshis::const_from_u64(200000);
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        Address::from(to).to_zcash_address(st.network()),
+        transfer_amount,
+    )])
+    .unwrap();
+
+    let mut send_transparent = || {
+        let p0 = st
+            .propose_transfer(
+                source_account.id(),
+                &input_selector,
+                &change_strategy,
+                request.clone(),
+                NonZeroU32::new(1).unwrap(),
+            )
+            .unwrap();
+        let result0 = st
+            .create_proposed_transactions::<Infallible, _, Infallible, _>(
+                source_account.usk(),
+                OvkPolicy::Sender,
+                &p0,
+            )
+            .unwrap();
+        assert_eq!(result0.len(), 1);
+        let txid = result0[0];
+        let (h, _) = st.generate_next_block_including(txid);
+        st.scan_cached_blocks(h, 1);
+
+        // Make the destination account aware of the received UTXOs
+        let tx = st.wallet().get_transaction(txid).unwrap().unwrap();
+        let t_bundle = tx.transparent_bundle().unwrap();
+        assert_eq!(t_bundle.vout.len(), 1);
+
+        let outpoint = OutPoint::new(*txid.as_ref(), 0);
+        let utxo = WalletTransparentOutput::from_parts(outpoint, t_bundle.vout[0].clone(), Some(h))
+            .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+
+        (txid, h)
+    };
+
+    send_transparent();
+    let (input_tx_1_txid, input_tx_1_height) = send_transparent();
+
+    assert_eq!(
+        st.get_total_balance(dest_account_id),
+        (transfer_amount + transfer_amount).unwrap()
+    );
+
+    // Shield the funds in the destination account
+    let p1 = st
+        .propose_shielding(
+            &input_selector,
+            &change_strategy,
+            Zatoshis::const_from_u64(10000),
+            &[to],
+            dest_account_id,
+            1,
+        )
+        .unwrap();
+    let result1 = st
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
+            &dest_usk,
+            OvkPolicy::Sender,
+            &p1,
+        )
+        .unwrap();
+    assert_eq!(result1.len(), 1);
+    let txid = result1[0];
+    let (h, _) = st.generate_next_block_including(txid);
+    st.scan_cached_blocks(h, 1);
+
+    // Since our wallet constructed the transaction, we have the fee information;
+    // we will need to wipe it out via a backend-level intervention in order to simulate
+    // what happens in recovery.
+    let shielding_tx = st.get_tx_from_history(txid).unwrap().unwrap();
+    assert_matches!(shielding_tx.fee_paid, Some(_));
+    let created_fee = shielding_tx.fee_paid.unwrap();
+
+    intervene(st.wallet_mut(), txid).unwrap();
+
+    // Verify that the intervention removed the fee information for the transaction.
+    let shielding_tx = st.get_tx_from_history(txid).unwrap().unwrap();
+    assert_matches!(shielding_tx.fee_paid, None);
+
+    // Run `decrypt_and_store_transaction; this should restore the fee, since the wallet has all of
+    // the necessary input and output data.
+    let tx = st.wallet().get_transaction(txid).unwrap().unwrap();
+    let network = *st.network();
+    decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, Some(h)).unwrap();
+
+    // Verify that the fee information has been restored.
+    let shielding_tx = st.get_tx_from_history(txid).unwrap().unwrap();
+    assert_eq!(shielding_tx.fee_paid, Some(created_fee));
+
+    // Wipe the fee information again; calling `decrypt_and_store_transaction` with the *input* tx
+    // should also cause the fees to be restored.
+    intervene(st.wallet_mut(), txid).unwrap();
+
+    let shielding_tx = st.get_tx_from_history(txid).unwrap().unwrap();
+    assert_matches!(shielding_tx.fee_paid, None);
+
+    // Run `decrypt_and_store_transaction with one of the inputs; this should also restore the fee,
+    // since the wallet has all of the necessary input and output data.
+    let tx = st
+        .wallet()
+        .get_transaction(input_tx_1_txid)
+        .unwrap()
+        .unwrap();
+    let network = *st.network();
+    decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, Some(input_tx_1_height)).unwrap();
+
+    // Verify that the fee information has been restored.
+    let shielding_tx = st.get_tx_from_history(txid).unwrap().unwrap();
+    assert_eq!(shielding_tx.fee_paid, Some(created_fee));
 }

@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use transparent::address::TransparentAddress;
 use zcash_address::{
     unified::{self, Container, Encoding, Typecode},
-    ConversionError, ToAddress, TryFromRawAddress, ZcashAddress,
+    ConversionError, ToAddress, TryFromAddress, ZcashAddress,
 };
 use zcash_protocol::consensus::{self, NetworkType};
 
@@ -333,16 +333,20 @@ impl From<UnifiedAddress> for Address {
     }
 }
 
-impl TryFromRawAddress for Address {
+impl TryFromAddress for Address {
     type Error = &'static str;
 
     #[cfg(feature = "sapling")]
-    fn try_from_raw_sapling(data: [u8; 43]) -> Result<Self, ConversionError<Self::Error>> {
+    fn try_from_sapling(
+        _net: NetworkType,
+        data: [u8; 43],
+    ) -> Result<Self, ConversionError<Self::Error>> {
         let pa = PaymentAddress::from_bytes(&data).ok_or("Invalid Sapling payment address")?;
         Ok(pa.into())
     }
 
-    fn try_from_raw_unified(
+    fn try_from_unified(
+        _net: NetworkType,
         ua: zcash_address::unified::Address,
     ) -> Result<Self, ConversionError<Self::Error>> {
         UnifiedAddress::try_from(ua)
@@ -350,17 +354,24 @@ impl TryFromRawAddress for Address {
             .map(Address::from)
     }
 
-    fn try_from_raw_transparent_p2pkh(
+    fn try_from_transparent_p2pkh(
+        _net: NetworkType,
         data: [u8; 20],
     ) -> Result<Self, ConversionError<Self::Error>> {
         Ok(TransparentAddress::PublicKeyHash(data).into())
     }
 
-    fn try_from_raw_transparent_p2sh(data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
+    fn try_from_transparent_p2sh(
+        _net: NetworkType,
+        data: [u8; 20],
+    ) -> Result<Self, ConversionError<Self::Error>> {
         Ok(TransparentAddress::ScriptHash(data).into())
     }
 
-    fn try_from_raw_tex(data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
+    fn try_from_tex(
+        _net: NetworkType,
+        data: [u8; 20],
+    ) -> Result<Self, ConversionError<Self::Error>> {
         Ok(Address::Tex(data))
     }
 }
@@ -434,6 +445,18 @@ impl Address {
             Address::Transparent(addr) => Some(*addr),
             Address::Unified(ua) => ua.transparent().copied(),
             Address::Tex(addr_bytes) => Some(TransparentAddress::PublicKeyHash(*addr_bytes)),
+        }
+    }
+
+    /// Returns the Sapling address corresponding to this address, if it is a ZIP 32-encoded
+    /// Sapling address, or a Unified address with a Sapling receiver.
+    #[cfg(feature = "sapling")]
+    pub fn to_sapling_address(&self) -> Option<PaymentAddress> {
+        match self {
+            Address::Sapling(addr) => Some(*addr),
+            Address::Transparent(_) => None,
+            Address::Unified(ua) => ua.sapling().copied(),
+            Address::Tex(_) => None,
         }
     }
 }

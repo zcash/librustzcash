@@ -224,6 +224,8 @@ impl TxVersion {
             }
             BranchId::Nu5 => TxVersion::V5,
             BranchId::Nu6 => TxVersion::V5,
+            #[cfg(zcash_unstable = "nu6.1")]
+            BranchId::Nu6_1 => TxVersion::V5,
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => TxVersion::V6,
             #[cfg(zcash_unstable = "zfuture")]
@@ -1150,6 +1152,8 @@ pub mod testing {
             }
             BranchId::Nu5 => Just(TxVersion::V5).boxed(),
             BranchId::Nu6 => Just(TxVersion::V5).boxed(),
+            #[cfg(zcash_unstable = "nu6.1")]
+            BranchId::Nu6_1 => Just(TxVersion::V5).boxed(),
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => Just(TxVersion::V6).boxed(),
             #[cfg(zcash_unstable = "zfuture")]

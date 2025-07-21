@@ -69,8 +69,8 @@ pub enum FeeError<FE> {
 impl<FE: fmt::Display> fmt::Display for FeeError<FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            FeeError::FeeRule(e) => write!(f, "An error occurred in fee calculation: {}", e),
-            FeeError::Bundle(b) => write!(f, "Bundle structure invalid in fee calculation: {}", b),
+            FeeError::FeeRule(e) => write!(f, "An error occurred in fee calculation: {e}"),
+            FeeError::Bundle(b) => write!(f, "Bundle structure invalid in fee calculation: {b}"),
         }
     }
 }
@@ -114,21 +114,19 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
         match self {
             Error::InsufficientFunds(amount) => write!(
                 f,
-                "Insufficient funds for transaction construction; need an additional {:?} zatoshis",
-                amount
+                "Insufficient funds for transaction construction; need an additional {amount:?} zatoshis"
             ),
             Error::ChangeRequired(amount) => write!(
                 f,
-                "The transaction requires an additional change output of {:?} zatoshis",
-                amount
+                "The transaction requires an additional change output of {amount:?} zatoshis"
             ),
-            Error::Balance(e) => write!(f, "Invalid amount {:?}", e),
-            Error::Fee(e) => write!(f, "An error occurred in fee calculation: {}", e),
+            Error::Balance(e) => write!(f, "Invalid amount {e:?}"),
+            Error::Fee(e) => write!(f, "An error occurred in fee calculation: {e}"),
             Error::TransparentBuild(err) => err.fmt(f),
             Error::SaplingBuild(err) => err.fmt(f),
-            Error::OrchardBuild(err) => write!(f, "{:?}", err),
-            Error::OrchardSpend(err) => write!(f, "Could not add Orchard spend: {}", err),
-            Error::OrchardRecipient(err) => write!(f, "Could not add Orchard recipient: {}", err),
+            Error::OrchardBuild(err) => write!(f, "{err:?}"),
+            Error::OrchardSpend(err) => write!(f, "Could not add Orchard spend: {err}"),
+            Error::OrchardRecipient(err) => write!(f, "Could not add Orchard recipient: {err}"),
             Error::SaplingBuilderNotAvailable => write!(
                 f,
                 "Cannot create Sapling transactions without a Sapling anchor"
@@ -501,7 +499,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             .add_output(
                 ovk,
                 to,
-                sapling::value::NoteValue::from_raw(value.into()),
+                sapling::value::NoteValue::from_raw(u64::from(value)),
                 memo.into_bytes(),
             )
             .map_err(Error::SaplingBuild)
@@ -737,8 +735,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         //
 
         // After fees are accounted for, the value balance of the transaction must be zero.
-        let balance_after_fees =
-            (self.value_balance()? - fee.into()).ok_or(BalanceError::Underflow)?;
+        let balance_after_fees = (self.value_balance()? - fee).ok_or(BalanceError::Underflow)?;
 
         match balance_after_fees.cmp(&ZatBalance::zero()) {
             Ordering::Less => {
@@ -924,8 +921,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         //
 
         // After fees are accounted for, the value balance of the transaction must be zero.
-        let balance_after_fees =
-            (self.value_balance()? - fee.into()).ok_or(BalanceError::Underflow)?;
+        let balance_after_fees = (self.value_balance()? - fee).ok_or(BalanceError::Underflow)?;
 
         match balance_after_fees.cmp(&ZatBalance::zero()) {
             Ordering::Less => {

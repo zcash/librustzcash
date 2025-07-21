@@ -3,23 +3,55 @@ All notable changes to this library will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this library adheres to Rust's notion of
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Future releases are
+indicated by the `PLANNED` status in order to make it possible to correctly
+represent the transitive `semver` implications of changes within the enclosing
+workspace.
 
 ## [Unreleased]
 
+## [0.18.1, 0.19.1] - 2025-07-19
+
+### Changed
+- The signature of `zcash_client_backend::data_api::testing::TestState::create_proposed_transaction`
+  has been modified to allow transactions to be created from shielding
+  proposals; this API was previously overconstrained. This only affects users
+  of the `test-dependencies` feature.
+- Documentation of the `test-dependencies` feature has been updated to indicate
+  that breaking changes to the APIs exposed by this feature flag may appear
+  in any release version of this crate, including patch releases.
+
+## [0.19.0] - 2025-05-30
+
 ### Added
+- `zcash_client_backend::data_api`:
+  - `TargetValue`: An intent of representing spendable value to reach a certain
+    targeted amount.
+- `zcash_client_backend::proto::service`:
+  - `LightdInfo.donation_address` field.
+  - Helper methods for parsing `LightdInfo` fields:
+    - `LightdInfo::chain_name`
+    - `LightdInfo::sapling_activation_height`
+    - `LightdInfo::consensus_branch_id`
+    - `LightdInfo::block_height`
+    - `LightdInfo::estimated_height`
+    - `LightdInfo::donation_address`
 - `zcash_client_backend::tor`:
+  - `http::Retry`
+  - `Client::http_get`
+  - `Client::http_get_json`
+  - `Client::http_post`
   - `Client::set_dormant`
   - `DormantMode`
 
 ### Changed
+- Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`, `zcash_address 0.8`,
+  `zip321 0.4`, `zcash_transparent 0.3`, `zcash_primitives 0.23`,
+  `zcash_proofs 0.23`, `zcash_keys 0.9`, `pczt 0.3`
 - `zcash_client_backend::data_api`:
-  - `TargetValue`: An intent of representing spendable value to reach a certain 
-    targeted amount.
-  - `select_spendable_notes`: parameter `target_value` now is a `TargetValue`. 
-    Existing calls to this function that used `Zatoshis` now use 
+  - `select_spendable_notes`: parameter `target_value` now is a `TargetValue`.
+    Existing calls to this function that used `Zatoshis` now use
     `TargetValue::AtLeast(Zatoshis)`
-- Migrated to `arti-client 0.28`, `dynosaur 0.2`, `tonic 0.13`.
 - `zcash_client_backend::tor`:
   - `Client::{connect_to_lightwalletd, get_latest_zec_to_usd_rate}` now ensure
     that the inner Tor client is ready for traffic, and re-bootstrap it if

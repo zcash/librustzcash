@@ -1,7 +1,7 @@
 [package]
 name = "zcash_client_backend"
 description = "APIs for creating shielded Zcash light clients"
-version = "0.18.0"
+version = "0.19.1"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -148,6 +148,7 @@ proptest.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 shardtree = { workspace = true, features = ["test-dependencies"] }
+tempfile = "3.5.0"
 tokio = { version = "1.21.0", features = ["rt-multi-thread"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
@@ -221,6 +222,9 @@ tor = [
 ]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
+##
+## NOTE: Semver-breaking changes to the APIs exposed by this feature may be
+## present in any release version, including patch releases.
 test-dependencies = [
     "dep:ambassador",
     "dep:assert_matches",

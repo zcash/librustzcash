@@ -117,8 +117,7 @@ impl fmt::Display for WalletMigrationError {
             WalletMigrationError::DatabaseNotSupported(version) => {
                 write!(
                     f,
-                    "The installed SQLite version {} does not support operations required by the wallet.",
-                    version
+                    "The installed SQLite version {version} does not support operations required by the wallet."
                 )
             }
             WalletMigrationError::SeedRequired => {
@@ -134,23 +133,19 @@ impl fmt::Display for WalletMigrationError {
                 )
             }
             WalletMigrationError::CorruptedData(reason) => {
-                write!(f, "Wallet database is corrupted: {}", reason)
+                write!(f, "Wallet database is corrupted: {reason}")
             }
-            WalletMigrationError::DbError(e) => write!(f, "{}", e),
-            WalletMigrationError::BalanceError(e) => write!(f, "Balance error: {:?}", e),
-            WalletMigrationError::CommitmentTree(e) => write!(f, "Commitment tree error: {:?}", e),
+            WalletMigrationError::DbError(e) => write!(f, "{e}"),
+            WalletMigrationError::BalanceError(e) => write!(f, "Balance error: {e:?}"),
+            WalletMigrationError::CommitmentTree(e) => write!(f, "Commitment tree error: {e:?}"),
             WalletMigrationError::AddressGeneration(e) => {
-                write!(f, "Address generation error: {:?}", e)
+                write!(f, "Address generation error: {e:?}")
             }
             WalletMigrationError::CannotRevert(uuid) => {
-                write!(f, "Reverting migration {} is not supported", uuid)
+                write!(f, "Reverting migration {uuid} is not supported")
             }
             WalletMigrationError::Other(err) => {
-                write!(
-                    f,
-                    "Unexpected violation of database business rules: {}",
-                    err
-                )
+                write!(f, "Unexpected violation of database business rules: {err}")
             }
         }
     }
@@ -197,7 +192,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::BadAccountData(e) => WalletMigrationError::CorruptedData(e),
         SqliteClientError::CommitmentTree(e) => WalletMigrationError::CommitmentTree(Box::new(e)),
         SqliteClientError::UnsupportedPoolType(pool) => WalletMigrationError::CorruptedData(
-            format!("Wallet DB contains unsupported pool type {}", pool),
+            format!("Wallet DB contains unsupported pool type {pool}"),
         ),
         SqliteClientError::BalanceError(e) => WalletMigrationError::BalanceError(e),
         SqliteClientError::TableNotEmpty => unreachable!("wallet already initialized"),

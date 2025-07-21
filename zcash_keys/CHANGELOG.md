@@ -2,9 +2,32 @@ All notable changes to this library will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this library adheres to Rust's notion of
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Future releases are
+indicated by the `PLANNED` status in order to make it possible to correctly
+represent the transitive `semver` implications of changes within the enclosing
+workspace.
 
 ## [Unreleased]
+
+## [0.9.0] - 2025-05-30
+
+### Added
+- `zcash_keys::keys::UnifiedAddressRequest::{SHIELDED, ORCHARD}`
+- `zcash_keys::keys::ReceiverRequirements::{SHIELDED, ORCHARD}`
+
+### Changed
+- Migrated to `zcash_address 0.8`, `zcash_transparent 0.3`.
+
+## [0.8.2] - 2025-07-18
+
+### Added
+- `zcash_keys::keys::{UnifiedFullViewingKey, UnifiedIncomingViewingKey}::default_transparent_address`
+  have been added under the `test-dependencies` feature.
+
+## [0.4.1, 0.5.1, 0.6.1, 0.7.1, 0.8.1] - 2025-05-09
+
+### Added
+- `zcash_keys::Address::to_sapling_address`
 
 ## [0.8.0] - 2025-03-19
 
@@ -56,6 +79,11 @@ and this library adheres to Rust's notion of
 - `zcash_keys::keys::UnifiedAddressRequest::all` (use
   `UnifiedAddressRequest::ALLOW_ALL` or
   `UnifiedFullViewingKey::to_address_request` instead)
+
+## [0.4.1, 0.5.1, 0.6.1] - 2025-05-09
+
+### Added
+- `zcash_keys::Address::to_transparent_address`
 
 ## [0.6.0] - 2024-12-16
 

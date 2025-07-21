@@ -85,7 +85,7 @@ use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 use wallet::{
     commitment_tree::{self, put_shard_roots},
-    common::spendable_notes_meta,
+    common::{spendable_notes_meta, TableConstants},
     scanning::replace_queue_entries,
     upsert_address, SubtreeProgressEstimator,
 };
@@ -103,6 +103,7 @@ use {
     std::collections::BTreeSet,
     zcash_client_backend::wallet::TransparentAddressMetadata,
     zcash_keys::encoding::AddressCodec,
+    zcash_protocol::value::Zatoshis,
 };
 
 #[cfg(feature = "multicore")]
@@ -250,7 +251,7 @@ pub struct ReceivedNoteId(pub(crate) ShieldedProtocol, pub(crate) i64);
 impl fmt::Display for ReceivedNoteId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ReceivedNoteId(protocol, id) => write!(f, "Received {:?} Note: {}", protocol, id),
+            ReceivedNoteId(protocol, id) => write!(f, "Received {protocol:?} Note: {id}"),
         }
     }
 }
@@ -837,7 +838,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         min_confirmations: NonZeroU32,
     ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
         wallet::get_target_and_anchor_heights(self.conn.borrow(), min_confirmations)
-            .map_err(SqliteClientError::from)
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
@@ -1015,6 +1015,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         &self,
         txid: &TxId,
     ) -> Result<Vec<OutputOfSentTx>, <Self as WalletRead>::Error> {
+        use zcash_protocol::value::Zatoshis;
+
         let mut stmt_sent = self.conn.borrow().prepare(
             "SELECT value, to_address,
                     a.cached_transparent_receiver_address, a.transparent_child_index
@@ -1064,7 +1066,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         Vec<(BlockHeight, Option<incrementalmerkletree::Position>)>,
         <Self as WalletRead>::Error,
     > {
-        wallet::testing::get_checkpoint_history(self.conn.borrow(), protocol)
+        wallet::testing::get_checkpoint_history(self.conn.borrow(), *protocol)
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -1084,9 +1086,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         &self,
         protocol: ShieldedProtocol,
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error> {
-        let (table_prefix, index_col, _) = wallet::common::per_protocol_names(protocol);
+        let TableConstants {
+            table_prefix,
+            output_index_col,
+            ..
+        } = wallet::common::table_constants::<<Self as InputSource>::Error>(protocol)?;
         let mut stmt_received_notes = self.conn.borrow().prepare(&format!(
-            "SELECT txid, {index_col}
+            "SELECT txid, {output_index_col}
              FROM {table_prefix}_received_notes rn
              INNER JOIN transactions ON transactions.id_tx = rn.tx
              WHERE transactions.block IS NOT NULL
@@ -2270,13 +2276,13 @@ impl std::fmt::Display for FsBlockDbError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             FsBlockDbError::Fs(io_error) => {
-                write!(f, "Failed to access the file system: {}", io_error)
+                write!(f, "Failed to access the file system: {io_error}")
             }
             FsBlockDbError::Db(e) => {
-                write!(f, "There was a problem with the sqlite db: {}", e)
+                write!(f, "There was a problem with the sqlite db: {e}")
             }
             FsBlockDbError::Protobuf(e) => {
-                write!(f, "Failed to parse protobuf-encoded record: {}", e)
+                write!(f, "Failed to parse protobuf-encoded record: {e}")
             }
             FsBlockDbError::MissingBlockPath(block_path) => {
                 write!(
@@ -2302,15 +2308,13 @@ impl std::fmt::Display for FsBlockDbError {
             FsBlockDbError::CorruptedData(e) => {
                 write!(
                     f,
-                    "The block cache has corrupted data and this caused an error: {}",
-                    e,
+                    "The block cache has corrupted data and this caused an error: {e}",
                 )
             }
             FsBlockDbError::CacheMiss(height) => {
                 write!(
                     f,
-                    "Requested height {} does not exist in the block cache",
-                    height
+                    "Requested height {height} does not exist in the block cache"
                 )
             }
         }

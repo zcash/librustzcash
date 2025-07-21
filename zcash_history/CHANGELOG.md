@@ -9,6 +9,9 @@ and this library adheres to Rust's notion of
 ### Changed
 - MSRV is now 1.81.0.
 
+### Added
+- `zcash_history::Entry::data`
+
 ## [0.4.0] - 2023-03-01
 ### Changed
 - MSRV is now 1.65.0.

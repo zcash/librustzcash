@@ -45,6 +45,7 @@ use {
     ::transparent::{address::TransparentAddress, bundle::OutPoint, keys::NonHardenedChildIndex},
     core::ops::Range,
     testing::transparent::GapLimits,
+    zcash_protocol::value::Zatoshis,
 };
 
 #[cfg(feature = "test-dependencies")]

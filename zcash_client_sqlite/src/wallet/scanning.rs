@@ -15,16 +15,18 @@ use zcash_protocol::{
     ShieldedProtocol,
 };
 
+use crate::TableConstants;
 use crate::{
     error::SqliteClientError,
     wallet::{block_height_extrema, init::WalletMigrationError},
-    PRUNING_DEPTH, SAPLING_TABLES_PREFIX, VERIFY_LOOKAHEAD,
+    PRUNING_DEPTH, VERIFY_LOOKAHEAD,
 };
 
+use super::common::table_constants;
 use super::wallet_birthday;
 
 #[cfg(feature = "orchard")]
-use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT};
+use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 #[cfg(not(feature = "orchard"))]
 use zcash_protocol::PoolType;
@@ -78,7 +80,7 @@ pub(crate) fn suggest_scan_ranges(
         };
         let code = row.get::<_, i64>(2)?;
         let priority = parse_priority_code(code).ok_or_else(|| {
-            SqliteClientError::CorruptedData(format!("scan priority not recognized: {}", code))
+            SqliteClientError::CorruptedData(format!("scan priority not recognized: {code}"))
         })?;
 
         result.push(ScanRange::from_parts(range, priority));
@@ -179,7 +181,7 @@ pub(crate) fn replace_queue_entries<E: WalletError>(
                 {
                     let code = row.get::<_, i64>(2).map_err(E::db_error)?;
                     parse_priority_code(code).ok_or_else(|| {
-                        E::corrupt(format!("scan priority not recognized: {}", code))
+                        E::corrupt(format!("scan priority not recognized: {code}"))
                     })?
                 },
             );
@@ -223,10 +225,12 @@ fn extend_range(
     conn: &rusqlite::Transaction<'_>,
     range: &Range<BlockHeight>,
     required_subtree_indices: BTreeSet<u64>,
-    table_prefix: &'static str,
+    protocol: ShieldedProtocol,
     fallback_start_height: Option<BlockHeight>,
     birthday_height: Option<BlockHeight>,
 ) -> Result<Option<Range<BlockHeight>>, SqliteClientError> {
+    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
+
     // we'll either have both min and max bounds, or we'll have neither
     let subtree_index_bounds = required_subtree_indices
         .iter()
@@ -235,9 +239,8 @@ fn extend_range(
 
     let mut shard_end_stmt = conn.prepare_cached(&format!(
         "SELECT subtree_end_height
-                FROM {}_tree_shards
-                WHERE shard_index = :shard_index",
-        table_prefix
+                FROM {table_prefix}_tree_shards
+                WHERE shard_index = :shard_index"
     ))?;
 
     let mut shard_end = |index: u64| -> Result<Option<BlockHeight>, rusqlite::Error> {
@@ -324,7 +327,7 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
             conn,
             &range,
             required_sapling_subtrees,
-            SAPLING_TABLES_PREFIX,
+            ShieldedProtocol::Sapling,
             params.activation_height(NetworkUpgrade::Sapling),
             wallet_birthday,
         )?;
@@ -334,7 +337,7 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
             conn,
             extended_range.as_ref().unwrap_or(&range),
             required_orchard_subtrees,
-            ORCHARD_TABLES_PREFIX,
+            ShieldedProtocol::Orchard,
             params.activation_height(NetworkUpgrade::Nu5),
             wallet_birthday,
         )?
@@ -372,16 +375,15 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
 
 fn tip_shard_end_height(
     conn: &rusqlite::Transaction<'_>,
-    table_prefix: &'static str,
-) -> Result<Option<BlockHeight>, rusqlite::Error> {
+    protocol: ShieldedProtocol,
+) -> Result<Option<BlockHeight>, SqliteClientError> {
+    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
     conn.query_row(
-        &format!(
-            "SELECT MAX(subtree_end_height) FROM {}_tree_shards",
-            table_prefix
-        ),
+        &format!("SELECT MAX(subtree_end_height) FROM {table_prefix}_tree_shards"),
         [],
         |row| Ok(row.get::<_, Option<u32>>(0)?.map(BlockHeight::from)),
     )
+    .map_err(SqliteClientError::from)
 }
 
 pub(crate) fn update_chain_tip<P: consensus::Parameters>(
@@ -424,9 +426,9 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     // Read the maximum height from each of the shards tables. The minimum of the two
     // gives the start of a height range that covers the last incomplete shard of both the
     // Sapling and Orchard pools.
-    let sapling_shard_tip = tip_shard_end_height(conn, SAPLING_TABLES_PREFIX)?;
+    let sapling_shard_tip = tip_shard_end_height(conn, ShieldedProtocol::Sapling)?;
     #[cfg(feature = "orchard")]
-    let orchard_shard_tip = tip_shard_end_height(conn, ORCHARD_TABLES_PREFIX)?;
+    let orchard_shard_tip = tip_shard_end_height(conn, ShieldedProtocol::Orchard)?;
 
     #[cfg(feature = "orchard")]
     let min_shard_tip = match (sapling_shard_tip, orchard_shard_tip) {
@@ -1795,11 +1797,12 @@ pub(crate) mod tests {
             )
             .unwrap();
 
-        let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
-            account.usk(),
-            OvkPolicy::Sender,
-            &proposal,
-        );
+        let create_proposed_result = st
+            .create_proposed_transactions::<Infallible, _, Infallible, _>(
+                account.usk(),
+                OvkPolicy::Sender,
+                &proposal,
+            );
         assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
     }
 

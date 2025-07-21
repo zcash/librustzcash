@@ -3,17 +3,44 @@ All notable changes to this library will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this library adheres to Rust's notion of
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Future releases are
+indicated by the `PLANNED` status in order to make it possible to correctly
+represent the transitive `semver` implications of changes within the enclosing
+workspace.
 
 ## [Unreleased]
+
+## [0.16.4, 0.17.2] - 2025-08-19
+
+### Fixed
+- `TransactionDataRequest::GetStatus` requests for txids that do not
+  correspond to unexpired transactions in the transactions table are now
+  deleted from the status check queue when `set_transaction_status` is
+  called with a status of either `TxidNotRecognized` or `NotInMainChain`.
+- This release fixes a bug that caused transparent UTXO value to be
+  double_counted in the wallet summary, contributing to both spendable and
+  pending balance, when queried with `min_confirmations == 0`.
+- Transaction fees are now restored when possible by calls to
+  `WalletDb::store_decrypted_tx`.
+
+## [0.16.3, 0.17.1] - 2025-06-17
+
+### Fixed
+- `TransactionDataRequest`s will no longer be generated for coinbase inputs
+  (which are represented as having the all-zeros txid).
+
+## [0.17.0] - 2025-05-30
 
 ### Added
 - `zcash_client_sqlite::wallet::init::WalletMigrator`
 - `zcash_client_sqlite::wallet::init::migrations`
 
 ### Changed
+- Migrated to `zcash_address 0.8`, `zip321 0.4`, `zcash_transparent 0.3`,
+  `zcash_primitives 0.23`, `zcash_proofs 0.23`, `zcash_keys 0.9`, `pczt 0.3`,
+  `zcash_client_backend 0.19`
 - `zcash_client_sqlite::wallet::init::WalletMigrationError::`
-  - Variants `WalletMigrationError::CommitmentTree` and 
+  - Variants `WalletMigrationError::CommitmentTree` and
     `WalletMigrationError::Other` now `Box` their contents.
 
 ## [0.16.2] - 2025-04-02

@@ -36,7 +36,7 @@ impl io::Read for ResponseLazyReader {
                 Request(request) => match request.clone().send_lazy() {
                     Ok(response) => *self = Response(response),
                     Err(error) => {
-                        let error = Err(format!("download request failed: {:?}", error));
+                        let error = Err(format!("download request failed: {error:?}"));
 
                         *self = Complete(error);
                     }
@@ -59,7 +59,7 @@ impl io::Read for ResponseLazyReader {
 
                             // The response is corrupted.
                             Some(Err(error)) => {
-                                let error = format!("download response failed: {:?}", error);
+                                let error = format!("download response failed: {error:?}");
 
                                 *self = Complete(Err(error.clone()));
                                 return Err(io::Error::other(error));
