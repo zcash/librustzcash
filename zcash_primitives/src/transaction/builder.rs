@@ -543,7 +543,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
                 },
             )?,
             #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            -<Zatoshis as Into<ZatBalance>>::into(self.zip233_amount),
+            -self.zip233_amount,
             #[cfg(zcash_unstable = "zfuture")]
             self.tze_builder.value_balance()?,
         ];

@@ -441,7 +441,7 @@ impl<A: Authorization> TransactionData<A> {
                 .as_ref()
                 .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
             #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            -<Zatoshis as Into<ZatBalance>>::into(self.zip233_amount),
+            -self.zip233_amount,
         ];
 
         value_balances
