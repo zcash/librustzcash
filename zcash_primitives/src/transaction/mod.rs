@@ -634,7 +634,13 @@ impl Transaction {
 
     #[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
     fn from_data_v6(data: TransactionData<Authorized>) -> Self {
-        Self::from_data_v5(data)
+        let txid = to_txid(
+            data.version,
+            data.consensus_branch_id,
+            &data.digest(TxIdDigester),
+        );
+
+        Transaction { txid, data }
     }
 
     pub fn into_data(self) -> TransactionData<Authorized> {
