@@ -112,7 +112,7 @@ impl TxVersion {
                 #[cfg(zcash_unstable = "zfuture")]
                 (ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID) => Ok(TxVersion::ZFuture),
                 _ => Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
+                    io::ErrorKind::InvalidData,
                     "Unknown transaction format",
                 )),
             }
@@ -120,7 +120,7 @@ impl TxVersion {
             Ok(TxVersion::Sprout(version))
         } else {
             Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
+                io::ErrorKind::InvalidData,
                 "Unknown transaction format",
             ))
         }
@@ -826,7 +826,7 @@ impl Transaction {
         let consensus_branch_id = reader.read_u32_le().and_then(|value| {
             BranchId::try_from(value).map_err(|_e| {
                 io::Error::new(
-                    io::ErrorKind::InvalidInput,
+                    io::ErrorKind::InvalidData,
                     #[cfg(not(feature = "std"))]
                     "invalid consensus branch id",
                     #[cfg(feature = "std")]
