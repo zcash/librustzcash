@@ -11,8 +11,8 @@ pub mod sighash_v6;
 pub mod txid;
 pub mod util;
 
-#[cfg(test)]
-mod tests;
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod tests;
 
 use crate::encoding::{ReadBytesExt, WriteBytesExt};
 use blake2b_simd::Hash as Blake2bHash;

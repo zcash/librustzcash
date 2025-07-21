@@ -28,6 +28,9 @@ use crate::transaction::TxVersion;
 #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
 use super::sighash_v6::v6_signature_hash;
 
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod data;
+
 #[test]
 fn tx_read_write() {
     let data = &self::data::tx_read_write::TX_READ_WRITE;
@@ -147,7 +150,6 @@ proptest! {
     }
 }
 
-mod data;
 #[test]
 fn zip_0143() {
     for tv in self::data::zip_0143::make_test_vectors() {
