@@ -795,7 +795,7 @@ impl Transaction {
     #[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
     fn read_v6<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
         let (consensus_branch_id, lock_time, expiry_height, zip233_amount) =
-            Self::read_v6_header_fragment(&mut reader, version)?;
+            Self::read_v6_header_fragment(&mut reader)?;
 
         let transparent_bundle = Self::read_transparent(&mut reader)?;
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
@@ -845,17 +845,12 @@ impl Transaction {
     #[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
     fn read_v6_header_fragment<R: Read>(
         mut reader: R,
-        version: TxVersion,
     ) -> io::Result<(BranchId, u32, BlockHeight, Zatoshis)> {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_v5_header_fragment(&mut reader)?;
 
         #[cfg(feature = "zip-233")]
-        let zip233_amount = if version >= TxVersion::V6 {
-            Self::read_zip233_amount(&mut reader)?
-        } else {
-            Zatoshis::ZERO
-        };
+        let zip233_amount = Self::read_zip233_amount(&mut reader)?;
 
         #[cfg(not(feature = "zip-233"))]
         let zip233_amount = Zatoshis::ZERO;
