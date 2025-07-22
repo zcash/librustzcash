@@ -134,6 +134,11 @@ webpki-roots = { workspace = true, optional = true }
 # Workaround for https://anonticket.torproject.org/user/projects/arti/issues/pending/4028/
 time-core.workspace = true
 
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Boilerplate
+getset.workspace = true
+
 [build-dependencies]
 tonic-build = { workspace = true, features = ["prost"] }
 which = "7"
@@ -176,6 +181,9 @@ transparent-inputs = [
 
 ## Enables receiving and spending Orchard funds.
 orchard = ["dep:orchard", "dep:pasta_curves", "zcash_keys/orchard"]
+
+## Enables compatibility with legacy zcashd wallet data
+zcashd-compat = ["zcash_keys/zcashd-compat"]
 
 ## Enables creating partially-constructed transactions for use in hardware wallet and multisig scenarios.
 pczt = [

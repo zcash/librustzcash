@@ -10,6 +10,36 @@ workspace.
 
 ## [Unreleased]
 
+## [0.20.0] - PLANNED
+
+### Added
+- `zcash_client_backend::data_api::TransactionsInvolvingAddress`
+- `zcash_client_backend::data_api::TransactionDataRequest::transactions_involving_address`
+- `zcash_client_backend::data_api::AccountBirthday::from_parts`
+- A `zcashd-compat` feature flag has been added in service of being able to
+  import data from the zcashd `wallet.dat` format. It enables functionality
+  needed in order to represent the nonstandard derivations for keys and
+  addresses produced by the embedded `zcashd` wallet as part of the `zcashd
+  v4.7.0` migration to permit use of a mnemonic seed for wallet backup.
+  The following additions are guarded by this feature flag:
+  - `zcash_client_backend::data_api::Zip32Derivation::legacy_address_index`
+
+### Changed
+- `zcash_client_backend::data_api`:
+  - `WalletWrite` has added method `notify_address_checked` when the
+    `transparent-inputs` feature flag is enabled.
+  - The `TransactionDataRequest::TransactionsInvolvingAddress` variant is no
+    longer structured, but takes a `TransactionsInvolvingAddress` struct value
+    as its payload. This permits the `TransactionsInvolvingAddress` type
+    to be used independent of the rest of the `TransactionDataRequest` variants.
+  - `WalletRead::get_derived_account` now takes a `Zip32Derivation` value
+    as its argument instead of its parts. This minimizes the API complexity
+    that would otherwise arise due to the presence of the `zcashd-compat`
+    feature flag.
+  - `Zip32Derivation::new` arguments have changed when the `zcashd-compat`
+    feature is enabled; in this circumstance, `new` takes an additional
+    `legacy_address_index` argument.
+
 ## [0.18.1, 0.19.1] - 2025-07-19
 
 ### Changed

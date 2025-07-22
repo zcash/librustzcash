@@ -9,6 +9,13 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::keys::zcashd`, a module containing utilities that are useful
+  for interacting with key data from legacy zcashd wallets, has been added
+  under a newly-added `zcashd-compat` feature flag.
+- `zcash_keys::address::UnifiedAddress::receivers`
+- `zcash_keys::address::Address::receivers`
+
 ## [0.9.0] - 2025-05-30
 
 ### Added
