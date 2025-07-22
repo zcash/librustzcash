@@ -1595,9 +1595,7 @@ where
                         build_state
                             .transparent_input_addresses
                             .get(
-                                &input
-                                    .script_pubkey()
-                                    .address()
+                                &TransparentAddress::from_script_pubkey(input.script_pubkey())
                                     .expect("we created this with a supported transparent address"),
                             )
                             .map(|address_metadata| {

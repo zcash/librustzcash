@@ -266,13 +266,14 @@ where
 mod tests {
     use core::{convert::Infallible, num::NonZeroUsize};
 
-    use ::transparent::{address::Script, bundle::TxOut};
+    use transparent::bundle::TxOut;
     use zcash_primitives::transaction::fees::zip317::FeeRule as Zip317FeeRule;
     use zcash_protocol::{
         consensus::{Network, NetworkUpgrade, Parameters},
         value::Zatoshis,
         ShieldedProtocol,
     };
+    use zcash_script::script::{self, Parsable};
 
     use super::SingleOutputChangeStrategy;
     use crate::{
@@ -622,7 +623,7 @@ mod tests {
             &[] as &[TestTransparentInput],
             &[TxOut {
                 value: Zatoshis::const_from_u64(40000),
-                script_pubkey: Script(vec![]),
+                script_pubkey: script::PubKey(vec![]),
             }],
             &(
                 sapling::builder::BundleType::DEFAULT,
@@ -674,7 +675,7 @@ mod tests {
             }],
             &[TxOut {
                 value: Zatoshis::const_from_u64(40000),
-                script_pubkey: Script(vec![]),
+                script_pubkey: script::PubKey::from_bytes(&[]).expect("valid").0,
             }],
             &sapling_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
@@ -719,7 +720,7 @@ mod tests {
             }],
             &[TxOut {
                 value: Zatoshis::const_from_u64(40000),
-                script_pubkey: Script(vec![]),
+                script_pubkey: script::PubKey::from_bytes(&[]).expect("valid").0,
             }],
             &sapling_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
@@ -770,7 +771,7 @@ mod tests {
             }],
             &[TxOut {
                 value: Zatoshis::const_from_u64(40000),
-                script_pubkey: Script(vec![]),
+                script_pubkey: script::PubKey::from_bytes(&[]).expect("valid").0,
             }],
             &sapling_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]

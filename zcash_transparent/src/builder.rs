@@ -6,8 +6,13 @@ use core::fmt;
 
 use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
 
+use zcash_script::{
+    pattern::*,
+    script::{self, Parsable},
+};
+
 use crate::{
-    address::{Script, TransparentAddress},
+    address::TransparentAddress,
     bundle::{Authorization, Authorized, Bundle, TxIn, TxOut},
     pczt,
     sighash::{SignableInput, TransparentAuthorizingContext},
@@ -149,7 +154,7 @@ impl TransparentBuilder {
         // Ensure that the RIPEMD-160 digest of the public key associated with the
         // provided secret key matches that of the address to which the provided
         // output may be spent.
-        match coin.script_pubkey.address() {
+        match TransparentAddress::from_script_pubkey(&coin.script_pubkey) {
             Some(TransparentAddress::PublicKeyHash(hash)) => {
                 use ripemd::Ripemd160;
                 use sha2::Sha256;
@@ -259,10 +264,10 @@ impl TransparentBuilder {
         } else {
             let outputs = self
                 .vout
-                .into_iter()
+                .iter()
                 .map(|o| pczt::Output {
                     value: o.value,
-                    script_pubkey: o.script_pubkey,
+                    script_pubkey: o.script_pubkey.clone(),
                     // We don't currently support spending P2SH coins, so we only ever see
                     // external P2SH recipients here, for which we never know the redeem
                     // script.
@@ -295,7 +300,7 @@ impl TransparentAuthorizingContext for Unauthorized {
         vec![]
     }
 
-    fn input_scriptpubkeys(&self) -> Vec<Script> {
+    fn input_scriptpubkeys(&self) -> Vec<script::PubKey> {
         vec![]
     }
 }
@@ -306,7 +311,7 @@ impl TransparentAuthorizingContext for Unauthorized {
         self.inputs.iter().map(|txin| txin.coin.value).collect()
     }
 
-    fn input_scriptpubkeys(&self) -> Vec<Script> {
+    fn input_scriptpubkeys(&self) -> Vec<script::PubKey> {
         self.inputs
             .iter()
             .map(|txin| txin.coin.script_pubkey.clone())
@@ -355,21 +360,26 @@ impl Bundle<Unauthorized> {
                 sig_bytes.extend([SIGHASH_ALL]);
 
                 // P2PKH scriptSig
-                Ok(Script::default() << &sig_bytes[..] << &info.pubkey.serialize()[..])
+                Ok(script::Sig::new(vec![
+                    push_vec(&sig_bytes),
+                    push_vec(&info.pubkey.serialize()),
+                ]))
             });
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let script_sigs = core::iter::empty::<Result<Script, Error>>();
+        let script_sigs = core::iter::empty::<Result<script::Sig<Opcode>, Error>>();
 
         Ok(Bundle {
             vin: self
                 .vin
-                .iter()
+                .into_iter()
                 .zip(script_sigs)
                 .map(|(txin, sig)| {
                     Ok(TxIn {
                         prevout: txin.prevout.clone(),
-                        script_sig: sig?,
+                        script_sig: script::Sig::from_bytes(&sig?.to_bytes())
+                            .expect("PushValues are a subset of Opcodes")
+                            .0,
                         sequence: txin.sequence,
                     })
                 })

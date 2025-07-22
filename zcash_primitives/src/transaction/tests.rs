@@ -4,10 +4,12 @@ use core::ops::Deref;
 
 use proptest::prelude::*;
 
-use ::transparent::{
-    address::Script, sighash::SighashType, sighash::TransparentAuthorizingContext,
-};
+use ::transparent::sighash::{SighashType, TransparentAuthorizingContext};
 use zcash_protocol::{consensus::BranchId, value::Zatoshis};
+use zcash_script::{
+    opcode::Opcode,
+    script::{self, Parsable},
+};
 
 use super::{
     sighash::SignableInput,
@@ -180,11 +182,11 @@ fn zip_0243() {
 #[derive(Debug)]
 struct TestTransparentAuth {
     input_amounts: Vec<Zatoshis>,
-    input_scriptpubkeys: Vec<Script>,
+    input_scriptpubkeys: Vec<script::PubKey>,
 }
 
 impl transparent::Authorization for TestTransparentAuth {
-    type ScriptSig = Script;
+    type ScriptSig = script::Sig<Opcode>;
 }
 
 impl TransparentAuthorizingContext for TestTransparentAuth {
@@ -192,7 +194,7 @@ impl TransparentAuthorizingContext for TestTransparentAuth {
         self.input_amounts.clone()
     }
 
-    fn input_scriptpubkeys(&self) -> Vec<Script> {
+    fn input_scriptpubkeys(&self) -> Vec<script::PubKey> {
         self.input_scriptpubkeys.clone()
     }
 }
@@ -228,7 +230,7 @@ fn zip_0244() {
         let input_scriptpubkeys = tv
             .script_pubkeys
             .iter()
-            .map(|s| Script(s.clone()))
+            .map(|s| script::PubKey::from_bytes(s).expect("valid script").0)
             .collect();
 
         let test_bundle = txdata

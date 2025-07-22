@@ -325,8 +325,8 @@ mod tests {
     use secrecy::Secret;
     use tempfile::NamedTempFile;
 
-    use ::transparent::{
-        address::{Script, TransparentAddress},
+    use transparent::{
+        address::TransparentAddress,
         bundle::{OutPoint, TxIn, TxOut},
     };
     use zcash_primitives::transaction::{Authorized, TransactionData, TxVersion};
@@ -334,6 +334,7 @@ mod tests {
         consensus::{BranchId, Network},
         value::Zatoshis,
     };
+    use zcash_script::script::{self, Parsable};
 
     use crate::{
         testing::db::{test_clock, test_rng},
@@ -390,7 +391,7 @@ mod tests {
             Some(transparent::bundle::Bundle {
                 vin: vec![TxIn {
                     prevout: OutPoint::fake(),
-                    script_sig: Script(vec![]),
+                    script_sig: script::Sig::from_bytes(&[]).expect("valid script_sig").0,
                     sequence: 0,
                 }],
                 vout: vec![TxOut {

@@ -7,7 +7,10 @@ use blake2b_simd::{Hash as Blake2bHash, Params};
 use ff::PrimeField;
 
 use ::orchard::bundle::{self as orchard};
-use ::transparent::bundle::{self as transparent, TxIn, TxOut};
+use ::transparent::{
+    address::write_script_sig,
+    bundle::{self as transparent, TxIn, TxOut},
+};
 use zcash_protocol::{
     consensus::{BlockHeight, BranchId},
     value::ZatBalance,
@@ -453,7 +456,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         let mut h = hasher(ZCASH_TRANSPARENT_SCRIPTS_HASH_PERSONALIZATION);
         if let Some(bundle) = transparent_bundle {
             for txin in &bundle.vin {
-                txin.script_sig.write(&mut h).unwrap();
+                write_script_sig(&txin.script_sig, &mut h).unwrap();
             }
         }
         h.finalize()

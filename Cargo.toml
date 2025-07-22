@@ -74,6 +74,7 @@ crypto-common = { version = "=0.2.0-rc.1" } # later RCs require edition2024
 ripemd = { version = "0.1", default-features = false }
 secp256k1 = { version = "0.29", default-features = false, features = ["alloc"] }
 transparent = { package = "zcash_transparent", version = "0.3", path = "zcash_transparent", default-features = false }
+zcash_script = "0.2"
 
 # Boilerplate & missing stdlib
 getset = "0.1"
@@ -219,3 +220,6 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))',
   'cfg(live_network_tests)',
 ] }
+
+[patch.crates-io]
+zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script.git", rev = "e110c8d1b359eec918d9a19f66c66ba5abf9203a" }

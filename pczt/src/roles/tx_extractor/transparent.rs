@@ -2,6 +2,10 @@ use transparent::{
     bundle::{Authorization, Authorized, Bundle, MapAuth},
     pczt::{ParseError, TxExtractorError, Unbound},
 };
+use zcash_script::{
+    opcode::Opcode,
+    script::{self, Parsable},
+};
 
 pub(super) fn extract_bundle(
     bundle: crate::transparent::Bundle,
@@ -20,7 +24,10 @@ impl MapAuth<Unbound, Authorized> for RemoveInputInfo {
         &self,
         s: <Unbound as Authorization>::ScriptSig,
     ) -> <Authorized as Authorization>::ScriptSig {
-        s
+        // TODO: This conversion is infallible, and should be provided by `zcash_script`.
+        script::Sig::<Opcode>::from_bytes(&s.to_bytes())
+            .expect("valid by construction")
+            .0
     }
 
     fn map_authorization(&self, _: Unbound) -> Authorized {

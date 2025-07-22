@@ -27,7 +27,7 @@ impl super::Input {
             hash_type: self.sighash_type,
             index,
             // for p2pkh, always the same as script_pubkey
-            script_code: self.redeem_script.as_ref().unwrap_or(&self.script_pubkey),
+            script_code: &self.redeem_script.as_ref().unwrap_or(&self.script_pubkey),
             script_pubkey: &self.script_pubkey,
             value: self.value,
         });

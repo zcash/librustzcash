@@ -4,8 +4,12 @@ use alloc::vec::Vec;
 
 use bip32::ChildNumber;
 use zcash_protocol::{value::Zatoshis, TxId};
+use zcash_script::{
+    opcode::PushValue,
+    script::{self, Parsable},
+};
 
-use crate::{address::Script, sighash::SighashType};
+use crate::sighash::SighashType;
 
 use super::{Bip32Derivation, Bundle, Input, Output};
 
@@ -50,16 +54,20 @@ impl Input {
             Some(_) => Err(ParseError::InvalidRequiredHeightLocktime),
         }?;
 
-        // TODO: Verify that the script is not nonsense.
-        let script_sig = script_sig.map(Script);
+        let script_sig = script_sig
+            .as_deref()
+            .map(|s| parse_script_sig(s).ok_or(ParseError::InvalidScriptSig))
+            .transpose()?;
 
         let value = Zatoshis::from_u64(value).map_err(|_| ParseError::InvalidValue)?;
 
-        // TODO: Verify that the script is not nonsense.
-        let script_pubkey = Script(script_pubkey);
+        let script_pubkey =
+            parse_script_pubkey(&script_pubkey).ok_or(ParseError::InvalidScriptPubkey)?;
 
-        // TODO: Verify that the script is not nonsense.
-        let redeem_script = redeem_script.map(Script);
+        let redeem_script = redeem_script
+            .as_deref()
+            .map(|s| parse_script_pubkey(s).ok_or(ParseError::InvalidRedeemScript))
+            .transpose()?;
 
         let sighash_type =
             SighashType::parse(sighash_type).ok_or(ParseError::InvalidSighashType)?;
@@ -98,11 +106,13 @@ impl Output {
     ) -> Result<Self, ParseError> {
         let value = Zatoshis::from_u64(value).map_err(|_| ParseError::InvalidValue)?;
 
-        // TODO: Verify that the script is not nonsense.
-        let script_pubkey = Script(script_pubkey);
+        let script_pubkey =
+            parse_script_pubkey(&script_pubkey).ok_or(ParseError::InvalidScriptPubkey)?;
 
-        // TODO: Verify that the script is not nonsense.
-        let redeem_script = redeem_script.map(Script);
+        let redeem_script = redeem_script
+            .as_deref()
+            .map(|s| parse_script_pubkey(s).ok_or(ParseError::InvalidRedeemScript))
+            .transpose()?;
 
         Ok(Self {
             value,
@@ -128,11 +138,27 @@ impl Bip32Derivation {
     }
 }
 
+fn parse_script_pubkey(script_pubkey: &[u8]) -> Option<script::PubKey> {
+    let (script_pubkey, rest) = script::PubKey::from_bytes(script_pubkey).ok()?;
+    rest.is_empty().then_some(script_pubkey)
+}
+
+fn parse_script_sig(script_sig: &[u8]) -> Option<script::Sig<PushValue>> {
+    let (script_sig, rest) = script::Sig::<PushValue>::from_bytes(script_sig).ok()?;
+    rest.is_empty().then_some(script_sig)
+}
+
 /// Errors that can occur while parsing a PCZT bundle.
 #[derive(Debug)]
 pub enum ParseError {
+    /// An invalid `redeem_script` was provided.
+    InvalidRedeemScript,
     InvalidRequiredHeightLocktime,
     InvalidRequiredTimeLocktime,
+    /// An invalid `script_pubkey` was provided.
+    InvalidScriptPubkey,
+    /// An invalid `script_sig` was provided.
+    InvalidScriptSig,
     /// An invalid `sighash_type` was provided.
     InvalidSighashType,
     /// An invalid `value` was provided.
