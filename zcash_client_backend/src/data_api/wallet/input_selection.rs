@@ -750,7 +750,8 @@ impl<DbT: WalletRead + InputSource> InputSelector for GreedyInputSelector<DbT> {
                     account,
                     TargetValue::AtLeast(amount_required),
                     selectable_pools,
-                    anchor_height,
+                    target_height,
+                    min_confirmations,
                     &exclude,
                 )
                 .map_err(InputSelectorError::DataSource)?;

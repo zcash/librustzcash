@@ -40,7 +40,8 @@ use crate::{
             TestBuilder,
         },
         wallet::{
-            decrypt_and_store_transaction, input_selection::GreedyInputSelector, TransferErrT,
+            decrypt_and_store_transaction, input_selection::GreedyInputSelector,
+            ConfirmationsPolicy, TransferErrT,
         },
         Account as _, AccountBirthday, BoundedU8, DecryptedTransaction, InputSource, NoteFilter,
         Ratio, TargetValue, WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest,
@@ -149,7 +150,8 @@ pub trait ShieldedPoolTester {
         st: &TestState<Cache, DbT, P>,
         account: <DbT as InputSource>::AccountId,
         target_value: TargetValue,
-        anchor_height: BlockHeight,
+        target_height: BlockHeight,
+        min_confirmations: ConfirmationsPolicy,
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error>;
 
@@ -1985,7 +1987,10 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
         &st,
         account_id,
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
+        // TODO(schell): this height needs to be changed as we're now taking the target_height (chain tip + 1)
+        // instead of anchor height
         received_tx_height + 10,
+        ConfirmationsPolicy::default(),
         &[],
     )
     .unwrap();

@@ -64,6 +64,7 @@ use std::{
     io,
     num::{NonZeroU32, TryFromIntError},
 };
+use wallet::ConfirmationsPolicy;
 
 use incrementalmerkletree::{frontier::Frontier, Retention};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
@@ -1294,7 +1295,8 @@ pub trait InputSource {
         account: Self::AccountId,
         target_value: TargetValue,
         sources: &[ShieldedProtocol],
-        anchor_height: BlockHeight,
+        target_height: BlockHeight,
+        min_confirmations: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
 
@@ -1507,11 +1509,6 @@ pub trait WalletRead {
         &self,
         min_confirmations: NonZeroU32,
     ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
-
-    /// Returns the default target height (for the block in which a new
-    /// transaction would be mined), given the range of block heights that the
-    /// backend knows about.
-    fn get_target_height(&self) -> BlockHeight;
 
     /// Returns the block height in which the specified transaction was mined, or `Ok(None)` if the
     /// transaction is not in the main chain.

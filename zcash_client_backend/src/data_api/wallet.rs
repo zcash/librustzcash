@@ -259,8 +259,19 @@ pub type ExtractErrT<DbT, N> = Error<
 /// transactions.
 #[derive(Clone, Copy)]
 pub struct ConfirmationsPolicy {
-    trusted: NonZeroU32,
-    untrusted: NonZeroU32,
+    pub trusted: NonZeroU32,
+    pub untrusted: NonZeroU32,
+}
+
+impl Default for ConfirmationsPolicy {
+    fn default() -> Self {
+        ConfirmationsPolicy {
+            // 3
+            trusted: NonZeroU32::MIN.saturating_add(2),
+            // 10
+            untrusted: NonZeroU32::MIN.saturating_add(8),
+        }
+    }
 }
 
 /// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
