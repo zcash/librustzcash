@@ -30,6 +30,7 @@ mod sent_notes_to_internal;
 mod shardtree_support;
 mod spend_key_available;
 mod support_legacy_sqlite;
+mod support_zcashd_wallet_import;
 mod transparent_gap_limit_handling;
 mod tx_retrieval_queue;
 mod tx_retrieval_queue_expiry;
@@ -113,6 +114,8 @@ pub(super) fn all_migrations<
     //                              \      ensure_default_transparent_address    /
     //                               \                     |                    /
     //                                `---- fix_transparent_received_outputs --'
+    //                                                     |
+    //                                        support_zcashd_wallet_import
     let rng = Rc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
@@ -188,6 +191,7 @@ pub(super) fn all_migrations<
         }),
         Box::new(tx_retrieval_queue_expiry::Migration),
         Box::new(fix_transparent_received_outputs::Migration),
+        Box::new(support_zcashd_wallet_import::Migration),
     ]
 }
 

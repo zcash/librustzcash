@@ -12,11 +12,18 @@ workspace.
 
 ## [0.4.0] - PLANNED
 
+### Added
+- `zcash_transparent::address::TransparentAddress::from_pubkey`
+
 ### Changed
 - The type of `zcash_transparent::bundle::Bundle::value_balance` has changed.
   The closure provided to this method for input retrieval can now indicate that
   an input for the given outpoint is not available, and `value_balance` will
   return `Ok(None)` when this is the case. 
+
+### Removed
+- Removed deprecated method `zcash_transparent::keys::pubkey_to_address`;
+  use `zcash_transparent::address::TransparentAddress::from_pubkey` instead.
 
 ## [0.3.0] - 2025-05-30
 
