@@ -54,538 +54,540 @@
 <a href=#54 id=54 data-nosnippet>54</a>            derivation: Zip32Derivation::new(
 <a href=#55 id=55 data-nosnippet>55</a>                SeedFingerprint::from_bytes([<span class="number">0</span>; <span class="number">32</span>]),
 <a href=#56 id=56 data-nosnippet>56</a>                zip32::AccountId::ZERO,
-<a href=#57 id=57 data-nosnippet>57</a>            ),
-<a href=#58 id=58 data-nosnippet>58</a>            key_source: <span class="prelude-val">None</span>,
-<a href=#59 id=59 data-nosnippet>59</a>        });
-<a href=#60 id=60 data-nosnippet>60</a>        <span class="kw">let </span>account_kind_imported = account_kind_code(<span class="kw-2">&amp;</span>AccountSource::Imported {
-<a href=#61 id=61 data-nosnippet>61</a>            <span class="comment">// the purpose here is irrelevant; we just use it to get the correct code
-<a href=#62 id=62 data-nosnippet>62</a>            // for the account kind
-<a href=#63 id=63 data-nosnippet>63</a>            </span>purpose: AccountPurpose::ViewOnly,
-<a href=#64 id=64 data-nosnippet>64</a>            key_source: <span class="prelude-val">None</span>,
-<a href=#65 id=65 data-nosnippet>65</a>        });
-<a href=#66 id=66 data-nosnippet>66</a>        transaction.execute_batch(<span class="kw-2">&amp;</span><span class="macro">format!</span>(
-<a href=#67 id=67 data-nosnippet>67</a>            <span class="string">r#"
-<a href=#68 id=68 data-nosnippet>68</a>            CREATE TABLE accounts_new (
-<a href=#69 id=69 data-nosnippet>69</a>                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-<a href=#70 id=70 data-nosnippet>70</a>                account_kind INTEGER NOT NULL DEFAULT {account_kind_derived},
-<a href=#71 id=71 data-nosnippet>71</a>                hd_seed_fingerprint BLOB,
-<a href=#72 id=72 data-nosnippet>72</a>                hd_account_index INTEGER,
-<a href=#73 id=73 data-nosnippet>73</a>                ufvk TEXT,
-<a href=#74 id=74 data-nosnippet>74</a>                uivk TEXT NOT NULL,
-<a href=#75 id=75 data-nosnippet>75</a>                orchard_fvk_item_cache BLOB,
-<a href=#76 id=76 data-nosnippet>76</a>                sapling_fvk_item_cache BLOB,
-<a href=#77 id=77 data-nosnippet>77</a>                p2pkh_fvk_item_cache BLOB,
-<a href=#78 id=78 data-nosnippet>78</a>                birthday_height INTEGER NOT NULL,
-<a href=#79 id=79 data-nosnippet>79</a>                birthday_sapling_tree_size INTEGER,
-<a href=#80 id=80 data-nosnippet>80</a>                birthday_orchard_tree_size INTEGER,
-<a href=#81 id=81 data-nosnippet>81</a>                recover_until_height INTEGER,
-<a href=#82 id=82 data-nosnippet>82</a>                CHECK (
-<a href=#83 id=83 data-nosnippet>83</a>                  (
-<a href=#84 id=84 data-nosnippet>84</a>                    account_kind = {account_kind_derived}
-<a href=#85 id=85 data-nosnippet>85</a>                    AND hd_seed_fingerprint IS NOT NULL
-<a href=#86 id=86 data-nosnippet>86</a>                    AND hd_account_index IS NOT NULL
-<a href=#87 id=87 data-nosnippet>87</a>                    AND ufvk IS NOT NULL
-<a href=#88 id=88 data-nosnippet>88</a>                  )
-<a href=#89 id=89 data-nosnippet>89</a>                  OR
-<a href=#90 id=90 data-nosnippet>90</a>                  (
-<a href=#91 id=91 data-nosnippet>91</a>                    account_kind = {account_kind_imported}
-<a href=#92 id=92 data-nosnippet>92</a>                    AND hd_seed_fingerprint IS NULL
-<a href=#93 id=93 data-nosnippet>93</a>                    AND hd_account_index IS NULL
-<a href=#94 id=94 data-nosnippet>94</a>                  )
-<a href=#95 id=95 data-nosnippet>95</a>                )
-<a href=#96 id=96 data-nosnippet>96</a>            );
-<a href=#97 id=97 data-nosnippet>97</a>            CREATE UNIQUE INDEX hd_account ON accounts_new (hd_seed_fingerprint, hd_account_index);
-<a href=#98 id=98 data-nosnippet>98</a>            CREATE UNIQUE INDEX accounts_uivk ON accounts_new (uivk);
-<a href=#99 id=99 data-nosnippet>99</a>            CREATE UNIQUE INDEX accounts_ufvk ON accounts_new (ufvk);
-<a href=#100 id=100 data-nosnippet>100</a>            "#
-<a href=#101 id=101 data-nosnippet>101</a>        </span>))<span class="question-mark">?</span>;
-<a href=#102 id=102 data-nosnippet>102</a>
-<a href=#103 id=103 data-nosnippet>103</a>        <span class="comment">// We require the seed *if* there are existing accounts in the table.
-<a href=#104 id=104 data-nosnippet>104</a>        </span><span class="kw">if </span>transaction.query_row(<span class="string">"SELECT COUNT(*) FROM accounts"</span>, [], |row| {
-<a href=#105 id=105 data-nosnippet>105</a>            <span class="prelude-val">Ok</span>(row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">0</span>)<span class="question-mark">? </span>&gt; <span class="number">0</span>)
-<a href=#106 id=106 data-nosnippet>106</a>        })<span class="question-mark">? </span>{
-<a href=#107 id=107 data-nosnippet>107</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(seed) = <span class="kw-2">&amp;</span><span class="self">self</span>.seed {
-<a href=#108 id=108 data-nosnippet>108</a>                <span class="kw">let </span>seed_id = SeedFingerprint::from_seed(seed.expose_secret())
-<a href=#109 id=109 data-nosnippet>109</a>                    .expect(<span class="string">"Seed is between 32 and 252 bytes in length."</span>);
-<a href=#110 id=110 data-nosnippet>110</a>
-<a href=#111 id=111 data-nosnippet>111</a>                <span class="comment">// We track whether we have determined seed relevance or not, in order to
-<a href=#112 id=112 data-nosnippet>112</a>                // correctly report errors when checking the seed against an account:
-<a href=#113 id=113 data-nosnippet>113</a>                //
-<a href=#114 id=114 data-nosnippet>114</a>                // - If we encounter an error with the first account, we can assert that
-<a href=#115 id=115 data-nosnippet>115</a>                //   the seed is not relevant to the wallet by assuming that:
-<a href=#116 id=116 data-nosnippet>116</a>                //   - All accounts are from the same seed (which is historically the only
-<a href=#117 id=117 data-nosnippet>117</a>                //     use case that this migration supported), and
-<a href=#118 id=118 data-nosnippet>118</a>                //   - All accounts in the wallet must have been able to derive their USKs
-<a href=#119 id=119 data-nosnippet>119</a>                //     (in order to derive UIVKs).
-<a href=#120 id=120 data-nosnippet>120</a>                //
-<a href=#121 id=121 data-nosnippet>121</a>                // - Once the seed has been determined to be relevant (because it matched
-<a href=#122 id=122 data-nosnippet>122</a>                //   the first account), any subsequent account derivation failure is
-<a href=#123 id=123 data-nosnippet>123</a>                //   proving wrong our second assumption above, and we report this as
-<a href=#124 id=124 data-nosnippet>124</a>                //   corrupted data.
-<a href=#125 id=125 data-nosnippet>125</a>                </span><span class="kw">let </span><span class="kw-2">mut </span>seed_is_relevant = <span class="bool-val">false</span>;
-<a href=#126 id=126 data-nosnippet>126</a>
-<a href=#127 id=127 data-nosnippet>127</a>                <span class="kw">let </span><span class="kw-2">mut </span>q = transaction.prepare(<span class="string">"SELECT * FROM accounts"</span>)<span class="question-mark">?</span>;
-<a href=#128 id=128 data-nosnippet>128</a>                <span class="kw">let </span><span class="kw-2">mut </span>rows = q.query([])<span class="question-mark">?</span>;
-<a href=#129 id=129 data-nosnippet>129</a>                <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
-<a href=#130 id=130 data-nosnippet>130</a>                    <span class="kw">let </span>account_index: u32 = row.get(<span class="string">"account"</span>)<span class="question-mark">?</span>;
-<a href=#131 id=131 data-nosnippet>131</a>                    <span class="kw">let </span>birthday_height: u32 = row.get(<span class="string">"birthday_height"</span>)<span class="question-mark">?</span>;
-<a href=#132 id=132 data-nosnippet>132</a>                    <span class="kw">let </span>recover_until_height: <span class="prelude-ty">Option</span>&lt;u32&gt; = row.get(<span class="string">"recover_until_height"</span>)<span class="question-mark">?</span>;
-<a href=#133 id=133 data-nosnippet>133</a>
-<a href=#134 id=134 data-nosnippet>134</a>                    <span class="comment">// Although 'id' is an AUTOINCREMENT column, we'll set it explicitly to match the old account value
-<a href=#135 id=135 data-nosnippet>135</a>                    // strictly as a matter of convenience to make this migration script easier,
-<a href=#136 id=136 data-nosnippet>136</a>                    // specifically around updating tables with foreign keys to this one.
-<a href=#137 id=137 data-nosnippet>137</a>                    </span><span class="kw">let </span>account_id = account_index;
-<a href=#138 id=138 data-nosnippet>138</a>
-<a href=#139 id=139 data-nosnippet>139</a>                    <span class="comment">// Verify that the UFVK is as expected by re-deriving it.
-<a href=#140 id=140 data-nosnippet>140</a>                    </span><span class="kw">let </span>ufvk: String = row.get(<span class="string">"ufvk"</span>)<span class="question-mark">?</span>;
-<a href=#141 id=141 data-nosnippet>141</a>                    <span class="kw">let </span>ufvk_parsed = UnifiedFullViewingKey::decode(<span class="kw-2">&amp;</span><span class="self">self</span>.params, <span class="kw-2">&amp;</span>ufvk)
-<a href=#142 id=142 data-nosnippet>142</a>                        .map_err(|<span class="kw">_</span>| WalletMigrationError::CorruptedData(<span class="string">"Bad UFVK"</span>.to_string()))<span class="question-mark">?</span>;
-<a href=#143 id=143 data-nosnippet>143</a>                    <span class="kw">let </span>usk = UnifiedSpendingKey::from_seed(
-<a href=#144 id=144 data-nosnippet>144</a>                        <span class="kw-2">&amp;</span><span class="self">self</span>.params,
-<a href=#145 id=145 data-nosnippet>145</a>                        seed.expose_secret(),
-<a href=#146 id=146 data-nosnippet>146</a>                        zip32::AccountId::try_from(account_index).map_err(|<span class="kw">_</span>| {
-<a href=#147 id=147 data-nosnippet>147</a>                            WalletMigrationError::CorruptedData(<span class="string">"Bad account index"</span>.to_string())
-<a href=#148 id=148 data-nosnippet>148</a>                        })<span class="question-mark">?</span>,
-<a href=#149 id=149 data-nosnippet>149</a>                    )
-<a href=#150 id=150 data-nosnippet>150</a>                    .map_err(|<span class="kw">_</span>| {
-<a href=#151 id=151 data-nosnippet>151</a>                        <span class="kw">if </span>seed_is_relevant {
-<a href=#152 id=152 data-nosnippet>152</a>                            WalletMigrationError::CorruptedData(
-<a href=#153 id=153 data-nosnippet>153</a>                                <span class="string">"Unable to derive spending key from seed."</span>.to_string(),
-<a href=#154 id=154 data-nosnippet>154</a>                            )
-<a href=#155 id=155 data-nosnippet>155</a>                        } <span class="kw">else </span>{
-<a href=#156 id=156 data-nosnippet>156</a>                            WalletMigrationError::SeedNotRelevant
-<a href=#157 id=157 data-nosnippet>157</a>                        }
-<a href=#158 id=158 data-nosnippet>158</a>                    })<span class="question-mark">?</span>;
-<a href=#159 id=159 data-nosnippet>159</a>                    <span class="kw">let </span>expected_ufvk = usk.to_unified_full_viewing_key();
-<a href=#160 id=160 data-nosnippet>160</a>                    <span class="kw">if </span>ufvk != expected_ufvk.encode(<span class="kw-2">&amp;</span><span class="self">self</span>.params) {
-<a href=#161 id=161 data-nosnippet>161</a>                        <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="kw">if </span>seed_is_relevant {
-<a href=#162 id=162 data-nosnippet>162</a>                            WalletMigrationError::CorruptedData(
-<a href=#163 id=163 data-nosnippet>163</a>                                <span class="string">"UFVK does not match expected value."</span>.to_string(),
-<a href=#164 id=164 data-nosnippet>164</a>                            )
-<a href=#165 id=165 data-nosnippet>165</a>                        } <span class="kw">else </span>{
-<a href=#166 id=166 data-nosnippet>166</a>                            WalletMigrationError::SeedNotRelevant
-<a href=#167 id=167 data-nosnippet>167</a>                        });
-<a href=#168 id=168 data-nosnippet>168</a>                    }
-<a href=#169 id=169 data-nosnippet>169</a>
-<a href=#170 id=170 data-nosnippet>170</a>                    <span class="comment">// We made it past one derived account, so the seed must be relevant.
-<a href=#171 id=171 data-nosnippet>171</a>                    </span>seed_is_relevant = <span class="bool-val">true</span>;
-<a href=#172 id=172 data-nosnippet>172</a>
-<a href=#173 id=173 data-nosnippet>173</a>                    <span class="kw">let </span>uivk = ufvk_parsed
-<a href=#174 id=174 data-nosnippet>174</a>                        .to_unified_incoming_viewing_key()
-<a href=#175 id=175 data-nosnippet>175</a>                        .encode(<span class="kw-2">&amp;</span><span class="self">self</span>.params);
-<a href=#176 id=176 data-nosnippet>176</a>
-<a href=#177 id=177 data-nosnippet>177</a>                    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
-<a href=#178 id=178 data-nosnippet>178</a>                    </span><span class="kw">let </span>orchard_item = ufvk_parsed.orchard().map(|k| k.to_bytes());
-<a href=#179 id=179 data-nosnippet>179</a>                    <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
-<a href=#180 id=180 data-nosnippet>180</a>                    </span><span class="kw">let </span>orchard_item: <span class="prelude-ty">Option</span>&lt;Vec&lt;u8&gt;&gt; = <span class="prelude-val">None</span>;
-<a href=#181 id=181 data-nosnippet>181</a>
-<a href=#182 id=182 data-nosnippet>182</a>                    <span class="kw">let </span>sapling_item = ufvk_parsed.sapling().map(|k| k.to_bytes());
+<a href=#57 id=57 data-nosnippet>57</a>                <span class="attr">#[cfg(feature = <span class="string">"zcashd-compat"</span>)]
+<a href=#58 id=58 data-nosnippet>58</a>                </span><span class="prelude-val">None</span>,
+<a href=#59 id=59 data-nosnippet>59</a>            ),
+<a href=#60 id=60 data-nosnippet>60</a>            key_source: <span class="prelude-val">None</span>,
+<a href=#61 id=61 data-nosnippet>61</a>        });
+<a href=#62 id=62 data-nosnippet>62</a>        <span class="kw">let </span>account_kind_imported = account_kind_code(<span class="kw-2">&amp;</span>AccountSource::Imported {
+<a href=#63 id=63 data-nosnippet>63</a>            <span class="comment">// the purpose here is irrelevant; we just use it to get the correct code
+<a href=#64 id=64 data-nosnippet>64</a>            // for the account kind
+<a href=#65 id=65 data-nosnippet>65</a>            </span>purpose: AccountPurpose::ViewOnly,
+<a href=#66 id=66 data-nosnippet>66</a>            key_source: <span class="prelude-val">None</span>,
+<a href=#67 id=67 data-nosnippet>67</a>        });
+<a href=#68 id=68 data-nosnippet>68</a>        transaction.execute_batch(<span class="kw-2">&amp;</span><span class="macro">format!</span>(
+<a href=#69 id=69 data-nosnippet>69</a>            <span class="string">r#"
+<a href=#70 id=70 data-nosnippet>70</a>            CREATE TABLE accounts_new (
+<a href=#71 id=71 data-nosnippet>71</a>                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+<a href=#72 id=72 data-nosnippet>72</a>                account_kind INTEGER NOT NULL DEFAULT {account_kind_derived},
+<a href=#73 id=73 data-nosnippet>73</a>                hd_seed_fingerprint BLOB,
+<a href=#74 id=74 data-nosnippet>74</a>                hd_account_index INTEGER,
+<a href=#75 id=75 data-nosnippet>75</a>                ufvk TEXT,
+<a href=#76 id=76 data-nosnippet>76</a>                uivk TEXT NOT NULL,
+<a href=#77 id=77 data-nosnippet>77</a>                orchard_fvk_item_cache BLOB,
+<a href=#78 id=78 data-nosnippet>78</a>                sapling_fvk_item_cache BLOB,
+<a href=#79 id=79 data-nosnippet>79</a>                p2pkh_fvk_item_cache BLOB,
+<a href=#80 id=80 data-nosnippet>80</a>                birthday_height INTEGER NOT NULL,
+<a href=#81 id=81 data-nosnippet>81</a>                birthday_sapling_tree_size INTEGER,
+<a href=#82 id=82 data-nosnippet>82</a>                birthday_orchard_tree_size INTEGER,
+<a href=#83 id=83 data-nosnippet>83</a>                recover_until_height INTEGER,
+<a href=#84 id=84 data-nosnippet>84</a>                CHECK (
+<a href=#85 id=85 data-nosnippet>85</a>                  (
+<a href=#86 id=86 data-nosnippet>86</a>                    account_kind = {account_kind_derived}
+<a href=#87 id=87 data-nosnippet>87</a>                    AND hd_seed_fingerprint IS NOT NULL
+<a href=#88 id=88 data-nosnippet>88</a>                    AND hd_account_index IS NOT NULL
+<a href=#89 id=89 data-nosnippet>89</a>                    AND ufvk IS NOT NULL
+<a href=#90 id=90 data-nosnippet>90</a>                  )
+<a href=#91 id=91 data-nosnippet>91</a>                  OR
+<a href=#92 id=92 data-nosnippet>92</a>                  (
+<a href=#93 id=93 data-nosnippet>93</a>                    account_kind = {account_kind_imported}
+<a href=#94 id=94 data-nosnippet>94</a>                    AND hd_seed_fingerprint IS NULL
+<a href=#95 id=95 data-nosnippet>95</a>                    AND hd_account_index IS NULL
+<a href=#96 id=96 data-nosnippet>96</a>                  )
+<a href=#97 id=97 data-nosnippet>97</a>                )
+<a href=#98 id=98 data-nosnippet>98</a>            );
+<a href=#99 id=99 data-nosnippet>99</a>            CREATE UNIQUE INDEX hd_account ON accounts_new (hd_seed_fingerprint, hd_account_index);
+<a href=#100 id=100 data-nosnippet>100</a>            CREATE UNIQUE INDEX accounts_uivk ON accounts_new (uivk);
+<a href=#101 id=101 data-nosnippet>101</a>            CREATE UNIQUE INDEX accounts_ufvk ON accounts_new (ufvk);
+<a href=#102 id=102 data-nosnippet>102</a>            "#
+<a href=#103 id=103 data-nosnippet>103</a>        </span>))<span class="question-mark">?</span>;
+<a href=#104 id=104 data-nosnippet>104</a>
+<a href=#105 id=105 data-nosnippet>105</a>        <span class="comment">// We require the seed *if* there are existing accounts in the table.
+<a href=#106 id=106 data-nosnippet>106</a>        </span><span class="kw">if </span>transaction.query_row(<span class="string">"SELECT COUNT(*) FROM accounts"</span>, [], |row| {
+<a href=#107 id=107 data-nosnippet>107</a>            <span class="prelude-val">Ok</span>(row.get::&lt;<span class="kw">_</span>, u32&gt;(<span class="number">0</span>)<span class="question-mark">? </span>&gt; <span class="number">0</span>)
+<a href=#108 id=108 data-nosnippet>108</a>        })<span class="question-mark">? </span>{
+<a href=#109 id=109 data-nosnippet>109</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(seed) = <span class="kw-2">&amp;</span><span class="self">self</span>.seed {
+<a href=#110 id=110 data-nosnippet>110</a>                <span class="kw">let </span>seed_id = SeedFingerprint::from_seed(seed.expose_secret())
+<a href=#111 id=111 data-nosnippet>111</a>                    .expect(<span class="string">"Seed is between 32 and 252 bytes in length."</span>);
+<a href=#112 id=112 data-nosnippet>112</a>
+<a href=#113 id=113 data-nosnippet>113</a>                <span class="comment">// We track whether we have determined seed relevance or not, in order to
+<a href=#114 id=114 data-nosnippet>114</a>                // correctly report errors when checking the seed against an account:
+<a href=#115 id=115 data-nosnippet>115</a>                //
+<a href=#116 id=116 data-nosnippet>116</a>                // - If we encounter an error with the first account, we can assert that
+<a href=#117 id=117 data-nosnippet>117</a>                //   the seed is not relevant to the wallet by assuming that:
+<a href=#118 id=118 data-nosnippet>118</a>                //   - All accounts are from the same seed (which is historically the only
+<a href=#119 id=119 data-nosnippet>119</a>                //     use case that this migration supported), and
+<a href=#120 id=120 data-nosnippet>120</a>                //   - All accounts in the wallet must have been able to derive their USKs
+<a href=#121 id=121 data-nosnippet>121</a>                //     (in order to derive UIVKs).
+<a href=#122 id=122 data-nosnippet>122</a>                //
+<a href=#123 id=123 data-nosnippet>123</a>                // - Once the seed has been determined to be relevant (because it matched
+<a href=#124 id=124 data-nosnippet>124</a>                //   the first account), any subsequent account derivation failure is
+<a href=#125 id=125 data-nosnippet>125</a>                //   proving wrong our second assumption above, and we report this as
+<a href=#126 id=126 data-nosnippet>126</a>                //   corrupted data.
+<a href=#127 id=127 data-nosnippet>127</a>                </span><span class="kw">let </span><span class="kw-2">mut </span>seed_is_relevant = <span class="bool-val">false</span>;
+<a href=#128 id=128 data-nosnippet>128</a>
+<a href=#129 id=129 data-nosnippet>129</a>                <span class="kw">let </span><span class="kw-2">mut </span>q = transaction.prepare(<span class="string">"SELECT * FROM accounts"</span>)<span class="question-mark">?</span>;
+<a href=#130 id=130 data-nosnippet>130</a>                <span class="kw">let </span><span class="kw-2">mut </span>rows = q.query([])<span class="question-mark">?</span>;
+<a href=#131 id=131 data-nosnippet>131</a>                <span class="kw">while let </span><span class="prelude-val">Some</span>(row) = rows.next()<span class="question-mark">? </span>{
+<a href=#132 id=132 data-nosnippet>132</a>                    <span class="kw">let </span>account_index: u32 = row.get(<span class="string">"account"</span>)<span class="question-mark">?</span>;
+<a href=#133 id=133 data-nosnippet>133</a>                    <span class="kw">let </span>birthday_height: u32 = row.get(<span class="string">"birthday_height"</span>)<span class="question-mark">?</span>;
+<a href=#134 id=134 data-nosnippet>134</a>                    <span class="kw">let </span>recover_until_height: <span class="prelude-ty">Option</span>&lt;u32&gt; = row.get(<span class="string">"recover_until_height"</span>)<span class="question-mark">?</span>;
+<a href=#135 id=135 data-nosnippet>135</a>
+<a href=#136 id=136 data-nosnippet>136</a>                    <span class="comment">// Although 'id' is an AUTOINCREMENT column, we'll set it explicitly to match the old account value
+<a href=#137 id=137 data-nosnippet>137</a>                    // strictly as a matter of convenience to make this migration script easier,
+<a href=#138 id=138 data-nosnippet>138</a>                    // specifically around updating tables with foreign keys to this one.
+<a href=#139 id=139 data-nosnippet>139</a>                    </span><span class="kw">let </span>account_id = account_index;
+<a href=#140 id=140 data-nosnippet>140</a>
+<a href=#141 id=141 data-nosnippet>141</a>                    <span class="comment">// Verify that the UFVK is as expected by re-deriving it.
+<a href=#142 id=142 data-nosnippet>142</a>                    </span><span class="kw">let </span>ufvk: String = row.get(<span class="string">"ufvk"</span>)<span class="question-mark">?</span>;
+<a href=#143 id=143 data-nosnippet>143</a>                    <span class="kw">let </span>ufvk_parsed = UnifiedFullViewingKey::decode(<span class="kw-2">&amp;</span><span class="self">self</span>.params, <span class="kw-2">&amp;</span>ufvk)
+<a href=#144 id=144 data-nosnippet>144</a>                        .map_err(|<span class="kw">_</span>| WalletMigrationError::CorruptedData(<span class="string">"Bad UFVK"</span>.to_string()))<span class="question-mark">?</span>;
+<a href=#145 id=145 data-nosnippet>145</a>                    <span class="kw">let </span>usk = UnifiedSpendingKey::from_seed(
+<a href=#146 id=146 data-nosnippet>146</a>                        <span class="kw-2">&amp;</span><span class="self">self</span>.params,
+<a href=#147 id=147 data-nosnippet>147</a>                        seed.expose_secret(),
+<a href=#148 id=148 data-nosnippet>148</a>                        zip32::AccountId::try_from(account_index).map_err(|<span class="kw">_</span>| {
+<a href=#149 id=149 data-nosnippet>149</a>                            WalletMigrationError::CorruptedData(<span class="string">"Bad account index"</span>.to_string())
+<a href=#150 id=150 data-nosnippet>150</a>                        })<span class="question-mark">?</span>,
+<a href=#151 id=151 data-nosnippet>151</a>                    )
+<a href=#152 id=152 data-nosnippet>152</a>                    .map_err(|<span class="kw">_</span>| {
+<a href=#153 id=153 data-nosnippet>153</a>                        <span class="kw">if </span>seed_is_relevant {
+<a href=#154 id=154 data-nosnippet>154</a>                            WalletMigrationError::CorruptedData(
+<a href=#155 id=155 data-nosnippet>155</a>                                <span class="string">"Unable to derive spending key from seed."</span>.to_string(),
+<a href=#156 id=156 data-nosnippet>156</a>                            )
+<a href=#157 id=157 data-nosnippet>157</a>                        } <span class="kw">else </span>{
+<a href=#158 id=158 data-nosnippet>158</a>                            WalletMigrationError::SeedNotRelevant
+<a href=#159 id=159 data-nosnippet>159</a>                        }
+<a href=#160 id=160 data-nosnippet>160</a>                    })<span class="question-mark">?</span>;
+<a href=#161 id=161 data-nosnippet>161</a>                    <span class="kw">let </span>expected_ufvk = usk.to_unified_full_viewing_key();
+<a href=#162 id=162 data-nosnippet>162</a>                    <span class="kw">if </span>ufvk != expected_ufvk.encode(<span class="kw-2">&amp;</span><span class="self">self</span>.params) {
+<a href=#163 id=163 data-nosnippet>163</a>                        <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="kw">if </span>seed_is_relevant {
+<a href=#164 id=164 data-nosnippet>164</a>                            WalletMigrationError::CorruptedData(
+<a href=#165 id=165 data-nosnippet>165</a>                                <span class="string">"UFVK does not match expected value."</span>.to_string(),
+<a href=#166 id=166 data-nosnippet>166</a>                            )
+<a href=#167 id=167 data-nosnippet>167</a>                        } <span class="kw">else </span>{
+<a href=#168 id=168 data-nosnippet>168</a>                            WalletMigrationError::SeedNotRelevant
+<a href=#169 id=169 data-nosnippet>169</a>                        });
+<a href=#170 id=170 data-nosnippet>170</a>                    }
+<a href=#171 id=171 data-nosnippet>171</a>
+<a href=#172 id=172 data-nosnippet>172</a>                    <span class="comment">// We made it past one derived account, so the seed must be relevant.
+<a href=#173 id=173 data-nosnippet>173</a>                    </span>seed_is_relevant = <span class="bool-val">true</span>;
+<a href=#174 id=174 data-nosnippet>174</a>
+<a href=#175 id=175 data-nosnippet>175</a>                    <span class="kw">let </span>uivk = ufvk_parsed
+<a href=#176 id=176 data-nosnippet>176</a>                        .to_unified_incoming_viewing_key()
+<a href=#177 id=177 data-nosnippet>177</a>                        .encode(<span class="kw-2">&amp;</span><span class="self">self</span>.params);
+<a href=#178 id=178 data-nosnippet>178</a>
+<a href=#179 id=179 data-nosnippet>179</a>                    <span class="attr">#[cfg(feature = <span class="string">"orchard"</span>)]
+<a href=#180 id=180 data-nosnippet>180</a>                    </span><span class="kw">let </span>orchard_item = ufvk_parsed.orchard().map(|k| k.to_bytes());
+<a href=#181 id=181 data-nosnippet>181</a>                    <span class="attr">#[cfg(not(feature = <span class="string">"orchard"</span>))]
+<a href=#182 id=182 data-nosnippet>182</a>                    </span><span class="kw">let </span>orchard_item: <span class="prelude-ty">Option</span>&lt;Vec&lt;u8&gt;&gt; = <span class="prelude-val">None</span>;
 <a href=#183 id=183 data-nosnippet>183</a>
-<a href=#184 id=184 data-nosnippet>184</a>                    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
-<a href=#185 id=185 data-nosnippet>185</a>                    </span><span class="kw">let </span>transparent_item = ufvk_parsed.transparent().map(|k| k.serialize());
-<a href=#186 id=186 data-nosnippet>186</a>                    <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
-<a href=#187 id=187 data-nosnippet>187</a>                    </span><span class="kw">let </span>transparent_item: <span class="prelude-ty">Option</span>&lt;Vec&lt;u8&gt;&gt; = <span class="prelude-val">None</span>;
-<a href=#188 id=188 data-nosnippet>188</a>
-<a href=#189 id=189 data-nosnippet>189</a>                    <span class="comment">// Get the tree sizes for the birthday height from the blocks table, if
-<a href=#190 id=190 data-nosnippet>190</a>                    // available.
-<a href=#191 id=191 data-nosnippet>191</a>                    </span><span class="kw">let </span>(birthday_sapling_tree_size, birthday_orchard_tree_size) = transaction
-<a href=#192 id=192 data-nosnippet>192</a>                        .query_row(
-<a href=#193 id=193 data-nosnippet>193</a>                            <span class="string">"SELECT sapling_commitment_tree_size - sapling_output_count,
-<a href=#194 id=194 data-nosnippet>194</a>                                    orchard_commitment_tree_size - orchard_action_count
-<a href=#195 id=195 data-nosnippet>195</a>                             FROM blocks
-<a href=#196 id=196 data-nosnippet>196</a>                             WHERE height = :birthday_height"</span>,
-<a href=#197 id=197 data-nosnippet>197</a>                            <span class="macro">named_params!</span>[<span class="string">":birthday_height"</span>: birthday_height],
-<a href=#198 id=198 data-nosnippet>198</a>                            |row| {
-<a href=#199 id=199 data-nosnippet>199</a>                                <span class="prelude-val">Ok</span>(row
-<a href=#200 id=200 data-nosnippet>200</a>                                    .get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="number">0</span>)<span class="question-mark">?
-<a href=#201 id=201 data-nosnippet>201</a>                                    </span>.zip(row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="number">1</span>)<span class="question-mark">?</span>))
-<a href=#202 id=202 data-nosnippet>202</a>                            },
-<a href=#203 id=203 data-nosnippet>203</a>                        )
-<a href=#204 id=204 data-nosnippet>204</a>                        .optional()<span class="question-mark">?
-<a href=#205 id=205 data-nosnippet>205</a>                        </span>.flatten()
-<a href=#206 id=206 data-nosnippet>206</a>                        .map_or((<span class="prelude-val">None</span>, <span class="prelude-val">None</span>), |(s, o)| (<span class="prelude-val">Some</span>(s), <span class="prelude-val">Some</span>(o)));
-<a href=#207 id=207 data-nosnippet>207</a>
-<a href=#208 id=208 data-nosnippet>208</a>                    transaction.execute(
-<a href=#209 id=209 data-nosnippet>209</a>                        <span class="string">r#"
-<a href=#210 id=210 data-nosnippet>210</a>                        INSERT INTO accounts_new (
-<a href=#211 id=211 data-nosnippet>211</a>                            id, account_kind, hd_seed_fingerprint, hd_account_index,
-<a href=#212 id=212 data-nosnippet>212</a>                            ufvk, uivk,
-<a href=#213 id=213 data-nosnippet>213</a>                            orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
-<a href=#214 id=214 data-nosnippet>214</a>                            birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
-<a href=#215 id=215 data-nosnippet>215</a>                            recover_until_height
-<a href=#216 id=216 data-nosnippet>216</a>                        )
-<a href=#217 id=217 data-nosnippet>217</a>                        VALUES (
-<a href=#218 id=218 data-nosnippet>218</a>                            :account_id, :account_kind, :seed_id, :account_index,
-<a href=#219 id=219 data-nosnippet>219</a>                            :ufvk, :uivk,
-<a href=#220 id=220 data-nosnippet>220</a>                            :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
-<a href=#221 id=221 data-nosnippet>221</a>                            :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
-<a href=#222 id=222 data-nosnippet>222</a>                            :recover_until_height
-<a href=#223 id=223 data-nosnippet>223</a>                        );
-<a href=#224 id=224 data-nosnippet>224</a>                        "#</span>,
-<a href=#225 id=225 data-nosnippet>225</a>                        <span class="macro">named_params!</span>[
-<a href=#226 id=226 data-nosnippet>226</a>                            <span class="string">":account_id"</span>: account_id,
-<a href=#227 id=227 data-nosnippet>227</a>                            <span class="string">":account_kind"</span>: account_kind_derived,
-<a href=#228 id=228 data-nosnippet>228</a>                            <span class="string">":seed_id"</span>: seed_id.to_bytes(),
-<a href=#229 id=229 data-nosnippet>229</a>                            <span class="string">":account_index"</span>: account_index,
-<a href=#230 id=230 data-nosnippet>230</a>                            <span class="string">":ufvk"</span>: ufvk,
-<a href=#231 id=231 data-nosnippet>231</a>                            <span class="string">":uivk"</span>: uivk,
-<a href=#232 id=232 data-nosnippet>232</a>                            <span class="string">":orchard_fvk_item_cache"</span>: orchard_item,
-<a href=#233 id=233 data-nosnippet>233</a>                            <span class="string">":sapling_fvk_item_cache"</span>: sapling_item,
-<a href=#234 id=234 data-nosnippet>234</a>                            <span class="string">":p2pkh_fvk_item_cache"</span>: transparent_item,
-<a href=#235 id=235 data-nosnippet>235</a>                            <span class="string">":birthday_height"</span>: birthday_height,
-<a href=#236 id=236 data-nosnippet>236</a>                            <span class="string">":birthday_sapling_tree_size"</span>: birthday_sapling_tree_size,
-<a href=#237 id=237 data-nosnippet>237</a>                            <span class="string">":birthday_orchard_tree_size"</span>: birthday_orchard_tree_size,
-<a href=#238 id=238 data-nosnippet>238</a>                            <span class="string">":recover_until_height"</span>: recover_until_height,
-<a href=#239 id=239 data-nosnippet>239</a>                        ],
-<a href=#240 id=240 data-nosnippet>240</a>                    )<span class="question-mark">?</span>;
-<a href=#241 id=241 data-nosnippet>241</a>                }
-<a href=#242 id=242 data-nosnippet>242</a>            } <span class="kw">else </span>{
-<a href=#243 id=243 data-nosnippet>243</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(WalletMigrationError::SeedRequired);
-<a href=#244 id=244 data-nosnippet>244</a>            }
-<a href=#245 id=245 data-nosnippet>245</a>        }
-<a href=#246 id=246 data-nosnippet>246</a>
-<a href=#247 id=247 data-nosnippet>247</a>        transaction.execute_batch(<span class="string">r#"
-<a href=#248 id=248 data-nosnippet>248</a>            PRAGMA legacy_alter_table = ON;
-<a href=#249 id=249 data-nosnippet>249</a>
-<a href=#250 id=250 data-nosnippet>250</a>            DROP TABLE accounts;
-<a href=#251 id=251 data-nosnippet>251</a>            ALTER TABLE accounts_new RENAME TO accounts;
-<a href=#252 id=252 data-nosnippet>252</a>
-<a href=#253 id=253 data-nosnippet>253</a>            -- Migrate addresses table
-<a href=#254 id=254 data-nosnippet>254</a>            CREATE TABLE addresses_new (
-<a href=#255 id=255 data-nosnippet>255</a>                account_id INTEGER NOT NULL,
-<a href=#256 id=256 data-nosnippet>256</a>                diversifier_index_be BLOB NOT NULL,
-<a href=#257 id=257 data-nosnippet>257</a>                address TEXT NOT NULL,
-<a href=#258 id=258 data-nosnippet>258</a>                cached_transparent_receiver_address TEXT,
-<a href=#259 id=259 data-nosnippet>259</a>                FOREIGN KEY (account_id) REFERENCES accounts(id),
-<a href=#260 id=260 data-nosnippet>260</a>                CONSTRAINT diversification UNIQUE (account_id, diversifier_index_be)
-<a href=#261 id=261 data-nosnippet>261</a>            );
-<a href=#262 id=262 data-nosnippet>262</a>            CREATE INDEX "addresses_accounts" ON "addresses_new" (
-<a href=#263 id=263 data-nosnippet>263</a>                "account_id" ASC
-<a href=#264 id=264 data-nosnippet>264</a>            );
-<a href=#265 id=265 data-nosnippet>265</a>            INSERT INTO addresses_new (account_id, diversifier_index_be, address, cached_transparent_receiver_address)
-<a href=#266 id=266 data-nosnippet>266</a>            SELECT account, diversifier_index_be, address, cached_transparent_receiver_address
-<a href=#267 id=267 data-nosnippet>267</a>            FROM addresses;
-<a href=#268 id=268 data-nosnippet>268</a>
-<a href=#269 id=269 data-nosnippet>269</a>            DROP TABLE addresses;
-<a href=#270 id=270 data-nosnippet>270</a>            ALTER TABLE addresses_new RENAME TO addresses;
-<a href=#271 id=271 data-nosnippet>271</a>
-<a href=#272 id=272 data-nosnippet>272</a>            -- Migrate sapling_received_notes table
-<a href=#273 id=273 data-nosnippet>273</a>            CREATE TABLE sapling_received_notes_new (
-<a href=#274 id=274 data-nosnippet>274</a>                id INTEGER PRIMARY KEY,
-<a href=#275 id=275 data-nosnippet>275</a>                tx INTEGER NOT NULL,
-<a href=#276 id=276 data-nosnippet>276</a>                output_index INTEGER NOT NULL,
-<a href=#277 id=277 data-nosnippet>277</a>                account_id INTEGER NOT NULL,
-<a href=#278 id=278 data-nosnippet>278</a>                diversifier BLOB NOT NULL,
-<a href=#279 id=279 data-nosnippet>279</a>                value INTEGER NOT NULL,
-<a href=#280 id=280 data-nosnippet>280</a>                rcm BLOB NOT NULL,
-<a href=#281 id=281 data-nosnippet>281</a>                nf BLOB UNIQUE,
-<a href=#282 id=282 data-nosnippet>282</a>                is_change INTEGER NOT NULL,
-<a href=#283 id=283 data-nosnippet>283</a>                memo BLOB,
-<a href=#284 id=284 data-nosnippet>284</a>                commitment_tree_position INTEGER,
-<a href=#285 id=285 data-nosnippet>285</a>                recipient_key_scope INTEGER,
-<a href=#286 id=286 data-nosnippet>286</a>                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-<a href=#287 id=287 data-nosnippet>287</a>                FOREIGN KEY (account_id) REFERENCES accounts(id),
-<a href=#288 id=288 data-nosnippet>288</a>                CONSTRAINT tx_output UNIQUE (tx, output_index)
-<a href=#289 id=289 data-nosnippet>289</a>            );
-<a href=#290 id=290 data-nosnippet>290</a>            CREATE INDEX "sapling_received_notes_account" ON "sapling_received_notes_new" (
-<a href=#291 id=291 data-nosnippet>291</a>                "account_id" ASC
-<a href=#292 id=292 data-nosnippet>292</a>            );
-<a href=#293 id=293 data-nosnippet>293</a>            CREATE INDEX "sapling_received_notes_tx" ON "sapling_received_notes_new" (
-<a href=#294 id=294 data-nosnippet>294</a>                "tx" ASC
-<a href=#295 id=295 data-nosnippet>295</a>            );
-<a href=#296 id=296 data-nosnippet>296</a>
-<a href=#297 id=297 data-nosnippet>297</a>            -- Replace the `spent` column in `sapling_received_notes` with a junction table between
-<a href=#298 id=298 data-nosnippet>298</a>            -- received notes and the transactions that spend them. This is necessary as otherwise
-<a href=#299 id=299 data-nosnippet>299</a>            -- we cannot compute the correct value of transactions that expire unmined.
-<a href=#300 id=300 data-nosnippet>300</a>            CREATE TABLE sapling_received_note_spends (
-<a href=#301 id=301 data-nosnippet>301</a>                sapling_received_note_id INTEGER NOT NULL,
-<a href=#302 id=302 data-nosnippet>302</a>                transaction_id INTEGER NOT NULL,
-<a href=#303 id=303 data-nosnippet>303</a>                FOREIGN KEY (sapling_received_note_id)
-<a href=#304 id=304 data-nosnippet>304</a>                    REFERENCES sapling_received_notes(id)
-<a href=#305 id=305 data-nosnippet>305</a>                    ON DELETE CASCADE,
-<a href=#306 id=306 data-nosnippet>306</a>                FOREIGN KEY (transaction_id)
-<a href=#307 id=307 data-nosnippet>307</a>                    -- We do not delete transactions, so this does not cascade
-<a href=#308 id=308 data-nosnippet>308</a>                    REFERENCES transactions(id_tx),
-<a href=#309 id=309 data-nosnippet>309</a>                UNIQUE (sapling_received_note_id, transaction_id)
-<a href=#310 id=310 data-nosnippet>310</a>            );
-<a href=#311 id=311 data-nosnippet>311</a>
-<a href=#312 id=312 data-nosnippet>312</a>            INSERT INTO sapling_received_note_spends (sapling_received_note_id, transaction_id)
-<a href=#313 id=313 data-nosnippet>313</a>            SELECT id_note, spent
-<a href=#314 id=314 data-nosnippet>314</a>            FROM sapling_received_notes
-<a href=#315 id=315 data-nosnippet>315</a>            WHERE spent IS NOT NULL;
-<a href=#316 id=316 data-nosnippet>316</a>
-<a href=#317 id=317 data-nosnippet>317</a>            INSERT INTO sapling_received_notes_new (
-<a href=#318 id=318 data-nosnippet>318</a>                id, tx, output_index, account_id,
-<a href=#319 id=319 data-nosnippet>319</a>                diversifier, value, rcm, nf, is_change, memo, commitment_tree_position,
-<a href=#320 id=320 data-nosnippet>320</a>                recipient_key_scope
-<a href=#321 id=321 data-nosnippet>321</a>            )
-<a href=#322 id=322 data-nosnippet>322</a>            SELECT
-<a href=#323 id=323 data-nosnippet>323</a>                id_note, tx, output_index, account,
-<a href=#324 id=324 data-nosnippet>324</a>                diversifier, value, rcm, nf, is_change, memo, commitment_tree_position,
-<a href=#325 id=325 data-nosnippet>325</a>                recipient_key_scope
-<a href=#326 id=326 data-nosnippet>326</a>            FROM sapling_received_notes;
-<a href=#327 id=327 data-nosnippet>327</a>
-<a href=#328 id=328 data-nosnippet>328</a>            DROP TABLE sapling_received_notes;
-<a href=#329 id=329 data-nosnippet>329</a>            ALTER TABLE sapling_received_notes_new RENAME TO sapling_received_notes;
-<a href=#330 id=330 data-nosnippet>330</a>
-<a href=#331 id=331 data-nosnippet>331</a>            -- Migrate sent_notes table
-<a href=#332 id=332 data-nosnippet>332</a>            CREATE TABLE sent_notes_new (
-<a href=#333 id=333 data-nosnippet>333</a>                id INTEGER PRIMARY KEY,
-<a href=#334 id=334 data-nosnippet>334</a>                tx INTEGER NOT NULL,
-<a href=#335 id=335 data-nosnippet>335</a>                output_pool INTEGER NOT NULL,
-<a href=#336 id=336 data-nosnippet>336</a>                output_index INTEGER NOT NULL,
-<a href=#337 id=337 data-nosnippet>337</a>                from_account_id INTEGER NOT NULL,
-<a href=#338 id=338 data-nosnippet>338</a>                to_address TEXT,
-<a href=#339 id=339 data-nosnippet>339</a>                to_account_id INTEGER,
-<a href=#340 id=340 data-nosnippet>340</a>                value INTEGER NOT NULL,
-<a href=#341 id=341 data-nosnippet>341</a>                memo BLOB,
-<a href=#342 id=342 data-nosnippet>342</a>                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-<a href=#343 id=343 data-nosnippet>343</a>                FOREIGN KEY (from_account_id) REFERENCES accounts(id),
-<a href=#344 id=344 data-nosnippet>344</a>                FOREIGN KEY (to_account_id) REFERENCES accounts(id),
-<a href=#345 id=345 data-nosnippet>345</a>                CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index),
-<a href=#346 id=346 data-nosnippet>346</a>                CONSTRAINT note_recipient CHECK (
-<a href=#347 id=347 data-nosnippet>347</a>                    (to_address IS NOT NULL) OR (to_account_id IS NOT NULL)
-<a href=#348 id=348 data-nosnippet>348</a>                )
-<a href=#349 id=349 data-nosnippet>349</a>            );
-<a href=#350 id=350 data-nosnippet>350</a>            CREATE INDEX sent_notes_tx ON sent_notes_new (tx);
-<a href=#351 id=351 data-nosnippet>351</a>            CREATE INDEX sent_notes_from_account ON sent_notes_new (from_account_id);
-<a href=#352 id=352 data-nosnippet>352</a>            CREATE INDEX sent_notes_to_account ON sent_notes_new (to_account_id);
-<a href=#353 id=353 data-nosnippet>353</a>            INSERT INTO sent_notes_new (id, tx, output_pool, output_index, from_account_id, to_address, to_account_id, value, memo)
-<a href=#354 id=354 data-nosnippet>354</a>            SELECT id_note, tx, output_pool, output_index, from_account, to_address, to_account, value, memo
-<a href=#355 id=355 data-nosnippet>355</a>            FROM sent_notes;
-<a href=#356 id=356 data-nosnippet>356</a>
-<a href=#357 id=357 data-nosnippet>357</a>            DROP TABLE sent_notes;
-<a href=#358 id=358 data-nosnippet>358</a>            ALTER TABLE sent_notes_new RENAME TO sent_notes;
-<a href=#359 id=359 data-nosnippet>359</a>
-<a href=#360 id=360 data-nosnippet>360</a>            -- No one uses this table any more, and it contains a reference to columns we renamed.
-<a href=#361 id=361 data-nosnippet>361</a>            DROP TABLE sapling_witnesses;
-<a href=#362 id=362 data-nosnippet>362</a>
-<a href=#363 id=363 data-nosnippet>363</a>            -- Migrate utxos table
-<a href=#364 id=364 data-nosnippet>364</a>            CREATE TABLE utxos_new (
-<a href=#365 id=365 data-nosnippet>365</a>                id INTEGER PRIMARY KEY,
-<a href=#366 id=366 data-nosnippet>366</a>                received_by_account_id INTEGER NOT NULL,
-<a href=#367 id=367 data-nosnippet>367</a>                address TEXT NOT NULL,
-<a href=#368 id=368 data-nosnippet>368</a>                prevout_txid BLOB NOT NULL,
-<a href=#369 id=369 data-nosnippet>369</a>                prevout_idx INTEGER NOT NULL,
-<a href=#370 id=370 data-nosnippet>370</a>                script BLOB NOT NULL,
-<a href=#371 id=371 data-nosnippet>371</a>                value_zat INTEGER NOT NULL,
-<a href=#372 id=372 data-nosnippet>372</a>                height INTEGER NOT NULL,
-<a href=#373 id=373 data-nosnippet>373</a>                FOREIGN KEY (received_by_account_id) REFERENCES accounts(id),
-<a href=#374 id=374 data-nosnippet>374</a>                CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
-<a href=#375 id=375 data-nosnippet>375</a>            );
-<a href=#376 id=376 data-nosnippet>376</a>            CREATE INDEX utxos_received_by_account ON utxos_new (received_by_account_id);
-<a href=#377 id=377 data-nosnippet>377</a>
-<a href=#378 id=378 data-nosnippet>378</a>            INSERT INTO utxos_new (id, received_by_account_id, address, prevout_txid, prevout_idx, script, value_zat, height)
-<a href=#379 id=379 data-nosnippet>379</a>            SELECT id_utxo, received_by_account, address, prevout_txid, prevout_idx, script, value_zat, height
-<a href=#380 id=380 data-nosnippet>380</a>            FROM utxos;
-<a href=#381 id=381 data-nosnippet>381</a>
-<a href=#382 id=382 data-nosnippet>382</a>            -- Replace the `spent_in_tx` column in `utxos` with a junction table between received
-<a href=#383 id=383 data-nosnippet>383</a>            -- outputs and the transactions that spend them. This is necessary as otherwise we
-<a href=#384 id=384 data-nosnippet>384</a>            -- cannot compute the correct value of transactions that expire unmined.
-<a href=#385 id=385 data-nosnippet>385</a>            CREATE TABLE transparent_received_output_spends (
-<a href=#386 id=386 data-nosnippet>386</a>                transparent_received_output_id INTEGER NOT NULL,
-<a href=#387 id=387 data-nosnippet>387</a>                transaction_id INTEGER NOT NULL,
-<a href=#388 id=388 data-nosnippet>388</a>                FOREIGN KEY (transparent_received_output_id)
-<a href=#389 id=389 data-nosnippet>389</a>                    REFERENCES utxos(id)
-<a href=#390 id=390 data-nosnippet>390</a>                    ON DELETE CASCADE,
-<a href=#391 id=391 data-nosnippet>391</a>                FOREIGN KEY (transaction_id)
-<a href=#392 id=392 data-nosnippet>392</a>                    -- We do not delete transactions, so this does not cascade
-<a href=#393 id=393 data-nosnippet>393</a>                    REFERENCES transactions(id_tx),
-<a href=#394 id=394 data-nosnippet>394</a>                UNIQUE (transparent_received_output_id, transaction_id)
-<a href=#395 id=395 data-nosnippet>395</a>            );
-<a href=#396 id=396 data-nosnippet>396</a>
-<a href=#397 id=397 data-nosnippet>397</a>            INSERT INTO transparent_received_output_spends (transparent_received_output_id, transaction_id)
-<a href=#398 id=398 data-nosnippet>398</a>            SELECT id_utxo, spent_in_tx
-<a href=#399 id=399 data-nosnippet>399</a>            FROM utxos
-<a href=#400 id=400 data-nosnippet>400</a>            WHERE spent_in_tx IS NOT NULL;
-<a href=#401 id=401 data-nosnippet>401</a>
-<a href=#402 id=402 data-nosnippet>402</a>            DROP TABLE utxos;
-<a href=#403 id=403 data-nosnippet>403</a>            ALTER TABLE utxos_new RENAME TO utxos;
-<a href=#404 id=404 data-nosnippet>404</a>
-<a href=#405 id=405 data-nosnippet>405</a>            PRAGMA legacy_alter_table = OFF;
-<a href=#406 id=406 data-nosnippet>406</a>        "#</span>)<span class="question-mark">?</span>;
-<a href=#407 id=407 data-nosnippet>407</a>
-<a href=#408 id=408 data-nosnippet>408</a>        <span class="comment">// Rewrite v_transactions view
-<a href=#409 id=409 data-nosnippet>409</a>        </span>transaction.execute_batch(<span class="string">"
-<a href=#410 id=410 data-nosnippet>410</a>            DROP VIEW v_transactions;
-<a href=#411 id=411 data-nosnippet>411</a>            CREATE VIEW v_transactions AS
-<a href=#412 id=412 data-nosnippet>412</a>            WITH
-<a href=#413 id=413 data-nosnippet>413</a>            notes AS (
-<a href=#414 id=414 data-nosnippet>414</a>                SELECT sapling_received_notes.id             AS id,
-<a href=#415 id=415 data-nosnippet>415</a>                       sapling_received_notes.account_id     AS account_id,
-<a href=#416 id=416 data-nosnippet>416</a>                       transactions.block                    AS block,
-<a href=#417 id=417 data-nosnippet>417</a>                       transactions.txid                     AS txid,
-<a href=#418 id=418 data-nosnippet>418</a>                       2                                     AS pool,
-<a href=#419 id=419 data-nosnippet>419</a>                       sapling_received_notes.value          AS value,
-<a href=#420 id=420 data-nosnippet>420</a>                       CASE
-<a href=#421 id=421 data-nosnippet>421</a>                            WHEN sapling_received_notes.is_change THEN 1
-<a href=#422 id=422 data-nosnippet>422</a>                            ELSE 0
-<a href=#423 id=423 data-nosnippet>423</a>                       END AS is_change,
-<a href=#424 id=424 data-nosnippet>424</a>                       CASE
-<a href=#425 id=425 data-nosnippet>425</a>                            WHEN sapling_received_notes.is_change THEN 0
-<a href=#426 id=426 data-nosnippet>426</a>                            ELSE 1
-<a href=#427 id=427 data-nosnippet>427</a>                       END AS received_count,
-<a href=#428 id=428 data-nosnippet>428</a>                       CASE
-<a href=#429 id=429 data-nosnippet>429</a>                         WHEN (sapling_received_notes.memo IS NULL OR sapling_received_notes.memo = X'F6')
-<a href=#430 id=430 data-nosnippet>430</a>                           THEN 0
-<a href=#431 id=431 data-nosnippet>431</a>                         ELSE 1
-<a href=#432 id=432 data-nosnippet>432</a>                       END AS memo_present
-<a href=#433 id=433 data-nosnippet>433</a>                FROM sapling_received_notes
-<a href=#434 id=434 data-nosnippet>434</a>                JOIN transactions
-<a href=#435 id=435 data-nosnippet>435</a>                     ON transactions.id_tx = sapling_received_notes.tx
-<a href=#436 id=436 data-nosnippet>436</a>                UNION
-<a href=#437 id=437 data-nosnippet>437</a>                SELECT utxos.id                      AS id,
-<a href=#438 id=438 data-nosnippet>438</a>                       utxos.received_by_account_id  AS account_id,
-<a href=#439 id=439 data-nosnippet>439</a>                       utxos.height                  AS block,
-<a href=#440 id=440 data-nosnippet>440</a>                       utxos.prevout_txid            AS txid,
-<a href=#441 id=441 data-nosnippet>441</a>                       0                             AS pool,
-<a href=#442 id=442 data-nosnippet>442</a>                       utxos.value_zat               AS value,
-<a href=#443 id=443 data-nosnippet>443</a>                       0                             AS is_change,
-<a href=#444 id=444 data-nosnippet>444</a>                       1                             AS received_count,
-<a href=#445 id=445 data-nosnippet>445</a>                       0                             AS memo_present
-<a href=#446 id=446 data-nosnippet>446</a>                FROM utxos
-<a href=#447 id=447 data-nosnippet>447</a>                UNION
-<a href=#448 id=448 data-nosnippet>448</a>                SELECT sapling_received_notes.id             AS id,
-<a href=#449 id=449 data-nosnippet>449</a>                       sapling_received_notes.account_id     AS account_id,
-<a href=#450 id=450 data-nosnippet>450</a>                       transactions.block                    AS block,
-<a href=#451 id=451 data-nosnippet>451</a>                       transactions.txid                     AS txid,
-<a href=#452 id=452 data-nosnippet>452</a>                       2                                     AS pool,
-<a href=#453 id=453 data-nosnippet>453</a>                       -sapling_received_notes.value         AS value,
-<a href=#454 id=454 data-nosnippet>454</a>                       0                             AS is_change,
-<a href=#455 id=455 data-nosnippet>455</a>                       0                             AS received_count,
-<a href=#456 id=456 data-nosnippet>456</a>                       0                             AS memo_present
-<a href=#457 id=457 data-nosnippet>457</a>                FROM sapling_received_notes
-<a href=#458 id=458 data-nosnippet>458</a>                JOIN sapling_received_note_spends
-<a href=#459 id=459 data-nosnippet>459</a>                     ON sapling_received_note_id = sapling_received_notes.id
-<a href=#460 id=460 data-nosnippet>460</a>                JOIN transactions
-<a href=#461 id=461 data-nosnippet>461</a>                     ON transactions.id_tx = sapling_received_note_spends.transaction_id
-<a href=#462 id=462 data-nosnippet>462</a>                UNION
-<a href=#463 id=463 data-nosnippet>463</a>                SELECT utxos.id                      AS id,
-<a href=#464 id=464 data-nosnippet>464</a>                       utxos.received_by_account_id  AS account_id,
-<a href=#465 id=465 data-nosnippet>465</a>                       transactions.block            AS block,
-<a href=#466 id=466 data-nosnippet>466</a>                       transactions.txid             AS txid,
-<a href=#467 id=467 data-nosnippet>467</a>                       0                             AS pool,
-<a href=#468 id=468 data-nosnippet>468</a>                       -utxos.value_zat              AS value,
-<a href=#469 id=469 data-nosnippet>469</a>                       0                             AS is_change,
-<a href=#470 id=470 data-nosnippet>470</a>                       0                             AS received_count,
-<a href=#471 id=471 data-nosnippet>471</a>                       0                             AS memo_present
-<a href=#472 id=472 data-nosnippet>472</a>                FROM utxos
-<a href=#473 id=473 data-nosnippet>473</a>            JOIN transparent_received_output_spends txo_spends
-<a href=#474 id=474 data-nosnippet>474</a>                 ON txo_spends.transparent_received_output_id = txos.id
-<a href=#475 id=475 data-nosnippet>475</a>            JOIN transactions
-<a href=#476 id=476 data-nosnippet>476</a>                 ON transactions.id_tx = txo_spends.transaction_id
-<a href=#477 id=477 data-nosnippet>477</a>            ),
-<a href=#478 id=478 data-nosnippet>478</a>            sent_note_counts AS (
-<a href=#479 id=479 data-nosnippet>479</a>                SELECT sent_notes.from_account_id AS account_id,
-<a href=#480 id=480 data-nosnippet>480</a>                       transactions.txid       AS txid,
-<a href=#481 id=481 data-nosnippet>481</a>                       COUNT(DISTINCT sent_notes.id) as sent_notes,
-<a href=#482 id=482 data-nosnippet>482</a>                       SUM(
-<a href=#483 id=483 data-nosnippet>483</a>                         CASE
-<a href=#484 id=484 data-nosnippet>484</a>                           WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6' OR sapling_received_notes.tx IS NOT NULL)
-<a href=#485 id=485 data-nosnippet>485</a>                             THEN 0
-<a href=#486 id=486 data-nosnippet>486</a>                           ELSE 1
-<a href=#487 id=487 data-nosnippet>487</a>                         END
-<a href=#488 id=488 data-nosnippet>488</a>                       ) AS memo_count
-<a href=#489 id=489 data-nosnippet>489</a>                FROM sent_notes
-<a href=#490 id=490 data-nosnippet>490</a>                JOIN transactions
-<a href=#491 id=491 data-nosnippet>491</a>                     ON transactions.id_tx = sent_notes.tx
-<a href=#492 id=492 data-nosnippet>492</a>                LEFT JOIN sapling_received_notes
-<a href=#493 id=493 data-nosnippet>493</a>                          ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
-<a href=#494 id=494 data-nosnippet>494</a>                             (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
-<a href=#495 id=495 data-nosnippet>495</a>                WHERE COALESCE(sapling_received_notes.is_change, 0) = 0
-<a href=#496 id=496 data-nosnippet>496</a>                GROUP BY account_id, txid
-<a href=#497 id=497 data-nosnippet>497</a>            ),
-<a href=#498 id=498 data-nosnippet>498</a>            blocks_max_height AS (
-<a href=#499 id=499 data-nosnippet>499</a>                SELECT MAX(blocks.height) as max_height FROM blocks
-<a href=#500 id=500 data-nosnippet>500</a>            )
-<a href=#501 id=501 data-nosnippet>501</a>            SELECT notes.account_id                  AS account_id,
-<a href=#502 id=502 data-nosnippet>502</a>                   notes.block                       AS mined_height,
-<a href=#503 id=503 data-nosnippet>503</a>                   notes.txid                        AS txid,
-<a href=#504 id=504 data-nosnippet>504</a>                   transactions.tx_index             AS tx_index,
-<a href=#505 id=505 data-nosnippet>505</a>                   transactions.expiry_height        AS expiry_height,
-<a href=#506 id=506 data-nosnippet>506</a>                   transactions.raw                  AS raw,
-<a href=#507 id=507 data-nosnippet>507</a>                   SUM(notes.value)                  AS account_balance_delta,
-<a href=#508 id=508 data-nosnippet>508</a>                   transactions.fee                  AS fee_paid,
-<a href=#509 id=509 data-nosnippet>509</a>                   SUM(notes.is_change) &gt; 0          AS has_change,
-<a href=#510 id=510 data-nosnippet>510</a>                   MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,
-<a href=#511 id=511 data-nosnippet>511</a>                   SUM(notes.received_count)         AS received_note_count,
-<a href=#512 id=512 data-nosnippet>512</a>                   SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
-<a href=#513 id=513 data-nosnippet>513</a>                   blocks.time                       AS block_time,
-<a href=#514 id=514 data-nosnippet>514</a>                   (
-<a href=#515 id=515 data-nosnippet>515</a>                        blocks.height IS NULL
-<a href=#516 id=516 data-nosnippet>516</a>                        AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height
-<a href=#517 id=517 data-nosnippet>517</a>                   ) AS expired_unmined
-<a href=#518 id=518 data-nosnippet>518</a>            FROM notes
-<a href=#519 id=519 data-nosnippet>519</a>            LEFT JOIN transactions
-<a href=#520 id=520 data-nosnippet>520</a>                 ON notes.txid = transactions.txid
-<a href=#521 id=521 data-nosnippet>521</a>            JOIN blocks_max_height
-<a href=#522 id=522 data-nosnippet>522</a>            LEFT JOIN blocks ON blocks.height = notes.block
-<a href=#523 id=523 data-nosnippet>523</a>            LEFT JOIN sent_note_counts
-<a href=#524 id=524 data-nosnippet>524</a>                      ON sent_note_counts.account_id = notes.account_id
-<a href=#525 id=525 data-nosnippet>525</a>                      AND sent_note_counts.txid = notes.txid
-<a href=#526 id=526 data-nosnippet>526</a>            GROUP BY notes.account_id, notes.txid;
-<a href=#527 id=527 data-nosnippet>527</a>
-<a href=#528 id=528 data-nosnippet>528</a>            DROP VIEW v_tx_outputs;
-<a href=#529 id=529 data-nosnippet>529</a>            CREATE VIEW v_tx_outputs AS
-<a href=#530 id=530 data-nosnippet>530</a>            SELECT transactions.txid                   AS txid,
-<a href=#531 id=531 data-nosnippet>531</a>                   2                                   AS output_pool,
-<a href=#532 id=532 data-nosnippet>532</a>                   sapling_received_notes.output_index AS output_index,
-<a href=#533 id=533 data-nosnippet>533</a>                   sent_notes.from_account_id          AS from_account_id,
-<a href=#534 id=534 data-nosnippet>534</a>                   sapling_received_notes.account_id   AS to_account_id,
-<a href=#535 id=535 data-nosnippet>535</a>                   NULL                                AS to_address,
-<a href=#536 id=536 data-nosnippet>536</a>                   sapling_received_notes.value        AS value,
-<a href=#537 id=537 data-nosnippet>537</a>                   sapling_received_notes.is_change    AS is_change,
-<a href=#538 id=538 data-nosnippet>538</a>                   sapling_received_notes.memo         AS memo
-<a href=#539 id=539 data-nosnippet>539</a>            FROM sapling_received_notes
-<a href=#540 id=540 data-nosnippet>540</a>            JOIN transactions
-<a href=#541 id=541 data-nosnippet>541</a>                 ON transactions.id_tx = sapling_received_notes.tx
-<a href=#542 id=542 data-nosnippet>542</a>            LEFT JOIN sent_notes
-<a href=#543 id=543 data-nosnippet>543</a>                      ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
-<a href=#544 id=544 data-nosnippet>544</a>                         (sapling_received_notes.tx, 2, sent_notes.output_index)
-<a href=#545 id=545 data-nosnippet>545</a>            UNION
-<a href=#546 id=546 data-nosnippet>546</a>            SELECT utxos.prevout_txid           AS txid,
-<a href=#547 id=547 data-nosnippet>547</a>                   0                            AS output_pool,
-<a href=#548 id=548 data-nosnippet>548</a>                   utxos.prevout_idx            AS output_index,
-<a href=#549 id=549 data-nosnippet>549</a>                   NULL                         AS from_account_id,
-<a href=#550 id=550 data-nosnippet>550</a>                   utxos.received_by_account_id AS to_account_id,
-<a href=#551 id=551 data-nosnippet>551</a>                   utxos.address                AS to_address,
-<a href=#552 id=552 data-nosnippet>552</a>                   utxos.value_zat              AS value,
-<a href=#553 id=553 data-nosnippet>553</a>                   0                            AS is_change,
-<a href=#554 id=554 data-nosnippet>554</a>                   NULL                         AS memo
-<a href=#555 id=555 data-nosnippet>555</a>            FROM utxos
-<a href=#556 id=556 data-nosnippet>556</a>            UNION
-<a href=#557 id=557 data-nosnippet>557</a>            SELECT transactions.txid                 AS txid,
-<a href=#558 id=558 data-nosnippet>558</a>                   sent_notes.output_pool            AS output_pool,
-<a href=#559 id=559 data-nosnippet>559</a>                   sent_notes.output_index           AS output_index,
-<a href=#560 id=560 data-nosnippet>560</a>                   sent_notes.from_account_id        AS from_account_id,
-<a href=#561 id=561 data-nosnippet>561</a>                   sapling_received_notes.account_id AS to_account_id,
-<a href=#562 id=562 data-nosnippet>562</a>                   sent_notes.to_address             AS to_address,
-<a href=#563 id=563 data-nosnippet>563</a>                   sent_notes.value                  AS value,
-<a href=#564 id=564 data-nosnippet>564</a>                   0                                 AS is_change,
-<a href=#565 id=565 data-nosnippet>565</a>                   sent_notes.memo                   AS memo
-<a href=#566 id=566 data-nosnippet>566</a>            FROM sent_notes
-<a href=#567 id=567 data-nosnippet>567</a>            JOIN transactions
-<a href=#568 id=568 data-nosnippet>568</a>                 ON transactions.id_tx = sent_notes.tx
-<a href=#569 id=569 data-nosnippet>569</a>            LEFT JOIN sapling_received_notes
-<a href=#570 id=570 data-nosnippet>570</a>                      ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
-<a href=#571 id=571 data-nosnippet>571</a>                         (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
-<a href=#572 id=572 data-nosnippet>572</a>            WHERE COALESCE(sapling_received_notes.is_change, 0) = 0;
-<a href=#573 id=573 data-nosnippet>573</a>        "</span>)<span class="question-mark">?</span>;
-<a href=#574 id=574 data-nosnippet>574</a>
-<a href=#575 id=575 data-nosnippet>575</a>        <span class="prelude-val">Ok</span>(())
-<a href=#576 id=576 data-nosnippet>576</a>    }
-<a href=#577 id=577 data-nosnippet>577</a>
-<a href=#578 id=578 data-nosnippet>578</a>    <span class="kw">fn </span>down(<span class="kw-2">&amp;</span><span class="self">self</span>, _transaction: <span class="kw-2">&amp;</span>Transaction) -&gt; <span class="prelude-ty">Result</span>&lt;(), WalletMigrationError&gt; {
-<a href=#579 id=579 data-nosnippet>579</a>        <span class="prelude-val">Err</span>(WalletMigrationError::CannotRevert(MIGRATION_ID))
-<a href=#580 id=580 data-nosnippet>580</a>    }
-<a href=#581 id=581 data-nosnippet>581</a>}
-<a href=#582 id=582 data-nosnippet>582</a>
-<a href=#583 id=583 data-nosnippet>583</a><span class="attr">#[cfg(test)]
-<a href=#584 id=584 data-nosnippet>584</a></span><span class="kw">mod </span>tests {
-<a href=#585 id=585 data-nosnippet>585</a>    <span class="kw">use </span><span class="kw">crate</span>::wallet::init::migrations::tests::test_migrate;
-<a href=#586 id=586 data-nosnippet>586</a>
-<a href=#587 id=587 data-nosnippet>587</a>    <span class="attr">#[test]
-<a href=#588 id=588 data-nosnippet>588</a>    </span><span class="kw">fn </span>migrate() {
-<a href=#589 id=589 data-nosnippet>589</a>        test_migrate(<span class="kw-2">&amp;</span>[<span class="kw">super</span>::MIGRATION_ID]);
-<a href=#590 id=590 data-nosnippet>590</a>    }
-<a href=#591 id=591 data-nosnippet>591</a>}</code></pre></div></section></main></body></html>
+<a href=#184 id=184 data-nosnippet>184</a>                    <span class="kw">let </span>sapling_item = ufvk_parsed.sapling().map(|k| k.to_bytes());
+<a href=#185 id=185 data-nosnippet>185</a>
+<a href=#186 id=186 data-nosnippet>186</a>                    <span class="attr">#[cfg(feature = <span class="string">"transparent-inputs"</span>)]
+<a href=#187 id=187 data-nosnippet>187</a>                    </span><span class="kw">let </span>transparent_item = ufvk_parsed.transparent().map(|k| k.serialize());
+<a href=#188 id=188 data-nosnippet>188</a>                    <span class="attr">#[cfg(not(feature = <span class="string">"transparent-inputs"</span>))]
+<a href=#189 id=189 data-nosnippet>189</a>                    </span><span class="kw">let </span>transparent_item: <span class="prelude-ty">Option</span>&lt;Vec&lt;u8&gt;&gt; = <span class="prelude-val">None</span>;
+<a href=#190 id=190 data-nosnippet>190</a>
+<a href=#191 id=191 data-nosnippet>191</a>                    <span class="comment">// Get the tree sizes for the birthday height from the blocks table, if
+<a href=#192 id=192 data-nosnippet>192</a>                    // available.
+<a href=#193 id=193 data-nosnippet>193</a>                    </span><span class="kw">let </span>(birthday_sapling_tree_size, birthday_orchard_tree_size) = transaction
+<a href=#194 id=194 data-nosnippet>194</a>                        .query_row(
+<a href=#195 id=195 data-nosnippet>195</a>                            <span class="string">"SELECT sapling_commitment_tree_size - sapling_output_count,
+<a href=#196 id=196 data-nosnippet>196</a>                                    orchard_commitment_tree_size - orchard_action_count
+<a href=#197 id=197 data-nosnippet>197</a>                             FROM blocks
+<a href=#198 id=198 data-nosnippet>198</a>                             WHERE height = :birthday_height"</span>,
+<a href=#199 id=199 data-nosnippet>199</a>                            <span class="macro">named_params!</span>[<span class="string">":birthday_height"</span>: birthday_height],
+<a href=#200 id=200 data-nosnippet>200</a>                            |row| {
+<a href=#201 id=201 data-nosnippet>201</a>                                <span class="prelude-val">Ok</span>(row
+<a href=#202 id=202 data-nosnippet>202</a>                                    .get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="number">0</span>)<span class="question-mark">?
+<a href=#203 id=203 data-nosnippet>203</a>                                    </span>.zip(row.get::&lt;<span class="kw">_</span>, <span class="prelude-ty">Option</span>&lt;u32&gt;&gt;(<span class="number">1</span>)<span class="question-mark">?</span>))
+<a href=#204 id=204 data-nosnippet>204</a>                            },
+<a href=#205 id=205 data-nosnippet>205</a>                        )
+<a href=#206 id=206 data-nosnippet>206</a>                        .optional()<span class="question-mark">?
+<a href=#207 id=207 data-nosnippet>207</a>                        </span>.flatten()
+<a href=#208 id=208 data-nosnippet>208</a>                        .map_or((<span class="prelude-val">None</span>, <span class="prelude-val">None</span>), |(s, o)| (<span class="prelude-val">Some</span>(s), <span class="prelude-val">Some</span>(o)));
+<a href=#209 id=209 data-nosnippet>209</a>
+<a href=#210 id=210 data-nosnippet>210</a>                    transaction.execute(
+<a href=#211 id=211 data-nosnippet>211</a>                        <span class="string">r#"
+<a href=#212 id=212 data-nosnippet>212</a>                        INSERT INTO accounts_new (
+<a href=#213 id=213 data-nosnippet>213</a>                            id, account_kind, hd_seed_fingerprint, hd_account_index,
+<a href=#214 id=214 data-nosnippet>214</a>                            ufvk, uivk,
+<a href=#215 id=215 data-nosnippet>215</a>                            orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
+<a href=#216 id=216 data-nosnippet>216</a>                            birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
+<a href=#217 id=217 data-nosnippet>217</a>                            recover_until_height
+<a href=#218 id=218 data-nosnippet>218</a>                        )
+<a href=#219 id=219 data-nosnippet>219</a>                        VALUES (
+<a href=#220 id=220 data-nosnippet>220</a>                            :account_id, :account_kind, :seed_id, :account_index,
+<a href=#221 id=221 data-nosnippet>221</a>                            :ufvk, :uivk,
+<a href=#222 id=222 data-nosnippet>222</a>                            :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
+<a href=#223 id=223 data-nosnippet>223</a>                            :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
+<a href=#224 id=224 data-nosnippet>224</a>                            :recover_until_height
+<a href=#225 id=225 data-nosnippet>225</a>                        );
+<a href=#226 id=226 data-nosnippet>226</a>                        "#</span>,
+<a href=#227 id=227 data-nosnippet>227</a>                        <span class="macro">named_params!</span>[
+<a href=#228 id=228 data-nosnippet>228</a>                            <span class="string">":account_id"</span>: account_id,
+<a href=#229 id=229 data-nosnippet>229</a>                            <span class="string">":account_kind"</span>: account_kind_derived,
+<a href=#230 id=230 data-nosnippet>230</a>                            <span class="string">":seed_id"</span>: seed_id.to_bytes(),
+<a href=#231 id=231 data-nosnippet>231</a>                            <span class="string">":account_index"</span>: account_index,
+<a href=#232 id=232 data-nosnippet>232</a>                            <span class="string">":ufvk"</span>: ufvk,
+<a href=#233 id=233 data-nosnippet>233</a>                            <span class="string">":uivk"</span>: uivk,
+<a href=#234 id=234 data-nosnippet>234</a>                            <span class="string">":orchard_fvk_item_cache"</span>: orchard_item,
+<a href=#235 id=235 data-nosnippet>235</a>                            <span class="string">":sapling_fvk_item_cache"</span>: sapling_item,
+<a href=#236 id=236 data-nosnippet>236</a>                            <span class="string">":p2pkh_fvk_item_cache"</span>: transparent_item,
+<a href=#237 id=237 data-nosnippet>237</a>                            <span class="string">":birthday_height"</span>: birthday_height,
+<a href=#238 id=238 data-nosnippet>238</a>                            <span class="string">":birthday_sapling_tree_size"</span>: birthday_sapling_tree_size,
+<a href=#239 id=239 data-nosnippet>239</a>                            <span class="string">":birthday_orchard_tree_size"</span>: birthday_orchard_tree_size,
+<a href=#240 id=240 data-nosnippet>240</a>                            <span class="string">":recover_until_height"</span>: recover_until_height,
+<a href=#241 id=241 data-nosnippet>241</a>                        ],
+<a href=#242 id=242 data-nosnippet>242</a>                    )<span class="question-mark">?</span>;
+<a href=#243 id=243 data-nosnippet>243</a>                }
+<a href=#244 id=244 data-nosnippet>244</a>            } <span class="kw">else </span>{
+<a href=#245 id=245 data-nosnippet>245</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(WalletMigrationError::SeedRequired);
+<a href=#246 id=246 data-nosnippet>246</a>            }
+<a href=#247 id=247 data-nosnippet>247</a>        }
+<a href=#248 id=248 data-nosnippet>248</a>
+<a href=#249 id=249 data-nosnippet>249</a>        transaction.execute_batch(<span class="string">r#"
+<a href=#250 id=250 data-nosnippet>250</a>            PRAGMA legacy_alter_table = ON;
+<a href=#251 id=251 data-nosnippet>251</a>
+<a href=#252 id=252 data-nosnippet>252</a>            DROP TABLE accounts;
+<a href=#253 id=253 data-nosnippet>253</a>            ALTER TABLE accounts_new RENAME TO accounts;
+<a href=#254 id=254 data-nosnippet>254</a>
+<a href=#255 id=255 data-nosnippet>255</a>            -- Migrate addresses table
+<a href=#256 id=256 data-nosnippet>256</a>            CREATE TABLE addresses_new (
+<a href=#257 id=257 data-nosnippet>257</a>                account_id INTEGER NOT NULL,
+<a href=#258 id=258 data-nosnippet>258</a>                diversifier_index_be BLOB NOT NULL,
+<a href=#259 id=259 data-nosnippet>259</a>                address TEXT NOT NULL,
+<a href=#260 id=260 data-nosnippet>260</a>                cached_transparent_receiver_address TEXT,
+<a href=#261 id=261 data-nosnippet>261</a>                FOREIGN KEY (account_id) REFERENCES accounts(id),
+<a href=#262 id=262 data-nosnippet>262</a>                CONSTRAINT diversification UNIQUE (account_id, diversifier_index_be)
+<a href=#263 id=263 data-nosnippet>263</a>            );
+<a href=#264 id=264 data-nosnippet>264</a>            CREATE INDEX "addresses_accounts" ON "addresses_new" (
+<a href=#265 id=265 data-nosnippet>265</a>                "account_id" ASC
+<a href=#266 id=266 data-nosnippet>266</a>            );
+<a href=#267 id=267 data-nosnippet>267</a>            INSERT INTO addresses_new (account_id, diversifier_index_be, address, cached_transparent_receiver_address)
+<a href=#268 id=268 data-nosnippet>268</a>            SELECT account, diversifier_index_be, address, cached_transparent_receiver_address
+<a href=#269 id=269 data-nosnippet>269</a>            FROM addresses;
+<a href=#270 id=270 data-nosnippet>270</a>
+<a href=#271 id=271 data-nosnippet>271</a>            DROP TABLE addresses;
+<a href=#272 id=272 data-nosnippet>272</a>            ALTER TABLE addresses_new RENAME TO addresses;
+<a href=#273 id=273 data-nosnippet>273</a>
+<a href=#274 id=274 data-nosnippet>274</a>            -- Migrate sapling_received_notes table
+<a href=#275 id=275 data-nosnippet>275</a>            CREATE TABLE sapling_received_notes_new (
+<a href=#276 id=276 data-nosnippet>276</a>                id INTEGER PRIMARY KEY,
+<a href=#277 id=277 data-nosnippet>277</a>                tx INTEGER NOT NULL,
+<a href=#278 id=278 data-nosnippet>278</a>                output_index INTEGER NOT NULL,
+<a href=#279 id=279 data-nosnippet>279</a>                account_id INTEGER NOT NULL,
+<a href=#280 id=280 data-nosnippet>280</a>                diversifier BLOB NOT NULL,
+<a href=#281 id=281 data-nosnippet>281</a>                value INTEGER NOT NULL,
+<a href=#282 id=282 data-nosnippet>282</a>                rcm BLOB NOT NULL,
+<a href=#283 id=283 data-nosnippet>283</a>                nf BLOB UNIQUE,
+<a href=#284 id=284 data-nosnippet>284</a>                is_change INTEGER NOT NULL,
+<a href=#285 id=285 data-nosnippet>285</a>                memo BLOB,
+<a href=#286 id=286 data-nosnippet>286</a>                commitment_tree_position INTEGER,
+<a href=#287 id=287 data-nosnippet>287</a>                recipient_key_scope INTEGER,
+<a href=#288 id=288 data-nosnippet>288</a>                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
+<a href=#289 id=289 data-nosnippet>289</a>                FOREIGN KEY (account_id) REFERENCES accounts(id),
+<a href=#290 id=290 data-nosnippet>290</a>                CONSTRAINT tx_output UNIQUE (tx, output_index)
+<a href=#291 id=291 data-nosnippet>291</a>            );
+<a href=#292 id=292 data-nosnippet>292</a>            CREATE INDEX "sapling_received_notes_account" ON "sapling_received_notes_new" (
+<a href=#293 id=293 data-nosnippet>293</a>                "account_id" ASC
+<a href=#294 id=294 data-nosnippet>294</a>            );
+<a href=#295 id=295 data-nosnippet>295</a>            CREATE INDEX "sapling_received_notes_tx" ON "sapling_received_notes_new" (
+<a href=#296 id=296 data-nosnippet>296</a>                "tx" ASC
+<a href=#297 id=297 data-nosnippet>297</a>            );
+<a href=#298 id=298 data-nosnippet>298</a>
+<a href=#299 id=299 data-nosnippet>299</a>            -- Replace the `spent` column in `sapling_received_notes` with a junction table between
+<a href=#300 id=300 data-nosnippet>300</a>            -- received notes and the transactions that spend them. This is necessary as otherwise
+<a href=#301 id=301 data-nosnippet>301</a>            -- we cannot compute the correct value of transactions that expire unmined.
+<a href=#302 id=302 data-nosnippet>302</a>            CREATE TABLE sapling_received_note_spends (
+<a href=#303 id=303 data-nosnippet>303</a>                sapling_received_note_id INTEGER NOT NULL,
+<a href=#304 id=304 data-nosnippet>304</a>                transaction_id INTEGER NOT NULL,
+<a href=#305 id=305 data-nosnippet>305</a>                FOREIGN KEY (sapling_received_note_id)
+<a href=#306 id=306 data-nosnippet>306</a>                    REFERENCES sapling_received_notes(id)
+<a href=#307 id=307 data-nosnippet>307</a>                    ON DELETE CASCADE,
+<a href=#308 id=308 data-nosnippet>308</a>                FOREIGN KEY (transaction_id)
+<a href=#309 id=309 data-nosnippet>309</a>                    -- We do not delete transactions, so this does not cascade
+<a href=#310 id=310 data-nosnippet>310</a>                    REFERENCES transactions(id_tx),
+<a href=#311 id=311 data-nosnippet>311</a>                UNIQUE (sapling_received_note_id, transaction_id)
+<a href=#312 id=312 data-nosnippet>312</a>            );
+<a href=#313 id=313 data-nosnippet>313</a>
+<a href=#314 id=314 data-nosnippet>314</a>            INSERT INTO sapling_received_note_spends (sapling_received_note_id, transaction_id)
+<a href=#315 id=315 data-nosnippet>315</a>            SELECT id_note, spent
+<a href=#316 id=316 data-nosnippet>316</a>            FROM sapling_received_notes
+<a href=#317 id=317 data-nosnippet>317</a>            WHERE spent IS NOT NULL;
+<a href=#318 id=318 data-nosnippet>318</a>
+<a href=#319 id=319 data-nosnippet>319</a>            INSERT INTO sapling_received_notes_new (
+<a href=#320 id=320 data-nosnippet>320</a>                id, tx, output_index, account_id,
+<a href=#321 id=321 data-nosnippet>321</a>                diversifier, value, rcm, nf, is_change, memo, commitment_tree_position,
+<a href=#322 id=322 data-nosnippet>322</a>                recipient_key_scope
+<a href=#323 id=323 data-nosnippet>323</a>            )
+<a href=#324 id=324 data-nosnippet>324</a>            SELECT
+<a href=#325 id=325 data-nosnippet>325</a>                id_note, tx, output_index, account,
+<a href=#326 id=326 data-nosnippet>326</a>                diversifier, value, rcm, nf, is_change, memo, commitment_tree_position,
+<a href=#327 id=327 data-nosnippet>327</a>                recipient_key_scope
+<a href=#328 id=328 data-nosnippet>328</a>            FROM sapling_received_notes;
+<a href=#329 id=329 data-nosnippet>329</a>
+<a href=#330 id=330 data-nosnippet>330</a>            DROP TABLE sapling_received_notes;
+<a href=#331 id=331 data-nosnippet>331</a>            ALTER TABLE sapling_received_notes_new RENAME TO sapling_received_notes;
+<a href=#332 id=332 data-nosnippet>332</a>
+<a href=#333 id=333 data-nosnippet>333</a>            -- Migrate sent_notes table
+<a href=#334 id=334 data-nosnippet>334</a>            CREATE TABLE sent_notes_new (
+<a href=#335 id=335 data-nosnippet>335</a>                id INTEGER PRIMARY KEY,
+<a href=#336 id=336 data-nosnippet>336</a>                tx INTEGER NOT NULL,
+<a href=#337 id=337 data-nosnippet>337</a>                output_pool INTEGER NOT NULL,
+<a href=#338 id=338 data-nosnippet>338</a>                output_index INTEGER NOT NULL,
+<a href=#339 id=339 data-nosnippet>339</a>                from_account_id INTEGER NOT NULL,
+<a href=#340 id=340 data-nosnippet>340</a>                to_address TEXT,
+<a href=#341 id=341 data-nosnippet>341</a>                to_account_id INTEGER,
+<a href=#342 id=342 data-nosnippet>342</a>                value INTEGER NOT NULL,
+<a href=#343 id=343 data-nosnippet>343</a>                memo BLOB,
+<a href=#344 id=344 data-nosnippet>344</a>                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
+<a href=#345 id=345 data-nosnippet>345</a>                FOREIGN KEY (from_account_id) REFERENCES accounts(id),
+<a href=#346 id=346 data-nosnippet>346</a>                FOREIGN KEY (to_account_id) REFERENCES accounts(id),
+<a href=#347 id=347 data-nosnippet>347</a>                CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index),
+<a href=#348 id=348 data-nosnippet>348</a>                CONSTRAINT note_recipient CHECK (
+<a href=#349 id=349 data-nosnippet>349</a>                    (to_address IS NOT NULL) OR (to_account_id IS NOT NULL)
+<a href=#350 id=350 data-nosnippet>350</a>                )
+<a href=#351 id=351 data-nosnippet>351</a>            );
+<a href=#352 id=352 data-nosnippet>352</a>            CREATE INDEX sent_notes_tx ON sent_notes_new (tx);
+<a href=#353 id=353 data-nosnippet>353</a>            CREATE INDEX sent_notes_from_account ON sent_notes_new (from_account_id);
+<a href=#354 id=354 data-nosnippet>354</a>            CREATE INDEX sent_notes_to_account ON sent_notes_new (to_account_id);
+<a href=#355 id=355 data-nosnippet>355</a>            INSERT INTO sent_notes_new (id, tx, output_pool, output_index, from_account_id, to_address, to_account_id, value, memo)
+<a href=#356 id=356 data-nosnippet>356</a>            SELECT id_note, tx, output_pool, output_index, from_account, to_address, to_account, value, memo
+<a href=#357 id=357 data-nosnippet>357</a>            FROM sent_notes;
+<a href=#358 id=358 data-nosnippet>358</a>
+<a href=#359 id=359 data-nosnippet>359</a>            DROP TABLE sent_notes;
+<a href=#360 id=360 data-nosnippet>360</a>            ALTER TABLE sent_notes_new RENAME TO sent_notes;
+<a href=#361 id=361 data-nosnippet>361</a>
+<a href=#362 id=362 data-nosnippet>362</a>            -- No one uses this table any more, and it contains a reference to columns we renamed.
+<a href=#363 id=363 data-nosnippet>363</a>            DROP TABLE sapling_witnesses;
+<a href=#364 id=364 data-nosnippet>364</a>
+<a href=#365 id=365 data-nosnippet>365</a>            -- Migrate utxos table
+<a href=#366 id=366 data-nosnippet>366</a>            CREATE TABLE utxos_new (
+<a href=#367 id=367 data-nosnippet>367</a>                id INTEGER PRIMARY KEY,
+<a href=#368 id=368 data-nosnippet>368</a>                received_by_account_id INTEGER NOT NULL,
+<a href=#369 id=369 data-nosnippet>369</a>                address TEXT NOT NULL,
+<a href=#370 id=370 data-nosnippet>370</a>                prevout_txid BLOB NOT NULL,
+<a href=#371 id=371 data-nosnippet>371</a>                prevout_idx INTEGER NOT NULL,
+<a href=#372 id=372 data-nosnippet>372</a>                script BLOB NOT NULL,
+<a href=#373 id=373 data-nosnippet>373</a>                value_zat INTEGER NOT NULL,
+<a href=#374 id=374 data-nosnippet>374</a>                height INTEGER NOT NULL,
+<a href=#375 id=375 data-nosnippet>375</a>                FOREIGN KEY (received_by_account_id) REFERENCES accounts(id),
+<a href=#376 id=376 data-nosnippet>376</a>                CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
+<a href=#377 id=377 data-nosnippet>377</a>            );
+<a href=#378 id=378 data-nosnippet>378</a>            CREATE INDEX utxos_received_by_account ON utxos_new (received_by_account_id);
+<a href=#379 id=379 data-nosnippet>379</a>
+<a href=#380 id=380 data-nosnippet>380</a>            INSERT INTO utxos_new (id, received_by_account_id, address, prevout_txid, prevout_idx, script, value_zat, height)
+<a href=#381 id=381 data-nosnippet>381</a>            SELECT id_utxo, received_by_account, address, prevout_txid, prevout_idx, script, value_zat, height
+<a href=#382 id=382 data-nosnippet>382</a>            FROM utxos;
+<a href=#383 id=383 data-nosnippet>383</a>
+<a href=#384 id=384 data-nosnippet>384</a>            -- Replace the `spent_in_tx` column in `utxos` with a junction table between received
+<a href=#385 id=385 data-nosnippet>385</a>            -- outputs and the transactions that spend them. This is necessary as otherwise we
+<a href=#386 id=386 data-nosnippet>386</a>            -- cannot compute the correct value of transactions that expire unmined.
+<a href=#387 id=387 data-nosnippet>387</a>            CREATE TABLE transparent_received_output_spends (
+<a href=#388 id=388 data-nosnippet>388</a>                transparent_received_output_id INTEGER NOT NULL,
+<a href=#389 id=389 data-nosnippet>389</a>                transaction_id INTEGER NOT NULL,
+<a href=#390 id=390 data-nosnippet>390</a>                FOREIGN KEY (transparent_received_output_id)
+<a href=#391 id=391 data-nosnippet>391</a>                    REFERENCES utxos(id)
+<a href=#392 id=392 data-nosnippet>392</a>                    ON DELETE CASCADE,
+<a href=#393 id=393 data-nosnippet>393</a>                FOREIGN KEY (transaction_id)
+<a href=#394 id=394 data-nosnippet>394</a>                    -- We do not delete transactions, so this does not cascade
+<a href=#395 id=395 data-nosnippet>395</a>                    REFERENCES transactions(id_tx),
+<a href=#396 id=396 data-nosnippet>396</a>                UNIQUE (transparent_received_output_id, transaction_id)
+<a href=#397 id=397 data-nosnippet>397</a>            );
+<a href=#398 id=398 data-nosnippet>398</a>
+<a href=#399 id=399 data-nosnippet>399</a>            INSERT INTO transparent_received_output_spends (transparent_received_output_id, transaction_id)
+<a href=#400 id=400 data-nosnippet>400</a>            SELECT id_utxo, spent_in_tx
+<a href=#401 id=401 data-nosnippet>401</a>            FROM utxos
+<a href=#402 id=402 data-nosnippet>402</a>            WHERE spent_in_tx IS NOT NULL;
+<a href=#403 id=403 data-nosnippet>403</a>
+<a href=#404 id=404 data-nosnippet>404</a>            DROP TABLE utxos;
+<a href=#405 id=405 data-nosnippet>405</a>            ALTER TABLE utxos_new RENAME TO utxos;
+<a href=#406 id=406 data-nosnippet>406</a>
+<a href=#407 id=407 data-nosnippet>407</a>            PRAGMA legacy_alter_table = OFF;
+<a href=#408 id=408 data-nosnippet>408</a>        "#</span>)<span class="question-mark">?</span>;
+<a href=#409 id=409 data-nosnippet>409</a>
+<a href=#410 id=410 data-nosnippet>410</a>        <span class="comment">// Rewrite v_transactions view
+<a href=#411 id=411 data-nosnippet>411</a>        </span>transaction.execute_batch(<span class="string">"
+<a href=#412 id=412 data-nosnippet>412</a>            DROP VIEW v_transactions;
+<a href=#413 id=413 data-nosnippet>413</a>            CREATE VIEW v_transactions AS
+<a href=#414 id=414 data-nosnippet>414</a>            WITH
+<a href=#415 id=415 data-nosnippet>415</a>            notes AS (
+<a href=#416 id=416 data-nosnippet>416</a>                SELECT sapling_received_notes.id             AS id,
+<a href=#417 id=417 data-nosnippet>417</a>                       sapling_received_notes.account_id     AS account_id,
+<a href=#418 id=418 data-nosnippet>418</a>                       transactions.block                    AS block,
+<a href=#419 id=419 data-nosnippet>419</a>                       transactions.txid                     AS txid,
+<a href=#420 id=420 data-nosnippet>420</a>                       2                                     AS pool,
+<a href=#421 id=421 data-nosnippet>421</a>                       sapling_received_notes.value          AS value,
+<a href=#422 id=422 data-nosnippet>422</a>                       CASE
+<a href=#423 id=423 data-nosnippet>423</a>                            WHEN sapling_received_notes.is_change THEN 1
+<a href=#424 id=424 data-nosnippet>424</a>                            ELSE 0
+<a href=#425 id=425 data-nosnippet>425</a>                       END AS is_change,
+<a href=#426 id=426 data-nosnippet>426</a>                       CASE
+<a href=#427 id=427 data-nosnippet>427</a>                            WHEN sapling_received_notes.is_change THEN 0
+<a href=#428 id=428 data-nosnippet>428</a>                            ELSE 1
+<a href=#429 id=429 data-nosnippet>429</a>                       END AS received_count,
+<a href=#430 id=430 data-nosnippet>430</a>                       CASE
+<a href=#431 id=431 data-nosnippet>431</a>                         WHEN (sapling_received_notes.memo IS NULL OR sapling_received_notes.memo = X'F6')
+<a href=#432 id=432 data-nosnippet>432</a>                           THEN 0
+<a href=#433 id=433 data-nosnippet>433</a>                         ELSE 1
+<a href=#434 id=434 data-nosnippet>434</a>                       END AS memo_present
+<a href=#435 id=435 data-nosnippet>435</a>                FROM sapling_received_notes
+<a href=#436 id=436 data-nosnippet>436</a>                JOIN transactions
+<a href=#437 id=437 data-nosnippet>437</a>                     ON transactions.id_tx = sapling_received_notes.tx
+<a href=#438 id=438 data-nosnippet>438</a>                UNION
+<a href=#439 id=439 data-nosnippet>439</a>                SELECT utxos.id                      AS id,
+<a href=#440 id=440 data-nosnippet>440</a>                       utxos.received_by_account_id  AS account_id,
+<a href=#441 id=441 data-nosnippet>441</a>                       utxos.height                  AS block,
+<a href=#442 id=442 data-nosnippet>442</a>                       utxos.prevout_txid            AS txid,
+<a href=#443 id=443 data-nosnippet>443</a>                       0                             AS pool,
+<a href=#444 id=444 data-nosnippet>444</a>                       utxos.value_zat               AS value,
+<a href=#445 id=445 data-nosnippet>445</a>                       0                             AS is_change,
+<a href=#446 id=446 data-nosnippet>446</a>                       1                             AS received_count,
+<a href=#447 id=447 data-nosnippet>447</a>                       0                             AS memo_present
+<a href=#448 id=448 data-nosnippet>448</a>                FROM utxos
+<a href=#449 id=449 data-nosnippet>449</a>                UNION
+<a href=#450 id=450 data-nosnippet>450</a>                SELECT sapling_received_notes.id             AS id,
+<a href=#451 id=451 data-nosnippet>451</a>                       sapling_received_notes.account_id     AS account_id,
+<a href=#452 id=452 data-nosnippet>452</a>                       transactions.block                    AS block,
+<a href=#453 id=453 data-nosnippet>453</a>                       transactions.txid                     AS txid,
+<a href=#454 id=454 data-nosnippet>454</a>                       2                                     AS pool,
+<a href=#455 id=455 data-nosnippet>455</a>                       -sapling_received_notes.value         AS value,
+<a href=#456 id=456 data-nosnippet>456</a>                       0                             AS is_change,
+<a href=#457 id=457 data-nosnippet>457</a>                       0                             AS received_count,
+<a href=#458 id=458 data-nosnippet>458</a>                       0                             AS memo_present
+<a href=#459 id=459 data-nosnippet>459</a>                FROM sapling_received_notes
+<a href=#460 id=460 data-nosnippet>460</a>                JOIN sapling_received_note_spends
+<a href=#461 id=461 data-nosnippet>461</a>                     ON sapling_received_note_id = sapling_received_notes.id
+<a href=#462 id=462 data-nosnippet>462</a>                JOIN transactions
+<a href=#463 id=463 data-nosnippet>463</a>                     ON transactions.id_tx = sapling_received_note_spends.transaction_id
+<a href=#464 id=464 data-nosnippet>464</a>                UNION
+<a href=#465 id=465 data-nosnippet>465</a>                SELECT utxos.id                      AS id,
+<a href=#466 id=466 data-nosnippet>466</a>                       utxos.received_by_account_id  AS account_id,
+<a href=#467 id=467 data-nosnippet>467</a>                       transactions.block            AS block,
+<a href=#468 id=468 data-nosnippet>468</a>                       transactions.txid             AS txid,
+<a href=#469 id=469 data-nosnippet>469</a>                       0                             AS pool,
+<a href=#470 id=470 data-nosnippet>470</a>                       -utxos.value_zat              AS value,
+<a href=#471 id=471 data-nosnippet>471</a>                       0                             AS is_change,
+<a href=#472 id=472 data-nosnippet>472</a>                       0                             AS received_count,
+<a href=#473 id=473 data-nosnippet>473</a>                       0                             AS memo_present
+<a href=#474 id=474 data-nosnippet>474</a>                FROM utxos
+<a href=#475 id=475 data-nosnippet>475</a>            JOIN transparent_received_output_spends txo_spends
+<a href=#476 id=476 data-nosnippet>476</a>                 ON txo_spends.transparent_received_output_id = txos.id
+<a href=#477 id=477 data-nosnippet>477</a>            JOIN transactions
+<a href=#478 id=478 data-nosnippet>478</a>                 ON transactions.id_tx = txo_spends.transaction_id
+<a href=#479 id=479 data-nosnippet>479</a>            ),
+<a href=#480 id=480 data-nosnippet>480</a>            sent_note_counts AS (
+<a href=#481 id=481 data-nosnippet>481</a>                SELECT sent_notes.from_account_id AS account_id,
+<a href=#482 id=482 data-nosnippet>482</a>                       transactions.txid       AS txid,
+<a href=#483 id=483 data-nosnippet>483</a>                       COUNT(DISTINCT sent_notes.id) as sent_notes,
+<a href=#484 id=484 data-nosnippet>484</a>                       SUM(
+<a href=#485 id=485 data-nosnippet>485</a>                         CASE
+<a href=#486 id=486 data-nosnippet>486</a>                           WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6' OR sapling_received_notes.tx IS NOT NULL)
+<a href=#487 id=487 data-nosnippet>487</a>                             THEN 0
+<a href=#488 id=488 data-nosnippet>488</a>                           ELSE 1
+<a href=#489 id=489 data-nosnippet>489</a>                         END
+<a href=#490 id=490 data-nosnippet>490</a>                       ) AS memo_count
+<a href=#491 id=491 data-nosnippet>491</a>                FROM sent_notes
+<a href=#492 id=492 data-nosnippet>492</a>                JOIN transactions
+<a href=#493 id=493 data-nosnippet>493</a>                     ON transactions.id_tx = sent_notes.tx
+<a href=#494 id=494 data-nosnippet>494</a>                LEFT JOIN sapling_received_notes
+<a href=#495 id=495 data-nosnippet>495</a>                          ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+<a href=#496 id=496 data-nosnippet>496</a>                             (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
+<a href=#497 id=497 data-nosnippet>497</a>                WHERE COALESCE(sapling_received_notes.is_change, 0) = 0
+<a href=#498 id=498 data-nosnippet>498</a>                GROUP BY account_id, txid
+<a href=#499 id=499 data-nosnippet>499</a>            ),
+<a href=#500 id=500 data-nosnippet>500</a>            blocks_max_height AS (
+<a href=#501 id=501 data-nosnippet>501</a>                SELECT MAX(blocks.height) as max_height FROM blocks
+<a href=#502 id=502 data-nosnippet>502</a>            )
+<a href=#503 id=503 data-nosnippet>503</a>            SELECT notes.account_id                  AS account_id,
+<a href=#504 id=504 data-nosnippet>504</a>                   notes.block                       AS mined_height,
+<a href=#505 id=505 data-nosnippet>505</a>                   notes.txid                        AS txid,
+<a href=#506 id=506 data-nosnippet>506</a>                   transactions.tx_index             AS tx_index,
+<a href=#507 id=507 data-nosnippet>507</a>                   transactions.expiry_height        AS expiry_height,
+<a href=#508 id=508 data-nosnippet>508</a>                   transactions.raw                  AS raw,
+<a href=#509 id=509 data-nosnippet>509</a>                   SUM(notes.value)                  AS account_balance_delta,
+<a href=#510 id=510 data-nosnippet>510</a>                   transactions.fee                  AS fee_paid,
+<a href=#511 id=511 data-nosnippet>511</a>                   SUM(notes.is_change) &gt; 0          AS has_change,
+<a href=#512 id=512 data-nosnippet>512</a>                   MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,
+<a href=#513 id=513 data-nosnippet>513</a>                   SUM(notes.received_count)         AS received_note_count,
+<a href=#514 id=514 data-nosnippet>514</a>                   SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
+<a href=#515 id=515 data-nosnippet>515</a>                   blocks.time                       AS block_time,
+<a href=#516 id=516 data-nosnippet>516</a>                   (
+<a href=#517 id=517 data-nosnippet>517</a>                        blocks.height IS NULL
+<a href=#518 id=518 data-nosnippet>518</a>                        AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height
+<a href=#519 id=519 data-nosnippet>519</a>                   ) AS expired_unmined
+<a href=#520 id=520 data-nosnippet>520</a>            FROM notes
+<a href=#521 id=521 data-nosnippet>521</a>            LEFT JOIN transactions
+<a href=#522 id=522 data-nosnippet>522</a>                 ON notes.txid = transactions.txid
+<a href=#523 id=523 data-nosnippet>523</a>            JOIN blocks_max_height
+<a href=#524 id=524 data-nosnippet>524</a>            LEFT JOIN blocks ON blocks.height = notes.block
+<a href=#525 id=525 data-nosnippet>525</a>            LEFT JOIN sent_note_counts
+<a href=#526 id=526 data-nosnippet>526</a>                      ON sent_note_counts.account_id = notes.account_id
+<a href=#527 id=527 data-nosnippet>527</a>                      AND sent_note_counts.txid = notes.txid
+<a href=#528 id=528 data-nosnippet>528</a>            GROUP BY notes.account_id, notes.txid;
+<a href=#529 id=529 data-nosnippet>529</a>
+<a href=#530 id=530 data-nosnippet>530</a>            DROP VIEW v_tx_outputs;
+<a href=#531 id=531 data-nosnippet>531</a>            CREATE VIEW v_tx_outputs AS
+<a href=#532 id=532 data-nosnippet>532</a>            SELECT transactions.txid                   AS txid,
+<a href=#533 id=533 data-nosnippet>533</a>                   2                                   AS output_pool,
+<a href=#534 id=534 data-nosnippet>534</a>                   sapling_received_notes.output_index AS output_index,
+<a href=#535 id=535 data-nosnippet>535</a>                   sent_notes.from_account_id          AS from_account_id,
+<a href=#536 id=536 data-nosnippet>536</a>                   sapling_received_notes.account_id   AS to_account_id,
+<a href=#537 id=537 data-nosnippet>537</a>                   NULL                                AS to_address,
+<a href=#538 id=538 data-nosnippet>538</a>                   sapling_received_notes.value        AS value,
+<a href=#539 id=539 data-nosnippet>539</a>                   sapling_received_notes.is_change    AS is_change,
+<a href=#540 id=540 data-nosnippet>540</a>                   sapling_received_notes.memo         AS memo
+<a href=#541 id=541 data-nosnippet>541</a>            FROM sapling_received_notes
+<a href=#542 id=542 data-nosnippet>542</a>            JOIN transactions
+<a href=#543 id=543 data-nosnippet>543</a>                 ON transactions.id_tx = sapling_received_notes.tx
+<a href=#544 id=544 data-nosnippet>544</a>            LEFT JOIN sent_notes
+<a href=#545 id=545 data-nosnippet>545</a>                      ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+<a href=#546 id=546 data-nosnippet>546</a>                         (sapling_received_notes.tx, 2, sent_notes.output_index)
+<a href=#547 id=547 data-nosnippet>547</a>            UNION
+<a href=#548 id=548 data-nosnippet>548</a>            SELECT utxos.prevout_txid           AS txid,
+<a href=#549 id=549 data-nosnippet>549</a>                   0                            AS output_pool,
+<a href=#550 id=550 data-nosnippet>550</a>                   utxos.prevout_idx            AS output_index,
+<a href=#551 id=551 data-nosnippet>551</a>                   NULL                         AS from_account_id,
+<a href=#552 id=552 data-nosnippet>552</a>                   utxos.received_by_account_id AS to_account_id,
+<a href=#553 id=553 data-nosnippet>553</a>                   utxos.address                AS to_address,
+<a href=#554 id=554 data-nosnippet>554</a>                   utxos.value_zat              AS value,
+<a href=#555 id=555 data-nosnippet>555</a>                   0                            AS is_change,
+<a href=#556 id=556 data-nosnippet>556</a>                   NULL                         AS memo
+<a href=#557 id=557 data-nosnippet>557</a>            FROM utxos
+<a href=#558 id=558 data-nosnippet>558</a>            UNION
+<a href=#559 id=559 data-nosnippet>559</a>            SELECT transactions.txid                 AS txid,
+<a href=#560 id=560 data-nosnippet>560</a>                   sent_notes.output_pool            AS output_pool,
+<a href=#561 id=561 data-nosnippet>561</a>                   sent_notes.output_index           AS output_index,
+<a href=#562 id=562 data-nosnippet>562</a>                   sent_notes.from_account_id        AS from_account_id,
+<a href=#563 id=563 data-nosnippet>563</a>                   sapling_received_notes.account_id AS to_account_id,
+<a href=#564 id=564 data-nosnippet>564</a>                   sent_notes.to_address             AS to_address,
+<a href=#565 id=565 data-nosnippet>565</a>                   sent_notes.value                  AS value,
+<a href=#566 id=566 data-nosnippet>566</a>                   0                                 AS is_change,
+<a href=#567 id=567 data-nosnippet>567</a>                   sent_notes.memo                   AS memo
+<a href=#568 id=568 data-nosnippet>568</a>            FROM sent_notes
+<a href=#569 id=569 data-nosnippet>569</a>            JOIN transactions
+<a href=#570 id=570 data-nosnippet>570</a>                 ON transactions.id_tx = sent_notes.tx
+<a href=#571 id=571 data-nosnippet>571</a>            LEFT JOIN sapling_received_notes
+<a href=#572 id=572 data-nosnippet>572</a>                      ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+<a href=#573 id=573 data-nosnippet>573</a>                         (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
+<a href=#574 id=574 data-nosnippet>574</a>            WHERE COALESCE(sapling_received_notes.is_change, 0) = 0;
+<a href=#575 id=575 data-nosnippet>575</a>        "</span>)<span class="question-mark">?</span>;
+<a href=#576 id=576 data-nosnippet>576</a>
+<a href=#577 id=577 data-nosnippet>577</a>        <span class="prelude-val">Ok</span>(())
+<a href=#578 id=578 data-nosnippet>578</a>    }
+<a href=#579 id=579 data-nosnippet>579</a>
+<a href=#580 id=580 data-nosnippet>580</a>    <span class="kw">fn </span>down(<span class="kw-2">&amp;</span><span class="self">self</span>, _transaction: <span class="kw-2">&amp;</span>Transaction) -&gt; <span class="prelude-ty">Result</span>&lt;(), WalletMigrationError&gt; {
+<a href=#581 id=581 data-nosnippet>581</a>        <span class="prelude-val">Err</span>(WalletMigrationError::CannotRevert(MIGRATION_ID))
+<a href=#582 id=582 data-nosnippet>582</a>    }
+<a href=#583 id=583 data-nosnippet>583</a>}
+<a href=#584 id=584 data-nosnippet>584</a>
+<a href=#585 id=585 data-nosnippet>585</a><span class="attr">#[cfg(test)]
+<a href=#586 id=586 data-nosnippet>586</a></span><span class="kw">mod </span>tests {
+<a href=#587 id=587 data-nosnippet>587</a>    <span class="kw">use </span><span class="kw">crate</span>::wallet::init::migrations::tests::test_migrate;
+<a href=#588 id=588 data-nosnippet>588</a>
+<a href=#589 id=589 data-nosnippet>589</a>    <span class="attr">#[test]
+<a href=#590 id=590 data-nosnippet>590</a>    </span><span class="kw">fn </span>migrate() {
+<a href=#591 id=591 data-nosnippet>591</a>        test_migrate(<span class="kw-2">&amp;</span>[<span class="kw">super</span>::MIGRATION_ID]);
+<a href=#592 id=592 data-nosnippet>592</a>    }
+<a href=#593 id=593 data-nosnippet>593</a>}</code></pre></div></section></main></body></html>
