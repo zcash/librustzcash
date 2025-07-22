@@ -38,6 +38,7 @@ regex = { workspace = true, optional = true }
 
 # - Transparent protocols
 bip32 = { workspace = true, optional = true }
+secp256k1 = { workspace = true, optional = true, default-features = false }
 transparent.workspace = true
 
 # - Logging and metrics
@@ -89,8 +90,13 @@ std = ["dep:document-features"]
 
 ## Enables use of transparent key parts and addresses
 transparent-inputs = [
-  "dep:bip32", 
-  "transparent/transparent-inputs", 
+  "dep:bip32",
+  "transparent/transparent-inputs",
+]
+
+## Enables use of zcashd-derived secp256k1 secret key encodings.
+transparent-key-encoding = [
+  "transparent-inputs", "dep:secp256k1"
 ]
 
 ## Enables use of Orchard key parts and addresses
