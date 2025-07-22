@@ -11,6 +11,7 @@ use ::transparent::bundle::TxOut;
 use nonempty::NonEmpty;
 use zcash_address::ConversionError;
 use zcash_keys::address::{Address, UnifiedAddress};
+use zcash_primitives::transaction::fees::FeeRule;
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     value::{BalanceError, Zatoshis},
@@ -22,7 +23,7 @@ use crate::{
     data_api::{
         wallet::TargetHeight, InputSource, SimpleNoteRetention, SpendableNotes, TargetValue,
     },
-    fees::{sapling, ChangeError, ChangeStrategy},
+    fees::{sapling, ChangeError, ChangeStrategy, TransactionBalance},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
 };
@@ -592,7 +593,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
 
             // In the ZIP 320 case, this is the balance for transaction 0, taking into account
             // the ephemeral output.
-            let balance = change_strategy.compute_balance(
+            let tr0_balance = change_strategy.compute_balance(
                 params,
                 target_height,
                 &[] as &[WalletTransparentOutput],
@@ -612,11 +613,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 &wallet_meta,
             );
 
-            match balance {
-                Ok(balance) => {
-                    // At this point, we have enough input value to pay for everything, so we will
-                    // return at the end of this block.
-
+            match tr0_balance {
+                Ok(tr0_balance) => {
+                    // At this point, we have enough input value to pay for everything, so we
+                    // return here.
                     let shielded_inputs =
                         NonEmpty::from_vec(shielded_inputs.into_vec(&SimpleNoteRetention {
                             sapling: use_sapling,
@@ -625,95 +625,22 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         }))
                         .map(|notes| ShieldedInputs::from_parts(anchor_height, notes));
 
-                    #[cfg(feature = "transparent-inputs")]
-                    if let Some(tr1_balance) = tr1_balance_opt {
-                        // Construct two new `TransactionRequest`s:
-                        // * `tr0` excludes the TEX outputs, and in their place includes
-                        //   a single additional ephemeral output to the transparent pool.
-                        // * `tr1` spends from that ephemeral output to each TEX output.
-
-                        // Find exactly one ephemeral change output.
-                        let ephemeral_outputs = balance
-                            .proposed_change()
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, c)| c.is_ephemeral())
-                            .collect::<Vec<_>>();
-
-                        let ephemeral_value = ephemeral_balance
-                            .and_then(|b| b.ephemeral_output_amount())
-                            .expect("ephemeral output balance exists (constructed above)");
-
-                        let ephemeral_output_index = match &ephemeral_outputs[..] {
-                            [(i, change_value)] if change_value.value() == ephemeral_value => {
-                                Ok(*i)
-                            }
-                            _ => Err(InputSelectorError::Proposal(
-                                ProposalError::EphemeralOutputsInvalid,
-                            )),
-                        }?;
-
-                        let ephemeral_stepoutput =
-                            StepOutput::new(0, StepOutputIndex::Change(ephemeral_output_index));
-
-                        let tr0 = TransactionRequest::from_indexed(
-                            transaction_request
-                                .payments()
-                                .iter()
-                                .filter(|(idx, _payment)| !tr1_payment_pools.contains_key(idx))
-                                .map(|(k, v)| (*k, v.clone()))
-                                .collect(),
-                        )
-                        .expect("removing payments from a TransactionRequest preserves validity");
-
-                        let mut steps = vec![];
-                        steps.push(
-                            Step::from_parts(
-                                &[],
-                                tr0,
-                                payment_pools,
-                                vec![],
-                                shielded_inputs,
-                                vec![],
-                                balance,
-                                false,
-                            )
-                            .map_err(InputSelectorError::Proposal)?,
-                        );
-
-                        let tr1 =
-                            TransactionRequest::new(tr1_payments).expect("valid by construction");
-                        steps.push(
-                            Step::from_parts(
-                                &steps,
-                                tr1,
-                                tr1_payment_pools,
-                                vec![],
-                                None,
-                                vec![ephemeral_stepoutput],
-                                tr1_balance,
-                                false,
-                            )
-                            .map_err(InputSelectorError::Proposal)?,
-                        );
-
-                        return Proposal::multi_step(
-                            change_strategy.fee_rule().clone(),
-                            target_height,
-                            NonEmpty::from_vec(steps).expect("steps is known to be nonempty"),
-                        )
-                        .map_err(InputSelectorError::Proposal);
-                    }
-
-                    return Proposal::single_step(
+                    return build_proposal(
+                        change_strategy.fee_rule(),
+                        tr0_balance,
+                        target_height,
+                        shielded_inputs,
                         transaction_request,
                         payment_pools,
-                        vec![],
-                        shielded_inputs,
-                        balance,
-                        (*change_strategy.fee_rule()).clone(),
-                        target_height,
-                        false,
+                        #[cfg(feature = "transparent-inputs")]
+                        ephemeral_balance
+                            .zip(tr1_balance_opt)
+                            .map(|(balance, tr1_balance)| EphemeralStepConfig {
+                                balance,
+                                tr1_balance,
+                                tr1_payment_pools,
+                                tr1_payments,
+                            }),
                     )
                     .map_err(InputSelectorError::Proposal);
                 }
@@ -762,6 +689,106 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             }
         }
     }
+}
+
+#[cfg(feature = "transparent-inputs")]
+struct EphemeralStepConfig {
+    balance: EphemeralBalance,
+    tr1_balance: TransactionBalance,
+    tr1_payment_pools: BTreeMap<usize, PoolType>,
+    tr1_payments: Vec<Payment>,
+}
+
+fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
+    fee_rule: &FeeRuleT,
+    tr0_balance: TransactionBalance,
+    target_height: TargetHeight,
+    shielded_inputs: Option<ShieldedInputs<NoteRef>>,
+    transaction_request: TransactionRequest,
+    payment_pools: BTreeMap<usize, PoolType>,
+    #[cfg(feature = "transparent-inputs")] ephemeral_step_opt: Option<EphemeralStepConfig>,
+) -> Result<Proposal<FeeRuleT, NoteRef>, ProposalError> {
+    #[cfg(feature = "transparent-inputs")]
+    if let Some(ephemeral_step) = ephemeral_step_opt {
+        let tr1_balance = ephemeral_step.tr1_balance;
+        // Construct two new `TransactionRequest`s:
+        // * `tr0` excludes the TEX outputs, and in their place includes
+        //   a single additional ephemeral output to the transparent pool.
+        // * `tr1` spends from that ephemeral output to each TEX output.
+
+        // Find exactly one ephemeral change output.
+        let ephemeral_outputs = tr0_balance
+            .proposed_change()
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.is_ephemeral())
+            .collect::<Vec<_>>();
+
+        let ephemeral_value = ephemeral_step
+            .balance
+            .ephemeral_output_amount()
+            .expect("ephemeral output balance exists");
+
+        let ephemeral_output_index = match &ephemeral_outputs[..] {
+            [(i, change_value)] if change_value.value() == ephemeral_value => Ok(*i),
+            _ => Err(ProposalError::EphemeralOutputsInvalid),
+        }?;
+
+        let ephemeral_stepoutput =
+            StepOutput::new(0, StepOutputIndex::Change(ephemeral_output_index));
+
+        let tr0 = TransactionRequest::from_indexed(
+            transaction_request
+                .payments()
+                .iter()
+                .filter(|(idx, _payment)| !ephemeral_step.tr1_payment_pools.contains_key(idx))
+                .map(|(k, v)| (*k, v.clone()))
+                .collect(),
+        )
+        .expect("removing payments from a TransactionRequest preserves validity");
+
+        let mut steps = vec![];
+        steps.push(Step::from_parts(
+            &[],
+            tr0,
+            payment_pools,
+            vec![],
+            shielded_inputs,
+            vec![],
+            tr0_balance,
+            false,
+        )?);
+
+        let tr1 =
+            TransactionRequest::new(ephemeral_step.tr1_payments).expect("valid by construction");
+        steps.push(Step::from_parts(
+            &steps,
+            tr1,
+            ephemeral_step.tr1_payment_pools,
+            vec![],
+            None,
+            vec![ephemeral_stepoutput],
+            tr1_balance,
+            false,
+        )?);
+
+        return Proposal::multi_step(
+            fee_rule.clone(),
+            target_height,
+            NonEmpty::from_vec(steps).expect("steps is known to be nonempty"),
+        );
+    }
+
+    Proposal::single_step(
+        transaction_request,
+        payment_pools,
+        vec![],
+        shielded_inputs,
+        tr0_balance,
+        fee_rule.clone(),
+        target_height,
+        false,
+    )
 }
 
 #[cfg(feature = "transparent-inputs")]
