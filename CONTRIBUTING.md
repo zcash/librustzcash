@@ -69,7 +69,7 @@ this may take some time.
 
 `librustzcash` is a Rust workspace containing numerous interdependent crates
 with a somewhat complex internal dependency relationship. Please refer to the
-[README](blob/main/README.md) for a graphical view of these dependencies and
+[README](README.md) for a graphical view of these dependencies and
 summary documentation for each module.
 
 ### Project Versioning
@@ -119,7 +119,7 @@ possible.
 
 #### How Do I Submit a Good Bug Report?
 
-> You must never report security related issues, vulnerabilities or bugs including sensitive information to the issue tracker, or elsewhere in public. Issues that have impliciations for personal or network security should be reported as described at [https://z.cash/support/security/](https://z.cash/support/security/).
+> You must never report security related issues, vulnerabilities or bugs including sensitive information to the issue tracker, or elsewhere in public. Issues that have implications for personal or network security should be reported as described at [https://z.cash/support/security/](https://z.cash/support/security/).
 
 
 We use GitHub issues to track bugs and errors. If you run into an issue with
@@ -162,12 +162,8 @@ community to understand your suggestion and find related suggestions.
 
 #### Before Submitting an Enhancement
 
-- Make sure that you are using the latest version, or that the enhancement you
-  are proposing is suitable for implementation in the version that you rely
-  upon: this requires that the feature can be implemented without a SemVer
-  breaking change.
-- Read the documentation of the appropriate module carefully and find out if
-  the functionality is already covered, maybe by an individual configuration.
+- Read the documentation of the latest version of the appropriate crate to find
+  out if the functionality is already provided, potentially under a feature flag.
 - Perform a [search](/issues) to see if the enhancement has already been
   suggested. If it has, add a comment to the existing issue instead of opening
   a new one.
@@ -188,8 +184,8 @@ community to understand your suggestion and find related suggestions.
 Enhancement suggestions are tracked as [GitHub issues](/issues).
 
 - Use a **clear and descriptive title** for the issue to identify the
-  suggestion. The relevant module, if known, should be indicated by prefixing
-  the title with `<module-name>:`.
+  suggestion. The relevant library crate, if known, should be indicated by prefixing
+  the title with `<crate-name>:`.
 - Provide a **step-by-step description of the suggested enhancement** in as
   many details as possible.
 - **Describe the current behavior** and **explain which behavior you expected
@@ -207,7 +203,7 @@ Enhancement suggestions are tracked as [GitHub issues](/issues).
 This repository is currently developed with an "unstable main" workflow. The
 current contents of the main branch is a preview of what the next full release
 of all crates may look like, but is not stable. For example, as-yet-unreleased
-zcash_client_sqlite migrations may be altered incompatibly at any time.
+`zcash_client_sqlite` migrations may be altered incompatibly at any time.
 
 In the main branch, all crates have the version corresponding to their most
 recent stable release on https://crates.io; this enables the preview state to
@@ -234,7 +230,7 @@ crate to which the modification will be applied. There are two cases to
 consider here:
 
 - If the modification involves a SemVer-breaking API change, branch from
-  the latest release tag for the crate in question.
+  the `main` branch.
 
 - If the modification can be applied as a SemVer-compatible change without
   generating substantial source-code-level or semantic conflicts with the
@@ -272,7 +268,7 @@ to aid with PR stacking.
   the context of a single PR.
 - When a commit alters the public API, fixes a bug, or changes the underlying
   semantics of existing code, the commit MUST also modify the affected
-  submodules' `CHANGELOG.md` files to clearly document the change.
+  crates' `CHANGELOG.md` files to clearly document the change.
 - Updated or added members of the public API MUST include complete `rustdoc`
   documentation comments.
 - It is acceptable and desirable to open pull requests in "Draft" status. Only
