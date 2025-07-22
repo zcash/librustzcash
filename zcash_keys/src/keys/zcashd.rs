@@ -170,7 +170,7 @@ impl ZcashdHdDerivation {
 
             Ok(ZcashdHdDerivation::Post470LegacySapling { address_index })
         } else {
-            if parts.get(4).is_some() {
+            if parts.get(3).is_some() {
                 return Err(PathParseError::PathInvalid);
             }
             let account_id = AccountId::try_from(account_index)
@@ -220,7 +220,7 @@ mod tests {
         );
 
         let zip32_bip39_account_id_invalid = format!(
-            "m/32'/{}'/{}'/0'",
+            "m/32'/{}'/{}'",
             NetworkType::Main.coin_type(),
             ZcashdHdDerivation::ZCASHD_LEGACY_ACCOUNT_INDEX + 1
         );
