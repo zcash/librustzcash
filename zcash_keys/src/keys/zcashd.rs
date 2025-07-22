@@ -170,7 +170,7 @@ impl ZcashdHdDerivation {
 
             Ok(ZcashdHdDerivation::Post470LegacySapling { address_index })
         } else {
-            if parts.get(4).is_some() {
+            if parts.get(3).is_some() {
                 return Err(PathParseError::PathInvalid);
             }
             let account_id = AccountId::try_from(account_index)
@@ -220,7 +220,7 @@ mod tests {
         );
 
         let zip32_bip39_account_id_invalid = format!(
-            "m/32'/{}'/{}'/0'",
+            "m/32'/{}'/{}'",
             NetworkType::Main.coin_type(),
             ZcashdHdDerivation::ZCASHD_LEGACY_ACCOUNT_INDEX + 1
         );
@@ -240,6 +240,12 @@ mod tests {
                 address_index
             })
             if address_index.0 == 0
+        );
+
+        let too_long_path = format!("m/32'/{}'/1'/0'", NetworkType::Main.coin_type(),);
+        assert_matches!(
+            ZcashdHdDerivation::parse_hd_path(&NetworkType::Main, &too_long_path),
+            Err(PathParseError::PathInvalid)
         );
     }
 }
