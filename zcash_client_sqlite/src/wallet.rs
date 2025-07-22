@@ -1073,7 +1073,7 @@ pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
         let ufvk_str: Option<String> = row.get(1)?;
         if let Some(ufvk_str) = ufvk_str {
             let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
-                .map_err(SqliteClientError::CorruptedData);
+                .map_err(|e| SqliteClientError::CorruptedData(e.to_string()));
             Ok(Some((AccountUuid(row.get(0)?), ufvk)))
         } else {
             Ok(None)

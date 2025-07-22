@@ -73,7 +73,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
             let ufvk_str: String = row.get(1)?;
             let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str)
-                .map_err(WalletMigrationError::CorruptedData)?;
+                .map_err(|e| WalletMigrationError::CorruptedData(e.to_string()))?;
 
             // Verify that the address column contains the expected value.
             let address: String = row.get(2)?;

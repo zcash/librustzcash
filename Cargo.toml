@@ -176,6 +176,9 @@ zip32 = { version = "0.2", default-features = false }
 # Workaround for https://anonticket.torproject.org/user/projects/arti/issues/pending/4028/
 time-core = "=0.1.2"
 
+# Error handling
+snafu = "0.8.6"
+
 [workspace.metadata.release]
 consolidate-commits = false
 pre-release-commit-message = "{{crate_name}} {{version}}"

@@ -3,6 +3,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::{self, Display};
 
+use snafu::prelude::*;
 use zcash_address::unified::{self, Container, Encoding, Typecode, Ufvk, Uivk};
 use zcash_protocol::consensus;
 use zip32::{AccountId, DiversifierIndex};
@@ -90,7 +91,7 @@ fn to_transparent_child_index(j: DiversifierIndex) -> Option<NonHardenedChildInd
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum DerivationError {
     #[cfg(feature = "orchard")]
     Orchard(orchard::zip32::Error),
@@ -131,54 +132,57 @@ pub enum Era {
 }
 
 /// A type for errors that can occur when decoding keys from their serialized representations.
-#[derive(Debug, PartialEq, Eq)]
+
+#[derive(Snafu, Debug, PartialEq, Eq)]
 pub enum DecodingError {
     #[cfg(feature = "unstable")]
-    ReadError(&'static str),
+    #[snafu(display("Read error: {msg}"))]
+    ReadError { msg: &'static str },
+
     #[cfg(feature = "unstable")]
+    #[snafu(display("Invalid era"))]
     EraInvalid,
+
     #[cfg(feature = "unstable")]
-    EraMismatch(Era),
+    #[snafu(display("Era mismatch: actual {era}"))]
+    EraMismatch { era: Era },
+
     #[cfg(feature = "unstable")]
+    #[snafu(display("Invalid typecode"))]
     TypecodeInvalid,
+
     #[cfg(feature = "unstable")]
+    #[snafu(display("Invalid length"))]
     LengthInvalid,
+
     #[cfg(feature = "unstable")]
-    LengthMismatch(Typecode, u32),
+    #[snafu(display("Length mismatch: received {length} bytes for typecode {typecode:?}"))]
+    LengthMismatch { typecode: Typecode, length: u32 },
+
     #[cfg(feature = "unstable")]
-    InsufficientData(Typecode),
+    #[snafu(display("Insufficient data for typecode {typecode:?}"))]
+    InsufficientData { typecode: Typecode },
+
     /// The key data could not be decoded from its string representation to a valid key.
-    KeyDataInvalid(Typecode),
-}
+    #[snafu(display("Invalid key data for key type {typecode:?}"))]
+    KeyDataInvalid { typecode: Typecode },
 
-impl core::fmt::Display for DecodingError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            #[cfg(feature = "unstable")]
-            DecodingError::ReadError(s) => write!(f, "Read error: {s}"),
-            #[cfg(feature = "unstable")]
-            DecodingError::EraInvalid => write!(f, "Invalid era"),
-            #[cfg(feature = "unstable")]
-            DecodingError::EraMismatch(e) => write!(f, "Era mismatch: actual {e:?}"),
-            #[cfg(feature = "unstable")]
-            DecodingError::TypecodeInvalid => write!(f, "Invalid typecode"),
-            #[cfg(feature = "unstable")]
-            DecodingError::LengthInvalid => write!(f, "Invalid length"),
-            #[cfg(feature = "unstable")]
-            DecodingError::LengthMismatch(t, l) => {
-                write!(f, "Length mismatch: received {l} bytes for typecode {t:?}")
-            }
-            #[cfg(feature = "unstable")]
-            DecodingError::InsufficientData(t) => {
-                write!(f, "Insufficient data for typecode {t:?}")
-            }
-            DecodingError::KeyDataInvalid(t) => write!(f, "Invalid key data for key type {t:?}"),
-        }
-    }
-}
+    #[snafu(display("{source}"))]
+    Parse { source: unified::ParseError },
 
-#[cfg(feature = "std")]
-impl std::error::Error for DecodingError {}
+    #[snafu(display("UFVK is for network {seen:?} but we expected {expected:?}"))]
+    NetworkMismatch {
+        seen: zcash_protocol::consensus::NetworkType,
+        expected: zcash_protocol::consensus::NetworkType,
+    },
+
+    #[snafu(display("Derivation error - typecode {typecode:?}"))]
+    Derivation {
+        #[cfg(any(feature = "orchard", feature = "transparent-inputs"))]
+        error: DerivationError,
+        typecode: Typecode,
+    },
+}
 
 #[cfg(feature = "unstable")]
 impl Era {
@@ -832,16 +836,20 @@ impl UnifiedFullViewingKey {
     /// Parses a `UnifiedFullViewingKey` from its [ZIP 316] string encoding.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn decode<P: consensus::Parameters>(params: &P, encoding: &str) -> Result<Self, String> {
-        let (net, ufvk) = unified::Ufvk::decode(encoding).map_err(|e| e.to_string())?;
+    pub fn decode<P: consensus::Parameters>(
+        params: &P,
+        encoding: &str,
+    ) -> Result<Self, DecodingError> {
+        let (net, ufvk) = unified::Ufvk::decode(encoding).context(ParseSnafu)?;
         let expected_net = params.network_type();
-        if net != expected_net {
-            return Err(format!(
-                "UFVK is for network {net:?} but we expected {expected_net:?}",
-            ));
-        }
-
-        Self::parse(&ufvk).map_err(|e| e.to_string())
+        snafu::ensure!(
+            net == expected_net,
+            NetworkMismatchSnafu {
+                seen: net,
+                expected: expected_net
+            }
+        );
+        Self::parse(&ufvk)
     }
 
     /// Parses a `UnifiedFullViewingKey` from its [ZIP 316] string encoding.
@@ -863,7 +871,9 @@ impl UnifiedFullViewingKey {
             .filter_map(|receiver| match receiver {
                 #[cfg(feature = "orchard")]
                 unified::Fvk::Orchard(data) => orchard::keys::FullViewingKey::from_bytes(data)
-                    .ok_or(DecodingError::KeyDataInvalid(Typecode::Orchard))
+                    .context(KeyDataInvalidSnafu {
+                        typecode: Typecode::Orchard,
+                    })
                     .map(|addr| {
                         orchard = Some(addr);
                         None
@@ -877,7 +887,12 @@ impl UnifiedFullViewingKey {
                 #[cfg(feature = "sapling")]
                 unified::Fvk::Sapling(data) => {
                     sapling::DiversifiableFullViewingKey::from_bytes(data)
-                        .ok_or(DecodingError::KeyDataInvalid(Typecode::Sapling))
+                        .ok_or(
+                            KeyDataInvalidSnafu {
+                                typecode: Typecode::Sapling,
+                            }
+                            .build(),
+                        )
                         .map(|pa| {
                             sapling = Some(pa);
                             None
@@ -891,7 +906,13 @@ impl UnifiedFullViewingKey {
                 ))),
                 #[cfg(feature = "transparent-inputs")]
                 unified::Fvk::P2pkh(data) => transparent::keys::AccountPubKey::deserialize(data)
-                    .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh))
+                    .map_err(|_| {
+                        // Note: the bip32::Error is ignored
+                        KeyDataInvalidSnafu {
+                            typecode: Typecode::P2pkh,
+                        }
+                        .build()
+                    })
                     .map(|tfvk| {
                         transparent = Some(tfvk);
                         None
@@ -915,7 +936,14 @@ impl UnifiedFullViewingKey {
             orchard,
             unknown,
         )
-        .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh))
+        .map_err(|_e| {
+            DerivationSnafu {
+                typecode: Typecode::P2pkh,
+                #[cfg(any(feature = "orchard", feature = "transparent-inputs"))]
+                error: _e,
+            }
+            .build()
+        })
     }
 
     /// Returns the string encoding of this `UnifiedFullViewingKey` for the given network.
@@ -1124,7 +1152,9 @@ impl UnifiedIncomingViewingKey {
                     {
                         orchard = Some(
                             Option::from(orchard::keys::IncomingViewingKey::from_bytes(data))
-                                .ok_or(DecodingError::KeyDataInvalid(Typecode::Orchard))?,
+                                .context(KeyDataInvalidSnafu {
+                                    typecode: Typecode::Orchard,
+                                })?,
                         );
                     }
 
@@ -1136,7 +1166,9 @@ impl UnifiedIncomingViewingKey {
                     {
                         sapling = Some(
                             Option::from(::sapling::zip32::IncomingViewingKey::from_bytes(data))
-                                .ok_or(DecodingError::KeyDataInvalid(Typecode::Sapling))?,
+                                .context(KeyDataInvalidSnafu {
+                                    typecode: Typecode::Sapling,
+                                })?,
                         );
                     }
 
@@ -1147,8 +1179,13 @@ impl UnifiedIncomingViewingKey {
                     #[cfg(feature = "transparent-inputs")]
                     {
                         transparent = Some(
-                            transparent::keys::ExternalIvk::deserialize(data)
-                                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh))?,
+                            transparent::keys::ExternalIvk::deserialize(data).map_err(|_| {
+                                // Note: the bip32:Error is ignored
+                                KeyDataInvalidSnafu {
+                                    typecode: Typecode::P2pkh,
+                                }
+                                .build()
+                            })?,
                         );
                     }
 

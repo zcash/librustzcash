@@ -67,6 +67,9 @@ byteorder = { workspace = true, optional = true }
 # - Digests
 blake2b_simd = { workspace = true }
 
+# - Error handling
+snafu.workspace = true
+
 [dev-dependencies]
 hex.workspace = true
 jubjub.workspace = true
@@ -76,7 +79,9 @@ orchard = { workspace = true, features = ["circuit"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 
 [features]
-default = ["std"]
+# TODO(schell): remove this
+#default = ["std"]
+default = ["std", "transparent-inputs", "orchard", "sapling"]
 std = ["dep:document-features"]
 
 ## Enables use of transparent key parts and addresses
