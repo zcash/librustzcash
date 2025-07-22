@@ -130,7 +130,8 @@ impl<A: Authorization> Bundle<A> {
             .sum::<Option<ZatBalance>>()
             .ok_or(BalanceError::Overflow)?;
 
-        Ok(Some(ZatBalance::from(input_sum) - output_sum).ok_or(BalanceError::Underflow)?)
+        let balance = (ZatBalance::from(input_sum) - output_sum).ok_or(BalanceError::Underflow)?;
+        Ok(Some(balance))
     }
 }
 
