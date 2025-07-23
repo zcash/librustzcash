@@ -1296,7 +1296,7 @@ pub trait InputSource {
         target_value: TargetValue,
         sources: &[ShieldedProtocol],
         target_height: BlockHeight,
-        min_confirmations: ConfirmationsPolicy,
+        confirmations_policy: wallet::ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
 

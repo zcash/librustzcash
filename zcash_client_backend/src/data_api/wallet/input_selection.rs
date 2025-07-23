@@ -179,7 +179,7 @@ pub trait InputSelector {
         params: &ParamsT,
         wallet_db: &Self::InputSource,
         target_height: BlockHeight,
-        untrusted_anchor_height: BlockHeight,
+        anchor_height: BlockHeight,
         min_confirmations: ConfirmationsPolicy,
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,

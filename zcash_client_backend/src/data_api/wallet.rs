@@ -274,6 +274,25 @@ impl Default for ConfirmationsPolicy {
     }
 }
 
+impl ConfirmationsPolicy {
+    pub const MIN: Self = ConfirmationsPolicy {
+        trusted: NonZeroU32::MIN,
+        untrusted: NonZeroU32::MIN,
+    };
+
+    /// Create a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields both
+    /// set to `min_confirmations`.
+    ///
+    /// Returns `None` if `min_confirmations` is `0`.
+    pub fn new_symmetrical(min_confirmations: u32) -> Option<Self> {
+        let confirmations = NonZeroU32::new(min_confirmations)?;
+        Some(Self {
+            trusted: confirmations,
+            untrusted: confirmations,
+        })
+    }
+}
+
 /// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
 /// of transactions that can then be authorized and made ready for submission to the network with
 /// [`create_proposed_transactions`].
@@ -298,17 +317,21 @@ where
     InputsT: InputSelector<InputSource = DbT>,
     ChangeT: ChangeStrategy<MetaSource = DbT>,
 {
+    // Using the trusted confirmations results in an anchor_height that will
+    // include the maximum number of notes being selected, and we can filter
+    // later based on the input source (whether it's trusted or not) and the
+    // number of confirmations
     let maybe_intial_heights = wallet_db
-        .get_target_and_anchor_heights(min_confirmations.untrusted)
+        .get_target_and_anchor_heights(min_confirmations.trusted)
         .map_err(InputSelectorError::DataSource)?;
-    let (target_height, untrusted_anchor_height) =
+    let (target_height, anchor_height) =
         maybe_intial_heights.ok_or_else(|| InputSelectorError::SyncRequired)?;
 
     let proposal = input_selector.propose_transaction(
         params,
         wallet_db,
         target_height,
-        untrusted_anchor_height,
+        anchor_height,
         min_confirmations,
         spend_from_account,
         request,
