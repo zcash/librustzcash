@@ -1,13 +1,11 @@
 use crate::encoding::{ReadBytesExt, WriteBytesExt};
+use core2::io::{self, Error, ErrorKind, Read, Write};
 use nonempty::NonEmpty;
 use orchard::issuance::{IssueAction, IssueAuth, IssueBundle, Signed};
 use orchard::keys::IssuanceValidatingKey;
 use orchard::note::{AssetBase, RandomSeed, Rho};
 use orchard::value::NoteValue;
 use orchard::{Address, Note};
-/// Functions for parsing & serialization of the issuance bundle components.
-use std::io;
-use std::io::{Error, ErrorKind, Read, Write};
 use zcash_encoding::{CompactSize, Vector};
 
 /// Reads an [`orchard::Bundle`] from a v6 transaction format.

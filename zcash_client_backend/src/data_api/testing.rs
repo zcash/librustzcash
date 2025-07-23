@@ -2112,14 +2112,13 @@ fn compact_orchard_action<R: RngCore + CryptoRng>(
 ) -> (CompactOrchardAction, ::orchard::Note) {
     use zcash_note_encryption::ShieldedOutput;
 
-    let (compact_action, note) =
-        ::orchard::domain::compact_action::testing::fake_compact_action::<_, OrchardVanilla>(
-            rng,
-            nf_old,
-            recipient,
-            ::orchard::value::NoteValue::from_raw(value.into_u64()),
-            ovk,
-        );
+    let (compact_action, note) = ::orchard::domain::fake_compact_action::<_, OrchardVanilla>(
+        rng,
+        nf_old,
+        recipient,
+        ::orchard::value::NoteValue::from_raw(value.into_u64()),
+        ovk,
+    );
 
     (
         CompactOrchardAction {

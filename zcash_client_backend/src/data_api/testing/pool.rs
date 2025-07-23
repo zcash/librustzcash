@@ -85,6 +85,8 @@ use {
 use zcash_protocol::PoolType;
 
 #[cfg(feature = "pczt")]
+use orchard::orchard_flavor::OrchardVanilla;
+#[cfg(feature = "pczt")]
 use pczt::roles::{prover::Prover, signer::Signer};
 
 /// Trait that exposes the pool-specific types and operations necessary to run the
@@ -3171,9 +3173,9 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, DSF>(
 
     // Create proofs.
     let sapling_prover = LocalTxProver::bundled();
-    let orchard_pk = ::orchard::circuit::ProvingKey::build();
+    let orchard_pk = ::orchard::circuit::ProvingKey::build::<OrchardVanilla>();
     let pczt_proven = Prover::new(pczt_updated)
-        .create_orchard_proof(&orchard_pk)
+        .create_orchard_proof::<OrchardVanilla>(&orchard_pk)
         .unwrap()
         .create_sapling_proofs(&sapling_prover, &sapling_prover)
         .unwrap()

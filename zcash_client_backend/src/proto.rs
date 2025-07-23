@@ -40,7 +40,7 @@ use orchard::orchard_flavor::OrchardVanilla;
 #[cfg(feature = "orchard")]
 use orchard::tree::MerkleHashOrchard;
 #[cfg(feature = "orchard")]
-use zcash_note_encryption::note_bytes::NoteBytesData;
+use zcash_note_encryption::note_bytes::{NoteBytes, NoteBytesData};
 
 #[rustfmt::skip]
 #[allow(unknown_lints)]
@@ -206,7 +206,7 @@ impl TryFrom<&compact_formats::CompactOrchardAction>
                 value.nf()?,
                 value.cmx()?,
                 value.ephemeral_key()?,
-                NoteBytesData(value.ciphertext[..].as_ref().try_into().unwrap()),
+                NoteBytesData::from_slice(value.ciphertext.as_slice()).unwrap(),
             ),
         )
     }

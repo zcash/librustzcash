@@ -28,17 +28,21 @@ use {
     crate::transaction::{
         sighash::{signature_hash, SignableInput},
         txid::TxIdDigester,
-        TransactionData, Unauthorized,
+        OrchardBundle, TransactionData, Unauthorized,
     },
     ::sapling::prover::{OutputProver, SpendProver},
     ::transparent::builder::TransparentSigningSet,
     alloc::vec::Vec,
+    orchard::{
+        builder::{InProgress, Unproven},
+        bundle::Authorized,
+        orchard_flavor::OrchardFlavor,
+    },
 };
 
-use crate::transaction::OrchardBundle;
-use orchard::builder::{BundleType, InProgress, Unproven};
+use orchard::builder::BundleType;
 use orchard::note::AssetBase;
-use orchard::orchard_flavor::{OrchardFlavor, OrchardVanilla};
+use orchard::orchard_flavor::OrchardVanilla;
 use orchard::Address;
 
 #[cfg(feature = "transparent-inputs")]
@@ -59,7 +63,6 @@ use crate::{
     },
 };
 use orchard::builder::BuildError::BundleTypeNotSatisfiable;
-use orchard::bundle::Authorized;
 #[cfg(zcash_unstable = "nu7")]
 use orchard::{
     bundle::Authorization,
@@ -1122,11 +1125,9 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
                     #[cfg(not(zcash_unstable = "nu7"))]
                     Err(Error::OrchardBuild(BundleTypeNotSatisfiable))
                 }
-                BundleType::DEFAULT_VANILLA => {
-                    return builder
-                        .build_for_pczt::<OrchardVanilla>(&mut rng)
-                        .map_err(Error::OrchardBuild)
-                }
+                BundleType::DEFAULT_VANILLA => builder
+                    .build_for_pczt::<OrchardVanilla>(&mut rng)
+                    .map_err(Error::OrchardBuild),
                 _ => Err(Error::OrchardBuild(BundleTypeNotSatisfiable)),
             })
             .transpose()?
@@ -1152,6 +1153,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
     }
 }
 
+#[cfg(feature = "circuits")]
 fn prove_and_sign<D, V, FE>(
     bundle: orchard::Bundle<InProgress<Unproven, orchard::builder::Unauthorized>, V, D>,
     mut rng: &mut (impl RngCore + CryptoRng),
@@ -1171,6 +1173,7 @@ where
 /// This function returns the first nullifier from the first transfer action in the Orchard bundle.
 /// It can only be called on ZSA bundle, will panic in case of invalid input e.g. Vanilla or empty bundle.
 #[cfg(zcash_unstable = "nu7")]
+#[cfg(feature = "circuits")]
 fn first_nullifier<A: Authorization>(orchard_bundle: &Option<OrchardBundle<A>>) -> &Nullifier {
     match orchard_bundle {
         Some(OrchardBundle::OrchardZSA(b)) => b.actions().first().nullifier(),

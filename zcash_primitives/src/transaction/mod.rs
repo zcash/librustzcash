@@ -35,13 +35,12 @@ use self::{
 };
 
 #[cfg(feature = "circuits")]
-use ::sapling::builder as sapling_builder;
+use {::sapling::builder as sapling_builder, orchard::builder::Unproven};
 
 #[cfg(zcash_unstable = "zfuture")]
 use self::components::tze::{self, TzeIn, TzeOut};
 #[cfg(zcash_unstable = "nu7")]
 use crate::transaction::components::issuance;
-use orchard::builder::Unproven;
 use orchard::orchard_flavor::OrchardVanilla;
 use orchard::Bundle;
 #[cfg(zcash_unstable = "nu7")]

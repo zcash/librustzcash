@@ -24,7 +24,8 @@ jobs:
 
         include:
           - target: Linux
-            os: ubuntu-latest-8cores
+            # TODO: return to ubuntu-latest-8cores when merging with upstream
+            os: ubuntu-latest
 
           - state: transparent
             extra_flags: transparent-inputs
@@ -90,7 +91,8 @@ jobs:
           - target: macOS
             os: macOS-latest
           - target: Windows
-            os: windows-latest-8cores
+            # TODO: return to windows-latest-8cores when merging with upstream
+            os: windows-latest
 
           - state: transparent
             extra_flags: transparent-inputs
@@ -159,7 +161,8 @@ jobs:
 
         include:
           - target: Linux
-            os: ubuntu-latest-8cores
+            # TODO: return to ubuntu-latest-8cores when merging with upstream
+            os: ubuntu-latest
 
           - state: transparent
             extra_flags: transparent-inputs

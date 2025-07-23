@@ -2848,7 +2848,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.11.0"
-source = "git+https://github.com/QED-it/orchard?rev=c9e513e2b579c48f46ea9f455878aa15b1852948#c9e513e2b579c48f46ea9f455878aa15b1852948"
+source = "git+https://github.com/QED-it/orchard?rev=9f44f55eca726114a4b89793b2a59fe386e638ed#9f44f55eca726114a4b89793b2a59fe386e638ed"
 dependencies = [
  "aes",
  "bitvec",
@@ -6528,7 +6528,7 @@ dependencies = [
 [[package]]
 name = "zcash_note_encryption"
 version = "0.4.1"
-source = "git+https://github.com/QED-it/zcash_note_encryption?branch=zsa1#ba58c2964ff8c96830407bdd6ff284b39171ba62"
+source = "git+https://github.com/zcash/zcash_note_encryption?branch=main#668ea44cf59a226715a5f3cb1bf88710a8c188a3"
 dependencies = [
  "chacha20",
  "chacha20poly1305",
