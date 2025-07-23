@@ -9,6 +9,12 @@ represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
 ## [Unreleased]
+### Added
+- `zcash_protocol::constants::`
+  - `{mainnet, testnet, regtest}::B58_SECRET_KEY_PREFIX`
+
+### Changed
+- `zcash_protocol::consensus::NetworkConstants` has added method `b58_secret_key_prefix`.
 
 ## [0.5.4] - 2025-07-15
 
