@@ -195,8 +195,6 @@ Please ensure these processes succeed without errors on your machine before subm
 
 - cargo check
 - cargo test --all-features
-- cargo build
-- cargo build --release
 - cargo clippy
 - cargo fmt
 - cargo doc
