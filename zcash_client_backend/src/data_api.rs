@@ -64,7 +64,6 @@ use std::{
     io,
     num::{NonZeroU32, TryFromIntError},
 };
-use wallet::ConfirmationsPolicy;
 
 use incrementalmerkletree::{frontier::Frontier, Retention};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
@@ -89,6 +88,7 @@ use self::{
     scanning::ScanRange,
 };
 use crate::{
+    data_api::wallet::ConfirmationsPolicy,
     decrypt::DecryptedOutput,
     proto::service::TreeState,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
