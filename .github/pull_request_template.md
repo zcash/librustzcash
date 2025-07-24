@@ -43,7 +43,8 @@
 
 I verified each of these on my system:
 
-- [ ] cargo test
+- [ ] cargo check
+- [ ] cargo test --all-features
 - [ ] cargo build
 - [ ] cargo build --release
 - [ ] cargo clippy
