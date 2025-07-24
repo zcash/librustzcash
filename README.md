@@ -161,8 +161,66 @@ All code in this workspace is licensed under either of
 
 at your option.
 
-### Contribution
+## Contribution Guide
+
+We always welcome more contributors to improve core Zcash infrastructure! Please take some time to read this whole section to contribute most helpfully.
+
+### Licensing
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall
 be dual licensed as above, without any additional terms or conditions.
+
+### Ways of Contributing
+
+Any of the following are helpful:
+
+- Providing reviews to open PRs: https://github.com/zcash/librustzcash/pulls
+- Updating open issues, especially older ones, such as by checking if it is still relevant on the latest `main` branch, recreating the issue on your machine, adding an automated test to demonstrate a given bug, recommending issue labels, etc...
+- Filing new issues, especially if you've learned about open issues and the current codebase. One good form of issue are questions about the state of things or future plans which aren't clear from current docs (or are out of scope for current docs).
+- Contributing documentation improvements to the README.md files or API docs. Also, checking for API doc rendering issues.
+- Submitting bugfix or feature improvement PRs for open issues.
+
+### Coding Guidelines
+
+As this project evolves, so do the coding guidelines. Remember to check this document for changes.
+
+#### Draft Pull Requests
+
+We recommend opening a draft pull request early in your process. This includes a template which can help you cover all of the bases in your process, and it lets others know your intention (and to potentially provide early feedback/questions before you spend too much time on a misaligned goal).
+
+You can also review the pull request template locally in `.github/pull_request_template.md`.
+
+#### Local Automated Checks
+
+Please ensure these processes succeed without errors on your machine before submitting a PR:
+
+- cargo check
+- cargo test --all-features
+- cargo clippy --all-features --all-targets
+- cargo fmt
+- cargo doc
+
+For all of these, make sure you are using only the default configuration, or configuration specific to this workspace. (For example, if you have configured `rustfmt` or `clippy` in a non-default way, it may not be compatible with our formatting conventions and add noise to your submission.)
+
+**Tip:** `cargo clippy --all-features --all-targets --fix` will modify source to fix a subset of the issues it detects.
+
+##### Warnings
+
+Ideally none of the above processes should produce warnings. However, sometimes it is necessary to support configurations or systems which issue warnings to meet our target use cases.
+
+Verify that the checks above do not create any _new_ (or changed) warnings whenever you are contributing changes. If you believe your changes need to introduce a warning in some contexts, ensure you describe that in the PR description.
+
+#### Crate Versioning
+
+We aspire to follow SemVer as per https://semver.org/.
+
+Document all API changes clearly in your PR description, and a rationale motivating the change, including what would be required to not break backwards compatibility.
+
+Do not change crate version numbers in your PR. These are changed as part of a distinct crate release process.
+
+#### Dependencies
+
+We aspire to a rigorous standard for dependencies. In particular, this code is security critical, and so we scrutinize dependencies and their releases moreso than many open source projects.
+
+This means any PR which adds dependencies has a notably higher bar to pass. The PR description needs a section on the motivation and impact of selecting a dependency. This is also true for changes to versions or crate features of dependencies, though often that will be a less strenuous process than adding completely new dependencies.
