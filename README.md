@@ -214,10 +214,6 @@ Verify that the checks above do not create any _new_ (or changed) warnings whene
 
 We aspire to follow SemVer as per https://semver.org/.
 
-A major restriction there is for any crate v1.x.y or later, backwards-incompatible API changes cannot be accepted.
-
-As of this writing, every crate is in the initial-development stage of v0.x.y, so it is _feasible_ that public APIs can change in backwards-incompatible ways. However, in practice the impact on the current (known) Zcash ecosystem is a crucial concern.
-
 Document all API changes clearly in your PR description, and a rationale motivating the change, including what would be required to not break backwards compatibility.
 
 Do not change crate version numbers in your PR. These are changed as part of a distinct crate release process.
