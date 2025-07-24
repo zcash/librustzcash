@@ -64,7 +64,6 @@ use std::{
     io,
     num::{NonZeroU32, TryFromIntError},
 };
-use wallet::ConfirmationsPolicy;
 
 use incrementalmerkletree::{frontier::Frontier, Retention};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
