@@ -229,12 +229,19 @@ where
     //    well as a single note for which the sum was greater than or equal to the
     //    required value, bringing the sum of all selected notes across the threshold.
     let mut stmt_select_notes = conn.prepare_cached(
-        // TODO(schell): query should take anchor height of untrusted as well
         &format!(
             "WITH eligible AS (
                  SELECT
                      {table_prefix}_received_notes.id AS id, txid, {output_index_col},
-                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
+                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position, 
+                     transactions.block AS mined_height,
+                     -- TODO(schell): ensure this SQL is correct
+                     EXISTS (
+                         SELECT 1
+                         FROM {table_prefix}_sent_notes
+                         WHERE {table_prefix}_sent_notes.txid = transactions.txid
+                         AND {table_prefix}_sent_notes.from_account_id = accounts.id
+                     ) AS is_trusted,
                      SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
                      accounts.ufvk as ufvk, recipient_key_scope
                  FROM {table_prefix}_received_notes
@@ -272,7 +279,7 @@ where
              )
              SELECT id, txid, {output_index_col},
                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                    ufvk, recipient_key_scope
+                    ufvk, recipient_key_scope, mined_height, is_trusted
              FROM eligible WHERE so_far < :target_value
              UNION
              SELECT id, txid, {output_index_col},
@@ -302,12 +309,28 @@ where
             ":exclude": &excluded_ptr,
             ":wallet_birthday": u32::from(birthday_height)
         ],
-        |r| to_spendable_note(params, r),
+        |r| -> Result<_, SqliteClientError> {
+            let maybe_note = to_spendable_note(params, r)?;
+            let note_is_trusted: bool = r.get("is_trusted")?;
+            let mined_height: u32 = r.get("mined_height")?;
+            Ok(maybe_note.map(|note| (note, note_is_trusted, mined_height)))
+        },
     )?;
 
-    notes
-        .filter_map(|r| r.transpose())
-        .collect::<Result<_, _>>()
+    let mut spendable_notes: Vec<_> = vec![];
+    for result_maybe_note in notes {
+        let maybe_note = result_maybe_note?;
+        if let Some((note, is_trusted, mined_height)) = maybe_note {
+            let number_of_confirmations = u32::from(anchor_height).saturating_sub(mined_height);
+            // If the note is from a trusted source (this wallet), then we don't have to determine the
+            // number of confirmations, as we've already queried above based on the trusted anchor height.
+            // So we only check if it's trusted, or if it meets the untrusted number of confirmations.
+            if is_trusted || number_of_confirmations >= confirmations_policy.untrusted.into() {
+                spendable_notes.push(note);
+            }
+        }
+    }
+    Ok(spendable_notes)
 }
 
 #[allow(dead_code)]
