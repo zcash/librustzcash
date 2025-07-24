@@ -193,7 +193,8 @@ You can also review the pull request template locally in `.github/pull_request_t
 
 Please ensure these processes succeed without errors on your machine before submitting a PR:
 
-- cargo test
+- cargo check
+- cargo test --all-features
 - cargo build
 - cargo build --release
 - cargo clippy
