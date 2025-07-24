@@ -195,13 +195,13 @@ Please ensure these processes succeed without errors on your machine before subm
 
 - cargo check
 - cargo test --all-features
-- cargo clippy
+- cargo clippy --all-features --all-targets
 - cargo fmt
 - cargo doc
 
 For all of these, make sure you are using only the default configuration, or configuration specific to this workspace. (For example, if you have configured `rustfmt` or `clippy` in a non-default way, it may not be compatible with our formatting conventions and add noise to your submission.)
 
-**Tip:** `cargo clippy --fix` will modify source to fix a subset of the issues it detects.
+**Tip:** `cargo clippy --all-features --all-targets --fix` will modify source to fix a subset of the issues it detects.
 
 ##### Warnings
 
