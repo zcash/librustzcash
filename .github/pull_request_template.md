@@ -17,7 +17,7 @@
 
 ## Public API Changes
 
-<!-- document all API changes as best as you can, including whether it breaks backwards compatibility or extends the API from the target branch. If there are 0 public API impacts, assert "No API changes." here -->
+<!-- Ensure that the CHANGELOG of the appropriate crate(s) document all changes to public APIs. Briefly note those changes here, indicating whether the change(s) breaks API compatibility; pay particular attention to changes to public trait interfaces, as additive changes that do not supply a default implementation are API-breaking. Also, updates to the minimum-supported Rust version, and major-version updates to dependencies that are exposed as part of the public API are considered to be API-breaking changes. Use `cargo semver-checks` to confirm whether the changes you have introduced constitute semver-breaking changes. If there are no public API impacts, assert "No API changes." here. -->
 
 ## Known Related Project Impacts
 
