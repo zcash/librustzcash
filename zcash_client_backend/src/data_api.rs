@@ -1294,7 +1294,8 @@ pub trait InputSource {
         account: Self::AccountId,
         target_value: TargetValue,
         sources: &[ShieldedProtocol],
-        anchor_height: BlockHeight,
+        target_height: BlockHeight,
+        confirmations_policy: wallet::ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
 
