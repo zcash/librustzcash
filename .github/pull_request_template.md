@@ -47,7 +47,7 @@ I verified each of these on my system:
 - [ ] cargo test --all-features
 - [ ] cargo build
 - [ ] cargo build --release
-- [ ] cargo clippy
+- [ ] cargo clippy --all-features --all-targets 
 - [ ] cargo fmt
 - [ ] cargo doc
 
