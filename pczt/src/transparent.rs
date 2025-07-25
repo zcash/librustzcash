@@ -374,6 +374,8 @@ impl Bundle {
     }
 
     pub(crate) fn serialize_from(bundle: transparent::pczt::Bundle) -> Self {
+        use zcash_script::script::Parsable;
+
         let inputs = bundle
             .inputs()
             .iter()
@@ -386,13 +388,13 @@ impl Bundle {
                 script_sig: input
                     .script_sig()
                     .as_ref()
-                    .map(|script_sig| script_sig.0.clone()),
+                    .map(|script_sig| script_sig.to_bytes()),
                 value: input.value().into_u64(),
-                script_pubkey: input.script_pubkey().0.clone(),
+                script_pubkey: input.script_pubkey().to_bytes(),
                 redeem_script: input
                     .redeem_script()
                     .as_ref()
-                    .map(|redeem_script| redeem_script.0.clone()),
+                    .map(|redeem_script| redeem_script.to_bytes()),
                 partial_signatures: input.partial_signatures().clone(),
                 sighash_type: input.sighash_type().encode(),
                 bip32_derivation: input
@@ -426,11 +428,11 @@ impl Bundle {
             .iter()
             .map(|output| Output {
                 value: output.value().into_u64(),
-                script_pubkey: output.script_pubkey().0.clone(),
+                script_pubkey: output.script_pubkey().to_bytes(),
                 redeem_script: output
                     .redeem_script()
                     .as_ref()
-                    .map(|redeem_script| redeem_script.0.clone()),
+                    .map(|redeem_script| redeem_script.to_bytes()),
                 bip32_derivation: output
                     .bip32_derivation()
                     .iter()

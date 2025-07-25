@@ -282,7 +282,6 @@ mod tests {
     use {
         crate::wallet::init::migrations::{ufvk_support, utxos_table},
         ::transparent::{
-            address::Script,
             bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut},
             keys::IncomingViewingKey,
         },
@@ -398,6 +397,7 @@ mod tests {
         use zcash_client_backend::keys::UnifiedAddressRequest;
         use zcash_keys::keys::ReceiverRequirement::*;
         use zcash_protocol::value::Zatoshis;
+        use zcash_script::script::{self, Parsable};
 
         use crate::UA_TRANSPARENT;
 
@@ -422,12 +422,12 @@ mod tests {
             Some(transparent::Bundle {
                 vin: vec![TxIn {
                     prevout: OutPoint::fake(),
-                    script_sig: Script(vec![]),
+                    script_sig: script::Sig::from_bytes(&[]).expect("valid").0,
                     sequence: 0,
                 }],
                 vout: vec![TxOut {
                     value: Zatoshis::const_from_u64(1100000000),
-                    script_pubkey: Script(vec![]),
+                    script_pubkey: script::PubKey::from_bytes(&[]).expect("valid").0,
                 }],
                 authorization: Authorized,
             }),

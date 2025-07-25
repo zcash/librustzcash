@@ -4,10 +4,12 @@ use ff::PrimeField;
 
 use ::sapling::bundle::{GrothProofBytes, OutputDescription, SpendDescription};
 use ::transparent::{
+    address::write_script_code,
     bundle::{self as transparent, TxIn, TxOut},
     sighash::{SIGHASH_ANYONECANPAY, SIGHASH_MASK, SIGHASH_NONE, SIGHASH_SINGLE},
 };
 use zcash_protocol::consensus::BranchId;
+use zcash_script::script::Parsable;
 
 use super::{
     components::{sapling as sapling_serialization, sprout::JsDescription},
@@ -235,7 +237,7 @@ pub fn v4_signature_hash<
                 if let Some(bundle) = tx.transparent_bundle.as_ref() {
                     let mut data = vec![];
                     bundle.vin[*input.index()].prevout.write(&mut data).unwrap();
-                    input.script_code().write(&mut data).unwrap();
+                    write_script_code(&input.script_code().to_bytes(), &mut data).unwrap();
                     data.extend_from_slice(&input.value().to_i64_le_bytes());
                     data.extend_from_slice(&bundle.vin[*input.index()].sequence.to_le_bytes());
                     h.update(&data);

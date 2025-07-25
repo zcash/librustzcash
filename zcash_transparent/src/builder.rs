@@ -6,8 +6,13 @@ use core::fmt;
 
 use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
 
+use zcash_script::{
+    pattern::*,
+    script::{self, Parsable},
+};
+
 use crate::{
-    address::{Script, TransparentAddress},
+    address::TransparentAddress,
     bundle::{Authorization, Authorized, Bundle, TxIn, TxOut},
     pczt,
     sighash::{SignableInput, TransparentAuthorizingContext},
@@ -20,6 +25,8 @@ use {
         sighash::{SighashType, SIGHASH_ALL},
     },
     sha2::Digest,
+    zcash_encoding::CompactSize,
+    zcash_script::{interpreter::Evaluable, op, standard},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -80,11 +87,17 @@ impl TransparentSigningSet {
     }
 }
 
+#[derive(Debug, Clone)]
+enum InputKind {
+    P2pkh { pubkey: secp256k1::PublicKey },
+    P2sh { redeem_script: script::PubKey },
+}
+
 // TODO: This feature gate can be removed.
 #[cfg(feature = "transparent-inputs")]
 #[derive(Debug, Clone)]
 pub struct TransparentInputInfo {
-    pubkey: secp256k1::PublicKey,
+    kind: InputKind,
     utxo: OutPoint,
     coin: TxOut,
 }
@@ -97,6 +110,47 @@ impl TransparentInputInfo {
 
     pub fn coin(&self) -> &TxOut {
         &self.coin
+    }
+
+    /// The size of this transparent input in a transaction, as used in [ZIP 317].
+    ///
+    /// Returns `None` if we cannot determine the size. (TODO: Remove this case)
+    ///
+    /// [ZIP 317]: https://zips.z.cash/zip-0317#rationale-for-the-chosen-parameters
+    pub fn serialized_len(&self) -> Option<usize> {
+        // PushData(secp256k1::ecdsa::serialized_signature::MAX_LEN + 1)
+        let fake_sig = push_vec(&[0; 72 + 1]);
+
+        let script_len = match &self.kind {
+            InputKind::P2pkh { .. } => {
+                // P2PKH `script_sig` format is:
+                // - PushData(signature || sigtype)
+                // - PushData(pubkey)
+                let fake_pubkey = push_vec(&[0; secp256k1::constants::PUBLIC_KEY_SIZE]);
+                Some(fake_sig.byte_len() + fake_pubkey.byte_len())
+            }
+            InputKind::P2sh { redeem_script } => {
+                standard::solver(redeem_script).and_then(|kind| match kind {
+                    standard::ScriptKind::MultiSig { required, .. } => {
+                        // P2MS-in-P2SH `script_sig` format is:
+                        // - Dummy OP_0 to bypass OP_CHECKMULTISIG bug.
+                        // - PushData(signature || sigtype) * required
+                        // - PushData(redeem_script)
+                        Some(
+                            op::_0.byte_len()
+                                + fake_sig.byte_len() * usize::from(required)
+                                + push_script(redeem_script).byte_len(),
+                        )
+                    }
+                    _ => None,
+                })
+            }
+        }?;
+
+        let prevout_len = 32 + 4;
+        let script_sig_len = CompactSize::serialized_size(script_len) + script_len;
+        let sequence_len = 4;
+        Some(prevout_len + script_sig_len + sequence_len)
     }
 }
 
@@ -138,7 +192,7 @@ impl TransparentBuilder {
         &self.vout
     }
 
-    /// Adds a coin (the output of a previous transaction) to be spent to the transaction.
+    /// Adds a coin (the output of a previous transaction) to be spent in the transaction.
     #[cfg(feature = "transparent-inputs")]
     pub fn add_input(
         &mut self,
@@ -149,7 +203,7 @@ impl TransparentBuilder {
         // Ensure that the RIPEMD-160 digest of the public key associated with the
         // provided secret key matches that of the address to which the provided
         // output may be spent.
-        match coin.script_pubkey.address() {
+        match TransparentAddress::from_script_pubkey(&coin.script_pubkey) {
             Some(TransparentAddress::PublicKeyHash(hash)) => {
                 use ripemd::Ripemd160;
                 use sha2::Sha256;
@@ -161,8 +215,44 @@ impl TransparentBuilder {
             _ => return Err(Error::InvalidAddress),
         }
 
-        self.inputs
-            .push(TransparentInputInfo { pubkey, utxo, coin });
+        self.inputs.push(TransparentInputInfo {
+            kind: InputKind::P2pkh { pubkey },
+            utxo,
+            coin,
+        });
+
+        Ok(())
+    }
+
+    /// Adds a P2SH coin (the output of a previous transaction) to be spent in the
+    /// transaction.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn add_p2sh_input(
+        &mut self,
+        redeem_script: script::PubKey,
+        utxo: OutPoint,
+        coin: TxOut,
+    ) -> Result<(), Error> {
+        // Ensure that the RIPEMD-160 digest of the public key associated with the
+        // provided secret key matches that of the address to which the provided
+        // output may be spent.
+        match TransparentAddress::from_script_pubkey(&coin.script_pubkey) {
+            Some(TransparentAddress::ScriptHash(hash)) => {
+                use ripemd::Ripemd160;
+                use sha2::Sha256;
+
+                if hash[..] != Ripemd160::digest(Sha256::digest(redeem_script.to_bytes()))[..] {
+                    return Err(Error::InvalidAddress);
+                }
+            }
+            _ => return Err(Error::InvalidAddress),
+        }
+
+        self.inputs.push(TransparentInputInfo {
+            kind: InputKind::P2sh { redeem_script },
+            utxo,
+            coin,
+        });
 
         Ok(())
     }
@@ -228,7 +318,7 @@ impl TransparentBuilder {
         #[cfg(feature = "transparent-inputs")]
         let inputs = self
             .inputs
-            .iter()
+            .into_iter()
             .map(|i| pczt::Input {
                 prevout_txid: i.utxo.hash,
                 prevout_index: i.utxo.n,
@@ -237,9 +327,11 @@ impl TransparentBuilder {
                 required_height_lock_time: None,
                 script_sig: None,
                 value: i.coin.value,
-                script_pubkey: i.coin.script_pubkey.clone(),
-                // We don't currently support spending P2SH coins.
-                redeem_script: None,
+                script_pubkey: i.coin.script_pubkey,
+                redeem_script: match i.kind {
+                    InputKind::P2pkh { .. } => None,
+                    InputKind::P2sh { redeem_script } => Some(redeem_script),
+                },
                 partial_signatures: BTreeMap::new(),
                 sighash_type: SighashType::ALL,
                 bip32_derivation: BTreeMap::new(),
@@ -259,13 +351,13 @@ impl TransparentBuilder {
         } else {
             let outputs = self
                 .vout
-                .into_iter()
+                .iter()
                 .map(|o| pczt::Output {
                     value: o.value,
-                    script_pubkey: o.script_pubkey,
-                    // We don't currently support spending P2SH coins, so we only ever see
-                    // external P2SH recipients here, for which we never know the redeem
-                    // script.
+                    script_pubkey: o.script_pubkey.clone(),
+                    // We don't currently support providing the redeem script for
+                    // user-controlled P2SH addresses, so we only ever see external P2SH
+                    // recipients here, for which we never know the redeem script.
                     redeem_script: None,
                     bip32_derivation: BTreeMap::new(),
                     user_address: None,
@@ -295,7 +387,7 @@ impl TransparentAuthorizingContext for Unauthorized {
         vec![]
     }
 
-    fn input_scriptpubkeys(&self) -> Vec<Script> {
+    fn input_scriptpubkeys(&self) -> Vec<script::PubKey> {
         vec![]
     }
 }
@@ -306,7 +398,7 @@ impl TransparentAuthorizingContext for Unauthorized {
         self.inputs.iter().map(|txin| txin.coin.value).collect()
     }
 
-    fn input_scriptpubkeys(&self) -> Vec<Script> {
+    fn input_scriptpubkeys(&self) -> Vec<script::PubKey> {
         self.inputs
             .iter()
             .map(|txin| txin.coin.script_pubkey.clone())
@@ -331,45 +423,56 @@ impl Bundle<Unauthorized> {
             .iter()
             .enumerate()
             .map(|(index, info)| {
-                // Find the matching signing key.
-                let (sk, _) = signing_set
-                    .keys
-                    .iter()
-                    .find(|(_, pubkey)| pubkey == &info.pubkey)
-                    .ok_or(Error::MissingSigningKey)?;
+                match info.kind {
+                    InputKind::P2pkh { pubkey } => {
+                        // Find the matching signing key.
+                        let (sk, _) = signing_set
+                            .keys
+                            .iter()
+                            .find(|(_, pk)| pk == &pubkey)
+                            .ok_or(Error::MissingSigningKey)?;
 
-                let sighash = calculate_sighash(SignableInput {
-                    hash_type: SighashType::ALL,
-                    index,
-                    script_code: &info.coin.script_pubkey, // for p2pkh, always the same as script_pubkey
-                    script_pubkey: &info.coin.script_pubkey,
-                    value: info.coin.value,
-                });
+                        let sighash = calculate_sighash(SignableInput {
+                            hash_type: SighashType::ALL,
+                            index,
+                            script_code: &info.coin.script_pubkey, // for p2pkh, always the same as script_pubkey
+                            script_pubkey: &info.coin.script_pubkey,
+                            value: info.coin.value,
+                        });
 
-                let msg =
-                    secp256k1::Message::from_digest_slice(sighash.as_ref()).expect("32 bytes");
-                let sig = signing_set.secp.sign_ecdsa(&msg, sk);
+                        let msg = secp256k1::Message::from_digest_slice(sighash.as_ref())
+                            .expect("32 bytes");
+                        let sig = signing_set.secp.sign_ecdsa(&msg, sk);
 
-                // Signature has to have "SIGHASH_ALL" appended to it
-                let mut sig_bytes: Vec<u8> = sig.serialize_der()[..].to_vec();
-                sig_bytes.extend([SIGHASH_ALL]);
+                        // Signature has to have "SIGHASH_ALL" appended to it
+                        let mut sig_bytes: Vec<u8> = sig.serialize_der()[..].to_vec();
+                        sig_bytes.extend([SIGHASH_ALL]);
 
-                // P2PKH scriptSig
-                Ok(Script::default() << &sig_bytes[..] << &info.pubkey.serialize()[..])
+                        // P2PKH scriptSig
+                        Ok(script::Sig::new(vec![
+                            push_vec(&sig_bytes),
+                            push_vec(&pubkey.serialize()),
+                        ]))
+                    }
+                    // P2SH is unsupported here; use the PCZT workflow instead.
+                    InputKind::P2sh { .. } => Err(Error::InvalidAddress),
+                }
             });
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let script_sigs = core::iter::empty::<Result<Script, Error>>();
+        let script_sigs = core::iter::empty::<Result<script::Sig<Opcode>, Error>>();
 
         Ok(Bundle {
             vin: self
                 .vin
-                .iter()
+                .into_iter()
                 .zip(script_sigs)
                 .map(|(txin, sig)| {
                     Ok(TxIn {
                         prevout: txin.prevout.clone(),
-                        script_sig: sig?,
+                        script_sig: script::Sig::from_bytes(&sig?.to_bytes())
+                            .expect("PushValues are a subset of Opcodes")
+                            .0,
                         sequence: txin.sequence,
                     })
                 })

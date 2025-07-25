@@ -44,11 +44,9 @@ use orchard::tree::MerkleHashOrchard;
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::WalletTransparentOutput,
-    ::transparent::{
-        address::Script,
-        bundle::{OutPoint, TxOut},
-    },
+    ::transparent::bundle::{OutPoint, TxOut},
     zcash_protocol::value::Zatoshis,
+    zcash_script::script::{self, Parsable},
 };
 
 /// Scans the chain until the wallet is up-to-date.
@@ -519,7 +517,13 @@ where
                     TxOut {
                         value: Zatoshis::from_nonnegative_i64(reply.value_zat)
                             .map_err(|_| Error::MisbehavingServer)?,
-                        script_pubkey: Script(reply.script),
+                        script_pubkey: {
+                            let (script_pubkey, rest) = script::PubKey::from_bytes(&reply.script)
+                                .map_err(|_| Error::MisbehavingServer)?;
+                            rest.is_empty()
+                                .then_some(script_pubkey)
+                                .ok_or(Error::MisbehavingServer)?
+                        },
                     },
                     Some(
                         BlockHeight::try_from(reply.height)

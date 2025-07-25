@@ -5,10 +5,11 @@ use core::convert::Infallible;
 
 use crate::transaction::fees::zip317::P2PKH_STANDARD_INPUT_SIZE;
 use transparent::{
-    address::{Script, TransparentAddress},
+    address::{serialized_script_pubkey_size, TransparentAddress},
     bundle::{OutPoint, TxOut},
 };
 use zcash_protocol::value::Zatoshis;
+use zcash_script::script;
 
 #[cfg(feature = "transparent-inputs")]
 use transparent::builder::TransparentInputInfo;
@@ -38,9 +39,11 @@ pub trait InputView: core::fmt::Debug {
     /// The previous output being spent.
     fn coin(&self) -> &TxOut;
 
-    /// The size of the transparent script required to spend this input.
+    /// The size of this transparent input in a transaction, as used in [ZIP 317].
+    ///
+    /// [ZIP 317]: https://zips.z.cash/zip-0317#rationale-for-the-chosen-parameters
     fn serialized_size(&self) -> InputSize {
-        match self.coin().script_pubkey.address() {
+        match TransparentAddress::from_script_pubkey(&self.coin().script_pubkey) {
             Some(TransparentAddress::PublicKeyHash(_)) => InputSize::STANDARD_P2PKH,
             _ => InputSize::Unknown(self.outpoint().clone()),
         }
@@ -55,6 +58,13 @@ impl InputView for TransparentInputInfo {
 
     fn coin(&self) -> &TxOut {
         self.coin()
+    }
+
+    fn serialized_size(&self) -> InputSize {
+        self.serialized_len().map_or(
+            InputSize::Unknown(self.outpoint().clone()),
+            InputSize::Known,
+        )
     }
 }
 
@@ -74,13 +84,13 @@ pub trait OutputView: core::fmt::Debug {
     fn value(&self) -> Zatoshis;
 
     /// Returns the script corresponding to the newly created output.
-    fn script_pubkey(&self) -> &Script;
+    fn script_pubkey(&self) -> &script::PubKey;
 
     /// Returns the serialized size of the txout.
     fn serialized_size(&self) -> usize {
         // The serialized size of a transparent `TxOut` is the serialized size of an amount
         // plus the serialized size of the script pubkey.
-        8 + self.script_pubkey().serialized_size()
+        8 + serialized_script_pubkey_size(&self.script_pubkey())
     }
 }
 
@@ -89,7 +99,7 @@ impl OutputView for TxOut {
         self.value
     }
 
-    fn script_pubkey(&self) -> &Script {
+    fn script_pubkey(&self) -> &script::PubKey {
         &self.script_pubkey
     }
 }

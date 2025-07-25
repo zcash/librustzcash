@@ -16,7 +16,7 @@ use tracing::debug;
 
 use transparent::keys::NonHardenedChildRange;
 use transparent::{
-    address::{Script, TransparentAddress},
+    address::TransparentAddress,
     bundle::{OutPoint, TxOut},
     keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
@@ -40,6 +40,7 @@ use zcash_protocol::{
     value::{ZatBalance, Zatoshis},
     TxId,
 };
+use zcash_script::script::Parsable;
 use zip32::{DiversifierIndex, Scope};
 
 use super::encoding::{decode_epoch_seconds, ReceiverFlags};
@@ -693,7 +694,16 @@ fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, S
     txid_bytes.copy_from_slice(&txid);
 
     let index: u32 = row.get("output_index")?;
-    let script_pubkey = Script(row.get("script")?);
+    let script_pubkey = {
+        let bytes = row.get::<_, Vec<u8>>("script")?;
+        let (script_pubkey, rest) =
+            zcash_script::script::PubKey::from_bytes(&bytes).map_err(|e| {
+                SqliteClientError::CorruptedData(format!("Invalid script_pubkey value: {e:?}"))
+            })?;
+        rest.is_empty().then_some(script_pubkey).ok_or_else(|| {
+            SqliteClientError::CorruptedData(format!("Invalid script_pubkey value"))
+        })?
+    };
     let raw_value: i64 = row.get("value_zat")?;
     let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
         SqliteClientError::CorruptedData(format!("Invalid UTXO value: {raw_value}"))
@@ -1552,7 +1562,7 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
         ":account_id": account_id.0,
         ":address_id": address_id.0,
         ":address": output.recipient_address().encode(params),
-        ":script": &output.txout().script_pubkey.0,
+        ":script": &output.txout().script_pubkey.to_bytes(),
         ":value_zat": &i64::from(ZatBalance::from(output.txout().value)),
         ":max_observed_unspent_height": max_observed_unspent.map(u32::from),
     ];
