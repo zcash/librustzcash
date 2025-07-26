@@ -501,7 +501,6 @@ pub fn send_max_single_step_proposed_transfer<T: ShieldedPoolTester>(
 
     let fee_rule = StandardFeeRule::Zip317;
 
-    let change_memo = "Test change memo".parse::<Memo>().unwrap();
     let send_max_memo = "Test Send Max memo".parse::<Memo>().unwrap();
 
     let proposal = st
@@ -533,19 +532,19 @@ pub fn send_max_single_step_proposed_transfer<T: ShieldedPoolTester>(
         .into_iter()
         .collect();
     let d_tx = decrypt_transaction(st.network(), None, Some(h), &tx, &ufvks);
-    assert_eq!(T::decrypted_pool_outputs_count(&d_tx), 2);
+    assert_eq!(T::decrypted_pool_outputs_count(&d_tx), 1);
 
-    let mut found_tx_change_memo = false;
+    let mut found_send_max_memo = false;
     let mut found_tx_empty_memo = false;
     T::with_decrypted_pool_memos(&d_tx, |memo| {
-        if Memo::try_from(memo).unwrap() == change_memo {
-            found_tx_change_memo = true
+        if Memo::try_from(memo).unwrap() == send_max_memo {
+            found_send_max_memo = true
         }
         if Memo::try_from(memo).unwrap() == Memo::Empty {
             found_tx_empty_memo = true
         }
     });
-    assert!(found_tx_change_memo);
+    assert!(found_send_max_memo);
     assert!(!found_tx_empty_memo); // there's no empty memo in this case
 
     // Verify that the stored sent notes match what we're expecting
@@ -553,11 +552,9 @@ pub fn send_max_single_step_proposed_transfer<T: ShieldedPoolTester>(
         .wallet()
         .get_sent_note_ids(&sent_tx_id, T::SHIELDED_PROTOCOL)
         .unwrap();
-    assert_eq!(sent_note_ids.len(), 2);
+    assert_eq!(sent_note_ids.len(), 1);
 
-    // The sent memo should be the empty memo for the sent output, and the
-    // change output's memo should be as specified.
-    let mut found_sent_change_memo = false;
+    // The sent memo should the specified memo for the sent output
     let mut found_sent_empty_memo = false;
     let mut found_sent_max_memo = false;
     for sent_note_id in sent_note_ids {
@@ -567,9 +564,6 @@ pub fn send_max_single_step_proposed_transfer<T: ShieldedPoolTester>(
             .expect("Note id is valid")
             .as_ref()
         {
-            Some(m) if m == &change_memo => {
-                found_sent_change_memo = true;
-            }
             Some(m) if m == &Memo::Empty => {
                 found_sent_empty_memo = true;
             }
@@ -580,7 +574,7 @@ pub fn send_max_single_step_proposed_transfer<T: ShieldedPoolTester>(
             None => panic!("Memo should not be stored as NULL"),
         }
     }
-    assert!(found_sent_change_memo);
+
     assert!(found_sent_max_memo);
     assert!(!found_sent_empty_memo);
 
