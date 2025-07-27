@@ -238,9 +238,9 @@ where
                      -- TODO(schell): ensure this SQL is correct
                      EXISTS (
                          SELECT 1
-                         FROM {table_prefix}_sent_notes
-                         WHERE {table_prefix}_sent_notes.txid = transactions.txid
-                         AND {table_prefix}_sent_notes.from_account_id = accounts.id
+                         FROM sent_notes
+                         WHERE sent_notes.tx = transactions.id_tx
+                         AND to_account_id NOT NULL
                      ) AS is_trusted,
                      SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
                      accounts.ufvk as ufvk, recipient_key_scope
@@ -284,7 +284,7 @@ where
              UNION
              SELECT id, txid, {output_index_col},
                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                    ufvk, recipient_key_scope
+                    ufvk, recipient_key_scope, mined_height, is_trusted
              FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
         )
     )?;
