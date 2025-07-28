@@ -232,26 +232,32 @@ where
         &format!(
             "WITH eligible AS (
                  SELECT
-                     {table_prefix}_received_notes.id AS id, txid, {output_index_col},
-                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position, 
-                     transactions.block AS mined_height,
-                     -- TODO(schell): ensure this SQL is correct
-                     EXISTS (
-                         SELECT 1
-                         FROM sent_notes
-                         WHERE sent_notes.tx = transactions.id_tx
-                         AND to_account_id NOT NULL
-                     ) AS is_trusted,
-                     SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
+                     {table_prefix}_received_notes.id AS id, txid,
+                     {table_prefix}_received_notes.{output_index_col},
+                     diversifier,
+                     {table_prefix}_received_notes.value, {note_reconstruction_cols}, commitment_tree_position, 
+                     transactions.block AS mined_height, sent_notes.to_account_id AS sent_to_account_id,
+                     -- EXISTS (
+                     --     SELECT 1
+                     --     FROM sent_notes
+                     --     WHERE sent_notes.tx = transactions.id_tx
+                     --     AND to_account_id NOT NULL
+                     -- ) AS is_trusted,
+                     SUM(
+                         {table_prefix}_received_notes.value
+                     ) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
                      accounts.ufvk as ufvk, recipient_key_scope
                  FROM {table_prefix}_received_notes
                  INNER JOIN accounts
                     ON accounts.id = {table_prefix}_received_notes.account_id
                  INNER JOIN transactions
                     ON transactions.id_tx = {table_prefix}_received_notes.tx
+                 LEFT JOIN sent_notes
+                    ON transactions.id_tx = sent_notes.tx
                  WHERE accounts.uuid = :account_uuid
                  AND {table_prefix}_received_notes.account_id = accounts.id
-                 AND value > 5000 -- FIXME #1316, allow selection of dust inputs
+                 -- FIXME #1316, allow selection of dust inputs
+                 AND {table_prefix}_received_notes.value > 5000 
                  AND accounts.ufvk IS NOT NULL
                  AND recipient_key_scope IS NOT NULL
                  AND nf IS NOT NULL
@@ -279,12 +285,12 @@ where
              )
              SELECT id, txid, {output_index_col},
                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                    ufvk, recipient_key_scope, mined_height, is_trusted
+                    ufvk, recipient_key_scope, mined_height, sent_to_account_id
              FROM eligible WHERE so_far < :target_value
              UNION
              SELECT id, txid, {output_index_col},
                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                    ufvk, recipient_key_scope, mined_height, is_trusted
+                    ufvk, recipient_key_scope, mined_height, sent_to_account_id
              FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
         )
     )?;
@@ -311,7 +317,10 @@ where
         ],
         |r| -> Result<_, SqliteClientError> {
             let maybe_note = to_spendable_note(params, r)?;
-            let note_is_trusted: bool = r.get("is_trusted")?;
+            let sent_to_account_id: Option<i64> = r.get("sent_to_account_id")?;
+            // It's enough to know this account id _exists_ as external recipients are null in
+            // the `sent_notes` table
+            let note_is_trusted = sent_to_account_id.is_some();
             let mined_height: u32 = r.get("mined_height")?;
             Ok(maybe_note.map(|note| (note, note_is_trusted, mined_height)))
         },
@@ -322,10 +331,26 @@ where
         let maybe_note = result_maybe_note?;
         if let Some((note, is_trusted, mined_height)) = maybe_note {
             let number_of_confirmations = u32::from(anchor_height).saturating_sub(mined_height);
+            let required_confirmations = u32::from(confirmations_policy.untrusted);
             // If the note is from a trusted source (this wallet), then we don't have to determine the
             // number of confirmations, as we've already queried above based on the trusted anchor height.
             // So we only check if it's trusted, or if it meets the untrusted number of confirmations.
-            if is_trusted || number_of_confirmations >= confirmations_policy.untrusted.into() {
+            let is_spendable =
+                is_trusted || number_of_confirmations >= confirmations_policy.untrusted.into();
+            println!(
+                "note: {} is {}\n  \
+                is_trusted: {is_trusted},\n  \
+                confirmations: {number_of_confirmations} >= {required_confirmations} = {is_spendable},\n  \
+                mined_height: {mined_height},\n  \
+                anchor_height: {anchor_height}",
+                note.internal_note_id(),
+                if is_spendable {
+                    "spendable"
+                } else {
+                    "not spendable"
+                }
+            );
+            if is_spendable {
                 spendable_notes.push(note);
             }
         }

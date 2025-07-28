@@ -2,7 +2,7 @@ use std::{
     cmp::Eq,
     convert::Infallible,
     hash::Hash,
-    num::{NonZeroU64, NonZeroU8, NonZeroUsize},
+    num::{NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize},
 };
 
 use assert_matches::assert_matches;
@@ -2055,13 +2055,18 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
     // Scan the block
     st.scan_cached_blocks(account.birthday().height() + 10, 1);
 
+    println!("account_birthday_height: {}", account.birthday().height());
     // Verify that our note is considered spendable
     let spendable = T::select_spendable_notes(
         &st,
         account.id(),
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
         account.birthday().height() + 5,
-        ConfirmationsPolicy::default(),
+        ConfirmationsPolicy {
+            // 5
+            untrusted: NonZeroU32::MIN.saturating_add(4),
+            ..Default::default()
+        },
         &[],
     )
     .unwrap();
