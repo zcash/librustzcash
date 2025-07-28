@@ -3314,7 +3314,7 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
                 &input_selector,
                 &change_strategy,
                 request.clone(),
-                NonZeroU32::new(1).unwrap(),
+                ConfirmationsPolicy::MIN,
             )
             .unwrap();
         let result0 = st

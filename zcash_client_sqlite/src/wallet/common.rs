@@ -326,36 +326,34 @@ where
         },
     )?;
 
-    let mut spendable_notes: Vec<_> = vec![];
-    for result_maybe_note in notes {
-        let maybe_note = result_maybe_note?;
-        if let Some((note, is_trusted, mined_height)) = maybe_note {
-            let number_of_confirmations = u32::from(anchor_height).saturating_sub(mined_height);
-            let required_confirmations = u32::from(confirmations_policy.untrusted);
-            // If the note is from a trusted source (this wallet), then we don't have to determine the
-            // number of confirmations, as we've already queried above based on the trusted anchor height.
-            // So we only check if it's trusted, or if it meets the untrusted number of confirmations.
-            let is_spendable =
-                is_trusted || number_of_confirmations >= confirmations_policy.untrusted.into();
-            println!(
-                "note: {} is {}\n  \
-                is_trusted: {is_trusted},\n  \
-                confirmations: {number_of_confirmations} >= {required_confirmations} = {is_spendable},\n  \
-                mined_height: {mined_height},\n  \
-                anchor_height: {anchor_height}",
-                note.internal_note_id(),
-                if is_spendable {
-                    "spendable"
-                } else {
-                    "not spendable"
-                }
-            );
-            if is_spendable {
-                spendable_notes.push(note);
-            }
-        }
-    }
-    Ok(spendable_notes)
+    notes
+        .filter_map(|result_maybe_note| {
+            let result_note = result_maybe_note.transpose()?;
+            result_note.map(|(note, is_trusted, mined_height)| {
+                let number_of_confirmations = u32::from(anchor_height).saturating_sub(mined_height);
+                let required_confirmations = u32::from(confirmations_policy.untrusted);
+                // If the note is from a trusted source (this wallet), then we don't have to determine the
+                // number of confirmations, as we've already queried above based on the trusted anchor height.
+                // So we only check if it's trusted, or if it meets the untrusted number of confirmations.
+                let is_spendable =
+                    is_trusted || number_of_confirmations >= confirmations_policy.untrusted.into();
+                println!(
+                    "note: {} is {}\n  \
+                    is_trusted: {is_trusted},\n  \
+                    confirmations: {number_of_confirmations} >= {required_confirmations} = {is_spendable},\n  \
+                    mined_height: {mined_height},\n  \
+                    anchor_height: {anchor_height}",
+                    note.internal_note_id(),
+                    if is_spendable {
+                        "spendable"
+                    } else {
+                        "not spendable"
+                    }
+                );
+                is_spendable.then_some(note)
+            }).transpose()
+        })
+        .collect::<Result<Vec<_>, _>>()
 }
 
 #[allow(dead_code)]
