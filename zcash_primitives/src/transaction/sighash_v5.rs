@@ -44,7 +44,7 @@ fn hasher(personal: &[u8; 16]) -> StateWrite {
 }
 
 /// Implements [ZIP 244 section S.2](https://zips.z.cash/zip-0244#s-2-transparent-sig-digest).
-pub fn transparent_sig_digest<A: TransparentAuthorizingContext>(
+fn transparent_sig_digest<A: TransparentAuthorizingContext>(
     tx_data: Option<(&transparent::Bundle<A>, &TransparentDigests<Blake2bHash>)>,
     input: &SignableInput<'_>,
 ) -> Blake2bHash {

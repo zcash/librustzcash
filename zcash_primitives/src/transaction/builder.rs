@@ -164,7 +164,7 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
             ),
             Error::OrchardBundleNotAvailable => write!(
                 f,
-                "The builder was constructed with a target height before NU5 activation, but an Orchard spend or output was added"
+                "Cannot create Orchard transactions without an Orchard anchor, or before NU5 activation"
             ),
             #[cfg(zcash_unstable = "nu7" )]
             Error::IssuanceBuilderNotAvailable => write!(
@@ -248,11 +248,12 @@ impl Progress {
 /// Rules for how the builder should be configured for each shielded pool.
 #[derive(Clone, Copy)]
 pub enum BuildConfig {
-    Standard {
+    TxV5 {
         sapling_anchor: Option<sapling::Anchor>,
         orchard_anchor: Option<orchard::Anchor>,
     },
-    Zsa {
+    #[cfg(zcash_unstable = "nu7")]
+    TxV6 {
         sapling_anchor: Option<sapling::Anchor>,
         orchard_anchor: Option<orchard::Anchor>,
     },
@@ -265,8 +266,11 @@ impl BuildConfig {
         &self,
     ) -> Option<(sapling::builder::BundleType, sapling::Anchor)> {
         match self {
-            BuildConfig::Standard { sapling_anchor, .. }
-            | BuildConfig::Zsa { sapling_anchor, .. } => sapling_anchor
+            BuildConfig::TxV5 { sapling_anchor, .. } => sapling_anchor
+                .as_ref()
+                .map(|a| (sapling::builder::BundleType::DEFAULT, *a)),
+            #[cfg(zcash_unstable = "nu7")]
+            BuildConfig::TxV6 { sapling_anchor, .. } => sapling_anchor
                 .as_ref()
                 .map(|a| (sapling::builder::BundleType::DEFAULT, *a)),
             BuildConfig::Coinbase => Some((
@@ -279,10 +283,11 @@ impl BuildConfig {
     /// Returns the Orchard bundle type and anchor for this configuration.
     pub fn orchard_builder_config(&self) -> Option<(BundleType, orchard::Anchor)> {
         match self {
-            BuildConfig::Standard { orchard_anchor, .. } => orchard_anchor
+            BuildConfig::TxV5 { orchard_anchor, .. } => orchard_anchor
                 .as_ref()
                 .map(|a| (BundleType::DEFAULT_VANILLA, *a)),
-            BuildConfig::Zsa { orchard_anchor, .. } => orchard_anchor
+            #[cfg(zcash_unstable = "nu7")]
+            BuildConfig::TxV6 { orchard_anchor, .. } => orchard_anchor
                 .as_ref()
                 .map(|a| (BundleType::DEFAULT_ZSA, *a)),
             BuildConfig::Coinbase => Some((BundleType::Coinbase, orchard::Anchor::empty_tree())),
@@ -500,7 +505,9 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
         issue_info: Option<IssueInfo>,
         first_issuance: bool,
     ) -> Result<(), Error<FE>> {
-        assert!(self.build_config.orchard_bundle_type()? == BundleType::DEFAULT_ZSA);
+        if self.build_config.orchard_bundle_type()? != BundleType::DEFAULT_ZSA {
+            return Err(Error::OrchardBuild(BundleTypeNotSatisfiable));
+        }
 
         if self.issuance_builder.is_some() {
             return Err(Error::IssuanceBundleAlreadyInitialized);
@@ -530,7 +537,9 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
         value: orchard::value::NoteValue,
         first_issuance: bool,
     ) -> Result<(), Error<FE>> {
-        assert!(self.build_config.orchard_bundle_type()? == BundleType::DEFAULT_ZSA);
+        if self.build_config.orchard_bundle_type()? != BundleType::DEFAULT_ZSA {
+            return Err(Error::OrchardBuild(BundleTypeNotSatisfiable));
+        }
         self.issuance_builder
             .as_mut()
             .ok_or(Error::IssuanceBuilderNotAvailable)?
@@ -543,7 +552,9 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     /// Finalizes a given asset
     #[cfg(zcash_unstable = "nu7")]
     pub fn finalize_asset<FE>(&mut self, asset_desc_hash: &[u8; 32]) -> Result<(), Error<FE>> {
-        assert!(self.build_config.orchard_bundle_type()? == BundleType::DEFAULT_ZSA);
+        if self.build_config.orchard_bundle_type()? != BundleType::DEFAULT_ZSA {
+            return Err(Error::OrchardBuild(BundleTypeNotSatisfiable));
+        }
         self.issuance_builder
             .as_mut()
             .ok_or(Error::IssuanceBuilderNotAvailable)?
@@ -556,7 +567,9 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     /// Adds a Burn action to the transaction.
     #[cfg(zcash_unstable = "nu7")]
     pub fn add_burn<FE>(&mut self, value: u64, asset: AssetBase) -> Result<(), Error<FE>> {
-        assert!(self.build_config.orchard_bundle_type()? == BundleType::DEFAULT_ZSA);
+        if self.build_config.orchard_bundle_type()? != BundleType::DEFAULT_ZSA {
+            return Err(Error::OrchardBuild(BundleTypeNotSatisfiable));
+        }
         self.orchard_builder
             .as_mut()
             .ok_or(Error::OrchardBundleNotAvailable)?
@@ -596,8 +609,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         memo: MemoBytes,
     ) -> Result<(), Error<FE>> {
         let bundle_type = self.build_config.orchard_bundle_type()?;
-        if bundle_type == BundleType::DEFAULT_VANILLA {
-            assert!(bool::from(asset.is_native()));
+        if bundle_type == BundleType::DEFAULT_VANILLA && !bool::from(asset.is_native()) {
+            return Err(Error::OrchardBuild(BundleTypeNotSatisfiable));
         }
         self.orchard_builder
             .as_mut()
@@ -931,6 +944,8 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
                     unproven_orchard_bundle = Some(OrchardBundle::OrchardZSA(bundle));
                     orchard_meta = meta;
                 }
+                #[cfg(not(zcash_unstable = "nu7"))]
+                return Err(Error::OrchardBuild(BundleTypeNotSatisfiable));
             } else {
                 let (bundle, meta) = builder.build(&mut rng).map_err(Error::OrchardBuild)?;
                 unproven_orchard_bundle = Some(OrchardBundle::OrchardVanilla(bundle));
@@ -1321,7 +1336,7 @@ mod tests {
         // Create a builder with 0 fee, so we can construct t outputs
         let mut builder = builder::Builder {
             params: TEST_NETWORK,
-            build_config: BuildConfig::Standard {
+            build_config: BuildConfig::TxV5 {
                 sapling_anchor: Some(sapling::Anchor::empty_tree()),
                 orchard_anchor: Some(orchard::Anchor::empty_tree()),
             },
@@ -1397,7 +1412,7 @@ mod tests {
             .activation_height(NetworkUpgrade::Sapling)
             .unwrap();
 
-        let build_config = BuildConfig::Standard {
+        let build_config = BuildConfig::TxV5 {
             sapling_anchor: Some(witness1.root().into()),
             orchard_anchor: None,
         };
@@ -1437,7 +1452,7 @@ mod tests {
         // Fails with no inputs or outputs
         // 0.0001 t-ZEC fee
         {
-            let build_config = BuildConfig::Standard {
+            let build_config = BuildConfig::TxV5 {
                 sapling_anchor: None,
                 orchard_anchor: None,
             };
@@ -1457,7 +1472,7 @@ mod tests {
         // Fail if there is only a Sapling output
         // 0.0005 z-ZEC out, 0.0001 t-ZEC fee
         {
-            let build_config = BuildConfig::Standard {
+            let build_config = BuildConfig::TxV5 {
                 sapling_anchor: Some(sapling::Anchor::empty_tree()),
                 orchard_anchor: Some(orchard::Anchor::empty_tree()),
             };
@@ -1480,7 +1495,7 @@ mod tests {
         // Fail if there is only a transparent output
         // 0.0005 t-ZEC out, 0.0001 t-ZEC fee
         {
-            let build_config = BuildConfig::Standard {
+            let build_config = BuildConfig::TxV5 {
                 sapling_anchor: Some(sapling::Anchor::empty_tree()),
                 orchard_anchor: Some(orchard::Anchor::empty_tree()),
             };
@@ -1510,7 +1525,7 @@ mod tests {
         // Fail if there is insufficient input
         // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
         {
-            let build_config = BuildConfig::Standard {
+            let build_config = BuildConfig::TxV5 {
                 sapling_anchor: Some(witness1.root().into()),
                 orchard_anchor: Some(orchard::Anchor::empty_tree()),
             };
@@ -1554,7 +1569,7 @@ mod tests {
         // Succeeds if there is sufficient input
         // 0.0003 z-ZEC out, 0.00015 t-ZEC out, 0.00015 t-ZEC fee, 0.0006 z-ZEC in
         {
-            let build_config = BuildConfig::Standard {
+            let build_config = BuildConfig::TxV5 {
                 sapling_anchor: Some(witness1.root().into()),
                 orchard_anchor: Some(orchard::Anchor::empty_tree()),
             };

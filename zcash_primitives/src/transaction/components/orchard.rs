@@ -97,7 +97,6 @@ pub fn read_orchard_bundle<R: Read>(
 pub fn read_orchard_zsa_bundle<R: Read>(
     mut reader: R,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance, OrchardZSA>>> {
-    // Read a number of action group
     let num_action_groups: u32 = CompactSize::read_t::<_, u32>(&mut reader)?;
     if num_action_groups == 0 {
         return Ok(None);
@@ -132,7 +131,7 @@ pub fn read_orchard_zsa_bundle<R: Read>(
             .map(|act| act.try_map(|_| read_signature::<_, redpallas::SpendAuth>(&mut reader)))
             .collect::<Result<Vec<_>, _>>()?,
     )
-    .expect("A nonzero number of actions was read from the transaction data.");
+    .expect("The action group must contain at least one action.");
 
     let value_balance = Transaction::read_amount(&mut reader)?;
 
@@ -291,7 +290,7 @@ pub fn write_orchard_bundle<W: Write>(
 ) -> io::Result<()> {
     if let Some(bundle) = bundle {
         match bundle {
-            OrchardBundle::OrchardVanilla(b) => write_v5_bundle(b, writer)?,
+            OrchardBundle::OrchardVanilla(b) => write_orchard_vanilla_bundle(b, writer)?,
             #[cfg(zcash_unstable = "nu7")]
             OrchardBundle::OrchardZSA(b) => write_orchard_zsa_bundle(writer, b)?,
         }
@@ -303,7 +302,7 @@ pub fn write_orchard_bundle<W: Write>(
 }
 
 /// Writes an [`orchard::Bundle`] in the v5 transaction format.
-pub fn write_v5_bundle<W: Write>(
+pub fn write_orchard_vanilla_bundle<W: Write>(
     bundle: &Bundle<Authorized, ZatBalance, OrchardVanilla>,
     mut writer: W,
 ) -> io::Result<()> {

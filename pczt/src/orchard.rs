@@ -1,4 +1,5 @@
 //! The Orchard fields of a PCZT.
+//! Currently burning assets is not supported, so it is always empty.
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -15,6 +16,11 @@ use crate::{
     common::{Global, Zip32Derivation},
     roles::combiner::{merge_map, merge_optional},
 };
+
+#[cfg(feature = "orchard")]
+const DUMMY_EXPIRY_HEIGHT: u32 = 0;
+#[cfg(feature = "orchard")]
+const EMPTY_BURN: Vec<([u8; 32], u64)> = vec![];
 
 /// PCZT fields that are specific to producing the transaction's Orchard bundle (if any).
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
@@ -500,8 +506,8 @@ impl Bundle {
             self.flags,
             self.value_sum,
             self.anchor,
-            vec![], // TODO burn
-            0,      // TODO expiry height
+            EMPTY_BURN,
+            DUMMY_EXPIRY_HEIGHT,
             self.zkproof,
             self.bsk,
         )

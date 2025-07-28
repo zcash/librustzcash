@@ -772,7 +772,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
     let mut builder = Builder::new(
         *st.network(),
         height + 1,
-        BuildConfig::Standard {
+        BuildConfig::TxV5 {
             sapling_anchor: None,
             orchard_anchor: None,
         },

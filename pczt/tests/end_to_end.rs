@@ -77,7 +77,7 @@ fn transparent_to_orchard() {
     let mut builder = Builder::new(
         params,
         10_000_000.into(),
-        BuildConfig::Standard {
+        BuildConfig::TxV5 {
             sapling_anchor: None,
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
         },
@@ -207,7 +207,7 @@ fn sapling_to_orchard() {
     let mut builder = Builder::new(
         MainNetwork,
         10_000_000.into(),
-        BuildConfig::Standard {
+        BuildConfig::TxV5 {
             sapling_anchor: Some(anchor),
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
         },
@@ -375,7 +375,7 @@ fn orchard_to_orchard() {
     let mut builder = Builder::new(
         MainNetwork,
         10_000_000.into(),
-        BuildConfig::Standard {
+        BuildConfig::TxV5 {
             sapling_anchor: None,
             orchard_anchor: Some(anchor),
         },
