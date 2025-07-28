@@ -221,4 +221,4 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 [patch.crates-io]
 zcash_note_encryption = { version = "0.4.1", git = "https://github.com/zcash/zcash_note_encryption", branch = "main" }
 sapling = { package = "sapling-crypto", version = "0.5", git = "https://github.com/QED-it/sapling-crypto", branch = "zsa1" }
-orchard = { version = "0.11.0", git = "https://github.com/QED-it/orchard", rev = "9f44f55eca726114a4b89793b2a59fe386e638ed" }
+orchard = { version = "0.11.0", git = "https://github.com/QED-it/orchard", rev = "01758ea45adf480746e783934fe9ef5a058fb703" }
