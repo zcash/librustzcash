@@ -831,18 +831,29 @@ where
     }
     .map_err(|fee_error| InputSelectorError::Change(ChangeError::StrategyError(fee_error)))?;
 
+    // the total fee required for the all the involved transactions. For the case
+    // of TEX it means the fee requied to send the max value to the ephemeral
+    // address + the fee to send the value in that ephemeral change address to
+    // the TEX address.
     let total_fee_required = (tr0_fee + tr1_fee.unwrap_or(Zatoshis::ZERO))
         .expect("fee value addition does not overflow");
 
-    let amount =
+    // the total amount involved in the "send max" operation. This is the total
+    // spendable value present in the wallet minus the fees required to perform
+    // the send max operation.
+    let total_to_recipient =
         (input_total - total_fee_required).ok_or(InputSelectorError::InsufficientFunds {
             available: input_total,
             required: total_fee_required,
         })?;
 
+    // when the recipient of the send max operation is a TEX address this is the
+    // amount that will be needed to send the max available amount accounting the
+    // fees needed to propose a transaction involving one transparent input and
+    // one transparent output (the TEX address recipient.)
     #[cfg(feature = "transparent-inputs")]
     let ephemeral_output_value =
-        tr1_fee.map(|_| (input_total - tr0_fee).expect("insufficient funds already checked"));
+        tr1_fee.map(|fee| (total_to_recipient + fee).expect("overflow already checked"));
 
     #[cfg(feature = "transparent-inputs")]
     let tr0_change = ephemeral_output_value
@@ -859,7 +870,7 @@ where
 
     let payment = zip321::Payment::new(
         recipient.to_zcash_address(params),
-        amount,
+        total_to_recipient,
         memo,
         None,
         None,

@@ -752,7 +752,7 @@ pub fn send_max_proposal_fails_when_unconfirmed_funds_present<T: ShieldedPoolTes
     );
 }
 /// This test attempts to send the max spendable funds to a TEX address recipient
-/// checks that the transactions were stred and that the amounts involved are correct
+/// checks that the transactions were stored and that the amounts involved are correct
 #[cfg(feature = "transparent-inputs")]
 pub fn send_multi_step_max_amount_proposed_transfer<T: ShieldedPoolTester, DSF>(
     ds_factory: DSF,
@@ -809,7 +809,7 @@ pub fn send_multi_step_max_amount_proposed_transfer<T: ShieldedPoolTester, DSF>(
         let expected_step1_fee = zip317::MINIMUM_FEE;
         let expected_ephemeral_spend = (value - expected_step0_fee - expected_step1_fee).unwrap();
         let expected_ephemeral_balance = (value - expected_step0_fee).unwrap();
-        let expected_step0_change = Zatoshis::ZERO;
+        let expected_step0_change = (value - expected_step0_fee).unwrap();
 
         let total_sent =
             (expected_step0_fee + expected_step1_fee + expected_ephemeral_spend).unwrap();
@@ -824,6 +824,7 @@ pub fn send_multi_step_max_amount_proposed_transfer<T: ShieldedPoolTester, DSF>(
             TransparentAddress::PublicKeyHash(data) => Address::Tex(data),
             _ => unreachable!(),
         };
+
         // TODO: Do we want to allow shielded change memos in ephemeral transfers?
         //let change_memo = Memo::from_str("change").expect("valid memo").encode();
         let fee_rule = StandardFeeRule::Zip317;
@@ -887,15 +888,15 @@ pub fn send_multi_step_max_amount_proposed_transfer<T: ShieldedPoolTester, DSF>(
         let tx_data_requests = st.wallet().transaction_data_requests().unwrap();
         assert!(tx_data_requests.contains(&TransactionDataRequest::GetStatus(*txids.last())));
 
-        assert!(expected_step0_change < expected_ephemeral_spend);
+        assert!(expected_step0_change > expected_ephemeral_spend);
         assert_eq!(confirmed_sent.len(), 2);
-        assert_eq!(confirmed_sent[0].len(), 2);
+        assert_eq!(confirmed_sent[0].len(), 1);
         assert_eq!(confirmed_sent[0][0].value, expected_step0_change);
         let OutputOfSentTx {
             value: ephemeral_v,
             external_recipient: to_addr,
             ephemeral_address,
-        } = confirmed_sent[0][1].clone();
+        } = confirmed_sent[0][0].clone();
         assert_eq!(ephemeral_v, expected_ephemeral_balance);
         assert!(to_addr.is_some());
         assert_eq!(
