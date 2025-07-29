@@ -232,7 +232,10 @@ where
     //    well as a single note for which the sum was greater than or equal to the
     //    required value, bringing the sum of all selected notes across the threshold.
     let mut stmt_select_notes = conn.prepare_cached(
-        // TODO(schell): use received_notes instead of 
+        // TODO(schell): use received_notes instead of sent_notes.
+        // but maybe sent_notes is fine, because sent_notes has the `to_account_id` field
+        // which specifies internal recipients?
+        // @see the db.rs docs
         &format!(
             "WITH eligible AS (
                  SELECT
@@ -268,8 +271,7 @@ where
                    JOIN transactions stx ON stx.id_tx = transaction_id
                    WHERE stx.block IS NOT NULL -- the spending tx is mined
                    OR stx.expiry_height IS NULL -- the spending tx will not expire
-                   -- TODO(schell): this should be chain_tip height
-                   OR stx.expiry_height > :target_height -- the spending tx is unexpired
+                   OR stx.expiry_height >= :target_height -- the spending tx is unexpired
                  )
                  AND NOT EXISTS (
                     SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges unscanned
