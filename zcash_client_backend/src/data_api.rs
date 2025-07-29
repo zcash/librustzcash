@@ -88,7 +88,7 @@ use self::{
     scanning::ScanRange,
 };
 use crate::{
-    data_api::wallet::ConfirmationsPolicy,
+    data_api::wallet::{ConfirmationsPolicy, TargetHeight},
     decrypt::DecryptedOutput,
     proto::service::TreeState,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
@@ -1295,7 +1295,7 @@ pub trait InputSource {
         account: Self::AccountId,
         target_value: TargetValue,
         sources: &[ShieldedProtocol],
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
@@ -1340,7 +1340,7 @@ pub trait InputSource {
     fn get_spendable_transparent_outputs(
         &self,
         _address: &TransparentAddress,
-        _target_height: BlockHeight,
+        _target_height: TargetHeight,
         _min_confirmations: u32,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         Ok(vec![])
@@ -1508,7 +1508,7 @@ pub trait WalletRead {
     fn get_target_and_anchor_heights(
         &self,
         min_confirmations: NonZeroU32,
-    ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
+    ) -> Result<Option<(TargetHeight, BlockHeight)>, Self::Error>;
 
     /// Returns the block height in which the specified transaction was mined, or `Ok(None)` if the
     /// transaction is not in the main chain.
@@ -2099,7 +2099,7 @@ impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
 pub struct SentTransaction<'a, AccountId> {
     tx: &'a Transaction,
     created: time::OffsetDateTime,
-    target_height: BlockHeight,
+    target_height: TargetHeight,
     account: AccountId,
     outputs: &'a [SentTransactionOutput<AccountId>],
     fee_amount: Zatoshis,
@@ -2122,7 +2122,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
     pub fn new(
         tx: &'a Transaction,
         created: time::OffsetDateTime,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         account: AccountId,
         outputs: &'a [SentTransactionOutput<AccountId>],
         fee_amount: Zatoshis,
@@ -2167,7 +2167,7 @@ impl<'a, AccountId> SentTransaction<'a, AccountId> {
     }
 
     /// Returns the block height that this transaction was created to target.
-    pub fn target_height(&self) -> BlockHeight {
+    pub fn target_height(&self) -> TargetHeight {
         self.target_height
     }
 }

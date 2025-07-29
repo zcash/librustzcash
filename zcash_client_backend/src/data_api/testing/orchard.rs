@@ -24,7 +24,7 @@ use crate::{
     data_api::{
         chain::{CommitmentTreeRoot, ScanSummary},
         testing::{pool::ShieldedPoolTester, TestState},
-        wallet::ConfirmationsPolicy,
+        wallet::{ConfirmationsPolicy, TargetHeight},
         DecryptedTransaction, InputSource, TargetValue, WalletCommitmentTrees, WalletSummary,
         WalletTest,
     },
@@ -109,7 +109,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
         st: &TestState<Cache, DbT, P>,
         account: <DbT as InputSource>::AccountId,
         target_value: TargetValue,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error> {

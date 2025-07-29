@@ -6,7 +6,8 @@ use std::{num::NonZeroU64, rc::Rc};
 
 use zcash_client_backend::{
     data_api::{
-        wallet::ConfirmationsPolicy, NoteFilter, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT,
+        wallet::{ConfirmationsPolicy, TargetHeight},
+        NoteFilter, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT,
     },
     wallet::ReceivedNote,
 };
@@ -156,7 +157,7 @@ pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     params: &P,
     account: AccountUuid,
     target_value: TargetValue,
-    anchor_height: BlockHeight,
+    target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
@@ -171,7 +172,7 @@ where
             params,
             account,
             zats,
-            anchor_height,
+            target_height,
             confirmations_policy,
             exclude,
             protocol,
@@ -186,7 +187,7 @@ fn select_minimum_spendable_notes<P: consensus::Parameters, F, Note>(
     params: &P,
     account: AccountUuid,
     target_value: Zatoshis,
-    anchor_height: BlockHeight,
+    target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
@@ -204,13 +205,15 @@ where
         }
     };
 
+    let trusted_anchor_height = target_height - u32::from(confirmations_policy.trusted);
+
     let TableConstants {
         table_prefix,
         output_index_col,
         note_reconstruction_cols,
         ..
     } = table_constants::<SqliteClientError>(protocol)?;
-    if unscanned_tip_exists(conn, anchor_height, table_prefix)? {
+    if unscanned_tip_exists(conn, trusted_anchor_height, table_prefix)? {
         return Ok(vec![]);
     }
 
@@ -229,6 +232,7 @@ where
     //    well as a single note for which the sum was greater than or equal to the
     //    required value, bringing the sum of all selected notes across the threshold.
     let mut stmt_select_notes = conn.prepare_cached(
+        // TODO(schell): use received_notes instead of 
         &format!(
             "WITH eligible AS (
                  SELECT
@@ -237,12 +241,6 @@ where
                      diversifier,
                      {table_prefix}_received_notes.value, {note_reconstruction_cols}, commitment_tree_position,
                      transactions.block AS mined_height, sent_notes.to_account_id AS sent_to_account_id,
-                     -- EXISTS (
-                     --     SELECT 1
-                     --     FROM sent_notes
-                     --     WHERE sent_notes.tx = transactions.id_tx
-                     --     AND to_account_id NOT NULL
-                     -- ) AS is_trusted,
                      SUM(
                          {table_prefix}_received_notes.value
                      ) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
@@ -270,7 +268,8 @@ where
                    JOIN transactions stx ON stx.id_tx = transaction_id
                    WHERE stx.block IS NOT NULL -- the spending tx is mined
                    OR stx.expiry_height IS NULL -- the spending tx will not expire
-                   OR stx.expiry_height > :anchor_height -- the spending tx is unexpired
+                   -- TODO(schell): this should be chain_tip height
+                   OR stx.expiry_height > :target_height -- the spending tx is unexpired
                  )
                  AND NOT EXISTS (
                     SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges unscanned
@@ -310,7 +309,8 @@ where
     let notes = stmt_select_notes.query_and_then(
         named_params![
             ":account_uuid": account.0,
-            ":anchor_height": &u32::from(anchor_height),
+            ":anchor_height": &u32::from(trusted_anchor_height),
+            ":target_height": &u32::from(target_height),
             ":target_value": &u64::from(target_value),
             ":exclude": &excluded_ptr,
             ":wallet_birthday": u32::from(birthday_height)
@@ -330,19 +330,19 @@ where
         .filter_map(|result_maybe_note| {
             let result_note = result_maybe_note.transpose()?;
             result_note.map(|(note, is_trusted, mined_height)| {
-                let number_of_confirmations = u32::from(anchor_height).saturating_sub(mined_height);
+                let number_of_confirmations = target_height - mined_height;
                 let required_confirmations = u32::from(confirmations_policy.untrusted);
                 // If the note is from a trusted source (this wallet), then we don't have to determine the
                 // number of confirmations, as we've already queried above based on the trusted anchor height.
                 // So we only check if it's trusted, or if it meets the untrusted number of confirmations.
                 let is_spendable =
-                    is_trusted || number_of_confirmations >= confirmations_policy.untrusted.into();
+                    is_trusted || u32::from(number_of_confirmations) >= confirmations_policy.untrusted.into();
                 println!(
                     "note: {} is {}\n  \
                     is_trusted: {is_trusted},\n  \
                     confirmations: {number_of_confirmations} >= {required_confirmations} = {is_spendable},\n  \
                     mined_height: {mined_height},\n  \
-                    anchor_height: {anchor_height}",
+                    target_height: {target_height:?}",
                     note.internal_note_id(),
                     if is_spendable {
                         "spendable"

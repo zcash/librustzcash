@@ -21,6 +21,7 @@ use transparent::{
     keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
 use zcash_address::unified::{Ivk, Typecode, Uivk};
+use zcash_client_backend::data_api::wallet::TargetHeight;
 use zcash_client_backend::{
     data_api::{
         Account, AccountBalance, OutputStatusFilter, TransactionDataRequest,
@@ -792,7 +793,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     address: &TransparentAddress,
-    target_height: BlockHeight,
+    target_height: TargetHeight,
     min_confirmations: u32,
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
     let confirmed_height = target_height - min_confirmations;

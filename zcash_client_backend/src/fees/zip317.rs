@@ -8,14 +8,14 @@ use core::marker::PhantomData;
 
 use zcash_primitives::transaction::fees::{transparent, zip317 as prim_zip317, FeeRule};
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus,
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
     ShieldedProtocol,
 };
 
 use crate::{
-    data_api::{AccountMeta, InputSource, NoteFilter},
+    data_api::{wallet::TargetHeight, AccountMeta, InputSource, NoteFilter},
     fees::StandardFeeRule,
 };
 
@@ -119,7 +119,7 @@ where
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
         &self,
         params: &P,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
@@ -228,7 +228,7 @@ where
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
         &self,
         params: &P,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
@@ -306,7 +306,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -351,7 +352,8 @@ mod tests {
                     &Network::TestNetwork,
                     Network::TestNetwork
                         .activation_height(NetworkUpgrade::Nu5)
-                        .unwrap(),
+                        .unwrap()
+                        .into(),
                     &[] as &[TestTransparentInput],
                     &[] as &[TxOut],
                     &(
@@ -401,7 +403,8 @@ mod tests {
                 &Network::TestNetwork,
                 Network::TestNetwork
                     .activation_height(NetworkUpgrade::Nu5)
-                    .unwrap(),
+                    .unwrap()
+                    .into(),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -441,7 +444,8 @@ mod tests {
                 &Network::TestNetwork,
                 Network::TestNetwork
                     .activation_height(NetworkUpgrade::Nu5)
-                    .unwrap(),
+                    .unwrap()
+                    .into(),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -476,7 +480,8 @@ mod tests {
                 &Network::TestNetwork,
                 Network::TestNetwork
                     .activation_height(NetworkUpgrade::Nu5)
-                    .unwrap(),
+                    .unwrap()
+                    .into(),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -516,7 +521,8 @@ mod tests {
                 &Network::TestNetwork,
                 Network::TestNetwork
                     .activation_height(NetworkUpgrade::Nu5)
-                    .unwrap(),
+                    .unwrap()
+                    .into(),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -564,7 +570,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -618,7 +625,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[] as &[TestTransparentInput],
             &[TxOut {
                 value: Zatoshis::const_from_u64(40000),
@@ -664,7 +672,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut {
@@ -709,7 +718,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut {
@@ -760,7 +770,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut {
@@ -816,7 +827,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -862,7 +874,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(

@@ -88,6 +88,7 @@ use zcash_address::ZcashAddress;
 use zcash_client_backend::{
     data_api::{
         scanning::{ScanPriority, ScanRange},
+        wallet::TargetHeight,
         Account as _, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, AddressInfo,
         BlockMetadata, DecryptedTransaction, Progress, Ratio, SentTransaction,
         SentTransactionOutput, TransactionDataRequest, TransactionStatus, WalletSummary,
@@ -2458,7 +2459,7 @@ pub(crate) fn chain_tip_height(
 pub(crate) fn get_target_and_anchor_heights(
     conn: &rusqlite::Connection,
     min_confirmations: NonZeroU32,
-) -> Result<Option<(BlockHeight, BlockHeight)>, SqliteClientError> {
+) -> Result<Option<(TargetHeight, BlockHeight)>, SqliteClientError> {
     match chain_tip_height(conn)? {
         Some(chain_tip_height) => {
             let sapling_anchor_height = get_max_checkpointed_height(
@@ -2485,7 +2486,7 @@ pub(crate) fn get_target_and_anchor_heights(
                 .or(sapling_anchor_height)
                 .or(orchard_anchor_height);
 
-            Ok(anchor_height.map(|h| (chain_tip_height + 1, h)))
+            Ok(anchor_height.map(|h| ((chain_tip_height + 1).into(), h)))
         }
         None => Ok(None),
     }
@@ -2778,7 +2779,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                             TransferType::WalletInternal,
                         ),
                         tx_ref,
-                        Some(sent_tx.target_height()),
+                        Some(sent_tx.target_height().into()),
                         None,
                     )?;
                 }
@@ -2797,7 +2798,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                             TransferType::WalletInternal,
                         ),
                         tx_ref,
-                        Some(sent_tx.target_height()),
+                        Some(sent_tx.target_height().into()),
                         None,
                     )?;
                 }
@@ -3876,7 +3877,7 @@ pub(crate) fn put_tx_data(
     tx: &Transaction,
     fee: Option<Zatoshis>,
     created_at: Option<time::OffsetDateTime>,
-    target_height: Option<BlockHeight>,
+    target_height: Option<TargetHeight>,
 ) -> Result<TxRef, SqliteClientError> {
     let mut stmt_upsert_tx_data = conn.prepare_cached(
         "INSERT INTO transactions (txid, created, expiry_height, raw, fee, target_height)
