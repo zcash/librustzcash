@@ -71,7 +71,7 @@ use zcash_primitives::transaction::{
     Transaction, TxId,
 };
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, TargetHeight},
     memo::MemoBytes,
     value::Zatoshis,
     PoolType, ShieldedProtocol,
@@ -113,6 +113,27 @@ const PROPRIETARY_PROPOSAL_INFO: &str = "zcash_client_backend:proposal_info";
 #[cfg(feature = "pczt")]
 const PROPRIETARY_OUTPUT_INFO: &str = "zcash_client_backend:output_info";
 
+#[cfg(feature = "pczt")]
+fn serialize_target_height<S>(
+    target_height: &TargetHeight,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let u: u32 = BlockHeight::from(*target_height).into();
+    u.serialize(serializer)
+}
+
+#[cfg(feature = "pczt")]
+fn deserialize_target_height<'de, D>(deserializer: D) -> Result<TargetHeight, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let u = u32::deserialize(deserializer)?;
+    Ok(BlockHeight::from_u32(u).into())
+}
+
 /// Information about the proposal from which a PCZT was created.
 ///
 /// Stored under the proprietary field `PROPRIETARY_PROPOSAL_INFO`.
@@ -120,7 +141,11 @@ const PROPRIETARY_OUTPUT_INFO: &str = "zcash_client_backend:output_info";
 #[derive(Serialize, Deserialize)]
 struct ProposalInfo<AccountId> {
     from_account: AccountId,
-    target_height: u32,
+    #[serde(
+        serialize_with = "serialize_target_height",
+        deserialize_with = "deserialize_target_height"
+    )]
+    target_height: TargetHeight,
 }
 
 /// Reduced version of [`Recipient`] stored inside a PCZT.
@@ -465,7 +490,7 @@ where
             shielding_threshold,
             from_addrs,
             to_account,
-            chain_tip_height + 1,
+            (chain_tip_height + 1).into(),
             min_confirmations,
         )
         .map_err(Error::from)
@@ -676,7 +701,7 @@ fn build_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>
     ufvk: &UnifiedFullViewingKey,
     account_id: <DbT as WalletRead>::AccountId,
     ovk_policy: OvkPolicy,
-    min_target_height: BlockHeight,
+    min_target_height: consensus::TargetHeight,
     prior_step_results: &[(&Step<N>, StepResult<<DbT as WalletRead>::AccountId>)],
     proposal_step: &Step<N>,
     #[cfg(feature = "transparent-inputs")] unused_transparent_outputs: &mut HashMap<
@@ -1246,7 +1271,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N
     account_id: <DbT as WalletRead>::AccountId,
     ovk_policy: OvkPolicy,
     fee_rule: &FeeRuleT,
-    min_target_height: BlockHeight,
+    min_target_height: consensus::TargetHeight,
     prior_step_results: &[(&Step<N>, StepResult<<DbT as WalletRead>::AccountId>)],
     proposal_step: &Step<N>,
     #[cfg(feature = "transparent-inputs")] unused_transparent_outputs: &mut HashMap<
@@ -1347,7 +1372,7 @@ where
                         try_sapling_note_decryption(
                             &sapling_internal_ivk,
                             &bundle.shielded_outputs()[output_index],
-                            zip212_enforcement(params, min_target_height),
+                            zip212_enforcement(params, min_target_height.into()),
                         )
                         .map(|(note, _, _)| Note::Sapling(note))
                     })
@@ -1518,7 +1543,7 @@ where
                 PROPRIETARY_PROPOSAL_INFO.into(),
                 postcard::to_allocvec(&ProposalInfo::<DbT::AccountId> {
                     from_account: account_id,
-                    target_height: proposal.min_target_height().into(),
+                    target_height: proposal.min_target_height(),
                 })
                 .expect("postcard encoding of PCZT proposal metadata should not fail"),
             )
@@ -2104,7 +2129,7 @@ where
     let transactions = vec![SentTransaction::new(
         &transaction,
         created,
-        BlockHeight::from_u32(proposal_info.target_height),
+        proposal_info.target_height,
         proposal_info.from_account,
         &outputs,
         fee_amount,

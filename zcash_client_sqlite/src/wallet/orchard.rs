@@ -214,7 +214,7 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     params: &P,
     account: AccountUuid,
     target_value: TargetValue,
-    target_height: BlockHeight,
+    target_height: consensus::TargetHeight,
     min_confirmations: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
