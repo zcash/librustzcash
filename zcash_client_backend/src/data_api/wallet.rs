@@ -352,6 +352,7 @@ where
     let (target_height, anchor_height) =
         maybe_intial_heights.ok_or_else(|| InputSelectorError::SyncRequired)?;
 
+    // TODO(schell): should this even take the anchor_height?
     let proposal = input_selector.propose_transaction(
         params,
         wallet_db,
