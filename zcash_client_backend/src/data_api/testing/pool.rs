@@ -561,7 +561,7 @@ pub fn send_max_single_step_proposed_transfer<T: ShieldedPoolTester>(
         match st
             .wallet()
             .get_memo(sent_note_id)
-            .expect("Note id is valid")
+            .expect("Memo retrieval should succeed")
             .as_ref()
         {
             Some(m) if m == &Memo::Empty => {
