@@ -507,8 +507,16 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "transparent-inputs")]
-    fn send_max_multi_step_proposed_transfer() {
-        testing::pool::send_max_multi_step_proposed_transfer::<OrchardPoolTester>()
+    fn send_multi_step_single_note_max_amount_proposed_transfer() {
+        testing::pool::send_multi_step_single_note_max_amount_proposed_transfer::<OrchardPoolTester>(
+        )
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn send_multi_step_many_notes_max_amount_proposed_transfer() {
+        testing::pool::send_multi_step_many_notes_max_amount_proposed_transfer::<OrchardPoolTester>(
+        )
     }
 
     #[test]

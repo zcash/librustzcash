@@ -59,8 +59,25 @@ pub(crate) fn send_max_proposal_fails_when_unconfirmed_funds_present<T: Shielded
 }
 
 #[cfg(feature = "transparent-inputs")]
-pub(crate) fn send_max_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
-    zcash_client_backend::data_api::testing::pool::send_multi_step_max_amount_proposed_transfer::<
+pub(crate) fn send_multi_step_many_notes_max_amount_proposed_transfer<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_multi_step_many_notes_max_amount_proposed_transfer::<
+        T,
+        _,
+    >(
+        TestDbFactory::default(),
+        BlockCache::new(),
+        |e, _, expected_bad_index| {
+            matches!(
+                e,
+                crate::error::SqliteClientError::ReachedGapLimit(_, bad_index)
+                if bad_index == &expected_bad_index)
+        },
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn send_multi_step_single_note_max_amount_proposed_transfer<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_multi_step_single_note_max_amount_proposed_transfer::<
         T,
         _,
     >(
