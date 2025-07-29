@@ -12,7 +12,7 @@ use transparent::bundle::TxOut;
 use zcash_address::ConversionError;
 use zcash_keys::address::{Address, UnifiedAddress};
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, TargetHeight},
     value::{BalanceError, Zatoshis},
     PoolType, ShieldedProtocol,
 };
@@ -178,7 +178,7 @@ pub trait InputSelector {
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         anchor_height: BlockHeight,
         min_confirmations: ConfirmationsPolicy,
         account: <Self::InputSource as InputSource>::AccountId,
@@ -230,7 +230,7 @@ pub trait ShieldingSelector {
         shielding_threshold: Zatoshis,
         source_addrs: &[TransparentAddress],
         to_account: <Self::InputSource as InputSource>::AccountId,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         min_confirmations: u32,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
@@ -366,8 +366,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         &self,
         params: &ParamsT,
         wallet_db: &Self::InputSource,
-        target_height: BlockHeight,
-        untrusted_anchor_height: BlockHeight,
+        target_height: TargetHeight,
+        anchor_height: BlockHeight,
         min_confirmations: ConfirmationsPolicy,
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
@@ -630,7 +630,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             #[cfg(feature = "orchard")]
                             orchard: use_orchard,
                         }))
-                        .map(|notes| ShieldedInputs::from_parts(untrusted_anchor_height, notes));
+                        .map(|notes| ShieldedInputs::from_parts(anchor_height, notes));
 
                     #[cfg(feature = "transparent-inputs")]
                     if let Some(tr1_balance) = tr1_balance_opt {
@@ -785,7 +785,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         shielding_threshold: Zatoshis,
         source_addrs: &[TransparentAddress],
         to_account: <Self::InputSource as InputSource>::AccountId,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         min_confirmations: u32,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,

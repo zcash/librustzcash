@@ -125,6 +125,59 @@ impl Sub<BlockHeight> for BlockHeight {
         self.0.saturating_sub(other.0)
     }
 }
+/// A wrapper type around [`BlockHeight`] that represents the _next_ chain tip.
+///
+/// Addition and subtraction are provided by proxying to [`BlockHeight`].
+// TODO(schell): determine if we actually need PartialEq, Eq, Hash
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TargetHeight(BlockHeight);
+
+impl From<BlockHeight> for TargetHeight {
+    fn from(value: BlockHeight) -> Self {
+        TargetHeight(value)
+    }
+}
+
+impl From<TargetHeight> for BlockHeight {
+    fn from(value: TargetHeight) -> Self {
+        value.0
+    }
+}
+
+impl From<TargetHeight> for u32 {
+    fn from(value: TargetHeight) -> Self {
+        value.0 .0
+    }
+}
+
+impl From<u32> for TargetHeight {
+    fn from(value: u32) -> Self {
+        BlockHeight::from_u32(value).into()
+    }
+}
+
+impl<I> Add<I> for TargetHeight
+where
+    BlockHeight: Add<I>,
+{
+    type Output = <BlockHeight as Add<I>>::Output;
+
+    fn add(self, rhs: I) -> Self::Output {
+        self.0 + rhs
+    }
+}
+
+impl<I> Sub<I> for TargetHeight
+where
+    BlockHeight: Sub<I>,
+{
+    type Output = <BlockHeight as Sub<I>>::Output;
+
+    fn sub(self, rhs: I) -> Self::Output {
+        self.0 - rhs
+    }
+}
 
 /// The enumeration of known Zcash network types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

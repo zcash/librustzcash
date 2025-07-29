@@ -1,7 +1,7 @@
 use crate::transaction::fees::transparent;
 
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus::{self, TargetHeight},
     value::Zatoshis,
 };
 
@@ -33,7 +33,7 @@ impl super::FeeRule for FeeRule {
     fn fee_required<P: consensus::Parameters>(
         &self,
         _params: &P,
-        _target_height: BlockHeight,
+        _target_height: TargetHeight,
         _transparent_input_sizes: impl IntoIterator<Item = transparent::InputSize>,
         _transparent_output_sizes: impl IntoIterator<Item = usize>,
         _sapling_input_count: usize,
@@ -49,7 +49,7 @@ impl super::FutureFeeRule for FeeRule {
     fn fee_required_zfuture<P: consensus::Parameters>(
         &self,
         _params: &P,
-        _target_height: BlockHeight,
+        _target_height: TargetHeight,
         _transparent_input_sizes: impl IntoIterator<Item = transparent::InputSize>,
         _transparent_output_sizes: impl IntoIterator<Item = usize>,
         _sapling_input_count: usize,
