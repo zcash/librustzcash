@@ -4,7 +4,7 @@ use core::marker::PhantomData;
 
 use zcash_primitives::transaction::fees::{fixed::FeeRule as FixedFeeRule, transparent};
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus::{self, TargetHeight},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
     ShieldedProtocol,
@@ -77,7 +77,7 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
         &self,
         params: &P,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
@@ -151,7 +151,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -191,7 +192,8 @@ mod tests {
             &Network::TestNetwork,
             Network::TestNetwork
                 .activation_height(NetworkUpgrade::Nu5)
-                .unwrap(),
+                .unwrap()
+                .into(),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(

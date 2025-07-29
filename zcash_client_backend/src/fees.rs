@@ -10,7 +10,7 @@ use zcash_primitives::transaction::fees::{
     FeeRule,
 };
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus::{self, TargetHeight},
     memo::MemoBytes,
     value::Zatoshis,
     PoolType, ShieldedProtocol,
@@ -39,7 +39,7 @@ impl FeeRule for StandardFeeRule {
     fn fee_required<P: consensus::Parameters>(
         &self,
         params: &P,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         transparent_input_sizes: impl IntoIterator<Item = InputSize>,
         transparent_output_sizes: impl IntoIterator<Item = usize>,
         sapling_input_count: usize,
@@ -542,7 +542,7 @@ pub trait ChangeStrategy {
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
         &self,
         params: &P,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling::BundleView<NoteRefT>,

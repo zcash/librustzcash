@@ -9,7 +9,7 @@ use shardtree::error::ShardTreeError;
 use zcash_keys::{address::Address, keys::UnifiedSpendingKey};
 use zcash_primitives::transaction::{components::sapling::zip212_enforcement, Transaction};
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, TargetHeight},
     memo::MemoBytes,
     ShieldedProtocol,
 };
@@ -93,7 +93,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
         st: &TestState<Cache, DbT, P>,
         account: <DbT as InputSource>::AccountId,
         target_value: TargetValue,
-        anchor_height: BlockHeight,
+        target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error> {
@@ -102,7 +102,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
                 account,
                 target_value,
                 &[ShieldedProtocol::Sapling],
-                anchor_height,
+                target_height,
                 confirmations_policy,
                 exclude,
             )

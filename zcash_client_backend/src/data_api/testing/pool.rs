@@ -21,7 +21,7 @@ use zcash_primitives::{
     },
 };
 use zcash_protocol::{
-    consensus::{self, BlockHeight, NetworkUpgrade, Parameters},
+    consensus::{self, BlockHeight, NetworkUpgrade, Parameters, TargetHeight},
     local_consensus::LocalNetwork,
     memo::{Memo, MemoBytes},
     value::Zatoshis,
@@ -150,7 +150,7 @@ pub trait ShieldedPoolTester {
         st: &TestState<Cache, DbT, P>,
         account: <DbT as InputSource>::AccountId,
         target_value: TargetValue,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error>;
@@ -772,7 +772,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 
     let mut builder = Builder::new(
         *st.network(),
-        height + 1,
+        (height + 1).into(),
         BuildConfig::Standard {
             sapling_anchor: None,
             orchard_anchor: None,
@@ -1209,6 +1209,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     );
 }
 
+/// TODO(schell): write docs about what this test does
 pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
@@ -1989,7 +1990,7 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
         // TODO(schell): this height needs to be changed as we're now taking the target_height (chain tip + 1)
         // instead of anchor height
-        received_tx_height + 10,
+        (received_tx_height + 10).into(),
         ConfirmationsPolicy::default(),
         &[],
     )
@@ -2005,7 +2006,9 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
         &st,
         account_id,
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
-        received_tx_height + 10,
+        // TODO(schell): this height needs to be changed as we're now taking the target_height (chain tip + 1)
+        // instead of anchor height
+        (received_tx_height + 10).into(),
         ConfirmationsPolicy::default(),
         &[],
     )
@@ -2061,7 +2064,8 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
         &st,
         account.id(),
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
-        account.birthday().height() + 5,
+        // TODO(schell): revisit this height, we should be passing chain tip + 1
+        (account.birthday().height() + 5).into(),
         ConfirmationsPolicy {
             // 5
             untrusted: NonZeroU32::MIN.saturating_add(4),

@@ -7,7 +7,7 @@ use core::cmp::max;
 
 use ::transparent::bundle::OutPoint;
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus::{self, TargetHeight},
     value::{BalanceError, Zatoshis},
 };
 
@@ -155,7 +155,7 @@ impl super::FeeRule for FeeRule {
     fn fee_required<P: consensus::Parameters>(
         &self,
         _params: &P,
-        _target_height: BlockHeight,
+        _target_height: TargetHeight,
         transparent_input_sizes: impl IntoIterator<Item = transparent::InputSize>,
         transparent_output_sizes: impl IntoIterator<Item = usize>,
         sapling_input_count: usize,

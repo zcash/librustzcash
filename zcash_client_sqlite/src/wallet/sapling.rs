@@ -14,7 +14,7 @@ use zcash_client_backend::{
 };
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, TargetHeight},
     memo::MemoBytes,
     ShieldedProtocol, TxId,
 };
@@ -223,7 +223,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     params: &P,
     account: AccountUuid,
     target_value: TargetValue,
-    target_height: BlockHeight,
+    target_height: TargetHeight,
     min_confirmations: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {

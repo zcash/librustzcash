@@ -5,7 +5,7 @@ use zcash_primitives::transaction::fees::{
     transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE, FeeRule,
 };
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus::{self, TargetHeight},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
     ShieldedProtocol,
@@ -204,7 +204,7 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
 pub(crate) fn single_pool_output_balance<P: consensus::Parameters, NoteRefT: Clone, F: FeeRule, E>(
     cfg: SinglePoolBalanceConfig<P, F>,
     wallet_meta: Option<&AccountMeta>,
-    target_height: BlockHeight,
+    target_height: TargetHeight,
     transparent_inputs: &[impl transparent::InputView],
     transparent_outputs: &[impl transparent::OutputView],
     sapling: &impl sapling_fees::BundleView<NoteRefT>,

@@ -77,7 +77,7 @@ use zcash_primitives::{
     transaction::{Transaction, TxId},
 };
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, TargetHeight},
     memo::Memo,
     ShieldedProtocol,
 };
@@ -575,7 +575,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         account: Self::AccountId,
         target_value: TargetValue,
         sources: &[ShieldedProtocol],
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         min_confirmations: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
@@ -622,7 +622,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     fn get_spendable_transparent_outputs(
         &self,
         address: &TransparentAddress,
-        target_height: BlockHeight,
+        target_height: TargetHeight,
         min_confirmations: u32,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs(
@@ -847,7 +847,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
     fn get_target_and_anchor_heights(
         &self,
         min_confirmations: NonZeroU32,
-    ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+    ) -> Result<Option<(TargetHeight, BlockHeight)>, Self::Error> {
         wallet::get_target_and_anchor_heights(self.conn.borrow(), min_confirmations)
     }
 
