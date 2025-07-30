@@ -358,7 +358,6 @@ where
         confirmations: {confirmations_policy:?}"
     );
 
-    // TODO(schell): should this even take the anchor_height?
     let proposal = input_selector.propose_transaction(
         params,
         wallet_db,
