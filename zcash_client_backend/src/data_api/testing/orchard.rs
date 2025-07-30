@@ -110,7 +110,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
         account: <DbT as InputSource>::AccountId,
         target_value: TargetValue,
         target_height: TargetHeight,
-        min_confirmations: ConfirmationsPolicy,
+        confirmation_policy: ConfirmationsPolicy,
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error> {
         st.wallet()
@@ -119,7 +119,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
                 target_value,
                 &[ShieldedProtocol::Orchard],
                 target_height,
-                min_confirmations,
+                confirmation_policy,
                 exclude,
             )
             .map(|n| n.take_orchard())

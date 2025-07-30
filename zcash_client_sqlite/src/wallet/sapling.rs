@@ -224,7 +224,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     account: AccountUuid,
     target_value: TargetValue,
     target_height: TargetHeight,
-    min_confirmations: ConfirmationsPolicy,
+    confirmation_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
@@ -233,7 +233,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
         account,
         target_value,
         target_height,
-        min_confirmations,
+        confirmation_policy,
         exclude,
         ShieldedProtocol::Sapling,
         to_spendable_note,

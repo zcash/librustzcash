@@ -922,8 +922,6 @@ where
             from_account.usk(),
             request,
             OvkPolicy::Sender,
-            // TODO(schell): Check this passes tests.
-            // This was previously `NonZeroU32::MIN`, which is 1.
             ConfirmationsPolicy::MIN,
         )
     }
