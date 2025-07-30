@@ -418,8 +418,10 @@ pub mod testing {
 
     use crate::transaction::{OrchardBundle, TxVersion};
     use orchard::bundle::{testing as t_orch, Authorized};
-    use orchard::orchard_flavor::OrchardZSA;
     use zcash_protocol::value::testing::arb_zat_balance;
+
+    #[cfg(zcash_unstable = "nu7")]
+    use orchard::orchard_flavor::OrchardZSA;
 
     prop_compose! {
         pub fn arb_bundle(n_actions: usize)(
@@ -432,26 +434,29 @@ pub mod testing {
         }
     }
 
+    #[cfg(zcash_unstable = "nu7")]
     prop_compose! {
-        #[allow(unreachable_code)]
         pub fn arb_zsa_bundle(n_actions: usize)(
-            _orchard_value_balance in arb_zat_balance(),
-            _bundle in t_orch::BundleArb::<OrchardZSA>::arb_bundle(n_actions)
+            orchard_value_balance in arb_zat_balance(),
+            bundle in t_orch::BundleArb::<OrchardZSA>::arb_bundle(n_actions)
         ) -> OrchardBundle<Authorized> {
             // overwrite the value balance, as we can't guarantee that the
             // value doesn't exceed the MAX_MONEY bounds.
-            #[cfg(zcash_unstable = "nu7" )]
-            return OrchardBundle::OrchardZSA(_bundle.try_map_value_balance::<_, (), _>(|_| Ok(_orchard_value_balance)).unwrap());
-            panic!("ZSA is not supported in this version");
+            OrchardBundle::OrchardZSA(bundle.try_map_value_balance::<_, (), _>(|_| Ok(orchard_value_balance)).unwrap())
         }
     }
 
     pub fn arb_bundle_for_version(
         v: TxVersion,
     ) -> impl Strategy<Value = Option<OrchardBundle<Authorized>>> {
+        #[cfg(zcash_unstable = "nu7")]
         if v.has_orchard_zsa() {
-            Strategy::boxed((1usize..100).prop_flat_map(|n| prop::option::of(arb_zsa_bundle(n))))
-        } else if v.has_orchard() {
+            return Strategy::boxed(
+                (1usize..100).prop_flat_map(|n| prop::option::of(arb_zsa_bundle(n))),
+            );
+        }
+
+        if v.has_orchard() {
             Strategy::boxed((1usize..100).prop_flat_map(|n| prop::option::of(arb_bundle(n))))
         } else {
             Strategy::boxed(Just(None))
