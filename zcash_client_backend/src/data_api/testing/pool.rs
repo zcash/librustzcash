@@ -344,6 +344,98 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
     );
 }
 
+/// Tests that inputs from trusted sources (the same wallet) can be spent according to
+/// the `ConfirmationPolicy`.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Checks that the wallet balances are correct.
+/// - Constructs a request to spend part of that balance to an external address in the
+///   same pool.
+/// - Builds the transaction.
+pub fn can_spend_trusted_inputs_by_confirmations_policy<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let dfvk = T::test_account_fvk(&st);
+
+    // Add funds to the wallet in a single note
+    let value = Zatoshis::const_from_u64(60000);
+    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    st.scan_cached_blocks(h, 1);
+
+    // Spendable balance matches total balance
+    assert_eq!(st.get_total_balance(account.id()), value);
+    assert_eq!(st.get_spendable_balance(account.id(), 1), value);
+
+    assert_eq!(
+        st.wallet()
+            .block_max_scanned()
+            .unwrap()
+            .unwrap()
+            .block_height(),
+        h
+    );
+
+    let to_extsk = T::sk(&[0xf5; 32]);
+    let to: Address = T::sk_default_address(&to_extsk);
+    let payment_amount = Zatoshis::const_from_u64(10000);
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        payment_amount,
+    )])
+    .unwrap();
+
+    let fee_rule = StandardFeeRule::Zip317;
+
+    let change_memo = "Test change memo".parse::<Memo>().unwrap();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        fee_rule,
+        Some(change_memo.clone().into()),
+        T::SHIELDED_PROTOCOL,
+        DustOutputPolicy::default(),
+    );
+    let input_selector = GreedyInputSelector::new();
+
+    let proposal = st
+        .propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap();
+
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+        account.usk(),
+        OvkPolicy::Sender,
+        &proposal,
+    );
+    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+
+    let sent_tx_id = create_proposed_result.unwrap()[0];
+
+    // Ensure that when the transaction is mined, we cannot spend the change, yet.
+    let (h, _) = st.generate_next_block_including(sent_tx_id);
+    st.scan_cached_blocks(h, 1);
+
+    let fee = Zatoshis::from_u64(1000).unwrap();
+    assert_eq!(
+        st.get_total_balance(account.id()),
+        (value - payment_amount - fee).unwrap()
+    );
+    // Spendable balance matches total balance
+    assert_eq!(st.get_spendable_balance(account.id(), 1), value);
+}
+
 pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
@@ -1209,7 +1301,6 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     );
 }
 
-/// TODO(schell): write docs about what this test does
 pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,

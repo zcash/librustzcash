@@ -637,4 +637,9 @@ pub(crate) mod tests {
     fn wallet_recovery_compute_fees() {
         testing::pool::wallet_recovery_computes_fees::<SaplingPoolTester>();
     }
+
+    #[test]
+    fn zip315_can_spend_trusted_inputs_by_confirmations_policy() {
+        testing::pool::can_spend_trusted_inputs_by_confirmations_policy::<SaplingPoolTester>();
+    }
 }
