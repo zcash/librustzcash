@@ -290,3 +290,9 @@ pub(crate) fn wallet_recovery_computes_fees<T: ShieldedPoolTester>() {
         },
     )
 }
+
+pub(crate) fn can_spend_trusted_inputs_by_confirmations_policy<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::can_spend_trusted_inputs_by_confirmations_policy::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
