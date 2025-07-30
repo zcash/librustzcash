@@ -35,7 +35,6 @@ use zcash_keys::{
     keys::{AddressGenerationError, UnifiedAddressRequest},
 };
 use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
-use zcash_protocol::consensus::TargetHeight;
 use zcash_protocol::{
     consensus::{self, BlockHeight},
     value::{ZatBalance, Zatoshis},
@@ -793,7 +792,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     address: &TransparentAddress,
-    target_height: TargetHeight,
+    target_height: consensus::TargetHeight,
     min_confirmations: u32,
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
     let confirmed_height = target_height - min_confirmations;
