@@ -282,7 +282,7 @@ pub type ExtractErrT<DbT, N> = Error<
 
 /// The minimum number of confirmations required for trusted and untrusted
 /// transactions.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct ConfirmationsPolicy {
     pub trusted: NonZeroU32,
     pub untrusted: NonZeroU32,
@@ -330,7 +330,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     input_selector: &InputsT,
     change_strategy: &ChangeT,
     request: zip321::TransactionRequest,
-    min_confirmations: ConfirmationsPolicy,
+    confirmations_policy: ConfirmationsPolicy,
 ) -> Result<
     Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
     ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -347,10 +347,16 @@ where
     // later based on the input source (whether it's trusted or not) and the
     // number of confirmations
     let maybe_intial_heights = wallet_db
-        .get_target_and_anchor_heights(min_confirmations.trusted)
+        .get_target_and_anchor_heights(confirmations_policy.trusted)
         .map_err(InputSelectorError::DataSource)?;
     let (target_height, anchor_height) =
         maybe_intial_heights.ok_or_else(|| InputSelectorError::SyncRequired)?;
+
+    println!(
+        "target_height: {target_height:?}\n\
+        anchor_height: {anchor_height:?}\n\
+        confirmations: {confirmations_policy:?}"
+    );
 
     // TODO(schell): should this even take the anchor_height?
     let proposal = input_selector.propose_transaction(
@@ -358,7 +364,7 @@ where
         wallet_db,
         target_height,
         anchor_height,
-        min_confirmations,
+        confirmations_policy,
         spend_from_account,
         request,
         change_strategy,
@@ -398,7 +404,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     params: &ParamsT,
     fee_rule: StandardFeeRule,
     spend_from_account: <DbT as InputSource>::AccountId,
-    min_confirmations: ConfirmationsPolicy,
+    confirmations_policy: ConfirmationsPolicy,
     to: &Address,
     amount: Zatoshis,
     memo: Option<MemoBytes>,
@@ -450,7 +456,7 @@ where
         &input_selector,
         &change_strategy,
         request,
-        min_confirmations,
+        confirmations_policy,
     )
 }
 

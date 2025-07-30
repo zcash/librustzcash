@@ -576,7 +576,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         target_value: TargetValue,
         sources: &[ShieldedProtocol],
         target_height: TargetHeight,
-        min_confirmations: ConfirmationsPolicy,
+        confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
     ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
         Ok(SpendableNotes::new(
@@ -587,7 +587,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     account,
                     target_value,
                     target_height,
-                    min_confirmations,
+                    confirmations_policy,
                     exclude,
                 )?
             } else {
@@ -601,7 +601,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     account,
                     target_value,
                     target_height,
-                    min_confirmations,
+                    confirmations_policy,
                     exclude,
                 )?
             } else {
