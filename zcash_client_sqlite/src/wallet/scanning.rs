@@ -595,7 +595,7 @@ pub(crate) mod tests {
     use {
         incrementalmerkletree::Level,
         orchard::tree::MerkleHashOrchard,
-        std::{convert::Infallible, num::NonZeroU32},
+        std::convert::Infallible,
         zcash_client_backend::{
             data_api::{
                 testing::orchard::OrchardPoolTester, wallet::input_selection::GreedyInputSelector,
