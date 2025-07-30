@@ -129,9 +129,8 @@ impl Sub<BlockHeight> for BlockHeight {
 /// A wrapper type around [`BlockHeight`] that represents the _next_ chain tip.
 ///
 /// Addition and subtraction are provided by proxying to [`BlockHeight`].
-// TODO(schell): determine if we actually need PartialEq, Eq, Hash
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TargetHeight(BlockHeight);
 
 impl From<BlockHeight> for TargetHeight {
