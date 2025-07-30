@@ -152,7 +152,7 @@ static_assertions = "1"
 ambassador = "0.4"
 assert_matches = "1.5"
 criterion = "0.5"
-proptest = "=1.2.0"
+proptest = ">=1,<1.7" # proptest 1.7 updates to rand 0.9
 rand_chacha = "0.3"
 rand_xorshift = "0.3"
 incrementalmerkletree-testing = "0.3"
@@ -221,4 +221,4 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 [patch.crates-io]
 zcash_note_encryption = { version = "0.4.1", git = "https://github.com/zcash/zcash_note_encryption", branch = "main" }
 sapling = { package = "sapling-crypto", version = "0.5", git = "https://github.com/QED-it/sapling-crypto", branch = "zsa1" }
-orchard = { version = "0.11.0", git = "https://github.com/QED-it/orchard", rev = "01758ea45adf480746e783934fe9ef5a058fb703" }
+orchard = { version = "0.11.0", git = "https://github.com/QED-it/orchard", rev = "806878c75e491ec7815af86ee08d761c7ed527b5" }
