@@ -180,7 +180,7 @@ pub trait InputSelector {
         wallet_db: &Self::InputSource,
         target_height: TargetHeight,
         anchor_height: BlockHeight,
-        min_confirmations: ConfirmationsPolicy,
+        confirmations_policy: ConfirmationsPolicy,
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
@@ -368,7 +368,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         wallet_db: &Self::InputSource,
         target_height: TargetHeight,
         anchor_height: BlockHeight,
-        min_confirmations: ConfirmationsPolicy,
+        confirmations_policy: ConfirmationsPolicy,
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
@@ -751,7 +751,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     TargetValue::AtLeast(amount_required),
                     selectable_pools,
                     target_height,
-                    min_confirmations,
+                    confirmations_policy,
                     &exclude,
                 )
                 .map_err(InputSelectorError::DataSource)?;
