@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+## [0.5.0] - 2025-07-31
+### Changed
+- Migrated to `zcash_protocol 0.6`, `zcash_address 0.9`.
+
 ## [0.4.0] - 2025-05-30
 ### Changed
 - Migrated to `zcash_address 0.8`.
