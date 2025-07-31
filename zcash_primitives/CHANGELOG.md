@@ -13,6 +13,7 @@ workspace.
 ## [0.24.0] - PLANNED
 
 ### Changed
+- Migrated to `zcash_protocol 0.6`
 - The type of `zcash_primitives::transaction::TransactionData::fee_paid` has
   changed. The closure provided to this method for input retrieval can now
   indicate that an input for the given outpoint is not available, and

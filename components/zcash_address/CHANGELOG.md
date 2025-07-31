@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+## [0.9.0] - PLANNED
+### Changed
+- Migrated to `zcash_protocol 0.6`
+
 ## [0.8.0] - 2025-05-30
 ### Changed
 - The following methods with generic parameter `T` now require `T: TryFromAddress`

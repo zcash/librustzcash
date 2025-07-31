@@ -16,7 +16,7 @@ workspace.
   refer to the `zcash_client_backend 0.20.0` release notes.
 
 ### Changed
-- Migrated to `zcash_client_backend 0.20`.
+- Migrated to `zcash_protocol 0.6`, `zcash_client_backend 0.20`.
 
 ## [0.16.4, 0.17.2] - 2025-08-19
 

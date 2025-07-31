@@ -10,7 +10,7 @@ workspace.
 
 ## [Unreleased]
 
-## [0.6.0] - PLANNED
+## [0.6.0] - 2025-07-31
 
 ### Changed
 - `zcash_protocol::consensus`:
@@ -18,6 +18,7 @@ workspace.
   - `NetworkUpgrade` now has an additional `Nu6_1` variant.
 - `zcash_protocol::local_consensus`:
   - `LocalNetwork` has a new field `nu6_1`.
+- The testnet activation height has been set for `consensus::BranchId::Nu6_1`
 
 ## [0.5.4] - 2025-07-15
 

@@ -25,6 +25,7 @@ workspace.
   - `zcash_client_backend::data_api::Zip32Derivation::legacy_address_index`
 
 ### Changed
+- Migrated to `zcash_protocol 0.6`
 - `zcash_client_backend::data_api`:
   - `WalletWrite` has added method `notify_address_checked` when the
     `transparent-inputs` feature flag is enabled.
