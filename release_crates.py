@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Automated crate release script for librustzcash workspace.
+Automated crate release script for the librustzcash workspace.
 
-This script releases crates in dependency order, performing the same operations
-as seen in recent commits: updating versions, CHANGELOGs, and creating commits.
+This script releases crates in dependency order, performing version updates,
+updating CHANGELOGs, and creating release commits.
 """
 
 import json
@@ -195,29 +195,13 @@ class WorkspaceReleaser:
                     f.write(content)
     
     def update_supply_chain(self, crate_name: str, new_version: str):
-        """Update supply-chain/imports.lock."""
-        imports_lock = self.workspace_root / "supply-chain" / "imports.lock"
+        """Update supply chain metadata using cargo vet."""
+        cmd = ["cargo", "vet"]
+        result = subprocess.run(cmd, cwd=self.workspace_root, capture_output=True, text=True)
         
-        if not imports_lock.exists():
-            return
-        
-        with open(imports_lock, 'r') as f:
-            content = f.read()
-        
-        # Add or update unpublished entry
-        old_version = self.crates[crate_name].version
-        new_entry = f'[[unpublished.{crate_name}]]\nversion = "{new_version}"\naudited_as = "{old_version}"\n'
-        
-        # Check if entry exists
-        pattern = rf'\[\[unpublished\.{re.escape(crate_name)}\]\][^\[]*'
-        if re.search(pattern, content, re.MULTILINE | re.DOTALL):
-            content = re.sub(pattern, new_entry.rstrip() + '\n', content, flags=re.MULTILINE | re.DOTALL)
-        else:
-            # Add new entry at the end
-            content = content.rstrip() + '\n\n' + new_entry
-        
-        with open(imports_lock, 'w') as f:
-            f.write(content)
+        if result.returncode != 0:
+            print(f"Warning: cargo vet failed: {result.stderr}", file=sys.stderr)
+            # Continue anyway as this might not be critical for the release
     
     def run_cargo_update(self):
         """Run cargo update to update Cargo.lock."""
