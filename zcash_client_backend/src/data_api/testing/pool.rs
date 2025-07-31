@@ -2078,8 +2078,6 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
         &st,
         account_id,
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
-        // TODO(schell): this height needs to be changed as we're now taking the target_height (chain tip + 1)
-        // instead of anchor height
         (received_tx_height + 10).into(),
         ConfirmationsPolicy::default(),
         &[],
@@ -2096,8 +2094,6 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
         &st,
         account_id,
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
-        // TODO(schell): this height needs to be changed as we're now taking the target_height (chain tip + 1)
-        // instead of anchor height
         (received_tx_height + 10).into(),
         ConfirmationsPolicy::default(),
         &[],
@@ -2153,7 +2149,6 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
         &st,
         account.id(),
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
-        // TODO(schell): revisit this height, we should be passing chain tip + 1
         (account.birthday().height() + 5).into(),
         ConfirmationsPolicy {
             // 5
