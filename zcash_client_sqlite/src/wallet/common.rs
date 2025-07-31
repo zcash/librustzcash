@@ -232,29 +232,19 @@ where
     //    well as a single note for which the sum was greater than or equal to the
     //    required value, bringing the sum of all selected notes across the threshold.
     let mut stmt_select_notes = conn.prepare_cached(
-        // TODO(schell): use received_notes instead of sent_notes.
-        // but maybe sent_notes is fine, because sent_notes has the `to_account_id` field
-        // which specifies internal recipients?
-        // @see the db.rs docs
         &format!(
             "WITH eligible AS (
                  SELECT
-                     {table_prefix}_received_notes.id AS id, txid,
-                     {table_prefix}_received_notes.{output_index_col},
-                     diversifier,
-                     {table_prefix}_received_notes.value, {note_reconstruction_cols}, commitment_tree_position,
-                     transactions.block AS mined_height, sent_notes.to_account_id AS sent_to_account_id,
-                     SUM(
-                         {table_prefix}_received_notes.value
-                     ) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
-                     accounts.ufvk as ufvk, recipient_key_scope
+                     {table_prefix}_received_notes.id AS id, txid, {output_index_col},
+                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
+                     SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
+                     accounts.ufvk as ufvk, recipient_key_scope,
+                     transactions.block AS mined_height
                  FROM {table_prefix}_received_notes
                  INNER JOIN accounts
                     ON accounts.id = {table_prefix}_received_notes.account_id
                  INNER JOIN transactions
                     ON transactions.id_tx = {table_prefix}_received_notes.tx
-                 LEFT JOIN sent_notes
-                    ON transactions.id_tx = sent_notes.tx
                  WHERE accounts.uuid = :account_uuid
                  AND {table_prefix}_received_notes.account_id = accounts.id
                  -- FIXME #1316, allow selection of dust inputs
@@ -286,12 +276,12 @@ where
              )
              SELECT id, txid, {output_index_col},
                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                    ufvk, recipient_key_scope, mined_height, sent_to_account_id
+                    ufvk, recipient_key_scope, mined_height
              FROM eligible WHERE so_far < :target_value
              UNION
              SELECT id, txid, {output_index_col},
                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                    ufvk, recipient_key_scope, mined_height, sent_to_account_id
+                    ufvk, recipient_key_scope, mined_height
              FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
         )
     )?;
@@ -319,10 +309,8 @@ where
         ],
         |r| -> Result<_, SqliteClientError> {
             let maybe_note = to_spendable_note(params, r)?;
-            let sent_to_account_id: Option<i64> = r.get("sent_to_account_id")?;
-            // It's enough to know this account id _exists_ as external recipients are null in
-            // the `sent_notes` table
-            let note_is_trusted = sent_to_account_id.is_some();
+            let recipient_key_scope: i64 = r.get("recipient_key_scope")?;
+            let note_is_trusted = recipient_key_scope == 1;
             let mined_height: u32 = r.get("mined_height")?;
             Ok(maybe_note.map(|note| (note, note_is_trusted, mined_height)))
         },
@@ -331,29 +319,18 @@ where
     notes
         .filter_map(|result_maybe_note| {
             let result_note = result_maybe_note.transpose()?;
-            result_note.map(|(note, is_trusted, mined_height)| {
-                let number_of_confirmations = target_height - mined_height;
-                let required_confirmations = u32::from(confirmations_policy.untrusted);
-                // If the note is from a trusted source (this wallet), then we don't have to determine the
-                // number of confirmations, as we've already queried above based on the trusted anchor height.
-                // So we only check if it's trusted, or if it meets the untrusted number of confirmations.
-                let is_spendable =
-                    is_trusted || u32::from(number_of_confirmations) >= confirmations_policy.untrusted.into();
-                println!(
-                    "note: {} is {}\n  \
-                    is_trusted: {is_trusted},\n  \
-                    confirmations: {number_of_confirmations} >= {required_confirmations} = {is_spendable},\n  \
-                    mined_height: {mined_height},\n  \
-                    target_height: {target_height:?}",
-                    note.internal_note_id(),
-                    if is_spendable {
-                        "spendable"
-                    } else {
-                        "not spendable"
-                    }
-                );
-                is_spendable.then_some(note)
-            }).transpose()
+            result_note
+                .map(|(note, is_trusted, mined_height)| {
+                    let number_of_confirmations = target_height - mined_height;
+                    let required_confirmations = u32::from(confirmations_policy.untrusted);
+                    // If the note is from a trusted source (this wallet), then we don't have to determine the
+                    // number of confirmations, as we've already queried above based on the trusted anchor height.
+                    // So we only check if it's trusted, or if it meets the untrusted number of confirmations.
+                    let is_spendable =
+                        is_trusted || u32::from(number_of_confirmations) >= required_confirmations;
+                    is_spendable.then_some(note)
+                })
+                .transpose()
         })
         .collect::<Result<Vec<_>, _>>()
 }

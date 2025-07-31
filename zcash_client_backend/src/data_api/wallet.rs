@@ -350,7 +350,7 @@ impl Default for ConfirmationsPolicy {
             // 3
             trusted: NonZeroU32::MIN.saturating_add(2),
             // 10
-            untrusted: NonZeroU32::MIN.saturating_add(8),
+            untrusted: NonZeroU32::MIN.saturating_add(9),
         }
     }
 }
