@@ -9,6 +9,10 @@ audited_as = "0.8.0"
 version = "0.6.0"
 audited_as = "0.5.4"
 
+[[unpublished.zip321]]
+version = "0.5.0"
+audited_as = "0.4.0"
+
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
