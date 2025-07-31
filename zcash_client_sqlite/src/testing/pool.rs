@@ -291,8 +291,12 @@ pub(crate) fn wallet_recovery_computes_fees<T: ShieldedPoolTester>() {
     )
 }
 
-pub(crate) fn can_spend_trusted_inputs_by_confirmations_policy<T: ShieldedPoolTester>() {
-    zcash_client_backend::data_api::testing::pool::can_spend_trusted_inputs_by_confirmations_policy::<
-        T,
-    >(TestDbFactory::default(), BlockCache::new())
+pub(crate) fn can_spend_inputs_by_confirmations_policy<T: ShieldedPoolTester>() {
+    for is_trusted in [false, true] {
+        zcash_client_backend::data_api::testing::pool::zip_315_confirmations_test_steps::<T>(
+            TestDbFactory::default(),
+            BlockCache::new(),
+            is_trusted,
+        );
+    }
 }
