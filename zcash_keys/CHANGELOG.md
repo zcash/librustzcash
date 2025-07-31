@@ -11,7 +11,7 @@ workspace.
 
 ## [0.10.0] - PLANNED
 ### Added
-- Migrated to `zcash_protocol 0.6`
+- Migrated to `zcash_protocol 0.6`, `zcash_address 0.9`
 - `zcash_keys::keys::zcashd`, a module containing utilities that are useful
   for interacting with key data from legacy zcashd wallets, has been added
   under a newly-added `zcashd-compat` feature flag.

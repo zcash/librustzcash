@@ -16,7 +16,7 @@ workspace.
 - `zcash_transparent::address::TransparentAddress::from_pubkey`
 
 ### Changed
-- Migrated to `zcash_protocol 0.6`
+- Migrated to `zcash_protocol 0.6`, `zcash_address 0.9`
 - The type of `zcash_transparent::bundle::Bundle::value_balance` has changed.
   The closure provided to this method for input retrieval can now indicate that
   an input for the given outpoint is not available, and `value_balance` will
