@@ -12,7 +12,7 @@ workspace.
 
 ## [0.4.0] - PLANNED
 ### Changed
-- Migrated to `zcash_protocol 0.6`, `zcash_transparent 0.4`
+- Migrated to `zcash_protocol 0.6`, `zcash_transparent 0.4`, `zcash_primitives 0.24`
 
 ## [0.3.0] - 2025-05-30
 
