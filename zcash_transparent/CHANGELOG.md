@@ -10,7 +10,7 @@ workspace.
 
 ## [Unreleased]
 
-## [0.4.0] - PLANNED
+## [0.4.0] - 2025-07-31
 
 ### Added
 - `zcash_transparent::address::TransparentAddress::from_pubkey`

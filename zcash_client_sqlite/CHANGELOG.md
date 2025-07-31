@@ -17,7 +17,7 @@ workspace.
 
 ### Changed
 - Migrated to `zcash_protocol 0.6`, `zcash_address 0.9`, `zip321 0.5`,
-  `zcash_client_backend 0.20`.
+  `zcash_transparent 0.4`, `zcash_client_backend 0.20`.
 
 ## [0.16.4, 0.17.2] - 2025-08-19
 
