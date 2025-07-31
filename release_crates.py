@@ -204,11 +204,11 @@ class WorkspaceReleaser:
             # Continue anyway as this might not be critical for the release
     
     def run_cargo_update(self):
-        """Run cargo update to update Cargo.lock."""
-        cmd = ["cargo", "update"]
+        """Run cargo check to perform minimal required updates to Cargo.lock."""
+        cmd = ["cargo", "check", "--tests", "--all-features"]
         result = subprocess.run(cmd, cwd=self.workspace_root)
         if result.returncode != 0:
-            print("Error running cargo update", file=sys.stderr)
+            print("Error running cargo check", file=sys.stderr)
             sys.exit(1)
     
     def validate_release(self, crate_name: str, new_version: str) -> bool:
