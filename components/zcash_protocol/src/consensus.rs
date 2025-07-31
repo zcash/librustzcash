@@ -441,7 +441,7 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Canopy => Some(BlockHeight(1_028_500)),
             NetworkUpgrade::Nu5 => Some(BlockHeight(1_842_420)),
             NetworkUpgrade::Nu6 => Some(BlockHeight(2_976_000)),
-            NetworkUpgrade::Nu6_1 => None,
+            NetworkUpgrade::Nu6_1 => Some(BlockHeight(3_536_500)),
             #[cfg(zcash_unstable = "nu7")]
             NetworkUpgrade::Nu7 => None,
             #[cfg(zcash_unstable = "zfuture")]
