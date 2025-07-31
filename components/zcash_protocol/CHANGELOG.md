@@ -10,6 +10,15 @@ workspace.
 
 ## [Unreleased]
 
+## [0.6.0] - PLANNED
+
+### Changed
+- `zcash_protocol::consensus`:
+  - `BranchId` now has an additional `Nu6_1` variant.
+  - `NetworkUpgrade` now has an additional `Nu6_1` variant.
+- `zcash_protocol::local_consensus`:
+  - `LocalNetwork` has a new field `nu6_1`.
+
 ## [0.5.4] - 2025-07-15
 
 ### Added
