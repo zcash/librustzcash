@@ -636,7 +636,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn zip315_can_spend_trusted_inputs_by_confirmations_policy() {
-        testing::pool::can_spend_trusted_inputs_by_confirmations_policy::<SaplingPoolTester>();
+    fn zip315_can_spend_inputs_by_confirmations_policy() {
+        testing::pool::can_spend_inputs_by_confirmations_policy::<SaplingPoolTester>();
     }
 }

@@ -294,7 +294,7 @@ impl Default for ConfirmationsPolicy {
             // 3
             trusted: NonZeroU32::MIN.saturating_add(2),
             // 10
-            untrusted: NonZeroU32::MIN.saturating_add(8),
+            untrusted: NonZeroU32::MIN.saturating_add(9),
         }
     }
 }
@@ -351,13 +351,6 @@ where
         .map_err(InputSelectorError::DataSource)?;
     let (target_height, anchor_height) =
         maybe_intial_heights.ok_or_else(|| InputSelectorError::SyncRequired)?;
-
-    println!(
-        "target_height: {target_height:?}\n\
-        anchor_height: {anchor_height:?}\n\
-        confirmations: {confirmations_policy:?}"
-    );
-
     let proposal = input_selector.propose_transaction(
         params,
         wallet_db,
