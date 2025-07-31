@@ -211,6 +211,34 @@ class WorkspaceReleaser:
             print("Error running cargo update", file=sys.stderr)
             sys.exit(1)
     
+    def validate_release(self, crate_name: str, new_version: str) -> bool:
+        """Validate the release using cargo publish --dry-run and cargo semver-checks."""
+        print(f"  Validating release for {crate_name}...")
+        
+        # Run cargo publish --dry-run
+        print(f"  Running cargo publish --dry-run for {crate_name}...")
+        cmd = ["cargo", "publish", "-p", crate_name, "--dry-run"]
+        result = subprocess.run(cmd, cwd=self.workspace_root, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(f"Error: cargo publish --dry-run failed for {crate_name}:", file=sys.stderr)
+            print(result.stderr, file=sys.stderr)
+            return False
+        
+        # Run cargo semver-checks
+        print(f"  Running cargo semver-checks for {crate_name}...")
+        cmd = ["cargo", "semver-checks", "check-release", "-p", crate_name]
+        result = subprocess.run(cmd, cwd=self.workspace_root, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(f"Error: cargo semver-checks failed for {crate_name}:", file=sys.stderr)
+            print(result.stderr, file=sys.stderr)
+            print(f"Consider using a different version bump type (--bump major/minor/patch)", file=sys.stderr)
+            return False
+        
+        print(f"  ✓ Validation passed for {crate_name}")
+        return True
+    
     def create_commit(self, crate_name: str, new_version: str):
         """Create a git commit for the release."""
         commit_message = f"Release {crate_name} version {new_version}"
@@ -247,6 +275,11 @@ class WorkspaceReleaser:
         
         # Update Cargo.lock
         self.run_cargo_update()
+        
+        # Validate the release before committing
+        if not self.validate_release(crate_name, new_version):
+            print(f"Release validation failed for {crate_name}", file=sys.stderr)
+            return False
         
         # Create commit
         self.create_commit(crate_name, new_version)
