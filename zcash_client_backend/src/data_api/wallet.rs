@@ -71,7 +71,7 @@ use zcash_primitives::transaction::{
     Transaction, TxId,
 };
 use zcash_protocol::{
-    consensus::{self, BlockHeight, TargetHeight},
+    consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::Zatoshis,
     PoolType, ShieldedProtocol,
@@ -115,7 +115,7 @@ const PROPRIETARY_OUTPUT_INFO: &str = "zcash_client_backend:output_info";
 
 #[cfg(feature = "pczt")]
 fn serialize_target_height<S>(
-    target_height: &TargetHeight,
+    target_height: &consensus::TargetHeight,
     serializer: S,
 ) -> Result<S::Ok, S::Error>
 where
@@ -126,7 +126,7 @@ where
 }
 
 #[cfg(feature = "pczt")]
-fn deserialize_target_height<'de, D>(deserializer: D) -> Result<TargetHeight, D::Error>
+fn deserialize_target_height<'de, D>(deserializer: D) -> Result<consensus::TargetHeight, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -145,7 +145,7 @@ struct ProposalInfo<AccountId> {
         serialize_with = "serialize_target_height",
         deserialize_with = "deserialize_target_height"
     )]
-    target_height: TargetHeight,
+    target_height: consensus::TargetHeight,
 }
 
 /// Reduced version of [`Recipient`] stored inside a PCZT.
