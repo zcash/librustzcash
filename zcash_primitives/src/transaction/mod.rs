@@ -25,11 +25,8 @@ use ::transparent::bundle::{self as transparent, OutPoint, TxIn, TxOut};
 use zcash_encoding::{CompactSize, Vector};
 use zcash_protocol::{
     consensus::{BlockHeight, BranchId},
-    value::{BalanceError, ZatBalance},
+    value::{BalanceError, ZatBalance, Zatoshis},
 };
-
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
-use zcash_protocol::value::Zatoshis;
 
 use self::{
     components::{
@@ -224,7 +221,6 @@ impl TxVersion {
             }
             BranchId::Nu5 => TxVersion::V5,
             BranchId::Nu6 => TxVersion::V5,
-            #[cfg(zcash_unstable = "nu6.1")]
             BranchId::Nu6_1 => TxVersion::V5,
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => TxVersion::V6,
@@ -421,33 +417,43 @@ impl<A: Authorization> TransactionData<A> {
     /// Returns the total fees paid by the transaction, given a function that can be used to
     /// retrieve the value of previous transactions' transparent outputs that are being spent in
     /// this transaction.
-    pub fn fee_paid<E, F>(&self, get_prevout: F) -> Result<ZatBalance, E>
+    pub fn fee_paid<E, F>(&self, get_prevout: F) -> Result<Option<Zatoshis>, E>
     where
         E: From<BalanceError>,
-        F: FnMut(&OutPoint) -> Result<ZatBalance, E>,
+        F: FnMut(&OutPoint) -> Result<Option<Zatoshis>, E>,
     {
-        let value_balances = [
-            self.transparent_bundle
-                .as_ref()
-                .map_or_else(|| Ok(ZatBalance::zero()), |b| b.value_balance(get_prevout))?,
-            self.sprout_bundle.as_ref().map_or_else(
-                || Ok(ZatBalance::zero()),
-                |b| b.value_balance().ok_or(BalanceError::Overflow),
-            )?,
-            self.sapling_bundle
-                .as_ref()
-                .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
-            self.orchard_bundle
-                .as_ref()
-                .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            -self.zip233_amount,
-        ];
+        let transparent_balance = self.transparent_bundle.as_ref().map_or_else(
+            || Ok(Some(ZatBalance::zero())),
+            |b| b.value_balance(get_prevout),
+        )?;
 
-        value_balances
-            .iter()
-            .sum::<Option<_>>()
-            .ok_or_else(|| BalanceError::Overflow.into())
+        transparent_balance
+            .map(|transparent_balance| {
+                let value_balances = [
+                    transparent_balance,
+                    self.sprout_bundle.as_ref().map_or_else(
+                        || Ok(ZatBalance::zero()),
+                        |b| b.value_balance().ok_or(BalanceError::Overflow),
+                    )?,
+                    self.sapling_bundle
+                        .as_ref()
+                        .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
+                    self.orchard_bundle
+                        .as_ref()
+                        .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
+                    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+                    -self.zip233_amount,
+                ];
+
+                let overall_balance = value_balances
+                    .iter()
+                    .sum::<Option<_>>()
+                    .ok_or(BalanceError::Overflow)?;
+
+                Zatoshis::try_from(overall_balance).map_err(|_| BalanceError::Underflow)
+            })
+            .transpose()
+            .map_err(E::from)
     }
 
     pub fn digest<D: TransactionDigest<A>>(&self, digester: D) -> D::Digest {
@@ -1153,7 +1159,6 @@ pub mod testing {
             }
             BranchId::Nu5 => Just(TxVersion::V5).boxed(),
             BranchId::Nu6 => Just(TxVersion::V5).boxed(),
-            #[cfg(zcash_unstable = "nu6.1")]
             BranchId::Nu6_1 => Just(TxVersion::V5).boxed(),
             #[cfg(zcash_unstable = "nu7")]
             BranchId::Nu7 => Just(TxVersion::V6).boxed(),

@@ -1441,7 +1441,7 @@ mod tests {
                 res.transaction()
                     .fee_paid(|_| Err(BalanceError::Overflow))
                     .unwrap(),
-                ZatBalance::const_from_i64(15_000)
+                Some(Zatoshis::const_from_u64(15_000))
             );
         }
 
@@ -1490,7 +1490,7 @@ mod tests {
                 res.transaction()
                     .fee_paid(|_| Err(BalanceError::Overflow))
                     .unwrap(),
-                ZatBalance::const_from_i64(15_000)
+                Some(Zatoshis::const_from_u64(15_000))
             );
         }
     }

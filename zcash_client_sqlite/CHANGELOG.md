@@ -10,6 +10,16 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- A `zcashd-compat` feature flag has been added in service of being able to
+  import data from the zcashd `wallet.dat` format. For additional information
+  refer to the `zcash_client_backend 0.20.0` release notes.
+
+### Changed
+- Migrated to `zcash_protocol 0.6`, `zcash_address 0.9`, `zip321 0.5`,
+  `zcash_transparent 0.4`, `zcash_primitives 0.24`, `zcash_proofs 0.24`,
+  `zcash_client_backend 0.20`.
+
 ## [0.16.4, 0.17.2] - 2025-08-19
 
 ### Fixed
@@ -34,6 +44,7 @@ workspace.
 ### Added
 - `zcash_client_sqlite::wallet::init::WalletMigrator`
 - `zcash_client_sqlite::wallet::init::migrations`
+- `zcash_client_sqlite::WalletDb::params`
 
 ### Changed
 - Migrated to `zcash_address 0.8`, `zip321 0.4`, `zcash_transparent 0.3`,
