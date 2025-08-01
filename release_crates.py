@@ -16,6 +16,13 @@ from dataclasses import dataclass
 from typing import Dict, List, Set, Optional
 from datetime import datetime
 
+try:
+    import marko
+    from marko import block, inline
+except ImportError:
+    print("Error: marko library not found. Please install it with: pip install marko", file=sys.stderr)
+    sys.exit(1)
+
 
 @dataclass
 class CrateInfo:
@@ -23,6 +30,199 @@ class CrateInfo:
     version: str
     manifest_path: str
     dependencies: Set[str]
+
+
+class ChangelogParser:
+    """Helper class for parsing and updating changelog files."""
+    
+    def __init__(self, content: str):
+        self.content = content
+        self.doc = marko.parse(content)
+    
+    def find_heading(self, heading_text: str, level: int = 2) -> Optional[int]:
+        """Find the index of a heading in the document."""
+        for i, child in enumerate(self.doc.children):
+            if isinstance(child, block.Heading) and child.level == level:
+                text = self._extract_text(child)
+                if heading_text in text:
+                    return i
+        return None
+    
+    def _extract_text(self, element) -> str:
+        """Extract plain text from a markdown element."""
+        if hasattr(element, 'children'):
+            return ''.join(self._extract_text(child) for child in element.children)
+        elif hasattr(element, 'content'):
+            return element.content
+        else:
+            return str(element)
+    
+    def _create_heading(self, text: str, level: int) -> block.Heading:
+        """Create a new heading element."""
+        heading = block.Heading(level=level)
+        heading.children = [inline.RawText(content=text)]
+        return heading
+    
+    def _create_paragraph(self, text: str = "") -> block.Paragraph:
+        """Create a new paragraph element."""
+        para = block.Paragraph()
+        if text:
+            para.children = [inline.RawText(content=text)]
+        else:
+            para.children = []
+        return para
+    
+    def update_planned_to_date(self, version: str, date: str) -> bool:
+        """Update a PLANNED version to have an actual date."""
+        pattern = f"[{version}] - PLANNED"
+        replacement = f"[{version}] - {date}"
+        
+        for child in self.doc.children:
+            if isinstance(child, block.Heading) and child.level == 2:
+                text = self._extract_text(child)
+                if pattern in text:
+                    # Update the heading text
+                    new_text = text.replace(pattern, replacement)
+                    child.children = [inline.RawText(content=new_text)]
+                    return True
+        return False
+    
+    def ensure_version_section(self, version: str, date: str) -> bool:
+        """Ensure a version section exists, creating it if necessary."""
+        # First try to update existing PLANNED section
+        if self.update_planned_to_date(version, date):
+            return True
+        
+        # Check if version section already exists
+        version_pattern = f"[{version}]"
+        if self.find_heading(version_pattern, 2) is not None:
+            return True
+        
+        # Create new version section after Unreleased
+        unreleased_idx = self.find_heading("Unreleased", 2)
+        insert_idx = 0
+        
+        if unreleased_idx is not None:
+            # Find the next heading after Unreleased, or end of document
+            insert_idx = unreleased_idx + 1
+            while (insert_idx < len(self.doc.children) and
+                   not (isinstance(self.doc.children[insert_idx], block.Heading) and
+                        self.doc.children[insert_idx].level == 2)):
+                insert_idx += 1
+        
+        # Create new version heading
+        version_heading = self._create_heading(f"[{version}] - {date}", 2)
+        
+        # Insert empty paragraph and Changes heading
+        empty_para = self._create_paragraph()
+        changes_heading = self._create_heading("Changes", 3)
+        changes_para = self._create_paragraph()
+        
+        # Insert in reverse order to maintain indices
+        self.doc.children.insert(insert_idx, changes_para)
+        self.doc.children.insert(insert_idx, changes_heading)
+        self.doc.children.insert(insert_idx, empty_para)
+        self.doc.children.insert(insert_idx, version_heading)
+        
+        return True
+    
+    def find_changes_section_for_version(self, version: str) -> Optional[int]:
+        """Find the Changes section index for a given version."""
+        version_idx = self.find_heading(f"[{version}]", 2)
+        if version_idx is None:
+            return None
+        
+        # Look for ### Changes after the version heading
+        for i in range(version_idx + 1, len(self.doc.children)):
+            child = self.doc.children[i]
+            if isinstance(child, block.Heading):
+                if child.level == 2:
+                    # Hit another version section
+                    break
+                elif child.level == 3:
+                    text = self._extract_text(child)
+                    if "Changes" in text:
+                        return i
+        return None
+    
+    def ensure_changes_section(self, version: str):
+        """Ensure a Changes section exists for the given version."""
+        if self.find_changes_section_for_version(version) is not None:
+            return  # Already exists
+        
+        version_idx = self.find_heading(f"[{version}]", 2)
+        if version_idx is None:
+            return
+        
+        # Insert Changes section after version heading
+        insert_idx = version_idx + 1
+        
+        # Skip any existing content until we find the next heading or end
+        while (insert_idx < len(self.doc.children) and
+               not (isinstance(self.doc.children[insert_idx], block.Heading) and
+                    self.doc.children[insert_idx].level <= 3)):
+            insert_idx += 1
+        
+        changes_heading = self._create_heading("Changes", 3)
+        changes_para = self._create_paragraph()
+        
+        self.doc.children.insert(insert_idx, changes_para)
+        self.doc.children.insert(insert_idx, changes_heading)
+    
+    def add_or_update_migration_line(self, version: str, crate_name: str, crate_version: str):
+        """Add or update a migration line in the Changes section."""
+        self.ensure_changes_section(version)
+        
+        changes_idx = self.find_changes_section_for_version(version)
+        if changes_idx is None:
+            return
+        
+        migration_text = f"- Migrated to `{crate_name} {crate_version}`"
+        
+        # Look for existing migration line or place to insert
+        for i in range(changes_idx + 1, len(self.doc.children)):
+            child = self.doc.children[i]
+            
+            # Stop at next heading
+            if isinstance(child, block.Heading):
+                # Insert new list item before this heading
+                list_item = block.ListItem()
+                list_item.children = [block.Paragraph()]
+                list_item.children[0].children = [inline.RawText(content=f"Migrated to `{crate_name} {crate_version}`")]
+                
+                # Create list if needed
+                if i > 0 and not isinstance(self.doc.children[i-1], block.List):
+                    new_list = block.List(ordered=False)
+                    new_list.children = [list_item]
+                    self.doc.children.insert(i, new_list)
+                else:
+                    self.doc.children[i-1].children.append(list_item)
+                break
+            
+            # Check if this is a list with migration items
+            elif isinstance(child, block.List):
+                # Look for existing migration line for this crate
+                found_existing = False
+                for list_item in child.children:
+                    if isinstance(list_item, block.ListItem):
+                        item_text = self._extract_text(list_item)
+                        if f"Migrated to" in item_text and crate_name in item_text:
+                            # Update existing item
+                            list_item.children[0].children = [inline.RawText(content=f"Migrated to `{crate_name} {crate_version}`")]
+                            found_existing = True
+                            break
+                
+                if not found_existing:
+                    # Add new item to existing list
+                    new_item = block.ListItem()
+                    new_item.children = [block.Paragraph()]
+                    new_item.children[0].children = [inline.RawText(content=f"Migrated to `{crate_name} {crate_version}`")]
+                    child.children.append(new_item)
+                break
+    
+    def render(self) -> str:
+        """Render the document back to markdown."""
+        return marko.render(self.doc)
 
 
 class WorkspaceReleaser:
@@ -152,15 +352,12 @@ class WorkspaceReleaser:
         
         today = datetime.now().strftime("%Y-%m-%d")
         
-        # Replace PLANNED with actual date
-        content = re.sub(
-            rf'## \[{re.escape(new_version)}\] - PLANNED',
-            f'## [{new_version}] - {today}',
-            content
-        )
+        # Use the changelog parser to handle the update
+        parser = ChangelogParser(content)
+        parser.ensure_version_section(new_version, today)
         
         with open(changelog_path, 'w') as f:
-            f.write(content)
+            f.write(parser.render())
     
     def update_dependent_changelogs(self, crate_name: str, new_version: str):
         """Update CHANGELOGs of crates that depend on the released crate."""
@@ -179,20 +376,18 @@ class WorkspaceReleaser:
             with open(changelog_path, 'r') as f:
                 content = f.read()
             
-            # Look for migration line and update it
-            migration_pattern = r'(- Migrated to[^`]*`' + re.escape(crate_name) + r' [^`]*`)'
-            if re.search(migration_pattern, content):
-                content = re.sub(
-                    migration_pattern,
-                    lambda m: m.group(1).replace(
-                        f'`{crate_name} {self.crates[crate_name].version}`',
-                        f'`{crate_name} {new_version}`'
-                    ),
-                    content
-                )
-                
-                with open(changelog_path, 'w') as f:
-                    f.write(content)
+            # Use the changelog parser to handle the update
+            parser = ChangelogParser(content)
+            
+            # Find the current version of the dependent crate for the changelog entry
+            dependent_version = self.crates[dependent].version
+            
+            # Ensure the dependent has a version section and Changes subsection
+            parser.ensure_version_section(dependent_version, "PLANNED")
+            parser.add_or_update_migration_line(dependent_version, crate_name, new_version)
+            
+            with open(changelog_path, 'w') as f:
+                f.write(parser.render())
     
     def update_supply_chain(self, crate_name: str, new_version: str):
         """Update supply chain metadata using cargo vet."""
