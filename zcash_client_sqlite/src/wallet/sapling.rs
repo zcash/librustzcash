@@ -8,13 +8,13 @@ use rusqlite::{named_params, types::Value, Connection, Row};
 
 use sapling::{self, Diversifier, Nullifier, Rseed};
 use zcash_client_backend::{
-    data_api::{Account, NullifierQuery, TargetValue},
+    data_api::{wallet::ConfirmationsPolicy, Account, NullifierQuery, TargetValue},
     wallet::{ReceivedNote, WalletSaplingOutput},
     DecryptedOutput, TransferType,
 };
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, TargetHeight},
     memo::MemoBytes,
     ShieldedProtocol, TxId,
 };
@@ -223,7 +223,8 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     params: &P,
     account: AccountUuid,
     target_value: TargetValue,
-    anchor_height: BlockHeight,
+    target_height: TargetHeight,
+    confirmation_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
@@ -231,7 +232,8 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
         params,
         account,
         target_value,
-        anchor_height,
+        target_height,
+        confirmation_policy,
         exclude,
         ShieldedProtocol::Sapling,
         to_spendable_note,
@@ -631,5 +633,10 @@ pub(crate) mod tests {
     #[test]
     fn wallet_recovery_compute_fees() {
         testing::pool::wallet_recovery_computes_fees::<SaplingPoolTester>();
+    }
+
+    #[test]
+    fn zip315_can_spend_inputs_by_confirmations_policy() {
+        testing::pool::can_spend_inputs_by_confirmations_policy::<SaplingPoolTester>();
     }
 }

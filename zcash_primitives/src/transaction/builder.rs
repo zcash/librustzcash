@@ -7,7 +7,7 @@ use rand::{CryptoRng, RngCore};
 use ::sapling::{builder::SaplingMetadata, Note, PaymentAddress};
 use ::transparent::{address::TransparentAddress, builder::TransparentBuilder, bundle::TxOut};
 use zcash_protocol::{
-    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
+    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters, TargetHeight},
     memo::MemoBytes,
     value::{BalanceError, ZatBalance, Zatoshis},
 };
@@ -301,7 +301,7 @@ pub struct PcztParts<P: Parameters> {
 pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     params: P,
     build_config: BuildConfig,
-    target_height: BlockHeight,
+    target_height: TargetHeight,
     expiry_height: BlockHeight,
     transparent_builder: TransparentBuilder,
     sapling_builder: Option<sapling::builder::Builder>,
@@ -320,7 +320,7 @@ impl<P, U: sapling::builder::ProverProgress> Builder<'_, P, U> {
     }
 
     /// Returns the target height of the transaction under construction.
-    pub fn target_height(&self) -> BlockHeight {
+    pub fn target_height(&self) -> TargetHeight {
         self.target_height
     }
 
@@ -362,8 +362,8 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     ///
     /// The expiry height will be set to the given height plus the default transaction
     /// expiry delta (20 blocks).
-    pub fn new(params: P, target_height: BlockHeight, build_config: BuildConfig) -> Self {
-        let orchard_builder = if params.is_nu_active(NetworkUpgrade::Nu5, target_height) {
+    pub fn new(params: P, target_height: TargetHeight, build_config: BuildConfig) -> Self {
+        let orchard_builder = if params.is_nu_active(NetworkUpgrade::Nu5, target_height.into()) {
             build_config
                 .orchard_builder_config()
                 .map(|(bundle_type, anchor)| orchard::builder::Builder::new(bundle_type, anchor))
@@ -375,7 +375,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             .sapling_builder_config()
             .map(|(bundle_type, anchor)| {
                 sapling::builder::Builder::new(
-                    zip212_enforcement(&params, target_height),
+                    zip212_enforcement(&params, target_height.into()),
                     bundle_type,
                     anchor,
                 )
@@ -712,7 +712,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         output_prover: &OP,
         fee: Zatoshis,
     ) -> Result<BuildResult, Error<FE>> {
-        let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
+        let consensus_branch_id = BranchId::for_height(&self.params, self.target_height.into());
 
         // determine transaction version
         let version = TxVersion::suggested_for_branch(consensus_branch_id);
@@ -785,7 +785,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
 
         let unauthed_tx: TransactionData<Unauthorized> = TransactionData {
             version,
-            consensus_branch_id: BranchId::for_height(&self.params, self.target_height),
+            consensus_branch_id: BranchId::for_height(&self.params, self.target_height.into()),
             lock_time: 0,
             expiry_height: self.expiry_height,
             transparent_bundle,
@@ -892,12 +892,12 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
         fee_rule: &FR,
     ) -> Result<PcztResult<P>, Error<FR::Error>> {
         let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
-        let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
+        let consensus_branch_id = BranchId::for_height(&self.params, self.target_height.into());
 
         // determine transaction version
         let version = TxVersion::suggested_for_branch(consensus_branch_id);
 
-        let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
+        let consensus_branch_id = BranchId::for_height(&self.params, self.target_height.into());
 
         //
         // Consistency checks
@@ -1102,7 +1102,7 @@ mod tests {
                 sapling_anchor: Some(sapling::Anchor::empty_tree()),
                 orchard_anchor: Some(orchard::Anchor::empty_tree()),
             },
-            target_height: sapling_activation_height,
+            target_height: sapling_activation_height.into(),
             expiry_height: sapling_activation_height + DEFAULT_TX_EXPIRY_DELTA,
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder: None,
@@ -1174,7 +1174,7 @@ mod tests {
             sapling_anchor: Some(witness1.root().into()),
             orchard_anchor: None,
         };
-        let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+        let mut builder = Builder::new(TEST_NETWORK, tx_height.into(), build_config);
 
         // Create a tx with a sapling spend. binding_sig should be present
         builder
@@ -1214,7 +1214,7 @@ mod tests {
                 sapling_anchor: None,
                 orchard_anchor: None,
             };
-            let builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            let builder = Builder::new(TEST_NETWORK, tx_height.into(), build_config);
             assert_matches!(
                 builder.mock_build(&TransparentSigningSet::new(), &[], &[], OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected == MINIMUM_FEE.into()
@@ -1234,7 +1234,7 @@ mod tests {
                 sapling_anchor: Some(sapling::Anchor::empty_tree()),
                 orchard_anchor: Some(orchard::Anchor::empty_tree()),
             };
-            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            let mut builder = Builder::new(TEST_NETWORK, tx_height.into(), build_config);
             builder
                 .add_sapling_output::<Infallible>(
                     ovk,
@@ -1257,7 +1257,7 @@ mod tests {
                 sapling_anchor: Some(sapling::Anchor::empty_tree()),
                 orchard_anchor: Some(orchard::Anchor::empty_tree()),
             };
-            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            let mut builder = Builder::new(TEST_NETWORK, tx_height.into(), build_config);
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKeyHash([0; 20]),
@@ -1287,7 +1287,7 @@ mod tests {
                 sapling_anchor: Some(witness1.root().into()),
                 orchard_anchor: Some(orchard::Anchor::empty_tree()),
             };
-            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            let mut builder = Builder::new(TEST_NETWORK, tx_height.into(), build_config);
             builder
                 .add_sapling_spend::<Infallible>(
                     dfvk.fvk().clone(),
@@ -1331,7 +1331,7 @@ mod tests {
                 sapling_anchor: Some(witness1.root().into()),
                 orchard_anchor: Some(orchard::Anchor::empty_tree()),
             };
-            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
+            let mut builder = Builder::new(TEST_NETWORK, tx_height.into(), build_config);
             builder
                 .add_sapling_spend::<Infallible>(
                     dfvk.fvk().clone(),

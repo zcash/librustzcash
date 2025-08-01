@@ -63,7 +63,7 @@ fn check_balance<DSF>(
     );
     assert_eq!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, mempool_height, min_confirmations)
+            .get_spendable_transparent_outputs(taddr, mempool_height.into(), min_confirmations)
             .unwrap()
             .into_iter()
             .map(|utxo| utxo.value())
@@ -78,7 +78,11 @@ fn check_balance<DSF>(
     if min_confirmations == 0 || min_confirmations == 1 {
         assert_eq!(
             st.wallet()
-                .get_spendable_transparent_outputs(taddr, mempool_height, 1 - min_confirmations)
+                .get_spendable_transparent_outputs(
+                    taddr,
+                    mempool_height.into(),
+                    1 - min_confirmations
+                )
                 .unwrap()
                 .into_iter()
                 .map(|utxo| utxo.value())
@@ -134,7 +138,7 @@ where
     assert_matches!(
         st.wallet().get_spendable_transparent_outputs(
             taddr,
-            height_1,
+            height_1.into(),
             0
         ).as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
@@ -155,7 +159,7 @@ where
     // Confirm that we no longer see any unspent outputs as of `height_1`.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, height_1, 0)
+            .get_spendable_transparent_outputs(taddr, height_1.into(), 0)
             .as_deref(),
         Ok(&[])
     );
@@ -169,7 +173,7 @@ where
     // If we include `height_2` then the output is returned.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, height_2, 0)
+            .get_spendable_transparent_outputs(taddr, height_2.into(), 0)
             .as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_2))
     );

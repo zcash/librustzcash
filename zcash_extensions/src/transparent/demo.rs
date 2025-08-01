@@ -615,7 +615,7 @@ mod tests {
     }
 
     fn demo_builder<'a>(
-        height: BlockHeight,
+        target_height: TargetHeight,
         sapling_anchor: sapling::Anchor,
     ) -> DemoBuilder<Builder<'a, FutureNetwork, ()>> {
         DemoBuilder {
@@ -812,7 +812,7 @@ mod tests {
         tree.append(cm1).unwrap();
         let witness1 = sapling::IncrementalWitness::from_tree(tree).unwrap();
 
-        let mut builder_a = demo_builder(tx_height, witness1.root().into());
+        let mut builder_a = demo_builder(tx_height.into(), witness1.root().into());
         builder_a
             .add_sapling_spend::<Infallible>(dfvk.fvk().clone(), note1, witness1.path().unwrap())
             .unwrap();

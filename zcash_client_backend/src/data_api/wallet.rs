@@ -113,6 +113,27 @@ const PROPRIETARY_PROPOSAL_INFO: &str = "zcash_client_backend:proposal_info";
 #[cfg(feature = "pczt")]
 const PROPRIETARY_OUTPUT_INFO: &str = "zcash_client_backend:output_info";
 
+#[cfg(feature = "pczt")]
+fn serialize_target_height<S>(
+    target_height: &consensus::TargetHeight,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let u: u32 = BlockHeight::from(*target_height).into();
+    u.serialize(serializer)
+}
+
+#[cfg(feature = "pczt")]
+fn deserialize_target_height<'de, D>(deserializer: D) -> Result<consensus::TargetHeight, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let u = u32::deserialize(deserializer)?;
+    Ok(BlockHeight::from_u32(u).into())
+}
+
 /// Information about the proposal from which a PCZT was created.
 ///
 /// Stored under the proprietary field `PROPRIETARY_PROPOSAL_INFO`.
@@ -120,7 +141,11 @@ const PROPRIETARY_OUTPUT_INFO: &str = "zcash_client_backend:output_info";
 #[derive(Serialize, Deserialize)]
 struct ProposalInfo<AccountId> {
     from_account: AccountId,
-    target_height: u32,
+    #[serde(
+        serialize_with = "serialize_target_height",
+        deserialize_with = "deserialize_target_height"
+    )]
+    target_height: consensus::TargetHeight,
 }
 
 /// Reduced version of [`Recipient`] stored inside a PCZT.
@@ -255,6 +280,44 @@ pub type ExtractErrT<DbT, N> = Error<
     N,
 >;
 
+/// The minimum number of confirmations required for trusted and untrusted
+/// transactions.
+#[derive(Clone, Copy, Debug)]
+pub struct ConfirmationsPolicy {
+    pub trusted: NonZeroU32,
+    pub untrusted: NonZeroU32,
+}
+
+impl Default for ConfirmationsPolicy {
+    fn default() -> Self {
+        ConfirmationsPolicy {
+            // 3
+            trusted: NonZeroU32::MIN.saturating_add(2),
+            // 10
+            untrusted: NonZeroU32::MIN.saturating_add(9),
+        }
+    }
+}
+
+impl ConfirmationsPolicy {
+    pub const MIN: Self = ConfirmationsPolicy {
+        trusted: NonZeroU32::MIN,
+        untrusted: NonZeroU32::MIN,
+    };
+
+    /// Create a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields both
+    /// set to `min_confirmations`.
+    ///
+    /// Returns `None` if `min_confirmations` is `0`.
+    pub fn new_symmetrical(min_confirmations: u32) -> Option<Self> {
+        let confirmations = NonZeroU32::new(min_confirmations)?;
+        Some(Self {
+            trusted: confirmations,
+            untrusted: confirmations,
+        })
+    }
+}
+
 /// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
 /// of transactions that can then be authorized and made ready for submission to the network with
 /// [`create_proposed_transactions`].
@@ -267,7 +330,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     input_selector: &InputsT,
     change_strategy: &ChangeT,
     request: zip321::TransactionRequest,
-    min_confirmations: NonZeroU32,
+    confirmations_policy: ConfirmationsPolicy,
 ) -> Result<
     Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
     ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -279,22 +342,26 @@ where
     InputsT: InputSelector<InputSource = DbT>,
     ChangeT: ChangeStrategy<MetaSource = DbT>,
 {
-    let (target_height, anchor_height) = wallet_db
-        .get_target_and_anchor_heights(min_confirmations)
-        .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
-        .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
-
-    input_selector
-        .propose_transaction(
-            params,
-            wallet_db,
-            target_height,
-            anchor_height,
-            spend_from_account,
-            request,
-            change_strategy,
-        )
-        .map_err(Error::from)
+    // Using the trusted confirmations results in an anchor_height that will
+    // include the maximum number of notes being selected, and we can filter
+    // later based on the input source (whether it's trusted or not) and the
+    // number of confirmations
+    let maybe_intial_heights = wallet_db
+        .get_target_and_anchor_heights(confirmations_policy.trusted)
+        .map_err(InputSelectorError::DataSource)?;
+    let (target_height, anchor_height) =
+        maybe_intial_heights.ok_or_else(|| InputSelectorError::SyncRequired)?;
+    let proposal = input_selector.propose_transaction(
+        params,
+        wallet_db,
+        target_height,
+        anchor_height,
+        confirmations_policy,
+        spend_from_account,
+        request,
+        change_strategy,
+    )?;
+    Ok(proposal)
 }
 
 /// Proposes making a payment to the specified address from the given account.
@@ -329,7 +396,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     params: &ParamsT,
     fee_rule: StandardFeeRule,
     spend_from_account: <DbT as InputSource>::AccountId,
-    min_confirmations: NonZeroU32,
+    confirmations_policy: ConfirmationsPolicy,
     to: &Address,
     amount: Zatoshis,
     memo: Option<MemoBytes>,
@@ -381,7 +448,7 @@ where
         &input_selector,
         &change_strategy,
         request,
-        min_confirmations,
+        confirmations_policy,
     )
 }
 
@@ -422,7 +489,7 @@ where
             shielding_threshold,
             from_addrs,
             to_account,
-            chain_tip_height + 1,
+            (chain_tip_height + 1).into(),
             min_confirmations,
         )
         .map_err(Error::from)
@@ -633,7 +700,7 @@ fn build_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>
     ufvk: &UnifiedFullViewingKey,
     account_id: <DbT as WalletRead>::AccountId,
     ovk_policy: OvkPolicy,
-    min_target_height: BlockHeight,
+    min_target_height: consensus::TargetHeight,
     prior_step_results: &[(&Step<N>, StepResult<<DbT as WalletRead>::AccountId>)],
     proposal_step: &Step<N>,
     #[cfg(feature = "transparent-inputs")] unused_transparent_outputs: &mut HashMap<
@@ -1203,7 +1270,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N
     account_id: <DbT as WalletRead>::AccountId,
     ovk_policy: OvkPolicy,
     fee_rule: &FeeRuleT,
-    min_target_height: BlockHeight,
+    min_target_height: consensus::TargetHeight,
     prior_step_results: &[(&Step<N>, StepResult<<DbT as WalletRead>::AccountId>)],
     proposal_step: &Step<N>,
     #[cfg(feature = "transparent-inputs")] unused_transparent_outputs: &mut HashMap<
@@ -1304,7 +1371,7 @@ where
                         try_sapling_note_decryption(
                             &sapling_internal_ivk,
                             &bundle.shielded_outputs()[output_index],
-                            zip212_enforcement(params, min_target_height),
+                            zip212_enforcement(params, min_target_height.into()),
                         )
                         .map(|(note, _, _)| Note::Sapling(note))
                     })
@@ -1475,7 +1542,7 @@ where
                 PROPRIETARY_PROPOSAL_INFO.into(),
                 postcard::to_allocvec(&ProposalInfo::<DbT::AccountId> {
                     from_account: account_id,
-                    target_height: proposal.min_target_height().into(),
+                    target_height: proposal.min_target_height(),
                 })
                 .expect("postcard encoding of PCZT proposal metadata should not fail"),
             )
@@ -2061,7 +2128,7 @@ where
     let transactions = vec![SentTransaction::new(
         &transaction,
         created,
-        BlockHeight::from_u32(proposal_info.target_height),
+        proposal_info.target_height,
         proposal_info.from_account,
         &outputs,
         fee_amount,
