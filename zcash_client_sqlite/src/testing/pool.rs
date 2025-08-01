@@ -36,6 +36,79 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn send_max_single_step_proposed_transfer<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_single_step_proposed_transfer::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn fails_to_send_max_to_transparent_with_memo<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::fails_to_send_max_to_transparent_with_memo::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn send_max_proposal_fails_when_unconfirmed_funds_present<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_proposal_fails_when_unconfirmed_funds_present::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn send_multi_step_many_notes_max_amount_proposed_transfer<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_multi_step_many_notes_max_amount_proposed_transfer::<
+        T,
+        _,
+    >(
+        TestDbFactory::default(),
+        BlockCache::new(),
+        |e, _, expected_bad_index| {
+            matches!(
+                e,
+                crate::error::SqliteClientError::ReachedGapLimit(_, bad_index)
+                if bad_index == &expected_bad_index)
+        },
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn send_multi_step_with_marginal_notes_max_amount_proposed_transfer<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_multi_step_with_marginal_notes_max_amount_proposed_transfer::<
+        T,
+        _,
+    >(
+        TestDbFactory::default(),
+        BlockCache::new(),
+        |e, _, expected_bad_index| {
+            matches!(
+                e,
+                crate::error::SqliteClientError::ReachedGapLimit(_, bad_index)
+                if bad_index == &expected_bad_index)
+        },
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn send_multi_step_single_note_max_amount_proposed_transfer<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_multi_step_single_note_max_amount_proposed_transfer::<
+        T,
+        _,
+    >(
+        TestDbFactory::default(),
+        BlockCache::new(),
+        |e, _, expected_bad_index| {
+            matches!(
+                e,
+                crate::error::SqliteClientError::ReachedGapLimit(_, bad_index)
+                if bad_index == &expected_bad_index)
+        },
+    )
+}
+
 pub(crate) fn send_with_multiple_change_outputs<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_with_multiple_change_outputs::<T>(
         TestDbFactory::default(),
