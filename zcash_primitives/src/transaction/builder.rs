@@ -880,7 +880,7 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'_, 
             lock_time: unauthed_tx.lock_time,
             expiry_height: unauthed_tx.expiry_height,
             #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-            zip233_amount: self.zip233_amount,
+            zip233_amount: unauthed_tx.zip233_amount,
             transparent_bundle,
             sprout_bundle: unauthed_tx.sprout_bundle,
             sapling_bundle,
@@ -1318,7 +1318,7 @@ mod tests {
         let mut witness1 = IncrementalWitness::from_tree(tree.clone()).unwrap();
 
         // Fail if there is insufficient input
-        // 0.0003 z-ZEC out, 0.00015 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
+        // 0.0003 z-ZEC out, 0.00015 t-ZEC out, 0.00015 t-ZEC fee, 0.00059999 z-ZEC in
         {
             let build_config = BuildConfig::Standard {
                 sapling_anchor: Some(witness1.root().into()),
@@ -1353,7 +1353,7 @@ mod tests {
         }
 
         // Fail if there is insufficient input
-        // 0.0003 z-ZEC out, 0.00005 t-ZEC out, 0.0001 burned, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
+        // 0.0003 z-ZEC out, 0.00005 t-ZEC out, 0.0001 burned, 0.00015 t-ZEC fee, 0.00059999 z-ZEC in
         #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
         {
             let build_config = BuildConfig::Standard {

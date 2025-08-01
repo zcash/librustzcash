@@ -238,7 +238,7 @@ fn hash_header_txid_data(
 
     // TODO: Factor this out into a separate txid computation when implementing ZIP 246 in full.
     #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-    if version >= TxVersion::V6 {
+    if version.has_zip233() {
         h.write_u64_le((*zip233_amount).into()).unwrap();
     }
 

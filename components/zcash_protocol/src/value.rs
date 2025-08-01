@@ -482,7 +482,7 @@ impl Neg for Zatoshis {
     type Output = ZatBalance;
 
     fn neg(self) -> ZatBalance {
-        ZatBalance(-i64::try_from(self.0).expect("Zatoshis value fits into i64"))
+        ZatBalance::from(self).neg()
     }
 }
 

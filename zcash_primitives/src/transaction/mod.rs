@@ -63,7 +63,7 @@ pub use zcash_protocol::TxId;
 /// transaction fields. Note that this is not dependent on epoch, only on transaction encoding.
 /// For example, if a particular epoch defines a new transaction version but also allows the
 /// previous version, then only the new version would be added to this enum.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TxVersion {
     /// Transaction versions allowed prior to Overwinter activation. The argument MUST be
     /// in the range `1..=0x7FFFFFFF`. Only versions 1 and 2 are defined; `3..=0x7FFFFFFF`
@@ -199,6 +199,20 @@ impl TxVersion {
         match self {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => false,
             TxVersion::V5 => true,
+            #[cfg(zcash_unstable = "nu7")]
+            TxVersion::V6 => true,
+            #[cfg(zcash_unstable = "zfuture")]
+            TxVersion::ZFuture => true,
+        }
+    }
+
+    #[cfg(all(
+        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        feature = "zip-233"
+    ))]
+    pub fn has_zip233(&self) -> bool {
+        match self {
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 | TxVersion::V5 => false,
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::V6 => true,
             #[cfg(zcash_unstable = "zfuture")]
@@ -605,6 +619,15 @@ impl TransactionData<Authorized> {
     }
 }
 
+#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+struct V6HeaderFragment {
+    consensus_branch_id: BranchId,
+    lock_time: u32,
+    expiry_height: BlockHeight,
+    #[cfg(feature = "zip-233")]
+    zip233_amount: Zatoshis,
+}
+
 impl Transaction {
     fn from_data(data: TransactionData<Authorized>) -> io::Result<Self> {
         match data.version {
@@ -667,9 +690,9 @@ impl Transaction {
             }
             TxVersion::V5 => Self::read_v5(reader.into_base_reader(), version),
             #[cfg(zcash_unstable = "nu7")]
-            TxVersion::V6 => Self::read_v6(&mut reader.into_base_reader(), version),
+            TxVersion::V6 => Self::read_v6(reader.into_base_reader(), version),
             #[cfg(zcash_unstable = "zfuture")]
-            TxVersion::ZFuture => Self::read_v6(&mut reader.into_base_reader(), version),
+            TxVersion::ZFuture => Self::read_v6(reader.into_base_reader(), version),
         }
     }
 
@@ -777,7 +800,7 @@ impl Transaction {
 
     fn read_v5<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
         let (consensus_branch_id, lock_time, expiry_height) =
-            Self::read_v5_header_fragment(&mut reader)?;
+            Self::read_header_fragment(&mut reader)?;
 
         #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
         let zip233_amount = Zatoshis::ZERO;
@@ -806,23 +829,26 @@ impl Transaction {
 
     #[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
     fn read_v6<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
-        let (consensus_branch_id, lock_time, expiry_height, _zip233_amount) =
-            Self::read_v6_header_fragment(&mut reader)?;
+        let header_fragment = Self::read_v6_header_fragment(&mut reader)?;
 
         let transparent_bundle = Self::read_transparent(&mut reader)?;
         let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
         let orchard_bundle = orchard_serialization::read_v6_bundle(&mut reader)?;
 
         #[cfg(zcash_unstable = "zfuture")]
-        let tze_bundle = Self::read_tze(&mut reader)?;
+        let tze_bundle = version
+            .has_tze()
+            .then(|| Self::read_tze(&mut reader))
+            .transpose()?
+            .flatten();
 
         let data = TransactionData {
             version,
-            consensus_branch_id,
-            lock_time,
-            expiry_height,
+            consensus_branch_id: header_fragment.consensus_branch_id,
+            lock_time: header_fragment.lock_time,
+            expiry_height: header_fragment.expiry_height,
             #[cfg(feature = "zip-233")]
-            zip233_amount: _zip233_amount,
+            zip233_amount: header_fragment.zip233_amount,
             transparent_bundle,
             sprout_bundle: None,
             sapling_bundle,
@@ -834,7 +860,8 @@ impl Transaction {
         Ok(Self::from_data_v5(data))
     }
 
-    fn read_v5_header_fragment<R: Read>(mut reader: R) -> io::Result<(BranchId, u32, BlockHeight)> {
+    /// Utility function for reading header data common to v5 and v6 transactions.
+    fn read_header_fragment<R: Read>(mut reader: R) -> io::Result<(BranchId, u32, BlockHeight)> {
         let consensus_branch_id = reader.read_u32_le().and_then(|value| {
             BranchId::try_from(value).map_err(|_e| {
                 io::Error::new(
@@ -855,19 +882,17 @@ impl Transaction {
     }
 
     #[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
-    fn read_v6_header_fragment<R: Read>(
-        mut reader: R,
-    ) -> io::Result<(BranchId, u32, BlockHeight, Zatoshis)> {
+    fn read_v6_header_fragment<R: Read>(mut reader: R) -> io::Result<V6HeaderFragment> {
         let (consensus_branch_id, lock_time, expiry_height) =
-            Self::read_v5_header_fragment(&mut reader)?;
+            Self::read_header_fragment(&mut reader)?;
 
-        #[cfg(feature = "zip-233")]
-        let zip233_amount = Self::read_zip233_amount(&mut reader)?;
-
-        #[cfg(not(feature = "zip-233"))]
-        let zip233_amount = Zatoshis::ZERO;
-
-        Ok((consensus_branch_id, lock_time, expiry_height, zip233_amount))
+        Ok(V6HeaderFragment {
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+            #[cfg(feature = "zip-233")]
+            zip233_amount: Self::read_zip233_amount(&mut reader)?,
+        })
     }
 
     #[cfg(feature = "temporary-zcashd")]
@@ -881,7 +906,6 @@ impl Transaction {
     fn read_zip233_amount<R: Read>(mut reader: R) -> io::Result<Zatoshis> {
         Zatoshis::from_u64(reader.read_u64_le()?)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "zip233Amount out of range"))
-            .map(Into::into)
     }
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -974,8 +998,7 @@ impl Transaction {
         self.write_transparent(&mut writer)?;
         self.write_v5_sapling(&mut writer)?;
         orchard_serialization::write_v5_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
-        #[cfg(zcash_unstable = "zfuture")]
-        self.write_tze(&mut writer)?;
+
         Ok(())
     }
 

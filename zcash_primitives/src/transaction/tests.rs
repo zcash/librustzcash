@@ -20,7 +20,7 @@ use {
 use super::components::tze;
 
 #[cfg(all(test, zcash_unstable = "nu7", feature = "zip-233"))]
-use {super::sighash_v6::v6_signature_hash, crate::transaction::TxVersion};
+use super::sighash_v6::v6_signature_hash;
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod data;
@@ -59,7 +59,7 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
         txo.orchard_bundle.as_ref().map(|v| *v.value_balance())
     );
     #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-    if tx.version >= TxVersion::V6 {
+    if tx.version.has_zip233() {
         prop_assert_eq!(tx.zip233_amount, txo.zip233_amount);
     }
     Ok(())
