@@ -532,6 +532,14 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "transparent-inputs")]
+    fn send_multi_step_with_marginal_notes_max_amount_proposed_transfer() {
+        testing::pool::send_multi_step_with_marginal_notes_max_amount_proposed_transfer::<
+            SaplingPoolTester,
+        >()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
     fn send_multi_step_many_notes_max_amount_proposed_transfer() {
         testing::pool::send_multi_step_many_notes_max_amount_proposed_transfer::<SaplingPoolTester>(
         )

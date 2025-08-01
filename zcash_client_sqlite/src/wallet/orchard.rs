@@ -520,6 +520,14 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn send_multi_step_with_marginal_notes_max_amount_proposed_transfer() {
+        testing::pool::send_multi_step_with_marginal_notes_max_amount_proposed_transfer::<
+            OrchardPoolTester,
+        >()
+    }
+
+    #[test]
     fn send_with_multiple_change_outputs() {
         testing::pool::send_with_multiple_change_outputs::<OrchardPoolTester>()
     }
