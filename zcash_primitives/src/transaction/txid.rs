@@ -13,6 +13,9 @@ use zcash_protocol::{
     value::ZatBalance,
 };
 
+#[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+use zcash_protocol::value::Zatoshis;
+
 use ::sapling::bundle::{OutputDescription, SpendDescription};
 
 use super::{
@@ -223,6 +226,7 @@ fn hash_header_txid_data(
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
+    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))] zip233_amount: &Zatoshis,
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_HEADERS_HASH_PERSONALIZATION);
 
@@ -231,6 +235,12 @@ fn hash_header_txid_data(
     h.write_u32_le(consensus_branch_id.into()).unwrap();
     h.write_u32_le(lock_time).unwrap();
     h.write_u32_le(expiry_height.into()).unwrap();
+
+    // TODO: Factor this out into a separate txid computation when implementing ZIP 246 in full.
+    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+    if version.has_zip233() {
+        h.write_u64_le((*zip233_amount).into()).unwrap();
+    }
 
     h.finalize()
 }
@@ -309,8 +319,16 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))] zip233_amount: &Zatoshis,
     ) -> Self::HeaderDigest {
-        hash_header_txid_data(version, consensus_branch_id, lock_time, expiry_height)
+        hash_header_txid_data(
+            version,
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            zip233_amount,
+        )
     }
 
     fn digest_transparent(
@@ -442,6 +460,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         consensus_branch_id: BranchId,
         _lock_time: u32,
         _expiry_height: BlockHeight,
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))] _zip233_amount: &Zatoshis,
     ) -> Self::HeaderDigest {
         consensus_branch_id
     }

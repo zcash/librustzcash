@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+
+### Added
+- `zcash_primitives::transaction::tests::data` has been exposed under the
+  `test-dependencies` feature to provide access to test vectors.
+
 ## [0.24.0] - 2025-07-31
 
 ### Changed
