@@ -930,7 +930,7 @@ impl Transaction {
             #[cfg(zcash_unstable = "nu7")]
             TxVersion::V6 => self.write_v6(writer),
             #[cfg(zcash_unstable = "zfuture")]
-            TxVersion::ZFuture => self.write_v5(writer),
+            TxVersion::ZFuture => self.write_v6(writer),
         }
     }
 
@@ -1247,7 +1247,7 @@ pub mod testing {
         )(
             lock_time in any::<u32>(),
             expiry_height in any::<u32>(),
-            zip233_amount in 0..MAX_MONEY,
+            zip233_amount in 0..=MAX_MONEY,
             transparent_bundle in transparent::arb_bundle(),
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
@@ -1301,7 +1301,7 @@ pub mod testing {
         )(
             lock_time in any::<u32>(),
             expiry_height in any::<u32>(),
-            zip233_amount in 0..MAX_MONEY,
+            zip233_amount in 0..=MAX_MONEY,
             transparent_bundle in transparent::arb_bundle(),
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
