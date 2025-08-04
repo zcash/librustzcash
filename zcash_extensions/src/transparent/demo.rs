@@ -677,11 +677,11 @@ mod tests {
             BranchId::ZFuture,
             0,
             0u32.into(),
+            #[cfg(feature = "zip-233")]
+            Zatoshis::ZERO,
             None,
             None,
             None,
-            None,
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
             None,
             Some(Bundle {
                 vin: vec![],
@@ -710,11 +710,11 @@ mod tests {
             BranchId::ZFuture,
             0,
             0u32.into(),
+            #[cfg(feature = "zip-233")]
+            Zatoshis::ZERO,
             None,
             None,
             None,
-            None,
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
             None,
             Some(Bundle {
                 vin: vec![in_b],
@@ -739,11 +739,11 @@ mod tests {
             BranchId::ZFuture,
             0,
             0u32.into(),
+            #[cfg(feature = "zip-233")]
+            Zatoshis::ZERO,
             None,
             None,
             None,
-            None,
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
             None,
             Some(Bundle {
                 vin: vec![in_c],

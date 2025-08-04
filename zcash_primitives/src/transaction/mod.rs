@@ -5,7 +5,7 @@ pub mod fees;
 pub mod sighash;
 pub mod sighash_v4;
 pub mod sighash_v5;
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 pub mod sighash_v6;
 
 pub mod txid;
@@ -40,9 +40,6 @@ use self::{
 #[cfg(feature = "circuits")]
 use ::sapling::builder as sapling_builder;
 
-#[cfg(zcash_unstable = "zfuture")]
-use self::components::tze::{self, TzeIn, TzeOut};
-
 use zcash_protocol::constants::{
     V3_TX_VERSION, V3_VERSION_GROUP_ID, V4_TX_VERSION, V4_VERSION_GROUP_ID, V5_TX_VERSION,
     V5_VERSION_GROUP_ID,
@@ -52,7 +49,10 @@ use zcash_protocol::constants::{
 use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
 
 #[cfg(zcash_unstable = "zfuture")]
-use zcash_protocol::constants::{ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID};
+use {
+    self::components::tze::{self, TzeIn, TzeOut},
+    zcash_protocol::constants::{ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID},
+};
 
 pub use zcash_protocol::TxId;
 
@@ -313,7 +313,10 @@ pub struct TransactionData<A: Authorization> {
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
-    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+    #[cfg(all(
+        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        feature = "zip-233"
+    ))]
     zip233_amount: Zatoshis,
     transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
     sprout_bundle: Option<sprout::Bundle>,
@@ -331,7 +334,11 @@ impl<A: Authorization> TransactionData<A> {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))] zip233_amount: Zatoshis,
+        #[cfg(all(
+            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+            feature = "zip-233"
+        ))]
+        zip233_amount: Zatoshis,
         transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
         sprout_bundle: Option<sprout::Bundle>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
@@ -342,7 +349,10 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
             zip233_amount,
             transparent_bundle,
             sprout_bundle,
@@ -362,7 +372,7 @@ impl<A: Authorization> TransactionData<A> {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))] zip233_amount: Option<Zatoshis>,
+        #[cfg(feature = "zip-233")] zip233_amount: Zatoshis,
         transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
         sprout_bundle: Option<sprout::Bundle>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, ZatBalance>>,
@@ -374,7 +384,7 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            #[cfg(feature = "zip-233")]
             zip233_amount,
             transparent_bundle,
             sprout_bundle,
@@ -418,7 +428,10 @@ impl<A: Authorization> TransactionData<A> {
         self.orchard_bundle.as_ref()
     }
 
-    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+    #[cfg(all(
+        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        feature = "zip-233"
+    ))]
     pub fn zip233_amount(&self) -> Zatoshis {
         self.zip233_amount
     }
@@ -455,7 +468,10 @@ impl<A: Authorization> TransactionData<A> {
                     self.orchard_bundle
                         .as_ref()
                         .map_or_else(ZatBalance::zero, |b| *b.value_balance()),
-                    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+                    #[cfg(all(
+                        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                        feature = "zip-233"
+                    ))]
                     -self.zip233_amount,
                 ];
 
@@ -477,7 +493,10 @@ impl<A: Authorization> TransactionData<A> {
                 self.consensus_branch_id,
                 self.lock_time,
                 self.expiry_height,
-                #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+                #[cfg(all(
+                    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                    feature = "zip-233"
+                ))]
                 &self.zip233_amount,
             ),
             digester.digest_transparent(self.transparent_bundle.as_ref()),
@@ -513,7 +532,10 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id: self.consensus_branch_id,
             lock_time: self.lock_time,
             expiry_height: self.expiry_height,
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
             zip233_amount: self.zip233_amount,
             transparent_bundle: f_transparent(self.transparent_bundle),
             sprout_bundle: self.sprout_bundle,
@@ -554,7 +576,10 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id: self.consensus_branch_id,
             lock_time: self.lock_time,
             expiry_height: self.expiry_height,
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
             zip233_amount: self.zip233_amount,
             transparent_bundle: f_transparent(self.transparent_bundle)?,
             sprout_bundle: self.sprout_bundle,
@@ -577,7 +602,10 @@ impl<A: Authorization> TransactionData<A> {
             consensus_branch_id: self.consensus_branch_id,
             lock_time: self.lock_time,
             expiry_height: self.expiry_height,
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
             zip233_amount: self.zip233_amount,
             transparent_bundle: self
                 .transparent_bundle
@@ -619,7 +647,7 @@ impl TransactionData<Authorized> {
     }
 }
 
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
 struct V6HeaderFragment {
     consensus_branch_id: BranchId,
     lock_time: u32,
@@ -661,7 +689,7 @@ impl Transaction {
         Transaction { txid, data }
     }
 
-    #[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     fn from_data_v6(data: TransactionData<Authorized>) -> Self {
         let txid = to_txid(
             data.version,
@@ -756,7 +784,10 @@ impl Transaction {
                 consensus_branch_id,
                 lock_time,
                 expiry_height,
-                #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+                #[cfg(all(
+                    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                    feature = "zip-233"
+                ))]
                 zip233_amount: Zatoshis::ZERO,
                 transparent_bundle,
                 sprout_bundle,
@@ -802,7 +833,10 @@ impl Transaction {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_header_fragment(&mut reader)?;
 
-        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+        #[cfg(all(
+            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+            feature = "zip-233"
+        ))]
         let zip233_amount = Zatoshis::ZERO;
 
         let transparent_bundle = Self::read_transparent(&mut reader)?;
@@ -814,7 +848,10 @@ impl Transaction {
             consensus_branch_id,
             lock_time,
             expiry_height,
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
             zip233_amount,
             transparent_bundle,
             sprout_bundle: None,
@@ -827,7 +864,7 @@ impl Transaction {
         Ok(Self::from_data_v5(data))
     }
 
-    #[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     fn read_v6<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
         let header_fragment = Self::read_v6_header_fragment(&mut reader)?;
 
@@ -881,7 +918,7 @@ impl Transaction {
         Ok((consensus_branch_id, lock_time, expiry_height))
     }
 
-    #[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     fn read_v6_header_fragment<R: Read>(mut reader: R) -> io::Result<V6HeaderFragment> {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_header_fragment(&mut reader)?;
@@ -902,7 +939,10 @@ impl Transaction {
         sapling_serialization::read_v5_bundle(reader)
     }
 
-    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+    #[cfg(all(
+        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        feature = "zip-233"
+    ))]
     fn read_zip233_amount<R: Read>(mut reader: R) -> io::Result<Zatoshis> {
         Zatoshis::from_u64(reader.read_u64_le()?)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "zip233Amount out of range"))
@@ -1002,7 +1042,7 @@ impl Transaction {
         Ok(())
     }
 
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     pub fn write_v6<W: Write>(&self, mut writer: W) -> io::Result<()> {
         if self.sprout_bundle.is_some() {
             return Err(io::Error::new(
@@ -1029,7 +1069,7 @@ impl Transaction {
         Ok(())
     }
 
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(any(zcash_unstable = "nu7", zcash_unstable = "zfuture"))]
     pub fn write_v6_header<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.version.write(&mut writer)?;
         writer.write_u32_le(u32::from(self.consensus_branch_id))?;
@@ -1113,7 +1153,11 @@ pub trait TransactionDigest<A: Authorization> {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))] zip233_amount: &Zatoshis,
+        #[cfg(all(
+            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+            feature = "zip-233"
+        ))]
+        zip233_amount: &Zatoshis,
     ) -> Self::HeaderDigest;
 
     fn digest_transparent(
@@ -1163,7 +1207,10 @@ pub mod testing {
         Authorized, Transaction, TransactionData, TxId, TxVersion,
     };
 
-    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+    #[cfg(all(
+        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        feature = "zip-233"
+    ))]
     use zcash_protocol::value::{Zatoshis, MAX_MONEY};
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -1313,7 +1360,7 @@ pub mod testing {
                 consensus_branch_id,
                 lock_time,
                 expiry_height: expiry_height.into(),
-                zip233_amount: Some(Zatoshis::from_u64(zip233_amount).unwrap()),
+                zip233_amount: Zatoshis::from_u64(zip233_amount).unwrap(),
                 transparent_bundle,
                 sprout_bundle: None,
                 sapling_bundle,

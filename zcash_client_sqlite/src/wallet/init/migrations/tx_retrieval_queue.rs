@@ -387,7 +387,10 @@ mod tests {
             BranchId::Nu5,
             0,
             12345678.into(),
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
             Zatoshis::ZERO,
             Some(transparent::bundle::Bundle {
                 vin: vec![TxIn {

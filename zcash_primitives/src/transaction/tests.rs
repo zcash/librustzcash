@@ -294,7 +294,7 @@ fn zip_0244() {
             txdata.consensus_branch_id(),
             txdata.lock_time(),
             txdata.expiry_height(),
-            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            #[cfg(feature = "zip-233")]
             txdata.zip233_amount,
             test_bundle,
             txdata.sprout_bundle().cloned(),
@@ -387,11 +387,7 @@ fn zip_0244() {
     }
 }
 
-#[cfg(all(
-    feature = "zip-233",
-    zcash_unstable = "nu7",
-    not(zcash_unstable = "zfuture")
-))]
+#[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
 #[test]
 fn zip_0233() {
     fn to_test_txdata(

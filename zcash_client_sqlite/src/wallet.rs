@@ -2234,7 +2234,10 @@ fn parse_tx<P: consensus::Parameters>(
                 BranchId::for_height(params, expiry_height),
                 tx_data.lock_time(),
                 expiry_height,
-                #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+                #[cfg(all(
+                    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                    feature = "zip-233"
+                ))]
                 tx_data.zip233_amount(),
                 tx_data.transparent_bundle().cloned(),
                 tx_data.sprout_bundle().cloned(),
