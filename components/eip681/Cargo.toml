@@ -1,22 +1,19 @@
 [package]
-name = "zip321"
-description = "Parsing functions and data types for Zcash ZIP 321 Payment Request URIs"
-version = "0.5.0"
+name = "eip681"
+description = "Parsing functions and data types for Ethereum EIP 681 Payment Request URIs"
+version = "0.1.0"
 authors = [
-    "Kris Nuttycombe <kris@electriccoin.co>"
+    "Schell Scivally <schell@electriccoin.co>"
 ]
 homepage = "https://github.com/zcash/librustzcash"
-repository.workspace = true
-readme = "README.md"
-license.workspace = true
 edition.workspace = true
+readme = "README.md"
 rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
 categories.workspace = true
 
 [dependencies]
-zcash_address.workspace = true
-zcash_protocol = { workspace = true, features = ["std"] }
-
 # - Parsing and Encoding
 nom.workspace = true
 base64.workspace = true
