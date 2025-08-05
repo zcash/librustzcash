@@ -23,6 +23,8 @@ use zcash_protocol::{
     value::Zatoshis,
 };
 
+pub mod eip681;
+
 /// Errors that may be produced in decoding of payment requests.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Zip321Error {
