@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3f430146c16f50087b640b424bd2f9b5802ba3e767645413aa2a2c8719481352 # shrinks to digits = Digits(0)
+cc a4c7cb3d762448fad8fd3043aeeff11aa82df5dadbcfaf99e212154378c28214 # shrinks to digits = Digits(0)
+cc 1b5ed264012c673fe7ff5a822f3eaf263525c63d80ccbb1bc3a723af35745bfc # shrinks to digits = Digits([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
