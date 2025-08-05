@@ -18,9 +18,10 @@ use zcash_protocol::{
     PoolType, ShieldedProtocol,
 };
 
-use super::wallet_birthday;
 use crate::{
-    error::SqliteClientError, wallet::pool_code, AccountUuid, ReceivedNoteId, SAPLING_TABLES_PREFIX,
+    error::SqliteClientError,
+    wallet::{encoding::KeyScope, pool_code, wallet_birthday},
+    AccountUuid, ReceivedNoteId, SAPLING_TABLES_PREFIX,
 };
 
 #[cfg(feature = "orchard")]
@@ -310,7 +311,8 @@ where
         |r| -> Result<_, SqliteClientError> {
             let maybe_note = to_spendable_note(params, r)?;
             let recipient_key_scope: i64 = r.get("recipient_key_scope")?;
-            let note_is_trusted = recipient_key_scope == 1;
+            // for now, we only treat wallet-internal outputs as trusted
+            let note_is_trusted = recipient_key_scope == KeyScope::INTERNAL.encode();
             let mined_height: u32 = r.get("mined_height")?;
             Ok(maybe_note.map(|note| (note, note_is_trusted, mined_height)))
         },
