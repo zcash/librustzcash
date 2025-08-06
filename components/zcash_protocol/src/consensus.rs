@@ -126,8 +126,29 @@ impl Sub<BlockHeight> for BlockHeight {
     }
 }
 
+/// The enumeration of known Zcash network types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NetworkType {
+    /// Zcash Mainnet.
+    Main,
+    /// Zcash Testnet.
+    Test,
+    /// Private integration / regression testing, used in `zcashd`.
+    ///
+    /// For some address types there is no distinction between test and regtest encodings;
+    /// those will always be parsed as `Network::Test`.
+    Regtest,
+}
+
+#[cfg(feature = "std")]
+memuse::impl_no_dynamic_usage!(NetworkType);
+
+pub(crate) mod private {
+    pub trait Sealed {}
+}
+
 /// Constants associated with a given Zcash network.
-pub trait NetworkConstants: Clone {
+pub trait NetworkConstants: private::Sealed + Clone {
     /// The coin type for ZEC, as defined by [SLIP 44].
     ///
     /// [SLIP 44]: https://github.com/satoshilabs/slips/blob/master/slip-0044.md
@@ -209,22 +230,7 @@ pub trait NetworkConstants: Clone {
     fn hrp_unified_ivk(&self) -> &'static str;
 }
 
-/// The enumeration of known Zcash network types.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum NetworkType {
-    /// Zcash Mainnet.
-    Main,
-    /// Zcash Testnet.
-    Test,
-    /// Private integration / regression testing, used in `zcashd`.
-    ///
-    /// For some address types there is no distinction between test and regtest encodings;
-    /// those will always be parsed as `Network::Test`.
-    Regtest,
-}
-
-#[cfg(feature = "std")]
-memuse::impl_no_dynamic_usage!(NetworkType);
+impl private::Sealed for NetworkType {}
 
 impl NetworkConstants for NetworkType {
     fn coin_type(&self) -> u32 {
@@ -349,6 +355,8 @@ impl<P: Parameters> Parameters for &P {
         (*self).activation_height(nu)
     }
 }
+
+impl<P: Parameters> private::Sealed for P {}
 
 impl<P: Parameters> NetworkConstants for P {
     fn coin_type(&self) -> u32 {

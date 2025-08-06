@@ -15,7 +15,9 @@ workspace.
 - `impl Neg<Output = ZatBalance> for Zatoshis`
 
 ### Changed
-- `zcash_protocol::consensus::NetworkConstants` has added method `b58_secret_key_prefix`.
+- `zcash_protocol::consensus::NetworkConstants` is now a sealed trait, and may
+  no longer be implemented by third parties. In addition, it has added method
+  `b58_secret_key_prefix`.
 
 ## [0.6.0] - 2025-07-31
 
