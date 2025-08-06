@@ -114,6 +114,7 @@ pprof = { version = "0.14", features = ["criterion", "flamegraph"] }
 [features]
 default = ["multicore", "std", "circuits"]
 std = ["document-features", "redjubjub/std"]
+zip-233 = []
 
 ## Enables creating proofs
 circuits = ["orchard/circuit", "sapling/circuit"]

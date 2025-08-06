@@ -677,6 +677,8 @@ mod tests {
             BranchId::ZFuture,
             0,
             0u32.into(),
+            #[cfg(feature = "zip-233")]
+            Zatoshis::ZERO,
             None,
             None,
             None,
@@ -708,6 +710,8 @@ mod tests {
             BranchId::ZFuture,
             0,
             0u32.into(),
+            #[cfg(feature = "zip-233")]
+            Zatoshis::ZERO,
             None,
             None,
             None,
@@ -735,6 +739,8 @@ mod tests {
             BranchId::ZFuture,
             0,
             0u32.into(),
+            #[cfg(feature = "zip-233")]
+            Zatoshis::ZERO,
             None,
             None,
             None,

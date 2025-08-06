@@ -1,26 +1,29 @@
-use alloc::vec::Vec;
-use blake2b_simd::Hash as Blake2bHash;
-use core::ops::Deref;
-
 use proptest::prelude::*;
 
-use ::transparent::{
-    address::Script, sighash::SighashType, sighash::TransparentAuthorizingContext,
+#[cfg(test)]
+use {
+    crate::transaction::{
+        sighash::SignableInput, sighash_v4::v4_signature_hash, sighash_v5::v5_signature_hash,
+        testing::arb_tx, transparent, txid::TxIdDigester, Authorization, Transaction,
+        TransactionData, TxDigests, TxIn,
+    },
+    ::transparent::{
+        address::Script, sighash::SighashType, sighash::TransparentAuthorizingContext,
+    },
+    alloc::vec::Vec,
+    blake2b_simd::Hash as Blake2bHash,
+    core::ops::Deref,
+    zcash_protocol::{consensus::BranchId, value::Zatoshis},
 };
-use zcash_protocol::{consensus::BranchId, value::Zatoshis};
 
-use super::{
-    sighash::SignableInput,
-    sighash_v4::v4_signature_hash,
-    sighash_v5::v5_signature_hash,
-    testing::arb_tx,
-    transparent::{self},
-    txid::TxIdDigester,
-    Authorization, Transaction, TransactionData, TxDigests, TxIn,
-};
-
-#[cfg(zcash_unstable = "zfuture")]
+#[cfg(all(test, zcash_unstable = "zfuture"))]
 use super::components::tze;
+
+#[cfg(all(test, zcash_unstable = "nu7", feature = "zip-233"))]
+use super::sighash_v6::v6_signature_hash;
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod data;
 
 #[test]
 fn tx_read_write() {
@@ -36,6 +39,7 @@ fn tx_read_write() {
     assert_eq!(&data[..], &encoded[..]);
 }
 
+#[cfg(test)]
 fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     let mut txn_bytes = vec![];
     tx.write(&mut txn_bytes).unwrap();
@@ -54,6 +58,10 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
         tx.orchard_bundle.as_ref().map(|v| *v.value_balance()),
         txo.orchard_bundle.as_ref().map(|v| *v.value_balance())
     );
+    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+    if tx.version.has_zip233() {
+        prop_assert_eq!(tx.zip233_amount, txo.zip233_amount);
+    }
     Ok(())
 }
 
@@ -118,6 +126,15 @@ proptest! {
     }
 }
 
+#[cfg(zcash_unstable = "nu7")]
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(10))]
+    #[test]
+    fn tx_serialization_roundtrip_nu7(tx in arb_tx(BranchId::Nu7)) {
+        check_roundtrip(tx)?;
+    }
+}
+
 #[cfg(zcash_unstable = "zfuture")]
 proptest! {
     #[test]
@@ -128,7 +145,6 @@ proptest! {
     }
 }
 
-mod data;
 #[test]
 fn zip_0143() {
     for tv in self::data::zip_0143::make_test_vectors() {
@@ -177,16 +193,19 @@ fn zip_0243() {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 struct TestTransparentAuth {
     input_amounts: Vec<Zatoshis>,
     input_scriptpubkeys: Vec<Script>,
 }
 
+#[cfg(test)]
 impl transparent::Authorization for TestTransparentAuth {
     type ScriptSig = Script;
 }
 
+#[cfg(test)]
 impl TransparentAuthorizingContext for TestTransparentAuth {
     fn input_amounts(&self) -> Vec<Zatoshis> {
         self.input_amounts.clone()
@@ -197,8 +216,10 @@ impl TransparentAuthorizingContext for TestTransparentAuth {
     }
 }
 
+#[cfg(test)]
 struct TestUnauthorized;
 
+#[cfg(test)]
 impl Authorization for TestUnauthorized {
     type TransparentAuth = TestTransparentAuth;
     type SaplingAuth = sapling::bundle::Authorized;
@@ -260,6 +281,8 @@ fn zip_0244() {
             txdata.consensus_branch_id(),
             txdata.lock_time(),
             txdata.expiry_height(),
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            txdata.zip233_amount,
             test_bundle,
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
@@ -271,6 +294,8 @@ fn zip_0244() {
             txdata.consensus_branch_id(),
             txdata.lock_time(),
             txdata.expiry_height(),
+            #[cfg(feature = "zip-233")]
+            txdata.zip233_amount,
             test_bundle,
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
@@ -357,6 +382,78 @@ fn zip_0244() {
 
         assert_eq!(
             v5_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),
+            tv.sighash_shielded
+        );
+    }
+}
+
+#[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+#[test]
+fn zip_0233() {
+    fn to_test_txdata(
+        tv: &self::data::zip_0233::TestVector,
+    ) -> (TransactionData<TestUnauthorized>, TxDigests<Blake2bHash>) {
+        let tx = Transaction::read(&tv.tx[..], BranchId::Nu7).unwrap();
+
+        assert_eq!(tx.txid.as_ref(), &tv.txid);
+        assert_eq!(tx.auth_commitment().as_ref(), &tv.auth_digest);
+
+        let txdata = tx.deref();
+
+        let input_amounts = tv
+            .amounts
+            .iter()
+            .map(|amount| Zatoshis::from_nonnegative_i64(*amount).unwrap())
+            .collect();
+        let input_scriptpubkeys = tv
+            .script_pubkeys
+            .iter()
+            .map(|s| Script(s.clone()))
+            .collect();
+
+        let test_bundle = txdata
+            .transparent_bundle
+            .as_ref()
+            .map(|b| transparent::Bundle {
+                // we have to do this map/clone to make the types line up, since the
+                // Authorization::ScriptSig type is bound to transparent::Authorized, and we need
+                // it to be bound to TestTransparentAuth.
+                vin: b
+                    .vin
+                    .iter()
+                    .map(|vin| TxIn {
+                        prevout: vin.prevout.clone(),
+                        script_sig: vin.script_sig.clone(),
+                        sequence: vin.sequence,
+                    })
+                    .collect(),
+                vout: b.vout.clone(),
+                authorization: TestTransparentAuth {
+                    input_amounts,
+                    input_scriptpubkeys,
+                },
+            });
+
+        let tdata = TransactionData::from_parts(
+            txdata.version(),
+            txdata.consensus_branch_id(),
+            txdata.lock_time(),
+            txdata.expiry_height(),
+            txdata.zip233_amount,
+            test_bundle,
+            txdata.sprout_bundle().cloned(),
+            txdata.sapling_bundle().cloned(),
+            txdata.orchard_bundle().cloned(),
+        );
+
+        (tdata, txdata.digest(TxIdDigester))
+    }
+
+    for tv in self::data::zip_0233::make_test_vectors() {
+        let (txdata, txid_parts) = to_test_txdata(&tv);
+
+        assert_eq!(
+            v6_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),
             tv.sighash_shielded
         );
     }

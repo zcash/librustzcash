@@ -478,6 +478,14 @@ impl Div<NonZeroU64> for Zatoshis {
     }
 }
 
+impl Neg for Zatoshis {
+    type Output = ZatBalance;
+
+    fn neg(self) -> ZatBalance {
+        ZatBalance::from(self).neg()
+    }
+}
+
 /// A type for balance violations in amount addition and subtraction
 /// (overflow and underflow of allowed ranges)
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

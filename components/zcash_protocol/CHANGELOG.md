@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `impl Neg<Output = ZatBalance> for Zatoshis`
+
 ## [0.6.0] - 2025-07-31
 
 ### Changed

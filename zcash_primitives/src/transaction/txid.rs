@@ -7,17 +7,22 @@ use blake2b_simd::{Hash as Blake2bHash, Params};
 use ff::PrimeField;
 
 use ::orchard::bundle::{self as orchard};
+use ::sapling::bundle::{OutputDescription, SpendDescription};
 use ::transparent::bundle::{self as transparent, TxIn, TxOut};
 use zcash_protocol::{
     consensus::{BlockHeight, BranchId},
     value::ZatBalance,
 };
 
-use ::sapling::bundle::{OutputDescription, SpendDescription};
-
 use super::{
     Authorization, Authorized, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
 };
+
+#[cfg(all(
+    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+    feature = "zip-233"
+))]
+use zcash_protocol::value::Zatoshis;
 
 #[cfg(zcash_unstable = "zfuture")]
 use super::{
@@ -223,6 +228,11 @@ fn hash_header_txid_data(
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
+    #[cfg(all(
+        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        feature = "zip-233"
+    ))]
+    zip233_amount: &Zatoshis,
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_HEADERS_HASH_PERSONALIZATION);
 
@@ -231,6 +241,15 @@ fn hash_header_txid_data(
     h.write_u32_le(consensus_branch_id.into()).unwrap();
     h.write_u32_le(lock_time).unwrap();
     h.write_u32_le(expiry_height.into()).unwrap();
+
+    // TODO: Factor this out into a separate txid computation when implementing ZIP 246 in full.
+    #[cfg(all(
+        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+        feature = "zip-233"
+    ))]
+    if version.has_zip233() {
+        h.write_u64_le((*zip233_amount).into()).unwrap();
+    }
 
     h.finalize()
 }
@@ -309,8 +328,23 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
+        #[cfg(all(
+            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+            feature = "zip-233"
+        ))]
+        zip233_amount: &Zatoshis,
     ) -> Self::HeaderDigest {
-        hash_header_txid_data(version, consensus_branch_id, lock_time, expiry_height)
+        hash_header_txid_data(
+            version,
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
+            zip233_amount,
+        )
     }
 
     fn digest_transparent(
@@ -442,6 +476,11 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         consensus_branch_id: BranchId,
         _lock_time: u32,
         _expiry_height: BlockHeight,
+        #[cfg(all(
+            any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+            feature = "zip-233"
+        ))]
+        _zip233_amount: &Zatoshis,
     ) -> Self::HeaderDigest {
         consensus_branch_id
     }
