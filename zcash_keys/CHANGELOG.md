@@ -9,7 +9,7 @@ workspace.
 
 ## [Unreleased]
 
-## [0.10.0] - PLANNED
+## [0.10.0] - 2025-08-06
 
 ### Added
 - `zcash_keys::keys::zcashd`, a module containing utilities that are useful

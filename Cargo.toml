@@ -36,8 +36,8 @@ equihash = { version = "0.2", path = "components/equihash", default-features = f
 zcash_address = { version = "0.9", path = "components/zcash_address", default-features = false }
 zcash_client_backend = { version = "0.19", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.3", path = "components/zcash_encoding", default-features = false }
-zcash_keys = { version = "0.9", path = "zcash_keys" }
-zcash_protocol = { version = "0.6.0", path = "components/zcash_protocol", default-features = false }
+zcash_keys = { version = "0.10", path = "zcash_keys" }
+zcash_protocol = { version = "0.6.1", path = "components/zcash_protocol", default-features = false }
 zip321 = { version = "0.5", path = "components/zip321" }
 
 zcash_note_encryption = "0.4.1"
