@@ -488,7 +488,7 @@ impl Bundle<Unauthorized> {
             original_vin_unauthorized: self.vin,
             original_vout: self.vout,
             authorization_inputs: self.authorization.inputs,
-            sighashes, // The newly computed and owned Vec of sighashes
+            sighashes,
             secp_ctx,
             final_script_sigs: vec![None; num_inputs],
         })
@@ -501,8 +501,11 @@ impl<'a> TransparentSignatureContext<'a, secp256k1::VerifyOnly> {
     ///
     /// This method iterates through the provided signatures, applying each one to the
     /// single input for which it is valid.
+    ///
+    /// An error will be returned if any of the signatures are not valid for any
+    /// available unsigned inputs, or valid for more than one input.
     pub fn append_external_signatures(
-        self, // Takes ownership of self
+        self,
         signatures: &[secp256k1::ecdsa::Signature],
     ) -> Result<Self, Error> {
         if self.authorization_inputs.is_empty() && !signatures.is_empty() {
@@ -524,7 +527,7 @@ impl<'a> TransparentSignatureContext<'a, secp256k1::VerifyOnly> {
     /// An error will be returned if the signature is not valid for any available
     /// unsigned inputs, or if it is valid for more than one input.
     fn append_external_signature(
-        mut self, // Also takes ownership
+        mut self,
         sig_idx: usize,
         signature: &secp256k1::ecdsa::Signature,
     ) -> Result<Self, Error> {
@@ -639,7 +642,7 @@ mod tests {
     }
 
     #[test]
-    fn happy_path_append_and_finalize_signatures() {
+    fn append_and_finalize_signatures() {
         let addr_str = "tmNUFAr71YAW3eXetm8fhx7k8zpUJYQiKZP";
         let generic_addr: ZcashAddress = addr_str
             .parse()
