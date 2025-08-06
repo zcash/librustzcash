@@ -358,7 +358,7 @@ struct ConfirmationStep {
 }
 
 /// Tests that inputs from a source can be spent according to the default
-/// `ConfirmationPolicy`.
+/// `ConfirmationsPolicy`.
 ///
 /// The test:
 /// - Adds funds to the wallet in a single note from an certain source.
@@ -873,7 +873,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 
     let mut builder = Builder::new(
         *st.network(),
-        (height + 1).into(),
+        height + 1,
         BuildConfig::Standard {
             sapling_anchor: None,
             orchard_anchor: None,
@@ -2157,7 +2157,7 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
         &st,
         account_id,
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
-        (received_tx_height + 10).into(),
+        TargetHeight::from(received_tx_height + 10),
         ConfirmationsPolicy::default(),
         &[],
     )
@@ -2173,7 +2173,7 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
         &st,
         account_id,
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
-        (received_tx_height + 10).into(),
+        TargetHeight::from(received_tx_height + 10),
         ConfirmationsPolicy::default(),
         &[],
     )
@@ -2228,7 +2228,7 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, DSF: DataStoreFactory>(
         &st,
         account.id(),
         TargetValue::AtLeast(Zatoshis::const_from_u64(300000)),
-        (account.birthday().height() + 5).into(),
+        TargetHeight::from(account.birthday().height() + 5),
         ConfirmationsPolicy {
             // 5
             untrusted: NonZeroU32::MIN.saturating_add(4),
