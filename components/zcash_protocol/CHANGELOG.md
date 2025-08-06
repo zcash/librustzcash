@@ -9,6 +9,9 @@ represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
 ## [Unreleased]
+
+## [0.6.1] - 2025-08-06
+
 ### Added
 - `zcash_protocol::constants::`
   - `{mainnet, testnet, regtest}::B58_SECRET_KEY_PREFIX`
@@ -18,16 +21,14 @@ workspace.
 - `zcash_protocol::consensus::NetworkConstants` is now a sealed trait, and may
   no longer be implemented by third parties. In addition, it has added method
   `b58_secret_key_prefix`.
-
-## [0.6.0] - 2025-07-31
-
-### Changed
 - `zcash_protocol::consensus`:
   - `BranchId` now has an additional `Nu6_1` variant.
   - `NetworkUpgrade` now has an additional `Nu6_1` variant.
 - `zcash_protocol::local_consensus`:
   - `LocalNetwork` has a new field `nu6_1`.
 - The testnet activation height has been set for `consensus::BranchId::Nu6_1`
+
+## [0.6.0] - YANKED
 
 ## [0.5.4] - 2025-07-15
 
