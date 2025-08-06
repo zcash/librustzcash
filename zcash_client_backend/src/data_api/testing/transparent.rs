@@ -5,7 +5,10 @@ use crate::{
         testing::{
             AddressType, DataStoreFactory, ShieldedProtocol, TestBuilder, TestCache, TestState,
         },
-        wallet::{decrypt_and_store_transaction, input_selection::GreedyInputSelector},
+        wallet::{
+            decrypt_and_store_transaction, input_selection::GreedyInputSelector,
+            ConfirmationsPolicy,
+        },
         Account as _, Balance, InputSource, WalletRead, WalletWrite,
     },
     fees::{standard, DustOutputPolicy, StandardFeeRule},
@@ -25,14 +28,12 @@ use zcash_protocol::{local_consensus::LocalNetwork, value::Zatoshis};
 use super::TestAccount;
 
 /// Checks whether the transparent balance of the given test `account` is as `expected`
-/// considering the `min_confirmations`. It is assumed that zero or one `min_confirmations`
-/// are treated the same, and so this function also checks the other case when
-/// `min_confirmations` is 0 or 1.
+/// considering the `confirmations_policy`.
 fn check_balance<DSF>(
     st: &TestState<impl TestCache, <DSF as DataStoreFactory>::DataStore, LocalNetwork>,
     account: &TestAccount<<DSF as DataStoreFactory>::Account>,
     taddr: &TransparentAddress,
-    min_confirmations: u32,
+    confirmations_policy: ConfirmationsPolicy,
     expected: &Balance,
 ) where
     DSF: DataStoreFactory,
@@ -40,7 +41,7 @@ fn check_balance<DSF>(
     // Check the wallet summary returns the expected transparent balance.
     let summary = st
         .wallet()
-        .get_wallet_summary(min_confirmations)
+        .get_wallet_summary(confirmations_policy)
         .unwrap()
         .unwrap();
     let balance = summary.account_balances().get(&account.id()).unwrap();
@@ -63,33 +64,13 @@ fn check_balance<DSF>(
     );
     assert_eq!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, mempool_height.into(), min_confirmations)
+            .get_spendable_transparent_outputs(taddr, mempool_height.into(), confirmations_policy)
             .unwrap()
             .into_iter()
             .map(|utxo| utxo.value())
             .sum::<Option<Zatoshis>>(),
         Some(expected.spendable_value()),
     );
-
-    // we currently treat min_confirmations the same regardless they are 0 (zero confirmations)
-    // or 1 (one block confirmation). We will check if this assumption holds until it's no
-    // longer made. If zero and one [`min_confirmations`] are treated differently in the future,
-    // this check should then be removed.
-    if min_confirmations == 0 || min_confirmations == 1 {
-        assert_eq!(
-            st.wallet()
-                .get_spendable_transparent_outputs(
-                    taddr,
-                    mempool_height.into(),
-                    1 - min_confirmations
-                )
-                .unwrap()
-                .into_iter()
-                .map(|utxo| utxo.value())
-                .sum::<Option<Zatoshis>>(),
-            Some(expected.spendable_value()),
-        );
-    }
 }
 
 pub fn put_received_transparent_utxo<DSF>(dsf: DSF)
@@ -139,7 +120,7 @@ where
         st.wallet().get_spendable_transparent_outputs(
             taddr,
             height_1.into(),
-            0
+            ConfirmationsPolicy::MIN
         ).as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
     );
@@ -159,7 +140,7 @@ where
     // Confirm that we no longer see any unspent outputs as of `height_1`.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, height_1.into(), 0)
+            .get_spendable_transparent_outputs(taddr, height_1.into(), ConfirmationsPolicy::MIN)
             .as_deref(),
         Ok(&[])
     );
@@ -173,7 +154,7 @@ where
     // If we include `height_2` then the output is returned.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, height_2.into(), 0)
+            .get_spendable_transparent_outputs(taddr, height_2.into(), ConfirmationsPolicy::MIN)
             .as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_2))
     );
@@ -213,7 +194,13 @@ where
     st.scan_cached_blocks(start_height, 10);
 
     // The wallet starts out with zero balance.
-    check_balance::<DSF>(&st, &account, taddr, 0, &Balance::ZERO);
+    check_balance::<DSF>(
+        &st,
+        &account,
+        taddr,
+        ConfirmationsPolicy::MIN,
+        &Balance::ZERO,
+    );
 
     // Create a fake transparent output.
     let value = Zatoshis::from_u64(100000).unwrap();
@@ -235,7 +222,13 @@ where
     // add the spendable value to the expected balance
     zero_or_one_conf_value.add_spendable_value(value).unwrap();
 
-    check_balance::<DSF>(&st, &account, taddr, 0, &zero_or_one_conf_value);
+    check_balance::<DSF>(
+        &st,
+        &account,
+        taddr,
+        ConfirmationsPolicy::MIN,
+        &zero_or_one_conf_value,
+    );
 
     // Shield the output.
     let input_selector = GreedyInputSelector::new();
@@ -253,20 +246,32 @@ where
             account.usk(),
             &[*taddr],
             account.id(),
-            1,
+            ConfirmationsPolicy::MIN,
         )
         .unwrap()[0];
 
     // The wallet should have zero transparent balance, because the shielding
     // transaction can be mined.
-    check_balance::<DSF>(&st, &account, taddr, 0, &Balance::ZERO);
+    check_balance::<DSF>(
+        &st,
+        &account,
+        taddr,
+        ConfirmationsPolicy::MIN,
+        &Balance::ZERO,
+    );
 
     // Mine the shielding transaction.
     let (mined_height, _) = st.generate_next_block_including(txid);
     st.scan_cached_blocks(mined_height, 1);
 
     // The wallet should still have zero transparent balance.
-    check_balance::<DSF>(&st, &account, taddr, 0, &Balance::ZERO);
+    check_balance::<DSF>(
+        &st,
+        &account,
+        taddr,
+        ConfirmationsPolicy::MIN,
+        &Balance::ZERO,
+    );
 
     // Unmine the shielding transaction via a reorg.
     st.wallet_mut()
@@ -275,7 +280,13 @@ where
     assert_eq!(st.wallet().chain_height().unwrap(), Some(mined_height - 1));
 
     // The wallet should still have zero transparent balance.
-    check_balance::<DSF>(&st, &account, taddr, 0, &Balance::ZERO);
+    check_balance::<DSF>(
+        &st,
+        &account,
+        taddr,
+        ConfirmationsPolicy::MIN,
+        &Balance::ZERO,
+    );
 
     // Expire the shielding transaction.
     let expiry_height = st
@@ -286,7 +297,13 @@ where
         .expiry_height();
     st.wallet_mut().update_chain_tip(expiry_height).unwrap();
 
-    check_balance::<DSF>(&st, &account, taddr, 0, &zero_or_one_conf_value);
+    check_balance::<DSF>(
+        &st,
+        &account,
+        taddr,
+        ConfirmationsPolicy::MIN,
+        &zero_or_one_conf_value,
+    );
 }
 
 /// This test attempts to verify that transparent funds spendability is
@@ -325,7 +342,7 @@ where
         &st as &TestState<_, DSF::DataStore, _>,
         &account,
         taddr,
-        0,
+        ConfirmationsPolicy::MIN,
         &Balance::ZERO,
     );
 
@@ -349,7 +366,13 @@ where
     // add the spendable value to the expected balance
     zero_or_one_conf_value.add_spendable_value(value).unwrap();
 
-    check_balance::<DSF>(&st, &account, taddr, 0, &zero_or_one_conf_value);
+    check_balance::<DSF>(
+        &st,
+        &account,
+        taddr,
+        ConfirmationsPolicy::MIN,
+        &zero_or_one_conf_value,
+    );
 
     // now if we increase the number of confirmations our spendable balance should
     // be zero and the total balance equal to `value`
@@ -359,7 +382,13 @@ where
         .add_pending_spendable_value(value)
         .unwrap();
 
-    check_balance::<DSF>(&st, &account, taddr, 2, &not_confirmed_yet_value);
+    check_balance::<DSF>(
+        &st,
+        &account,
+        taddr,
+        ConfirmationsPolicy::new_symmetrical(2).unwrap(),
+        &not_confirmed_yet_value,
+    );
 
     // Add one extra block
     st.generate_empty_block();
@@ -372,7 +401,13 @@ where
     st.generate_empty_block();
     st.scan_cached_blocks(height + 1, 1);
 
-    check_balance::<DSF>(&st, &account, taddr, 2, &zero_or_one_conf_value);
+    check_balance::<DSF>(
+        &st,
+        &account,
+        taddr,
+        ConfirmationsPolicy::new_symmetrical(2).unwrap(),
+        &zero_or_one_conf_value,
+    );
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

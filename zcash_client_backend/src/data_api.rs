@@ -86,9 +86,9 @@ use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
 use self::{
     chain::{ChainState, CommitmentTreeRoot},
     scanning::ScanRange,
+    wallet::ConfirmationsPolicy,
 };
 use crate::{
-    data_api::wallet::ConfirmationsPolicy,
     decrypt::DecryptedOutput,
     proto::service::TreeState,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
@@ -1341,7 +1341,7 @@ pub trait InputSource {
         &self,
         _address: &TransparentAddress,
         _target_height: TargetHeight,
-        _min_confirmations: u32,
+        _confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         Ok(vec![])
     }
@@ -1444,7 +1444,7 @@ pub trait WalletRead {
     /// wallet; or `Ok(None)` if the wallet has no summary data available.
     fn get_wallet_summary(
         &self,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error>;
 
     /// Returns the height of the chain as known to the wallet as of the most recent call to

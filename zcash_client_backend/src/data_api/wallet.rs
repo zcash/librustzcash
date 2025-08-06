@@ -465,7 +465,7 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     shielding_threshold: Zatoshis,
     from_addrs: &[TransparentAddress],
     to_account: <DbT as InputSource>::AccountId,
-    min_confirmations: u32,
+    confirmations_policy: ConfirmationsPolicy,
 ) -> Result<
     Proposal<ChangeT::FeeRule, Infallible>,
     ProposeShieldingErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -490,7 +490,7 @@ where
             from_addrs,
             to_account,
             (chain_tip_height + 1).into(),
-            min_confirmations,
+            confirmations_policy,
         )
         .map_err(Error::from)
 }
@@ -2190,7 +2190,7 @@ pub fn shield_transparent_funds<DbT, ParamsT, InputsT, ChangeT>(
     usk: &UnifiedSpendingKey,
     from_addrs: &[TransparentAddress],
     to_account: <DbT as InputSource>::AccountId,
-    min_confirmations: u32,
+    confirmations_policy: ConfirmationsPolicy,
 ) -> Result<NonEmpty<TxId>, ShieldErrT<DbT, InputsT, ChangeT>>
 where
     ParamsT: consensus::Parameters,
@@ -2206,7 +2206,7 @@ where
         shielding_threshold,
         from_addrs,
         to_account,
-        min_confirmations,
+        confirmations_policy,
     )?;
 
     create_proposed_transactions(

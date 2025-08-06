@@ -1056,7 +1056,7 @@ where
         shielding_threshold: Zatoshis,
         from_addrs: &[TransparentAddress],
         to_account: <InputsT::InputSource as InputSource>::AccountId,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<
         Proposal<ChangeT::FeeRule, Infallible>,
         super::wallet::ProposeShieldingErrT<DbT, Infallible, InputsT, ChangeT>,
@@ -1076,7 +1076,7 @@ where
             shielding_threshold,
             from_addrs,
             to_account,
-            min_confirmations,
+            confirmations_policy,
         )
     }
 
@@ -1174,7 +1174,7 @@ where
         usk: &UnifiedSpendingKey,
         from_addrs: &[TransparentAddress],
         to_account: <DbT as InputSource>::AccountId,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<NonEmpty<TxId>, super::wallet::ShieldErrT<DbT, InputsT, ChangeT>>
     where
         InputsT: ShieldingSelector<InputSource = DbT>,
@@ -1195,19 +1195,19 @@ where
             usk,
             from_addrs,
             to_account,
-            min_confirmations,
+            confirmations_policy,
         )
     }
 
     fn with_account_balance<T, F: FnOnce(&AccountBalance) -> T>(
         &self,
         account: AccountIdT,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
         f: F,
     ) -> T {
         let binding = self
             .wallet()
-            .get_wallet_summary(min_confirmations)
+            .get_wallet_summary(confirmations_policy)
             .unwrap()
             .unwrap();
         f(binding.account_balances().get(&account).unwrap())
@@ -1215,13 +1215,17 @@ where
 
     /// Returns the total balance in the given account at this point in the test.
     pub fn get_total_balance(&self, account: AccountIdT) -> Zatoshis {
-        self.with_account_balance(account, 0, |balance| balance.total())
+        self.with_account_balance(account, ConfirmationsPolicy::MIN, |balance| balance.total())
     }
 
     /// Returns the balance in the given account that is spendable with the given number
     /// of confirmations at this point in the test.
-    pub fn get_spendable_balance(&self, account: AccountIdT, min_confirmations: u32) -> Zatoshis {
-        self.with_account_balance(account, min_confirmations, |balance| {
+    pub fn get_spendable_balance(
+        &self,
+        account: AccountIdT,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Zatoshis {
+        self.with_account_balance(account, confirmations_policy, |balance| {
             balance.spendable_value()
         })
     }
@@ -1231,9 +1235,9 @@ where
     pub fn get_pending_shielded_balance(
         &self,
         account: AccountIdT,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Zatoshis {
-        self.with_account_balance(account, min_confirmations, |balance| {
+        self.with_account_balance(account, confirmations_policy, |balance| {
             balance.value_pending_spendability() + balance.change_pending_confirmation()
         })
         .unwrap()
@@ -1242,15 +1246,24 @@ where
     /// Returns the amount of change in the given account that is not yet spendable with
     /// the given number of confirmations at this point in the test.
     #[allow(dead_code)]
-    pub fn get_pending_change(&self, account: AccountIdT, min_confirmations: u32) -> Zatoshis {
-        self.with_account_balance(account, min_confirmations, |balance| {
+    pub fn get_pending_change(
+        &self,
+        account: AccountIdT,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Zatoshis {
+        self.with_account_balance(account, confirmations_policy, |balance| {
             balance.change_pending_confirmation()
         })
     }
 
     /// Returns a summary of the wallet at this point in the test.
-    pub fn get_wallet_summary(&self, min_confirmations: u32) -> Option<WalletSummary<AccountIdT>> {
-        self.wallet().get_wallet_summary(min_confirmations).unwrap()
+    pub fn get_wallet_summary(
+        &self,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Option<WalletSummary<AccountIdT>> {
+        self.wallet()
+            .get_wallet_summary(confirmations_policy)
+            .unwrap()
     }
 }
 
@@ -2583,7 +2596,7 @@ impl WalletRead for MockWalletDb {
 
     fn get_wallet_summary(
         &self,
-        _min_confirmations: u32,
+        _confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
         Ok(None)
     }
