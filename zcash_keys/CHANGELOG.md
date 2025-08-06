@@ -9,6 +9,15 @@ workspace.
 
 ## [Unreleased]
 
+## [0.10.0] - PLANNED
+### Added
+- Migrated to `zcash_protocol 0.6`, `zcash_address 0.9`, `zcash_transparent 0.4`
+- `zcash_keys::keys::zcashd`, a module containing utilities that are useful
+  for interacting with key data from legacy zcashd wallets, has been added
+  under a newly-added `zcashd-compat` feature flag.
+- `zcash_keys::address::UnifiedAddress::receivers`
+- `zcash_keys::address::Address::receivers`
+
 ## [0.9.0] - 2025-05-30
 
 ### Added
@@ -17,6 +26,12 @@ workspace.
 
 ### Changed
 - Migrated to `zcash_address 0.8`, `zcash_transparent 0.3`.
+
+## [0.8.2] - 2025-07-18
+
+### Added
+- `zcash_keys::keys::{UnifiedFullViewingKey, UnifiedIncomingViewingKey}::default_transparent_address`
+  have been added under the `test-dependencies` feature.
 
 ## [0.4.1, 0.5.1, 0.6.1, 0.7.1, 0.8.1] - 2025-05-09
 

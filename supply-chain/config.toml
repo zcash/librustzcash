@@ -193,6 +193,10 @@ criteria = "safe-to-deploy"
 version = "0.14.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.bip0039]]
+version = "0.12.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.bip32]]
 version = "0.6.0-pre.1"
 criteria = "safe-to-deploy"
@@ -841,12 +845,20 @@ criteria = "safe-to-deploy"
 version = "0.9.10"
 criteria = "safe-to-deploy"
 
+[[exemptions.password-hash]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.pasta_curves]]
 version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.paste]]
 version = "1.0.15"
+criteria = "safe-to-deploy"
+
+[[exemptions.pbkdf2]]
+version = "0.12.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.pem-rfc7468]]

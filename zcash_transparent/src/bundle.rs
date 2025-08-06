@@ -5,7 +5,7 @@ use core::fmt::Debug;
 use core2::io::{self, Read, Write};
 
 use zcash_protocol::{
-    value::{BalanceError, ZatBalance as Amount, Zatoshis as NonNegativeAmount},
+    value::{BalanceError, ZatBalance, Zatoshis},
     TxId,
 };
 
@@ -30,7 +30,7 @@ impl Authorization for EffectsOnly {
 }
 
 impl TransparentAuthorizingContext for EffectsOnly {
-    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
+    fn input_amounts(&self) -> Vec<Zatoshis> {
         self.inputs.iter().map(|input| input.value).collect()
     }
 
@@ -109,24 +109,29 @@ impl<A: Authorization> Bundle<A> {
     /// transferred out of the transparent pool into shielded pools or to fees; a negative value
     /// means that the containing transaction has funds being transferred into the transparent pool
     /// from the shielded pools.
-    pub fn value_balance<E, F>(&self, mut get_prevout_value: F) -> Result<Amount, E>
+    pub fn value_balance<E, F>(&self, mut get_prevout_value: F) -> Result<Option<ZatBalance>, E>
     where
         E: From<BalanceError>,
-        F: FnMut(&OutPoint) -> Result<Amount, E>,
+        F: FnMut(&OutPoint) -> Result<Option<Zatoshis>, E>,
     {
-        let input_sum = self.vin.iter().try_fold(Amount::zero(), |total, txin| {
-            get_prevout_value(&txin.prevout)
-                .and_then(|v| (total + v).ok_or_else(|| BalanceError::Overflow.into()))
-        })?;
+        let mut input_sum = Zatoshis::ZERO;
+        for txin in &self.vin {
+            if let Some(v) = get_prevout_value(&txin.prevout)? {
+                input_sum = (input_sum + v).ok_or(BalanceError::Overflow)?;
+            } else {
+                return Ok(None);
+            }
+        }
 
         let output_sum = self
             .vout
             .iter()
-            .map(|p| Amount::from(p.value))
-            .sum::<Option<Amount>>()
+            .map(|p| ZatBalance::from(p.value))
+            .sum::<Option<ZatBalance>>()
             .ok_or(BalanceError::Overflow)?;
 
-        (input_sum - output_sum).ok_or_else(|| BalanceError::Underflow.into())
+        let balance = (ZatBalance::from(input_sum) - output_sum).ok_or(BalanceError::Underflow)?;
+        Ok(Some(balance))
     }
 }
 
@@ -225,16 +230,24 @@ impl TxIn<Authorized> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TxOut {
-    pub value: NonNegativeAmount,
+    pub value: Zatoshis,
     pub script_pubkey: Script,
 }
 
 impl TxOut {
+    // Constructs a new `TxOut` from its constituent parts.
+    pub fn new(value: Zatoshis, script_pubkey: Script) -> Self {
+        Self {
+            value,
+            script_pubkey,
+        }
+    }
+
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let value = {
             let mut tmp = [0u8; 8];
             reader.read_exact(&mut tmp)?;
-            NonNegativeAmount::from_nonnegative_i64_le_bytes(tmp)
+            Zatoshis::from_nonnegative_i64_le_bytes(tmp)
         }
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
         let script_pubkey = Script::read(&mut reader)?;

@@ -10,6 +10,9 @@ use zcash_protocol::consensus::NetworkType;
 
 use zcash_encoding::Vector;
 
+#[cfg(feature = "transparent-inputs")]
+use sha2::{Digest, Sha256};
+
 /// Defined script opcodes.
 ///
 /// Most of the opcodes are unused by this crate, but we define them so that the alternate
@@ -406,6 +409,14 @@ impl TransparentAddress {
                 Script::default() << OpCode::Hash160 << &script_id[..] << OpCode::Equal
             }
         }
+    }
+
+    /// Derives the P2PKH transparent address corresponding to the given pubkey.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn from_pubkey(pubkey: &secp256k1::PublicKey) -> Self {
+        TransparentAddress::PublicKeyHash(
+            *ripemd::Ripemd160::digest(Sha256::digest(pubkey.serialize())).as_ref(),
+        )
     }
 }
 

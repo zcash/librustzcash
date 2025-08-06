@@ -1797,11 +1797,12 @@ pub(crate) mod tests {
             )
             .unwrap();
 
-        let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible>(
-            account.usk(),
-            OvkPolicy::Sender,
-            &proposal,
-        );
+        let create_proposed_result = st
+            .create_proposed_transactions::<Infallible, _, Infallible, _>(
+                account.usk(),
+                OvkPolicy::Sender,
+                &proposal,
+            );
         assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
     }
 

@@ -10,8 +10,29 @@ workspace.
 
 ## [Unreleased]
 
+
 ### Added
+- `zcash_primitives::transaction::tests::data` has been exposed under the
+  `test-dependencies` feature to provide access to test vectors.
 - `zcash_primitives::transaction::builder::Builder::add_transparent_null_data_output`
+
+## [0.24.0] - 2025-07-31
+
+### Changed
+- Migrated to `zcash_protocol 0.6`, `zcash_address 0.9`, `zcash_transparent 0.4`
+- The type of `zcash_primitives::transaction::TransactionData::fee_paid` has
+  changed. The closure provided to this method for input retrieval can now
+  indicate that an input for the given outpoint is not available, and
+  `fee_paid` will return `Ok(None)` when this is the case. In addition, this
+  method now requires nonnegative input values be provided by the closure, and
+  will only return positive fee value; negative fee value will result in an
+  error instead of reporting a potentially invalid result.
+
+## [0.23.1] - 2025-07-16
+
+### Changed
+- Migrated to `zcash_protocol 0.5.4` to alleviate a type inference issue
+  observed by downstream users.
 
 ## [0.23.0] - 2025-05-30
 
@@ -21,6 +42,12 @@ workspace.
   now represent explicit transaction versions, in order to avoid accidental
   confusion with the names of the network upgrades that they were introduced
   in.
+
+## [0.22.1] - 2025-07-18
+
+### Fixed
+- This fixes a potential build error caused by incautious use of `into()`,
+  where the addition of a `From` impl can cause resolution failure.
 
 ## [0.22.0] - 2025-02-21
 

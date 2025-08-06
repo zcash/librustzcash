@@ -19,6 +19,62 @@ use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
 use crate::wallet::scanning::priority_code;
 
 /// Stores information about the accounts that the wallet is tracking.
+///
+/// An account corresponds to a logical "bucket of funds" that has its own balance within the
+/// wallet and for which spending operations should treat received value as interchangeable,
+/// excepting situations where care must be taken to avoid publicly linking addresses within the
+/// account or where turnstile-crossings may have privacy implications.
+///
+/// ### Columns
+///
+/// - `id`: Internal primary key for the account record.
+/// - `name`: A human-readable reference for the account. This column is present merely as a
+///   convenience for front-ends and debugging; it has no stable semantics and values are not
+///   required to be unique.
+/// - `uuid`: A wallet-instance-specific identifier for the account. This identifier will remain
+///   stable for the lifetime of the wallet database, but is not expected or required to be
+///   stable across wallet restores and it should not be stored in external backup formats.
+/// - `account_kind`: 0 for accounts derived from a mnemonic seed, 1 for imported accounts
+///   for which derivation path information may not be available. This column may be removed in the
+///   future; the distinction between whether an account is derived or imported is better
+///   represented by the presence or absence of HD seed fingerprint and HD account index data.
+/// - `hd_seed_fingerprint`: If this account contains funds in keys obtained via HD derivation,
+///   the ZIP 32 fingerprint of the root HD seed. If this column is non-null, `hd_account_index`
+///   must also be non-null.
+/// - `hd_account_index`: If this account contains funds in keys obtained via HD derivation,
+///   the BIP 44 account-level component of the HD derivation path. If this column is non-null,
+///   `hd_seed_fingerprint` must also be non-null.
+/// - `ufvk`: The unified full viewing key for the account, if known.
+/// - `uivk`: The unified incoming viewing key for the account.
+/// - `orchard_fvk_item_cache`: The serialized representation of the Orchard item of the `ufvk`,
+///   if any.
+/// - `sapling_fvk_item_cache`: The serialized representation of the Sapling item of the `ufvk`,
+///   if any.
+/// - `p2pkh_fvk_item_cache`: The serialized representation of the P2PKH item of the `ufvk`,
+///   if any.
+/// - `birthday_height`: The minimum block height among blocks that may potentially contain
+///   shielded funds belonging to the account.
+/// - `birthday_sapling_tree_size`: A cache of the size of the Sapling note commitment tree
+///   as of the start of the birthday block.
+/// - `birthday_orchard_tree_size`: A cache of the size of the Orchard note commitment tree
+///   as of the start of the birthday block.
+/// - `recover_until_height`: The boundary between recovery and regular scanning for this account.
+///   Unscanned blocks up to and excluding this height are counted towards recovery progress. It
+///   is initially set via the `AccountBirthday` parameter of the `WalletWrite::import_account_*`
+///   methods (usually to the chain tip height at which account recovery was initiated), and may
+///   in future be automatically updated by the backend if the wallet is offline for an extended
+///   period (to keep the scan progress percentage accurate to what actually needs scanning).
+/// - `has_spend_key`: A boolean flag (0 or 1) indicating whether the application that embeds
+///   this wallet database has access to spending key(s) for the account.
+/// - `zcash_legacy_address_index`: This column is only potentially populated for wallets imported
+///   from a `zcashd` `wallet.dat` file, for "standalone" Sapling addresses (each of which
+///   corresponds to an independent account) derived after the introduction of mnemonic seed
+///   derivation in the `4.7.0` `zcashd` release. This column will only be non-null in
+///   the case that the `hd_account_index` column has the value `0x7FFFFFFF`, in accordance with
+///   how post-v4.7.0 Sapling addresses were produced by the `z_getnewaddress` RPC method.
+///   This relationship is not currently enforced by a CHECK constraint; such a constraint should
+///   be added the next time that the `accounts` table is deleted and re-created to support a
+///   SQLite-breaking change to the columns of the table.
 pub(super) const TABLE_ACCOUNTS: &str = r#"
 CREATE TABLE "accounts" (
     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -38,6 +94,7 @@ CREATE TABLE "accounts" (
     birthday_orchard_tree_size INTEGER,
     recover_until_height INTEGER,
     has_spend_key INTEGER NOT NULL DEFAULT 1,
+    zcashd_legacy_address_index INTEGER,
     CHECK (
       (
         account_kind = 0
@@ -172,6 +229,12 @@ CREATE TABLE blocks (
 ///   foreign key constraint on `block` prevents that column from being populated prior to complete
 ///   scanning of the block. This is constrained to be equal to the `block` column if `block` is
 ///   non-null.
+/// - `tx_index`: the index of the transaction within the block.
+/// - `expiry_height`: stores the maximum height at which the transaction may be mined, if known.
+/// - `raw`: the original serialized byte representation of the transaction, if it has been
+///   retrieved.
+/// - `fee`: the fee paid to send the transaction, if known. This should be present for all
+///   transactions constructed by this wallet.
 /// - `target_height`: stores the target height for which the transaction was constructed, if
 ///   known. This will ordinarily be null for transactions discovered via chain scanning; it
 ///   will only be set for transactions created using this wallet specifically, and not any
@@ -359,11 +422,8 @@ CREATE TABLE orchard_received_note_spends (
 ///   transaction.
 /// - `script`: The full txout script
 /// - `value_zat`: The value of the TXO in zatoshis
-/// - `max_observed_unspent_height`: The maximum block height at which this TXO was either
-///   observed to be a member of the UTXO set at the start of the block, or observed
-///   to be an output of a transaction mined in the block. This is intended to be used to
-///   determine when the TXO is no longer a part of the UTXO set, in the case that the
-///   transaction that spends it is not detected by the wallet.
+/// - `max_observed_unspent_height`: The maximum block height at which this TXO was observed to be
+///   a member of the UTXO set as of the end of the block.
 /// - `address_id`: a foreign key to the address that this note was sent to; non-null because
 ///   we can only find transparent outputs for known addresses (and therefore we must record
 ///   both internal and external addresses in the `addresses` table).
@@ -492,11 +552,15 @@ pub(super) const INDEX_SENT_NOTES_TX: &str = r#"CREATE INDEX sent_notes_tx ON "s
 ///   about transparent inputs to a transaction, this is a reference to that transaction record.
 ///   NULL for transactions where the request for enhancement data is based on discovery due
 ///   to blockchain scanning.
+/// - `request_expiry`: The block height at which this transaction data request will be considered
+///   expired. This is used to ensure that permanently-unsatisfiable transaction data requests
+///   do not stay in the queue forever.
 pub(super) const TABLE_TX_RETRIEVAL_QUEUE: &str = r#"
 CREATE TABLE tx_retrieval_queue (
     txid BLOB NOT NULL UNIQUE,
     query_type INTEGER NOT NULL,
     dependent_transaction_id INTEGER,
+    request_expiry INTEGER,
     FOREIGN KEY (dependent_transaction_id) REFERENCES transactions(id_tx)
 )"#;
 

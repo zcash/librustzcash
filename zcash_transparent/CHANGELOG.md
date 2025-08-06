@@ -10,7 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+## [0.4.0] - 2025-07-31
+
 ### Added
+- `zcash_transparent::address::TransparentAddress::from_pubkey`
 - `zcash_transparent::builder::TransparentBuilder::add_null_data_output`
 - `zcash_transparent::builder::TransparentSignatureContext` struct for staged application of external signatures.
 - `zcash_transparent::builder::Bundle<Unauthorized>::prepare_transparent_signatures` to initialize the signing context.
@@ -18,6 +21,11 @@ workspace.
 - `zcash_transparent::builder::TransparentSignatureContext::finalize_signatures` to produce an authorized bundle from the context.
 
 ### Changed
+- Migrated to `zcash_protocol 0.6`, `zcash_address 0.9`
+- The type of `zcash_transparent::bundle::Bundle::value_balance` has changed.
+  The closure provided to this method for input retrieval can now indicate that
+  an input for the given outpoint is not available, and `value_balance` will
+  return `Ok(None)` when this is the case. 
 - Added `NullDataTooLong` variant to public `Error` enum
 - `zcash_transparent::builder::Error` has added variants:
   - `InputCountMismatch`
@@ -25,6 +33,10 @@ workspace.
   - `AmbiguousSignature`
   - `NotAllInputsSigned`
   - `Secp256k1Error(String)`
+
+### Removed
+- Removed deprecated method `zcash_transparent::keys::pubkey_to_address`;
+  use `zcash_transparent::address::TransparentAddress::from_pubkey` instead.
 
 ## [0.3.0] - 2025-05-30
 

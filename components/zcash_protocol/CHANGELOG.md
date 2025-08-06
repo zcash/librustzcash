@@ -10,6 +10,24 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `impl Neg<Output = ZatBalance> for Zatoshis`
+
+## [0.6.0] - 2025-07-31
+
+### Changed
+- `zcash_protocol::consensus`:
+  - `BranchId` now has an additional `Nu6_1` variant.
+  - `NetworkUpgrade` now has an additional `Nu6_1` variant.
+- `zcash_protocol::local_consensus`:
+  - `LocalNetwork` has a new field `nu6_1`.
+- The testnet activation height has been set for `consensus::BranchId::Nu6_1`
+
+## [0.5.4] - 2025-07-15
+
+### Added
+- `impl {Add,Sub}<Zatoshis> for {ZatBalance, Option<ZatBalance>}`
+
 ## [0.5.3] - 2025-06-12
 ### Added
   - `zcash_protocol::txid::TxId::is_null`

@@ -12,6 +12,7 @@ use rand_distr::Distribution;
 use rusqlite::types::Value;
 use rusqlite::OptionalExtension;
 use rusqlite::{named_params, Connection, Row};
+use tracing::debug;
 
 use transparent::keys::NonHardenedChildRange;
 use transparent::{
@@ -27,7 +28,7 @@ use zcash_client_backend::{
     },
     wallet::{TransparentAddressMetadata, WalletTransparentOutput},
 };
-use zcash_keys::keys::UnifiedIncomingViewingKey;
+use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedIncomingViewingKey};
 use zcash_keys::{
     address::Address,
     encoding::AddressCodec,
@@ -457,7 +458,32 @@ pub(crate) fn generate_address_range<P: consensus::Parameters>(
     let account = get_account_internal(conn, params, account_id)?
         .ok_or_else(|| SqliteClientError::AccountUnknown)?;
 
-    if !account.uivk().has_transparent() {
+    generate_address_range_internal(
+        conn,
+        params,
+        account_id,
+        &account.uivk(),
+        account.ufvk(),
+        key_scope,
+        request,
+        range_to_store,
+        require_key,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_id: AccountRef,
+    account_uivk: &UnifiedIncomingViewingKey,
+    account_ufvk: Option<&UnifiedFullViewingKey>,
+    key_scope: KeyScope,
+    request: UnifiedAddressRequest,
+    range_to_store: Range<NonHardenedChildIndex>,
+    require_key: bool,
+) -> Result<(), SqliteClientError> {
+    if !account_uivk.has_transparent() {
         if require_key {
             return Err(SqliteClientError::AddressGeneration(
                 AddressGenerationError::KeyNotAvailable(Typecode::P2pkh),
@@ -470,11 +496,10 @@ pub(crate) fn generate_address_range<P: consensus::Parameters>(
     let gen_addrs = |key_scope: KeyScope, index: NonHardenedChildIndex| {
         Ok::<_, SqliteClientError>(match key_scope {
             KeyScope::Zip32(zip32::Scope::External) => {
-                generate_external_address(&account.uivk(), request, index)?
+                generate_external_address(account_uivk, request, index)?
             }
             KeyScope::Zip32(zip32::Scope::Internal) => {
-                let internal_address = account
-                    .ufvk()
+                let internal_address = account_ufvk
                     .and_then(|k| k.transparent())
                     .expect("presence of transparent key was checked above.")
                     .derive_internal_ivk()?
@@ -482,8 +507,7 @@ pub(crate) fn generate_address_range<P: consensus::Parameters>(
                 (Address::from(internal_address), internal_address)
             }
             KeyScope::Ephemeral => {
-                let ephemeral_address = account
-                    .ufvk()
+                let ephemeral_address = account_ufvk
                     .and_then(|k| k.transparent())
                     .expect("presence of transparent key was checked above.")
                     .derive_ephemeral_ivk()?
@@ -898,8 +922,16 @@ pub(crate) fn add_transparent_account_balances(
          JOIN transactions t ON t.id_tx = u.transaction_id
          -- the transaction that created the output is mined and with enough confirmations
          WHERE (
-            t.mined_height < :mempool_height -- tx is mined
-            AND :mempool_height - t.mined_height >= :min_confirmations -- has at least min_confirmations
+            -- tx is mined and has at least has at least min_confirmations
+            (
+                t.mined_height < :mempool_height -- tx is mined
+                AND :mempool_height - t.mined_height >= :min_confirmations
+            )
+            -- or the utxo can be spent with zero confirmations and is definitely unexpired
+            OR (
+                :min_confirmations = 0
+                AND (t.expiry_height = 0 OR t.expiry_height >= :mempool_height)
+            )
          )
          -- and the received txo is unspent
          AND u.id NOT IN (
@@ -931,47 +963,57 @@ pub(crate) fn add_transparent_account_balances(
             .with_unshielded_balance_mut(|bal| bal.add_spendable_value(value))?;
     }
 
-    let mut stmt_account_unconfirmed_balances = conn.prepare(
-        "SELECT a.uuid, SUM(u.value_zat)
-         FROM transparent_received_outputs u
-         JOIN accounts a ON a.id = u.account_id
-         JOIN transactions t ON t.id_tx = u.transaction_id
-         -- the transaction that created the output is mined with not enough confirmations or is definitely unexpired
-         WHERE (
-            t.mined_height < :mempool_height
-            AND :mempool_height - t.mined_height < :min_confirmations -- tx is mined but not confirmed
-            OR t.expiry_height = 0 -- tx will not expire
-            OR t.expiry_height >= :mempool_height
-         )
-         -- and the received txo is unspent
-         AND u.id NOT IN (
-           SELECT transparent_received_output_id
-           FROM transparent_received_output_spends txo_spends
-           JOIN transactions tx
-             ON tx.id_tx = txo_spends.transaction_id
-           WHERE tx.mined_height IS NOT NULL -- the spending tx is mined
-           OR tx.expiry_height = 0 -- the spending tx will not expire
-           OR tx.expiry_height >= :mempool_height -- the spending tx is unexpired
-         )
-         GROUP BY a.uuid",
-    )?;
+    // Pending spendable balance for transparent UTXOs is only relevant for min_confirmations > 0;
+    // with min_confirmations == 0, zero-conf spends are allowed and therefore the value will
+    // appear in the spendable balance and we don't want to double-count it.
+    if min_confirmations > 0 {
+        let mut stmt_account_unconfirmed_balances = conn.prepare(
+            "SELECT a.uuid, SUM(u.value_zat)
+             FROM transparent_received_outputs u
+             JOIN accounts a ON a.id = u.account_id
+             JOIN transactions t ON t.id_tx = u.transaction_id
+             WHERE (
+                 -- the transaction that created the output is mined with not enough confirmations
+                (
+                    t.mined_height < :mempool_height
+                    AND :mempool_height - t.mined_height < :min_confirmations -- tx is mined but not confirmed
+                )
+                -- or the tx is unmined but definitely not expired
+                OR (
+                    t.mined_height IS NULL
+                    AND (t.expiry_height = 0 OR t.expiry_height >= :mempool_height)
+                )
+             )
+             -- and the received txo is unspent
+             AND u.id NOT IN (
+               SELECT transparent_received_output_id
+               FROM transparent_received_output_spends txo_spends
+               JOIN transactions tx
+                 ON tx.id_tx = txo_spends.transaction_id
+               WHERE tx.mined_height IS NOT NULL -- the spending tx is mined
+               OR tx.expiry_height = 0 -- the spending tx will not expire
+               OR tx.expiry_height >= :mempool_height -- the spending tx is unexpired
+             )
+             GROUP BY a.uuid",
+        )?;
 
-    let mut rows = stmt_account_unconfirmed_balances.query(named_params![
-        ":mempool_height": u32::from(mempool_height),
-        ":min_confirmations": min_confirmations,
-    ])?;
+        let mut rows = stmt_account_unconfirmed_balances.query(named_params![
+            ":mempool_height": u32::from(mempool_height),
+            ":min_confirmations": min_confirmations,
+        ])?;
 
-    while let Some(row) = rows.next()? {
-        let account = AccountUuid(row.get(0)?);
-        let raw_value = row.get(1)?;
-        let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
-            SqliteClientError::CorruptedData(format!("Negative UTXO value {raw_value:?}"))
-        })?;
+        while let Some(row) = rows.next()? {
+            let account = AccountUuid(row.get(0)?);
+            let raw_value = row.get(1)?;
+            let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
+                SqliteClientError::CorruptedData(format!("Negative UTXO value {raw_value:?}"))
+            })?;
 
-        account_balances
-            .entry(account)
-            .or_insert(AccountBalance::ZERO)
-            .with_unshielded_balance_mut(|bal| bal.add_pending_spendable_value(value))?;
+            account_balances
+                .entry(account)
+                .or_insert(AccountBalance::ZERO)
+                .with_unshielded_balance_mut(|bal| bal.add_pending_spendable_value(value))?;
+        }
     }
     Ok(())
 }
@@ -980,7 +1022,7 @@ pub(crate) fn add_transparent_account_balances(
 ///
 /// Returns `true` if the UTXO was known to the wallet.
 pub(crate) fn mark_transparent_utxo_spent(
-    conn: &rusqlite::Connection,
+    conn: &rusqlite::Transaction,
     spent_in_tx: TxRef,
     outpoint: &OutPoint,
 ) -> Result<bool, SqliteClientError> {
@@ -1035,6 +1077,46 @@ pub(crate) fn mark_transparent_utxo_spent(
     }
 
     Ok(affected_rows > 0)
+}
+
+/// Sets the max observed unspent height for all unspent transparent outputs received at the given
+/// address to at least the given height (calling this method will not cause the max observed
+/// unspent height to decrease).
+pub(crate) fn update_observed_unspent_heights<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    address: TransparentAddress,
+    checked_at: BlockHeight,
+) -> Result<(), SqliteClientError> {
+    let chain_tip_height = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
+    let checked_at = std::cmp::min(checked_at, chain_tip_height);
+
+    let addr_str = address.encode(params);
+    debug!(
+        "Setting max_observed_unspent_height to {} for address {}",
+        checked_at, addr_str
+    );
+
+    let mut stmt_update_observed_unspent = conn.prepare(
+        "UPDATE transparent_received_outputs AS tro
+         SET max_observed_unspent_height = CASE
+            WHEN max_observed_unspent_height IS NULL THEN :checked_at
+            WHEN max_observed_unspent_height < :checked_at THEN :checked_at
+            ELSE max_observed_unspent_height
+         END
+         WHERE address = :addr_str
+         AND tro.id NOT IN (
+             SELECT transparent_received_output_id
+             FROM transparent_received_output_spends
+         )",
+    )?;
+
+    stmt_update_observed_unspent.execute(named_params![
+        ":addr_str": addr_str,
+        ":checked_at": u32::from(checked_at)
+    ])?;
+
+    Ok(())
 }
 
 /// Adds the given received UTXO to the datastore.
@@ -1115,6 +1197,9 @@ pub(crate) fn next_check_time<R: RngCore, D: DerefMut<Target = R>>(
 
 /// Returns the vector of [`TransactionDataRequest`]s that represents the information needed by the
 /// wallet backend in order to be able to present a complete view of wallet history and memo data.
+///
+/// FIXME: the need for these requests will be obviated if transparent spend and output information
+/// is added to compact block data.
 pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -1125,35 +1210,68 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
     let chain_tip_height =
         super::chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
 
-    // We cannot construct address-based transaction data requests for the case where we cannot
-    // determine the height at which to begin, so we require that either the target height or mined
-    // height be set.
+    debug!(
+        "Generating transaction data requests as of chain tip height {}",
+        chain_tip_height
+    );
+
+    // Create transaction data requests that can find spends of our received UTXOs. Ideally (at
+    // least so long as address-based transaction data requests are required at all) these requests
+    // would not be served by address-based lookups, but instead by querying for the spends of the
+    // associated outpoints directly.
     let mut spend_requests_stmt = conn.prepare_cached(
         "SELECT
             ssq.address,
-            IFNULL(t.target_height, t.mined_height)
+            COALESCE(tro.max_observed_unspent_height + 1, t.mined_height) AS block_range_start
          FROM transparent_spend_search_queue ssq
          JOIN transactions t ON t.id_tx = ssq.transaction_id
-         WHERE t.target_height IS NOT NULL
-         OR t.mined_height IS NOT NULL",
+         JOIN transparent_received_outputs tro ON tro.transaction_id = t.id_tx
+         JOIN addresses ON addresses.id = tro.address_id
+         LEFT OUTER JOIN transparent_received_output_spends tros
+            ON tros.transparent_received_output_id = tro.id
+         WHERE tros.transaction_id IS NULL
+         AND addresses.key_scope != :ephemeral_key_scope
+         AND (
+             tro.max_observed_unspent_height IS NULL
+             OR tro.max_observed_unspent_height < :chain_tip_height
+         )
+         AND (
+             block_range_start IS NOT NULL
+             OR t.expiry_height > :chain_tip_height
+         )",
     )?;
 
-    let spend_search_rows = spend_requests_stmt.query_and_then([], |row| {
-        let address = TransparentAddress::decode(params, &row.get::<_, String>(0)?)?;
-        let block_range_start = BlockHeight::from(row.get::<_, u32>(1)?);
-        let max_end_height = block_range_start + DEFAULT_TX_EXPIRY_DELTA + 1;
-        Ok::<TransactionDataRequest, SqliteClientError>(
-            TransactionDataRequest::TransactionsInvolvingAddress {
-                address,
-                block_range_start,
-                block_range_end: Some(std::cmp::min(chain_tip_height + 1, max_end_height)),
-                request_at: None,
-                tx_status_filter: TransactionStatusFilter::Mined,
-                output_status_filter: OutputStatusFilter::All,
-            },
-        )
-    })?;
+    let spend_search_rows = spend_requests_stmt.query_and_then(
+        named_params! {
+            ":ephemeral_key_scope": KeyScope::Ephemeral.encode(),
+            ":chain_tip_height": u32::from(chain_tip_height)
+        },
+        |row| {
+            let address = TransparentAddress::decode(params, &row.get::<_, String>(0)?)?;
+            // If the transaction that creates this UTXO is unmined, then this must be a mempool
+            // transaction so we default to the chain tip for block_range_start
+            let block_range_start = row
+                .get::<_, Option<u32>>(1)?
+                .map(BlockHeight::from)
+                .unwrap_or(chain_tip_height);
+            let max_end_height = block_range_start + DEFAULT_TX_EXPIRY_DELTA + 1;
+            Ok::<TransactionDataRequest, SqliteClientError>(
+                TransactionDataRequest::transactions_involving_address(
+                    address,
+                    block_range_start,
+                    Some(std::cmp::min(chain_tip_height + 1, max_end_height)),
+                    None,
+                    TransactionStatusFilter::Mined,
+                    OutputStatusFilter::All,
+                ),
+            )
+        },
+    )?;
 
+    // Query for transactions that "return" funds to an ephemeral address. By including a block
+    // range start equal to the mined height of the transaction, we make it harder to distinguish
+    // these requests from the spend detection requests above.
+    //
     // Since we don't want to interpret funds that are temporarily held by an ephemeral address in
     // the course of creating ZIP 320 transaction pair as belonging to the wallet, we will perform
     // ephemeral address checks only for addresses that do not have an unexpired transaction
@@ -1164,16 +1282,21 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
     let mut ephemeral_check_stmt = conn.prepare_cached(
         "SELECT
             cached_transparent_receiver_address,
+            MIN(COALESCE(tro.max_observed_unspent_height + 1, t.mined_height)),
             transparent_receiver_next_check_time
          FROM addresses
-         WHERE key_scope = :ephemeral_key_scope
+         LEFT OUTER JOIN transparent_received_outputs tro ON tro.address_id = addresses.id
+         LEFT OUTER JOIN transactions t ON t.id_tx = tro.transaction_id
+         WHERE addresses.key_scope = :ephemeral_key_scope
+         -- ensure that there is not a pending transaction
          AND NOT EXISTS (
             SELECT 'x'
             FROM transparent_received_outputs tro
             JOIN transactions t ON t.id_tx = tro.transaction_id
             WHERE tro.address_id = addresses.id
             AND t.expiry_height > :chain_tip_height
-         )",
+         )
+         GROUP BY addresses.id",
     )?;
 
     let ephemeral_check_rows = ephemeral_check_stmt.query_and_then(
@@ -1183,22 +1306,21 @@ pub(crate) fn transaction_data_requests<P: consensus::Parameters>(
         },
         |row| {
             let address = TransparentAddress::decode(params, &row.get::<_, String>(0)?)?;
+            let block_range_start = BlockHeight::from(row.get::<_, Option<u32>>(1)?.unwrap_or(0));
             let request_at = row
-                .get::<_, Option<i64>>(1)?
+                .get::<_, Option<i64>>(2)?
                 .map(decode_epoch_seconds)
                 .transpose()?;
 
             Ok::<TransactionDataRequest, SqliteClientError>(
-                TransactionDataRequest::TransactionsInvolvingAddress {
+                TransactionDataRequest::transactions_involving_address(
                     address,
-                    // We don't want these queries to leak anything about when the wallet created
-                    // or exposed the address, so we just query for all UTXOs for the address.
-                    block_range_start: BlockHeight::from(0),
-                    block_range_end: None,
+                    block_range_start,
+                    None,
                     request_at,
-                    tx_status_filter: TransactionStatusFilter::All,
-                    output_status_filter: OutputStatusFilter::Unspent,
-                },
+                    TransactionStatusFilter::All,
+                    OutputStatusFilter::Unspent,
+                ),
             )
         },
     )?;
@@ -1308,7 +1430,7 @@ pub(crate) fn find_account_uuid_for_transparent_address<P: consensus::Parameters
 /// transaction we created, that we do not yet know to have been mined.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn put_transparent_output<P: consensus::Parameters>(
-    conn: &rusqlite::Connection,
+    conn: &rusqlite::Transaction,
     params: &P,
     output: &WalletTransparentOutput,
     known_unspent: bool,

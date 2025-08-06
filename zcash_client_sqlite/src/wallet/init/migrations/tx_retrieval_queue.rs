@@ -20,17 +20,18 @@ pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xfec02b61_3988_4b4f_9699_
 use {
     crate::{
         error::SqliteClientError,
-        wallet::{
-            queue_transparent_input_retrieval, queue_unmined_tx_retrieval,
-            transparent::{queue_transparent_spend_detection, uivk_legacy_transparent_address},
-        },
+        wallet::{transparent::uivk_legacy_transparent_address, TxQueryType},
         AccountRef, TxRef,
     },
     rusqlite::OptionalExtension as _,
     std::convert::Infallible,
+    transparent::address::TransparentAddress,
     zcash_client_backend::data_api::DecryptedTransaction,
     zcash_keys::encoding::AddressCodec,
-    zcash_protocol::consensus::{BlockHeight, BranchId},
+    zcash_protocol::{
+        consensus::{BlockHeight, BranchId},
+        TxId,
+    },
 };
 
 const DEPENDENCIES: &[Uuid] = &[
@@ -86,8 +87,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 prevout_txid BLOB NOT NULL,
                 prevout_output_index INTEGER NOT NULL,
                 FOREIGN KEY (spending_transaction_id) REFERENCES transactions(id_tx)
-                -- NOTE: We can't create a unique constraint on just (prevout_txid, prevout_output_index) 
-                -- because the same output may be attempted to be spent in multiple transactions, even 
+                -- NOTE: We can't create a unique constraint on just (prevout_txid, prevout_output_index)
+                -- because the same output may be attempted to be spent in multiple transactions, even
                 -- though only one will ever be mined.
                 CONSTRAINT transparent_spend_map_unique UNIQUE (
                     spending_transaction_id, prevout_txid, prevout_output_index
@@ -217,6 +218,107 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     }
 }
 
+#[cfg(feature = "transparent-inputs")]
+fn queue_transparent_spend_detection<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction<'_>,
+    params: &P,
+    receiving_address: TransparentAddress,
+    tx_ref: TxRef,
+    output_index: u32,
+) -> Result<(), SqliteClientError> {
+    let mut stmt = conn.prepare_cached(
+        "INSERT INTO transparent_spend_search_queue
+         (address, transaction_id, output_index)
+         VALUES
+         (:address, :transaction_id, :output_index)
+         ON CONFLICT (transaction_id, output_index) DO NOTHING",
+    )?;
+
+    let addr_str = receiving_address.encode(params);
+    stmt.execute(named_params! {
+        ":address": addr_str,
+        ":transaction_id": tx_ref.0,
+        ":output_index": output_index
+    })?;
+
+    Ok(())
+}
+
+#[cfg(feature = "transparent-inputs")]
+fn queue_transparent_input_retrieval<AccountId>(
+    conn: &rusqlite::Transaction<'_>,
+    tx_ref: TxRef,
+    d_tx: &DecryptedTransaction<'_, AccountId>,
+) -> Result<(), SqliteClientError> {
+    if let Some(b) = d_tx.tx().transparent_bundle() {
+        if !b.is_coinbase() {
+            // queue the transparent inputs for enhancement
+            queue_tx_retrieval(
+                conn,
+                b.vin.iter().map(|txin| *txin.prevout.txid()),
+                Some(tx_ref),
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "transparent-inputs")]
+fn queue_unmined_tx_retrieval<AccountId>(
+    conn: &rusqlite::Transaction<'_>,
+    d_tx: &DecryptedTransaction<'_, AccountId>,
+) -> Result<(), SqliteClientError> {
+    let detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
+    #[cfg(feature = "orchard")]
+    let detectable_via_scanning = detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
+
+    if d_tx.mined_height().is_none() && !detectable_via_scanning {
+        queue_tx_retrieval(conn, std::iter::once(d_tx.tx().txid()), None)?
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "transparent-inputs")]
+fn queue_tx_retrieval(
+    conn: &rusqlite::Transaction<'_>,
+    txids: impl Iterator<Item = TxId>,
+    dependent_tx_ref: Option<TxRef>,
+) -> Result<(), SqliteClientError> {
+    // Add an entry to the transaction retrieval queue if it would not be redundant.
+    let mut stmt_insert_tx = conn.prepare_cached(
+        "INSERT INTO tx_retrieval_queue (txid, query_type, dependent_transaction_id)
+            SELECT
+            :txid,
+            IIF(
+                EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL),
+                :status_type,
+                :enhancement_type
+            ),
+            :dependent_transaction_id
+        ON CONFLICT (txid) DO UPDATE
+        SET query_type =
+            IIF(
+                EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL),
+                :status_type,
+                :enhancement_type
+            ),
+            dependent_transaction_id = IFNULL(:dependent_transaction_id, dependent_transaction_id)",
+    )?;
+
+    for txid in txids {
+        stmt_insert_tx.execute(named_params! {
+            ":txid": txid.as_ref(),
+            ":status_type": TxQueryType::Status.code(),
+            ":enhancement_type": TxQueryType::Enhancement.code(),
+            ":dependent_transaction_id": dependent_tx_ref.map(|r| r.0),
+        })?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use rusqlite::named_params;
@@ -285,6 +387,11 @@ mod tests {
             BranchId::Nu5,
             0,
             12345678.into(),
+            #[cfg(all(
+                any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
+                feature = "zip-233"
+            ))]
+            Zatoshis::ZERO,
             Some(transparent::bundle::Bundle {
                 vin: vec![TxIn {
                     prevout: OutPoint::fake(),

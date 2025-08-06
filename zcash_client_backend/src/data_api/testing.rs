@@ -41,7 +41,7 @@ use zcash_protocol::{
     value::{ZatBalance, Zatoshis},
     ShieldedProtocol,
 };
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
+use zip32::DiversifierIndex;
 use zip321::Payment;
 
 use super::{
@@ -57,7 +57,7 @@ use super::{
     AddressInfo, BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
     ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes, TransactionDataRequest,
     TransactionStatus, WalletCommitmentTrees, WalletRead, WalletSummary, WalletTest, WalletWrite,
-    SAPLING_SHARD_HEIGHT,
+    Zip32Derivation, SAPLING_SHARD_HEIGHT,
 };
 use crate::{
     data_api::TargetValue,
@@ -74,7 +74,7 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    super::wallet::input_selection::ShieldingSelector,
+    super::{wallet::input_selection::ShieldingSelector, TransactionsInvolvingAddress},
     crate::wallet::TransparentAddressMetadata,
     ::transparent::{address::TransparentAddress, keys::NonHardenedChildIndex},
     std::ops::Range,
@@ -1082,15 +1082,12 @@ where
 
     /// Invokes [`create_proposed_transactions`] with the given arguments.
     #[allow(clippy::type_complexity)]
-    pub fn create_proposed_transactions<InputsErrT, FeeRuleT, ChangeErrT>(
+    pub fn create_proposed_transactions<InputsErrT, FeeRuleT, ChangeErrT, N>(
         &mut self,
         usk: &UnifiedSpendingKey,
         ovk_policy: OvkPolicy,
-        proposal: &Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
-    ) -> Result<
-        NonEmpty<TxId>,
-        super::wallet::CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, DbT::NoteRef>,
-    >
+        proposal: &Proposal<FeeRuleT, N>,
+    ) -> Result<NonEmpty<TxId>, super::wallet::CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
     where
         FeeRuleT: FeeRule,
     {
@@ -1397,7 +1394,6 @@ impl TestBuilder<(), ()> {
         canopy: Some(BlockHeight::from_u32(100_000)),
         nu5: Some(BlockHeight::from_u32(100_000)),
         nu6: None,
-        #[cfg(zcash_unstable = "nu6.1")]
         nu6_1: None,
         #[cfg(zcash_unstable = "nu7")]
         nu7: None,
@@ -1701,13 +1697,16 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
             let (account, usk) = match self.account_index {
                 Some(index) => wallet_data
                     .import_account_hd("", &seed, index, &birthday, None)
-                    .unwrap(),
+                    .expect("test account import succeeds"),
                 None => {
                     let result = wallet_data
                         .create_account("", &seed, &birthday, None)
-                        .unwrap();
+                        .expect("test account creation succeeds");
                     (
-                        wallet_data.get_account(result.0).unwrap().unwrap(),
+                        wallet_data
+                            .get_account(result.0)
+                            .expect("retrieval of just-created account succeeds")
+                            .expect("an account was created"),
                         result.1,
                     )
                 }
@@ -2534,8 +2533,7 @@ impl WalletRead for MockWalletDb {
 
     fn get_derived_account(
         &self,
-        _seed: &SeedFingerprint,
-        _account_id: zip32::AccountId,
+        _derivation: &Zip32Derivation,
     ) -> Result<Option<Self::Account>, Self::Error> {
         Ok(None)
     }
@@ -2821,6 +2819,15 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _txid: TxId,
         _status: TransactionStatus,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn notify_address_checked(
+        &mut self,
+        _request: TransactionsInvolvingAddress,
+        _as_of_height: BlockHeight,
     ) -> Result<(), Self::Error> {
         Ok(())
     }

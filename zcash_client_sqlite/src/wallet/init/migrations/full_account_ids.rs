@@ -54,6 +54,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             derivation: Zip32Derivation::new(
                 SeedFingerprint::from_bytes([0; 32]),
                 zip32::AccountId::ZERO,
+                #[cfg(feature = "zcashd-compat")]
+                None,
             ),
             key_source: None,
         });
