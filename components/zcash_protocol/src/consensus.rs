@@ -152,7 +152,7 @@ impl From<TargetHeight> for u32 {
 
 impl From<u32> for TargetHeight {
     fn from(value: u32) -> Self {
-        BlockHeight::from_u32(value).into()
+        TargetHeight::from(BlockHeight::from_u32(value))
     }
 }
 
