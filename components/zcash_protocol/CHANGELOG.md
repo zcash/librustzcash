@@ -9,9 +9,13 @@ represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
 ## [Unreleased]
-
 ### Added
+- `zcash_protocol::constants::`
+  - `{mainnet, testnet, regtest}::B58_SECRET_KEY_PREFIX`
 - `impl Neg<Output = ZatBalance> for Zatoshis`
+
+### Changed
+- `zcash_protocol::consensus::NetworkConstants` has added method `b58_secret_key_prefix`.
 
 ## [0.6.0] - 2025-07-31
 
