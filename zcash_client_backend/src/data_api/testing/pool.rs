@@ -211,7 +211,10 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
 
     // Spendable balance matches total balance
     assert_eq!(st.get_total_balance(account.id()), value);
-    assert_eq!(st.get_spendable_balance(account.id(), 1), value);
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        value
+    );
 
     assert_eq!(
         st.wallet()
@@ -387,7 +390,10 @@ pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
 
     // Spendable balance matches total balance at 1 confirmation.
     assert_eq!(st.get_total_balance(account.id()), starting_balance);
-    assert_eq!(st.get_spendable_balance(account.id(), 1), starting_balance);
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        starting_balance
+    );
 
     // Generate N confirmations by mining blocks
     let confirmations_policy = ConfirmationsPolicy::default();
@@ -404,8 +410,9 @@ pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
                 i,
                 confirmation_requirement: min_confirmations,
                 number_of_confirmations: 1 + i,
-                pending_balance: st.get_pending_shielded_balance(account.id(), min_confirmations),
-                spendable_balance: st.get_spendable_balance(account.id(), min_confirmations),
+                pending_balance: st
+                    .get_pending_shielded_balance(account.id(), confirmations_policy),
+                spendable_balance: st.get_spendable_balance(account.id(), confirmations_policy),
                 total_balance: st.get_total_balance(account.id()),
             }
         })
@@ -455,7 +462,10 @@ pub fn send_with_multiple_change_outputs<T: ShieldedPoolTester>(
 
     // Spendable balance matches total balance
     assert_eq!(st.get_total_balance(account.id()), value);
-    assert_eq!(st.get_spendable_balance(account.id(), 1), value);
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        value
+    );
 
     assert_eq!(
         st.wallet()
@@ -665,7 +675,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
         add_funds(st, value);
         let initial_balance: Option<Zatoshis> = prior_balance + value;
         assert_eq!(
-            st.get_spendable_balance(account_id, 1),
+            st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
             initial_balance.unwrap()
         );
 
@@ -793,7 +803,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
             -ZatBalance::from(expected_ephemeral),
         );
 
-        let ending_balance = st.get_spendable_balance(account_id, 1);
+        let ending_balance = st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN);
         assert_eq!(initial_balance - total_sent, ending_balance.into());
 
         (ephemeral_address.unwrap().0, txids, ending_balance)
@@ -1007,7 +1017,10 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
                 .block_height(),
             h
         );
-        assert_eq!(st.get_spendable_balance(account_id, 1), value);
+        assert_eq!(
+            st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+            value
+        );
     };
 
     let value = Zatoshis::const_from_u64(100000);
@@ -1120,7 +1133,7 @@ where
     let to = T::fvk_default_address(&dfvk);
 
     // Wallet summary is not yet available
-    assert_eq!(st.get_wallet_summary(0), None);
+    assert_eq!(st.get_wallet_summary(ConfirmationsPolicy::MIN), None);
 
     // We cannot do anything if we aren't synchronised
     assert_matches!(
@@ -1159,11 +1172,26 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
 
     // Spendable balance matches total balance at 1 confirmation.
     assert_eq!(st.get_total_balance(account_id), value);
-    assert_eq!(st.get_spendable_balance(account_id, 1), value);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        value
+    );
 
     // Value is considered pending at 10 confirmations.
-    assert_eq!(st.get_pending_shielded_balance(account_id, 10), value);
-    assert_eq!(st.get_spendable_balance(account_id, 10), Zatoshis::ZERO);
+    assert_eq!(
+        st.get_pending_shielded_balance(
+            account_id,
+            ConfirmationsPolicy::new_symmetrical(10).unwrap()
+        ),
+        value
+    );
+    assert_eq!(
+        st.get_spendable_balance(
+            account_id,
+            ConfirmationsPolicy::new_symmetrical(10).unwrap()
+        ),
+        Zatoshis::ZERO
+    );
 
     // If none of the wallet's accounts have a recover-until height, then there
     // is no recovery phase for the wallet, and therefore the denominator in the
@@ -1171,7 +1199,7 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     let no_recovery = Some(Ratio::new(0, 0));
 
     // Wallet is fully scanned
-    let summary = st.get_wallet_summary(1);
+    let summary = st.get_wallet_summary(ConfirmationsPolicy::MIN);
     assert_eq!(
         summary.as_ref().and_then(|s| s.progress().recovery()),
         no_recovery,
@@ -1184,12 +1212,21 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
 
     // Verified balance does not include the second note
     let total = (value + value).unwrap();
-    assert_eq!(st.get_spendable_balance(account_id, 2), value);
-    assert_eq!(st.get_pending_shielded_balance(account_id, 2), value);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::new_symmetrical(2).unwrap()),
+        value
+    );
+    assert_eq!(
+        st.get_pending_shielded_balance(
+            account_id,
+            ConfirmationsPolicy::new_symmetrical(2).unwrap()
+        ),
+        value
+    );
     assert_eq!(st.get_total_balance(account_id), total);
 
     // Wallet is still fully scanned
-    let summary = st.get_wallet_summary(1);
+    let summary = st.get_wallet_summary(ConfirmationsPolicy::MIN);
     assert_eq!(
         summary.as_ref().and_then(|s| s.progress().recovery()),
         no_recovery
@@ -1256,11 +1293,17 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     assert_eq!(st.get_total_balance(account_id), (value * 11u64).unwrap());
     // Spendable balance at 10 confirmations is value * 2.
     assert_eq!(
-        st.get_spendable_balance(account_id, 10),
+        st.get_spendable_balance(
+            account_id,
+            ConfirmationsPolicy::new_symmetrical(10).unwrap()
+        ),
         (value * 2u64).unwrap()
     );
     assert_eq!(
-        st.get_pending_shielded_balance(account_id, 10),
+        st.get_pending_shielded_balance(
+            account_id,
+            ConfirmationsPolicy::new_symmetrical(10).unwrap()
+        ),
         (value * 9u64).unwrap()
     );
 
@@ -1323,7 +1366,10 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
 
     // Spendable balance matches total balance at 1 confirmation.
     assert_eq!(st.get_total_balance(account_id), value);
-    assert_eq!(st.get_spendable_balance(account_id, 1), value);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        value
+    );
 
     // Send some of the funds to another address, but don't mine the tx.
     let extsk2 = T::sk(&[0xf5; 32]);
@@ -1407,7 +1453,10 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
 
     // Spendable balance matches total balance at 1 confirmation.
     assert_eq!(st.get_total_balance(account_id), value);
-    assert_eq!(st.get_spendable_balance(account_id, 1), value);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        value
+    );
 
     // Second spend should now succeed
     let amount_sent2 = Zatoshis::const_from_u64(2000);
@@ -1466,7 +1515,10 @@ pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, DSF>(
 
     // Spendable balance matches total balance at 1 confirmation.
     assert_eq!(st.get_total_balance(account_id), value);
-    assert_eq!(st.get_spendable_balance(account_id, 1), value);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        value
+    );
 
     let extsk2 = T::sk(&[0xf5; 32]);
     let addr2 = T::sk_default_address(&extsk2);
@@ -1556,7 +1608,10 @@ pub fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>(
 
     // Spendable balance matches total balance at 1 confirmation.
     assert_eq!(st.get_total_balance(account_id), value);
-    assert_eq!(st.get_spendable_balance(account_id, 1), value);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        value
+    );
 
     let fee_rule = StandardFeeRule::Zip317;
 
@@ -1604,11 +1659,26 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
 
     // Spendable balance matches total balance at 1 confirmation.
     assert_eq!(st.get_total_balance(account_id), value);
-    assert_eq!(st.get_spendable_balance(account_id, 1), value);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        value
+    );
 
     // Value is considered pending at 10 confirmations.
-    assert_eq!(st.get_pending_shielded_balance(account_id, 10), value);
-    assert_eq!(st.get_spendable_balance(account_id, 10), Zatoshis::ZERO);
+    assert_eq!(
+        st.get_pending_shielded_balance(
+            account_id,
+            ConfirmationsPolicy::new_symmetrical(10).unwrap()
+        ),
+        value
+    );
+    assert_eq!(
+        st.get_spendable_balance(
+            account_id,
+            ConfirmationsPolicy::new_symmetrical(10).unwrap()
+        ),
+        Zatoshis::ZERO
+    );
 
     let change_note_scope = st
         .wallet()
@@ -1677,7 +1747,10 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
 
     // Spendable balance matches total balance
     assert_eq!(st.get_total_balance(account1), value);
-    assert_eq!(st.get_spendable_balance(account1, 1), value);
+    assert_eq!(
+        st.get_spendable_balance(account1, ConfirmationsPolicy::MIN),
+        value
+    );
     assert_eq!(st.get_total_balance(account2), Zatoshis::ZERO);
 
     let amount_sent = Zatoshis::from_u64(20000).unwrap();
@@ -1715,7 +1788,10 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
     let pending_change = (amount_left - amount_legacy_change).unwrap();
 
     // The "legacy change" is not counted by get_pending_change().
-    assert_eq!(st.get_pending_change(account1, 1), pending_change);
+    assert_eq!(
+        st.get_pending_change(account1, ConfirmationsPolicy::MIN),
+        pending_change
+    );
     // We spent the only note so we only have pending change.
     assert_eq!(st.get_total_balance(account1), pending_change);
 
@@ -1788,7 +1864,10 @@ pub fn zip317_spend<T: ShieldedPoolTester, DSF: DataStoreFactory>(
     // Spendable balance matches total balance
     let total = Zatoshis::const_from_u64(60000);
     assert_eq!(st.get_total_balance(account_id), total);
-    assert_eq!(st.get_spendable_balance(account_id, 1), total);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        total
+    );
 
     let input_selector = GreedyInputSelector::<DSF::DataStore>::new();
     let change_strategy =
@@ -1905,7 +1984,7 @@ where
             account.usk(),
             &[*taddr],
             account.id(),
-            1,
+            ConfirmationsPolicy::MIN,
         )
         .unwrap();
     assert_eq!(txids.len(), 1);
@@ -2210,7 +2289,10 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
 
     let initial_balance = note_value;
     assert_eq!(st.get_total_balance(account.id()), initial_balance);
-    assert_eq!(st.get_spendable_balance(account.id(), 1), initial_balance);
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        initial_balance
+    );
 
     let transfer_amount = Zatoshis::const_from_u64(200000);
     let p0_to_p1 = TransactionRequest::new(vec![Payment::without_memo(
@@ -2269,7 +2351,7 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
         (initial_balance - expected_fee).unwrap()
     );
     assert_eq!(
-        st.get_spendable_balance(account.id(), 1),
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
         (initial_balance - expected_fee).unwrap()
     );
 }
@@ -2300,7 +2382,10 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
 
     let initial_balance = (note_value * 2u64).unwrap();
     assert_eq!(st.get_total_balance(account.id()), initial_balance);
-    assert_eq!(st.get_spendable_balance(account.id(), 1), initial_balance);
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        initial_balance
+    );
 
     let transfer_amount = Zatoshis::const_from_u64(200000);
     let p0_to_p1 = TransactionRequest::new(vec![Payment::without_memo(
@@ -2360,7 +2445,7 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
         (initial_balance - expected_fee).unwrap()
     );
     assert_eq!(
-        st.get_spendable_balance(account.id(), 1),
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
         (initial_balance - expected_fee).unwrap()
     );
 }
@@ -2390,7 +2475,10 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
 
     let initial_balance = (note_value * 2u64).unwrap();
     assert_eq!(st.get_total_balance(account.id()), initial_balance);
-    assert_eq!(st.get_spendable_balance(account.id(), 1), initial_balance);
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        initial_balance
+    );
 
     let transfer_amount = Zatoshis::const_from_u64(200000);
     let p0_to_p1 = TransactionRequest::new(vec![Payment::without_memo(
@@ -2447,7 +2535,7 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
         (initial_balance - transfer_amount - expected_fee).unwrap()
     );
     assert_eq!(
-        st.get_spendable_balance(account.id(), 1),
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
         (initial_balance - transfer_amount - expected_fee).unwrap()
     );
 }
@@ -2483,7 +2571,10 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
 
     let initial_balance = (note_value * 3u64).unwrap();
     assert_eq!(st.get_total_balance(acct_id), initial_balance);
-    assert_eq!(st.get_spendable_balance(acct_id, 1), initial_balance);
+    assert_eq!(
+        st.get_spendable_balance(acct_id, ConfirmationsPolicy::MIN),
+        initial_balance
+    );
 
     // Generate several empty blocks
     for _ in 0..10 {
@@ -2496,7 +2587,10 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
 
     // The initial balance should be unchanged.
     assert_eq!(st.get_total_balance(acct_id), initial_balance);
-    assert_eq!(st.get_spendable_balance(acct_id, 1), initial_balance);
+    assert_eq!(
+        st.get_spendable_balance(acct_id, ConfirmationsPolicy::MIN),
+        initial_balance
+    );
 
     // Set up the fee rule and input selector we'll use for all the transfers.
     let input_selector = GreedyInputSelector::new();
@@ -2528,7 +2622,10 @@ pub fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
         st.get_total_balance(acct_id),
         ((note_value * 2u64).unwrap() + expected_change).unwrap()
     );
-    assert_eq!(st.get_pending_change(acct_id, 1), expected_change);
+    assert_eq!(
+        st.get_pending_change(acct_id, ConfirmationsPolicy::MIN),
+        expected_change
+    );
 
     // In the next block, send funds to both P0 and P1
     let both_transfer = TransactionRequest::new(vec![
@@ -2762,7 +2859,7 @@ where
     let dfvk = T::test_account_fvk(&st);
 
     // Wallet summary is not yet available
-    assert_eq!(st.get_wallet_summary(0), None);
+    assert_eq!(st.get_wallet_summary(ConfirmationsPolicy::MIN), None);
 
     // Create fake CompactBlocks sending value to the address
     let value = Zatoshis::const_from_u64(5);
@@ -2775,7 +2872,7 @@ where
 
     // Spendable balance should reflect both received notes
     assert_eq!(
-        st.get_spendable_balance(account.id(), 1),
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
         (value + value2).unwrap()
     );
 
@@ -2784,7 +2881,7 @@ where
 
     // Spendable balance should be unaltered
     assert_eq!(
-        st.get_spendable_balance(account.id(), 1),
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
         (value + value2).unwrap()
     );
 
@@ -2793,15 +2890,21 @@ where
 
     // Spendable balance should only contain the first received note;
     // the rest should be pending.
-    assert_eq!(st.get_spendable_balance(account.id(), 1), value);
-    assert_eq!(st.get_pending_shielded_balance(account.id(), 1), value2);
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        value
+    );
+    assert_eq!(
+        st.get_pending_shielded_balance(account.id(), ConfirmationsPolicy::MIN),
+        value2
+    );
 
     // Scan the cache again
     st.scan_cached_blocks(h, 2);
 
     // Account balance should again reflect both received notes
     assert_eq!(
-        st.get_spendable_balance(account.id(), 1),
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
         (value + value2).unwrap()
     );
 }
@@ -3019,7 +3122,7 @@ pub fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester, DSF>(
     let dfvk = T::test_account_fvk(&st);
 
     // Wallet summary is not yet available
-    assert_eq!(st.get_wallet_summary(0), None);
+    assert_eq!(st.get_wallet_summary(ConfirmationsPolicy::MIN), None);
 
     // Create a fake CompactBlock sending value to the address
     let value = Zatoshis::const_from_u64(5);
@@ -3069,7 +3172,7 @@ pub fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester, DSF>(
     let dfvk = T::test_account_fvk(&st);
 
     // Wallet summary is not yet available
-    assert_eq!(st.get_wallet_summary(0), None);
+    assert_eq!(st.get_wallet_summary(ConfirmationsPolicy::MIN), None);
 
     // Create a fake CompactBlock sending value to the address
     let value = Zatoshis::const_from_u64(5);
@@ -3115,7 +3218,7 @@ pub fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester, DSF
     let dfvk = T::test_account_fvk(&st);
 
     // Wallet summary is not yet available
-    assert_eq!(st.get_wallet_summary(0), None);
+    assert_eq!(st.get_wallet_summary(ConfirmationsPolicy::MIN), None);
 
     // Create a fake CompactBlock sending value to the address
     let value = Zatoshis::const_from_u64(5);
@@ -3282,7 +3385,10 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, DSF>(
     st.scan_cached_blocks(account.birthday().height(), 1);
 
     assert_eq!(st.get_total_balance(account.id()), note_value);
-    assert_eq!(st.get_spendable_balance(account.id(), 1), note_value);
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        note_value
+    );
 
     let transfer_amount = Zatoshis::const_from_u64(200000);
     let p0_to_p1 = TransactionRequest::new(vec![Payment::without_memo(
@@ -3448,7 +3554,7 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
             Zatoshis::const_from_u64(10000),
             &[to],
             dest_account_id,
-            1,
+            ConfirmationsPolicy::MIN,
         )
         .unwrap();
     let result1 = st

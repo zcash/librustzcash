@@ -43,21 +43,34 @@ workspace.
   - Arguments to `InputSource::select_spendable_notes` have changed; it now takes
     a `TargetHeight` and a `ConfirmationsPolicy` instead of an anchor height.
     The signatures of `wallet::propose_transfer`, `wallet::propose_standard_transfer`,
-    and `wallet::propose_standard_transfer_to_address`, have also been modified
+    `wallet::propose_standard_transfer_to_address`, have also been modified
     to take these changes into account, as have the signatures of the
     `test-dependencies`-flagged methods
     `testing::TestState::{spend, propose_transfer, propose_standard_transfer}`.
-  - The `target_height` argument to `InputSource::get_spendable_transparent_outputs`
-    now has type `TargetHeight` instead of `BlockHeight`.
+  - Arguments to `InputSource::get_spendable_transparent_outputs` have changed:
+      - the `target_height` argument now has type `TargetHeight` instead of
+        `BlockHeight`.
+      - it now takes a `ConfirmationsPolicy` instead of a `u32` `min_confirmations`
+        argument.
+    Related `test-dependencies`-flagged methods on `testing::TestState` have
+    also been changed accordingly.
   - Arguments to `wallet::input_selection::InputSelector::propose_transaction`
     have changed; it now takes a `TargetHeight` and `ConfirmationsPolicy` instead
     of an anchor height.
   - Arguments to `wallet::input_selection::ShieldingSelector::propose_shielding`
-    have changed; it now takes a `TargetHeight` instead of `BlockHeight` for
-    its `target_height` argument.
+    have changed:
+    - it now takes a `TargetHeight` instead of `BlockHeight` for its
+      `target_height` argument.
+      - it now takes a `ConfirmationsPolicy` instead of a `u32` `min_confirmations`
+        argument.
+  - Arguments to `wallet::propose_shielding` and `wallet::shield_transparent_funds`
+    have changed; they now take `ConfirmationsPolicy` instead of `u32`
+    `min_confirmations` arguments.
   - The result type of `WalletRead::get_target_and_anchor_heights` has changed.
     It now returns a `TargetHeight` instead of a `BlockHeight` for the target
     height element of its result tuple.
+  - Arguments to `WalletRead::get_wallet_summary` have changed; it now takes a
+    `ConfirmationsPolicy` instead of a `u32` `min_confirmations` argument.
   - `Zip32Derivation::new` arguments have changed when the `zcashd-compat`
     feature is enabled; in this circumstance, `new` takes an additional
     `legacy_address_index` argument.

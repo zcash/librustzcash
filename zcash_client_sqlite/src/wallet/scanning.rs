@@ -572,6 +572,7 @@ pub(crate) mod tests {
             pool::ShieldedPoolTester, sapling::SaplingPoolTester, AddressType, FakeCompactOutput,
             InitialChainState, TestBuilder, TestState,
         },
+        wallet::ConfirmationsPolicy,
         AccountBirthday, Ratio, WalletRead, WalletWrite,
     };
     use zcash_primitives::block::BlockHash;
@@ -769,7 +770,7 @@ pub(crate) mod tests {
         // shard is incomplete.
         assert_eq!(
             st.wallet()
-                .get_wallet_summary(0)
+                .get_wallet_summary(ConfirmationsPolicy::MIN)
                 .unwrap()
                 .map(|s| T::next_subtree_index(&s)),
             Some(2),
@@ -1304,7 +1305,7 @@ pub(crate) mod tests {
         // We have scan ranges and a subtree, but have scanned no blocks. Given the number of
         // blocks scanned in the previous subtree, we estimate the number of notes in the current
         // subtree
-        let summary = st.get_wallet_summary(1);
+        let summary = st.get_wallet_summary(ConfirmationsPolicy::MIN);
         assert_eq!(
             summary.as_ref().and_then(|s| s.progress().recovery()),
             no_recovery,
@@ -1347,7 +1348,7 @@ pub(crate) mod tests {
 
         // We have scanned a block, so we now have a starting tree position, 500 blocks above the
         // wallet birthday but before the end of the shard.
-        let summary = st.get_wallet_summary(1);
+        let summary = st.get_wallet_summary(ConfirmationsPolicy::MIN);
         assert_eq!(summary.as_ref().map(|s| T::next_subtree_index(s)), Some(0));
 
         assert_eq!(
@@ -1454,7 +1455,7 @@ pub(crate) mod tests {
             + (10
                 + ((1234 + 10) * (new_tip - max_scanned))
                     / (max_scanned - (birthday.height() - 10)));
-        let summary = st.get_wallet_summary(1);
+        let summary = st.get_wallet_summary(ConfirmationsPolicy::MIN);
         assert_eq!(
             summary.map(|s| s.progress().scan()),
             Some(Ratio::new(1, u64::from(expected_denom)))
@@ -1763,7 +1764,7 @@ pub(crate) mod tests {
             Zatoshis::const_from_u64(100000)
         );
         assert_eq!(
-            st.get_spendable_balance(account.id(), 10),
+            st.get_spendable_balance(account.id(), ConfirmationsPolicy::default()),
             Zatoshis::const_from_u64(100000)
         );
 
@@ -1852,7 +1853,10 @@ pub(crate) mod tests {
             st.get_total_balance(account.id()),
             Zatoshis::const_from_u64(100000)
         );
-        assert_eq!(st.get_spendable_balance(account.id(), 10), Zatoshis::ZERO);
+        assert_eq!(
+            st.get_spendable_balance(account.id(), ConfirmationsPolicy::default()),
+            Zatoshis::ZERO
+        );
 
         // Attempting to spend the note should fail to generate a proposal
         let to_extsk = OrchardPoolTester::sk(&[0xf5; 32]);

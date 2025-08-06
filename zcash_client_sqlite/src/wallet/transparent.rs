@@ -21,9 +21,9 @@ use transparent::{
     keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
 use zcash_address::unified::{Ivk, Typecode, Uivk};
-use zcash_client_backend::data_api::wallet::TargetHeight;
 use zcash_client_backend::{
     data_api::{
+        wallet::{ConfirmationsPolicy, TargetHeight},
         Account, AccountBalance, OutputStatusFilter, TransactionDataRequest,
         TransactionStatusFilter,
     },
@@ -783,9 +783,9 @@ pub(crate) fn get_wallet_transparent_output(
 /// * the output is unspent as of the current chain tip.
 ///
 /// An output that is potentially spent by an unmined transaction in the mempool is excluded
-/// iff the spending transaction will not be expired at `target_height`.
+/// if the spending transaction will not be expired at `target_height`.
 ///
-/// This could, in very rare circumstances, return as unspent outputs that are actually not
+/// This could, in very rare circumstances, return unspent outputs that are actually not
 /// spendable, if they are the outputs of deshielding transactions where the spend anchors have
 /// been invalidated by a rewind. There isn't a way to detect this circumstance at present, but
 /// it should be vanishingly rare as the vast majority of rewinds are of a single block.
@@ -794,8 +794,11 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     params: &P,
     address: &TransparentAddress,
     target_height: TargetHeight,
-    min_confirmations: u32,
+    confirmations_policy: ConfirmationsPolicy,
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
+    // TODO(schell): not sure if this is correct
+    let min_confirmations = u32::from(confirmations_policy.untrusted)
+        .saturating_sub(u32::from(confirmations_policy.trusted));
     let confirmed_height = target_height - min_confirmations;
 
     let mut stmt_utxos = conn.prepare(
@@ -912,7 +915,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
 pub(crate) fn add_transparent_account_balances(
     conn: &rusqlite::Connection,
     mempool_height: BlockHeight,
-    min_confirmations: u32,
+    confirmations_policy: ConfirmationsPolicy,
     account_balances: &mut HashMap<AccountUuid, AccountBalance>,
 ) -> Result<(), SqliteClientError> {
     // TODO (#1592): Ability to distinguish between Transparent pending change and pending non-change
@@ -923,7 +926,7 @@ pub(crate) fn add_transparent_account_balances(
          JOIN transactions t ON t.id_tx = u.transaction_id
          -- the transaction that created the output is mined and with enough confirmations
          WHERE (
-            -- tx is mined and has at least has at least min_confirmations
+            -- tx is mined and has at least min_confirmations
             (
                 t.mined_height < :mempool_height -- tx is mined
                 AND :mempool_height - t.mined_height >= :min_confirmations
@@ -946,6 +949,9 @@ pub(crate) fn add_transparent_account_balances(
          )
          GROUP BY a.uuid",
     )?;
+    // TODO(schell): figure out if this in any way a correct treatment for min_confirmations
+    let min_confirmations = u32::from(confirmations_policy.untrusted)
+        .saturating_sub(u32::from(confirmations_policy.trusted));
     let mut rows = stmt_account_spendable_balances.query(named_params![
         ":mempool_height": u32::from(mempool_height),
         ":min_confirmations": min_confirmations,

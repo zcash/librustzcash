@@ -233,7 +233,7 @@ pub trait ShieldingSelector {
         source_addrs: &[TransparentAddress],
         to_account: <Self::InputSource as InputSource>::AccountId,
         target_height: TargetHeight,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
         InputSelectorError<
@@ -788,7 +788,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         source_addrs: &[TransparentAddress],
         to_account: <Self::InputSource as InputSource>::AccountId,
         target_height: TargetHeight,
-        min_confirmations: u32,
+        confirmations_policy: ConfirmationsPolicy,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, Infallible>,
         InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, Infallible>,
@@ -800,7 +800,11 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         let mut transparent_inputs: Vec<WalletTransparentOutput> = source_addrs
             .iter()
             .map(|taddr| {
-                wallet_db.get_spendable_transparent_outputs(taddr, target_height, min_confirmations)
+                wallet_db.get_spendable_transparent_outputs(
+                    taddr,
+                    target_height,
+                    confirmations_policy,
+                )
             })
             .collect::<Result<Vec<Vec<_>>, _>>()
             .map_err(InputSelectorError::DataSource)?
