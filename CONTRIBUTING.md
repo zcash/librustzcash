@@ -314,6 +314,9 @@ To get around this GitHub UI limitation, the general process we follow is:
   new branch tip. When submitting a review for a PR, reviewers note the commit
   up to which the review covers; this aids PR authors in constructing these
   diff links.
+- The PR author should mark each review comment that their update addresses as
+  resolved using the GitHub UI. Reviewers will un-resolve comment threads to
+  reopen them if they consider there to be a problem with the resolution.
 - If the author would like to rebase the branch but `S-please-do-not-rebase` is
   present, they should ask the reviewer(s) through an external channel whether
   rebasing is okay. If everyone is agreed that it is no longer needed, they
