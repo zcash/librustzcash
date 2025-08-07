@@ -14,6 +14,7 @@ workspace.
 ### Added
 - `zcash_primitives::transaction::tests::data` has been exposed under the
   `test-dependencies` feature to provide access to test vectors.
+- `zcash_primitives::transaction::builder::Builder::add_transparent_null_data_output`
 
 ## [0.24.0] - 2025-07-31
 
