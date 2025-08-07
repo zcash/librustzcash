@@ -5,12 +5,15 @@ use core::fmt::Debug;
 use core2::io::{self, Read, Write};
 
 use zcash_protocol::{
+    consensus::BlockHeight,
     value::{BalanceError, ZatBalance, Zatoshis},
     TxId,
 };
 
 use crate::{
     address::{Script, TransparentAddress},
+    builder,
+    coinbase::{self, MinerData},
     sighash::TransparentAuthorizingContext,
 };
 
@@ -173,12 +176,17 @@ impl OutPoint {
         writer.write_all(&self.n.to_le_bytes())
     }
 
+    /// Returns the null [`OutPoint`] in the Bitcoin sense:
+    /// - [`TxId`] is set to all-zeroes, and
+    /// - output index is set to [`u32::MAX`].
+    pub fn null() -> Self {
+        OutPoint::new([0; 32], u32::MAX)
+    }
+
     /// Returns `true` if this `OutPoint` is "null" in the Bitcoin sense: it has txid set to
     /// all-zeroes and output index set to `u32::MAX`.
     fn is_null(&self) -> bool {
-        // From `BaseOutPoint::IsNull()` in zcashd:
-        //   return (hash.IsNull() && n == (uint32_t) -1);
-        self.hash.is_null() && self.n == u32::MAX
+        *self == OutPoint::null()
     }
 
     /// Returns the output index of this `OutPoint`.
@@ -225,6 +233,45 @@ impl TxIn<Authorized> {
         self.prevout.write(&mut writer)?;
         self.script_sig.write(&mut writer)?;
         writer.write_all(&self.sequence.to_le_bytes())
+    }
+}
+
+impl TxIn<builder::Coinbase> {
+    /// Creates an input for a coinbase transaction. Does not support creating inputs for the
+    /// genesis block.
+    pub fn coinbase(
+        height: BlockHeight,
+        miner_data: &MinerData,
+        sequence: u32,
+    ) -> Result<Self, coinbase::Error> {
+        let h = u32::from(height);
+
+        let mut script_sig = match h {
+            0 => Err(coinbase::Error::GenesisInputNotSupported)?,
+            1..=16 => vec![0x50 + (h as u8)],
+            17..=127 => {
+                vec![0x01, h as u8]
+            }
+            128..=32_767 => {
+                let b = h.to_le_bytes();
+                vec![0x02, b[0], b[1]]
+            }
+            32_768..=8_388_607 => {
+                vec![0x03, h as u8, (h >> 8) as u8, (h >> 16) as u8]
+            }
+            8_388_608..=u32::MAX => {
+                let b = h.to_le_bytes();
+                vec![0x04, b[0], b[1], b[2], b[3]]
+            }
+        };
+
+        script_sig.extend(miner_data.as_ref());
+
+        Ok(TxIn {
+            prevout: OutPoint::null(),
+            script_sig,
+            sequence,
+        })
     }
 }
 
