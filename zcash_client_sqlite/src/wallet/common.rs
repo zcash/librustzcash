@@ -206,7 +206,7 @@ where
         }
     };
 
-    let trusted_anchor_height = target_height - u32::from(confirmations_policy.trusted);
+    let trusted_anchor_height = target_height - u32::from(confirmations_policy.trusted());
 
     let TableConstants {
         table_prefix,
@@ -324,7 +324,7 @@ where
             result_note
                 .map(|(note, is_trusted, mined_height)| {
                     let number_of_confirmations = target_height - mined_height;
-                    let required_confirmations = u32::from(confirmations_policy.untrusted);
+                    let required_confirmations = u32::from(confirmations_policy.untrusted());
                     // If the note is from a trusted source (this wallet), then we don't have to determine the
                     // number of confirmations, as we've already queried above based on the trusted anchor height.
                     // So we only check if it's trusted, or if it meets the untrusted number of confirmations.

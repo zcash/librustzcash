@@ -797,8 +797,8 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     confirmations_policy: ConfirmationsPolicy,
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
     // TODO(schell): not sure if this is correct
-    let min_confirmations = u32::from(confirmations_policy.untrusted)
-        .saturating_sub(u32::from(confirmations_policy.trusted));
+    let min_confirmations = u32::from(confirmations_policy.untrusted())
+        .saturating_sub(u32::from(confirmations_policy.trusted()));
     let confirmed_height = target_height - min_confirmations;
 
     let mut stmt_utxos = conn.prepare(
@@ -950,8 +950,8 @@ pub(crate) fn add_transparent_account_balances(
          GROUP BY a.uuid",
     )?;
     // TODO(schell): figure out if this in any way a correct treatment for min_confirmations
-    let min_confirmations = u32::from(confirmations_policy.untrusted)
-        .saturating_sub(u32::from(confirmations_policy.trusted));
+    let min_confirmations = u32::from(confirmations_policy.untrusted())
+        .saturating_sub(u32::from(confirmations_policy.trusted()));
     let mut rows = stmt_account_spendable_balances.query(named_params![
         ":mempool_height": u32::from(mempool_height),
         ":min_confirmations": min_confirmations,

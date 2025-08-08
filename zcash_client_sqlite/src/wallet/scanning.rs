@@ -1794,7 +1794,7 @@ pub(crate) mod tests {
                 &input_selector,
                 &change_strategy,
                 request,
-                ConfirmationsPolicy::new_symmetrical(10).unwrap(),
+                ConfirmationsPolicy::new_symmetrical_unchecked(10),
             )
             .unwrap();
 
@@ -1883,7 +1883,7 @@ pub(crate) mod tests {
             &input_selector,
             &change_strategy,
             request.clone(),
-            ConfirmationsPolicy::new_symmetrical(10).unwrap(),
+            ConfirmationsPolicy::new_symmetrical_unchecked(10),
         );
 
         assert_matches!(proposal, Err(_));
@@ -1897,7 +1897,7 @@ pub(crate) mod tests {
             &input_selector,
             &change_strategy,
             request,
-            ConfirmationsPolicy::new_symmetrical(10).unwrap(),
+            ConfirmationsPolicy::new_symmetrical_unchecked(10),
         );
 
         assert_matches!(proposal, Ok(_));

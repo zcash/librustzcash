@@ -1978,7 +1978,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         }
         let target_height = chain_tip_height + 1;
         let trusted_summary_height =
-            target_height.saturating_sub(u32::from(confirmations_policy.trusted));
+            target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
         let any_spendable = is_any_spendable(tx, trusted_summary_height, table_prefix)?;
         let mut stmt_select_notes = tx.prepare_cached(&format!(
             "SELECT
@@ -2009,7 +2009,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         ))?;
 
         let mut rows = stmt_select_notes
-            .query(named_params![":summary_height": u32::from(target_height).saturating_sub(u32::from(confirmations_policy.trusted))])?;
+            .query(named_params![":summary_height": u32::from(target_height).saturating_sub(u32::from(confirmations_policy.trusted()))])?;
         while let Some(row) = rows.next()? {
             let account = AccountUuid(row.get::<_, Uuid>(0)?);
 
@@ -2043,7 +2043,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
             let recipient_key_scope = row.get::<_, i64>(5)?;
             // for now, we only treat wallet-internal outputs as trusted
             let note_is_trusted = recipient_key_scope == KeyScope::INTERNAL.encode();
-            let required_confirmations = u32::from(confirmations_policy.untrusted);
+            let required_confirmations = u32::from(confirmations_policy.untrusted());
             // If the note is from a trusted source (this wallet), then we don't have to determine the
             // number of confirmations, as we've already queried above based on the trusted summary height.
             // So we only check if it's trusted, or if it meets the untrusted number of confirmations.

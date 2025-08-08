@@ -55,13 +55,11 @@ use crate::{
     proposal::{Proposal, ProposalError, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
 };
-use ::sapling::{
+use sapling::{
     note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
     prover::{OutputProver, SpendProver},
 };
-use ::transparent::{
-    address::TransparentAddress, builder::TransparentSigningSet, bundle::OutPoint,
-};
+use transparent::{address::TransparentAddress, builder::TransparentSigningSet, bundle::OutPoint};
 use zcash_address::ZcashAddress;
 use zcash_keys::{
     address::Address,
@@ -85,17 +83,16 @@ use zip321::Payment;
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{fees::ChangeValue, proposal::StepOutput, wallet::TransparentAddressMetadata},
-    ::transparent::bundle::TxOut,
     core::convert::Infallible,
     input_selection::ShieldingSelector,
     std::collections::HashMap,
+    transparent::bundle::TxOut,
     zcash_keys::encoding::AddressCodec,
 };
 
 #[cfg(feature = "pczt")]
 use {
     crate::data_api::error::PcztError,
-    ::transparent::pczt::Bip32Derivation,
     bip32::ChildNumber,
     orchard::note_encryption::OrchardDomain,
     pczt::roles::{
@@ -104,6 +101,7 @@ use {
     },
     sapling::note_encryption::SaplingDomain,
     serde::{Deserialize, Serialize},
+    transparent::pczt::Bip32Derivation,
     zcash_note_encryption::try_output_recovery_with_pkd_esk,
     zcash_protocol::{consensus::NetworkConstants, value::BalanceError},
 };
@@ -340,8 +338,8 @@ where
 /// transactions.
 #[derive(Clone, Copy, Debug)]
 pub struct ConfirmationsPolicy {
-    pub trusted: NonZeroU32,
-    pub untrusted: NonZeroU32,
+    trusted: NonZeroU32,
+    untrusted: NonZeroU32,
 }
 
 impl Default for ConfirmationsPolicy {
@@ -361,16 +359,78 @@ impl ConfirmationsPolicy {
         untrusted: NonZeroU32::MIN,
     };
 
-    /// Create a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields both
+    /// Constructs a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields set to the
+    /// provided values.
+    ///
+    /// The number of confirmations required for trusted notes must be less than or equal to the
+    /// number of confirmations required for untrusted notes; this returns `Err(())` if this
+    /// invariant is violated.
+    pub fn new(trusted: NonZeroU32, untrusted: NonZeroU32) -> Result<Self, ()> {
+        if trusted > untrusted {
+            Err(())
+        } else {
+            Ok(Self { trusted, untrusted })
+        }
+    }
+
+    /// Constructs a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields both
+    /// set to `min_confirmations`.
+    pub fn new_symmetrical(min_confirmations: NonZeroU32) -> Self {
+        Self {
+            trusted: min_confirmations,
+            untrusted: min_confirmations,
+        }
+    }
+
+    /// Constructs a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields set to the
+    /// provided values, which must both be nonzero. The number of trusted confirmations required
+    /// must be less than or equal to the number of untrusted confirmations required.
+    ///
+    /// # Panics
+    /// Panics if `trusted > untrusted` or either argument value is zero.
+    #[cfg(feature = "test-dependencies")]
+    pub fn new_unchecked(trusted: u32, untrusted: u32) -> Self {
+        if trusted > untrusted {
+            panic!("trusted must be <= untrusted")
+        }
+
+        Self {
+            trusted: NonZeroU32::new(trusted).expect("trusted must be nonzero"),
+            untrusted: NonZeroU32::new(untrusted).expect("untrusted must be nonzero"),
+        }
+    }
+
+    /// Constructs a new `ConfirmationsPolicy` with `trusted` and `untrusted` fields both
     /// set to `min_confirmations`.
     ///
-    /// Returns `None` if `min_confirmations` is `0`.
-    pub fn new_symmetrical(min_confirmations: u32) -> Option<Self> {
-        let confirmations = NonZeroU32::new(min_confirmations)?;
-        Some(Self {
+    /// # Panics
+    /// Panics if `min_confirmations == 0`
+    #[cfg(feature = "test-dependencies")]
+    pub fn new_symmetrical_unchecked(min_confirmations: u32) -> Self {
+        let confirmations =
+            NonZeroU32::new(min_confirmations).expect("min_confirmations must be nonzero");
+        Self {
             trusted: confirmations,
             untrusted: confirmations,
-        })
+        }
+    }
+
+    /// Returns the number of confirmations required before trusted notes may be spent.
+    ///
+    /// See [`ZIP 315`] for details.
+    ///
+    /// [`ZIP 315`]: https://zips.z.cash/zip-0315#trusted-and-untrusted-txos
+    pub fn trusted(&self) -> NonZeroU32 {
+        self.trusted
+    }
+
+    /// Returns the number of confirmations required before untrusted notes may be spent.
+    ///
+    /// See [`ZIP 315`] for details.
+    ///
+    /// [`ZIP 315`]: https://zips.z.cash/zip-0315#trusted-and-untrusted-txos
+    pub fn untrusted(&self) -> NonZeroU32 {
+        self.untrusted
     }
 }
 
