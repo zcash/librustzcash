@@ -5,19 +5,22 @@ use rusqlite::{named_params, types::Value, Connection, Row};
 use std::{num::NonZeroU64, rc::Rc};
 
 use zcash_client_backend::{
-    data_api::{NoteFilter, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT},
+    data_api::{
+        wallet::ConfirmationsPolicy, NoteFilter, PoolMeta, TargetValue, SAPLING_SHARD_HEIGHT,
+    },
     wallet::ReceivedNote,
 };
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, TargetHeight},
     value::{BalanceError, Zatoshis},
     PoolType, ShieldedProtocol,
 };
 
-use super::wallet_birthday;
 use crate::{
-    error::SqliteClientError, wallet::pool_code, AccountUuid, ReceivedNoteId, SAPLING_TABLES_PREFIX,
+    error::SqliteClientError,
+    wallet::{encoding::KeyScope, pool_code, wallet_birthday},
+    AccountUuid, ReceivedNoteId, SAPLING_TABLES_PREFIX,
 };
 
 #[cfg(feature = "orchard")]
@@ -154,7 +157,8 @@ pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     params: &P,
     account: AccountUuid,
     target_value: TargetValue,
-    anchor_height: BlockHeight,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
     to_spendable_note: F,
@@ -168,7 +172,8 @@ where
             params,
             account,
             zats,
-            anchor_height,
+            target_height,
+            confirmations_policy,
             exclude,
             protocol,
             to_spendable_note,
@@ -182,7 +187,8 @@ fn select_minimum_spendable_notes<P: consensus::Parameters, F, Note>(
     params: &P,
     account: AccountUuid,
     target_value: Zatoshis,
-    anchor_height: BlockHeight,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
     protocol: ShieldedProtocol,
     to_spendable_note: F,
@@ -199,13 +205,15 @@ where
         }
     };
 
+    let trusted_anchor_height = target_height - u32::from(confirmations_policy.trusted);
+
     let TableConstants {
         table_prefix,
         output_index_col,
         note_reconstruction_cols,
         ..
     } = table_constants::<SqliteClientError>(protocol)?;
-    if unscanned_tip_exists(conn, anchor_height, table_prefix)? {
+    if unscanned_tip_exists(conn, trusted_anchor_height, table_prefix)? {
         return Ok(vec![]);
     }
 
@@ -228,9 +236,10 @@ where
             "WITH eligible AS (
                  SELECT
                      {table_prefix}_received_notes.id AS id, txid, {output_index_col},
-                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
+                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position, 
                      SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
-                     accounts.ufvk as ufvk, recipient_key_scope
+                     accounts.ufvk as ufvk, recipient_key_scope,
+                     transactions.block AS mined_height
                  FROM {table_prefix}_received_notes
                  INNER JOIN accounts
                     ON accounts.id = {table_prefix}_received_notes.account_id
@@ -238,7 +247,8 @@ where
                     ON transactions.id_tx = {table_prefix}_received_notes.tx
                  WHERE accounts.uuid = :account_uuid
                  AND {table_prefix}_received_notes.account_id = accounts.id
-                 AND value > 5000 -- FIXME #1316, allow selection of dust inputs
+                 -- FIXME #1316, allow selection of dust inputs
+                 AND {table_prefix}_received_notes.value > 5000 
                  AND accounts.ufvk IS NOT NULL
                  AND recipient_key_scope IS NOT NULL
                  AND nf IS NOT NULL
@@ -251,7 +261,7 @@ where
                    JOIN transactions stx ON stx.id_tx = transaction_id
                    WHERE stx.block IS NOT NULL -- the spending tx is mined
                    OR stx.expiry_height IS NULL -- the spending tx will not expire
-                   OR stx.expiry_height > :anchor_height -- the spending tx is unexpired
+                   OR stx.expiry_height >= :target_height -- the spending tx is unexpired
                  )
                  AND NOT EXISTS (
                     SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges unscanned
@@ -266,12 +276,12 @@ where
              )
              SELECT id, txid, {output_index_col},
                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                    ufvk, recipient_key_scope
+                    ufvk, recipient_key_scope, mined_height 
              FROM eligible WHERE so_far < :target_value
              UNION
              SELECT id, txid, {output_index_col},
                     diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                    ufvk, recipient_key_scope
+                    ufvk, recipient_key_scope, mined_height
              FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
         )
     )?;
@@ -291,17 +301,39 @@ where
     let notes = stmt_select_notes.query_and_then(
         named_params![
             ":account_uuid": account.0,
-            ":anchor_height": &u32::from(anchor_height),
+            ":anchor_height": &u32::from(trusted_anchor_height),
+            ":target_height": &u32::from(target_height),
             ":target_value": &u64::from(target_value),
             ":exclude": &excluded_ptr,
             ":wallet_birthday": u32::from(birthday_height)
         ],
-        |r| to_spendable_note(params, r),
+        |r| -> Result<_, SqliteClientError> {
+            let maybe_note = to_spendable_note(params, r)?;
+            let recipient_key_scope: i64 = r.get("recipient_key_scope")?;
+            // for now, we only treat wallet-internal outputs as trusted
+            let note_is_trusted = recipient_key_scope == KeyScope::INTERNAL.encode();
+            let mined_height: u32 = r.get("mined_height")?;
+            Ok(maybe_note.map(|note| (note, note_is_trusted, mined_height)))
+        },
     )?;
 
     notes
-        .filter_map(|r| r.transpose())
-        .collect::<Result<_, _>>()
+        .filter_map(|result_maybe_note| {
+            let result_note = result_maybe_note.transpose()?;
+            result_note
+                .map(|(note, is_trusted, mined_height)| {
+                    let number_of_confirmations = target_height - mined_height;
+                    let required_confirmations = u32::from(confirmations_policy.untrusted);
+                    // If the note is from a trusted source (this wallet), then we don't have to determine the
+                    // number of confirmations, as we've already queried above based on the trusted anchor height.
+                    // So we only check if it's trusted, or if it meets the untrusted number of confirmations.
+                    let is_spendable =
+                        is_trusted || u32::from(number_of_confirmations) >= required_confirmations;
+                    is_spendable.then_some(note)
+                })
+                .transpose()
+        })
+        .collect::<Result<Vec<_>, _>>()
 }
 
 #[allow(dead_code)]

@@ -88,6 +88,7 @@ use zcash_address::ZcashAddress;
 use zcash_client_backend::{
     data_api::{
         scanning::{ScanPriority, ScanRange},
+        wallet::ConfirmationsPolicy,
         Account as _, AccountBalance, AccountBirthday, AccountPurpose, AccountSource, AddressInfo,
         BlockMetadata, DecryptedTransaction, Progress, Ratio, SentTransaction,
         SentTransactionOutput, TransactionDataRequest, TransactionStatus, WalletSummary,
@@ -110,7 +111,7 @@ use zcash_primitives::{
     transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, Transaction, TransactionData},
 };
 use zcash_protocol::{
-    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
+    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters, TargetHeight},
     memo::{Memo, MemoBytes},
     value::{BalanceError, ZatBalance, Zatoshis},
     PoolType, ShieldedProtocol, TxId,
@@ -1855,15 +1856,11 @@ impl ProgressEstimator for SubtreeProgressEstimator {
 ///
 /// This may be used to obtain a balance that ignores notes that have been detected so recently
 /// that they are not yet spendable, or for which it is not yet possible to construct witnesses.
-///
-/// `min_confirmations` can be 0, but that case is currently treated identically to
-/// `min_confirmations == 1` for both shielded and transparent TXOs. This behaviour
-/// may change in the future.
 #[tracing::instrument(skip(tx, params, progress))]
 pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     tx: &rusqlite::Transaction,
     params: &P,
-    min_confirmations: u32,
+    confirmations_policy: ConfirmationsPolicy,
     progress: &impl ProgressEstimator,
 ) -> Result<Option<WalletSummary<AccountUuid>>, SqliteClientError> {
     let chain_tip_height = match chain_tip_height(tx)? {
@@ -1883,7 +1880,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     let recover_until_height = recover_until_height(tx)?;
 
     let fully_scanned_height = block_fully_scanned(tx, params)?.map(|m| m.block_height());
-    let summary_height = (chain_tip_height + 1).saturating_sub(std::cmp::max(min_confirmations, 1));
+    let summary_height =
+        (chain_tip_height + 1).saturating_sub(u32::from(confirmations_policy.trusted));
 
     let sapling_progress = progress.sapling_scan_progress(
         tx,
@@ -2107,7 +2105,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     transparent::add_transparent_account_balances(
         tx,
         chain_tip_height + 1,
-        min_confirmations,
+        confirmations_policy,
         &mut account_balances,
     )?;
 
@@ -2458,7 +2456,7 @@ pub(crate) fn chain_tip_height(
 pub(crate) fn get_target_and_anchor_heights(
     conn: &rusqlite::Connection,
     min_confirmations: NonZeroU32,
-) -> Result<Option<(BlockHeight, BlockHeight)>, SqliteClientError> {
+) -> Result<Option<(TargetHeight, BlockHeight)>, SqliteClientError> {
     match chain_tip_height(conn)? {
         Some(chain_tip_height) => {
             let sapling_anchor_height = get_max_checkpointed_height(
@@ -2485,7 +2483,7 @@ pub(crate) fn get_target_and_anchor_heights(
                 .or(sapling_anchor_height)
                 .or(orchard_anchor_height);
 
-            Ok(anchor_height.map(|h| (chain_tip_height + 1, h)))
+            Ok(anchor_height.map(|h| ((chain_tip_height + 1).into(), h)))
         }
         None => Ok(None),
     }
@@ -2778,7 +2776,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                             TransferType::WalletInternal,
                         ),
                         tx_ref,
-                        Some(sent_tx.target_height()),
+                        Some(sent_tx.target_height().into()),
                         None,
                     )?;
                 }
@@ -2797,7 +2795,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                             TransferType::WalletInternal,
                         ),
                         tx_ref,
-                        Some(sent_tx.target_height()),
+                        Some(sent_tx.target_height().into()),
                         None,
                     )?;
                 }
@@ -3876,7 +3874,7 @@ pub(crate) fn put_tx_data(
     tx: &Transaction,
     fee: Option<Zatoshis>,
     created_at: Option<time::OffsetDateTime>,
-    target_height: Option<BlockHeight>,
+    target_height: Option<TargetHeight>,
 ) -> Result<TxRef, SqliteClientError> {
     let mut stmt_upsert_tx_data = conn.prepare_cached(
         "INSERT INTO transactions (txid, created, expiry_height, raw, fee, target_height)
@@ -4542,6 +4540,7 @@ mod tests {
     use uuid::Uuid;
     use zcash_client_backend::data_api::{
         testing::{AddressType, DataStoreFactory, FakeCompactOutput, TestBuilder, TestState},
+        wallet::ConfirmationsPolicy,
         Account as _, AccountSource, WalletRead, WalletWrite,
     };
     use zcash_keys::keys::UnifiedAddressRequest;
@@ -4565,7 +4564,7 @@ mod tests {
         let account = st.test_account().unwrap();
 
         // The account should have no summary information
-        assert_eq!(st.get_wallet_summary(0), None);
+        assert_eq!(st.get_wallet_summary(ConfirmationsPolicy::MIN), None);
 
         // We can't get an anchor height, as we have not scanned any blocks.
         assert_eq!(

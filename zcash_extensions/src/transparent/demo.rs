@@ -492,7 +492,7 @@ mod tests {
         },
     };
     use zcash_protocol::{
-        consensus::{BlockHeight, BranchId, NetworkType, NetworkUpgrade, Parameters},
+        consensus::{BlockHeight, BranchId, NetworkType, NetworkUpgrade, Parameters, TargetHeight},
         value::Zatoshis,
     };
 
@@ -615,13 +615,13 @@ mod tests {
     }
 
     fn demo_builder<'a>(
-        height: BlockHeight,
+        target_height: TargetHeight,
         sapling_anchor: sapling::Anchor,
     ) -> DemoBuilder<Builder<'a, FutureNetwork, ()>> {
         DemoBuilder {
             txn_builder: Builder::new(
                 FutureNetwork,
-                height,
+                target_height,
                 BuildConfig::Standard {
                     sapling_anchor: Some(sapling_anchor),
                     orchard_anchor: Some(orchard::Anchor::empty_tree()),
@@ -818,7 +818,7 @@ mod tests {
         tree.append(cm1).unwrap();
         let witness1 = sapling::IncrementalWitness::from_tree(tree).unwrap();
 
-        let mut builder_a = demo_builder(tx_height, witness1.root().into());
+        let mut builder_a = demo_builder(tx_height.into(), witness1.root().into());
         builder_a
             .add_sapling_spend::<Infallible>(dfvk.fvk().clone(), note1, witness1.path().unwrap())
             .unwrap();
@@ -848,7 +848,10 @@ mod tests {
         // Transfer
         //
 
-        let mut builder_b = demo_builder(tx_height + 1, sapling::Anchor::empty_tree());
+        let mut builder_b = demo_builder(
+            TargetHeight::from(tx_height + 1),
+            sapling::Anchor::empty_tree(),
+        );
         let prevout_a = (
             OutPoint::new(res_a.transaction().txid(), 0),
             tze_a.vout[0].clone(),
@@ -877,7 +880,10 @@ mod tests {
         // Closing transaction
         //
 
-        let mut builder_c = demo_builder(tx_height + 2, sapling::Anchor::empty_tree());
+        let mut builder_c = demo_builder(
+            TargetHeight::from(tx_height + 2),
+            sapling::Anchor::empty_tree(),
+        );
         let prevout_b = (
             OutPoint::new(res_a.transaction().txid(), 0),
             tze_b.vout[0].clone(),

@@ -15,7 +15,7 @@ use zcash_keys::{
 use zcash_note_encryption::try_output_recovery_with_ovk;
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, TargetHeight},
     memo::MemoBytes,
     ShieldedProtocol,
 };
@@ -24,6 +24,7 @@ use crate::{
     data_api::{
         chain::{CommitmentTreeRoot, ScanSummary},
         testing::{pool::ShieldedPoolTester, TestState},
+        wallet::ConfirmationsPolicy,
         DecryptedTransaction, InputSource, TargetValue, WalletCommitmentTrees, WalletSummary,
         WalletTest,
     },
@@ -108,7 +109,8 @@ impl ShieldedPoolTester for OrchardPoolTester {
         st: &TestState<Cache, DbT, P>,
         account: <DbT as InputSource>::AccountId,
         target_value: TargetValue,
-        anchor_height: BlockHeight,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error> {
         st.wallet()
@@ -116,7 +118,8 @@ impl ShieldedPoolTester for OrchardPoolTester {
                 account,
                 target_value,
                 &[ShieldedProtocol::Orchard],
-                anchor_height,
+                target_height,
+                confirmations_policy,
                 exclude,
             )
             .map(|n| n.take_orchard())

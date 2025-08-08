@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+
+- `zcash_protocol::consensus::TargetHeight`
+
 ## [0.6.1] - 2025-08-06
 
 ### Added

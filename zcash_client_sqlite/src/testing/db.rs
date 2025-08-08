@@ -17,6 +17,7 @@ use zcash_client_backend::{
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
         testing::{DataStoreFactory, Reset, TestState},
+        wallet::ConfirmationsPolicy,
         TargetValue, *,
     },
     wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
@@ -30,7 +31,10 @@ use zcash_primitives::{
     transaction::{Transaction, TxId},
 };
 use zcash_protocol::{
-    consensus::BlockHeight, local_consensus::LocalNetwork, memo::Memo, ShieldedProtocol,
+    consensus::{BlockHeight, TargetHeight},
+    local_consensus::LocalNetwork,
+    memo::Memo,
+    ShieldedProtocol,
 };
 use zip32::DiversifierIndex;
 

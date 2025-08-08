@@ -362,7 +362,7 @@ mod tests {
         // Create a shielding transaction that has an external note and an internal note.
         let mut builder = Builder::new(
             db_data.params.clone(),
-            height,
+            height.into(),
             BuildConfig::Standard {
                 sapling_anchor: Some(sapling::Anchor::empty_tree()),
                 orchard_anchor: None,
