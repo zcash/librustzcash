@@ -1880,8 +1880,6 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     let recover_until_height = recover_until_height(tx)?;
 
     let fully_scanned_height = block_fully_scanned(tx, params)?.map(|m| m.block_height());
-    let summary_height =
-        (chain_tip_height + 1).saturating_sub(u32::from(confirmations_policy.trusted));
 
     let sapling_progress = progress.sapling_scan_progress(
         tx,
@@ -1944,7 +1942,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
     fn with_pool_balances<F>(
         tx: &rusqlite::Transaction,
-        summary_height: BlockHeight,
+        chain_tip_height: BlockHeight,
+        confirmations_policy: ConfirmationsPolicy,
         account_balances: &mut HashMap<AccountUuid, AccountBalance>,
         protocol: ShieldedProtocol,
         with_pool_balance: F,
@@ -1959,7 +1958,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         #[tracing::instrument(skip_all)]
         fn is_any_spendable(
             conn: &rusqlite::Connection,
-            summary_height: BlockHeight,
+            trusted_summary_height: BlockHeight,
             table_prefix: &'static str,
         ) -> Result<bool, SqliteClientError> {
             conn.query_row(
@@ -1972,15 +1971,19 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                          AND block_range_start <= :summary_height
                      )"
                 ),
-                named_params![":summary_height": u32::from(summary_height)],
+                named_params![":summary_height": u32::from(trusted_summary_height)],
                 |row| row.get::<_, bool>(0),
             )
             .map_err(|e| e.into())
         }
-
-        let any_spendable = is_any_spendable(tx, summary_height, table_prefix)?;
+        let target_height = chain_tip_height + 1;
+        let trusted_summary_height =
+            target_height.saturating_sub(u32::from(confirmations_policy.trusted));
+        let any_spendable = is_any_spendable(tx, trusted_summary_height, table_prefix)?;
         let mut stmt_select_notes = tx.prepare_cached(&format!(
-            "SELECT a.uuid, n.value, n.is_change, scan_state.max_priority, t.block
+            "SELECT
+                a.uuid, n.value, n.is_change, scan_state.max_priority,
+                t.block, n.recipient_key_scope
              FROM {table_prefix}_received_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN transactions t ON t.id_tx = n.tx
@@ -1999,12 +2002,14 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                JOIN transactions t ON t.id_tx = transaction_id
                WHERE t.block IS NOT NULL -- the spending transaction is mined
                OR t.expiry_height IS NULL -- the spending tx will not expire
+               -- TODO(schell): a bug in select_spendable_notes was fixed by changing this to
+               -- `>= :summary_height`. Should that also happen here?
                OR t.expiry_height > :summary_height -- the spending tx is unexpired
              )"
         ))?;
 
-        let mut rows =
-            stmt_select_notes.query(named_params![":summary_height": u32::from(summary_height)])?;
+        let mut rows = stmt_select_notes
+            .query(named_params![":summary_height": u32::from(target_height).saturating_sub(u32::from(confirmations_policy.trusted))])?;
         while let Some(row) = rows.next()? {
             let account = AccountUuid(row.get::<_, Uuid>(0)?);
 
@@ -2032,14 +2037,27 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 },
             )?;
 
+            // TODO(schell): ask under what circumstances would `received_height` be None?
+            // It seems that from the query above, `block` will always be present
             let received_height = row.get::<_, Option<u32>>(4)?.map(BlockHeight::from);
+            let recipient_key_scope = row.get::<_, i64>(5)?;
+            // for now, we only treat wallet-internal outputs as trusted
+            let note_is_trusted = recipient_key_scope == KeyScope::INTERNAL.encode();
+            let required_confirmations = u32::from(confirmations_policy.untrusted);
+            // If the note is from a trusted source (this wallet), then we don't have to determine the
+            // number of confirmations, as we've already queried above based on the trusted summary height.
+            // So we only check if it's trusted, or if it meets the untrusted number of confirmations.
+            //
+            // This is outlined in zip315.
+            let untrusted_but_confirmed_spendable = received_height.iter().any(|mined_height| {
+                let number_of_confirmations = target_height - *mined_height;
+                number_of_confirmations >= required_confirmations
+            });
+            let confirmed_spendable = note_is_trusted || untrusted_but_confirmed_spendable;
+            let is_spendable =
+                any_spendable && confirmed_spendable && max_priority <= ScanPriority::Scanned;
 
-            let is_spendable = any_spendable
-                && received_height.iter().any(|h| h <= &summary_height)
-                && max_priority <= ScanPriority::Scanned;
-
-            let is_pending_change =
-                is_change && received_height.iter().all(|h| h > &summary_height);
+            let is_pending_change = is_change && !confirmed_spendable;
 
             let (spendable_value, change_pending_confirmation, value_pending_spendability) = {
                 let zero = Zatoshis::ZERO;
@@ -2069,7 +2087,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         let orchard_trace = tracing::info_span!("orchard_balances").entered();
         with_pool_balances(
             tx,
-            summary_height,
+            chain_tip_height,
+            confirmations_policy,
             &mut account_balances,
             ShieldedProtocol::Orchard,
             |balances, spendable_value, change_pending_confirmation, value_pending_spendability| {
@@ -2087,7 +2106,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     let sapling_trace = tracing::info_span!("sapling_balances").entered();
     with_pool_balances(
         tx,
-        summary_height,
+        chain_tip_height,
+        confirmations_policy,
         &mut account_balances,
         ShieldedProtocol::Sapling,
         |balances, spendable_value, change_pending_confirmation, value_pending_spendability| {
